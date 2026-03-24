@@ -119,25 +119,32 @@
    persistence. Representative coverage and the architecture decision remain
    open.
 
-6. [pending] Run a representative coverage and feasibility campaign
+6. [done] Run a representative coverage and feasibility campaign
    Depends on: items 2, 4, 5
-   Completion notes: using the accepted item-5 persistence tuple,
-   phase-and-surface ledger, and bounded outcome vocabulary, classify
-   representative capability-corpus families across both admitted item-4
-   families plus nested-`forall` reject-side, ambiguity-reject,
-   termination-pressure, binder-sensitive, and reconstruction-heavy pressure.
-   The output must say which cases achieve `stable visible persistence`,
-   which remain `admitted but not reconstruction-visible / blocker debt`, and
-   which stay `fail-closed rejection`, then state whether the accumulated
-   evidence supports broad generality, a bounded subset only, or an
-   architectural dead end. Stop short of the item-7 architecture choice or
-   any boundary revision.
+   Completion notes: accepted in `round-087` via
+   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`.
+   The repo now has one bounded seven-row representative matrix spanning the
+   two item-4-admitted families plus nested-`forall` reject-side,
+   ambiguity-reject, termination-pressure, binder-sensitive, and
+   reconstruction-heavy pressure. The accepted tally is zero `stable visible
+   persistence` rows, four `admitted but not reconstruction-visible / blocker
+   debt` rows (`C1`, `C2`, `C5`, `C7`), and three `fail-closed rejection`
+   rows (`C3`, `C4`, `C6`), so the strongest lawful aggregate read is
+   `bounded subset only`. Broad generality is still not justified, but the
+   current architecture is also not yet proven a dead end because two bounded
+   admitted pockets remain inside the inherited acyclic model and the
+   accepted item-2 `non-cyclic-graph = unknown` risk is still unresolved.
 
-7. [pending] Make the architecture decision and successor-plan choice
+7. [pending] Make the architecture decision and successor-plan choice from the bounded-subset-only coverage result
    Depends on: items 2, 6
-   Completion notes: record exactly one strategic outcome for this refreshed
-   control plane: continue within the current architecture, pursue targeted
-   boundary revision, or stop. If continuing, make the next cycle concrete and
-   bounded. If revising, name the first lawful revision gate and the
-   architectural boundary under review. If stopping, preserve predecessor truth
-   and state why broader work is not yet justified.
+   Completion notes: using the accepted item-2 audit and accepted item-6
+   `bounded subset only` result, record exactly one strategic outcome for
+   this refreshed control plane: continue within the current architecture,
+   pursue targeted boundary revision, or stop. The decision must account for
+   zero `stable visible persistence` rows, blocker debt in both admitted
+   families, nested-`forall` remaining reject-side only, and the still-live
+   `non-cyclic-graph = unknown` risk without reinterpreting bounded evidence
+   as broad generality. If continuing, name one concrete bounded successor
+   cycle. If revising, name the first lawful revision gate and the boundary
+   under review. If stopping, preserve predecessor truth and state why broader
+   work is not yet justified.
