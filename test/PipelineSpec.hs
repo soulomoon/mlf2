@@ -1583,6 +1583,17 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
                         Right _ -> pure ()
 
+            it "same-lane retained-child exact packet authoritative public output stays forall identity" $ do
+                let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                    expr =
+                        ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+                            (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+                    expectedTy = TForall "a" Nothing (TVar "a")
+                (_uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                (_checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+                uncheckedTy `shouldBe` expectedTy
+                checkedTy `shouldBe` expectedTy
+
             it "keeps retained-child lookup bounded to the same local TypeRef lane" $ do
                 fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
                 fallbackSrc
