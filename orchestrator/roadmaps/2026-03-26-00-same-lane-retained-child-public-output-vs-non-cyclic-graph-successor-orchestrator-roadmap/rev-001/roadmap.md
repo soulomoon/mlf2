@@ -95,11 +95,13 @@
    non-local alias-bound family, nested-`forall`, replay repair, or
    architecture revision.
 
-3. [pending] Clear or confirm the exact authoritative public-output collapse within the current architecture
+3. [done] Clear or confirm the exact authoritative public-output collapse within the current architecture
    Depends on: items 1, 2
-   Completion notes: consume only the accepted item-2 unchanged-anchor audit
-   from
+   Completion notes: completed in accepted `round-096` by consuming only the
+   accepted item-2 unchanged-anchor audit from
    `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-authoritative-path-audit.md`
+   and recording the canonical exact-pocket clear-or-confirm artifact in
+   `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-authoritative-collapse-clear-or-confirm.md`
    for the same exact frozen pocket and continuity split:
    family `same-lane retained-child`,
    anchor `boundVarTargetRoot`,
@@ -107,21 +109,33 @@
    `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`,
    clear-boundary-only status, and
    `TMu ...` plus `containsMu True` internally versus
-   `TForall "a" Nothing (TVar "a")` authoritatively. Either land the minimum
-   bounded docs/code/test slice needed so this exact pocket preserves
-   recursive structure on the authoritative public output surface without
-   changing family, anchor, owner-local frame, route, or clear-boundary
-   status, or record bounded proof that the collapse remains blocker debt
-   under the unchanged current architecture with `checkedAuthoritative` as
-   the first exact break and `termClosed` / `typeCheck termClosed` as its
-   same-pocket dependencies. No alias-bound widening, nested-`forall`, cyclic
-   search, second interface, or fallback path is authorized.
+   `TForall "a" Nothing (TVar "a")` authoritatively. The accepted result is
+   confirm-only, not repair: within the authorized bounded
+   `Pipeline.hs` / `TermClosure.hs` root-handoff slice,
+   `rootScheme`, `typeCheck termClosed`, and the root-level fallback all stay
+   at `TForall "a" Nothing (TVar "a")`, so no alternate recursive
+   whole-packet authoritative result exists in that slice to expose. The
+   exact public-output collapse therefore remains blocker debt within the
+   unchanged current architecture, with `checkedAuthoritative` still the
+   first exact break and `termClosed` / `typeCheck termClosed` still the
+   same-pocket dependencies. No alias-bound widening, nested-`forall`,
+   cyclic search, second interface, fallback path, or reopened
+   `non-cyclic-graph` decision was accepted here.
 
 4. [pending] Revalidate the frozen pocket end to end and classify its public-output continuity result
    Depends on: items 1, 2, 3
-   Completion notes: rerun only the exact frozen pocket across the accepted
-   review ledger after item 3 and record exactly one lawful exact-pocket
-   outcome:
+   Completion notes: consume the accepted item-3 confirm-only result from
+   `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-authoritative-collapse-clear-or-confirm.md`
+   and rerun only the exact frozen pocket across the accepted review ledger
+   for that same pocket and continuity split:
+   family `same-lane retained-child`,
+   anchor `boundVarTargetRoot`,
+   one owner-local retained-child frame, route
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`,
+   clear-boundary-only status, and
+   `TMu ...` plus `containsMu True` internally versus
+   `TForall "a" Nothing (TVar "a")` authoritatively. Record exactly one
+   lawful exact-pocket outcome:
    `stable visible persistence`,
    `admitted but not reconstruction-visible / blocker debt`, or
    `fail-closed rejection`.
