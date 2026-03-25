@@ -118,21 +118,30 @@
    alias-bound family, neighboring routes, nested-`forall`, replay /
    `InstBot`, fallback paths, or a broader capability claim.
 
-5. [pending] Make the bounded successor decision from the frozen-pocket persistence result
+5. [done] Make the bounded successor decision from the frozen-pocket persistence result
    Depends on: items 2, 4
-   Completion notes: consume only the accepted `round-092` item-4
-   classification for the exact frozen pocket:
+   Completion notes: completed in accepted `round-093` by consuming only the
+   accepted `round-092` item-4 classification for the exact frozen pocket:
    family `same-lane retained-child`,
    anchor `boundVarTargetRoot`,
    one owner-local retained-child frame, route
    `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`, and
-   clear-boundary-only status. The bounded decision to make now is whether
-   that exact-pocket result,
-   `admitted but not reconstruction-visible / blocker debt`,
-   means blocker debt remains within the current architecture, or whether the
-   same exact public-output collapse to
-   `TForall "a" Nothing (TVar "a")` specifically forces reopening the
-   `non-cyclic-graph` revision question. Do not relitigate solver admission
-   or item-3 elaboration clearance, do not upgrade the pocket to
-   `stable visible persistence`, and do not widen into the alias-bound
-   family, nested-`forall`, or a general automatic-recursive-inference claim.
+   clear-boundary-only status. The accepted bounded successor decision is
+   `blocker debt remains within the current architecture`; the non-selected
+   branch,
+   `reopen the non-cyclic-graph revision question`,
+   remains unaccepted because the exact-pocket record still proves bounded
+   public-output blocker debt rather than architecture impossibility. The
+   exact pocket therefore remains
+   `admitted but not reconstruction-visible / blocker debt`, not
+   `stable visible persistence`, and the accepted read does not widen into
+   the alias-bound family, nested-`forall`, or a general
+   automatic-recursive-inference claim.
+
+## Revision Completion
+
+All roadmap items in this revision are now `done`. This bounded successor loop
+is complete with the exact frozen same-lane retained-child pocket remaining
+inside the current architecture as
+`admitted but not reconstruction-visible / blocker debt`; `non-cyclic-graph`
+remains unreopened on the accepted record.
