@@ -35,6 +35,7 @@ import MLF.Elab.Elaborate.Scope
     )
 import qualified MLF.Elab.Inst as Inst
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
+import MLF.Elab.Legacy (expInstantiateArgsToInstNoFallback)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Run.Annotation (adjustAnnotationInst)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
@@ -325,8 +326,10 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
                                     case targetArgs of
                                         Just inferred -> Just inferred
                                         Nothing -> traceArgs
-                                shouldRefine =
+                                needsExpansionAuthority =
                                     instNeedsAuthoritativeRefinement phi
+                                shouldRefine =
+                                    needsExpansionAuthority
                                         || case targetTy of
                                             Just ty -> not (alphaEqType ty (schemeToType (siScheme schemeInfo)))
                                             Nothing -> phi == InstId
@@ -353,6 +356,18 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
                                                     (map (inlineBoundVarsType presolutionView) (take usableLen inferred))
                                                 )
                                             )
+                                _
+                                    | needsExpansionAuthority
+                                    , schemeArity > 0 ->
+                                        case expInstantiateArgsToInstNoFallback presolutionView namedSetReify args of
+                                            Right inst -> pure (Just inst)
+                                            Left _ ->
+                                                Left
+                                                    (PhiTranslatabilityError
+                                                        [ "reifyInst: missing authoritative instantiation translation for edge " ++ show eid
+                                                        , "expansion args=" ++ show args
+                                                        ]
+                                                    )
                                 _
                                     | shouldRefine
                                     , schemeArity > 0 ->

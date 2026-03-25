@@ -1569,6 +1569,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackTy <- requireRight (computeResultTypeFallback inputs innerCanon innerPre)
                 containsMu fallbackTy `shouldBe` True
 
+            it "same-lane retained-child exact packet clears Phase 6 elaboration" $ do
+                let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                    expr =
+                        ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+                            (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+                    pipelineRuns =
+                        [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                        , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+                        ]
+                forM_ pipelineRuns $ \(label, result) ->
+                    case result of
+                        Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
+                        Right _ -> pure ()
+
             it "keeps retained-child lookup bounded to the same local TypeRef lane" $ do
                 fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
                 fallbackSrc
