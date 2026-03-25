@@ -59,9 +59,9 @@
   - `artifact_path: "docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md"`
   - `review_snapshot: "orchestrator/rounds/round-078/reviews/attempt-1.md"`
   - `final_outcome: "boundVarTarget-exact-target-bind-established"`
-- `orchestrator/retry-subloop.md` permits merge preparation only after
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/retry-subloop.md` permits merge preparation only after
   `accepted + finalize`, and the live controller state in
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json` is already
+  `orchestrator/rounds/round-078/state-snapshot.json` is already
   `active_round_id: "round-078"`, `stage: "merge"`, `current_task: "N11"`,
   and `retry: null`.
 - No same-round retry remains open: `attempt-1` is authoritative, there is no

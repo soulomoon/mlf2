@@ -9,9 +9,9 @@
 
 - `git diff --check`
   - Result: pass.
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-016/state-snapshot.json >/dev/null`
   - Result: pass.
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-001/roadmap.md`
   - Result: pass.
   - Evidence: roadmap items `1` through `4` remain parseable and pending.
 - `test -f docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`
@@ -40,7 +40,7 @@
   - Evidence:
     - tracked edits remain confined to `app/Main.hs`, `mlf2.cabal`, `test/Main.hs`, and `test/RepoGuardSpec.hs`;
     - untracked additions remain confined to the round-016 packet, the bounded `P1` prototype modules, the `P1` spec, and the canonical `P1` artifact;
-    - no `src-public/` change, no `orchestrator/state.json` change, no `orchestrator/roadmap.md` change, and no prior-round or predecessor-packet rewrite.
+    - no `src-public/` change, no `orchestrator/rounds/round-016/state-snapshot.json` change, no `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-001/roadmap.md` change, and no prior-round or predecessor-packet rewrite.
 
 - Shared-entrypoint isolation and bounded scenario
   - Commands:

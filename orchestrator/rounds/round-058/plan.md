@@ -4,7 +4,7 @@
 
 Execute only roadmap item `J1` and prepare one accepted docs-only bind
 artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-058/docs/plans/2026-03-20-uri-r2-c1-j1-next-target-bind.md`.
+`docs/plans/2026-03-20-uri-r2-c1-j1-next-target-bind.md`.
 
 This is the initial `J1` plan for `attempt-1` with `retry: null`. The round
 must bind the queued next bounded cycle to repaired `URI-R2-C1` under the
@@ -18,13 +18,13 @@ The selected successor slice is:
 
 - one bounded local-binding inst-arg-only singleton-base
   `baseTarget -> baseC` fail-closed hardening slice centered on
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-058/src/MLF/Elab/Run/ResultType/Fallback.hs:382-387`
+  `src/MLF/Elab/Run/ResultType/Fallback.hs:382-387`
   plus the downstream final target-selection branch at
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-058/src/MLF/Elab/Run/ResultType/Fallback.hs:687-710`;
+  `src/MLF/Elab/Run/ResultType/Fallback.hs:687-710`;
 - future ownership limited to exactly
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-058/src/MLF/Elab/Run/ResultType/Fallback.hs`
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`
   and
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-058/test/PipelineSpec.hs`;
+  `test/PipelineSpec.hs`;
 - exact semantic intent: if the fallback root still resolves through a local
   `TypeRef`, `rootBaseBounds` is empty, the existing `instArgBaseBounds`
   logic collapses to exactly one base-like candidate, and both
@@ -40,7 +40,7 @@ The selected successor slice is:
 
 `J1` is a docs-only bind/selection round. It does not land the future
 inst-arg-only singleton-base hardening itself, does not edit production or
-test code, does not edit `orchestrator/state.json`, and does not perform
+test code, does not edit `orchestrator/rounds/round-058/state-snapshot.json`, and does not perform
 roadmap, bug-tracker, review, or merge bookkeeping.
 
 ## Locked Round Context
@@ -116,7 +116,7 @@ Current source and test anchors expose one adjacent unselected local
 
 Current repository state is already non-pristine:
 
-- `M orchestrator/state.json`
+- `M orchestrator/rounds/round-058/state-snapshot.json`
 - `?? orchestrator/rounds/round-058/selection.md`
 
 Respect those existing changes. Do not revert or "clean up" unrelated work.
@@ -132,10 +132,10 @@ Respect those existing changes. Do not revert or "clean up" unrelated work.
 
 ### Read-Only Evidence
 
-- `orchestrator/state.json`
+- `orchestrator/rounds/round-058/state-snapshot.json`
 - `orchestrator/rounds/round-058/selection.md`
-- `orchestrator/verification.md`
-- `orchestrator/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-025/verification.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-025/retry-subloop.md`
 - `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md`
 - `docs/plans/2026-03-20-uri-r2-c1-i4-next-cycle-decision-gate.md`
 - `docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md`
@@ -147,8 +147,8 @@ Respect those existing changes. Do not revert or "clean up" unrelated work.
 
 ### Preserve Unchanged
 
-- `orchestrator/state.json`
-- `orchestrator/roadmap.md`
+- `orchestrator/rounds/round-058/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-025/roadmap.md`
 - `orchestrator/rounds/round-058/selection.md`
 - `/Volumes/src/mlf4/Bugs.md`
 - `src/`
@@ -223,7 +223,7 @@ Respect those existing changes. Do not revert or "clean up" unrelated work.
 ### Task 4 - Refresh the canonical `J1` artifact with the exact non-selection list
 
 - Write
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-058/docs/plans/2026-03-20-uri-r2-c1-j1-next-target-bind.md`
+  `docs/plans/2026-03-20-uri-r2-c1-j1-next-target-bind.md`
   for `attempt-1`.
 - Record:
   - the accepted `I4` authority and the required fresh-bind rule;
@@ -247,18 +247,18 @@ Respect those existing changes. Do not revert or "clean up" unrelated work.
 
 ### Task 5 - Run the docs-only verification required for the bind round
 
-Run the baseline docs/state checks required by `orchestrator/verification.md`:
+Run the baseline docs/state checks required by `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-025/verification.md`:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-058/state-snapshot.json >/dev/null`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-058/state-snapshot.json`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-025/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-025/retry-subloop.md`
 
 Reconfirm exact-target authority with at least these focused checks:
 
@@ -322,9 +322,9 @@ inside all of the following limits:
 
 This `J1` plan does not authorize:
 
-- any change to `orchestrator/state.json`;
+- any change to `orchestrator/rounds/round-058/state-snapshot.json`;
 - any rewrite of `orchestrator/rounds/round-058/selection.md`,
-  `orchestrator/roadmap.md`, or `/Volumes/src/mlf4/Bugs.md`;
+  `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-025/roadmap.md`, or `/Volumes/src/mlf4/Bugs.md`;
 - any production/test/public-API/executable/Cabal edit during `J1` itself;
 - any reopening of accepted `I1` / `I2` / `I3` / `I4` as live work;
 - any reopening of the preserved scheme-alias/base-like `baseTarget` route as

@@ -8,9 +8,9 @@
 
 - `git diff --check`
   - pass.
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-017/state-snapshot.json >/dev/null`
   - pass.
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-002/roadmap.md`
   - pass.
   - Evidence: roadmap items `1` through `4` remain parseable with statuses `done`, `pending`, `pending`, `pending`.
 - `test -f docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`
@@ -67,7 +67,7 @@
   - Evidence:
     - tracked diff paths are exactly `mlf2.cabal`, `src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`, `src/MLF/Research/URI/R2/C1/Prototype/Entrypoint.hs`, `src/MLF/Research/URI/R2/C1/Prototype/Types.hs`, and `test/Research/UriR2C1PrototypeP1Spec.hs`;
     - `src/MLF/Research/URI/R2/C1/Prototype/P1.hs` has no diff;
-    - no forbidden tracked path appears for `orchestrator/state.json`, `orchestrator/roadmap.md`, `orchestrator/rounds/round-016/`, `app/Main.hs`, or `src-public/`;
+    - no forbidden tracked path appears for `orchestrator/rounds/round-017/state-snapshot.json`, `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-002/roadmap.md`, `orchestrator/rounds/round-016/`, `app/Main.hs`, or `src-public/`;
     - `mlf2.cabal` remains limited to the admitted one-line module registration at line `96`: `MLF.Research.URI.R2.C1.Prototype.P2`.
 
 - `P2-W` classification honesty and design conformance:

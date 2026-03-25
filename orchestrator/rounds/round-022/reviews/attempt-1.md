@@ -2,12 +2,12 @@
 
 - Baseline checks:
   - `git diff --check` (pass)
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` (pass)
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` (pass; `contract_version: 2`, `retry: null`)
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` (pass; ordered status list present)
+  - `python3 -m json.tool orchestrator/rounds/round-022/state-snapshot.json >/dev/null` (pass)
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-022/state-snapshot.json` (pass; `contract_version: 2`, `retry: null`)
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-003/roadmap.md` (pass; ordered status list present)
   - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md` (pass)
   - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` (pass)
-  - `test -f orchestrator/retry-subloop.md` (pass)
+  - `test -f orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-003/retry-subloop.md` (pass)
   - `cabal build all && cabal test` (pass; `1121 examples, 0 failures`; no post-success Cabal log-permission failure observed)
   - Continuity guards:
   - `git diff --name-only | rg '^orchestrator/rounds/round-(00[1-9]|01[0-9])/' || true` (pass; no edits under rounds `001..019`)
@@ -31,7 +31,7 @@
   - wrong tuple invocations fail fast with `UnsupportedScenario`, `UnsupportedResearchEntrypoint`, `UnsupportedStageSelector`, `UnsupportedAttemptId`
   - SHA-256 hashes of all `attempt-1` D3 evidence files are unchanged before/after rejection probes
   - Forbidden widening and controller-file checks:
-  - no edits to `orchestrator/state.json`, `orchestrator/roadmap.md`, or `orchestrator/attempt-log.jsonl`
+  - no edits to `orchestrator/rounds/round-022/state-snapshot.json`, `orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-003/roadmap.md`, or `orchestrator/attempt-log.jsonl`
   - no `src-public/` or `app/` changes, and no evidence of widened subject/scenario ownership claims
 
 - Implemented stage result: `pass`

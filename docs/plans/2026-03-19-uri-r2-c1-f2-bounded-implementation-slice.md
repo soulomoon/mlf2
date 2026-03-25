@@ -16,10 +16,10 @@ This artifact implements exactly one bounded `F2` fail-closed lane inside repair
 
 - the adjacent local-binding `rootIsSchemeAlias && rootBoundIsBaseLike`
   `keepTargetFinal` / `targetC` path in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-043/src/MLF/Elab/Run/ResultType/Fallback.hs`; and
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`; and
 - one bounded extension of the existing
   `ARI-C1 feasibility characterization (bounded prototype-only)` block in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-043/test/PipelineSpec.hs`.
+  `test/PipelineSpec.hs`.
 
 The inherited boundary remains fixed:
 

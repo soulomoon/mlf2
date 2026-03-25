@@ -1,0 +1,15 @@
+{
+  "base_branch": "codex/automatic-recursive-type-inference",
+  "active_round_id": null,
+  "stage": "done",
+  "current_task": null,
+  "branch": null,
+  "worktree_path": null,
+  "active_round_dir": null,
+  "round_artifacts": {},
+  "last_completed_round": "round-009",
+  "resume_error": null,
+  "roadmap_id": "2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap",
+  "roadmap_revision": "rev-005",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-005"
+}

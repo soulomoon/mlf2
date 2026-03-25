@@ -15,22 +15,22 @@ Rationale: item 5 is a decision-and-handoff milestone, and round 004 already sup
 
 ## Scope Guardrails
 
-- Do not edit `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-005/orchestrator/roadmap.md`.
-- Do not modify predecessor packet history under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-005/tasks/todo/2026-03-11-recursive-types-orchestration/`.
+- Do not edit `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-005/roadmap.md`.
+- Do not modify predecessor packet history under `tasks/todo/2026-03-11-recursive-types-orchestration/`.
 - Do not widen behavior claims beyond `ARI-C1`.
 - If contradictory evidence is discovered while drafting the decision artifact, switch outcome to `no-go/not-yet-go` and document blockers explicitly.
 
 ## Exact Target Files
 
-1. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-005/docs/plans/2026-03-14-automatic-recursive-inference-item5-handoff-decision.md`
-2. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-005/orchestrator/rounds/round-005/implementation-notes.md`
+1. Create `docs/plans/2026-03-14-automatic-recursive-inference-item5-handoff-decision.md`
+2. Create `orchestrator/rounds/round-005/implementation-notes.md`
 
 ## Sequential Tasks
 
 ### Task 1 — Write the roadmap-item-5 decision + handoff contract
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-005/docs/plans/2026-03-14-automatic-recursive-inference-item5-handoff-decision.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-item5-handoff-decision.md`
 
 Required contents:
 - Decision statement with one explicit outcome:
@@ -58,7 +58,7 @@ Required contents:
 ### Task 2 — Record round implementation notes and explicit handoff signal
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-005/orchestrator/rounds/round-005/implementation-notes.md`
+- `orchestrator/rounds/round-005/implementation-notes.md`
 
 Required contents:
 - Concise record of the item-5 decision taken (`implementation-handoff` or `no-go/not-yet-go`).
@@ -77,17 +77,17 @@ Required contents:
    - stop triggers.
 3. `/orchestrator/rounds/round-005/implementation-notes.md` exists and mirrors the same decision signal without ambiguity.
 4. Diff is docs/orchestrator-round artifacts only, with no edits to:
-   - `orchestrator/roadmap.md`,
+   - `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-005/roadmap.md`,
    - predecessor packet authoritative logs,
    - production/test code paths.
 5. Decision artifact is sufficient for a subsequent implementer to start a bounded `ARI-C1` implementation round without reopening research scope selection.
 
 ## Reviewer and Verification Checks
 
-Baseline checks (from `orchestrator/verification.md`):
+Baseline checks (from `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-005/verification.md`):
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-005/state-snapshot.json >/dev/null`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-005/roadmap.md`
 - `cabal build all && cabal test` is **not required this round** if diff excludes `src/`, `src-public/`, `app/`, `test/`, and `mlf2.cabal`; reviewer must record this skip rationale.
 - Reviewer-recorded guidance sync check for `AGENTS.md`, `tasks/readme`, `TODO.md`, `CHANGELOG.md`, `implementation_notes.md` (updated or intentionally unchanged with rationale).
 
@@ -104,4 +104,4 @@ Round-specific checks:
   - `rg -n 'src/MLF/Elab/Run/Pipeline\.hs|src/MLF/Constraint/Solve/Worklist\.hs|src/MLF/Constraint/Unify/Decompose\.hs|src/MLF/Reify/Type\.hs|test/PipelineSpec\.hs|test/PresolutionSpec\.hs' docs/plans/2026-03-14-automatic-recursive-inference-item5-handoff-decision.md`
 
 Review output requirement:
-- Reviewer writes `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-005/orchestrator/rounds/round-005/review.md` with baseline evidence, task-specific evidence, explicit decision (`approve`/`reject`), and explicit item-5 outcome confirmation (`implementation-handoff` or `no-go/not-yet-go`).
+- Reviewer writes `orchestrator/rounds/round-005/review.md` with baseline evidence, task-specific evidence, explicit decision (`approve`/`reject`), and explicit item-5 outcome confirmation (`implementation-handoff` or `no-go/not-yet-go`).

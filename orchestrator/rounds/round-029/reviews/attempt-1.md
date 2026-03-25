@@ -2,15 +2,15 @@
 
 - Baseline checks:
   - `git diff --check` (pass)
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` (pass)
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` (pass; `2: "contract_version": 2`, `13: "retry": null`)
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` (pass; ordered `U1` through `U6` markers remain parseable)
+  - `python3 -m json.tool orchestrator/rounds/round-029/state-snapshot.json >/dev/null` (pass)
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-029/state-snapshot.json` (pass; `2: "contract_version": 2`, `13: "retry": null`)
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-007/roadmap.md` (pass; ordered `U1` through `U6` markers remain parseable)
   - `test -f docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md` (pass)
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` (pass)
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-item5-handoff-decision.md` (pass)
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` (pass)
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` (pass)
-  - `test -f orchestrator/retry-subloop.md` (pass)
+  - `test -f orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-007/retry-subloop.md` (pass)
   - `cabal build all && cabal test` (not run; justified because `git -C . status --short -- src src-public app test mlf2.cabal` returned no output and the working-set is docs/orchestrator-only)
   - Continuity guards:
   - `python3 - <<'PY' ...` over `orchestrator/rounds/round-001` through `round-027` (pass; all required predecessor round directories exist)
@@ -30,7 +30,7 @@
   - `rg -n 'Carry-Forward Implications For \`U3\`|does not pre-clear \`U3\`, \`U4\`, \`U5\`, or \`U6\`' docs/plans/2026-03-17-uri-r2-c1-u2-unannotated-authority-clearance.md` (pass; no preemption beyond `U2`)
   - `git ls-files --others --exclude-standard` (pass; only `docs/plans/2026-03-17-uri-r2-c1-u2-unannotated-authority-clearance.md` and round-029 stage docs are present as untracked changes, with no production/test/controller drift)
   - Retry-contract legality:
-  - `cat orchestrator/retry-subloop.md` confirms `U2` legal review outcomes are `accepted + finalize`, `accepted + retry`, `rejected + retry`; current verdict/action stays within contract.
+  - `cat orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-007/retry-subloop.md` confirms `U2` legal review outcomes are `accepted + finalize`, `accepted + retry`, `rejected + retry`; current verdict/action stays within contract.
 
 - Implemented stage result:
 - `pass`
@@ -56,4 +56,4 @@
 - Stage artifact: `docs/plans/2026-03-17-uri-r2-c1-u2-unannotated-authority-clearance.md`
 - Review snapshot: `orchestrator/rounds/round-029/reviews/attempt-1.md`
 - Authoritative review record: `orchestrator/rounds/round-029/review-record.json`
-- Key boundedness contract: `orchestrator/rounds/round-029/plan.md`, `orchestrator/verification.md`, `orchestrator/retry-subloop.md`, `docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`
+- Key boundedness contract: `orchestrator/rounds/round-029/plan.md`, `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-007/verification.md`, `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-007/retry-subloop.md`, `docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`

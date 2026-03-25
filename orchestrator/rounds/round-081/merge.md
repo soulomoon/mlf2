@@ -50,10 +50,10 @@
   - `artifact_path: "docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md"`
   - `review_snapshot: "orchestrator/rounds/round-081/reviews/attempt-1.md"`
   - `final_outcome: "continue-bounded"`
-- `orchestrator/retry-subloop.md` permits merge preparation only after
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-014/retry-subloop.md` permits merge preparation only after
   `accepted + finalize`, and the live controller state in
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json` and
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-081/orchestrator/state.json`
+  `orchestrator/rounds/round-081/state-snapshot.json` and
+  `orchestrator/rounds/round-081/state-snapshot.json`
   is already `active_round_id: "round-081"`, `stage: "merge"`,
   `current_task: "N14"`, and `retry: null`.
 - No same-round retry remains open: `attempt-1` is authoritative, there is no

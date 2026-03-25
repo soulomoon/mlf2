@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Migrated the repo-local orchestrator to revisioned roadmap bundles under
+  `orchestrator/roadmaps/<roadmap_id>/rev-###/`: live controller state now
+  resolves the authoritative roadmap through `orchestrator/state.json`
+  `roadmap_id` / `roadmap_revision` / `roadmap_dir`, completed rounds now
+  point at stable roadmap bundles plus per-round `state-snapshot.json`
+  files, early pre-review-record rounds now carry migration-generated
+  roadmap-provenance `review-record.json` placeholders, and the open
+  `round-091` same-lane retained-child loop remains resumable on item `3`
+  under the new locator contract.
 - Completed the strategic general automatic iso-recursive inference control
   plane through accepted rounds `round-082` through `round-088`, selecting
   `continue within the current architecture` as the authoritative item-7

@@ -19,9 +19,9 @@ The round stays inside the accepted `H1` freeze:
 - inherited boundary remains explicit-only / non-equi-recursive /
   non-cyclic-graph / no-second-interface / no-fallback;
 - ownership stays bounded to
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-051/src/MLF/Elab/Run/ResultType/Fallback.hs`
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`
   and
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-051/test/PipelineSpec.hs`;
+  `test/PipelineSpec.hs`;
 - `rootHasMultiInst`, `rootLocalSchemeAliasBaseLike`, `boundVarTarget`,
   replay reopen, `MLF.Elab.Inst`, `InstBot`, non-local widening, and broader
   recursive inference remain excluded as separate target families.

@@ -3,7 +3,7 @@
 ## Objective
 
 Execute only roadmap item `L2` and prepare one docs-only decision artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-067/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`.
+`docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`.
 
 This is the initial `L2` plan for `attempt-1` with `retry: null`. The round
 must carry forward the accepted `L1` fail-closed result as binding continuity,
@@ -41,7 +41,7 @@ compatibility, convenience, or default-path fallback.
 - Fixed live subject: repaired `URI-R2-C1`
 - Active branch: `codex/round-067-l2-post-l1-decision-gate`
 - Active worktree:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-067`
+  `.worktrees/round-067`
 - Fixed inherited boundary:
   `explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback`
 - Stage mode: docs-only post-`L1` successor decision only
@@ -97,18 +97,18 @@ and do not revert or clean up unrelated changes.
 ### Read-Only Evidence
 
 - `orchestrator/rounds/round-067/selection.md`
-- `orchestrator/verification.md`
-- `orchestrator/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/verification.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/retry-subloop.md`
 - `orchestrator/roles/planner.md`
-- `orchestrator/roadmap.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/roadmap.md`
 - `orchestrator/rounds/round-066/review.md`
 - `orchestrator/rounds/round-066/review-record.json`
 - `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
 
 ### Preserve Unchanged
 
-- `orchestrator/state.json`
-- `orchestrator/roadmap.md`
+- `orchestrator/rounds/round-067/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/roadmap.md`
 - `orchestrator/rounds/round-067/selection.md`
 - `orchestrator/rounds/round-066/review.md`
 - `orchestrator/rounds/round-066/review-record.json`
@@ -160,7 +160,7 @@ and do not revert or clean up unrelated changes.
 ### Task 3 - Write the canonical `L2` artifact as one docs-only decision
 
 - Create
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-067/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+  `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
   for `attempt-1`.
 - The artifact must include:
   - the accepted `L1` authority and accepted-finalize reviewer record;
@@ -208,18 +208,18 @@ and do not revert or clean up unrelated changes.
 
 ### Task 5 - Run the docs-only verification required for the decision round
 
-Run the baseline docs/state checks required by `orchestrator/verification.md`:
+Run the baseline docs/state checks required by `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/verification.md`:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-067/state-snapshot.json >/dev/null`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-067/state-snapshot.json`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/retry-subloop.md`
 
 Run `L2`-specific continuity and predecessor checks:
 
@@ -238,7 +238,7 @@ Run `L2`-specific continuity and predecessor checks:
   precondition language.
 - `rg -n 'Attempt verdict: `accepted`|Stage action: `finalize`|fail-closed outcome is therefore a valid authoritative `L1` result' orchestrator/rounds/round-066/review.md`
   -> capture the accepted reviewer continuity that makes `L2` lawful.
-- `rg -n '^34\. \[pending\] Execute the bounded `L2` post-`L1` fail-closed successor decision gate for repaired `URI-R2-C1`' orchestrator/roadmap.md`
+- `rg -n '^34\. \[pending\] Execute the bounded `L2` post-`L1` fail-closed successor decision gate for repaired `URI-R2-C1`' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/roadmap.md`
   -> capture the exact pending roadmap item that `L2` is allowed to satisfy.
 
 Run docs-only diff-scope checks:

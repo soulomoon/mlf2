@@ -42,7 +42,7 @@ This round is continuous with accepted `L1` authority, not a fresh ownership res
 ## Follow-Up Notes
 
 - Any future work on the preserved generic scheme-alias / base-like `baseTarget` route remains blocked unless a separate roadmap amendment is accepted first and a fresh selection later authorizes that work.
-- This squash preparation does not select the next roadmap item, does not authorize implementation or verification beyond the approved docs-only `L2` decision, and does not include controller-owned `orchestrator/state.json` changes.
+- This squash preparation does not select the next roadmap item, does not authorize implementation or verification beyond the approved docs-only `L2` decision, and does not include controller-owned `orchestrator/rounds/round-067/state-snapshot.json` changes.
 
 ## Ready For Squash Merge
 

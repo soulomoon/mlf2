@@ -2,15 +2,15 @@
 
 - Baseline checks:
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2: "contract_version": 2`, `13: "retry": null`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `U1` through `U6` list intact, `U4` still pending pre-merge).
+  - `python3 -m json.tool orchestrator/rounds/round-031/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-031/state-snapshot.json` -> pass (`2: "contract_version": 2`, `13: "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-009/roadmap.md` -> pass (ordered `U1` through `U6` list intact, `U4` still pending pre-merge).
   - `test -f docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md` -> pass.
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
-  - `test -f orchestrator/retry-subloop.md` -> pass.
-  - Full Cabal gate `cabal build all && cabal test` -> correctly skipped (docs-only round; `git status --short src src-public app test mlf2.cabal orchestrator/state.json orchestrator/roadmap.md Bugs.md` returned no output).
+  - `test -f orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-009/retry-subloop.md` -> pass.
+  - Full Cabal gate `cabal build all && cabal test` -> correctly skipped (docs-only round; `git status --short src src-public app test mlf2.cabal orchestrator/rounds/round-031/state-snapshot.json orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-009/roadmap.md Bugs.md` returned no output).
 - Task-specific checks:
   - `U4-CONTRACT` -> pass: `Attempt: attempt-1`, `Retry state: null`, and `U4`-only feasibility scope are explicit in the artifact.
   - `U4-SUBJECT-BOUND` -> pass: live subject remains repaired `URI-R2-C1`; no subject widening beyond the bound lane.

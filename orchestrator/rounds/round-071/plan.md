@@ -4,7 +4,7 @@
 
 Execute only roadmap item `N4` and prepare one docs-only exact-target-bind
 artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`.
+`docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`.
 
 This is the initial `N4` plan for `attempt-1` with `retry: null`. The round
 must treat accepted `L1`, `L2`, `N1`, `N2`, and `N3` as binding predecessor
@@ -54,7 +54,7 @@ replay reopen, `MLF.Elab.Inst`, `InstBot`, or any other blocked route.
   planning subject
 - Active branch: `codex/round-071-n4-exact-target-bind`
 - Active worktree:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071`
+  `.worktrees/round-071`
 - Stage mode: docs-only exact-target bind only
 - Current round review feedback: none yet; this is a full `attempt-1` plan,
   not a retry delta
@@ -66,52 +66,52 @@ and do not revert unrelated work:
 
 ## Accepted Continuity That Remains Binding
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/orchestrator/rounds/round-071/selection.md`
+- `orchestrator/rounds/round-071/selection.md`
   already fixes this round to roadmap item `N4` only and explicitly forbids
   using this round for `N5` through `N7`, implementation, verification,
   roadmap/state edits, bug-tracker edits, or predecessor-history rewrites.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json` fixes the
+- `orchestrator/rounds/round-071/state-snapshot.json` fixes the
   live controller state at `active_round_id: "round-071"`, `stage: "plan"`,
   `current_task: "N4"`, `branch:
   "codex/round-071-n4-exact-target-bind"`, and `retry: null`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md` makes
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/roadmap.md` makes
   `N4` the first pending item after accepted `N3`; every later item depends on
   the exact target that `N4` freezes and therefore cannot run first.
-- `/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
   still records `N4 = NO` because the reopened loop has not yet frozen one
   exact bounded target inside the selected `baseTarget` subject.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
   remains binding predecessor evidence that repaired `URI-R2-C1` had no fresh
   lawful exact successor slice inside the inherited boundary, and that the
   remaining generic scheme-alias / base-like `baseTarget` route was preserved
   only as broader future context.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
   remains binding predecessor evidence that repaired `URI-R2-C1` finalized as
   `stop-blocked` and that any later work on the preserved generic
   scheme-alias / base-like `baseTarget` route first required a separate
   roadmap amendment plus a fresh selection.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
   remains binding predecessor evidence that the only lawful post-`L2`
   authority outcome is `reopen-planning-only`, preserving the inherited
   explicit-only / non-equi-recursive / non-cyclic-graph /
   no-second-interface / no-fallback boundary unchanged and keeping
   implementation plus verification blocked.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
   remains binding predecessor evidence that the only selected live subject is
   the preserved generic scheme-alias / base-like `baseTarget` route and that
   this subject remains planning-only until `N4` binds one exact bounded
   target.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
   remains binding predecessor evidence that any later `N4` target is lawful
   only if it names one bounded owner-binder / owned-bound packet, one exact
   edge or translation step, one inverse-translation-safe bound-inlining
   story, one structural / variance explanation for binding-flag
   reconstruction, and one explicit out-of-scope boundary.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/retry-subloop.md`
   allows retries for `N4`, but it also makes prior attempts immutable. This
   `attempt-1` plan must therefore create one new bounded bind artifact without
   rewriting any prior attempt or review artifact.
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` currently carries open
+- `Bugs.md` currently carries open
   `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains read-only
   predecessor context only. It does not reopen replay, `MLF.Elab.Inst`, or
   any repaired-queue family in this round.
@@ -120,7 +120,7 @@ and do not revert unrelated work:
 
 ### Modify
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
   - Responsibility: record the `N4` docs-only exact-target bind for the
     selected preserved generic scheme-alias / base-like `baseTarget` planning
     subject, freezing one bounded owner-binder / owned-bound packet and its
@@ -128,37 +128,37 @@ and do not revert unrelated work:
 
 ### Read-Only Evidence
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/papers/these-finale-english.txt`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/orchestrator/rounds/round-071/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/test/PipelineSpec.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Frontend/Normalize.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Elab/Run/Scope.hs`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/roadmap.md`
+- `orchestrator/rounds/round-071/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/verification.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/retry-subloop.md`
+- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
+- `Bugs.md`
+- `papers/these-finale-english.txt`
+- `orchestrator/rounds/round-071/selection.md`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
+- `src/MLF/Frontend/Normalize.hs`
+- `src/MLF/Elab/Run/Scope.hs`
 
 ### Preserve Unchanged
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/orchestrator/rounds/round-071/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src-public/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/app/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/test/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/mlf2.cabal`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/roadmap.md`
+- `orchestrator/rounds/round-071/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/verification.md`
+- `orchestrator/rounds/round-071/selection.md`
+- `Bugs.md`
+- `src/`
+- `src-public/`
+- `app/`
+- `test/`
+- `mlf2.cabal`
 
 ## Exact Frozen `N4` Target (Exactly One)
 
@@ -166,14 +166,14 @@ The only frozen `N4` target is:
 
 non-local preserved generic scheme-root alias-bound / base-like
 `baseTarget -> baseC` bind in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Elab/Run/ResultType/Fallback.hs`,
+`src/MLF/Elab/Run/ResultType/Fallback.hs`,
 limited to the existing generic scheme-alias / base-like `baseTarget`
 computation at `Fallback.hs:367-408` and the downstream same-lane `targetC`
 consumption at `Fallback.hs:700-710`, as exercised by
 `schemeAliasBaseLikeFallback False` in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/test/PipelineSpec.hs:1244-1269`
+`test/PipelineSpec.hs:1244-1269`
 and
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/test/PipelineSpec.hs:1622-1625`.
+`test/PipelineSpec.hs:1622-1625`.
 
 Required interpretation of that one bounded target:
 
@@ -259,7 +259,7 @@ Everything else remains out of scope, including:
 ### Task 3 - Write the canonical `N4` artifact as one bounded bind
 
 - Create
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`.
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`.
 - The artifact must include:
   - the stage contract freeze for `round-071` / `N4` / `attempt-1` /
     `retry: null`;
@@ -301,34 +301,34 @@ Everything else remains out of scope, including:
   - the accepted local single-base and inst-arg-only singleton-base lanes;
   - `rootLocalMultiInst`, `rootLocalInstArgMultiBase`, `boundVarTarget`,
     `boundTarget`, `schemeBodyTarget`, or
-    `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Elab/Run/ResultType/View.hs`;
+    `src/MLF/Elab/Run/ResultType/View.hs`;
   - any other fallback family or any other solver/pipeline subject;
   - equi-recursive reasoning, implicit unfolding, cyclic structural graph
     encoding, graph-cycle exceptions, multi-SCC reasoning, cross-family
     search, second-interface work, or fallback widening.
 - State explicitly that prior attempts and reviewer-owned history remain
-  immutable under `orchestrator/retry-subloop.md`.
+  immutable under `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/retry-subloop.md`.
 
 ### Task 5 - Run the docs-only verification required for `N4`
 
 Run the baseline docs/state checks required by
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`:
+`orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/verification.md`:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-071/state-snapshot.json >/dev/null`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-071/state-snapshot.json`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/roadmap.md`
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
 - `test -f docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
 - `test -f docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
 - `test -f tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/retry-subloop.md`
 
 Run `N4`-specific continuity, thesis, and anchor checks:
 
-- `rg -n '^4\\. \\[pending\\] Execute the `N4` exact bounded target bind for the reopened loop' orchestrator/roadmap.md`
+- `rg -n '^4\\. \\[pending\\] Execute the `N4` exact bounded target bind for the reopened loop' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/roadmap.md`
 - `rg -n 'N4 — Exact bounded target bind for the reopened loop|bind one exact bounded slice before any implementation begins' tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
 - `rg -n 'no fresh lawful exact successor slice|generic scheme-alias / base-like `baseTarget` route' docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
 - `rg -n 'stop-blocked|blocked future work only|separate roadmap amendment|fresh selection' docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
@@ -401,5 +401,5 @@ Reviewer should confirm that the implemented `N4` artifact:
   fallback family, every different solver/pipeline subject, equi-recursive
   reasoning, implicit unfolding, cyclic graphs, second-interface work, and
   fallback widening blocked; and
-- leaves `orchestrator/roadmap.md`, `orchestrator/state.json`, `Bugs.md`, and
+- leaves `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/roadmap.md`, `orchestrator/rounds/round-071/state-snapshot.json`, `Bugs.md`, and
   prior attempt/review history unchanged.

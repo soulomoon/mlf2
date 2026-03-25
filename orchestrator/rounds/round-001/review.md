@@ -4,9 +4,9 @@
 
 - `git diff --check`
   - Result: pass (no whitespace/conflict-marker issues).
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-001/state-snapshot.json >/dev/null`
   - Result: pass (`OK`).
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-001/roadmap.md`
   - Result: pass (`1..5` roadmap items found with status markers).
 - `cabal build all && cabal test`
   - Result: pass (`1096 examples, 0 failures`; test suite `mlf2-test: PASS`).

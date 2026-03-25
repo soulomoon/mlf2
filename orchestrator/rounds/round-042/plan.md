@@ -7,7 +7,7 @@ Repair only the rejected `attempt-2` mismatch recorded as
 
 All repo-local paths in this plan are relative to the active packet rooted at:
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042`
+`.worktrees/round-042`
 
 The one canonical `F1` bind artifact path remains:
 
@@ -148,7 +148,7 @@ not edit them.
   - `test -e orchestrator/rounds/round-042/reviews/attempt-1.md`
   - `test -e orchestrator/rounds/round-042/attempt-log.jsonl`
   - `test -e orchestrator/rounds/round-042/selection.md`
-  - `rg -n '/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-042/(review\\.md|reviews/attempt-1\\.md|attempt-log\\.jsonl|selection\\.md)' orchestrator/rounds/round-042/plan.md`
+  - `rg -n 'orchestrator/rounds/round-042/(review\\.md|reviews/attempt-1\\.md|attempt-log\\.jsonl|selection\\.md)' orchestrator/rounds/round-042/plan.md`
     - expected: no output
   - `rg -n 'orchestrator/rounds/round-042/(review\\.md|reviews/attempt-1\\.md|attempt-log\\.jsonl|selection\\.md)' orchestrator/rounds/round-042/plan.md`
 - Keep docs-only diff evidence:
@@ -167,7 +167,7 @@ not edit them.
 - No change to the binding effect of accepted `U2`, `U3`, or `U4`.
 - No edits to `docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md`,
   `orchestrator/rounds/round-042/implementation-notes.md`,
-  `orchestrator/state.json`, `orchestrator/roadmap.md`, `/Volumes/src/mlf4/Bugs.md`,
+  `orchestrator/rounds/round-042/state-snapshot.json`, `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-009/roadmap.md`, `/Volumes/src/mlf4/Bugs.md`,
   production code, tests, public API surfaces, executable entrypoints, or
   `mlf2.cabal`.
 - No rewrite of review history, `reviews/attempt-1.md`, `review.md`, or

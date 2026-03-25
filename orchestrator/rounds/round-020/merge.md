@@ -4,7 +4,7 @@
 
 - Latest review snapshot is `accepted + finalize`:
   - `review.md` reports `Attempt verdict: accepted`, `Stage action: finalize`, `Implemented stage result: pass`.
-  - This is merge-eligible under `orchestrator/retry-subloop.md` and `orchestrator/roles/merger.md`.
+  - This is merge-eligible under `orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-001/retry-subloop.md` and `orchestrator/roles/merger.md`.
 - `review-record.json` is final and authoritative for this round:
   - `attempt_verdict: accepted`
   - `stage_result: pass`

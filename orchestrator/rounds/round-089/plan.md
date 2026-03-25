@@ -3,7 +3,7 @@
 ## Objective
 
 Execute only roadmap item `1` and produce one docs-first artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`.
+`docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`.
 
 This is the initial `item-1` plan for `attempt-1` with `retry: null`. The
 round must freeze exactly one admitted pocket from the accepted predecessor
@@ -35,8 +35,8 @@ The artifact must:
 
 This round is docs-only and contract-freeze-only. It must not edit production
 code, tests, public surfaces, executables, `mlf2.cabal`,
-`orchestrator/state.json`, `orchestrator/roadmap.md`,
-`orchestrator/verification.md`, `orchestrator/retry-subloop.md`, `Bugs.md`,
+`orchestrator/rounds/round-089/state-snapshot.json`, `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/roadmap.md`,
+`orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/verification.md`, `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/retry-subloop.md`, `Bugs.md`,
 or any review / merge / predecessor-history artifact.
 
 This round must not silently widen into:
@@ -67,7 +67,7 @@ freezing only what later rounds are allowed to preserve and inspect.
   retained-child persistence case and review ledger
 - Active branch: `codex/round-089`
 - Active worktree:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089`
+  `.worktrees/round-089`
 - Current round review feedback: none yet; no `review.md`,
   `reviews/attempt-<n>.md`, or `review-record.json` exists for `round-089`,
   so this is a full `attempt-1` plan rather than a retry delta
@@ -75,58 +75,58 @@ freezing only what later rounds are allowed to preserve and inspect.
 Current round worktree state is already non-pristine. Respect existing edits
 and do not revert unrelated work:
 
-- `M orchestrator/state.json` (controller-owned; must remain untouched)
+- `M orchestrator/rounds/round-089/state-snapshot.json` (controller-owned; must remain untouched)
 - `?? orchestrator/rounds/round-089/selection.md`
 
 ## Accepted Continuity That Remains Binding
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/rounds/round-089/selection.md`
+- `orchestrator/rounds/round-089/selection.md`
   is the stage authority for this round. It fixes the live subject to
   roadmap item `1` only, names the exact same-lane retained-child pocket,
   and limits the output to freezing that pocket plus its review ledger.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/roadmap.md`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/roadmap.md`
   makes item `1` the first unfinished item on the refreshed successor loop
   and defines its completion notes as one exact pocket freeze plus one review
   ledger only.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/state.json`
+- `orchestrator/rounds/round-089/state-snapshot.json`
   fixes the live controller state at `active_round_id = round-089`,
   `stage = plan`, `current_task = item-1`, and `retry = null`. This plan
   must therefore be a full `attempt-1` plan, not a retry delta.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   preserves the inherited boundary: explicit-only recursive behavior remains
   the production baseline; recursive meaning remains iso-recursive only; and
   non-equi-recursive, non-cyclic-graph, no-second-interface, and no-fallback
   boundaries remain binding.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+- `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
   is the exact predecessor packet. It keeps the live pocket fixed to one
   same-lane retained-child `boundVarTarget -> targetC` route only and keeps
   neighboring routes and nested-`forall` success outside scope.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
   keeps `non-cyclic-graph = unknown` as architecture-pressure context only.
   Item `1` must not reopen that question.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
   supplies the controlling persistence tuple, phase-and-surface ledger, and
   bounded outcome vocabulary. Item `1` must freeze the exact same tuple and
   ledger for the selected pocket only, not invent a new rubric.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
   classifies the same-lane retained-child pocket as the strongest bounded
   positive-output candidate but still
   `admitted but not reconstruction-visible / blocker debt`. Item `1` must
   preserve that honest posture.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
   is the accepted item-7 authority that selected exactly one successor gate:
   determine whether this same-lane retained-child pocket can cross into
   accepted `stable visible persistence` without changing the inherited
   architecture.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/verification.md`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/verification.md`
   requires item-1-specific checks proving that the round freezes exactly one
   pocket, freezes the full persistence tuple, and names the solver /
   elaboration / reconstruction / internal-output / public-output /
   reviewer-visible evidence that later rounds must preserve.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/retry-subloop.md`
   confirms that item `1` may retry in principle, but `retry: null` means this
   plan is the full first-attempt plan.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/Bugs.md`
+- `Bugs.md`
   still lists open `BUG-2026-03-16-001`, but that replay / `InstBot` defect
   remains predecessor implementation context only. It does not authorize
   replay repair, code changes, or a different live subject for item `1`.
@@ -135,7 +135,7 @@ and do not revert unrelated work:
 
 ### Create
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
   - Responsibility: canonical docs-only item-1 artifact freezing exactly one
     same-lane retained-child persistence case, the exact persistence tuple,
     and the review-visible ledger that later rounds must preserve when they
@@ -143,31 +143,31 @@ and do not revert unrelated work:
 
 ### Read-Only Evidence
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/rounds/round-089/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/Bugs.md`
+- `orchestrator/rounds/round-089/selection.md`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/roadmap.md`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/verification.md`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/retry-subloop.md`
+- `orchestrator/rounds/round-089/state-snapshot.json`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
+- `Bugs.md`
 
 ### Preserve Unchanged
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/src/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/test/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/src-public/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/app/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/mlf2.cabal`
+- `orchestrator/rounds/round-089/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/roadmap.md`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/verification.md`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/retry-subloop.md`
+- `Bugs.md`
+- `src/`
+- `test/`
+- `src-public/`
+- `app/`
+- `mlf2.cabal`
 - reviewer-owned history under earlier round directories
 
 ## Exact Selected Slice (Exactly One)
@@ -305,7 +305,7 @@ or by naming the missing proof as later-round debt rather than widening item
   round planning artifacts; no code/test/public/Cabal surface changes are
   authorized.
 - Review should use the item-1 contract-freeze checks from
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-089/orchestrator/verification.md`:
+  `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/verification.md`:
   exactly one same-lane retained-child pocket, one full persistence tuple,
   and one exact solver/elaboration/reconstruction/internal-output/public-output/reviewer-visible
   ledger.

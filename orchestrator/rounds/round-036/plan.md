@@ -3,14 +3,14 @@
 ## Objective
 
 Execute only roadmap item `C3` and produce one accepted docs/evidence artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md`.
+`docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md`.
 
 This round must verify the accepted `C2` local-binding-only `rootBindingIsLocalType`
 fail-closed retention slice against all three required evidence surfaces named by the
 roadmap and selection:
 
 1. the focused `ARI-C1 feasibility characterization (bounded prototype-only)` block in
-   `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`;
+   `test/PipelineSpec.hs`;
 2. a fresh full repo gate via `cabal build all && cabal test`;
 3. predecessor continuity from accepted `C1`, accepted `C2`, accepted `U6`, and the
    inherited boundary/repair documents.
@@ -35,9 +35,9 @@ Accepted predecessor facts that must remain binding throughout `C3`:
 
 - `C1` froze exactly one bounded `C2` target: the local-binding-only result-type
   target-retention hardening slice in
-  `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`
   with focused coverage in
-  `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`.
+  `test/PipelineSpec.hs`.
 - `C2` finalized in `round-035` as authoritative `attempt-2`, with
   `attempt_verdict=accepted`, `stage_action=finalize`, and a passing focused
   `ARI-C1` block plus a passing full repo gate.
@@ -45,64 +45,64 @@ Accepted predecessor facts that must remain binding throughout `C3`:
 - `U2` remains `authority-narrowed`.
 - `U3` remains `uniqueness-owner-stable-refuted`.
 - `U4` remains `constructor-acyclic-termination-refuted`.
-- `BUG-2026-03-16-001` in `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
+- `BUG-2026-03-16-001` in `Bugs.md`
   remains replay-lane continuity context only; it is not authority to reopen
   `MLF.Elab.Inst`, replay repair, or any broader recursive-inference lane here.
 
 Current repository status at the root worktree is already non-pristine
-(`orchestrator/state.json` modified, current round files untracked, task folder
+(`orchestrator/rounds/round-036/state-snapshot.json` modified, current round files untracked, task folder
 untracked). Respect those existing changes. Do not revert or "clean up" unrelated
 work while gathering `C3` evidence.
 
 ## Authoritative Inputs To Preserve
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-036/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roles/planner.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-035/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
+- `orchestrator/rounds/round-036/selection.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-003/verification.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-003/retry-subloop.md`
+- `orchestrator/roles/planner.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-003/roadmap.md`
+- `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
+- `docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md`
+- `docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
+- `orchestrator/rounds/round-035/review-record.json`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
+- `Bugs.md`
 
 ## Files Expected In Scope
 
 Primary writable artifact:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md`
+1. `docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md`
    - create the canonical `C3` verification/evidence record.
 
 Optional bounded note file:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-036/implementation-notes.md`
+1. `orchestrator/rounds/round-036/implementation-notes.md`
    - optional command transcript / reviewer note file if needed for long outputs or blocker capture.
 
 Read-only evidence anchors:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`
-2. `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`
-3. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-035/review-record.json`
-4. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md`
-5. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
-6. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-7. `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
+1. `src/MLF/Elab/Run/ResultType/Fallback.hs`
+2. `test/PipelineSpec.hs`
+3. `orchestrator/rounds/round-035/review-record.json`
+4. `docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md`
+5. `docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
+6. `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
+7. `Bugs.md`
 
 Files that must remain untouched by `C3` `attempt-1`:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src-public/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/app/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/test/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/mlf2.cabal`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- reviewer-owned history under `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-035/`
+- `src/`
+- `src-public/`
+- `app/`
+- `test/`
+- `mlf2.cabal`
+- `orchestrator/rounds/round-036/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-003/roadmap.md`
+- `Bugs.md`
+- reviewer-owned history under `orchestrator/rounds/round-035/`
   and any prior round directories
 
 ## Sequential Tasks
@@ -135,9 +135,9 @@ Files that must remain untouched by `C3` `attempt-1`:
   - `U6` authorized `continue-bounded` only;
   - `U2`, `U3`, and `U4` remain accepted negative findings that still constrain the
     lane.
-- Use `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-035/review-record.json`
+- Use `orchestrator/rounds/round-035/review-record.json`
   as the authoritative acceptance proof for `C2`.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` only as continuity context.
+- Treat `Bugs.md` only as continuity context.
   Do not reinterpret `BUG-2026-03-16-001` as current-round repair authority.
 - State explicitly that `C3` answers only this bounded question:
   whether the accepted `C2` slice still looks stable under the focused `ARI-C1`
@@ -146,7 +146,7 @@ Files that must remain untouched by `C3` `attempt-1`:
 ### Task 3 - Collect read-only evidence from the bounded code/test anchors
 
 - Inspect the existing retained-target gate in
-  `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`
   without editing it.
 - Capture line-referenced evidence for all of the following:
   - `rootBindingIsLocalType`;
@@ -155,7 +155,7 @@ Files that must remain untouched by `C3` `attempt-1`:
   - the non-local `else rootFinal` fail-closed branch.
 - Inspect the focused
   `describe "ARI-C1 feasibility characterization (bounded prototype-only)"`
-  block in `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`
+  block in `test/PipelineSpec.hs`
   without editing it.
 - Capture line-referenced evidence showing the accepted bounded six-example shape:
   - annotation-anchored recursive positive control;
@@ -177,17 +177,17 @@ Recommended evidence commands for this step:
 ### Task 4 - Re-run the bounded verification suite required for `C3`
 
 - Run the baseline checks required by
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`:
+  `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-003/verification.md`:
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `python3 -m json.tool orchestrator/rounds/round-036/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-036/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-003/roadmap.md`
   - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-  - `test -f orchestrator/retry-subloop.md`
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-003/retry-subloop.md`
 - Run the focused bounded test block exactly:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'`
 - Re-run the full repo gate exactly:
@@ -249,7 +249,7 @@ PY
 ### Task 6 - Author the canonical `C3` verification artifact
 
 - Write
-  `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md`
+  `docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md`
   as the canonical stage result.
 - Required sections:
   - stage metadata (`Date`, `Round`, `Roadmap item`, `Stage`, `Attempt`,
@@ -287,7 +287,7 @@ PY
 ## Non-Goals
 
 - No production-code or test-code edits in `C3` `attempt-1`.
-- No edits to `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Inst.hs`.
+- No edits to `src/MLF/Elab/Inst.hs`.
 - No replay-lane reopen, including `InstBot`, as part of this verification round.
 - No roadmap mutation, no `Bugs.md` updates, and no controller-state edits.
 - No reinterpretation of accepted `U2` / `U3` / `U4` negative findings as if they were
@@ -301,7 +301,7 @@ PY
 ## Reviewer Checks
 
 Baseline checks from
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md` still apply.
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-003/verification.md` still apply.
 
 Round-specific checks:
 

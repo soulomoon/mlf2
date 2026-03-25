@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-028`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-028`
+- State Snapshot: `orchestrator/rounds/round-061/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 28: execute the bounded `J4` next-cycle decision gate for the
@@ -14,7 +22,7 @@ singleton-base slice.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` already fixes the live controller state at
+`orchestrator/rounds/round-061/state-snapshot.json` already fixes the live controller state at
 `active_round_id: "round-061"`, `active_round_dir:
 "orchestrator/rounds/round-061"`, `stage: "select-task"`,
 `current_task: null`, `retry: null`, and `last_completed_round:
@@ -22,11 +30,11 @@ singleton-base slice.
 interrupted later stage to continue, and no lawful reason to reopen an older
 round instead of selecting the next roadmap item now.
 
-`orchestrator/roadmap.md` marks items 1 through 27 done and leaves only item
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-028/roadmap.md` marks items 1 through 27 done and leaves only item
 28 (`J4`) pending. Under the guider contract, the next lawful choice is the
 lowest-numbered unfinished item unless live retry state forces a same-round
 retry. The live retry state does not: `retry` is `null`, and
-`orchestrator/retry-subloop.md` therefore does not authorize replaying or
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-028/retry-subloop.md` therefore does not authorize replaying or
 replanning any prior round. Item 28 now has its dependency satisfied because
 item 27 completed in accepted `round-060`.
 
@@ -89,7 +97,7 @@ selection authority for replay reopen, non-local widening, or any other
 out-of-scope family here.
 
 Current repository status before writing this selection showed only the
-controller-state preparation (`M orchestrator/state.json`) plus the
+controller-state preparation (`M orchestrator/rounds/round-061/state-snapshot.json`) plus the
 guider-owned round artifact path under `orchestrator/rounds/round-061/` on
 branch `codex/round-061-j4-next-cycle-decision`. That status does not change
 roadmap order, but it is consistent with selecting `J4` now and shows no

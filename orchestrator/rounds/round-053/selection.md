@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-020`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-020`
+- State Snapshot: `orchestrator/rounds/round-053/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 20: execute the bounded `H4` next-cycle decision gate for the
@@ -14,7 +22,7 @@ accepted `H3`-reverified repaired `URI-R2-C1` local-binding
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` reflects the live opened round:
+`orchestrator/rounds/round-053/state-snapshot.json` reflects the live opened round:
 `active_round_id: "round-053"`, `active_round_dir:
 "orchestrator/rounds/round-053"`, `stage: "select-task"`,
 `current_task: null`, `retry: null`, and `last_completed_round:
@@ -22,7 +30,7 @@ accepted `H3`-reverified repaired `URI-R2-C1` local-binding
 resume and no prior selection to carry forward ahead of normal roadmap
 ordering.
 
-`orchestrator/roadmap.md` marks items 1 through 19 done. Item 20 (`H4`) is
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-020/roadmap.md` marks items 1 through 19 done. Item 20 (`H4`) is
 the lowest-numbered unfinished roadmap entry, and there is no earlier pending
 item left to run first, so `H4` is the next lawful selection under the guider
 contract.
@@ -68,7 +76,7 @@ outside the accepted `H1` / `H2` / `H3` lane. It does not override roadmap
 ordering or authorize replay reopen, non-local widening, `boundVarTarget`
 widening, or broader recursive-inference work in this round. Current
 repository status shows only the expected controller-state preparation
-(`M orchestrator/state.json`) and no conflicting implementation diff, so
+(`M orchestrator/rounds/round-053/state-snapshot.json`) and no conflicting implementation diff, so
 there is no repository-status reason to bypass the lowest-numbered unfinished
 item.
 

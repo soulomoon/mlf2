@@ -72,7 +72,7 @@ clearance for replay repair, `MLF.Elab.Inst`, or `InstBot`.
 The only frozen future `H2` target is:
 
 local-binding `instArgRootMultiBase` fail-closed hardening in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-050/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 limited to the already-computed inst-argument multi-base aggregation at
 `Fallback.hs:289-359` and the downstream local `keepTargetFinal` / `targetC`
 selection in `Fallback.hs:671-697`.
@@ -119,14 +119,14 @@ family.
 
 Future `H2` ownership is frozen to exactly these files only:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-050/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-050/test/PipelineSpec.hs`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
 
 ### Future Focused Coverage Intent
 
 Future `H2` coverage remains one bounded extension of the existing
 `ARI-C1 feasibility characterization (bounded prototype-only)` block in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-050/test/PipelineSpec.hs`
+`test/PipelineSpec.hs`
 only:
 
 - add one local-binding multi-base success example that exercises the selected
@@ -146,7 +146,7 @@ No second implementation family is selected in this artifact.
 
 This `H1` bind does not authorize:
 
-- edits to `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-050/src/MLF/Elab/Inst.hs`;
+- edits to `src/MLF/Elab/Inst.hs`;
 - replay-repair reopen, including `MLF.Elab.Inst` / `InstBot`, as active `H2`
   work;
 - reopening the completed `G1` / `G2` / `G3` / `G4` chain;

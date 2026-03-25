@@ -2,15 +2,15 @@
 
 - Baseline checks:
   - `git diff --check` -> pass.
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`contract_version: 2`, `retry: null` present).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass; items `1` through `16` remain parseable and item `13` (`G1`) is still pending pre-merge.
+  - `python3 -m json.tool orchestrator/rounds/round-046/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-046/state-snapshot.json` -> pass (`contract_version: 2`, `retry: null` present).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-013/roadmap.md` -> pass; items `1` through `16` remain parseable and item `13` (`G1`) is still pending pre-merge.
   - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
-  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-013/retry-subloop.md` -> pass.
 - Task-specific checks:
   - `test -f docs/plans/2026-03-19-uri-r2-c1-f4-next-cycle-decision-gate.md` -> pass.
   - `python3 -m json.tool orchestrator/rounds/round-045/review-record.json >/dev/null` -> pass.
@@ -34,7 +34,7 @@
   - `rg -n 'open replay-path bug|state\.json modified|tasks/todo/2026-03-18-continue-bounded-orchestrator-run' orchestrator/rounds/round-046/selection.md` -> pass; found stale factual claims in the current round diff.
   - `rg -n 'BUG-2026-03-16-001|Status: Resolved' /Volumes/src/mlf4/Bugs.md` -> pass; `BUG-2026-03-16-001` is recorded as resolved.
   - `test -e tasks/todo/2026-03-18-continue-bounded-orchestrator-run && echo exists || echo missing` -> pass (`missing`).
-  - `git status --short orchestrator/state.json` -> pass (no output); `orchestrator/state.json` is not modified.
+  - `git status --short orchestrator/rounds/round-046/state-snapshot.json` -> pass (no output); `orchestrator/rounds/round-046/state-snapshot.json` is not modified.
 - Implemented stage result:
   - `fail`
   - The canonical `G1` bind artifact itself is aligned with the plan and accepted continue-bounded design, but the current round diff also carries `orchestrator/rounds/round-046/selection.md` with stale factual assertions that contradict the current repository and `Bugs.md` state.
@@ -48,7 +48,7 @@
   - Refresh `orchestrator/rounds/round-046/selection.md` so it matches the current repository state and `Bugs.md` facts, then rerun the same docs-only verification set.
 - Decision summary:
   - The required `G1` review targets pass on their own terms: the round stayed docs-only, the canonical artifact freezes exactly one bounded `G2` family (`rootHasMultiInst`), explicitly leaves `instArgRootMultiBase` non-selected, preserves the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary, does not reopen accepted `E2` / `E3` or `F1` / `F2` / `F3` / `F4` history, and justifies skipping `cabal build all && cabal test` because no `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal` paths changed.
-  - The attempt still cannot finalize because `orchestrator/rounds/round-046/selection.md` says `BUG-2026-03-16-001` is open, says `orchestrator/state.json` is modified, and says `tasks/todo/2026-03-18-continue-bounded-orchestrator-run/` is untracked. Fresh evidence shows the bug is resolved, the task folder is absent, and `orchestrator/state.json` is clean. This is a docs-only round, so stale round-control facts in the reviewed diff are a blocking defect.
+  - The attempt still cannot finalize because `orchestrator/rounds/round-046/selection.md` says `BUG-2026-03-16-001` is open, says `orchestrator/rounds/round-046/state-snapshot.json` is modified, and says `tasks/todo/2026-03-18-continue-bounded-orchestrator-run/` is untracked. Fresh evidence shows the bug is resolved, the task folder is absent, and `orchestrator/rounds/round-046/state-snapshot.json` is clean. This is a docs-only round, so stale round-control facts in the reviewed diff are a blocking defect.
 - Evidence summary:
   - Fresh baseline and `G1`-specific checks passed.
   - Fresh diff checks proved the packet remained docs-only and kept code/test surfaces untouched.

@@ -3,24 +3,24 @@
 - Baseline checks:
   - `git branch --show-current` -> pass (`codex/round-050-h1-next-target-bind`).
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `18:  "retry": null`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `H4` list intact; `H1` remains pending pre-merge at line `115`).
+  - `python3 -m json.tool orchestrator/rounds/round-050/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-050/state-snapshot.json` -> pass (`2:  "contract_version": 2,`, `18:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-017/roadmap.md` -> pass (ordered `C1` through `H4` list intact; `H1` remains pending pre-merge at line `115`).
   - Required design/boundary presence check -> pass:
     - `docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
     - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
     - `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
     - `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
     - `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-    - `orchestrator/retry-subloop.md`
+    - `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-017/retry-subloop.md`
   - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `replay_repair_track=True`, `initial_successor_cycle=True`, `recursive_types_packet=True`, `boundary_doc=True`, `repair_doc=True`).
   - `/Volumes/src/mlf4/Bugs.md` continuity check -> pass (`## Open` is empty; only resolved replay-repair history remains).
   - Authoritative predecessor record recheck via `python3` over `orchestrator/rounds/round-049/review-record.json` -> pass (`G4 accepted finalize authoritative docs/plans/2026-03-19-uri-r2-c1-g4-next-cycle-decision-gate.md`).
-  - `git status --short --untracked-files=all` -> pass (round-local payload is limited to `docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md` plus `orchestrator/rounds/round-050/{implementation-notes,plan,selection}.md`; the only tracked diff is the preexisting controller-state file `orchestrator/state.json`).
-  - `git diff --name-only` -> pass (`orchestrator/state.json` only; no tracked implementation diff beyond the preexisting controller-state change).
+  - `git status --short --untracked-files=all` -> pass (round-local payload is limited to `docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md` plus `orchestrator/rounds/round-050/{implementation-notes,plan,selection}.md`; the only tracked diff is the preexisting controller-state file `orchestrator/rounds/round-050/state-snapshot.json`).
+  - `git diff --name-only` -> pass (`orchestrator/rounds/round-050/state-snapshot.json` only; no tracked implementation diff beyond the preexisting controller-state change).
   - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` -> pass (no output; no tracked non-doc/code-path drift).
   - `git diff --name-only -- src src-public app test mlf2.cabal` -> pass (no output; no production, public API, executable, test, or Cabal drift).
-  - `git diff --name-only -- orchestrator/state.json orchestrator/roadmap.md docs/plans/2026-03-19-uri-r2-c1-g4-next-cycle-decision-gate.md orchestrator/rounds/round-049/review-record.json` -> pass (`orchestrator/state.json` only; no roadmap or accepted-`G4` artifact/record drift).
+  - `git diff --name-only -- orchestrator/rounds/round-050/state-snapshot.json orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-017/roadmap.md docs/plans/2026-03-19-uri-r2-c1-g4-next-cycle-decision-gate.md orchestrator/rounds/round-049/review-record.json` -> pass (`orchestrator/rounds/round-050/state-snapshot.json` only; no roadmap or accepted-`G4` artifact/record drift).
   - Conditional full repo gate omission -> justified: `cabal build all && cabal test` was not rerun because `git diff --name-only -- src src-public app test mlf2.cabal` is empty and `H1` is a docs-only bind/selection round with no code-path edits.
 
 - Task-specific checks:
@@ -28,7 +28,7 @@
   - `H1-CONTINUITY` -> pass: `python3 -m json.tool orchestrator/rounds/round-049/review-record.json >/dev/null` passes; the short `python3` assertion confirms `stage_id=G4`, `attempt=1`, `attempt_verdict=accepted`, `stage_action=finalize`, `status=authoritative`, and the canonical `G4` artifact path; artifact lines `38-68` carry forward only the accepted `G1` / `G2` / `G3` / `G4` chain plus still-binding `U2` / `U3` / `U4` negatives and keep `/Volumes/src/mlf4/Bugs.md` as continuity-only context rather than new clearance.
   - `H1-TARGET-FREEZE` -> pass: `rg -c '^The only frozen future `H2` target is:$' docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md` returns `1`; artifact lines `72-143` freeze exactly one future `H2` family, `instArgRootMultiBase`, anchored to `Fallback.hs:289-359` and `Fallback.hs:671-697`, freeze future ownership to `src/MLF/Elab/Run/ResultType/Fallback.hs` and `test/PipelineSpec.hs`, and explicitly keep `rootHasMultiInst`, `rootLocalSchemeAliasBaseLike`, and `boundVarTarget` out of scope as separate target families.
   - `H1-ANCHOR-READS` -> pass: `nl -ba src/MLF/Elab/Run/ResultType/Fallback.hs | sed -n '285,365p'` confirms the `instArgRootMultiBase` aggregation lives at lines `289-359`; `nl -ba src/MLF/Elab/Run/ResultType/Fallback.hs | sed -n '665,705p'` confirms the live `keepTargetFinal` / `targetC` path at lines `671-697`; `rg -n 'ARI-C1 feasibility characterization \(bounded prototype-only\)|rootHasMultiInst|rootLocalSchemeAliasBaseLike|boundVarTarget|instArgRootMultiBase' test/PipelineSpec.hs` confirms the existing bounded `ARI-C1` block remains the intended future test anchor and no new test family was introduced in `H1`.
-  - `H1-DOCS-ONLY` -> pass: `git status --short --untracked-files=all` shows only the canonical `H1` doc plus round-local orchestrator docs, with the preexisting tracked `orchestrator/state.json` controller-state diff still present; `git status --short --untracked-files=all | rg -n '^(.. )?(src/|src-public/|app/|test/|mlf2\.cabal)' && exit 1 || echo 'pass no code-path status entries'` passes; `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` and `git diff --name-only -- src src-public app test mlf2.cabal` are empty. No code-path drift was introduced by `H1`.
+  - `H1-DOCS-ONLY` -> pass: `git status --short --untracked-files=all` shows only the canonical `H1` doc plus round-local orchestrator docs, with the preexisting tracked `orchestrator/rounds/round-050/state-snapshot.json` controller-state diff still present; `git status --short --untracked-files=all | rg -n '^(.. )?(src/|src-public/|app/|test/|mlf2\.cabal)' && exit 1 || echo 'pass no code-path status entries'` passes; `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` and `git diff --name-only -- src src-public app test mlf2.cabal` are empty. No code-path drift was introduced by `H1`.
   - `H1-SKIP-NOTE` -> pass: artifact lines `257-260` explicitly justify skipping `cabal build all && cabal test` because the round is docs-only and does not edit `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`; that justification matches the actual diff state.
   - `H1-RETRY-SCHEMA` -> pass: artifact lines `169-186` preserve the retry-subloop contract for `H1` by allowing only `accepted + finalize`, `accepted + retry`, and `rejected + retry`, and by naming the required reviewer fields (`Implemented stage result`, `Attempt verdict`, `Stage action`, `Retry reason`, `Fix hypothesis`).
   - `H1-SCOPE-ALIGNMENT` -> pass: artifact lines `86-97` and `147-164` keep the future slice bounded to the local-binding `rootBindingIsLocalType && instArgRootMultiBase` lane and continue to reject replay reopen, `MLF.Elab.Inst`, `InstBot`, non-local binding widening, equi-recursive reasoning, cyclic structural encoding, second-interface work, and cross-family widening; this matches `selection.md`, roadmap item `17`, and the approved `H`-cycle design.
@@ -40,7 +40,7 @@
 - Fix hypothesis: `none`
 - Decision summary:
   - The `H1` packet lawfully binds the next bounded cycle to repaired `URI-R2-C1` under the accepted `G4 = continue-bounded` result and freezes exactly one future `H2` slice: the remaining local-binding `instArgRootMultiBase` `keepTargetFinal` / `targetC` family in `Fallback.hs`, with future ownership limited to `Fallback.hs` and `PipelineSpec.hs`.
-  - The round stays docs-only and preserves the inherited explicit-only / non-equi-recursive / non-cyclic / no-second-interface / no-fallback boundary. No production/test/Cabal drift is present, and no roadmap or accepted predecessor artifact drift is present beyond the preexisting `orchestrator/state.json` controller-state diff.
+  - The round stays docs-only and preserves the inherited explicit-only / non-equi-recursive / non-cyclic / no-second-interface / no-fallback boundary. No production/test/Cabal drift is present, and no roadmap or accepted predecessor artifact drift is present beyond the preexisting `orchestrator/rounds/round-050/state-snapshot.json` controller-state diff.
   - The skip of `cabal build all && cabal test` is explicitly justified and matches the actual diff scope. No blocking issue remains. The lawful outcome is `accepted + finalize`.
 - Evidence summary:
   - Round selection: `orchestrator/rounds/round-050/selection.md`

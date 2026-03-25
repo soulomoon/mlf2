@@ -2,15 +2,15 @@
 
 - Baseline checks:
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `C4` list intact, `C2` still pending pre-merge).
+  - `python3 -m json.tool orchestrator/rounds/round-035/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-035/state-snapshot.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-002/roadmap.md` -> pass (ordered `C1` through `C4` list intact, `C2` still pending pre-merge).
   - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
-  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-002/retry-subloop.md` -> pass.
   - Continuity presence check via `python3` -> pass (`round-001..round-033 directories: True`; predecessor recursive-types packet present at `tasks/todo/2026-03-11-recursive-types-orchestration`; replay-repair rounds `round-024` through `round-027` present; inherited boundary/repair docs present).
   - Authoritative predecessor record recheck via `python3` over `round-028` through `round-033` -> pass (each review record remains `accepted + finalize` with `retry_reason: none`, `fix_hypothesis: none`, and existing artifact/snapshot paths).
   - Full Cabal gate `cabal build all && cabal test` -> pass (`1127 examples, 0 failures`; `Test suite mlf2-test: PASS`).

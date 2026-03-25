@@ -9,10 +9,10 @@ without replanning the whole stage.
 This retry only adds the missing bounded evidence for the already-landed fail-closed behavior:
 the same non-local proxy wrapper case
 `let g = (\x : mu a. a -> Int. x) in g g`
-must be covered in `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`
+must be covered in `test/PipelineSpec.hs`
 through both `runPipelineElab` and `runPipelineElabChecked`,
 and the canonical `C2` artifact at
-`/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
+`docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
 must record that entrypoint evidence.
 
 ## Retry Context
@@ -27,7 +27,7 @@ must record that entrypoint evidence.
 - Fix hypothesis: add focused Hspec coverage in `test/PipelineSpec.hs` for the same non-local proxy wrapper case across both `runPipelineElab` and `runPipelineElabChecked`, keep the diff inside the existing bounded slice, and update the canonical `C2` artifact to record that evidence.
 
 `attempt-1` already established that the production behavior in
-`/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 is fail-closed in the intended lane and that the full repo gate passes.
 This retry does not reopen that production decision.
 It only repairs the missing bounded entrypoint evidence.
@@ -46,19 +46,19 @@ This retry does not reinterpret negative findings as clearance.
 
 ### Modify / Test
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`
+- `test/PipelineSpec.hs`
   - Responsibility: repair the bounded `C2` negative coverage so the exact non-local proxy wrapper case already exercised through `computeResultTypeFallback` is also exercised through both pipeline entrypoints.
   - Why this file: the rejected review found the missing evidence here and nowhere else.
 
 ### Modify
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
+- `docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
   - Responsibility: refresh the canonical `C2` artifact for `attempt-2` and record the repaired entrypoint evidence for the same bounded case.
   - Why this file: the stage contract requires the canonical artifact to reflect the evidence actually added by the retry.
 
 ### Evidence-Only, No Planned Edit
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
   - Responsibility: unchanged anchor for the already-landed `rootBindingIsLocalType` fail-closed retention gate.
   - Why this file stays read-only in this retry: the review did not find a production defect; widening the retry into new logic would violate the recorded fix hypothesis.
 
@@ -71,14 +71,14 @@ This retry does not reinterpret negative findings as clearance.
 - Preserve reviewer-owned history:
   - do not touch `reviews/attempt-1.md`;
   - do not touch `attempt-log.jsonl`;
-  - do not touch controller-owned `orchestrator/state.json`.
+  - do not touch controller-owned `orchestrator/rounds/round-035/state-snapshot.json`.
 - The canonical `C2` artifact is the only stage artifact that should be refreshed for `attempt-2`.
 
 ### Task 2 - Retarget the negative `PipelineSpec` entrypoint evidence to the same proxy-wrapper case
 
 - Work only inside the existing
   `describe "ARI-C1 feasibility characterization (bounded prototype-only)"`
-  block in `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`.
+  block in `test/PipelineSpec.hs`.
 - Reuse the exact expression already used by the direct reconstruction control:
   `let g = (\x : mu a. a -> Int. x) in g g`
   (encoded in the existing Haskell AST form with `ELet`, `ELamAnn`, and `EApp`).
@@ -98,7 +98,7 @@ This retry does not reinterpret negative findings as clearance.
 ### Task 3 - Refresh the canonical `C2` artifact with the repaired evidence
 
 - Update
-  `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
+  `docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
   for `attempt-2`.
 - Record that the same non-local proxy wrapper case is now evidenced in three bounded ways:
   - direct `computeResultTypeFallback` fail-closed reconstruction;
@@ -109,16 +109,16 @@ This retry does not reinterpret negative findings as clearance.
 
 ### Task 4 - Run the bounded verification needed for retry closure
 
-- Re-run baseline checks required by `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`.
+- Re-run baseline checks required by `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-002/verification.md`.
 - Re-run the focused bounded spec block:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'`
 - Because this retry still edits `test/`, the full repo gate remains mandatory:
   - `cabal build all && cabal test`
 - Reconfirm the diff stays bounded:
-  - only `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`
-    and `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
+  - only `test/PipelineSpec.hs`
+    and `docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`
     should need changes for the recorded fix hypothesis;
-  - no edits to `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`
+  - no edits to `src/MLF/Elab/Run/ResultType/Fallback.hs`
     are planned for this retry unless a new blocking mismatch is discovered first.
 
 ### Task 5 - Hand reviewer the exact evidence needed to clear retry reason
@@ -129,15 +129,15 @@ This retry does not reinterpret negative findings as clearance.
   - unchecked `runPipelineElab` rejection for that same expression;
   - checked `runPipelineElabChecked` rejection for that same expression.
 - Ensure the canonical `C2` artifact explicitly names the repaired evidence and the fact that the retry remained within the original bounded slice.
-- Preserve the reviewer outcome contract from `orchestrator/retry-subloop.md`:
+- Preserve the reviewer outcome contract from `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-002/retry-subloop.md`:
   - `accepted + finalize`
   - `accepted + retry`
   - `rejected + retry`
 
 ## Non-Goals
 
-- No new production logic in `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs` unless a newly discovered blocker proves the review diagnosis incomplete.
-- No edits to `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Inst.hs`.
+- No new production logic in `src/MLF/Elab/Run/ResultType/Fallback.hs` unless a newly discovered blocker proves the review diagnosis incomplete.
+- No edits to `src/MLF/Elab/Inst.hs`.
 - No replay reopen, `InstBot` work, prototype/research entrypoints, public API changes, executable changes, or `mlf2.cabal` changes.
 - No roadmap mutation, no `Bugs.md` edit, and no rewrite of prior review artifacts.
 - No widening into equi-recursive reasoning, implicit unfolding, cyclic structural graph encoding, multi-SCC support, cross-family search, heuristic owner selection, compatibility shims, or convenience fallbacks.
@@ -146,7 +146,7 @@ This retry does not reinterpret negative findings as clearance.
 
 1. `plan.md` explicitly names `attempt-2`, the retry reason, and the fix hypothesis as a delta only.
 2. The diff stays inside the existing bounded `C2` slice and canonical artifact, with no `MLF.Elab.Inst` or replay-lane edits.
-3. `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs` uses the same non-local proxy wrapper expression for:
+3. `test/PipelineSpec.hs` uses the same non-local proxy wrapper expression for:
    - direct `computeResultTypeFallback` fail-closed evidence;
    - unchecked `runPipelineElab` fail-closed evidence;
    - checked `runPipelineElabChecked` fail-closed evidence.

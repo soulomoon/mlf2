@@ -4,7 +4,7 @@
 
 Execute only roadmap item `N11` and prepare one docs-only exact-target-bind
 artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`.
+`docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`.
 
 This is the initial `N11` plan for `attempt-1` with `retry: null`. The round
 must keep `N11` docs-only, preserve accepted `L1` / `L2` / `N1` through `N10`
@@ -63,7 +63,7 @@ This round must not:
   binding-structure `boundVarTarget` planning subject only
 - Active branch: `codex/round-078-n11-exact-target-bind`
 - Active worktree:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078`
+  `.worktrees/round-078`
 - Stage mode: docs-only exact-target bind only
 - Current round review feedback: none yet; this is a full `attempt-1` plan,
   not a retry delta
@@ -71,68 +71,68 @@ This round must not:
 Current round worktree state is already non-pristine. Respect existing edits
 and do not revert unrelated work:
 
-- `M orchestrator/state.json` (controller-owned; must remain untouched)
+- `M orchestrator/rounds/round-078/state-snapshot.json` (controller-owned; must remain untouched)
 - `?? orchestrator/rounds/round-078/selection.md`
 
 ## Accepted Continuity That Remains Binding
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078/orchestrator/rounds/round-078/selection.md`
+- `orchestrator/rounds/round-078/selection.md`
   already fixes this round to roadmap item `N11` only, keeps the round
   docs-only and exact-target-bind only, preserves accepted
   `N9 = boundVarTarget-planning-subject-selected` and
   `N10 = boundVarTarget-safety-acceptance-contract-established`, and forbids
   implementation, verification, roadmap/state edits, bug-tracker edits, and
   silent widening.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json` fixes the
+- `orchestrator/rounds/round-078/state-snapshot.json` fixes the
   live controller state at `active_round_id: "round-078"`, `stage: "plan"`,
   `current_task: "N11"`, branch
   `codex/round-078-n11-exact-target-bind`, and `retry: null`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md` makes item
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/roadmap.md` makes item
   `11` the first pending item after accepted `N10`; later work cannot begin
   until this round freezes one exact bounded target for the selected
   `boundVarTarget` lane.
-- `/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
   records that the completed earlier lane already has predecessor-only
   `N4` / `N5` / `N6` evidence, while the fresh post-`N8` successor lane still
   has no accepted exact target after accepted `N10`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   remains the inherited baseline contract: explicit recursive annotations are
   supported, automatic recursive-type inference remains unresolved and
   disabled, and the inherited
   `explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback`
   boundary remains mandatory.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
   remains the authoritative `L1` fail-closed record. The repaired
   `URI-R2-C1` queue had no fresh lawful exact successor slice inside the
   inherited boundary.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
   remains the authoritative `L2` closeout. The repaired queue finalized as
   `stop-blocked`, and any broader preserved route required separate later
   authority before it could become live work.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-068/review-record.json`
+- `orchestrator/rounds/round-068/review-record.json`
   through
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/review-record.json`
+  `orchestrator/rounds/round-077/review-record.json`
   remain the authoritative acceptance chain for `N1` through `N10`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-next-live-subject-selection.md`
+- `docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-next-live-subject-selection.md`
   remains the authoritative `N9` record. It selects exactly one planning
   subject only: the retained-child / nested-`forall` / binding-structure
   `boundVarTarget` route. It explicitly leaves exact-bind, implementation, and
   verification work blocked.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-076/review-record.json`
+- `orchestrator/rounds/round-076/review-record.json`
   remains the authoritative acceptance proof that `N9` finalized as
   `accepted + finalize` with final outcome
   `boundVarTarget-planning-subject-selected`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/plan.md`
+- `orchestrator/rounds/round-077/plan.md`
   is binding continuity for the exact accepted `N10` intent: the next lawful
   work after `N10` is one docs-only exact bounded target bind for the selected
   lane, not implementation or verification.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/review.md`
+- `orchestrator/rounds/round-077/review.md`
   is binding continuity for the accepted `N10` interpretation: reviewer
   confirmed that the selected lane still required a later exact target bind,
   that `schemeBodyTarget` remained neighboring boundary context only, and that
   predecessor evidence could not be reinterpreted as fresh execution
   authority.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-safety-acceptance-contract.md`
+- `docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-safety-acceptance-contract.md`
   remains the authoritative `N10` record. Any lawful `N11` bind must satisfy
   its reviewer-visible acceptance criteria:
   name the concrete retained-child ownership and target-selection anchors
@@ -141,42 +141,42 @@ and do not revert unrelated work:
   evidence), state fail-closed nested-`forall` / nested-owner / nested
   scheme-root conditions, keep `schemeBodyTarget` as neighboring boundary
   context only, and explicitly exclude every unchanged blocked route.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/review-record.json`
+- `orchestrator/rounds/round-077/review-record.json`
   remains the authoritative acceptance proof that `N10` finalized as
   `accepted + finalize` with final outcome
   `boundVarTarget-safety-acceptance-contract-established`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
   and
-  `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
   remain predecessor evidence for the earlier `baseTarget` lane only. They do
   not authorize reuse of the earlier subject or of the earlier `N3` contract
   as fresh-lane clearance here.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`,
-  `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`,
-  `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`,
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`,
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`,
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`,
   and
-  `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
   remain predecessor evidence for the exact accepted non-local
   `baseTarget -> baseC` packet only. They do not authorize exact-target,
   implementation, or verification carry-forward for `boundVarTarget`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-e1-next-target-bind.md`,
-  `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`,
-  `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-e3-bounded-verification-gate.md`,
+- `docs/plans/2026-03-18-uri-r2-c1-e1-next-target-bind.md`,
+  `docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`,
+  `docs/plans/2026-03-18-uri-r2-c1-e3-bounded-verification-gate.md`,
   and
-  `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md`
+  `docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md`
   remain predecessor evidence for the repaired-queue retained-child packet
   only. They do not automatically authorize the fresh post-`N8`
   `boundVarTarget` lane even though they preserve useful boundedness and
   fail-closed contrast evidence.
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`,
-  `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/Scope.hs`, and
-  `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs` remain the
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`,
+  `src/MLF/Elab/Run/Scope.hs`, and
+  `test/PipelineSpec.hs` remain the
   read-only code/test anchors that identify the selected target precisely.
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` still carries open
+- `Bugs.md` still carries open
   `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains read-only
   predecessor context only and does not authorize replay reopen,
   `MLF.Elab.Inst`, `InstBot`, or a different live subject in this round.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/retry-subloop.md`
   keeps prior attempts immutable. This `attempt-1` plan must therefore create
   one new bounded exact-bind artifact without rewriting any prior attempt or
   review artifact.
@@ -185,7 +185,7 @@ and do not revert unrelated work:
 
 ### Modify
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`
+- `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`
   - Responsibility: canonical `N11` docs-only exact-target-bind artifact for
     the selected `boundVarTarget` planning subject only, freezing one bounded
     retained-child packet and its one downstream `targetC` use while keeping
@@ -193,66 +193,66 @@ and do not revert unrelated work:
 
 ### Read-Only Evidence
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078/orchestrator/rounds/round-078/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-e1-next-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-e3-bounded-verification-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-next-live-subject-selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-safety-acceptance-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-076/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/plan.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/review.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/Scope.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/papers/these-finale-english.txt`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
+- `orchestrator/rounds/round-078/selection.md`
+- `orchestrator/rounds/round-078/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/roadmap.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/verification.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/retry-subloop.md`
+- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+- `docs/plans/2026-03-18-uri-r2-c1-e1-next-target-bind.md`
+- `docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`
+- `docs/plans/2026-03-18-uri-r2-c1-e3-bounded-verification-gate.md`
+- `docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
+- `docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-next-live-subject-selection.md`
+- `docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-safety-acceptance-contract.md`
+- `orchestrator/rounds/round-076/review-record.json`
+- `orchestrator/rounds/round-077/plan.md`
+- `orchestrator/rounds/round-077/review.md`
+- `orchestrator/rounds/round-077/review-record.json`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `src/MLF/Elab/Run/Scope.hs`
+- `test/PipelineSpec.hs`
+- `papers/these-finale-english.txt`
+- `Bugs.md`
 
 ### Preserve Unchanged
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078/src/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078/test/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078/src-public/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078/app/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078/mlf2.cabal`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/roadmap.md`
+- `orchestrator/rounds/round-078/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/verification.md`
+- `Bugs.md`
+- `src/`
+- `test/`
+- `src-public/`
+- `app/`
+- `mlf2.cabal`
 - reviewer-owned history under
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-001/`
+  `orchestrator/rounds/round-001/`
   through
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/`
+  `orchestrator/rounds/round-077/`
 
 ## Exact Frozen `N11` Target (Exactly One)
 
 The only frozen `N11` target is:
 
 same-lane local `TypeRef` retained-child `boundVarTarget -> targetC` bind in
-`/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`,
+`src/MLF/Elab/Run/ResultType/Fallback.hs`,
 limited to the retained-child route around `boundVarTargetRoot`,
 `boundHasForallFrom`, `boundVarTarget`, `keepTargetFinal`, and the downstream
 `targetC` branch that returns the retained child through `Just v -> v`
 (`Fallback.hs:558-730`), as exercised by the retained-child same-lane positive
 and fail-closed contrast evidence in
-`/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs:1494-1589`.
+`test/PipelineSpec.hs:1494-1589`.
 
 Required interpretation of that one bounded target:
 
@@ -303,7 +303,7 @@ Everything else remains out of scope, including:
 - `rootFinal` as the fresh exact target for this lane;
 - replay reopen;
 - `MLF.Elab.Inst` and `InstBot`;
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/View.hs`;
+- `src/MLF/Elab/Run/ResultType/View.hs`;
 - any other `ResultType.Fallback` family;
 - any different solver or pipeline subject;
 - cross-family search;
@@ -345,8 +345,8 @@ Everything else remains out of scope, including:
     evidence only and not automatic carry-forward authority; and
   - accepted `N10` supplies the exact-target acceptance criteria but not
     implementation or verification clearance.
-- Use `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/plan.md`,
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/review.md`,
+- Use `orchestrator/rounds/round-077/plan.md`,
+  `orchestrator/rounds/round-077/review.md`,
   and the accepted `N10` artifact together to preserve the exact
   reviewer-confirmed meaning of the selected lane:
   one fresh exact bind is still required, `schemeBodyTarget` remains
@@ -398,7 +398,7 @@ Everything else remains out of scope, including:
 ### Task 5 - Write the canonical `N11` artifact as one bounded exact-target bind
 
 - Create
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`.
+  `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`.
 - The artifact must include:
   - the stage contract freeze for `round-078` / `N11` / `attempt-1` /
     `retry: null`;
@@ -449,33 +449,33 @@ Everything else remains out of scope, including:
   - `rootFinal` as the fresh exact target for this lane;
   - replay reopen;
   - `MLF.Elab.Inst` or `InstBot`;
-  - `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/View.hs`;
+  - `src/MLF/Elab/Run/ResultType/View.hs`;
   - any other fallback family or any other solver/pipeline subject;
   - equi-recursive reasoning, implicit unfolding, cyclic structural graph
     encoding, graph-cycle exceptions, multi-SCC reasoning, cross-family
     search, second-interface work, or fallback widening.
 - State explicitly that prior attempts and reviewer-owned history remain
-  immutable under `orchestrator/retry-subloop.md`.
+  immutable under `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/retry-subloop.md`.
 
 ### Task 7 - Run the docs-only continuity and exact-bind checks required for `N11`
 
 All commands run in:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-078`
+`.worktrees/round-078`
 
 Baseline docs/state checks:
 
 - `git branch --show-current`
   - Expect: `codex/round-078-n11-exact-target-bind`
 - `git status --short --untracked-files=all`
-  - Expect: controller-owned `M orchestrator/state.json` plus bounded docs-only
+  - Expect: controller-owned `M orchestrator/rounds/round-078/state-snapshot.json` plus bounded docs-only
     round payload only
 - `git diff --check`
   - Expect: pass
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-078/state-snapshot.json >/dev/null`
   - Expect: pass
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-078/state-snapshot.json`
   - Expect: `contract_version: 2` and `retry: null`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/roadmap.md`
   - Expect: parseable roadmap with item `11` pending
 - Required artifact presence:
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
@@ -489,31 +489,31 @@ Baseline docs/state checks:
   - `test -f orchestrator/rounds/round-077/review.md`
   - `test -f orchestrator/rounds/round-077/review-record.json`
   - `test -f tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-  - `test -f orchestrator/retry-subloop.md`
-  - `test -f /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-076/review-record.json`
+  - `test -f orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/retry-subloop.md`
+  - `test -f orchestrator/rounds/round-076/review-record.json`
 
 `N11`-specific continuity and exact-bind checks:
 
-- `rg -n '"stage_id": "N10"|"attempt_verdict": "accepted"|"stage_action": "finalize"|"status": "authoritative"|"final_outcome": "boundVarTarget-safety-acceptance-contract-established"' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/review-record.json`
+- `rg -n '"stage_id": "N10"|"attempt_verdict": "accepted"|"stage_action": "finalize"|"status": "authoritative"|"final_outcome": "boundVarTarget-safety-acceptance-contract-established"' orchestrator/rounds/round-077/review-record.json`
   - Expect: accepted `N10` finalization fields present
-- `rg -n 'future exact target bind|does not bind an exact target|does not authorize implementation|does not authorize verification|boundVarTarget-safety-acceptance-contract-established' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/plan.md /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-077/review.md`
+- `rg -n 'future exact target bind|does not bind an exact target|does not authorize implementation|does not authorize verification|boundVarTarget-safety-acceptance-contract-established' orchestrator/rounds/round-077/plan.md orchestrator/rounds/round-077/review.md`
   - Expect: round-077 plan/review continuity still points to one later
     docs-only exact bind and still blocks implementation / verification
-- `rg -n 'boundVarTarget-safety-acceptance-contract-established|Acceptance criteria for any later exact target bind|boundVarTargetRoot|boundHasForallFrom|boundVarTarget|keepTargetFinal|targetC|schemeBodyTarget|predecessor evidence only' /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-safety-acceptance-contract.md`
+- `rg -n 'boundVarTarget-safety-acceptance-contract-established|Acceptance criteria for any later exact target bind|boundVarTargetRoot|boundHasForallFrom|boundVarTarget|keepTargetFinal|targetC|schemeBodyTarget|predecessor evidence only' docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-safety-acceptance-contract.md`
   - Expect: accepted `N10` contract still fixes the exact target-bind criteria
-- `rg -n '^11\\. \\[pending\\]|freeze exactly one bounded target inside the selected retained-child / nested-`forall` / binding-structure `boundVarTarget` route|keep `schemeBodyTarget` as neighboring boundary context only' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
+- `rg -n '^11\\. \\[pending\\]|freeze exactly one bounded target inside the selected retained-child / nested-`forall` / binding-structure `boundVarTarget` route|keep `schemeBodyTarget` as neighboring boundary context only' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-011/roadmap.md`
   - Expect: roadmap still requires this exact docs-only bind and still keeps
     `schemeBodyTarget` as boundary context only
-- `rg -n 'fresh post-`N8` successor lane still has no accepted exact target after accepted `N10` contract finalization|Use accepted `N10` to define one exact bounded target for the selected `boundVarTarget` lane' /Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `rg -n 'fresh post-`N8` successor lane still has no accepted exact target after accepted `N10` contract finalization|Use accepted `N10` to define one exact bounded target for the selected `boundVarTarget` lane' tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
   - Expect: mechanism-table continuity still requires a fresh lane-specific
     exact bind
-- `rg -n 'boundVarTargetRoot = canonicalFinal \\(schemeBodyTarget targetPresolutionView rootC\\)|boundHasForallFrom start0 =|let sameLocalTypeLane child =|bndRoot == boundVarTargetRoot|not hasForall|\\|\\| maybe False \\(const True\\) boundVarTarget|Just v -> v|Nothing -> schemeBodyTarget targetPresolutionView rootC' /Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `rg -n 'boundVarTargetRoot = canonicalFinal \\(schemeBodyTarget targetPresolutionView rootC\\)|boundHasForallFrom start0 =|let sameLocalTypeLane child =|bndRoot == boundVarTargetRoot|not hasForall|\\|\\| maybe False \\(const True\\) boundVarTarget|Just v -> v|Nothing -> schemeBodyTarget targetPresolutionView rootC' src/MLF/Elab/Run/ResultType/Fallback.hs`
   - Expect: current retained-child target anchors present
-- `rg -n 'schemeBodyTarget :: PresolutionView -> NodeId -> NodeId|isSchemeRoot|schemeRootByBody' /Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/Scope.hs`
+- `rg -n 'schemeBodyTarget :: PresolutionView -> NodeId -> NodeId|isSchemeRoot|schemeRootByBody' src/MLF/Elab/Run/Scope.hs`
   - Expect: `schemeBodyTarget` remains neighboring owner-local context
-- `rg -n 'keeps retained-child fallback recursive through a same-lane local TypeRef root|keeps retained-child lookup bounded to the same local TypeRef lane|keeps retained-child fallback fail-closed when the same wrapper crosses a nested forall boundary|wireSameLaneLocalRoot|retainedRoot|retainedChild' /Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`
+- `rg -n 'keeps retained-child fallback recursive through a same-lane local TypeRef root|keeps retained-child lookup bounded to the same local TypeRef lane|keeps retained-child fallback fail-closed when the same wrapper crosses a nested forall boundary|wireSameLaneLocalRoot|retainedRoot|retainedChild' test/PipelineSpec.hs`
   - Expect: focused retained-child evidence still present
-- `rg -n '3\\.3\\.3\\.1 Grafting|5\\.1 Why rigid quantification|8\\.3\\.1 Inlining bounds|17\\.3 Perspectives' /Users/ares/.codex/worktrees/d432/mlf4/papers/these-finale-english.txt`
+- `rg -n '3\\.3\\.3\\.1 Grafting|5\\.1 Why rigid quantification|8\\.3\\.1 Inlining bounds|17\\.3 Perspectives' papers/these-finale-english.txt`
   - Expect: thesis anchors cited by the artifact remain present
 - `rg -n 'Attempt: `attempt-1`|Retry state: `null`|The only frozen `N11` target is:|boundVarTargetRoot|boundHasForallFrom|boundVarTarget|keepTargetFinal|targetC|same-lane local `TypeRef`|schemeBodyTarget|does not authorize implementation|does not authorize verification|boundVarTarget-exact-target-bind-established' docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`
   - Expect: the canonical `N11` artifact contains the required exact-bind

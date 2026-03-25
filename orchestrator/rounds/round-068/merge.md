@@ -60,7 +60,7 @@ accepted predecessor lane is reopened or widened by this packet.
 - This squash preparation does not merge the round itself, does not edit
   controller-owned state, and does not select the next roadmap item.
 - After an accepted round finalizes and merges, roadmap updates remain guider
-  work under `orchestrator/retry-subloop.md`.
+  work under `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-001/retry-subloop.md`.
 
 ## Ready For Squash Merge
 

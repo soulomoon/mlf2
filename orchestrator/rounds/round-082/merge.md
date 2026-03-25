@@ -51,7 +51,7 @@
   - `artifact_path: "docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md"`
   - `review_snapshot: "orchestrator/rounds/round-082/reviews/attempt-1.md"`
   - `final_outcome: "repo-level-capability-contract-and-evaluation-corpus-defined"`
-- `orchestrator/retry-subloop.md` permits merge preparation only after
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-001/retry-subloop.md` permits merge preparation only after
   `accepted + finalize`, and the active worktree controller state for this
   round is already `active_round_id: "round-082"`, `stage: "merge"`,
   `current_task: "item-1"`, and `retry: null`.
@@ -62,8 +62,8 @@
 
 - This round does not reset authority. Completed rounds `round-001` through
   `round-081` remain authoritative historical evidence for the refreshed
-  control plane exactly as `orchestrator/roadmap.md` and
-  `orchestrator/retry-subloop.md` describe.
+  control plane exactly as `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-001/roadmap.md` and
+  `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-001/retry-subloop.md` describe.
 - The inherited baseline contract from
   `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   remains binding: automatic recursive-type inference is still unresolved at

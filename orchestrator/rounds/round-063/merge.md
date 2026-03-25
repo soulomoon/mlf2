@@ -38,8 +38,8 @@
   `authoritative_attempt: 1`, `authoritative_result: pass`,
   `review_snapshot: orchestrator/rounds/round-063/reviews/attempt-1.md`, and
   `artifact_path: docs/plans/2026-03-21-uri-r2-c1-k2-bounded-implementation-slice.md`.
-- `orchestrator/retry-subloop.md` allows merge preparation after
-  `accepted + finalize`; `orchestrator/state.json` is at `stage: "merge"` with
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-030/retry-subloop.md` allows merge preparation after
+  `accepted + finalize`; `orchestrator/rounds/round-063/state-snapshot.json` is at `stage: "merge"` with
   `retry: null`, so no same-round retry remains live.
 
 ## Readiness Statement

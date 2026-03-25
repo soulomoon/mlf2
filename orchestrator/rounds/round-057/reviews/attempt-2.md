@@ -3,16 +3,16 @@
 - Baseline checks:
   - `git branch --show-current` -> pass (`codex/round-057-i4-next-cycle-decision`).
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `19:  "retry": {`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered roadmap intact; item `24` / `I4` remains pending at line `150` pre-merge).
+  - `python3 -m json.tool orchestrator/rounds/round-057/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-057/state-snapshot.json` -> pass (`2:  "contract_version": 2,`, `19:  "retry": {`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/roadmap.md` -> pass (ordered roadmap intact; item `24` / `I4` remains pending at line `150` pre-merge).
   - Required file-presence checks -> pass:
     - `docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
     - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
     - `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
     - `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
     - `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-    - `orchestrator/retry-subloop.md`
+    - `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/retry-subloop.md`
     - `docs/plans/2026-03-20-uri-r2-c1-i3-bounded-verification-gate.md`
     - `docs/plans/2026-03-20-uri-r2-c1-h4-next-cycle-decision-gate.md`
     - `orchestrator/rounds/round-053/reviews/attempt-1.md`
@@ -20,10 +20,10 @@
   - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `recursive_types_packet=True`, `boundary_doc=True`, `item5_handoff_doc=True`, `research_stop_doc=True`, `replay_repair_track=True`, `initial_successor_cycle=True`, `h4_doc=True`).
   - `python3 -m json.tool orchestrator/rounds/round-054/review-record.json >/dev/null && python3 -m json.tool orchestrator/rounds/round-055/review-record.json >/dev/null && python3 -m json.tool orchestrator/rounds/round-056/review-record.json >/dev/null` -> pass.
   - `python3` authoritative predecessor assertion over `round-054` / `round-055` / `round-056` -> pass (`I1` stays `attempt=1`, `accepted`, `finalize`, `authoritative`; `I2` stays `attempt=1`, `accepted`, `finalize`, `authoritative`; `I3` stays `attempt=2`, `accepted`, `finalize`, `authoritative`, with required `I3-*` checks all `pass`).
-  - `git status --short --untracked-files=all` -> pass (` M orchestrator/state.json`, `?? docs/plans/2026-03-20-uri-r2-c1-i4-next-cycle-decision-gate.md`, `?? orchestrator/rounds/round-057/attempt-log.jsonl`, `?? orchestrator/rounds/round-057/plan.md`, `?? orchestrator/rounds/round-057/review.md`, `?? orchestrator/rounds/round-057/reviews/attempt-1.md`, `?? orchestrator/rounds/round-057/selection.md`).
+  - `git status --short --untracked-files=all` -> pass (` M orchestrator/rounds/round-057/state-snapshot.json`, `?? docs/plans/2026-03-20-uri-r2-c1-i4-next-cycle-decision-gate.md`, `?? orchestrator/rounds/round-057/attempt-log.jsonl`, `?? orchestrator/rounds/round-057/plan.md`, `?? orchestrator/rounds/round-057/review.md`, `?? orchestrator/rounds/round-057/reviews/attempt-1.md`, `?? orchestrator/rounds/round-057/selection.md`).
   - `git diff --name-only -- src src-public app test mlf2.cabal` -> pass (no output; no production/test/public/Cabal diff).
   - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` -> pass (no output).
-  - `git diff --name-only -- orchestrator/roadmap.md docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md docs/plans/2026-03-20-uri-r2-c1-i3-bounded-verification-gate.md docs/plans/2026-03-20-uri-r2-c1-h4-next-cycle-decision-gate.md orchestrator/rounds/round-054/review-record.json orchestrator/rounds/round-055/review-record.json orchestrator/rounds/round-056/review-record.json` -> pass (no output; no roadmap, accepted artifact, or predecessor-history drift).
+  - `git diff --name-only -- orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/roadmap.md docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md docs/plans/2026-03-20-uri-r2-c1-i3-bounded-verification-gate.md docs/plans/2026-03-20-uri-r2-c1-h4-next-cycle-decision-gate.md orchestrator/rounds/round-054/review-record.json orchestrator/rounds/round-055/review-record.json orchestrator/rounds/round-056/review-record.json` -> pass (no output; no roadmap, accepted artifact, or predecessor-history drift).
   - Skip note: `cabal build all && cabal test` was intentionally not rerun. `I4` is aggregate-only and docs-only by contract, `git diff --name-only -- src src-public app test mlf2.cabal` returned no output, and the accepted `I3` artifact remains the current bounded verification baseline for this exact lane.
 
 - Task-specific checks:
@@ -31,7 +31,7 @@
   - `I4-CONTINUITY-AUTHORITY` -> pass: `/Volumes/src/mlf4/Bugs.md` has an empty `## Open` section and lists `BUG-2026-03-16-001` only under `## Resolved`; the accepted `I3` artifact and accepted `H4` artifact carry that same resolved continuity context; `orchestrator/rounds/round-057/plan.md` explicitly treats the stale open-bug sentence in `selection.md` as non-authoritative guider drift; and the refreshed canonical `I4` artifact now follows that rule instead of deriving a blocker from the stale sentence.
   - `I4-DECISION-TOKEN` -> pass: reviewer-run `python3` confirmed exactly one `Recorded result token:` line in `docs/plans/2026-03-20-uri-r2-c1-i4-next-cycle-decision-gate.md`, the token is `continue-bounded`, and the rationale now explains why `continue-bounded` is lawful while `stop-blocked` and `widen-approved` are not lawful.
   - `I4-BOUNDARY` -> pass: `docs/plans/2026-03-20-uri-r2-c1-i4-next-cycle-decision-gate.md` preserves repaired `URI-R2-C1`, the accepted `Fallback.hs` / `PipelineSpec.hs` read-only ownership anchor, the preserved scheme-alias/base-like `baseTarget` route outside the selected lane, and the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary.
-  - `I4-DIFF-BOUNDARY` -> pass: the attempt stays docs-only. `git diff --name-only -- src src-public app test mlf2.cabal` returned no output, `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` returned no output, and no roadmap, accepted artifact, or predecessor review-record drift appeared. The only tracked pre-review diff remains the controller-owned `orchestrator/state.json`.
+  - `I4-DIFF-BOUNDARY` -> pass: the attempt stays docs-only. `git diff --name-only -- src src-public app test mlf2.cabal` returned no output, `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` returned no output, and no roadmap, accepted artifact, or predecessor review-record drift appeared. The only tracked pre-review diff remains the controller-owned `orchestrator/rounds/round-057/state-snapshot.json`.
 
 - Implemented stage result: `pass`
 - Attempt verdict: `accepted`

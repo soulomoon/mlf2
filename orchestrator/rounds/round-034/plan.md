@@ -3,13 +3,13 @@
 ## Objective
 
 Execute only roadmap item `C1` and produce one accepted bind/selection artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md`.
+`docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md`.
 
 This round must bind the follow-on cycle to repaired `URI-R2-C1` under the accepted `U6` result `continue-bounded`, preserve the inherited `explicit-only / non-equi-recursive / non-cyclic-graph` boundary, and freeze exactly one bounded next-slice target for `C2`.
 
 The selected `C2` target is:
 
-- promote the already-landed `U5` reviewer-auditable `rootBindingIsLocalType` signal into one fail-closed local-binding-only target-retention hardening slice in `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`, with focused bounded coverage in `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`;
+- promote the already-landed `U5` reviewer-auditable `rootBindingIsLocalType` signal into one fail-closed local-binding-only target-retention hardening slice in `src/MLF/Elab/Run/ResultType/Fallback.hs`, with focused bounded coverage in `test/PipelineSpec.hs`;
 - keep recursive-looking wrapper/proxy shapes fail-closed unless the retained target is still rooted in a local `TypeRef` for repaired `URI-R2-C1`;
 - do this without reinterpreting accepted `U2` / `U3` / `U4` negative findings as if authority, uniqueness, or constructor-directed feasibility were already cleared.
 
@@ -29,47 +29,47 @@ Inherited carry-forward facts that must remain unchanged:
 - `U2` finalized `authority-narrowed`; provenance-stable unannotated authority is still not cleared.
 - `U3` finalized `uniqueness-owner-stable-refuted`; exactly one admissible local owner/root cluster is still not established.
 - `U4` finalized `constructor-acyclic-termination-refuted`; constructor-directed admissibility is still fail-closed under the inherited boundary.
-- `BUG-2026-03-16-001` in `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` remains continuity context only for repaired-lane history; it is not authority in this round to reopen broad repair work or widen scope.
+- `BUG-2026-03-16-001` in `Bugs.md` remains continuity context only for repaired-lane history; it is not authority in this round to reopen broad repair work or widen scope.
 
 Therefore `C1` may bind only one bounded next slice. It may not treat accepted negative findings as if they were already cleared, and it may not reopen `MLF.Elab.Inst.applyInstantiation` as active work merely because the repaired lane exists.
 
 ## Authoritative Inputs To Preserve
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-034/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u2-unannotated-authority-clearance.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u3-unannotated-uniqueness-owner-clearance.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u4-unannotated-feasibility-clearance.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` (continuity-only reference)
+- `orchestrator/rounds/round-034/selection.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-001/verification.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-001/retry-subloop.md`
+- `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u2-unannotated-authority-clearance.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u3-unannotated-uniqueness-owner-clearance.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u4-unannotated-feasibility-clearance.md`
+- `Bugs.md` (continuity-only reference)
 
 ## Files Expected In Scope
 
 Primary writable file:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md`
+1. `docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md`
 
 Optional bounded note file:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-034/implementation-notes.md` (only if needed for reviewer clarity)
+1. `orchestrator/rounds/round-034/implementation-notes.md` (only if needed for reviewer clarity)
 
 Read-only target-reference files for freezing the `C2` slice:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`
-2. `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`
+1. `src/MLF/Elab/Run/ResultType/Fallback.hs`
+2. `test/PipelineSpec.hs`
 
 Files that must remain untouched in this round:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-034/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- production and test surfaces under `/Users/ares/.codex/worktrees/d432/mlf4/src/`, `/Users/ares/.codex/worktrees/d432/mlf4/src-public/`, `/Users/ares/.codex/worktrees/d432/mlf4/app/`, `/Users/ares/.codex/worktrees/d432/mlf4/test/`, and `/Users/ares/.codex/worktrees/d432/mlf4/mlf2.cabal`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Inst.hs` and any historical repair-track / research artifacts
-- prior round artifacts under `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-001/` through `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-033/`
+- `orchestrator/rounds/round-034/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-001/roadmap.md`
+- `orchestrator/rounds/round-034/selection.md`
+- `Bugs.md`
+- production and test surfaces under `src/`, `src-public/`, `app/`, `test/`, and `mlf2.cabal`
+- `src/MLF/Elab/Inst.hs` and any historical repair-track / research artifacts
+- prior round artifacts under `orchestrator/rounds/round-001/` through `orchestrator/rounds/round-033/`
 
 If the bind/selection artifact cannot keep the next target confined to the single `ResultType.Fallback` / `PipelineSpec` family above, stop and hand the issue back to review rather than choosing a broader `C2` target.
 
@@ -89,7 +89,7 @@ If the bind/selection artifact cannot keep the next target confined to the singl
   - `U6` recorded `continue-bounded`, not `widen-approved`.
   - `U2`, `U3`, and `U4` remain accepted negative findings that still constrain later work.
 - State explicitly that these accepted negative findings remain binding and are not converted into implementation clearance by `C1`.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` only as repaired-lane continuity context; do not reopen `BUG-2026-03-16-001` as the selected next slice.
+- Treat `Bugs.md` only as repaired-lane continuity context; do not reopen `BUG-2026-03-16-001` as the selected next slice.
 
 ### Task 3 - Freeze exactly one bounded `C2` target and reject all broader alternatives
 
@@ -97,16 +97,16 @@ If the bind/selection artifact cannot keep the next target confined to the singl
   - use the already-landed `rootBindingIsLocalType` signal to harden the current result-type target-retention path so it stays fail-closed unless the retained recursive-looking root still resolves to a local `TypeRef` on repaired `URI-R2-C1`;
   - keep wrapper/proxy-shaped retention fail-closed rather than treating it as evidence that authority, uniqueness, or constructor feasibility has been cleared.
 - Freeze the future `C2` ownership surface to:
-  - `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`
+  - `src/MLF/Elab/Run/ResultType/Fallback.hs`
+  - `test/PipelineSpec.hs`
 - State explicitly that the selected target does **not** authorize:
-  - edits to `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Inst.hs`;
+  - edits to `src/MLF/Elab/Inst.hs`;
   - reopening replay-repair rounds or prototype/research entrypoints;
   - equi-recursive reasoning, implicit unfolding, cyclic graph encoding, multi-SCC or cross-family widening, heuristic ownership ranking, second interfaces, compatibility shims, or convenience/default-path widening.
 
 ### Task 4 - Author the canonical `C1` bind/selection artifact
 
-- Write `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md` with reviewer-auditable sections that include:
+- Write `docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md` with reviewer-auditable sections that include:
   - stage metadata (`Round`, `Roadmap item`, `Attempt`, `Retry state`, `Live subject`);
   - explicit `continue-bounded` carry-forward from `U6`;
   - explicit carry-forward of `U2` / `U3` / `U4` result tokens as still-binding negative evidence;
@@ -116,17 +116,17 @@ If the bind/selection artifact cannot keep the next target confined to the singl
 
 ### Task 5 - Run and record docs-only verification for `C1`
 
-- Run baseline checks from `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md` applicable to this docs-only slice:
+- Run baseline checks from `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-001/verification.md` applicable to this docs-only slice:
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `python3 -m json.tool orchestrator/rounds/round-034/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-034/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-001/roadmap.md`
   - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-  - `test -f orchestrator/retry-subloop.md`
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-001/retry-subloop.md`
 - Add `C1`-specific checks proving:
   - the artifact records exactly one selected next target;
   - the selected target is the bounded `ResultType.Fallback` / `PipelineSpec` family only;
@@ -161,13 +161,13 @@ If the bind/selection artifact cannot keep the next target confined to the singl
 
 ## Reviewer Checks
 
-Baseline checks from `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md` still apply.
+Baseline checks from `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-001/verification.md` still apply.
 
 Round-specific checks:
 
 1. `plan.md` and the produced `C1` artifact explicitly name `attempt-1` with `retry: null`.
 2. The artifact binds the new cycle to repaired `URI-R2-C1` under accepted `U6 = continue-bounded` and preserves the inherited `explicit-only / non-equi-recursive / non-cyclic-graph` boundary.
 3. The artifact carries forward `U2 = authority-narrowed`, `U3 = uniqueness-owner-stable-refuted`, and `U4 = constructor-acyclic-termination-refuted` as still-binding negative evidence and does not restate them as clearance.
-4. The artifact selects exactly one next bounded target: local-binding-only result-type target-retention hardening using the existing `rootBindingIsLocalType` signal, with future ownership frozen to `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/Fallback.hs` plus `/Users/ares/.codex/worktrees/d432/mlf4/test/PipelineSpec.hs`.
+4. The artifact selects exactly one next bounded target: local-binding-only result-type target-retention hardening using the existing `rootBindingIsLocalType` signal, with future ownership frozen to `src/MLF/Elab/Run/ResultType/Fallback.hs` plus `test/PipelineSpec.hs`.
 5. The artifact explicitly excludes `MLF.Elab.Inst.applyInstantiation`, replay-repair reopen, prototype/research entrypoints, broad solver widening, equi-recursive reasoning, cyclic encoding, second interfaces, fallback/default widening, and bug-tracker edits from this cycle bind.
 6. Verification evidence includes the required docs-only baseline checks and an explicit full-gate skip justification because the round stayed outside code-bearing surfaces.

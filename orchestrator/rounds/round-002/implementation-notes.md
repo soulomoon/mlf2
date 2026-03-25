@@ -22,7 +22,7 @@ Execution boundary statements:
 
 - This round is docs-only.
 - No production-code edits were made under `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
-- `orchestrator/roadmap.md` was not edited.
+- `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-002/roadmap.md` was not edited.
 
 Continuity statement:
 

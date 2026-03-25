@@ -3,9 +3,9 @@
 - Baseline checks:
   - `git diff --check`
     - Pass. Exit code `0`; no whitespace or conflict-marker issues.
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
+  - `python3 -m json.tool orchestrator/rounds/round-014/state-snapshot.json >/dev/null`
     - Pass. Exit code `0`.
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-02-uri-r2-c1-re-entry-evidence-successor-roadmap/rev-004/roadmap.md`
     - Pass. Ordered roadmap entries remain parseable; item `4` is still `[pending]`, so this round did not rewrite roadmap state.
   - `cabal build all && cabal test`
     - Skipped with justification. `git diff --name-only` produced no tracked-file diff, and `git ls-files --others --exclude-standard` lists only docs/round artifacts:

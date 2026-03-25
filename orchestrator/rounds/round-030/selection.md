@@ -6,15 +6,23 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: unannotated iso-recursive inference (bounded)
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap`
+- Roadmap Revision: `rev-008`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-008`
+- State Snapshot: `orchestrator/rounds/round-030/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 3: execute `U3` uniqueness and owner-stability clearance for the live subject.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `stage: select-task` for `round-030` with `current_task: null` and `retry: null`, so no same-round retry is active and no forced retry stage preempts normal selection.
+`orchestrator/rounds/round-030/state-snapshot.json` is parked at `stage: select-task` for `round-030` with `current_task: null` and `retry: null`, so no same-round retry is active and no forced retry stage preempts normal selection.
 
-`orchestrator/roadmap.md` records `U1` and `U2` as done and `U3` as the lowest-numbered unfinished item. Under the guider contract, that makes `U3` the next lawful bounded selection.
+`orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-008/roadmap.md` records `U1` and `U2` as done and `U3` as the lowest-numbered unfinished item. Under the guider contract, that makes `U3` the next lawful bounded selection.
 
 Predecessor evidence confirms readiness and scope for `U3`: `round-028` finalized `U1` (`accepted + finalize`) to bind the live subject and hard-stop boundaries, and `round-029` finalized `U2` (`accepted + finalize`) with authoritative artifact `docs/plans/2026-03-17-uri-r2-c1-u2-unannotated-authority-clearance.md`. That `U2` artifact records the bounded result token `authority-narrowed` and explicitly carries forward `U3` as the next pending clearance on the same repaired `URI-R2-C1` subject.
 

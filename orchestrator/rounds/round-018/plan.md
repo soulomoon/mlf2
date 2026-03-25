@@ -10,15 +10,15 @@ This delta keeps the same round/branch/worktree and narrows repair strictly to t
 
 - Round id: `round-018`
 - Branch: `codex/round-018`
-- Worktree: `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-018`
+- Worktree: `.worktrees/round-018`
 - Roadmap item: `3` (`P3` safety-validation prototype)
 - Research entrypoint: `uri-r2-c1-prototype-entrypoint-v1`
 - Scenario: `uri-r2-c1-only-v1`
 - Stage selector: `P3-safety-validation`
 - Attempt policy: preserve rejected `attempt-1`; rerun only as `attempt-2`
 - Authoritative inherited records:
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-016/review-record.json` (`P1` pass)
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-017/review-record.json` (`P2` semantic-negative, no `P3` token handoff)
+  - `orchestrator/rounds/round-016/review-record.json` (`P1` pass)
+  - `orchestrator/rounds/round-017/review-record.json` (`P2` semantic-negative, no `P3` token handoff)
 
 ## Repair Scope
 
@@ -33,7 +33,7 @@ Only repair the `P3` stage-input contract and resulting artifact/evidence statem
 
 - No new `P3` features, heuristics, or scope widening.
 - No `P4` logic.
-- No changes to controller files (`orchestrator/state.json`, `orchestrator/roadmap.md`).
+- No changes to controller files (`orchestrator/rounds/round-018/state-snapshot.json`, `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-003/roadmap.md`).
 - No changes to rounds other than `round-018`.
 - No rewriting or deleting rejected `attempt-1` evidence.
 
@@ -69,12 +69,12 @@ Only repair the `P3` stage-input contract and resulting artifact/evidence statem
 
 ## Allowed File Slice (Narrow)
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-018/src/MLF/Research/URI/R2/C1/Prototype/P3.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-018/src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-018/test/Research/UriR2C1PrototypeP1Spec.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-018/docs/plans/2026-03-15-uri-r2-c1-p3-safety-validation-prototype.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-018/orchestrator/rounds/round-018/implementation-notes.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-018/orchestrator/rounds/round-018/evidence/P3/attempt-2/`
+- `src/MLF/Research/URI/R2/C1/Prototype/P3.hs`
+- `src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`
+- `test/Research/UriR2C1PrototypeP1Spec.hs`
+- `docs/plans/2026-03-15-uri-r2-c1-p3-safety-validation-prototype.md`
+- `orchestrator/rounds/round-018/implementation-notes.md`
+- `orchestrator/rounds/round-018/evidence/P3/attempt-2/`
 
 `mlf2.cabal`, `Types.hs`, and `Entrypoint.hs` should remain untouched unless a strictly compile-blocking fix is proven necessary.
 
@@ -105,8 +105,8 @@ Only repair the `P3` stage-input contract and resulting artifact/evidence statem
 Baseline (unchanged):
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-018/state-snapshot.json >/dev/null`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-003/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`
 - `cabal build all && cabal test`
 

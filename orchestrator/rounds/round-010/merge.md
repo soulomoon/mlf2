@@ -19,7 +19,7 @@
 ## Continuity Note
 
 - This round closes the successor research track's item-5 decision stage while treating completed rounds `001` through `009`, the approved successor roadmap-design spec, and the predecessor recursive-types packet as inherited evidence only.
-- The approved review confirms those inherited references remained consistent, `URI-R2-C1` stayed fixed, the authoritative invariant audit stayed authoritative, and no prior round artifact, predecessor packet history, `orchestrator/state.json`, or `orchestrator/roadmap.md` was rewritten.
+- The approved review confirms those inherited references remained consistent, `URI-R2-C1` stayed fixed, the authoritative invariant audit stayed authoritative, and no prior round artifact, predecessor packet history, `orchestrator/rounds/round-010/state-snapshot.json`, or `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-005/roadmap.md` was rewritten.
 
 ## Readiness Statement
 

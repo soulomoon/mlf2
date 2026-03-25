@@ -1,0 +1,17 @@
+{
+  "contract_version": 2,
+  "base_branch": "codex/automatic-recursive-type-inference",
+  "active_round_id": null,
+  "stage": "done",
+  "current_task": null,
+  "branch": null,
+  "worktree_path": null,
+  "active_round_dir": null,
+  "round_artifacts": {},
+  "last_completed_round": "round-075",
+  "resume_error": null,
+  "retry": null,
+  "roadmap_id": "2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap",
+  "roadmap_revision": "rev-009",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-009"
+}

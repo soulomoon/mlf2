@@ -14,7 +14,7 @@
 ## Takeover continuity and predecessor-history note
 
 - Continuity is preserved by using predecessor packet artifacts and prior plan docs as reference-only evidence.
-- The approved review confirms predecessor authoritative history under `tasks/todo/2026-03-11-recursive-types-orchestration/` remained immutable and `orchestrator/roadmap.md` was not modified in this round.
+- The approved review confirms predecessor authoritative history under `tasks/todo/2026-03-11-recursive-types-orchestration/` remained immutable and `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-002/roadmap.md` was not modified in this round.
 
 ## Follow-up notes
 

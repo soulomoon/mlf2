@@ -19,7 +19,7 @@
 ## Continuity Note
 
 - This round advances the successor research track by completing the reviewer-visible `R4` feasibility-decision artifact while treating completed rounds `001` through `008`, the predecessor recursive-types packet, and the inherited invariant audit as reference-only evidence.
-- The approved review confirms that continuity remained intact and that no predecessor packet history, prior round artifacts, `orchestrator/state.json`, or `orchestrator/roadmap.md` were rewritten.
+- The approved review confirms that continuity remained intact and that no predecessor packet history, prior round artifacts, `orchestrator/rounds/round-009/state-snapshot.json`, or `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-004/roadmap.md` were rewritten.
 
 ## Readiness
 

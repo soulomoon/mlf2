@@ -2,12 +2,12 @@
 
 - Baseline checks:
   - `git diff --check` (pass)
-  - `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json >/dev/null` (pass)
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json` (pass; `contract_version: 2`, `retry: null`)
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md` (pass; ordered status list present for `R1` through `R4`)
-  - `test -f /Users/ares/.codex/worktrees/d432/mlf4/docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md` (pass)
-  - `test -f /Users/ares/.codex/worktrees/d432/mlf4/docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` (pass)
-  - `test -f /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md` (pass)
+  - `python3 -m json.tool orchestrator/rounds/round-024/state-snapshot.json >/dev/null` (pass)
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-024/state-snapshot.json` (pass; `contract_version: 2`, `retry: null`)
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-001/roadmap.md` (pass; ordered status list present for `R1` through `R4`)
+  - `test -f docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md` (pass)
+  - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` (pass)
+  - `test -f orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-001/retry-subloop.md` (pass)
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "URI-R2-C1 witness replay reproduces BUG-2026-03-16-001 at applyInstantiation InstBot"'` (pass; `1 example, 0 failures`)
   - `cabal build all && cabal test` (pass; `1122 examples, 0 failures`)
   - Continuity guards:
@@ -32,11 +32,11 @@
   - `sed -n '314,369p' test/ElaborationSpec.hs` shows `uriR2C1ReplayFixture` rebuilding the live `generalizeWithPlan -> reifyTypeWithNamedSetNoFallback -> phiFromEdgeWitnessWithTrace` inputs for the fixed `EAnn (ELam "x" (EVar "x")) (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))` lane
   - `sed -n '1458,1476p' test/ElaborationSpec.hs` shows the focused Hspec example asserting the exact scheme type, no-fallback replay shape `t5 -> t5`, witness replay instantiation `∀(⩾ ⊲t9); N; (∀(⩾ ⊲(a -> a)); N)`, and the localized owner-boundary failure `InstBot expects ⊥, got: t9 -> t9`
   - Inherited evidence continuity verified:
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-016/review-record.json` keeps `P1 = pass`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-017/review-record.json` keeps `P2 = semantic-negative`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-021/review-record.json` keeps `D2 = pass`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-022/review-record.json` keeps `D3 = pass`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-023/review-record.json` keeps `D4 = reopen-repair-track`
+  - `orchestrator/rounds/round-016/review-record.json` keeps `P1 = pass`
+  - `orchestrator/rounds/round-017/review-record.json` keeps `P2 = semantic-negative`
+  - `orchestrator/rounds/round-021/review-record.json` keeps `D2 = pass`
+  - `orchestrator/rounds/round-022/review-record.json` keeps `D3 = pass`
+  - `orchestrator/rounds/round-023/review-record.json` keeps `D4 = reopen-repair-track`
   - `Bugs.md` still tracks the same controlling defect `BUG-2026-03-16-001` at `MLF.Elab.Inst.applyInstantiation` (`InstBot` branch)
   - No forbidden widening into broader replay search, automatic inference, second-interface behavior, compatibility fallback, or production-path drift appears in the diff
 

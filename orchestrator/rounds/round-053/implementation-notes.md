@@ -14,7 +14,7 @@
   remain uncleared.
 - Ran the required docs/state continuity checks only:
   `git diff --check`,
-  `python3 -m json.tool orchestrator/state.json >/dev/null`,
+  `python3 -m json.tool orchestrator/rounds/round-053/state-snapshot.json >/dev/null`,
   state/roadmap `rg` checks,
   required `test -f` continuity checks,
   a `python3` assertion over `orchestrator/rounds/round-052/review-record.json`,
@@ -23,9 +23,9 @@
 - Post-edit docs-only diff evidence:
   `git status --short --untracked-files=all` showed only the new `H4` artifact,
   this file, and the preexisting packet/controller files
-  (`orchestrator/state.json`, `plan.md`, `selection.md`);
+  (`orchestrator/rounds/round-053/state-snapshot.json`, `plan.md`, `selection.md`);
   `git diff --name-only` showed only the preexisting tracked
-  `orchestrator/state.json` change; and
+  `orchestrator/rounds/round-053/state-snapshot.json` change; and
   `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'`
   returned no output.
 - Kept the round docs-only. No production code, tests, roadmap, bug tracker,

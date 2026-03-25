@@ -30,7 +30,7 @@ Inherited authoritative audit that must remain unchanged:
 - `R2 = pass`
 - `R3 = pass`
 
-`R4` follows `orchestrator/retry-subloop.md` terminal semantics:
+`R4` follows `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/retry-subloop.md` terminal semantics:
 
 - review may accept this stage only with `stage_action: finalize`;
 - review may reject and return the same round to `plan`;
@@ -38,50 +38,50 @@ Inherited authoritative audit that must remain unchanged:
 
 ## Authoritative Inputs To Preserve
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-027/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-16-uri-r2-c1-d3-bounded-fixability-probe.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-16-uri-r2-c1-d4-repair-track-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-024/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-025/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-026/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r3-locked-replay-verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` (`BUG-2026-03-16-001`)
+- `orchestrator/rounds/round-027/selection.md`
+- `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/verification.md`
+- `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/retry-subloop.md`
+- `docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`
+- `docs/plans/2026-03-16-uri-r2-c1-d3-bounded-fixability-probe.md`
+- `docs/plans/2026-03-16-uri-r2-c1-d4-repair-track-decision-gate.md`
+- `orchestrator/rounds/round-024/review-record.json`
+- `orchestrator/rounds/round-025/review-record.json`
+- `orchestrator/rounds/round-026/review-record.json`
+- `docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md`
+- `docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md`
+- `docs/plans/2026-03-17-uri-r2-c1-r3-locked-replay-verification.md`
+- `Bugs.md` (`BUG-2026-03-16-001`)
 
 ## Files Expected In Scope
 
 Primary writable files:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
-2. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-027/implementation-notes.md` only if one bounded reviewer-handoff note is strictly needed
+1. `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
+2. `orchestrator/rounds/round-027/implementation-notes.md` only if one bounded reviewer-handoff note is strictly needed
 
 Read-only inputs:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-024/review-record.json`
-2. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-025/review-record.json`
-3. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-026/review-record.json`
-4. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md`
-5. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md`
-6. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r3-locked-replay-verification.md`
+1. `orchestrator/rounds/round-024/review-record.json`
+2. `orchestrator/rounds/round-025/review-record.json`
+3. `orchestrator/rounds/round-026/review-record.json`
+4. `docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md`
+5. `docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md`
+6. `docs/plans/2026-03-17-uri-r2-c1-r3-locked-replay-verification.md`
 
 Files that must remain untouched in this round:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/attempt-log.jsonl`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- prior round artifacts under `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-001/` through `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-026/`
+- `orchestrator/rounds/round-027/state-snapshot.json`
+- `orchestrator/attempt-log.jsonl`
+- `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/roadmap.md`
+- `Bugs.md`
+- prior round artifacts under `orchestrator/rounds/round-001/` through `orchestrator/rounds/round-026/`
 
 ## Sequential Tasks
 
 ### Task 1 - Freeze the `R4` attempt-1 decision contract before aggregation
 
 - Restate inside the `R4` artifact that this is `attempt-1` with `retry: null`.
-- Restate that `R4` is aggregate-only and terminal under `orchestrator/retry-subloop.md`.
+- Restate that `R4` is aggregate-only and terminal under `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/retry-subloop.md`.
 - Reassert the fixed lane:
   - subject `URI-R2-C1`
   - scenario `uri-r2-c1-only-v1`
@@ -107,14 +107,14 @@ Files that must remain untouched in this round:
 
 ### Task 3 - Run current bounded verification for the terminal gate
 
-- Run the baseline checks required by `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`:
+- Run the baseline checks required by `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/verification.md`:
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `python3 -m json.tool orchestrator/rounds/round-027/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-027/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/roadmap.md`
   - `test -f docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`
   - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md`
-  - `test -f orchestrator/retry-subloop.md`
+  - `test -f orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/retry-subloop.md`
 - Reconfirm the authoritative `R1` through `R3` inputs are present and parseable:
   - `python3 -m json.tool orchestrator/rounds/round-024/review-record.json >/dev/null`
   - `python3 -m json.tool orchestrator/rounds/round-025/review-record.json >/dev/null`
@@ -134,7 +134,7 @@ Files that must remain untouched in this round:
 
 ### Task 4 - Apply the closed decision rule and emit the canonical `R4` artifact
 
-- Write `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`.
+- Write `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`.
 - Record exactly one final outcome token:
   - `repair-accepted`
   - `repair-blocked`
@@ -177,7 +177,7 @@ Files that must remain untouched in this round:
 
 ## Reviewer Checks
 
-Baseline checks from `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md` still apply.
+Baseline checks from `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/verification.md` still apply.
 
 Round-specific checks:
 

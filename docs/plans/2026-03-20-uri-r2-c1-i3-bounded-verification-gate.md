@@ -147,7 +147,7 @@ Commands executed in:
   - `17 examples, 0 failures`
   - `Test suite mlf2-test: PASS`
   - log:
-    `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-056/dist-newstyle/build/aarch64-osx/ghc-9.12.2/mlf2-0.2.0.0/t/mlf2-test/test/mlf2-0.2.0.0-mlf2-test.log`
+    `dist-newstyle/build/aarch64-osx/ghc-9.12.2/mlf2-0.2.0.0/t/mlf2-test/test/mlf2-0.2.0.0-mlf2-test.log`
 - `cabal build all && cabal test` -> pass (`exit 0`):
   - build step covered `lib:mlf2-internal`, public library, `test:mlf2-test`, `exe:mlf2`, and `exe:frozen-parity-gen`
   - `Running 1 test suites...`
@@ -155,7 +155,7 @@ Commands executed in:
   - `1138 examples, 0 failures`
   - `Test suite mlf2-test: PASS`
   - log:
-    `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-056/dist-newstyle/build/aarch64-osx/ghc-9.12.2/mlf2-0.2.0.0/t/mlf2-test/test/mlf2-0.2.0.0-mlf2-test.log`
+    `dist-newstyle/build/aarch64-osx/ghc-9.12.2/mlf2-0.2.0.0/t/mlf2-test/test/mlf2-0.2.0.0-mlf2-test.log`
 
 ### Inherited Attempt-1 Context Preserved Outside This Retry Delta
 

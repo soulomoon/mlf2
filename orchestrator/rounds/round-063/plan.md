@@ -8,9 +8,9 @@ This is the initial full `K2` plan, not a retry delta. The round must land
 one bounded production-and-test slice inside repaired `URI-R2-C1` only: the
 local-binding empty-candidate / no-inst-arg scheme-alias / base-like
 `baseTarget -> baseC` lane in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-063/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 and the matching focused coverage in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-063/test/PipelineSpec.hs`.
+`test/PipelineSpec.hs`.
 
 The inherited boundary remains fixed:
 
@@ -103,7 +103,7 @@ Current source and test anchors already expose the exact selected gap:
 
 Current repository state is already non-pristine:
 
-- `M orchestrator/state.json`
+- `M orchestrator/rounds/round-063/state-snapshot.json`
 - `?? orchestrator/rounds/round-063/`
 
 Respect those existing changes. Do not revert, rewrite, or clean up unrelated
@@ -113,14 +113,14 @@ work while landing this slice.
 
 ### Modify / Test
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-063/src/MLF/Elab/Run/ResultType/Fallback.hs`
+1. `src/MLF/Elab/Run/ResultType/Fallback.hs`
    - Responsibility: keep the existing empty-candidate / no-inst-arg
      `baseTarget` branch as the source of truth, add one named local proof
      built from the frozen `K1` ingredients, and make `targetC` consume only
      that proof on the same lane without widening adjacent continuity
      families.
 
-2. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-063/test/PipelineSpec.hs`
+2. `test/PipelineSpec.hs`
    - Responsibility: extend only the existing
      `ARI-C1 feasibility characterization (bounded prototype-only)` block with
      one local success example, one matched local continuity contrast in the
@@ -129,8 +129,8 @@ work while landing this slice.
 
 ### Preserve Unchanged
 
-- `orchestrator/state.json`
-- `orchestrator/roadmap.md`
+- `orchestrator/rounds/round-063/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-030/roadmap.md`
 - `orchestrator/rounds/round-063/selection.md`
 - `/Volumes/src/mlf4/Bugs.md`
 - `docs/plans/2026-03-21-uri-r2-c1-k1-next-target-bind.md`
@@ -247,18 +247,18 @@ work while landing this slice.
 ## Verification Plan
 
 Run the baseline contract checks required by
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-063/orchestrator/verification.md`:
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-030/verification.md`:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-063/state-snapshot.json >/dev/null`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-063/state-snapshot.json`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-030/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-030/retry-subloop.md`
 
 Run the focused `K2` checks:
 
@@ -275,7 +275,7 @@ Because this round edits `src/` and `test/`, the full repo gate is mandatory:
 
 ## Non-Goals
 
-- No edit to `orchestrator/state.json`, `orchestrator/roadmap.md`,
+- No edit to `orchestrator/rounds/round-063/state-snapshot.json`, `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-030/roadmap.md`,
   `orchestrator/rounds/round-063/selection.md`, or `/Volumes/src/mlf4/Bugs.md`.
 - No edit outside `src/MLF/Elab/Run/ResultType/Fallback.hs` and
   `test/PipelineSpec.hs`.
@@ -310,7 +310,7 @@ Because this round edits `src/` and `test/`, the full repo gate is mandatory:
 ## Reviewer Checks
 
 Baseline checks from
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-063/orchestrator/verification.md`
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-030/verification.md`
 still apply.
 
 Round-specific checks:

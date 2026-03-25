@@ -1,7 +1,7 @@
 # Round 038 Implementation Notes
 
 - Added the canonical `E1` bind artifact at
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-038/docs/plans/2026-03-18-uri-r2-c1-e1-next-target-bind.md`.
+  `docs/plans/2026-03-18-uri-r2-c1-e1-next-target-bind.md`.
 - Restated the accepted `C1` / `C2` / `C3` / `C4` evidence chain without widening
   scope and kept repaired `URI-R2-C1` inside the inherited explicit-only /
   non-equi-recursive / non-cyclic-graph boundary.

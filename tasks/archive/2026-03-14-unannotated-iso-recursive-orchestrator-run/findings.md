@@ -8,7 +8,7 @@
 - Controller references require strict delegation: only machine-control state, branch/worktree setup, artifact-path bookkeeping, and squash-merge bookkeeping may be handled directly.
 - The next legal action from the current state is to start a new round with the guider and create a new round branch/worktree for that selected item.
 - The live `round-006` controller shell is now initialized on branch `codex/round-006` with worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006`; `orchestrator/state.json` now records that round context while `stage` remains `select-task`.
-- The current environment did not produce a usable delegated guider result for `round-006`: after the subagent handoff, `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/orchestrator/rounds/round-006/selection.md` was still absent and the round worktree stayed clean.
+- The current environment did not produce a usable delegated guider result for `round-006`: after the subagent handoff, `orchestrator/rounds/round-006/selection.md` was still absent and the round worktree stayed clean.
 - A second fresh guider subagent completed `select-task` successfully after receiving a stricter role-only prompt without controller context leakage.
 - `round-006` selected roadmap item 1: write the `R1` gap map from `ARI-C1` to unannotated single-SCC, single-binder-family inference.
 - The delegated planner kept `round-006` strictly docs-only and targeted two artifacts: the `R1` gap-map doc plus round implementation notes.

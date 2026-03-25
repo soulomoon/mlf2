@@ -8,6 +8,14 @@ successor loop after the accepted `item-7` architecture decision
 Successor lane: roadmap item `1` only, freezing the exact same-lane
 retained-child persistence case and review ledger
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap`
+- Roadmap Revision: `rev-001`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001`
+- State Snapshot: `orchestrator/rounds/round-089/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item `1`: freeze the exact same-lane retained-child persistence case
@@ -15,15 +23,15 @@ and review ledger.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` fixes the live controller state at
+`orchestrator/rounds/round-089/state-snapshot.json` fixes the live controller state at
 `active_round_id: "round-089"`, `stage: "select-task"`, `current_task: null`,
 `retry: null`, `branch: "codex/round-089"`, `active_round_dir:
 "orchestrator/rounds/round-089"`, and `last_completed_round: "round-088"`.
-`orchestrator/retry-subloop.md` only overrides roadmap order when a live retry
+`orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/retry-subloop.md` only overrides roadmap order when a live retry
 object is present. `retry` is currently `null`, so the normal
 lowest-numbered-unfinished-item rule still governs this relaunch.
 
-`orchestrator/roadmap.md` marks item `1` as the first unfinished item on the
+`orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-001/roadmap.md` marks item `1` as the first unfinished item on the
 refreshed successor control plane, and items `2` through `5` all depend on
 work that item `1` must freeze first. Skipping directly to the audit or to a
 minimum implementation slice would leave the exact persistence subject
@@ -67,7 +75,7 @@ must preserve before item `2` audits the live pipeline against that contract.
 `InstBot` defect remains predecessor implementation context only and does not
 create a retry obligation or change roadmap order for this successor loop.
 Repository status in the active worktree shows only controller-owned
-`M orchestrator/state.json` drift. No live blocker forces a different
+`M orchestrator/rounds/round-089/state-snapshot.json` drift. No live blocker forces a different
 selection.
 
 ## Round Scope Guard

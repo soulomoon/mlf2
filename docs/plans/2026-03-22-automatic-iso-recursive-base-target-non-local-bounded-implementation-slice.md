@@ -16,10 +16,10 @@ This artifact implements exactly one bounded `N5` slice inside accepted `N4`.
 The round makes the already-frozen non-local generic scheme-root alias-bound /
 base-like `baseTarget -> baseC` packet reviewer-auditable by naming that
 packet explicitly in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-072/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 and by refreshing only the existing focused
 `ARI-C1 feasibility characterization (bounded prototype-only)` block in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-072/test/PipelineSpec.hs`.
+`test/PipelineSpec.hs`.
 
 This artifact does not authorize `N6`, `N7`, roadmap edits,
 `orchestrator/state.json` edits, bug-tracker edits, predecessor-history
@@ -107,7 +107,7 @@ not rewrite this attempt or reviewer-owned history.
 ### TDD Red -> Green
 
 - Source-guard refresh was written first in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-072/test/PipelineSpec.hs`.
+  `test/PipelineSpec.hs`.
 - First focused run surfaced a test-harness error in the new negative source
   guard; that test-only predicate shape was corrected before retrying the red
   run.
@@ -152,10 +152,10 @@ Commands executed in:
 
 This round changed only the bounded round-owned production/test/doc slice:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-072/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-072/test/PipelineSpec.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-072/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-072/orchestrator/rounds/round-072/implementation-notes.md`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
+- `orchestrator/rounds/round-072/implementation-notes.md`
 
 Accepted predecessor docs, roadmap/controller files, `Bugs.md`, and every
 non-selected route remained unchanged.

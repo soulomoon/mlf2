@@ -6,6 +6,14 @@ Role: guider
 Active subject: post-`L2` successor control plane for automatic iso-recursive inference
 Successor lane: closed until a lawful post-`L2` amendment reopens work
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap`
+- Roadmap Revision: `rev-001`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-001`
+- State Snapshot: `orchestrator/rounds/round-068/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 1 (`N1`): execute the `N1` post-`L2` roadmap-amendment
@@ -13,19 +21,19 @@ authority gate for automatic iso-recursive inference.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` fixes the live controller state at
+`orchestrator/rounds/round-068/state-snapshot.json` fixes the live controller state at
 `active_round_id: "round-068"`, `stage: "select-task"`, `current_task: null`,
 `retry: null`, `branch: "codex/round-068-n1-post-l2-roadmap-amendment"`, and
-`last_completed_round: "round-067"`. Under `orchestrator/retry-subloop.md`,
+`last_completed_round: "round-067"`. Under `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-001/retry-subloop.md`,
 that means there is no same-round retry to resume and no lawful path that
 skips fresh roadmap selection before `plan`.
 
-`orchestrator/roadmap.md` starts the refreshed successor control plane with
+`orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-001/roadmap.md` starts the refreshed successor control plane with
 item 1 (`N1`) pending and lists all later items (`N2` through `N7`) as
 depending on earlier authority. Because `N1` is the lowest-numbered unfinished
 item, it is the default next selection unless accepted predecessor evidence or
 live retry state requires something else. Neither does. Repository status in
-the controller root shows only the controller-owned `M orchestrator/state.json`
+the controller root shows only the controller-owned `M orchestrator/rounds/round-068/state-snapshot.json`
 edit, and `/Volumes/src/mlf4/Bugs.md` still has an empty `## Open` section, so
 there is no live defect or retry condition forcing a different stage.
 

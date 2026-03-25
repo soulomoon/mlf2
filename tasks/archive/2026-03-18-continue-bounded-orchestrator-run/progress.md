@@ -18,11 +18,11 @@
 - Attempted to hand off the delegated `implement` stage for `round-034`, but no usable fresh real subagent execution materialized and `.worktrees/round-034` still has no authored `C1` artifact or implementer notes.
 - Recorded the exact implement-stage delegation blockage in `orchestrator/state.json` and stopped rather than simulate delegated role work.
 - Switched to a narrower retry strategy for the delegated `implement` stage: clear the temporary blockage and re-dispatch a fresh subagent without inherited controller context so the stage can be owned directly by the implementer role.
-- Delegated the narrowed `implement` stage for `round-034`; the implementer wrote `.worktrees/round-034/docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md` and `.worktrees/round-034/orchestrator/rounds/round-034/implementation-notes.md`.
+- Delegated the narrowed `implement` stage for `round-034`; the implementer wrote `docs/plans/2026-03-18-uri-r2-c1-c1-continue-bounded-target-bind.md` and `orchestrator/rounds/round-034/implementation-notes.md`.
 - Advanced `orchestrator/state.json` to `stage: "review"` and recorded the `C1` implementation artifact paths for reviewer handoff.
-- Delegated the `review` stage for `round-034`; the reviewer accepted `C1` attempt 1 with `Stage action: finalize` and wrote `.worktrees/round-034/orchestrator/rounds/round-034/review.md`, `reviews/attempt-1.md`, and the authoritative `review-record.json`.
+- Delegated the `review` stage for `round-034`; the reviewer accepted `C1` attempt 1 with `Stage action: finalize` and wrote `orchestrator/rounds/round-034/review.md`, `reviews/attempt-1.md`, and the authoritative `review-record.json`.
 - Advanced `orchestrator/state.json` to `stage: "merge"` and recorded the `C1` review artifact paths.
-- Delegated the `merge` stage for `round-034`; the merger wrote `.worktrees/round-034/orchestrator/rounds/round-034/merge.md` and marked the round squash-ready with title `docs(c1): bind continue-bounded URI-R2-C1 C2 target`.
+- Delegated the `merge` stage for `round-034`; the merger wrote `orchestrator/rounds/round-034/merge.md` and marked the round squash-ready with title `docs(c1): bind continue-bounded URI-R2-C1 C2 target`.
 - Committed the approved round branch as `e2790c9 docs(c1): bind continue-bounded URI-R2-C1 C2 target`.
 - Squash-merged `codex/round-034-c1-continue-bounded-target-bind` into the base branch and committed the squashed result as `644c959 docs(c1): bind continue-bounded URI-R2-C1 C2 target`.
 - Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-034`.
@@ -34,19 +34,19 @@
 - Synced the `round-035` selection artifact into the round worktree and advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "C2"` and the selection artifact path recorded.
 - Delegated the `plan` stage for `round-035`; the planner wrote `orchestrator/rounds/round-035/plan.md`, freezing `C2` to the bounded `Fallback.hs` + `PipelineSpec.hs` slice with a canonical implementation artifact and mandatory full repo gate.
 - Synced the `round-035` plan artifact into the round worktree and advanced `orchestrator/state.json` to `stage: "implement"` for `C2`.
-- Delegated the `implement` stage for `round-035`; the implementer wrote `.worktrees/round-035/src/MLF/Elab/Run/ResultType/Fallback.hs`, `.worktrees/round-035/test/PipelineSpec.hs`, `.worktrees/round-035/docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`, and `.worktrees/round-035/orchestrator/rounds/round-035/implementation-notes.md`.
+- Delegated the `implement` stage for `round-035`; the implementer wrote `src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/PipelineSpec.hs`, `docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`, and `orchestrator/rounds/round-035/implementation-notes.md`.
 - The implementer followed TDD by first tightening `PipelineSpec`, verifying a failing targeted test, then landing the minimal `Fallback.hs` gate change, rerunning the targeted recursive-characterization block successfully, and finishing with a passing full `cabal build all && cabal test` gate (`1127 examples, 0 failures`).
 - Advanced `orchestrator/state.json` to `stage: "review"` and recorded the `C2` implementation artifact paths for reviewer handoff.
 - Delegated the `review` stage for `round-035`; the reviewer rejected `C2` attempt 1 with `Stage action: retry` because the same non-local proxy wrapper case was not yet asserted through both `runPipelineElab` and `runPipelineElabChecked` entrypoints.
 - Recorded controller-owned retry state in `orchestrator/state.json`, appended `orchestrator/rounds/round-035/attempt-log.jsonl`, preserved the same `round-035` branch/worktree, and returned the round to `stage: "plan"` for attempt 2.
 - Delegated the retry `plan` stage for `round-035` attempt 2; the planner rewrote `orchestrator/rounds/round-035/plan.md` as a delta plan focused only on adding same-case entrypoint coverage and updating the canonical `C2` artifact.
-- Synced the retry plan into `.worktrees/round-035/` and advanced `orchestrator/state.json` to `stage: "implement"` for `round-035` attempt 2.
-- Delegated the retry `implement` stage for `round-035` attempt 2; the implementer updated `.worktrees/round-035/test/PipelineSpec.hs`, `.worktrees/round-035/docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`, and `.worktrees/round-035/orchestrator/rounds/round-035/implementation-notes.md` while leaving `Fallback.hs` unchanged.
+- Synced the retry plan into `` and advanced `orchestrator/state.json` to `stage: "implement"` for `round-035` attempt 2.
+- Delegated the retry `implement` stage for `round-035` attempt 2; the implementer updated `test/PipelineSpec.hs`, `docs/plans/2026-03-18-uri-r2-c1-c2-bounded-fail-closed-implementation-slice.md`, and `orchestrator/rounds/round-035/implementation-notes.md` while leaving `Fallback.hs` unchanged.
 - The new same-case entrypoint test passed immediately after the test-first edit, so no production fix was needed; the targeted ARI-C1 block still passed (`6 examples, 0 failures`) and the full `cabal build all && cabal test` gate remained green (`1127 examples, 0 failures`).
 - Advanced `orchestrator/state.json` to `stage: "review"` for `round-035` attempt 2 while preserving the same retry state, branch, and worktree.
-- Delegated the retry `review` stage for `round-035` attempt 2; the reviewer accepted the bounded retry, wrote `.worktrees/round-035/orchestrator/rounds/round-035/review.md`, `reviews/attempt-2.md`, and the authoritative `review-record.json`, and confirmed the targeted block plus full gate remained green.
+- Delegated the retry `review` stage for `round-035` attempt 2; the reviewer accepted the bounded retry, wrote `orchestrator/rounds/round-035/review.md`, `reviews/attempt-2.md`, and the authoritative `review-record.json`, and confirmed the targeted block plus full gate remained green.
 - Cleared `retry` and advanced `orchestrator/state.json` to `stage: "merge"` for the accepted `C2` round while preserving the same branch/worktree until squash merge.
-- Delegated the `merge` stage for `round-035`; the merger wrote `.worktrees/round-035/orchestrator/rounds/round-035/merge.md` and marked the round squash-ready with title `C2: harden local-only fallback retention and fail-closed coverage`.
+- Delegated the `merge` stage for `round-035`; the merger wrote `orchestrator/rounds/round-035/merge.md` and marked the round squash-ready with title `C2: harden local-only fallback retention and fail-closed coverage`.
 - Committed the approved round branch as `7467be3 C2: harden local-only fallback retention and fail-closed coverage`.
 - Squash-merged `codex/round-035-c2-retention-hardening` into the base branch and committed the squashed result as `7649b7b C2: harden local-only fallback retention and fail-closed coverage`.
 - Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-035`.
@@ -58,12 +58,12 @@
 - Synced the `round-036` selection artifact into the round worktree and advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "C3"` and the selection artifact path recorded.
 - Delegated the `plan` stage for `round-036`; the planner wrote `orchestrator/rounds/round-036/plan.md`, freezing `C3` as a docs-only verification/evidence round over the accepted `C2` slice.
 - Synced the `round-036` plan artifact into the round worktree and advanced `orchestrator/state.json` to `stage: "implement"` for `C3`.
-- Delegated the `implement` stage for `round-036`; the implementer wrote `.worktrees/round-036/docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md` and `.worktrees/round-036/orchestrator/rounds/round-036/implementation-notes.md`.
+- Delegated the `implement` stage for `round-036`; the implementer wrote `docs/plans/2026-03-18-uri-r2-c1-c3-bounded-verification-gate.md` and `orchestrator/rounds/round-036/implementation-notes.md`.
 - The `C3` artifact records read-only anchor evidence from `Fallback.hs` and `PipelineSpec.hs`, accepted `C2` authority from `round-035/review-record.json`, predecessor continuity, docs-only diff evidence, the focused ARI-C1 block passing (`6 examples, 0 failures`), and the full `cabal build all && cabal test` gate passing (`1127 examples, 0 failures`).
 - Advanced `orchestrator/state.json` to `stage: "review"` and recorded the `C3` implementation artifact paths for reviewer handoff.
-- Delegated the `review` stage for `round-036`; the reviewer accepted `C3` attempt 1 with `Stage action: finalize` and wrote `.worktrees/round-036/orchestrator/rounds/round-036/review.md`, `reviews/attempt-1.md`, and the authoritative `review-record.json`.
+- Delegated the `review` stage for `round-036`; the reviewer accepted `C3` attempt 1 with `Stage action: finalize` and wrote `orchestrator/rounds/round-036/review.md`, `reviews/attempt-1.md`, and the authoritative `review-record.json`.
 - Advanced `orchestrator/state.json` to `stage: "merge"` and recorded the `C3` review artifact paths.
-- Delegated the `merge` stage for `round-036`; the merger wrote `.worktrees/round-036/orchestrator/rounds/round-036/merge.md` and marked the round squash-ready with title `docs(c3): record bounded verification evidence for local-only fallback slice`.
+- Delegated the `merge` stage for `round-036`; the merger wrote `orchestrator/rounds/round-036/merge.md` and marked the round squash-ready with title `docs(c3): record bounded verification evidence for local-only fallback slice`.
 - Committed the approved round branch as `eea3fcf docs(c3): record bounded verification evidence for local-only fallback slice`.
 - Squash-merged `codex/round-036-c3-verification-gate` into the base branch and committed the squashed result as `acb5e75 docs(c3): record bounded verification evidence for local-only fallback slice`.
 - Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-036`.
@@ -75,12 +75,12 @@
 - Synced the `round-037` selection artifact into the round worktree and advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "C4"` and the selection artifact path recorded.
 - Delegated the `plan` stage for `round-037`; the planner wrote `orchestrator/rounds/round-037/plan.md`, freezing `C4` as an aggregate-only docs-only decision gate that must record exactly one bounded result token.
 - Synced the `round-037` plan artifact into the round worktree and advanced `orchestrator/state.json` to `stage: "implement"` for `C4`.
-- Delegated the `implement` stage for `round-037`; the implementer wrote `.worktrees/round-037/docs/plans/2026-03-18-uri-r2-c1-c4-next-cycle-decision-gate.md` and `.worktrees/round-037/orchestrator/rounds/round-037/implementation-notes.md`.
+- Delegated the `implement` stage for `round-037`; the implementer wrote `docs/plans/2026-03-18-uri-r2-c1-c4-next-cycle-decision-gate.md` and `orchestrator/rounds/round-037/implementation-notes.md`.
 - The `C4` artifact recorded exactly one bounded token, `continue-bounded`, backed by the accepted `C1` / `C2` / `C3` evidence chain and fresh docs-only baseline/continuity checks; it also recorded why `widen-approved` and `stop-blocked` were not lawful.
 - Advanced `orchestrator/state.json` to `stage: "review"` and recorded the `C4` implementation artifact paths for reviewer handoff.
-- Delegated the `review` stage for `round-037`; the reviewer accepted `C4` attempt 1 with `Stage action: finalize` and wrote `.worktrees/round-037/orchestrator/rounds/round-037/review.md`, `reviews/attempt-1.md`, and the authoritative `review-record.json`.
+- Delegated the `review` stage for `round-037`; the reviewer accepted `C4` attempt 1 with `Stage action: finalize` and wrote `orchestrator/rounds/round-037/review.md`, `reviews/attempt-1.md`, and the authoritative `review-record.json`.
 - Advanced `orchestrator/state.json` to `stage: "merge"` and recorded the `C4` review artifact paths.
-- Delegated the `merge` stage for `round-037`; the merger wrote `.worktrees/round-037/orchestrator/rounds/round-037/merge.md` and marked the round squash-ready with title `docs(c4): record next-cycle continue-bounded decision gate`.
+- Delegated the `merge` stage for `round-037`; the merger wrote `orchestrator/rounds/round-037/merge.md` and marked the round squash-ready with title `docs(c4): record next-cycle continue-bounded decision gate`.
 - Committed the approved round branch as `28ced75 docs(c4): record next-cycle continue-bounded decision gate`.
 - Squash-merged `codex/round-037-c4-next-cycle-decision` into the base branch and committed the squashed result as `91d55bb docs(c4): record next-cycle continue-bounded decision gate`.
 - Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-037`.
@@ -93,12 +93,12 @@
 - Synced the `round-038` selection artifact into the round worktree and advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "E1"` and the selection artifact path recorded.
 - Delegated the `plan` stage for `round-038`; the planner wrote `orchestrator/rounds/round-038/plan.md`, freezing `E1` as a docs-only bind/selection stage that selects the retained-child `boundVarTarget` / nested-`forall` hardening slice as the next bounded target.
 - Synced the `round-038` plan artifact into the round worktree and advanced `orchestrator/state.json` to `stage: "implement"` for `E1`.
-- Delegated the `implement` stage for `round-038`; the implementer wrote `.worktrees/round-038/docs/plans/2026-03-18-uri-r2-c1-e1-next-target-bind.md` and `.worktrees/round-038/orchestrator/rounds/round-038/implementation-notes.md`.
+- Delegated the `implement` stage for `round-038`; the implementer wrote `docs/plans/2026-03-18-uri-r2-c1-e1-next-target-bind.md` and `orchestrator/rounds/round-038/implementation-notes.md`.
 - The `E1` artifact froze the next bounded slice to the retained-child `boundHasForallFrom` / `boundVarTarget` / `keepTargetFinal` / `targetC` branch in `Fallback.hs` with focused `PipelineSpec` coverage and recorded docs-only verification evidence plus an explicit full-gate skip note.
 - Advanced `orchestrator/state.json` to `stage: "review"` and recorded the `E1` implementation artifact paths for reviewer handoff.
-- Delegated the `review` stage for `round-038`; the reviewer accepted `E1` attempt 1 with `Stage action: finalize` and wrote `.worktrees/round-038/orchestrator/rounds/round-038/review.md`, `reviews/attempt-1.md`, and the authoritative `review-record.json`.
+- Delegated the `review` stage for `round-038`; the reviewer accepted `E1` attempt 1 with `Stage action: finalize` and wrote `orchestrator/rounds/round-038/review.md`, `reviews/attempt-1.md`, and the authoritative `review-record.json`.
 - Advanced `orchestrator/state.json` to `stage: "merge"` and recorded the `E1` review artifact paths.
-- Delegated the `merge` stage for `round-038`; the merger wrote `.worktrees/round-038/orchestrator/rounds/round-038/merge.md` and marked the round squash-ready with title `docs(e1): bind next retained-child bounded target`.
+- Delegated the `merge` stage for `round-038`; the merger wrote `orchestrator/rounds/round-038/merge.md` and marked the round squash-ready with title `docs(e1): bind next retained-child bounded target`.
 - Committed the approved round branch as `5f9e6cb docs(e1): bind next retained-child bounded target`.
 - Squash-merged `codex/round-038-e1-next-target-bind` into the base branch and committed the squashed result as `c14c641 docs(e1): bind next retained-child bounded target`.
 - Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-038`.
@@ -110,19 +110,19 @@
 - Synced the `round-039` selection artifact into the round worktree and advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "E2"` and the selection artifact path recorded.
 - Delegated the `plan` stage for `round-039`; the planner wrote `orchestrator/rounds/round-039/plan.md`, freezing `E2` to the retained-child `Fallback.hs:530-674` slice with focused `PipelineSpec` coverage and full verification requirements.
 - Synced the `round-039` plan artifact into the round worktree and advanced `orchestrator/state.json` to `stage: "implement"` for `E2`.
-- Delegated the `implement` stage for `round-039`; the implementer wrote `.worktrees/round-039/src/MLF/Elab/Run/ResultType/Fallback.hs`, `.worktrees/round-039/test/PipelineSpec.hs`, `.worktrees/round-039/docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`, and `.worktrees/round-039/orchestrator/rounds/round-039/implementation-notes.md`.
+- Delegated the `implement` stage for `round-039`; the implementer wrote `src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/PipelineSpec.hs`, `docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`, and `orchestrator/rounds/round-039/implementation-notes.md`.
 - The implementer followed TDD by first running a failing targeted ARI-C1 example, then landing the minimal retained-child production fix, rerunning the targeted ARI-C1 block successfully (`8 examples, 0 failures`), and finishing with a passing full `cabal build all && cabal test` gate (`1129 examples, 0 failures`).
 - Advanced `orchestrator/state.json` to `stage: "review"` and recorded the `E2` implementation artifact paths for reviewer handoff.
 - Delegated the `review` stage for `round-039`; the reviewer rejected `E2` attempt 1 with `Stage action: retry` because the bounded ARI-C1 block still lacked the required new retained-child same-lane success evidence.
 - Recorded controller-owned retry state in `orchestrator/state.json`, appended `orchestrator/rounds/round-039/attempt-log.jsonl`, preserved the same `round-039` branch/worktree, and returned the round to `stage: "plan"` for attempt 2.
 - Delegated the retry `plan` stage for `round-039` attempt 2; the planner rewrote `orchestrator/rounds/round-039/plan.md` as a delta plan focused only on adding the missing retained-child same-lane success evidence and updating the canonical `E2` artifact/notes.
-- Synced the retry plan into `.worktrees/round-039/` and advanced `orchestrator/state.json` to `stage: "implement"` for `round-039` attempt 2.
-- Delegated the retry `implement` stage for `round-039` attempt 2; the implementer updated `.worktrees/round-039/test/PipelineSpec.hs`, `.worktrees/round-039/docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`, and `.worktrees/round-039/orchestrator/rounds/round-039/implementation-notes.md` while leaving the accepted attempt-1 `Fallback.hs` change untouched.
+- Synced the retry plan into `` and advanced `orchestrator/state.json` to `stage: "implement"` for `round-039` attempt 2.
+- Delegated the retry `implement` stage for `round-039` attempt 2; the implementer updated `test/PipelineSpec.hs`, `docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`, and `orchestrator/rounds/round-039/implementation-notes.md` while leaving the accepted attempt-1 `Fallback.hs` change untouched.
 - The retry evidence passed the focused ARI-C1 block (`9 examples, 0 failures`) and the full `cabal build all && cabal test` gate (`1130 examples, 0 failures`).
 - Advanced `orchestrator/state.json` to `stage: "review"` for `round-039` attempt 2 while preserving the same retry state, branch, and worktree.
-- Delegated the retry `review` stage for `round-039` attempt 2; the reviewer accepted the bounded retry, wrote `.worktrees/round-039/orchestrator/rounds/round-039/review.md`, `reviews/attempt-2.md`, and the authoritative `review-record.json`, and confirmed the targeted block plus full gate remained green.
+- Delegated the retry `review` stage for `round-039` attempt 2; the reviewer accepted the bounded retry, wrote `orchestrator/rounds/round-039/review.md`, `reviews/attempt-2.md`, and the authoritative `review-record.json`, and confirmed the targeted block plus full gate remained green.
 - Cleared `retry` and advanced `orchestrator/state.json` to `stage: "merge"` for the accepted `E2` round while preserving the same branch/worktree until squash merge.
-- Delegated the `merge` stage for `round-039`; the merger wrote `.worktrees/round-039/orchestrator/rounds/round-039/merge.md` and marked the round squash-ready with title `elab: harden retained-child fallback to same-lane local TypeRef roots`.
+- Delegated the `merge` stage for `round-039`; the merger wrote `orchestrator/rounds/round-039/merge.md` and marked the round squash-ready with title `elab: harden retained-child fallback to same-lane local TypeRef roots`.
 - Committed the approved round branch as `7ce0681 elab: harden retained-child fallback to same-lane local TypeRef roots`.
 - Squash-merged `codex/round-039-e2-retained-child-hardening` into the base branch and committed the squashed result as `1d512dd elab: harden retained-child fallback to same-lane local TypeRef roots`.
 - Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-039`.
@@ -135,7 +135,7 @@
 - Delegated `select-task` for `round-041`; the guider chose roadmap item `E4` and wrote `orchestrator/rounds/round-041/selection.md`.
 - Created round branch `codex/round-041-e4-next-cycle-decision` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-041`.
 - Delegated the `plan` stage for `round-041`; the planner wrote `orchestrator/rounds/round-041/plan.md`, freezing `E4` as an aggregate-only docs-only decision gate.
-- Delegated the `implement` stage for `round-041`; the implementer wrote `.worktrees/round-041/docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md` and `.worktrees/round-041/orchestrator/rounds/round-041/implementation-notes.md`, recording token `continue-bounded`.
+- Delegated the `implement` stage for `round-041`; the implementer wrote `docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md` and `orchestrator/rounds/round-041/implementation-notes.md`, recording token `continue-bounded`.
 - Delegated the `review` stage for `round-041`; the reviewer accepted `E4` attempt 1 with `Stage action: finalize` and wrote the authoritative review artifacts.
 - Delegated the `merge` stage for `round-041`; the merger marked the round squash-ready with title `docs(e4): record retained-child continue-bounded decision gate`.
 - Committed the approved round branch as `3251b9b docs(e4): record retained-child continue-bounded decision gate`.
@@ -150,9 +150,9 @@
 - Delegated `select-task` for `round-040`; the guider chose roadmap item `E3` and wrote `orchestrator/rounds/round-040/selection.md`.
 - Created round branch `codex/round-040-e3-verification-gate` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-040`.
 - Delegated the `plan` stage for `round-040`; the planner wrote `orchestrator/rounds/round-040/plan.md`, freezing `E3` as a docs-only verification/evidence round over the accepted `E2` slice.
-- Delegated the `implement` stage for `round-040`; the implementer wrote `.worktrees/round-040/docs/plans/2026-03-18-uri-r2-c1-e3-bounded-verification-gate.md` and `.worktrees/round-040/orchestrator/rounds/round-040/implementation-notes.md`, and reran the focused ARI-C1 block (`9 examples, 0 failures`) plus the full repo gate (`1130 examples, 0 failures`).
+- Delegated the `implement` stage for `round-040`; the implementer wrote `docs/plans/2026-03-18-uri-r2-c1-e3-bounded-verification-gate.md` and `orchestrator/rounds/round-040/implementation-notes.md`, and reran the focused ARI-C1 block (`9 examples, 0 failures`) plus the full repo gate (`1130 examples, 0 failures`).
 - Delegated the `review` stage for `round-040`; the reviewer accepted `E3` attempt 1 with `Stage action: finalize` and wrote the authoritative review artifacts.
-- Delegated the `merge` stage for `round-040`; the merger wrote `.worktrees/round-040/orchestrator/rounds/round-040/merge.md` and marked the round squash-ready with title `docs(e3): record bounded verification evidence for same-lane retained-child slice`.
+- Delegated the `merge` stage for `round-040`; the merger wrote `orchestrator/rounds/round-040/merge.md` and marked the round squash-ready with title `docs(e3): record bounded verification evidence for same-lane retained-child slice`.
 - Committed the approved round branch as `28611c2 docs(e3): record bounded verification evidence for same-lane retained-child slice`.
 - Squash-merged `codex/round-040-e3-verification-gate` into the base branch and committed the squashed result as `9dc74ce docs(e3): record bounded verification evidence for same-lane retained-child slice`.
 - Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-040`.
@@ -162,7 +162,7 @@
 - Delegated `select-task` for `round-041`; the guider chose roadmap item `E4` and wrote `orchestrator/rounds/round-041/selection.md`.
 - Created round branch `codex/round-041-e4-next-cycle-decision` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-041`.
 - Delegated the `plan` stage for `round-041`; the planner wrote `orchestrator/rounds/round-041/plan.md`, freezing `E4` as an aggregate-only docs-only decision gate.
-- Delegated the `implement` stage for `round-041`; the implementer wrote `.worktrees/round-041/docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md` and `.worktrees/round-041/orchestrator/rounds/round-041/implementation-notes.md`, recording token `continue-bounded`.
+- Delegated the `implement` stage for `round-041`; the implementer wrote `docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md` and `orchestrator/rounds/round-041/implementation-notes.md`, recording token `continue-bounded`.
 - Delegated the `review` stage for `round-041`; the reviewer accepted `E4` attempt 1 with `Stage action: finalize` and wrote the authoritative review artifacts.
 - Delegated the `merge` stage for `round-041`; the merger marked the round squash-ready with title `docs(e4): record retained-child continue-bounded decision gate`.
 - Committed the approved round branch as `3251b9b docs(e4): record retained-child continue-bounded decision gate`.
@@ -194,16 +194,16 @@
 ## 2026-03-19
 
 - Reloaded `using-superpowers`, `devotion`, and the requested archived `run-orchestrator-loop` skill, then re-read the live controller references (`state.json`, `roadmap.md`, `verification.md`, `retry-subloop.md`, role prompts, and archived controller reference docs) before taking any new round action.
-- Verified that `round-043` is the active lawful round, the branch/worktree already exist, `selection.md` is synced into the round worktree, and no `plan.md` or later-stage artifacts exist yet in `.worktrees/round-043/orchestrator/rounds/round-043/`.
+- Verified that `round-043` is the active lawful round, the branch/worktree already exist, `selection.md` is synced into the round worktree, and no `plan.md` or later-stage artifacts exist yet in `orchestrator/rounds/round-043/`.
 - Refreshed the task packet so its objective/current-context text matches the live `round-043` / `F2` controller state before delegating the next stage.
 - Delegated the `plan` stage for `round-043`; the planner wrote `orchestrator/rounds/round-043/plan.md`, freezing the initial non-retry `F2` slice to the local-binding scheme-alias/base-like `keepTargetFinal` / `targetC` lane, the canonical `2026-03-19` implementation artifact path, and the mandatory focused plus full-repo verification contract.
-- Synced `orchestrator/rounds/round-043/plan.md` into `.worktrees/round-043/orchestrator/rounds/round-043/plan.md` and advanced `orchestrator/state.json` to `stage: "implement"` with the `plan` artifact recorded for the round.
-- Delegated the `implement` stage for `round-043`; the implementer updated `.worktrees/round-043/src/MLF/Elab/Run/ResultType/Fallback.hs` and `.worktrees/round-043/test/PipelineSpec.hs`, and authored `.worktrees/round-043/docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md` plus `.worktrees/round-043/orchestrator/rounds/round-043/implementation-notes.md`.
+- Synced `orchestrator/rounds/round-043/plan.md` into `orchestrator/rounds/round-043/plan.md` and advanced `orchestrator/state.json` to `stage: "implement"` with the `plan` artifact recorded for the round.
+- Delegated the `implement` stage for `round-043`; the implementer updated `src/MLF/Elab/Run/ResultType/Fallback.hs` and `test/PipelineSpec.hs`, and authored `docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md` plus `orchestrator/rounds/round-043/implementation-notes.md`.
 - The implementer followed a bounded red-to-green loop: the focused `ARI-C1` block initially failed only on the missing source guard, then passed at `11 examples, 0 failures` after landing the minimal `Fallback.hs` change; baseline controller checks passed; and the mandatory `cabal build all && cabal test` gate finished green at `1132 examples, 0 failures`.
 - Advanced `orchestrator/state.json` to `stage: "review"` for `round-043` and recorded the canonical implementation artifact plus round notes for reviewer handoff.
-- Delegated the `review` stage for `round-043`; the reviewer accepted `F2` attempt 1 with `Stage action: finalize`, wrote `.worktrees/round-043/orchestrator/rounds/round-043/review.md`, `.worktrees/round-043/orchestrator/rounds/round-043/reviews/attempt-1.md`, and the authoritative `.worktrees/round-043/orchestrator/rounds/round-043/review-record.json`, and reconfirmed fresh focused plus full-gate verification without any scope drift.
+- Delegated the `review` stage for `round-043`; the reviewer accepted `F2` attempt 1 with `Stage action: finalize`, wrote `orchestrator/rounds/round-043/review.md`, `orchestrator/rounds/round-043/reviews/attempt-1.md`, and the authoritative `orchestrator/rounds/round-043/review-record.json`, and reconfirmed fresh focused plus full-gate verification without any scope drift.
 - Advanced `orchestrator/state.json` to `stage: "merge"` for the accepted `round-043` review result and recorded the review artifacts for merger handoff.
-- Delegated the `merge` stage for `round-043`; the merger wrote `.worktrees/round-043/orchestrator/rounds/round-043/merge.md` and marked the round squash-ready with title `elab(f2): harden local scheme-alias/base-like fallback lane`.
+- Delegated the `merge` stage for `round-043`; the merger wrote `orchestrator/rounds/round-043/merge.md` and marked the round squash-ready with title `elab(f2): harden local scheme-alias/base-like fallback lane`.
 - Committed the approved round branch as `89f0813 elab(f2): harden local scheme-alias/base-like fallback lane`.
 - Squash-merged `codex/round-043-f2-scheme-alias-hardening` into `codex/automatic-recursive-type-inference` and committed the squashed result as `d4d4bc2 elab(f2): harden local scheme-alias/base-like fallback lane`.
 - Advanced `orchestrator/state.json` to `stage: "update-roadmap"`, cleared the active round fields, and set `last_completed_round` to `round-043`.
@@ -213,7 +213,7 @@
 - Delegated `select-task` for `round-044`; the guider chose roadmap item `F3` and wrote `orchestrator/rounds/round-044/selection.md`.
 - Created round branch `codex/round-044-f3-verification-gate` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-044`.
 - Delegated the `plan` stage for `round-044`; the planner wrote `orchestrator/rounds/round-044/plan.md`, freezing `F3` as a docs-only verification/evidence gate over the accepted `F2` local scheme-alias/base-like slice.
-- Delegated the `implement` stage for `round-044`; the implementer wrote `.worktrees/round-044/docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md`, reran the focused `ARI-C1` block (`11 examples, 0 failures`), reran the full repo gate (`1132 examples, 0 failures`), and kept the round docs-only with no production/test diffs.
+- Delegated the `implement` stage for `round-044`; the implementer wrote `docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md`, reran the focused `ARI-C1` block (`11 examples, 0 failures`), reran the full repo gate (`1132 examples, 0 failures`), and kept the round docs-only with no production/test diffs.
 - Delegated the `review` stage for `round-044`; the reviewer accepted `F3` attempt 1 with `Stage action: finalize` and wrote the authoritative review artifacts.
 - Delegated the `merge` stage for `round-044`; the merger marked the round squash-ready with title `docs(f3): finalize bounded verification gate for scheme-alias fallback lane`.
 - Committed the approved round branch as `aae377f docs(f3): finalize bounded verification gate for scheme-alias fallback lane`.
@@ -225,7 +225,7 @@
 - Delegated `select-task` for `round-045`; the guider chose roadmap item `F4` and wrote `orchestrator/rounds/round-045/selection.md`.
 - Created round branch `codex/round-045-f4-next-cycle-decision` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-045`.
 - Delegated the `plan` stage for `round-045`; the planner wrote `orchestrator/rounds/round-045/plan.md`, freezing `F4` as an aggregate-only docs-only decision gate.
-- Delegated the `implement` stage for `round-045`; the implementer wrote `.worktrees/round-045/docs/plans/2026-03-19-uri-r2-c1-f4-next-cycle-decision-gate.md` and recorded the decision token `continue-bounded` with docs-only verification evidence.
+- Delegated the `implement` stage for `round-045`; the implementer wrote `docs/plans/2026-03-19-uri-r2-c1-f4-next-cycle-decision-gate.md` and recorded the decision token `continue-bounded` with docs-only verification evidence.
 - Delegated the `review` stage for `round-045`; the reviewer accepted `F4` attempt 1 with `Stage action: finalize` and wrote the authoritative review artifacts.
 - Delegated the `merge` stage for `round-045`; the merger marked the round squash-ready with title `docs(f4): finalize next-cycle decision for scheme-alias fallback lane`.
 - Committed the approved round branch as `dd50436 docs(f4): finalize next-cycle decision for scheme-alias fallback lane`.
@@ -255,8 +255,8 @@
 - Prepared `round-047` in `orchestrator/state.json` at `stage: "select-task"`, created `orchestrator/rounds/round-047/`, selected roadmap item `G2`, created branch `codex/round-047-g2-multi-inst-hardening` and worktree `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-047`, synced `selection.md` into the round worktree, and advanced `orchestrator/state.json` to `stage: "plan"` with `current_task: "G2"`.
 - Loaded `test-driven-development` and `haskell-pro` for the upcoming bounded Haskell implementation slice, inspected the current `rootHasMultiInst` / `keepTargetFinal` anchors in `Fallback.hs` plus the `ARI-C1` block in `PipelineSpec.hs`, and authored the initial non-retry `G2` plan in `orchestrator/rounds/round-047/plan.md`.
 - Delegated the `plan` stage for `round-046` via a fresh `gpt-5.4` Codex subagent; it authored `orchestrator/rounds/round-046/plan.md`, selected the narrower local-binding `rootHasMultiInst` trigger family as the frozen `G2` slice, and fixed the canonical `G1` artifact path to `docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md`.
-- Synced `orchestrator/rounds/round-046/plan.md` into `.worktrees/round-046/orchestrator/rounds/round-046/plan.md` and advanced `orchestrator/state.json` to `stage: "implement"` with the `plan` artifact recorded for the round.
-- Delegated the `implement` stage for `round-046` via a fresh `gpt-5.4` Codex subagent inside `.worktrees/round-046`; it authored `.worktrees/round-046/docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md` and `.worktrees/round-046/orchestrator/rounds/round-046/implementation-notes.md`, freezing `G2` to the local-binding `rootHasMultiInst` family and recording the docs-only verification bundle plus the explicit full-gate skip.
+- Synced `orchestrator/rounds/round-046/plan.md` into `orchestrator/rounds/round-046/plan.md` and advanced `orchestrator/state.json` to `stage: "implement"` with the `plan` artifact recorded for the round.
+- Delegated the `implement` stage for `round-046` via a fresh `gpt-5.4` Codex subagent inside `.worktrees/round-046`; it authored `docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md` and `orchestrator/rounds/round-046/implementation-notes.md`, freezing `G2` to the local-binding `rootHasMultiInst` family and recording the docs-only verification bundle plus the explicit full-gate skip.
 - The implementer wrapper did not terminate cleanly after the files were present, so the controller preserved the produced worktree artifacts, synced them back to `docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md` and `orchestrator/rounds/round-046/implementation-notes.md`, and advanced `orchestrator/state.json` only to the reviewer handoff boundary instead of assuming any further side effects.
 - Resumed the blocked `round-048` `G3` reviewer handoff once fresh subagents were available; the reviewer finalized attempt 1, the merger wrote `merge.md`, the round branch committed as `620023b`, and the squash merge landed on `codex/automatic-recursive-type-inference` as `4621b79`.
 - Delegated the `round-048` roadmap update; the guider marked `G3` done, tightened `G4` around the accepted local `rootLocalMultiInst` / `targetC -> rootFinal` lane, and the roadmap update committed as `197ce3f`.

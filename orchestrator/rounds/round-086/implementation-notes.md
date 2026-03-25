@@ -34,12 +34,12 @@
     exist yet.
 - `git diff --check`
   - Result: passed in
-    `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-086`.
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+    `.worktrees/round-086`.
+- `python3 -m json.tool orchestrator/rounds/round-086/state-snapshot.json >/dev/null`
   - Result: passed.
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-086/state-snapshot.json`
   - Result: matched `contract_version: 2` and `retry: null`.
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-005/roadmap.md`
   - Result: passed; ordered roadmap item list remains parseable with item `5`
     still pending.
 - `test -f docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
@@ -50,7 +50,7 @@
   - Result: passed.
 - `test -f orchestrator/rounds/round-081/review-record.json`
   - Result: passed.
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-005/retry-subloop.md`
   - Result: passed.
 - `test -f docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
   - Result: passed after edits.
@@ -59,7 +59,7 @@
 - `git diff --name-only -- src test src-public app mlf2.cabal`
   - Result: passed with no output; the diff stayed out of the code / test /
     public / executable / Cabal surface.
-- `git diff --name-only -- orchestrator/roadmap.md Bugs.md orchestrator/retry-subloop.md orchestrator/verification.md`
+- `git diff --name-only -- orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-005/roadmap.md Bugs.md orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-005/retry-subloop.md orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-005/verification.md`
   - Result: passed with no output; the preserved controller / contract /
     bug-tracker surfaces stayed unchanged.
 - `rg -n 'Stage Contract Freeze|Bounded Admitted Family Inventory|Persistence Tuple|Phase And Surface Ledger|Output-Surface Honesty Rules|Lawful Outcome Vocabulary|Fail-Closed Drift And Invalidation Rules|Reviewer-Facing Validation Procedure|Bounded Item-5 Outcome And Later-Item Debt|stable visible persistence|admitted but not reconstruction-visible / blocker debt|fail-closed rejection|TBase \\(BaseTy "Int"\\)|containsMu False|containsMu True|sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC|baseTarget -> baseC -> targetC|manual reinterpretation|witness-only|fallback-like' docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`

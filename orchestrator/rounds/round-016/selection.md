@@ -1,14 +1,12 @@
 # Round 016 Selection
 
-Date: 2026-03-15
-Round: 016
-Role: guider
-Roadmap: `URI-R2-C1` prototype evidence successor roadmap
-Selected roadmap item: 1
-Selected stage: `P1` subject-discovery prototype
-Active subject: `URI-R2-C1`
-Active scenario: `uri-r2-c1-only-v1`
-Artifact kind: round selection only
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap`
+- Roadmap Revision: `rev-001`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-001`
+- State Snapshot: `orchestrator/rounds/round-016/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
 
 ## Selection
 

@@ -2,8 +2,8 @@
 
 - Baseline checks:
   - `git diff --check` -> pass.
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass; roadmap remains parseable and item 3 is still `pending`.
+  - `python3 -m json.tool orchestrator/rounds/round-013/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-02-uri-r2-c1-re-entry-evidence-successor-roadmap/rev-003/roadmap.md` -> pass; roadmap remains parseable and item 3 is still `pending`.
   - `cabal build all && cabal test` -> skipped by contract because `git diff --name-only` is empty and the round has no tracked edits under `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
   - Continuity check -> pass. The new `RE3` contract explicitly cites the approved re-entry design, accepted `R5`, accepted `RE1`, accepted `RE2`, and the invariant audit, and its continuity section preserves completed rounds `001` through `012` plus the predecessor recursive-types packet as inherited evidence only.
 - Task-specific checks:

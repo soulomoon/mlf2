@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-015`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-015`
+- State Snapshot: `orchestrator/rounds/round-048/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 15: execute the `G3` bounded verification and evidence
@@ -14,12 +22,12 @@ slice.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `active_round_id: "round-048"`,
+`orchestrator/rounds/round-048/state-snapshot.json` is parked at `active_round_id: "round-048"`,
 `stage: "select-task"`, `current_task: null`, and `retry: null`, so there is no
 same-round retry to resume and no prior review outcome that overrides normal
 roadmap ordering.
 
-`orchestrator/roadmap.md` marks items 1 through 14 done and leaves item 15
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-015/roadmap.md` marks items 1 through 14 done and leaves item 15
 (`G3`) as the lowest-numbered unfinished roadmap entry. Item 16 depends on item
 15, so `G4` is not yet selectable.
 

@@ -1,16 +1,16 @@
 # Round `round-025` Attempt `1` Review
 
 - Baseline checks:
-  - `git -C /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025 diff --check` => pass
-  - `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025/orchestrator/state.json >/dev/null` => pass
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025/orchestrator/state.json` => pass (`contract_version: 2`, `retry: null`)
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025/orchestrator/roadmap.md` => pass
-  - `test -f /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025/docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md && test -f /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025/docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md && test -f /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025/orchestrator/retry-subloop.md` => pass
+  - `git -C .worktrees/round-025 diff --check` => pass
+  - `python3 -m json.tool orchestrator/rounds/round-025/state-snapshot.json >/dev/null` => pass
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-025/state-snapshot.json` => pass (`contract_version: 2`, `retry: null`)
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-002/roadmap.md` => pass
+  - `test -f docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md && test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md && test -f orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-002/retry-subloop.md` => pass
   - `cabal build all && cabal test` => fail; `test/Research/UriR2C1PrototypeP1Spec.hs` still reports 4 failures (`P2`, `D1`, `D2`, `D3` status expectations)
 
 - Task-specific checks:
-  - Scope bound check: `git -C /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025 status --short` and `git -C /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025 diff --stat` show production/test edits only in `src/MLF/Elab/Inst.hs`, `test/ElaborationSpec.hs`, plus the new `docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md` artifact and current-round review files.
-  - Predecessor continuity check: `git -C /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025 diff --name-only -- orchestrator/rounds/round-0{01..09} orchestrator/rounds/round-1{0..9} orchestrator/rounds/round-2{0..4} tasks/todo/2026-03-11-recursive-types-orchestration Bugs.md` => empty; inherited rounds `001` through `024`, the accepted `D4 = reopen-repair-track` result, the recursive-types packet, and `Bugs.md` remain unchanged.
+  - Scope bound check: `git -C .worktrees/round-025 status --short` and `git -C .worktrees/round-025 diff --stat` show production/test edits only in `src/MLF/Elab/Inst.hs`, `test/ElaborationSpec.hs`, plus the new `docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md` artifact and current-round review files.
+  - Predecessor continuity check: `git -C .worktrees/round-025 diff --name-only -- orchestrator/rounds/round-0{01..09} orchestrator/rounds/round-1{0..9} orchestrator/rounds/round-2{0..4} tasks/todo/2026-03-11-recursive-types-orchestration Bugs.md` => empty; inherited rounds `001` through `024`, the accepted `D4 = reopen-repair-track` result, the recursive-types packet, and `Bugs.md` remain unchanged.
   - Locked replay checks:
     - `cabal test mlf2-test --test-show-details=direct --test-options='--match "URI-R2-C1 witness replay stays alpha-equivalent to the locked no-fallback shape"'` => pass
     - `cabal test mlf2-test --test-show-details=direct --test-options='--match "InstInside(InstBot) still rejects explicit non-bottom bounds without replay variables"'` => pass

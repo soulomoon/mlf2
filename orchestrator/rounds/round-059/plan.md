@@ -37,7 +37,7 @@ search, or any second implementation family.
 
 Pre-existing workspace state is not pristine:
 
-- `M orchestrator/state.json`
+- `M orchestrator/rounds/round-059/state-snapshot.json`
 - `?? orchestrator/rounds/round-059/`
 
 Do not revert, rewrite, or clean up anyone else's changes while landing this
@@ -61,8 +61,8 @@ slice.
 
 ### Preserve Unchanged
 
-- `orchestrator/state.json`
-- `orchestrator/roadmap.md`
+- `orchestrator/rounds/round-059/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-026/roadmap.md`
 - `/Volumes/src/mlf4/Bugs.md`
 - every file outside the two `J1`-frozen ownership targets above
 
@@ -188,7 +188,7 @@ This plan is satisfied only if all of the following are true:
 
 This `J2` plan does not authorize:
 
-- edits to `orchestrator/state.json`, `orchestrator/roadmap.md`, or
+- edits to `orchestrator/rounds/round-059/state-snapshot.json`, `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-026/roadmap.md`, or
   `/Volumes/src/mlf4/Bugs.md`
 - any new module, API, executable entrypoint, compatibility shim, or fallback
   path

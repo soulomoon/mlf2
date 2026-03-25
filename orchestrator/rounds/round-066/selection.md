@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-033`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033`
+- State Snapshot: `orchestrator/rounds/round-066/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 33: execute the `L1` continue-bounded bind and exact next-slice
@@ -15,19 +23,19 @@ no-inst-arg scheme-alias / base-like `K2` / `K3` baseline.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` already fixes the live controller state at
+`orchestrator/rounds/round-066/state-snapshot.json` already fixes the live controller state at
 `active_round_id: "round-066"`, `stage: "select-task"`, `current_task: null`,
 `retry: null`, `branch: "codex/round-066-l1-next-target-bind"`, and
 `last_completed_round: "round-065"`. Under the guider contract,
-`orchestrator/retry-subloop.md`, and the orchestrator state machine, that
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/retry-subloop.md`, and the orchestrator state machine, that
 means there is no same-round retry to resume and no lawful path that skips
 fresh roadmap selection before `plan`.
 
-`orchestrator/roadmap.md` marks item 32 (`K4`) done and item 33 (`L1`)
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/roadmap.md` marks item 32 (`K4`) done and item 33 (`L1`)
 pending. Because item 33 is now the lowest-numbered unfinished roadmap entry,
 `L1` is the next lawful selection unless current continuity shows a blocker.
 Current continuity does not: repository status in the round worktree shows only
-the expected controller-state edit (`M orchestrator/state.json`), and
+the expected controller-state edit (`M orchestrator/rounds/round-066/state-snapshot.json`), and
 `/Volumes/src/mlf4/Bugs.md` currently has an empty `## Open` section.
 
 The accepted predecessor chain makes `L1` exact rather than discretionary.
@@ -36,7 +44,7 @@ authoritative accepted record with `stage_id: "K4"`, `attempt: 1`,
 `attempt_verdict: "accepted"`, `stage_action: "finalize"`, `status:
 "authoritative"`, and canonical artifact path
 `docs/plans/2026-03-21-uri-r2-c1-k4-next-cycle-decision-gate.md`.
-`orchestrator/roadmap.md` records that accepted `K4` result as
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/roadmap.md` records that accepted `K4` result as
 `continue-bounded` for the repaired `URI-R2-C1` local-binding
 empty-candidate / no-inst-arg scheme-alias / base-like lane, while preserving
 the frozen `Fallback.hs` / `PipelineSpec.hs` ownership anchors, the inherited

@@ -28,7 +28,7 @@
   and a fresh full repo gate (`1138` examples, `0` failures).
 - Accepted review evidence keeps the payload bounded to the selected code/test
   slice plus the round docs; no production/interface drift appears outside the
-  pre-existing controller-owned `orchestrator/state.json` tracked diff.
+  pre-existing controller-owned `orchestrator/rounds/round-055/state-snapshot.json` tracked diff.
 
 ## Review And Retry Consistency Check
 

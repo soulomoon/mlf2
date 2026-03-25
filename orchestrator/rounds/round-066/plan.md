@@ -3,7 +3,7 @@
 ## Objective
 
 Execute only roadmap item `L1` and prepare one docs-only bind artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-066/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`.
+`docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`.
 
 This is the initial `L1` plan for `attempt-1` with `retry: null`. The round
 must carry forward accepted `K4 = continue-bounded`, preserve repaired
@@ -46,7 +46,7 @@ trigger-family widening.
 - Fixed live subject: repaired `URI-R2-C1`
 - Active branch: `codex/round-066-l1-next-target-bind`
 - Active worktree:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-066`
+  `.worktrees/round-066`
 - Fixed inherited boundary:
   `explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback`
 - Stage mode: docs-only bind / selection only
@@ -56,7 +56,7 @@ trigger-family widening.
 Current repository state is already non-pristine. Respect existing work and do
 not revert or clean up unrelated changes:
 
-- `M orchestrator/state.json`
+- `M orchestrator/rounds/round-066/state-snapshot.json`
 - `?? orchestrator/rounds/round-066/selection.md`
 - `?? orchestrator/rounds/round-066/plan.md`
 
@@ -112,10 +112,10 @@ not revert or clean up unrelated changes:
 
 - `AGENTS.md`
 - `orchestrator/roles/planner.md`
-- `orchestrator/state.json`
-- `orchestrator/roadmap.md`
-- `orchestrator/retry-subloop.md`
-- `orchestrator/verification.md`
+- `orchestrator/rounds/round-066/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/roadmap.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/verification.md`
 - `orchestrator/rounds/round-066/selection.md`
 - `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
 - `docs/plans/2026-03-21-uri-r2-c1-k4-next-cycle-decision-gate.md`
@@ -132,8 +132,8 @@ not revert or clean up unrelated changes:
 
 ### Preserve Unchanged
 
-- `orchestrator/state.json`
-- `orchestrator/roadmap.md`
+- `orchestrator/rounds/round-066/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/roadmap.md`
 - `orchestrator/rounds/round-066/selection.md`
 - `/Volumes/src/mlf4/Bugs.md`
 - `src/`
@@ -195,7 +195,7 @@ not revert or clean up unrelated changes:
 ### Task 3 - Write the canonical `L1` artifact according to the verified case analysis
 
 - Create
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-066/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
+  `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
   for `attempt-1`.
 - The artifact must include:
   - the accepted `K4` authority and fresh-bind requirement;
@@ -241,18 +241,18 @@ not revert or clean up unrelated changes:
 
 ### Task 5 - Run the docs-only verification required for the bind round
 
-Run the baseline docs/state checks required by `orchestrator/verification.md`:
+Run the baseline docs/state checks required by `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/verification.md`:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-066/state-snapshot.json >/dev/null`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-066/state-snapshot.json`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/retry-subloop.md`
 
 Run `L1`-specific continuity and anchor checks:
 

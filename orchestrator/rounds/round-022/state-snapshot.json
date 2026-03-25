@@ -1,0 +1,17 @@
+{
+  "contract_version": 2,
+  "base_branch": "codex/automatic-recursive-type-inference",
+  "active_round_id": null,
+  "stage": "done",
+  "current_task": null,
+  "branch": null,
+  "worktree_path": null,
+  "active_round_dir": null,
+  "round_artifacts": null,
+  "last_completed_round": "round-019",
+  "resume_error": null,
+  "retry": null,
+  "roadmap_id": "2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-003"
+}

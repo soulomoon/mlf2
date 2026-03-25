@@ -21,5 +21,8 @@
     "J3-CONTINUITY": "pass",
     "J3-RETRY-SCHEMA": "pass"
   },
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap",
+  "roadmap_revision": "rev-027",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027"
 }

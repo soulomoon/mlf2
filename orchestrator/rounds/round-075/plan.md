@@ -4,7 +4,7 @@
 
 Execute only roadmap item `N8` and produce one accepted docs-only
 roadmap-amendment authority artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`.
+`docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`.
 
 This is the initial `N8` plan for `attempt-1` with `retry: null`. The round
 must interpret accepted `round-074` / `N7 = continue-bounded` into exactly one
@@ -20,8 +20,8 @@ required a separate future roadmap amendment / update before any new bounded
 cycle can begin. `N8` should therefore authorize only one fresh docs-first
 planning lane for later bounded successor selection. It must not itself select
 the next live subject, bind an exact target, authorize implementation,
-authorize verification, edit `orchestrator/roadmap.md`, edit
-`orchestrator/state.json`, edit `Bugs.md`, or widen the blocked-route set.
+authorize verification, edit `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/roadmap.md`, edit
+`orchestrator/rounds/round-075/state-snapshot.json`, edit `Bugs.md`, or widen the blocked-route set.
 
 If read-only continuity evidence now reveals a concrete contradiction that
 prevents even planning-only successor authority while preserving accepted
@@ -40,7 +40,7 @@ into de facto `stop-blocked`.
   post-`N7` roadmap-amendment / update authority outcome only
 - Active branch: `codex/round-075-n8-roadmap-amendment`
 - Active worktree:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075`
+  `.worktrees/round-075`
 - Stage mode: docs-only authority-only roadmap amendment / update
 - Current round review feedback: none yet; this is a full `attempt-1` plan,
   not a retry delta
@@ -52,50 +52,50 @@ and do not revert unrelated work:
 
 ## Accepted Continuity That Remains Binding
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/orchestrator/rounds/round-075/selection.md`
+- `orchestrator/rounds/round-075/selection.md`
   already fixes this round to roadmap item `N8` only, keeps the round
   docs-only and authority-only, and forbids roadmap edits, state edits,
   implementation, verification, and silent widening.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json` fixes the
+- `orchestrator/rounds/round-075/state-snapshot.json` fixes the
   live controller state at `active_round_id: "round-075"`, `stage: "plan"`,
   `current_task: "N8"`, branch
   `codex/round-075-n8-roadmap-amendment`, and `retry: null`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md` makes item
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/roadmap.md` makes item
   `8` the first pending item after accepted `N7`; the completion notes already
   constrain `N8` to exactly one docs-only authority artifact that either keeps
   additional work closed or authorizes exactly one fresh planning-only bounded
   successor lane.
-- `/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
   still records the long-horizon `N7` row as `NO` and states that accepted
   `continue-bounded` is only one bounded packet, with any further work
   requiring a separate roadmap amendment / update before any new target or
   slice can start.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
   remains the accepted `N1` authority record. It reopened work only at
   planning scope, preserved the inherited boundary unchanged, and did not
   authorize implementation or verification.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
   remains the accepted `N7` decision artifact. It finalizes the exact accepted
   non-local `baseTarget -> baseC` packet as one bounded verified packet with
   authoritative outcome `continue-bounded`, explains why `stop-blocked` and
   `completed` are not lawful on that packet, preserves the blocked-route set,
   and requires a separate future roadmap amendment / update before any new
   bounded cycle can begin.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/review-record.json`
+- `orchestrator/rounds/round-074/review-record.json`
   remains the authoritative acceptance proof that `round-074` / `N7`
   finalized as `accepted + finalize` with `final_outcome:
   "continue-bounded"`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/review.md`
+- `orchestrator/rounds/round-074/review.md`
   and
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/merge.md`
+  `orchestrator/rounds/round-074/merge.md`
   remain reviewer/merger-owned continuity evidence that the accepted `N7`
   packet is docs-only, preserves the inherited boundary, and keeps future work
   gated behind a separate roadmap amendment / update.
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` still carries open
+- `Bugs.md` still carries open
   `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains read-only
   predecessor context only and does not authorize replay reopen,
   `MLF.Elab.Inst`, `InstBot`, or a different live subject here.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/retry-subloop.md`
   keeps prior attempts immutable and allows the guider to update the roadmap
   only after an accepted round finalizes and merges. This round records one
   authority artifact only; it does not rewrite completed roadmap history.
@@ -104,42 +104,42 @@ and do not revert unrelated work:
 
 ### Modify
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`
   - Responsibility: canonical `N8` docs-only authority artifact recording
     exactly one post-`N7` next-step authority outcome and the precise
     non-authorization boundaries for everything else.
 
 ### Read-Only Evidence
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/orchestrator/rounds/round-075/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/review.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/merge.md`
+- `orchestrator/rounds/round-075/selection.md`
+- `orchestrator/rounds/round-075/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/roadmap.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/verification.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/retry-subloop.md`
+- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `Bugs.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
+- `orchestrator/rounds/round-074/review-record.json`
+- `orchestrator/rounds/round-074/review.md`
+- `orchestrator/rounds/round-074/merge.md`
 
 ### Preserve Unchanged
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/roadmap.md`
+- `orchestrator/rounds/round-075/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/verification.md`
+- `Bugs.md`
 - reviewer-owned history under
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-001/`
+  `orchestrator/rounds/round-001/`
   through
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/src/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/src-public/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/app/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/test/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/mlf2.cabal`
+  `orchestrator/rounds/round-074/`
+- `src/`
+- `src-public/`
+- `app/`
+- `test/`
+- `mlf2.cabal`
 
 ## Exact Selected `N8` Slice (Exactly One)
 
@@ -214,7 +214,7 @@ that ambiguity is exactly why the chosen `N8` outcome is planning-only.
 ### Task 3 - Write the canonical `N8` artifact as one bounded authority record
 
 - Create
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`.
+  `docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`.
 - The artifact must include:
   - the stage contract freeze for `round-075` / `N8` / `attempt-1` /
     `retry: null`;
@@ -236,8 +236,8 @@ that ambiguity is exactly why the chosen `N8` outcome is planning-only.
   - bind an exact next target;
   - authorize implementation;
   - authorize verification;
-  - edit `orchestrator/roadmap.md`;
-  - edit `orchestrator/state.json`;
+  - edit `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/roadmap.md`;
+  - edit `orchestrator/rounds/round-075/state-snapshot.json`;
   - edit `Bugs.md`; or
   - rewrite predecessor review history.
 - State explicitly that `N8` does not reopen:
@@ -281,7 +281,7 @@ that ambiguity is exactly why the chosen `N8` outcome is planning-only.
 ### Task 6 - Run the docs-only continuity and scope checks required for `N8`
 
 All commands run in:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075`
+`.worktrees/round-075`
 
 Baseline docs/state checks:
 
@@ -291,11 +291,11 @@ Baseline docs/state checks:
   - Expect: bounded docs-only round payload only
 - `git diff --check`
   - Expect: pass
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-075/state-snapshot.json >/dev/null`
   - Expect: pass
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-075/state-snapshot.json`
   - Expect: `contract_version: 2` and `retry: null`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/roadmap.md`
   - Expect: parseable roadmap with item `8` pending
 - Required artifact presence:
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
@@ -306,24 +306,24 @@ Baseline docs/state checks:
   - `test -f docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
   - `test -f docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
   - `test -f tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-  - `test -f orchestrator/retry-subloop.md`
+  - `test -f orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/retry-subloop.md`
   - `test -f orchestrator/rounds/round-074/review-record.json`
 
 `N8`-specific continuity checks:
 
-- `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/review-record.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-074/review-record.json >/dev/null`
   - Expect: pass
-- `rg -n '"stage_id": "N7"|"attempt_verdict": "accepted"|"stage_action": "finalize"|"status": "authoritative"|"final_outcome": "continue-bounded"' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/review-record.json`
+- `rg -n '"stage_id": "N7"|"attempt_verdict": "accepted"|"stage_action": "finalize"|"status": "authoritative"|"final_outcome": "continue-bounded"' orchestrator/rounds/round-074/review-record.json`
   - Expect: all required `N7` acceptance fields present
-- `rg -n 'continue-bounded|separate future roadmap amendment / update|Why `stop-blocked` Is Not Lawful|Why `completed` Is Not Lawful|predecessor evidence only' /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
+- `rg -n 'continue-bounded|separate future roadmap amendment / update|Why `stop-blocked` Is Not Lawful|Why `completed` Is Not Lawful|predecessor evidence only' docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
   - Expect: accepted `N7` still requires a separate amendment and still rules
     out `stop-blocked` / `completed` on the accepted packet
-- `rg -n 'accepted \\+ finalize|future roadmap amendment / update|does not claim end-to-end completion|no blockers remain for merger preparation' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/review.md /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/merge.md`
+- `rg -n 'accepted \\+ finalize|future roadmap amendment / update|does not claim end-to-end completion|no blockers remain for merger preparation' orchestrator/rounds/round-074/review.md orchestrator/rounds/round-074/merge.md`
   - Expect: reviewer/merger continuity matches the accepted `N7` reading
-- `rg -n 'N7 — End-to-end automatic iso-recursive inference closure|separate roadmap amendment / update before authorizing any new target or slice|continue-bounded' /Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `rg -n 'N7 — End-to-end automatic iso-recursive inference closure|separate roadmap amendment / update before authorizing any new target or slice|continue-bounded' tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
   - Expect: mechanism-table long-horizon row still open and future work still
     gated
-- `rg -n 'BUG-2026-03-16-001|Status: Open' /Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
+- `rg -n 'BUG-2026-03-16-001|Status: Open' Bugs.md`
   - Expect: replay / `InstBot` bug still present as read-only continuity
 
 Post-write artifact checks:
@@ -332,7 +332,7 @@ Post-write artifact checks:
   - Expect: all critical `N8` authority constraints present
 - `git diff --name-only -- src test src-public app mlf2.cabal`
   - Expect: no output
-- `git diff --name-only -- orchestrator/roadmap.md orchestrator/state.json Bugs.md`
+- `git diff --name-only -- orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/roadmap.md orchestrator/rounds/round-075/state-snapshot.json Bugs.md`
   - Expect: no output
 
 `cabal build all && cabal test` is intentionally out of scope for this round
@@ -380,7 +380,7 @@ without replanning the whole `N8` stage.
 
 This retry remains bounded to the same canonical docs-only `N8` authority
 artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`
+`docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`
 
 The authoritative `N8` outcome does not change in this retry:
 `reopen-planning-only-successor-lane` remains the only planned outcome.
@@ -404,20 +404,20 @@ review-history rewrites.
   section to record the full required predecessor artifact-presence set from
   the `N8` plan.
 - Canonical artifact path remains unchanged:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`
+  `docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`
 - Boundary remains unchanged:
   `explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback`
 
 The rejected review authority that this retry must satisfy remains:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/orchestrator/rounds/round-075/review.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/orchestrator/rounds/round-075/reviews/attempt-1.md`
+- `orchestrator/rounds/round-075/review.md`
+- `orchestrator/rounds/round-075/reviews/attempt-1.md`
 
 ### File Map For Attempt-2
 
 #### Modify
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`
   - Responsibility: repair the stale controller-state assertions and expand
     the required predecessor artifact-presence evidence without changing the
     selected `N8` outcome, the canonical filename, or the bounded subject.
@@ -426,24 +426,24 @@ The rejected review authority that this retry must satisfy remains:
 
 #### Evidence-Only, No Planned Edit
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/orchestrator/rounds/round-075/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/orchestrator/rounds/round-075/review.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-075/orchestrator/rounds/round-075/reviews/attempt-1.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/review.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-074/merge.md`
+- `orchestrator/rounds/round-075/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/verification.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/retry-subloop.md`
+- `orchestrator/rounds/round-075/selection.md`
+- `orchestrator/rounds/round-075/review.md`
+- `orchestrator/rounds/round-075/reviews/attempt-1.md`
+- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `Bugs.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
+- `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
+- `orchestrator/rounds/round-074/review-record.json`
+- `orchestrator/rounds/round-074/review.md`
+- `orchestrator/rounds/round-074/merge.md`
 
 These files already carry the retry contract, accepted predecessor packet,
 mechanism-table continuity, bug continuity, and reviewer findings that this
@@ -476,7 +476,7 @@ retry must preserve. Do not edit them.
     `current_task = ...`, `branch = ...`, and `retry = ...` assertions; and
   - the sentence claiming that controller state is consistent with the
     implementer-owned artifact.
-- If the artifact still cites `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`,
+- If the artifact still cites `orchestrator/rounds/round-075/state-snapshot.json`,
   keep that citation at the stable contract level only:
   - `contract_version: 2` continuity is allowed;
   - the generic retry-contract grep from `verification.md` is allowed; but
@@ -500,7 +500,7 @@ retry must preserve. Do not edit them.
   - `docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
   - `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md`
   - `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-  - `orchestrator/retry-subloop.md`
+  - `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/retry-subloop.md`
   - `orchestrator/rounds/round-074/review-record.json`
 - Preserve the rest of the continuity narrative unchanged unless a sentence
   must move minimally to make this larger predecessor-evidence inventory read
@@ -510,12 +510,12 @@ retry must preserve. Do not edit them.
 #### Task 4 - Re-run only the docs-only checks needed to clear the retry reason
 
 - Re-run the baseline docs-only checks required by
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md` that
+  `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/verification.md` that
   remain lawful for this round:
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `python3 -m json.tool orchestrator/rounds/round-075/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-075/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/roadmap.md`
 - Reconfirm the specific stale-controller-state repair in the canonical
   artifact:
   - `rg -n 'active_round_id =|stage =|current_task =|branch =|retry = null|That controller state is consistent' docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`
@@ -530,7 +530,7 @@ retry must preserve. Do not edit them.
   - `rg -n 'Attempt: `attempt-2`|reopen-planning-only-successor-lane|predecessor evidence only|does not choose the next live subject|does not authorize implementation|does not authorize verification' docs/plans/2026-03-22-automatic-iso-recursive-post-n7-roadmap-amendment-authority-gate.md`
   - `git diff --name-only -- src test src-public app mlf2.cabal`
     - Expect: no output.
-  - `git diff --name-only -- orchestrator/roadmap.md orchestrator/state.json Bugs.md`
+  - `git diff --name-only -- orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/roadmap.md orchestrator/rounds/round-075/state-snapshot.json Bugs.md`
     - Expect: no output.
 
 `cabal build all && cabal test` remains intentionally out of scope for this
@@ -542,7 +542,7 @@ retry if the diff stays docs-only and does not touch `src/`, `src-public/`,
 - No change to the selected `N8` outcome beyond the two recorded documentation
   repairs.
 - No change to `selection.md`, `review.md`, `reviews/attempt-1.md`,
-  `orchestrator/state.json`, `orchestrator/roadmap.md`, `Bugs.md`, or any
+  `orchestrator/rounds/round-075/state-snapshot.json`, `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/roadmap.md`, `Bugs.md`, or any
   predecessor artifact.
 - No code, test, public-surface, executable, or Cabal edits.
 - No widening into replay reopen, `MLF.Elab.Inst`, `InstBot`, accepted local

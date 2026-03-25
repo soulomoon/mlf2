@@ -25,19 +25,19 @@ This round must restate the already accepted replay failure as a bounded product
 
 ## Authoritative Inputs To Preserve
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-024/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-16-uri-r2-c1-d3-bounded-fixability-probe.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-16-uri-r2-c1-d4-repair-track-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` (`BUG-2026-03-16-001`)
-- Predecessor evidence under `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-020/` through `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-023/`
+- `orchestrator/rounds/round-024/selection.md`
+- `docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`
+- `docs/plans/2026-03-16-uri-r2-c1-d3-bounded-fixability-probe.md`
+- `docs/plans/2026-03-16-uri-r2-c1-d4-repair-track-decision-gate.md`
+- `Bugs.md` (`BUG-2026-03-16-001`)
+- Predecessor evidence under `orchestrator/rounds/round-020/` through `orchestrator/rounds/round-023/`
 
 ## Scope
 
 1. Reproduce the accepted mismatch in implementation-facing terms for the locked lane only.
 2. Bind that reproduction to the existing production owner boundary in `src/MLF/Elab/Inst.hs`.
 3. Record the canonical `R1` artifact at:
-   - `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md`
+   - `docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md`
 4. Add only the smallest focused harness/tests or evidence needed to make the localized owner-boundary failure reviewer-auditable.
 5. Preserve the roadmap order: this round prepares `R2`; it does not implement `R2`, run `R3`, or decide `R4`.
 
@@ -45,16 +45,16 @@ This round must restate the already accepted replay failure as a bounded product
 
 Primary working set:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Inst.hs`
-2. `/Users/ares/.codex/worktrees/d432/mlf4/test/ElaborationSpec.hs`
-3. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md`
-4. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-024/implementation-notes.md` if a bounded reviewer handoff note is needed
+1. `src/MLF/Elab/Inst.hs`
+2. `test/ElaborationSpec.hs`
+3. `docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md`
+4. `orchestrator/rounds/round-024/implementation-notes.md` if a bounded reviewer handoff note is needed
 
 Historical evidence and controller-owned files must stay untouched:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- all prior round artifacts under `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-020/` through `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-023/`
+- `orchestrator/rounds/round-024/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-001/roadmap.md`
+- all prior round artifacts under `orchestrator/rounds/round-020/` through `orchestrator/rounds/round-023/`
 
 ## Sequential Tasks
 
@@ -88,7 +88,7 @@ Historical evidence and controller-owned files must stay untouched:
 
 ### Task 4 - Emit the canonical `R1` artifact
 
-- Write `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md`.
+- Write `docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md`.
 - The artifact must record:
   - `Attempt: 1`
   - inherited authoritative inputs and audit chain (`P1` through `D4`)
@@ -119,13 +119,13 @@ Historical evidence and controller-owned files must stay untouched:
 
 ## Reviewer Checks
 
-Baseline checks from `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md` still apply.
+Baseline checks from `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-001/verification.md` still apply.
 
 Round-specific checks:
 
-1. The diff stays inside the bounded `R1` slice and does not alter `orchestrator/state.json` or `orchestrator/roadmap.md`.
+1. The diff stays inside the bounded `R1` slice and does not alter `orchestrator/rounds/round-024/state-snapshot.json` or `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-001/roadmap.md`.
 2. The round remains fixed to `URI-R2-C1` and `uri-r2-c1-only-v1`.
 3. The reproduced failure is explicitly tied to `witness-replay/applyInstantiation-instbot-precondition` and `MLF.Elab.Inst.applyInstantiation` (`InstBot` branch).
 4. No second executable interface, compatibility fallback, or broad replay rewrite appears in the diff.
-5. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md` names `Attempt: 1` and preserves the inherited authoritative-boundary audit.
+5. `docs/plans/2026-03-17-uri-r2-c1-r1-repair-boundary-reproduction.md` names `Attempt: 1` and preserves the inherited authoritative-boundary audit.
 6. Review records `Implemented stage result`, `Attempt verdict`, `Stage action`, `Retry reason`, and `Fix hypothesis` under the contract-v2 retry rules.

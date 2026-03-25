@@ -36,7 +36,7 @@
   `authoritative_result: pass`,
   `review_snapshot: orchestrator/rounds/round-045/reviews/attempt-1.md`, and
   `artifact_path: docs/plans/2026-03-19-uri-r2-c1-f4-next-cycle-decision-gate.md`.
-- The repo-local retry contract in `orchestrator/retry-subloop.md` allows merge
+- The repo-local retry contract in `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-012/retry-subloop.md` allows merge
   preparation after `accepted + finalize`; `F4` forbids `accepted + retry`,
   `review-record.json` already captures the authoritative final state, and no
   non-idle same-round retry trail is present or needed for `round-045`.

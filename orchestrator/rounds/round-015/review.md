@@ -4,10 +4,10 @@
   - `git diff --check`
     - Result: pass.
     - Evidence: no output.
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
+  - `python3 -m json.tool orchestrator/rounds/round-015/state-snapshot.json >/dev/null`
     - Result: pass.
     - Evidence: command exited successfully with no output.
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-02-uri-r2-c1-re-entry-evidence-successor-roadmap/rev-005/roadmap.md`
     - Result: pass.
     - Evidence:
       - `20:1. [done] Write the \`RE1\` provenance-authority evidence contract for \`URI-R3-O4\``

@@ -8,6 +8,14 @@ iso-recursive inference after accepted roadmap item `4`
 Successor lane: roadmap item `5` only, defining the bounded full-pipeline
 reconstruction and validation contract
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap`
+- Roadmap Revision: `rev-005`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-005`
+- State Snapshot: `orchestrator/rounds/round-086/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 5: define the full-pipeline reconstruction and validation
@@ -15,17 +23,17 @@ contract.
 
 ## Why This Item Should Run Now
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-086/orchestrator/state.json`
+`orchestrator/rounds/round-086/state-snapshot.json`
 fixes the live controller state at `active_round_id: "round-086"`, `stage:
 "select-task"`, `current_task: null`, `retry: null`, `branch:
 "codex/round-086-item-5-reconstruction-contract"`, `active_round_dir:
 "orchestrator/rounds/round-086"`, and `last_completed_round: "round-085"`.
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-086/orchestrator/retry-subloop.md`
+`orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-005/retry-subloop.md`
 only overrides roadmap order when a retry object is present. `retry` is
 currently `null`, so the normal lowest-numbered unfinished item rule still
 governs this selection.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-086/orchestrator/roadmap.md`
+`orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-005/roadmap.md`
 marks items `1` through `4` done and items `5` through `7` pending. Item `5`
 depends on items `1`, `3`, and `4`, all of which are already accepted and
 recorded as complete. Item `6` depends on item `5`, and item `7` depends on
@@ -33,12 +41,12 @@ item `6`, so no later pending item is yet dependency-satisfied. Item `5` is
 therefore the next lawful successor.
 
 Accepted `round-085` finalized item `4` in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-086/orchestrator/rounds/round-085/review-record.json`
+`orchestrator/rounds/round-085/review-record.json`
 with `attempt_verdict: "accepted"`, `stage_action: "finalize"`, and
 `final_outcome:
 "search-model-established-with-bounded-admissibility-ambiguity-and-termination-read"`.
 The canonical artifact
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-086/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-search-model.md`
+`docs/plans/2026-03-25-general-automatic-iso-recursive-inference-search-model.md`
 explicitly leaves `full-pipeline P6 reconstruction-visible-output proof`
 as item `5` work. Item `4` established when recursive candidates may be
 admitted; item `5` now owns the next missing debt of proving that an admitted
@@ -46,7 +54,7 @@ candidate survives solver state, elaboration, reification / reconstruction,
 and internal/public output surfaces without hidden fallback or manual
 reinterpretation.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-086/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
+`docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
 states that the next strategic gate after the search model is to prove
 full-pipeline reconstruction. The live roadmap translates that milestone into
 item `5`: define one bounded docs-only reconstruction and validation contract
@@ -58,22 +66,22 @@ structure, or survives only through fallback-like interpretation.
 
 The inherited boundary remains fixed, so this is still a bounded docs-first
 selection rather than an implementation round.
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-086/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+`docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 still binds the repo to explicit-only recursive behavior, iso-recursive
 meaning, non-equi-recursive semantics, structurally acyclic encoding, and no
 fallback widening. The accepted `N14` decision artifact at
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-086/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+`docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
 still preserves predecessor packets as bounded evidence only, not as proof of
 general capability and not as authority to widen architecture. Item `5` must
 therefore define one evidence-preservation contract inside the inherited
 boundary, or record blocker debt, without silently widening semantics,
 representation, interfaces, or fallback behavior.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-086/Bugs.md` still
+`Bugs.md` still
 lists open `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains
 predecessor implementation context only and does not create a retry
 obligation or change roadmap order. Repository status in the active worktree
-shows only controller-owned `M orchestrator/state.json` drift. No live
+shows only controller-owned `M orchestrator/rounds/round-086/state-snapshot.json` drift. No live
 blocker forces a different selection.
 
 ## Round Scope Guard

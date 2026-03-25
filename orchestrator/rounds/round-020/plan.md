@@ -19,7 +19,7 @@ This round must not localize ownership, probe repairs, or reopen implementation 
 
 - Round id: `round-020`
 - Branch: `codex/round-020`
-- Worktree: `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020`
+- Worktree: `.worktrees/round-020`
 - Roadmap item: `D1`
 - Active attempt: `1`
 - Active subject boundary: `URI-R2-C1`
@@ -28,12 +28,12 @@ This round must not localize ownership, probe repairs, or reopen implementation 
 - Stage selector to add or execute: `D1-replay-reproduction`
 - Retry contract: `contract_version: 2`, so `D1` must accept bounded retry attempts `1..100`; this round runs `attempt-1`
 - Authoritative inherited inputs:
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-016/evidence/P1/attempt-2/subject-token.json`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-017/evidence/P2/attempt-2/check-P2-W.json`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-017/evidence/P2/attempt-2/stage-verdict.json`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-017/evidence/P2/attempt-2/trace-bundle.json`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-15-uri-r2-c1-p2-provenance-preservation-prototype.md`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-017/review-record.json`
+  - `orchestrator/rounds/round-016/evidence/P1/attempt-2/subject-token.json`
+  - `orchestrator/rounds/round-017/evidence/P2/attempt-2/check-P2-W.json`
+  - `orchestrator/rounds/round-017/evidence/P2/attempt-2/stage-verdict.json`
+  - `orchestrator/rounds/round-017/evidence/P2/attempt-2/trace-bundle.json`
+  - `docs/plans/2026-03-15-uri-r2-c1-p2-provenance-preservation-prototype.md`
+  - `orchestrator/rounds/round-017/review-record.json`
 
 ## Scope
 
@@ -45,9 +45,9 @@ This round must not localize ownership, probe repairs, or reopen implementation 
 2. Reuse the real bounded replay lane from the accepted `P2` path rather than fabricating the old diagnostic from files.
 3. Consume only the inherited authoritative `P1` subject token plus the accepted `P2` replay-failure evidence needed to verify continuity and compare signatures.
 4. Emit canonical `D1` artifact at:
-   - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/docs/plans/2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md`
+   - `docs/plans/2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md`
 5. Emit attempt-local machine-readable outputs under:
-   - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/orchestrator/rounds/round-020/evidence/D1/attempt-1/`
+   - `orchestrator/rounds/round-020/evidence/D1/attempt-1/`
 6. Keep default `cabal run mlf2` behavior unchanged.
 
 ## Non-Goals
@@ -58,32 +58,32 @@ This round must not localize ownership, probe repairs, or reopen implementation 
 - No second executable interface.
 - No widened subject search, alternate scenario, surrogate subject, or cross-scenario comparison.
 - No rewriting of any accepted `P1` through `P4` artifact, review record, or evidence file.
-- No edits to controller-owned files such as `orchestrator/state.json` or `orchestrator/roadmap.md`.
+- No edits to controller-owned files such as `orchestrator/rounds/round-020/state-snapshot.json` or `orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-001/roadmap.md`.
 
 ## Implementation Slice
 
 Primary files expected in scope:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
-2. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/src/MLF/Research/URI/R2/C1/Prototype/Entrypoint.hs`
-3. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`
-4. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/src/MLF/Research/URI/R2/C1/Prototype/D1.hs` (new)
-5. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/src/MLF/Research/URI/R2/C1/Prototype/P2.hs` only if strictly required to factor out the accepted bounded replay lane without changing `P2` semantics
-6. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/test/Research/UriR2C1PrototypeP1Spec.hs` or one new focused root-cause spec module
-7. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/mlf2.cabal` (module registration only, if required)
-8. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/docs/plans/2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md`
-9. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/orchestrator/rounds/round-020/evidence/D1/attempt-1/`
-10. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/orchestrator/rounds/round-020/implementation-notes.md`
+1. `src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
+2. `src/MLF/Research/URI/R2/C1/Prototype/Entrypoint.hs`
+3. `src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`
+4. `src/MLF/Research/URI/R2/C1/Prototype/D1.hs` (new)
+5. `src/MLF/Research/URI/R2/C1/Prototype/P2.hs` only if strictly required to factor out the accepted bounded replay lane without changing `P2` semantics
+6. `test/Research/UriR2C1PrototypeP1Spec.hs` or one new focused root-cause spec module
+7. `mlf2.cabal` (module registration only, if required)
+8. `docs/plans/2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md`
+9. `orchestrator/rounds/round-020/evidence/D1/attempt-1/`
+10. `orchestrator/rounds/round-020/implementation-notes.md`
 
 Files expected untouched:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/orchestrator/roadmap.md`
-- all files under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/orchestrator/rounds/round-016/`
-- all files under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/orchestrator/rounds/round-017/`
-- all files under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/orchestrator/rounds/round-018/`
-- all files under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/orchestrator/rounds/round-019/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/src-public/`
+- `orchestrator/rounds/round-020/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-001/roadmap.md`
+- all files under `orchestrator/rounds/round-016/`
+- all files under `orchestrator/rounds/round-017/`
+- all files under `orchestrator/rounds/round-018/`
+- all files under `orchestrator/rounds/round-019/`
+- `src-public/`
 
 ## Sequential Tasks
 
@@ -100,11 +100,11 @@ Files expected untouched:
 ### Task 2 - Implement inherited-input continuity (`D1-I`)
 
 - Read only the authoritative inherited subject token from:
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-016/evidence/P1/attempt-2/subject-token.json`
+  - `orchestrator/rounds/round-016/evidence/P1/attempt-2/subject-token.json`
 - Read only the accepted `P2` replay-failure boundary from:
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-017/evidence/P2/attempt-2/check-P2-W.json`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-017/evidence/P2/attempt-2/stage-verdict.json`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-017/evidence/P2/attempt-2/trace-bundle.json`
+  - `orchestrator/rounds/round-017/evidence/P2/attempt-2/check-P2-W.json`
+  - `orchestrator/rounds/round-017/evidence/P2/attempt-2/stage-verdict.json`
+  - `orchestrator/rounds/round-017/evidence/P2/attempt-2/trace-bundle.json`
 - Prove continuity facts explicitly:
   - subject id remains `uri-r2-c1/cluster-1`
   - inherited scenario remains `uri-r2-c1-only-v1`
@@ -140,7 +140,7 @@ Files expected untouched:
   - `stage-verdict.json`
 - Emit no handoff token for `D1`.
 - Write the canonical artifact at:
-  - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-020/docs/plans/2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md`
+  - `docs/plans/2026-03-16-uri-r2-c1-d1-replay-reproduction-contract.md`
 - The artifact must record:
   - inherited authoritative inputs
   - exact entrypoint/scenario/attempt tuple
@@ -184,15 +184,15 @@ Files expected untouched:
 
 ## Reviewer Checks
 
-Baseline checks from `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`:
+Baseline checks from `orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-001/verification.md`:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '"contract_version": 2|"retry": null|"retry": \\{' orchestrator/state.json`
-- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-020/state-snapshot.json >/dev/null`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \\{' orchestrator/rounds/round-020/state-snapshot.json`
+- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-001/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md`
 - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md`
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-001/retry-subloop.md`
 - `cabal build all && cabal test`
 
 Round-specific checks:
@@ -211,8 +211,8 @@ Round-specific checks:
 - Verify default path:
   - `cabal run mlf2`
 - Verify no forbidden widening in diff:
-  - no edits to `orchestrator/state.json`
-  - no edits to `orchestrator/roadmap.md`
+  - no edits to `orchestrator/rounds/round-020/state-snapshot.json`
+  - no edits to `orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-001/roadmap.md`
   - no edits to historical round artifacts under `round-016` through `round-019`
 
 ## Reviewer Decision Rule

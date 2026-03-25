@@ -90,5 +90,5 @@ If `H1` cannot be supported under bounded evidence, classify the attempt as boun
 - No repair-track implementation work in this round.
 - No widened scenario, subject, or ownership beyond inherited boundaries.
 - No second executable interface.
-- No edits to `orchestrator/state.json`.
+- No edits to `orchestrator/rounds/round-022/state-snapshot.json`.
 - No rewrite of authoritative `P1`, accepted `P2`, authoritative `D1`, or authoritative `D2` artifacts.

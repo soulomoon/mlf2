@@ -6,6 +6,14 @@ Role: guider
 Active subject: post-`L2` automatic iso-recursive successor planning lane
 Successor lane: reopened for planning only by accepted `N1`
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap`
+- Roadmap Revision: `rev-002`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-002`
+- State Snapshot: `orchestrator/rounds/round-069/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 2 (`N2`): execute the `N2` thesis-backed next live-subject
@@ -13,19 +21,19 @@ selection inside the accepted planning-only lane.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` fixes the live controller state at
+`orchestrator/rounds/round-069/state-snapshot.json` fixes the live controller state at
 `active_round_id: "round-069"`, `stage: "select-task"`, `current_task: null`,
 `retry: null`, `branch: "codex/round-069-n2-next-live-subject-selection"`, and
 `last_completed_round: "round-068"`. Under
-`orchestrator/retry-subloop.md`, that means there is no same-round retry to
+`orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-002/retry-subloop.md`, that means there is no same-round retry to
 resume and no lawful path that skips fresh roadmap selection before `plan`.
 
-`orchestrator/roadmap.md` marks item 1 (`N1`) done and item 2 (`N2`) pending,
+`orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-002/roadmap.md` marks item 1 (`N1`) done and item 2 (`N2`) pending,
 with items 3 through 7 depending on earlier authority. Because `N2` is now the
 lowest-numbered unfinished item, it is the default next selection unless live
 retry state or accepted predecessor evidence requires something else. Neither
 does. Repository status in the controller root shows only the controller-owned
-`M orchestrator/state.json` edit. `Bugs.md` in the controller root still lists
+`M orchestrator/rounds/round-069/state-snapshot.json` edit. `Bugs.md` in the controller root still lists
 open `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains
 read-only predecessor context only; it does not reopen repaired `URI-R2-C1`,
 force a replay retry, or override the accepted planning-only lane.

@@ -7,9 +7,9 @@ Reviewer: review
 
 - `git diff --check`  
   Result: pass (exit 0, no whitespace/conflict-marker issues).
-- `python3 -m json.tool orchestrator/state.json >/dev/null`  
+- `python3 -m json.tool orchestrator/rounds/round-003/state-snapshot.json >/dev/null`
   Result: pass (exit 0, valid JSON).
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`  
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-003/roadmap.md`
   Result: pass (exit 0; ordered status lines found at items 1-5).
 - `cabal build all && cabal test`  
   Result: pass (exit 0; `1096 examples, 0 failures`; `1 of 1 test suites passed`).

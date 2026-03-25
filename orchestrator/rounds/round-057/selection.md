@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-024`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024`
+- State Snapshot: `orchestrator/rounds/round-057/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 24: execute the bounded `I4` next-cycle decision gate for the
@@ -13,7 +21,7 @@ accepted `I3`-reverified repaired `URI-R2-C1` local-binding single-base slice.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` already fixes the live controller state at
+`orchestrator/rounds/round-057/state-snapshot.json` already fixes the live controller state at
 `active_round_id: "round-057"`, `active_round_dir:
 "orchestrator/rounds/round-057"`, `stage: "select-task"`,
 `current_task: null`, `retry: null`, and `last_completed_round:
@@ -22,11 +30,11 @@ interrupted `plan` / `implement` / `review` stage to continue, and no lawful
 reason to stay inside an older round instead of making the next roadmap
 selection now.
 
-`orchestrator/roadmap.md` marks items 1 through 23 done and leaves only item
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/roadmap.md` marks items 1 through 23 done and leaves only item
 24 (`I4`) pending. Under the guider contract, the next lawful choice is the
 lowest-numbered unfinished item unless live retry state forces a same-round
 retry. The live retry state does not: `retry` is `null`, and
-`orchestrator/retry-subloop.md` therefore does not authorize replaying any
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/retry-subloop.md` therefore does not authorize replaying any
 prior round. Item 24 now has its dependency satisfied because item 23
 completed in accepted `round-056`.
 
@@ -89,7 +97,7 @@ materialization, `View.hs`, `schemeBodyTarget` consolidation, non-local
 widening, or any broader trigger-family successor inside `I4`.
 
 Current repository status before writing this selection showed only the
-expected controller-state preparation (`M orchestrator/state.json`) and no
+expected controller-state preparation (`M orchestrator/rounds/round-057/state-snapshot.json`) and no
 competing implementation diff. That status does not override roadmap order,
 but it confirms there is no repository-local blocker forcing a different
 selection.

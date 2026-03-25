@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-017`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-017`
+- State Snapshot: `orchestrator/rounds/round-050/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 17: execute the `H1` continue-bounded bind and exact
@@ -15,7 +23,7 @@ next-slice target selection for repaired `URI-R2-C1` after the accepted
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` now reflects the live opened round:
+`orchestrator/rounds/round-050/state-snapshot.json` now reflects the live opened round:
 `active_round_id: "round-050"`, `active_round_dir:
 "orchestrator/rounds/round-050"`, `stage: "select-task"`,
 `current_task: null`, `retry: null`, and
@@ -23,7 +31,7 @@ next-slice target selection for repaired `URI-R2-C1` after the accepted
 plane is already positioned at the fresh `round-050` selection step, with no
 same-round retry to resume and no previously selected task to carry forward.
 
-`orchestrator/roadmap.md` marks items 1 through 16 done. Item 17 (`H1`) is
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-017/roadmap.md` marks items 1 through 16 done. Item 17 (`H1`) is
 the lowest-numbered unfinished roadmap entry, and items 18 through 20 depend
 on it, so `H1` is the next lawful selection under the guider contract.
 
@@ -53,7 +61,7 @@ resolved replay-path bug remains continuity context only and does not
 authorize replay reopen, `MLF.Elab.Inst` / `InstBot`,
 `boundVarTarget` widening, non-local widening, or broad automatic recursive
 inference here. Repository status shows the expected live-round controller
-state (` M orchestrator/state.json` and `?? orchestrator/rounds/round-050/`)
+state (` M orchestrator/rounds/round-050/state-snapshot.json` and `?? orchestrator/rounds/round-050/`)
 rather than a conflicting implementation change, so it does not alter the
 next lawful roadmap choice.
 

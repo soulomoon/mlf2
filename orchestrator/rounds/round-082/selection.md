@@ -8,6 +8,14 @@ iso-recursive inference after accepted `N14 = continue-bounded`
 Successor lane: roadmap item 1 only, defining the repo-level capability
 contract and evaluation corpus for general automatic iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap`
+- Roadmap Revision: `rev-001`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-001`
+- State Snapshot: `orchestrator/rounds/round-082/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 1: define the repo-level capability contract and evaluation
@@ -15,7 +23,7 @@ corpus for general automatic iso-recursive inference.
 
 ## Why This Item Should Run Now
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-082/orchestrator/state.json`
+`orchestrator/rounds/round-082/state-snapshot.json`
 fixes the live controller state at `active_round_id: "round-082"`, `stage:
 "select-task"`, `current_task: null`, `retry: null`, `branch:
 "codex/round-082-item-1-capability-contract"`, `active_round_dir:
@@ -25,11 +33,11 @@ The same state file also records a prior non-observable guider launch under
 `"relaunch_fresh_guider_same_stage"` and the machine state remains
 `select-task` with `retry: null`. This is therefore still an ordinary
 same-round selection recovery, not a live retry that overrides roadmap order.
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-082/orchestrator/retry-subloop.md`
+`orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-001/retry-subloop.md`
 only forces same-round retry behavior when `retry` is populated, so the
 normal lowest-numbered unfinished-item rule still governs this selection.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-082/orchestrator/roadmap.md`
+`orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-001/roadmap.md`
 marks items 1 through 7 pending, with item 1 dependency-free and every later
 item depending on earlier unfinished work. Item 2 depends on item 1; item 3
 depends on items 1 and 2; item 4 depends on items 1, 2, and 3; item 5
@@ -40,7 +48,7 @@ the current dependency graph.
 
 Accepted `round-081` finalized `N14` with `attempt_verdict: "accepted"`,
 `stage_action: "finalize"`, and `final_outcome: "continue-bounded"` in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-082/orchestrator/rounds/round-081/review-record.json`.
+`orchestrator/rounds/round-081/review-record.json`.
 That accepted `N14` result preserved one exact same-lane retained-child
 `boundVarTarget -> targetC` packet as bounded predecessor evidence only and
 explicitly stated that no new successor lane was yet authorized or bound.
@@ -50,7 +58,7 @@ that early rounds in this refreshed control plane are expected to be
 docs-first and must not silently widen into implementation, architectural
 revision, or another packet-first cycle.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-082/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
+`docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
 sets the immediate strategic need: stop treating bounded packet progress as
 if it already proved general capability, define the real target precisely
 enough to test, and build the corpus that can distinguish broad capability
@@ -65,22 +73,22 @@ negative corpus families, and state explicit success and failure criteria for
 soundness, thesis-faithfulness, termination, and explainability.
 
 The inherited baseline and accepted `N14` continuity make item 1 necessary
-before any broader audit or design work. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-082/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+before any broader audit or design work. `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 still binds the repo to explicit-only recursive behavior, iso-recursive
 meaning, non-equi-recursive semantics, non-cyclic graph structure, and no
 silent fallback widening. The accepted `N14` decision artifact at
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-082/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+`docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
 preserves exactly one bounded packet as continuity only and explicitly rejects
 treating it as completion of the long-horizon goal. Item 1 must therefore run
 before item 2 can audit architecture against a defined target, before item 3
 can generalize packets into reusable mechanisms, and before any search,
 reconstruction, or coverage argument could be coherent.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-082/Bugs.md` still
+`Bugs.md` still
 lists open `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains
 predecessor context only and does not create a retry obligation or authorize
 a different live subject. Repository status in the active worktree shows only
-the controller-owned `M orchestrator/state.json` drift. No repository-state
+the controller-owned `M orchestrator/rounds/round-082/state-snapshot.json` drift. No repository-state
 blocker forces a different selection.
 
 ## Round Scope Guard

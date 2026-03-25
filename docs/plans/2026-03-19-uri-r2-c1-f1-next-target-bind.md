@@ -40,9 +40,9 @@ Only accepted bounded predecessor facts are carried forward here:
    cycle.
 2. `E2` authoritative `attempt-2` landed only that bounded same-lane retained-child
    `boundVarTarget` / nested-`forall` fail-closed slice in
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/src/MLF/Elab/Run/ResultType/Fallback.hs`
+   `src/MLF/Elab/Run/ResultType/Fallback.hs`
    and
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/test/PipelineSpec.hs`.
+   `test/PipelineSpec.hs`.
    It did not reopen replay repair, `MLF.Elab.Inst`, or any broader trigger family.
 3. `E3` authoritative `attempt-1` reverified that exact same-lane retained-child
    slice under the focused `ARI-C1 feasibility characterization (bounded prototype-only)`
@@ -66,7 +66,7 @@ Only accepted bounded predecessor facts are carried forward here:
 The only frozen future `F2` target is:
 
 local-binding scheme-alias/base-like fail-closed hardening in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 limited to the already-computed
 `rootIsSchemeAlias && rootBoundIsBaseLike` branch inside `keepTargetFinal` and the
 downstream `targetC` selection (`Fallback.hs:521-686`).
@@ -94,14 +94,14 @@ Required interpretation of that one bounded slice:
 
 Future `F2` ownership is frozen to exactly these files only:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/test/PipelineSpec.hs`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
 
 ### Future Focused Coverage Intent
 
 Future `F2` coverage remains one bounded extension of the existing
 `ARI-C1 feasibility characterization (bounded prototype-only)` block in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/test/PipelineSpec.hs`
+`test/PipelineSpec.hs`
 only:
 
 - add one local-binding scheme-alias/base-like case that directly exercises the
@@ -117,7 +117,7 @@ No second implementation family is selected in this artifact.
 
 This `F1` bind does not authorize:
 
-- edits to `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/src/MLF/Elab/Inst.hs`;
+- edits to `src/MLF/Elab/Inst.hs`;
 - replay-repair reopen, including `MLF.Elab.Inst.applyInstantiation` / `InstBot`, as
   active `F2` work;
 - reopening the completed `E1` / `E2` / `E3` / `E4` cycle;
@@ -211,7 +211,7 @@ Commands executed in:
 - `sed -n '66,114p' docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md | rg -n 'The only frozen future `F2` target is:|rootIsSchemeAlias|rootBoundIsBaseLike|keepTargetFinal|targetC|Fallback\\.hs:521-686|boundVarTarget|Future `F2` ownership is frozen|/src/MLF/Elab/Run/ResultType/Fallback.hs|/test/PipelineSpec.hs|No second implementation family is selected'`
   -> pass:
   - `1:The only frozen future `F2` target is:`
-  - `4:`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/src/MLF/Elab/Run/ResultType/Fallback.hs``
+  - `4:`src/MLF/Elab/Run/ResultType/Fallback.hs``
   - `6:`rootIsSchemeAlias && rootBoundIsBaseLike` branch inside `keepTargetFinal` and the`
   - `7:downstream `targetC` selection (`Fallback.hs:521-686`).`
   - `12:  `rootBindingIsLocalType`, `scopeRootPost`, `boundHasForallFrom`, `boundVarTarget`,`
@@ -219,8 +219,8 @@ Commands executed in:
   - `17:  `rootIsSchemeAlias && rootBoundIsBaseLike`;`
   - `18:- treat `boundVarTarget` as absent for this selected slice, so the repaired lane is`
   - `30:Future `F2` ownership is frozen to exactly these files only:`
-  - `32:- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/src/MLF/Elab/Run/ResultType/Fallback.hs``
-  - `33:- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-042/test/PipelineSpec.hs``
+  - `32:- `src/MLF/Elab/Run/ResultType/Fallback.hs``
+  - `33:- `test/PipelineSpec.hs``
   - `49:No second implementation family is selected in this artifact.`
 - `sed -n '55,132p' docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md | rg -n '`authority-narrowed`|`uniqueness-owner-stable-refuted`|`constructor-acyclic-termination-refuted`|does not reinterpret any of them as implementation clearance|replay reopen|MLF\\.Elab\\.Inst|rootHasMultiInst|instArgRootMultiBase'`
   -> pass:

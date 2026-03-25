@@ -3,7 +3,7 @@
 - Stage: `G3` docs-only bounded verification/evidence consolidation for the
   accepted local `rootLocalMultiInst` / `targetC -> rootFinal` lane.
 - Canonical artifact created:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-048/docs/plans/2026-03-19-uri-r2-c1-g3-bounded-verification-gate.md`
+  `docs/plans/2026-03-19-uri-r2-c1-g3-bounded-verification-gate.md`
 - Read-only anchors inspected:
   - `src/MLF/Elab/Run/ResultType/Fallback.hs:525-527`
   - `src/MLF/Elab/Run/ResultType/Fallback.hs:622-697`

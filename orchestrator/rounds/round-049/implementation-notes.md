@@ -2,7 +2,7 @@
 
 - Stage: `G4` docs-only aggregate decision gate for repaired `URI-R2-C1`.
 - Canonical artifact created:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-049/docs/plans/2026-03-19-uri-r2-c1-g4-next-cycle-decision-gate.md`
+  `docs/plans/2026-03-19-uri-r2-c1-g4-next-cycle-decision-gate.md`
 - Decision token recorded:
   `continue-bounded`
 - Why the token is lawful:
@@ -18,20 +18,20 @@
     `instArgRootMultiBase`, `boundVarTarget`, replay reopen, or non-local lanes
 - Docs/state verification commands run and passed:
   `git diff --check`;
-  `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json >/dev/null`;
-  `rg -n '"contract_version": 2|"retry": null|"retry": \{' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`;
-  `rg -n '^\d+\. \[(pending|in-progress|done)\]' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`;
-  `test -f /Users/ares/.codex/worktrees/d432/mlf4/docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`;
-  `test -f /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`;
-  `test -f /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`;
-  `test -f /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`;
-  `test -f /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`;
-  `test -f /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`;
-  `test -f /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-19-uri-r2-c1-g3-bounded-verification-gate.md`;
-  `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-048/review-record.json >/dev/null`;
+  `python3 -m json.tool orchestrator/rounds/round-049/state-snapshot.json >/dev/null`;
+  `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-049/state-snapshot.json`;
+  `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-016/roadmap.md`;
+  `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`;
+  `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`;
+  `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`;
+  `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`;
+  `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`;
+  `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-016/retry-subloop.md`;
+  `test -f docs/plans/2026-03-19-uri-r2-c1-g3-bounded-verification-gate.md`;
+  `python3 -m json.tool orchestrator/rounds/round-048/review-record.json >/dev/null`;
   the `python3` assertion over
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-048/review-record.json`;
-  `rg -n 'rootLocalMultiInst|targetC -> rootFinal|instArgRootMultiBase|boundVarTarget|non-local' /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-19-uri-r2-c1-g3-bounded-verification-gate.md`;
+  `orchestrator/rounds/round-048/review-record.json`;
+  `rg -n 'rootLocalMultiInst|targetC -> rootFinal|instArgRootMultiBase|boundVarTarget|non-local' docs/plans/2026-03-19-uri-r2-c1-g3-bounded-verification-gate.md`;
   `git status --short --untracked-files=all`;
   `git diff --name-only`;
   `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'`.

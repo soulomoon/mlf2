@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-031`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031`
+- State Snapshot: `orchestrator/rounds/round-064/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 31: execute the `K3` bounded verification and evidence
@@ -14,16 +22,16 @@ no-inst-arg scheme-alias / base-like `K2` slice.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` fixes the live controller state at
+`orchestrator/rounds/round-064/state-snapshot.json` fixes the live controller state at
 `active_round_id: "round-064"`, `stage: "select-task"`, `current_task: null`,
 `retry: null`, `branch: "codex/round-064-k3-verification-gate"`, and
 `last_completed_round: "round-063"`. Under `orchestrator/roles/guider.md`
-and `orchestrator/retry-subloop.md`, that means there is no same-round retry
+and `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/retry-subloop.md`, that means there is no same-round retry
 to resume, no interrupted earlier stage to continue, and no authority to
 reopen a completed predecessor item instead of selecting the next roadmap
 entry for the repaired live subject.
 
-`orchestrator/roadmap.md` marks item 30 (`K2`) done and item 31 (`K3`)
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/roadmap.md` marks item 30 (`K2`) done and item 31 (`K3`)
 pending. Because the guider must prefer the lowest-numbered unfinished item
 when `retry` is `null`, item 31 is the next lawful selection. The roadmap's
 completion notes for item 31 already define the exact `K3` contract: verify
@@ -84,7 +92,7 @@ beyond the inherited no-second-interface / no-fallback boundary.
 
 Repository status preserves that continuity rather than changing selection:
 the worktree shows only the existing controller-state modification
-`M orchestrator/state.json`, and `/Volumes/src/mlf4/Bugs.md` still has an
+`M orchestrator/rounds/round-064/state-snapshot.json`, and `/Volumes/src/mlf4/Bugs.md` still has an
 empty `## Open` section. Those facts do not create authority to skip the
 pending verification gate or reorder the roadmap.
 

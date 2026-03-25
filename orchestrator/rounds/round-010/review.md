@@ -2,8 +2,8 @@
 
 - Baseline checks:
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass; roadmap list remains parseable and item `5` is still `[pending]`.
+  - `python3 -m json.tool orchestrator/rounds/round-010/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-005/roadmap.md` -> pass; roadmap list remains parseable and item `5` is still `[pending]`.
   - `cabal build all && cabal test` -> intentionally skipped. Rationale: `git diff --name-only` returned no tracked code/test/Cabal paths, and untracked changes are limited to `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` plus `orchestrator/rounds/round-010/*`, so the verification contract does not require the full Cabal gate for this docs-only round.
 
 - Task-specific checks:
@@ -27,7 +27,7 @@
     - Compared the artifact against `orchestrator/rounds/round-010/plan.md`, `orchestrator/rounds/round-010/selection.md`, `docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md`, and inherited `R1` through `R4` documents. The artifact stays at roadmap item 5, keeps `URI-R2-C1` fixed, preserves the approved `R1` -> `R5` staging, keeps the invariant audit authoritative, records `research-stop` rather than implementation clearance, and does not widen into multi-SCC, cross-family, implicit-unfolding, equi-recursive, or cyclic-graph territory.
   - Continuity with inherited evidence:
     - Verified `orchestrator/rounds/round-001` through `orchestrator/rounds/round-009` and `tasks/todo/2026-03-11-recursive-types-orchestration/` remain present.
-    - Verified no tracked modifications touch prior rounds, predecessor packet history, `orchestrator/state.json`, or `orchestrator/roadmap.md`.
+    - Verified no tracked modifications touch prior rounds, predecessor packet history, `orchestrator/rounds/round-010/state-snapshot.json`, or `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-005/roadmap.md`.
     - Verified the new artifact explicitly cites completed rounds `001` through `009`, the approved successor design, and the predecessor recursive-types packet as inherited evidence only and does not rewrite them.
 
 - Decision:

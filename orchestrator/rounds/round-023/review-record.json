@@ -18,5 +18,8 @@
     "D4-DECISION": "pass"
   },
   "final_outcome": "reopen-repair-track",
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-004"
 }

@@ -38,7 +38,7 @@ continuity without reopening earlier stages.
   non-cyclic-graph / no-second-interface / no-fallback boundary;
 - preserved `src/MLF/Elab/Run/ResultType/Fallback.hs` and
   `test/PipelineSpec.hs` as strict read-only anchors;
-- preserved `orchestrator/state.json`, `orchestrator/roadmap.md`,
+- preserved `orchestrator/rounds/round-065/state-snapshot.json`, `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-032/roadmap.md`,
   `orchestrator/rounds/round-065/selection.md`, and `/Volumes/src/mlf4/Bugs.md`
   untouched; and
 - preserved the rule that any successor work after `K4` must start with a

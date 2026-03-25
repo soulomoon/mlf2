@@ -2,7 +2,7 @@
 
 ## Delta Status
 
-This file is a same-round replan after the rejected review in `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/orchestrator/rounds/round-016/review.md`.
+This file is a same-round replan after the rejected review in `orchestrator/rounds/round-016/review.md`.
 
 It replaces the earlier round plan wherever they conflict.
 
@@ -12,7 +12,7 @@ Repair only the review-blocking contract gaps in the existing `P1` implementatio
 
 The repair target is one new authoritative rerun for the same round at:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/orchestrator/rounds/round-016/evidence/P1/attempt-2/`
+- `orchestrator/rounds/round-016/evidence/P1/attempt-2/`
 
 Attempt `1` is historical evidence now. Do not overwrite or reinterpret it.
 
@@ -25,7 +25,7 @@ Attempt `1` is historical evidence now. Do not overwrite or reinterpret it.
 - Keep the same single-SCC, single-binder-family, non-equi-recursive, non-cyclic-graph, shared-entrypoint-isolation boundaries.
 - Do not add a new executable, a new public API, a second research entrypoint, a new scenario, or any production-path dependency on research metadata.
 - Do not revisit the already-passing isolation, execution-path, or default-path behavior except as required to keep them passing after the schema repair.
-- Do not edit `orchestrator/state.json` or `orchestrator/roadmap.md`.
+- Do not edit `orchestrator/rounds/round-016/state-snapshot.json` or `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-001/roadmap.md`.
 
 Rationale: the review rejected round `016` only because the emitted machine-readable evidence and canonical subject token are contract-incomplete. The next slice is therefore a schema-and-tests repair, not a new prototype feature.
 
@@ -33,20 +33,20 @@ Rationale: the review rejected round `016` only because the emitted machine-read
 
 Modify only these files unless a compile-only type ripple makes one additional local edit unavoidable:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
-2. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/src/MLF/Research/URI/R2/C1/Prototype/P1.hs`
-3. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/test/Research/UriR2C1PrototypeP1Spec.hs`
+1. `src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
+2. `src/MLF/Research/URI/R2/C1/Prototype/P1.hs`
+3. `test/Research/UriR2C1PrototypeP1Spec.hs`
 
 Conditional-only edits:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs` only if the repaired types force a compile-alignment change.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/docs/plans/2026-03-15-uri-r2-c1-p1-subject-discovery-prototype.md` only if the accepted rerun must update `Attempt: 2` or a file path reference. Its narrative shape already passed review; do not redesign it.
+- `src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs` only if the repaired types force a compile-alignment change.
+- `docs/plans/2026-03-15-uri-r2-c1-p1-subject-discovery-prototype.md` only if the accepted rerun must update `Attempt: 2` or a file path reference. Its narrative shape already passed review; do not redesign it.
 
 Files expected to remain untouched:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/app/Main.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/mlf2.cabal`
-- every file under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/src-public/`
+- `app/Main.hs`
+- `mlf2.cabal`
+- every file under `src-public/`
 
 ## Sequential Repair Tasks
 
@@ -54,7 +54,7 @@ Files expected to remain untouched:
 
 Target files:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
+- `src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
 
 Required type changes:
 
@@ -90,10 +90,10 @@ Out of scope:
 
 Target files:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/src/MLF/Research/URI/R2/C1/Prototype/P1.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
+- `src/MLF/Research/URI/R2/C1/Prototype/P1.hs`
+- `src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
 
-Required output contract for `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/orchestrator/rounds/round-016/evidence/P1/attempt-2/`:
+Required output contract for `orchestrator/rounds/round-016/evidence/P1/attempt-2/`:
 
 - `trace-bundle.json`
   - must contain the approved trace-bundle fields:
@@ -174,7 +174,7 @@ Preservation rule:
 
 Target files:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/test/Research/UriR2C1PrototypeP1Spec.hs`
+- `test/Research/UriR2C1PrototypeP1Spec.hs`
 
 Required test additions:
 
@@ -207,7 +207,7 @@ Execution target:
 
 Required rerun discipline:
 
-- Preserve `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/orchestrator/rounds/round-016/evidence/P1/attempt-1/` unchanged as the rejected attempt.
+- Preserve `orchestrator/rounds/round-016/evidence/P1/attempt-1/` unchanged as the rejected attempt.
 - Write the repaired authoritative candidate files only under `attempt-2/`.
 - If the docs artifact is updated, limit the change to `Attempt: 2` and the `attempt-2` evidence references only.
 - Do not rewrite the round selection, the round review, or any predecessor artifact.
@@ -215,7 +215,7 @@ Required rerun discipline:
 ## Acceptance Criteria (All Required)
 
 1. The only intended behavioral change is that the emitted `P1` machine-readable outputs and canonical subject token now satisfy the approved schema and repeated-metadata contract.
-2. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/orchestrator/rounds/round-016/evidence/P1/attempt-1/` remains intact and `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/orchestrator/rounds/round-016/evidence/P1/attempt-2/` becomes the repair rerun target.
+2. `orchestrator/rounds/round-016/evidence/P1/attempt-1/` remains intact and `orchestrator/rounds/round-016/evidence/P1/attempt-2/` becomes the repair rerun target.
 3. `trace-bundle.json`, every `check-P1-*.json`, `stage-verdict.json`, and `subject-token.json` include the fields that were missing in the rejected review.
 4. Every machine-readable output produced for `attempt-2` repeats:
    - `research_entrypoint_id: uri-r2-c1-prototype-entrypoint-v1`
@@ -229,11 +229,11 @@ Required rerun discipline:
 
 ## Reviewer And Verification Checks
 
-Baseline checks from `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/orchestrator/verification.md` still apply:
+Baseline checks from `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-001/verification.md` still apply:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-016/state-snapshot.json >/dev/null`
+- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-001/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`
 - `cabal build all && cabal test`
 
@@ -249,7 +249,7 @@ Round-specific re-review checks:
   - `find orchestrator/rounds/round-016/evidence/P1/attempt-2 -maxdepth 1 -type f | sort`
 - JSON-parse every repaired machine-readable file under `attempt-2` with `python3 -m json.tool`
 - confirm the repaired files now expose the missing review fields:
-  - reviewer should explicitly audit `trace-bundle.json`, `check-P1-C.json`, `check-P1-N.json`, `check-P1-U.json`, `stage-verdict.json`, and `subject-token.json` against the finding list in `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-016/orchestrator/rounds/round-016/review.md`
+  - reviewer should explicitly audit `trace-bundle.json`, `check-P1-C.json`, `check-P1-N.json`, `check-P1-U.json`, `stage-verdict.json`, and `subject-token.json` against the finding list in `orchestrator/rounds/round-016/review.md`
 - confirm unchanged boundaries still hold:
   - wrong selector still rejects without writing evidence
   - wrong scenario still rejects without writing evidence

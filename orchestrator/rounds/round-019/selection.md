@@ -7,6 +7,14 @@ Active subject: `URI-R2-C1`
 Active scenario: `uri-r2-c1-only-v1`
 Research entrypoint: `uri-r2-c1-prototype-entrypoint-v1`
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap`
+- Roadmap Revision: `rev-004`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-004`
+- State Snapshot: `orchestrator/rounds/round-019/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 4: execute the `P4` prototype decision gate for `URI-R2-C1`.

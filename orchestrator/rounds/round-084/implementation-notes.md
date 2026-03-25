@@ -36,12 +36,12 @@
     docs-only red step.
 - `git diff --check`
   - Result: passed in
-    `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-084`.
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+    `.worktrees/round-084`.
+- `python3 -m json.tool orchestrator/rounds/round-084/state-snapshot.json >/dev/null`
   - Result: passed.
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-084/state-snapshot.json`
   - Result: matched `contract_version: 2` and `retry: null`.
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-003/roadmap.md`
   - Result: passed; ordered roadmap item list remains parseable with items
     `1` and `2` done and item `3` pending.
 - `test -f docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
@@ -52,7 +52,7 @@
   - Result: passed.
 - `test -f orchestrator/rounds/round-081/review-record.json`
   - Result: passed.
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-003/retry-subloop.md`
   - Result: passed.
 - `test -f docs/plans/2026-03-25-general-automatic-iso-recursive-inference-mechanism-map.md`
   - Result: passed after edits.

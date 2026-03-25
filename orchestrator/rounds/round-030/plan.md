@@ -3,7 +3,7 @@
 ## Objective
 
 Execute only roadmap item `U3` and produce one bounded uniqueness/owner-stability artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u3-unannotated-uniqueness-owner-clearance.md`.
+`docs/plans/2026-03-17-uri-r2-c1-u3-unannotated-uniqueness-owner-clearance.md`.
 
 This round must record, for repaired `URI-R2-C1` only, whether there is exactly one admissible local root/cluster with stable ownership and no heuristic ranking.
 
@@ -24,34 +24,34 @@ Inherited carry-forward facts that must remain unchanged:
 
 ## Authoritative Inputs To Preserve
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-030/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-028/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-029/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u1-unannotated-baseline-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u2-unannotated-authority-clearance.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` (continuity-only reference)
+- `orchestrator/rounds/round-030/selection.md`
+- `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-008/verification.md`
+- `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-008/retry-subloop.md`
+- `orchestrator/rounds/round-028/review-record.json`
+- `orchestrator/rounds/round-029/review-record.json`
+- `docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u1-unannotated-baseline-bind.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u2-unannotated-authority-clearance.md`
+- `Bugs.md` (continuity-only reference)
 
 ## Files Expected In Scope
 
 Primary writable file:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u3-unannotated-uniqueness-owner-clearance.md`
+1. `docs/plans/2026-03-17-uri-r2-c1-u3-unannotated-uniqueness-owner-clearance.md`
 
 Optional bounded note file:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-030/implementation-notes.md` (only if needed for reviewer clarity)
+1. `orchestrator/rounds/round-030/implementation-notes.md` (only if needed for reviewer clarity)
 
 Files that must remain untouched in this round:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-030/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- production/test surfaces under `/Users/ares/.codex/worktrees/d432/mlf4/src/`, `/Users/ares/.codex/worktrees/d432/mlf4/src-public/`, `/Users/ares/.codex/worktrees/d432/mlf4/app/`, `/Users/ares/.codex/worktrees/d432/mlf4/test/`, `/Users/ares/.codex/worktrees/d432/mlf4/mlf2.cabal`
-- prior round artifacts under `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-001/` through `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-029/`
+- `orchestrator/rounds/round-030/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-008/roadmap.md`
+- `orchestrator/rounds/round-030/selection.md`
+- `Bugs.md`
+- production/test surfaces under `src/`, `src-public/`, `app/`, `test/`, `mlf2.cabal`
+- prior round artifacts under `orchestrator/rounds/round-001/` through `orchestrator/rounds/round-029/`
 
 ## Sequential Tasks
 
@@ -73,7 +73,7 @@ Files that must remain untouched in this round:
 
 ### Task 3 - Author the canonical `U3` uniqueness/owner artifact
 
-- Write `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-u3-unannotated-uniqueness-owner-clearance.md` with:
+- Write `docs/plans/2026-03-17-uri-r2-c1-u3-unannotated-uniqueness-owner-clearance.md` with:
   - stage metadata (`Round`, `Roadmap item`, `Attempt`, `Retry state`, `Live subject`);
   - inherited-boundary restatement from `U1`/`U2`;
   - bounded uniqueness/owner analysis for repaired `URI-R2-C1` only;
@@ -83,16 +83,16 @@ Files that must remain untouched in this round:
 
 ### Task 4 - Run and record bounded verification for `U3`
 
-- Run applicable baseline checks from `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`:
+- Run applicable baseline checks from `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-008/verification.md`:
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `python3 -m json.tool orchestrator/rounds/round-030/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-030/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-008/roadmap.md`
   - `test -f docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
-  - `test -f orchestrator/retry-subloop.md`
+  - `test -f orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-008/retry-subloop.md`
 - Add `U3`-specific verification notes proving:
   - live subject remains repaired `URI-R2-C1` only;
   - inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary remains intact;
@@ -122,12 +122,12 @@ Files that must remain untouched in this round:
 - No broad automatic recursive inference authorization or implementation.
 - No equi-recursive semantics, implicit unfolding success path, or cyclic structural graph encoding.
 - No `U4` feasibility/termination clearance work, no `U5` implementation planning, and no `U6` aggregate decision work.
-- No edits to `orchestrator/state.json`, `orchestrator/roadmap.md`, `Bugs.md`, or prior-round history.
+- No edits to `orchestrator/rounds/round-030/state-snapshot.json`, `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-008/roadmap.md`, `Bugs.md`, or prior-round history.
 - No second executable interface, compatibility fallback, convenience shim, or default-on widening path.
 
 ## Reviewer Checks
 
-Baseline checks from `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md` still apply.
+Baseline checks from `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-008/verification.md` still apply.
 
 Round-specific checks:
 

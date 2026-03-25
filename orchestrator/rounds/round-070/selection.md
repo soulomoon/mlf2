@@ -6,6 +6,14 @@ Role: guider
 Active subject: preserved generic scheme-alias / base-like `baseTarget` planning subject
 Successor lane: planning-only lane reopened by accepted `N1` and fixed by accepted `N2`
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap`
+- Roadmap Revision: `rev-003`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003`
+- State Snapshot: `orchestrator/rounds/round-070/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 3 (`N3`): execute the `N3` reopened-loop safety and acceptance
@@ -14,14 +22,14 @@ contract for the selected preserved generic scheme-alias / base-like
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` fixes the live controller state at
+`orchestrator/rounds/round-070/state-snapshot.json` fixes the live controller state at
 `active_round_id: "round-070"`, `stage: "select-task"`, `current_task: null`,
 `retry: null`, `branch: "codex/round-070-n3-safety-acceptance-contract"`, and
-`last_completed_round: "round-069"`. Under `orchestrator/retry-subloop.md`,
+`last_completed_round: "round-069"`. Under `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/retry-subloop.md`,
 that means there is no same-round retry to resume and no lawful path that
 skips fresh roadmap selection before `plan`.
 
-`orchestrator/roadmap.md` marks item 1 (`N1`) and item 2 (`N2`) done, with
+`orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/roadmap.md` marks item 1 (`N1`) and item 2 (`N2`) done, with
 item 3 (`N3`) now the lowest-numbered unfinished item and items 4 through 7
 depending on earlier authority. No live retry state or accepted review artifact
 forces a same-round retry instead. `orchestrator/rounds/round-069/review-record.json`

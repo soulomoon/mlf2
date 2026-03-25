@@ -10,7 +10,9 @@ retained-child stable-visible-persistence successor loop.
 Inputs:
 - approved round diff
 - `review.md`
-- `orchestrator/retry-subloop.md`
+- `orchestrator/state.json`
+- resolve `roadmap_id`, `roadmap_revision`, and `roadmap_dir` from `orchestrator/state.json`
+- `roadmap_dir/retry-subloop.md`
 - current roadmap item
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`

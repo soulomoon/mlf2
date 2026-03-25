@@ -19,9 +19,9 @@ The round stays inside the accepted `K1` freeze:
 - inherited boundary remains explicit-only / non-equi-recursive /
   non-cyclic-graph / no-second-interface / no-fallback;
 - ownership stays bounded to
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-063/src/MLF/Elab/Run/ResultType/Fallback.hs`
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`
   and
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-063/test/PipelineSpec.hs`; and
+  `test/PipelineSpec.hs`; and
 - accepted `F2/F3` `rootLocalSchemeAliasBaseLike` / `rootFinal` continuity,
   completed `rootLocalSingleBase`, completed `rootLocalInstArgSingleBase`,
   retained-target logic, replay reopen, `MLF.Elab.Inst`, `InstBot`,

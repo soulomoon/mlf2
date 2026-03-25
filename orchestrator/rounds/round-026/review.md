@@ -2,12 +2,12 @@
 
 - Baseline checks:
   - `git diff --check` (pass)
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` (pass)
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` (pass; `contract_version: 2` and `retry: null` remain intact for the fresh `R3` attempt)
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` (pass; ordered `R1` through `R4` markers remain parseable and `R3` is still pending)
+  - `python3 -m json.tool orchestrator/rounds/round-026/state-snapshot.json >/dev/null` (pass)
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-026/state-snapshot.json` (pass; `contract_version: 2` and `retry: null` remain intact for the fresh `R3` attempt)
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-003/roadmap.md` (pass; ordered `R1` through `R4` markers remain parseable and `R3` is still pending)
   - `test -f docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md` (pass)
   - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` (pass)
-  - `test -f orchestrator/retry-subloop.md` (pass)
+  - `test -f orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-003/retry-subloop.md` (pass)
   - `cabal build all && cabal test` (pass; `1124 examples, 0 failures`)
   - Continuity guards:
   - `git diff --name-only -- orchestrator/rounds/round-{001..025} Bugs.md` (pass; no output, so completed rounds `001` through `025` and `Bugs.md` remain untouched)

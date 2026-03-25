@@ -3,7 +3,7 @@
 ## Objective
 
 Execute only roadmap item `2` and produce one docs-first artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`.
+`docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`.
 
 This is the initial `item-2` plan for `attempt-1` with `retry: null`. The
 round must audit the inherited architectural constraints against the accepted
@@ -21,8 +21,8 @@ item-1 capability contract and family matrix. The artifact must:
 
 This round is docs-only and constraint-audit-only. It must not edit production
 code, tests, public surfaces, executables, `mlf2.cabal`,
-`orchestrator/state.json`, `orchestrator/roadmap.md`,
-`orchestrator/verification.md`, `orchestrator/retry-subloop.md`, `Bugs.md`,
+`orchestrator/rounds/round-083/state-snapshot.json`, `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/roadmap.md`,
+`orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/verification.md`, `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/retry-subloop.md`, `Bugs.md`,
 or any review / merge / predecessor-history artifact.
 
 This round must not silently widen into:
@@ -53,52 +53,52 @@ instead of solving them inside this round.
   constraints against the accepted repo-level capability contract
 - Active branch: `codex/round-083-item-2-constraint-audit`
 - Active worktree:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083`
+  `.worktrees/round-083`
 - Current round review feedback: none yet; this is a full `attempt-1` plan,
   not a retry delta
 
 Current round worktree state is already non-pristine. Respect existing edits
 and do not revert unrelated work:
 
-- `M orchestrator/state.json` (controller-owned; must remain untouched)
+- `M orchestrator/rounds/round-083/state-snapshot.json` (controller-owned; must remain untouched)
 - `?? orchestrator/rounds/round-083/selection.md`
 
 ## Accepted Continuity That Remains Binding
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/rounds/round-083/selection.md`
+- `orchestrator/rounds/round-083/selection.md`
   already fixes this round to roadmap item `2` only, limits the scope to a
   docs-first constraint audit, and forbids implementation, roadmap / state
   edits, bug-tracker edits, and predecessor-history rewrites.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/roadmap.md`
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/roadmap.md`
   makes item `2` the next dependency-satisfied item and defines its completion
   notes as a four-constraint audit plus one bounded plausibility statement
   only.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
   supplies the human strategic gate: re-evaluate the inherited constraints,
   especially the high-risk `non-cyclic-graph` boundary, before mechanism or
   search design.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
   is the accepted item-1 contract that defines the repo-level target and the
   minimum family matrix (`P1`-`P6`, `N1`-`N6`) against which this audit must
   reason.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   remains the inherited baseline contract: explicit recursive annotations are
   still the current baseline, automatic recursive-type inference remains
   unresolved, and the explicit-only / non-equi-recursive /
   non-cyclic-graph / no-fallback boundary remains mandatory unless a later
   accepted item explicitly changes it.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+- `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
   remains the immediate predecessor decision: accepted `N14` preserves one
   exact same-lane retained-child packet as bounded evidence only and does not
   authorize a repo-level generality claim or a silent boundary revision.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/verification.md`
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/verification.md`
   requires item-2-specific checks proving that the round classifies the
   inherited boundaries as `keep`, `revise`, or `unknown` and explicitly states
   whether the current architecture still appears plausible.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/retry-subloop.md`
   confirms that `retry: null` means this plan is a full `attempt-1` plan, not
   a delta against a recorded `fix_hypothesis`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/Bugs.md` still
+- `Bugs.md` still
   lists open `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains
   predecessor implementation context only and does not authorize a code-path
   detour or a different live subject for this round.
@@ -107,7 +107,7 @@ and do not revert unrelated work:
 
 ### Create
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
   - Responsibility: canonical docs-first item-2 artifact classifying the four
     inherited architectural constraints against the accepted capability
     contract, recording per-family support / block / unresolved reads, and
@@ -116,28 +116,28 @@ and do not revert unrelated work:
 
 ### Read-Only Evidence
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/rounds/round-083/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/Bugs.md`
+- `orchestrator/rounds/round-083/selection.md`
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/roadmap.md`
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/verification.md`
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/retry-subloop.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+- `Bugs.md`
 
 ### Preserve Unchanged
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/src/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/test/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/src-public/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/app/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-083/mlf2.cabal`
+- `orchestrator/rounds/round-083/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/roadmap.md`
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/verification.md`
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/retry-subloop.md`
+- `Bugs.md`
+- `src/`
+- `test/`
+- `src-public/`
+- `app/`
+- `mlf2.cabal`
 - reviewer-owned history under earlier round directories
 
 ## Exact Selected Slice (Exactly One)
@@ -262,7 +262,7 @@ solving it here.
 - State that this round is expected to change only docs and that no full
   `cabal build all && cabal test` gate is triggered unless the work escapes
   the authorized docs-only surface.
-- Cite the reviewer-facing expectations from `orchestrator/verification.md`:
+- Cite the reviewer-facing expectations from `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002/verification.md`:
   the artifact must present the four classifications, the per-family support /
   block / unresolved reads, the bounded plausibility statement, and explicit
   continuity with the baseline contract, accepted item-1 capability contract,

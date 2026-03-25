@@ -20,9 +20,9 @@ same-lane retained-child slice. It records fresh verifier-visible evidence for
 the exact accepted packet only:
 
 - the live read-only source anchors in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/src/MLF/Elab/Run/ResultType/Fallback.hs`;
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`;
 - the live read-only focused test anchors in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/test/PipelineSpec.hs`;
+  `test/PipelineSpec.hs`;
 - a fresh focused rerun of
   `ARI-C1 feasibility characterization (bounded prototype-only)`;
 - a fresh full repo gate via `cabal build all && cabal test`; and
@@ -55,29 +55,29 @@ code/test file during this attempt.
 Fresh continuity checks reconfirmed the accepted authority chain that still
 binds this round:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+1. `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
    remains the inherited baseline contract: explicit recursive annotations are
    supported, automatic recursive-type inference remains unresolved and
    disabled, and the explicit-only / non-equi-recursive /
    non-cyclic-graph / no-second-interface / no-fallback boundary remains
    mandatory.
-2. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
+2. `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
    and
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+   `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
    remain the accepted `L1` / `L2` repaired-queue closeout. They keep the old
    queue closed and do not grant implicit clearance to any preserved route.
 3. The accepted `N1` through `N8` records under
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/docs/plans/`
+   `docs/plans/`
    remain binding predecessor continuity: `N1` reopened only a planning lane,
    `N2` through `N7` completed the earlier `baseTarget` cycle, and `N8`
    reopened exactly one successor planning lane only. Those accepted records
    stay predecessor evidence only and do not alter the current exact
    `boundVarTarget` packet.
-4. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-next-live-subject-selection.md`
+4. `docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-next-live-subject-selection.md`
    remains the accepted `N9` selection record, choosing exactly one fresh live
    subject: the retained-child / nested-`forall` / binding-structure
    `boundVarTarget` route.
-5. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-safety-acceptance-contract.md`
+5. `docs/plans/2026-03-23-automatic-iso-recursive-bound-var-target-safety-acceptance-contract.md`
    remains the accepted `N10` contract. Its binding axes still govern `N13`:
    retained-child ownership and target-selection anchors must stay
    reviewer-visible, nested-`forall` / nested-owner / nested scheme-root
@@ -85,28 +85,28 @@ binds this round:
    boundary context only, and the selected packet remains explicit-only,
    iso-recursive, non-equi-recursive, non-cyclic-graph, single-family, and
    no-fallback.
-6. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`
+6. `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`
    remains the accepted `N11` bind. The exact packet is still one same-lane
    local `TypeRef` retained-child `boundVarTarget -> targetC` route only.
 7. The accepted `N11` review chain remains binding authority:
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-078/review.md`,
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-078/reviews/attempt-1.md`,
+   `orchestrator/rounds/round-078/review.md`,
+   `orchestrator/rounds/round-078/reviews/attempt-1.md`,
    and
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-078/review-record.json`.
-8. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-bounded-implementation-slice.md`
+   `orchestrator/rounds/round-078/review-record.json`.
+8. `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-bounded-implementation-slice.md`
    remains the accepted `N12` implementation artifact. It still means:
    `boundVarTarget` search unchanged; explicit
    `sameLaneLocalRetainedChildTarget` proof present; only the retained-child
    `keepTargetFinal` / `targetC` consumer routed through that proof; and the
    focused `ARI-C1` block remaining the bounded test packet.
 9. The accepted `N12` review chain remains binding authority:
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-079/review.md`,
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-079/reviews/attempt-1.md`,
+   `orchestrator/rounds/round-079/review.md`,
+   `orchestrator/rounds/round-079/reviews/attempt-1.md`,
    and
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-079/review-record.json`.
-10. `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-078/review-record.json >/dev/null`
+   `orchestrator/rounds/round-079/review-record.json`.
+10. `python3 -m json.tool orchestrator/rounds/round-078/review-record.json >/dev/null`
    and
-   `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-079/review-record.json >/dev/null`
+   `python3 -m json.tool orchestrator/rounds/round-079/review-record.json >/dev/null`
    both passed, confirming the accepted `N11` / `N12` review records remain
    valid JSON.
 11. The continuity assertion over the accepted `round-078` and `round-079`
@@ -125,7 +125,7 @@ binds this round:
    `cabal build all && cabal test` recorded the full-gate green result, and
    the lawful `N12` outcome remained
    `boundVarTarget-same-lane-retained-child-proof-slice-established`.
-13. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+13. `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
     still records the reopened loop as unresolved. `N13` is evidence-only and
     does not itself act as a next-cycle decision token.
 14. `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` remains read-only
@@ -141,7 +141,7 @@ Read-only anchor command:
 - `nl -ba src/MLF/Elab/Run/ResultType/Fallback.hs | sed -n '558,731p'`
 
 Observed live anchors in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/src/MLF/Elab/Run/ResultType/Fallback.hs`:
+`src/MLF/Elab/Run/ResultType/Fallback.hs`:
 
 1. `boundVarTargetRoot` remains the neighboring boundary anchor at line `558`,
    still defined as
@@ -186,7 +186,7 @@ Read-only anchor commands:
 - `nl -ba test/PipelineSpec.hs | sed -n '1495,1785p'`
 
 Observed live anchors in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/test/PipelineSpec.hs`:
+`test/PipelineSpec.hs`:
 
 1. The focused helper family still lives in the same
    `describe "ARI-C1 feasibility characterization (bounded prototype-only)"`
@@ -281,9 +281,9 @@ block and the full repo verification gate.
 Continuity commands re-ran against the accepted `N11` / `N12` artifacts and
 review chain:
 
-- `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-078/review-record.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-078/review-record.json >/dev/null`
   -> pass
-- `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-079/review-record.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-079/review-record.json >/dev/null`
   -> pass
 - `rg -n 'sameLaneLocalRetainedChildTarget|cabal build all && cabal test|20 examples, 0 failures|boundVarTarget-same-lane-retained-child-proof-slice-established' docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-bounded-implementation-slice.md orchestrator/rounds/round-079/review.md`
   -> pass; hits reconfirmed:
@@ -350,9 +350,9 @@ Interpretation:
 
 Reviewer-target immutability also remained intact before reviewer outputs:
 
-- `find /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-080 -maxdepth 2 -type f | sort`
+- `find orchestrator/rounds/round-080 -maxdepth 2 -type f | sort`
   -> only `plan.md` and `selection.md`
-- `test ! -f /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-080/review-record.json && test ! -f /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-080/orchestrator/rounds/round-080/reviews/attempt-1.md`
+- `test ! -f orchestrator/rounds/round-080/review-record.json && test ! -f orchestrator/rounds/round-080/reviews/attempt-1.md`
   -> `reviewer-targets-absent`
 
 ## Stability Conclusion

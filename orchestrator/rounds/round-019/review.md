@@ -8,9 +8,9 @@
 
 - `git diff --check`
   - pass.
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-019/state-snapshot.json >/dev/null`
   - pass.
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-004/roadmap.md`
   - pass.
   - Evidence: roadmap items `1` through `4` remain parseable with statuses `done`, `done`, `done`, `pending`.
 - `test -f docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`
@@ -91,7 +91,7 @@
   - Result: pass.
   - Evidence:
     - tracked diff paths remain limited to `mlf2.cabal`, `src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`, `src/MLF/Research/URI/R2/C1/Prototype/Entrypoint.hs`, `src/MLF/Research/URI/R2/C1/Prototype/Types.hs`, and `test/Research/UriR2C1PrototypeP1Spec.hs`, with expected new `P4` files and round artifacts untracked in the round worktree;
-    - no forbidden tracked path appears for `orchestrator/state.json`, `orchestrator/roadmap.md`, `app/Main.hs`, `src-public/*`, or prior round directories.
+    - no forbidden tracked path appears for `orchestrator/rounds/round-019/state-snapshot.json`, `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-004/roadmap.md`, `app/Main.hs`, `src-public/*`, or prior round directories.
 
 ## Stage Result
 

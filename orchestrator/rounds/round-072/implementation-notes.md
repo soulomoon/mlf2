@@ -25,10 +25,10 @@
     same command -> pass (`20 examples, 0 failures`).
 - Required bounded verification:
   - `git diff --check` -> pass
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
+  - `python3 -m json.tool orchestrator/rounds/round-072/state-snapshot.json >/dev/null` -> pass
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-072/state-snapshot.json`
     -> pass (`contract_version: 2`, `retry: null`)
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-005/roadmap.md`
     -> pass
   - required `test -f` predecessor-doc / mechanism-table / retry-subloop checks
     -> pass

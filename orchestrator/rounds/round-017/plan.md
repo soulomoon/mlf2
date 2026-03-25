@@ -13,40 +13,40 @@ This remains a `URI-R2-C1`-only, `uri-r2-c1-only-v1`-only, single-SCC, single-bi
 
 - Round id stays `round-017`.
 - Branch stays `codex/round-017`.
-- Worktree stays `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017`.
+- Worktree stays `.worktrees/round-017`.
 - Shared research entrypoint stays `uri-r2-c1-prototype-entrypoint-v1`.
 - Stage selector stays `P2-provenance-preservation`.
 - Scenario stays `uri-r2-c1-only-v1`.
-- Stage input stays only `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/orchestrator/rounds/round-016/evidence/P1/attempt-2/subject-token.json`.
+- Stage input stays only `orchestrator/rounds/round-016/evidence/P1/attempt-2/subject-token.json`.
 - The next repaired execution must move to `orchestrator/rounds/round-017/evidence/P2/attempt-2/`.
 - `attempt-1` is rejected-history evidence and must remain preserved byte-for-byte; do not rewrite, delete, or relabel it.
-- The canonical artifact path stays `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/docs/plans/2026-03-15-uri-r2-c1-p2-provenance-preservation-prototype.md`, but the rerun narrative must identify `Attempt: 2`.
+- The canonical artifact path stays `docs/plans/2026-03-15-uri-r2-c1-p2-provenance-preservation-prototype.md`, but the rerun narrative must identify `Attempt: 2`.
 
 ## Repair Slice
 
 Allowed carried-forward round diff and outputs for this repair:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/src/MLF/Research/URI/R2/C1/Prototype/P2.hs` - required; this is the only file that should receive new logic changes unless a strictly paired renderer update is unavoidable.
-2. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/mlf2.cabal` - admitted compile-only necessity; keep only the existing single-line `MLF.Research.URI.R2.C1.Prototype.P2` registration and do not make any other cabal edits.
-3. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs` - only if needed to render the corrected bounded non-pass result or suppress `P3` handoff text when `P2` does not pass.
-4. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/docs/plans/2026-03-15-uri-r2-c1-p2-provenance-preservation-prototype.md` - regenerated canonical `P2` artifact for `Attempt: 2`.
-5. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/orchestrator/rounds/round-017/evidence/P2/attempt-2/` - new attempt-local raw evidence only.
+1. `src/MLF/Research/URI/R2/C1/Prototype/P2.hs` - required; this is the only file that should receive new logic changes unless a strictly paired renderer update is unavoidable.
+2. `mlf2.cabal` - admitted compile-only necessity; keep only the existing single-line `MLF.Research.URI.R2.C1.Prototype.P2` registration and do not make any other cabal edits.
+3. `src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs` - only if needed to render the corrected bounded non-pass result or suppress `P3` handoff text when `P2` does not pass.
+4. `docs/plans/2026-03-15-uri-r2-c1-p2-provenance-preservation-prototype.md` - regenerated canonical `P2` artifact for `Attempt: 2`.
+5. `orchestrator/rounds/round-017/evidence/P2/attempt-2/` - new attempt-local raw evidence only.
 
 Existing carried-forward round-local edits in the current diff may remain, but they must stay byte-stable unless the implementer can point to a direct dependency from the `P2-W` classification fix:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/src/MLF/Research/URI/R2/C1/Prototype/Entrypoint.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/test/Research/UriR2C1PrototypeP1Spec.hs`
+- `src/MLF/Research/URI/R2/C1/Prototype/Entrypoint.hs`
+- `src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
+- `test/Research/UriR2C1PrototypeP1Spec.hs`
 
 Files that must end this repair untouched:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/src/MLF/Research/URI/R2/C1/Prototype/P1.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/orchestrator/roadmap.md`
-- every file under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/orchestrator/rounds/round-016/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/orchestrator/rounds/round-017/evidence/P2/attempt-1/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/app/Main.hs`
-- every file under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/src-public/`
+- `src/MLF/Research/URI/R2/C1/Prototype/P1.hs`
+- `orchestrator/rounds/round-017/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-002/roadmap.md`
+- every file under `orchestrator/rounds/round-016/`
+- `orchestrator/rounds/round-017/evidence/P2/attempt-1/`
+- `app/Main.hs`
+- every file under `src-public/`
 
 ## Sequential Repair Tasks
 
@@ -97,11 +97,11 @@ Files that must end this repair untouched:
 
 ## Reviewer And Verification Checks
 
-Baseline checks from `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/orchestrator/verification.md` still apply:
+Baseline checks from `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-002/verification.md` still apply:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-017/state-snapshot.json >/dev/null`
+- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-002/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`
 - `cabal build all && cabal test`
 
@@ -114,7 +114,7 @@ Round-specific repair checks:
 - Confirm the admitted diff boundary:
   - `git diff --name-only`
   - expected tracked code paths may include only `mlf2.cabal`, `src/MLF/Research/URI/R2/C1/Prototype/P2.hs`, `src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`, `src/MLF/Research/URI/R2/C1/Prototype/Entrypoint.hs`, `src/MLF/Research/URI/R2/C1/Prototype/Types.hs`, and `test/Research/UriR2C1PrototypeP1Spec.hs`
-  - expected: no `P1.hs`, no `orchestrator/state.json`, no `orchestrator/roadmap.md`, no `orchestrator/rounds/round-016/`, no `app/Main.hs`, no `src-public/`
+  - expected: no `P1.hs`, no `orchestrator/rounds/round-017/state-snapshot.json`, no `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-002/roadmap.md`, no `orchestrator/rounds/round-016/`, no `app/Main.hs`, no `src-public/`
 - Confirm the repaired `P2-W` classification:
   - `python3 -m json.tool orchestrator/rounds/round-017/evidence/P2/attempt-2/check-P2-W.json >/dev/null`
   - `python3 -m json.tool orchestrator/rounds/round-017/evidence/P2/attempt-2/stage-verdict.json >/dev/null`
@@ -130,5 +130,5 @@ Round-specific repair checks:
 
 Reviewer output remains:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/orchestrator/rounds/round-017/review.md` with baseline checks, repair checks, explicit approve or reject decision, and continuity evidence against the accepted `P1` input
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-017/orchestrator/rounds/round-017/review-record.json` only if the repaired round is approved
+- `orchestrator/rounds/round-017/review.md` with baseline checks, repair checks, explicit approve or reject decision, and continuity evidence against the accepted `P1` input
+- `orchestrator/rounds/round-017/review-record.json` only if the repaired round is approved

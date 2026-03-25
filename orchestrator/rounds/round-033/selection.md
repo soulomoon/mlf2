@@ -6,19 +6,27 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: unannotated iso-recursive inference (bounded)
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap`
+- Roadmap Revision: `rev-011`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-011`
+- State Snapshot: `orchestrator/rounds/round-033/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 6: execute `U6` end-to-end verification and next-widening decision gate.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `stage: select-task` for `round-033` with `current_task: null` and `retry: null`, so no same-round retry is active and no earlier stage is forced ahead of normal roadmap selection.
+`orchestrator/rounds/round-033/state-snapshot.json` is parked at `stage: select-task` for `round-033` with `current_task: null` and `retry: null`, so no same-round retry is active and no earlier stage is forced ahead of normal roadmap selection.
 
-`orchestrator/roadmap.md` records `U1` through `U5` as done and leaves `U6` as the only pending and lowest-numbered unfinished item. Under the guider contract, that makes `U6` the next lawful bounded selection.
+`orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-011/roadmap.md` records `U1` through `U5` as done and leaves `U6` as the only pending and lowest-numbered unfinished item. Under the guider contract, that makes `U6` the next lawful bounded selection.
 
 The accepted predecessor evidence is now complete enough for the aggregate decision gate and does not justify any broader implementation step first. `round-028` through `round-032` each finalized `accepted + finalize` for `U1` through `U5`, preserving repaired `URI-R2-C1` as the only live subject and carrying forward bounded result tokens `authority-narrowed`, `uniqueness-owner-stable-refuted`, `constructor-acyclic-termination-refuted`, and `result-type-pipeline-hardening-slice-landed`. The accepted `U5` artifact also records that the bounded result-type/pipeline slice passed the full repo gate while explicitly not pre-deciding `U6`.
 
-The approved successor-roadmap design defines `U6` as the aggregate-only gate that must record exactly one bounded next-step result (`continue-bounded`, `widen-approved`, or `stop-blocked`) before any later roadmap update may refine or widen future work. `orchestrator/retry-subloop.md` tightens that contract further by forbidding `accepted + retry` for `U6`, so this round should consolidate accepted evidence and current bounded verification rather than start another implementation slice.
+The approved successor-roadmap design defines `U6` as the aggregate-only gate that must record exactly one bounded next-step result (`continue-bounded`, `widen-approved`, or `stop-blocked`) before any later roadmap update may refine or widen future work. `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-011/retry-subloop.md` tightens that contract further by forbidding `accepted + retry` for `U6`, so this round should consolidate accepted evidence and current bounded verification rather than start another implementation slice.
 
 `Bugs.md` remains continuity context for the repaired-lane origin story, but it does not authorize reopening broad repair work or silently widening past repaired `URI-R2-C1`. `U6` is the bounded place to decide whether the successor campaign should continue bounded, approve a later explicit widening, or stop blocked.
 

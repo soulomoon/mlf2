@@ -3,15 +3,15 @@
 - Baseline checks:
   - `git branch --show-current` -> pass (`codex/round-054-i1-next-target-bind`).
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `18:  "retry": null`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered roadmap intact; item `21` / `I1` remains pending at line `135` pre-merge).
+  - `python3 -m json.tool orchestrator/rounds/round-054/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-054/state-snapshot.json` -> pass (`2:  "contract_version": 2,`, `18:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-021/roadmap.md` -> pass (ordered roadmap intact; item `21` / `I1` remains pending at line `135` pre-merge).
   - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md` -> pass.
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
-  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-021/retry-subloop.md` -> pass.
   - Continuity presence check via `python3` -> pass (`{"boundary_doc": true, "h4_doc": true, "initial_successor_cycle": true, "item5_handoff_doc": true, "recursive_types_packet": true, "replay_repair_track": true, "research_stop_doc": true, "round_001_033_present": true}`).
   - `test -f docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md` -> pass.
   - `test -f docs/plans/2026-03-20-uri-r2-c1-h2-bounded-implementation-slice.md` -> pass.
@@ -20,10 +20,10 @@
   - Authoritative predecessor record recheck via `python3` over `orchestrator/rounds/round-053/review-record.json` -> pass (`{"artifact_path": true, "attempt": true, "attempt_verdict": true, "checks_all_pass": true, "stage_action": true, "stage_id": true, "status": true}`).
   - Bug-tracker continuity check via `python3` over `/Volumes/src/mlf4/Bugs.md` -> pass (`{'open_empty': True, 'bug_resolved': True}`).
   - `rg -n 'stale guider text|non-authoritative context drift|BUG-2026-03-16-001' orchestrator/rounds/round-053/review.md orchestrator/rounds/round-054/selection.md` -> pass (the stale open-bug sentence remains confined to guider-owned context and the accepted `round-053` review already marks it non-authoritative).
-  - Pre-review `git status --short --untracked-files=all` snapshot -> pass (tracked edit `orchestrator/state.json`; untracked packet files `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md`, `orchestrator/rounds/round-054/implementation-notes.md`, `orchestrator/rounds/round-054/plan.md`, and `orchestrator/rounds/round-054/selection.md`). The tracked `orchestrator/state.json` diff is the pre-existing controller-preparation change, not implementer/reviewer drift.
+  - Pre-review `git status --short --untracked-files=all` snapshot -> pass (tracked edit `orchestrator/rounds/round-054/state-snapshot.json`; untracked packet files `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md`, `orchestrator/rounds/round-054/implementation-notes.md`, `orchestrator/rounds/round-054/plan.md`, and `orchestrator/rounds/round-054/selection.md`). The tracked `orchestrator/rounds/round-054/state-snapshot.json` diff is the pre-existing controller-preparation change, not implementer/reviewer drift.
   - `git status --short --untracked-files=all -- src src-public app test mlf2.cabal` -> pass (no output; no code-path edits are present).
   - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` -> pass (no output).
-  - `git diff --name-only -- orchestrator/roadmap.md docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md docs/plans/2026-03-20-uri-r2-c1-h2-bounded-implementation-slice.md docs/plans/2026-03-20-uri-r2-c1-h3-bounded-verification-gate.md docs/plans/2026-03-20-uri-r2-c1-h4-next-cycle-decision-gate.md orchestrator/rounds/round-053/review-record.json` -> pass (no output; no frozen predecessor artifact, roadmap, or predecessor-review drift).
+  - `git diff --name-only -- orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-021/roadmap.md docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md docs/plans/2026-03-20-uri-r2-c1-h2-bounded-implementation-slice.md docs/plans/2026-03-20-uri-r2-c1-h3-bounded-verification-gate.md docs/plans/2026-03-20-uri-r2-c1-h4-next-cycle-decision-gate.md orchestrator/rounds/round-053/review-record.json` -> pass (no output; no frozen predecessor artifact, roadmap, or predecessor-review drift).
   - Skip note: `cabal build all && cabal test` was intentionally not rerun. `I1` is docs-only by contract, and fresh `git status --short --untracked-files=all -- src src-public app test mlf2.cabal` plus `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` both returned no output.
 
 - Task-specific checks:

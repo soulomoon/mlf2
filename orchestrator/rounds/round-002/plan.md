@@ -8,22 +8,22 @@ Deliver the smallest docs-only invariant-audit slice that closes roadmap item 2 
 
 - This round is docs-only.
 - Do not edit `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
-- Do not edit `orchestrator/roadmap.md` in this round.
+- Do not edit `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-002/roadmap.md` in this round.
 - Do not implement solver or inference behavior changes.
 - Do not rewrite predecessor authoritative packet history under `tasks/todo/2026-03-11-recursive-types-orchestration/`.
 - Preserve the explicit-only / non-equi-recursive / non-cyclic-graph boundary as mandatory current behavior.
 
 ## Target Files
 
-1. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-002/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`
-2. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-002/orchestrator/rounds/round-002/implementation-notes.md`
+1. Create `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`
+2. Create `orchestrator/rounds/round-002/implementation-notes.md`
 
 ## Sequential Tasks
 
 ### Task 1 — Write the bounded invariant audit document
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-002/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`
 
 Required contents:
 - State inherited baseline from item 1: automatic recursive-type inference remains unresolved; explicit-only recursive behavior is the active boundary.
@@ -51,7 +51,7 @@ Required contents:
 ### Task 2 — Record round implementation notes
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-002/orchestrator/rounds/round-002/implementation-notes.md`
+- `orchestrator/rounds/round-002/implementation-notes.md`
 
 Required contents:
 - Short summary of the audit artifact and why it satisfies roadmap item 2.
@@ -65,14 +65,14 @@ Required contents:
 3. The audit preserves and explicitly restates the explicit-only / non-equi-recursive / non-cyclic-graph boundary.
 4. The audit defines bounded proof obligations for any later feasibility spike and does not include implementation steps.
 5. `orchestrator/rounds/round-002/implementation-notes.md` exists and records docs-only execution plus continuity handling.
-6. Diff remains limited to planned docs/round artifacts and does not modify production code, `orchestrator/roadmap.md`, or predecessor authoritative logs.
+6. Diff remains limited to planned docs/round artifacts and does not modify production code, `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-002/roadmap.md`, or predecessor authoritative logs.
 
 ## Reviewer And Verification Checks
 
-Baseline checks (from `orchestrator/verification.md`):
+Baseline checks (from `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-002/verification.md`):
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-002/state-snapshot.json >/dev/null`
+- `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-002/roadmap.md`
 - Reviewer-recorded guidance sync check for `AGENTS.md`, `tasks/readme`, `TODO.md`, `CHANGELOG.md`, and `implementation_notes.md` (updated or intentionally unchanged, with rationale).
 
 Round-specific checks:
@@ -88,7 +88,7 @@ Round-specific checks:
   - `rg -n '2026-03-11-recursive-types-orchestration|2026-03-13-m6-pipeline-feasibility-spike|2026-03-13-m7-tymu-design-resolution' docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`
 
 Review output requirements:
-- Reviewer writes `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-002/orchestrator/rounds/round-002/review.md` with:
+- Reviewer writes `orchestrator/rounds/round-002/review.md` with:
   - baseline checks evidence,
   - round-specific checks evidence,
   - explicit decision (`approve` or `reject`),

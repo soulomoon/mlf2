@@ -1,3 +1,22 @@
+## 2026-03-25 - Repo-local orchestrator migrated to revisioned roadmap bundles
+
+- The repo-local orchestrator now resolves its live control plane through
+  `orchestrator/state.json` fields `roadmap_id`, `roadmap_revision`, and
+  `roadmap_dir` instead of treating top-level `orchestrator/roadmap.md`,
+  `orchestrator/retry-subloop.md`, and `orchestrator/verification.md` as
+  authoritative.
+- Historical roadmap epochs were materialized under
+  `orchestrator/roadmaps/<roadmap_id>/rev-###/`, and completed round packets
+  now point at stable roadmap bundle paths plus per-round
+  `state-snapshot.json` files.
+- Completed rounds keep their accepted substantive truth unchanged, but older
+  packets now carry migration-added roadmap provenance and, where necessary,
+  migration-generated `review-record.json` placeholders for rounds that
+  predated the repo-local review-record schema.
+- The currently open `round-091` successor loop stays resumable on roadmap
+  item `3` under the same same-lane retained-child bounded subject, now using
+  the revisioned-roadmap locator contract.
+
 ## 2026-03-25 - Strategic loop completed through round-088 and live control plane refreshed for the bounded persistence gate
 
 - The strategic general automatic iso-recursive inference control plane is now
@@ -10,11 +29,10 @@
   `continue within the current architecture`, and the selected successor is
   one bounded same-lane retained-child `stable visible persistence` gate
   inside the inherited acyclic model.
-- The live top-level `orchestrator/` is now refreshed in place for that
-  bounded gate. The new roadmap stages are: freeze the exact persistence case
-  and ledger, audit the current continuity breakpoint, land the minimum
-  bounded slice or proof, revalidate end to end, and record the bounded
-  follow-on decision.
+- The live orchestrator control plane is refreshed in place for that bounded
+  gate. Its roadmap stages are: freeze the exact persistence case and ledger,
+  audit the current continuity breakpoint, land the minimum bounded slice or
+  proof, revalidate end to end, and record the bounded follow-on decision.
 - Completed rounds `round-001` through `round-088` remain predecessor
   evidence, and the inherited explicit-only / non-equi-recursive /
   non-cyclic-graph / no-second-interface / no-fallback boundary remains

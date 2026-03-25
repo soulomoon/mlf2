@@ -26,5 +26,8 @@
     "N1-SCOPE-ALIGNMENT": "pass"
   },
   "final_outcome": "reopen-planning-only",
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-001"
 }

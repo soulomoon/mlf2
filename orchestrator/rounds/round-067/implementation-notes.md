@@ -14,15 +14,15 @@
 ## Docs-Only Verification Performed
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-067/state-snapshot.json >/dev/null`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-067/state-snapshot.json`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/retry-subloop.md`
 - `test -f docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
 - `python3 -m json.tool orchestrator/rounds/round-066/review-record.json >/dev/null`
 - `python3 - <<'PY'`
@@ -39,7 +39,7 @@
   `PY`
 - `rg -n 'fail closed|no fresh lawful exact successor slice|separate accepted roadmap/selection change' docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
 - `rg -n 'Attempt verdict: `accepted`|Stage action: `finalize`|fail-closed outcome is therefore a valid authoritative `L1` result' orchestrator/rounds/round-066/review.md`
-- `rg -n '^34\. \[pending\] Execute the bounded `L2` post-`L1` fail-closed successor decision gate for repaired `URI-R2-C1`' orchestrator/roadmap.md`
+- `rg -n '^34\. \[pending\] Execute the bounded `L2` post-`L1` fail-closed successor decision gate for repaired `URI-R2-C1`' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/roadmap.md`
 - `git status --short --untracked-files=all`
 - `git diff --name-only`
 

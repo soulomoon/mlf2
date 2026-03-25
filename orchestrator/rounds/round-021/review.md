@@ -2,12 +2,12 @@
 
 - Baseline checks:
   - `git diff --check` (pass)
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` (pass)
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` (pass; shows `contract_version: 2` and `retry: null`)
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` (pass; ordered status list present)
+  - `python3 -m json.tool orchestrator/rounds/round-021/state-snapshot.json >/dev/null` (pass)
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-021/state-snapshot.json` (pass; shows `contract_version: 2` and `retry: null`)
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-002/roadmap.md` (pass; ordered status list present)
   - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md` (pass)
   - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` (pass)
-  - `test -f orchestrator/retry-subloop.md` (pass)
+  - `test -f orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-002/retry-subloop.md` (pass)
   - `cabal build all && cabal test` (pass; `1119 examples, 0 failures`; no post-success Cabal log-permission failure observed in this run)
   - Continuity check: only `orchestrator/rounds/round-021/` is new in this round; inherited review/evidence records for rounds `016..020` remain untouched.
 
@@ -22,7 +22,7 @@
   - Forbidden widening checks:
     - no scenario/subject widening in D2 evidence or artifact;
     - no second executable interface introduced (entrypoint extension remains inside existing replay-root-cause route);
-    - no controller-file edits (`orchestrator/state.json`, `orchestrator/roadmap.md` unchanged).
+    - no controller-file edits (`orchestrator/rounds/round-021/state-snapshot.json`, `orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-002/roadmap.md` unchanged).
 
 - Implemented stage result: `pass`
 - Attempt verdict: `accepted`

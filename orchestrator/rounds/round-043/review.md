@@ -3,21 +3,21 @@
 - Baseline checks:
   - `git branch --show-current` -> pass (`codex/round-043-f2-scheme-alias-hardening`).
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `F4` list intact; `F2` remains pending pre-merge at line `79`).
+  - `python3 -m json.tool orchestrator/rounds/round-043/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-043/state-snapshot.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-010/roadmap.md` -> pass (ordered `C1` through `F4` list intact; `F2` remains pending pre-merge at line `79`).
   - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
-  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-010/retry-subloop.md` -> pass.
   - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `replay_repair_track=True`, `initial_successor_cycle=True`, `recursive_types_packet=True`, `boundary_doc=True`, `repair_doc=True`).
   - Authoritative predecessor record recheck via `python3` over `round-039` through `round-042` -> pass (`round-039 E2 accepted finalize authoritative docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`, `round-040 E3 accepted finalize authoritative docs/plans/2026-03-18-uri-r2-c1-e3-bounded-verification-gate.md`, `round-041 E4 accepted finalize authoritative docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md`, `round-042 F1 accepted finalize authoritative docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md`).
   - Pre-review `git status --short --untracked-files=all` snapshot -> pass (tracked edits only `src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/PipelineSpec.hs`; untracked packet files only `docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md`, `orchestrator/rounds/round-043/implementation-notes.md`, plus pre-existing round control files `orchestrator/rounds/round-043/plan.md` and `orchestrator/rounds/round-043/selection.md`).
   - Pre-review `git diff --name-only` -> pass (`src/MLF/Elab/Run/ResultType/Fallback.hs`, `test/PipelineSpec.hs`).
   - Pre-review `git diff --name-only -- . ':(exclude)src/MLF/Elab/Run/ResultType/Fallback.hs' ':(exclude)test/PipelineSpec.hs'` -> pass (no output).
-  - `git diff --name-only -- orchestrator/state.json orchestrator/roadmap.md Bugs.md docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md orchestrator/rounds/round-039/review-record.json orchestrator/rounds/round-040/review-record.json orchestrator/rounds/round-041/review-record.json orchestrator/rounds/round-042/review-record.json` -> pass (no output; no controller-state, roadmap, bug-tracker, predecessor-history drift).
+  - `git diff --name-only -- orchestrator/rounds/round-043/state-snapshot.json orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-010/roadmap.md Bugs.md docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md orchestrator/rounds/round-039/review-record.json orchestrator/rounds/round-040/review-record.json orchestrator/rounds/round-041/review-record.json orchestrator/rounds/round-042/review-record.json` -> pass (no output; no controller-state, roadmap, bug-tracker, predecessor-history drift).
 
 - Task-specific checks:
   - `F2-CONTRACT` -> pass: `selection.md`, `plan.md`, `implementation-notes.md`, and `docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md` all frame the round as `F2`, `attempt-1`, `retry: null`, fixed to repaired `URI-R2-C1`, and still inside the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary.

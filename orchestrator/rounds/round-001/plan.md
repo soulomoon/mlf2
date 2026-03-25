@@ -8,21 +8,21 @@ Deliver the smallest docs-only slice that closes roadmap item 1 by writing a sin
 
 - This round is docs-only.
 - Do not edit `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
-- Do not change `orchestrator/roadmap.md` in this round.
+- Do not change `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-001/roadmap.md` in this round.
 - Do not reopen predecessor campaign milestones as pending.
 - Do not plan or imply solver-behavior implementation, inference widening, or a feasibility spike.
 
 ## Target Files
 
-1. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-001/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-2. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-001/orchestrator/rounds/round-001/implementation-notes.md`
+1. Create `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+2. Create `orchestrator/rounds/round-001/implementation-notes.md`
 
 ## Sequential Tasks
 
 ### Task 1 — Write inherited baseline and scope contract document
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-001/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 
 Required contents:
 - A baseline section that explicitly states inherited truth:
@@ -45,7 +45,7 @@ Required contents:
 ### Task 2 — Record round implementation notes
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-001/orchestrator/rounds/round-001/implementation-notes.md`
+- `orchestrator/rounds/round-001/implementation-notes.md`
 
 Required contents:
 - Short summary of what was added and why it satisfies roadmap item 1.
@@ -62,10 +62,10 @@ Required contents:
 
 ## Reviewer And Verification Checks
 
-Baseline checks (from `orchestrator/verification.md`):
+Baseline checks (from `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-001/verification.md`):
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-001/state-snapshot.json >/dev/null`
+- `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-001/roadmap.md`
 - Reviewer-recorded guidance sync check for `AGENTS.md`, `tasks/readme`, `TODO.md`, `CHANGELOG.md`, and `implementation_notes.md` (updated or intentionally unchanged, with rationale).
 
 Round-specific checks:
@@ -78,7 +78,7 @@ Round-specific checks:
   - `rg -n '2026-03-11-recursive-types-orchestration|2026-03-11-recursive-types-roadmap|2026-03-13-m6-pipeline-feasibility-spike|2026-03-13-m7-tymu-design-resolution' docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 
 Review output requirements:
-- Reviewer writes `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-001/orchestrator/rounds/round-001/review.md` with:
+- Reviewer writes `orchestrator/rounds/round-001/review.md` with:
   - baseline checks evidence,
   - round-specific checks evidence,
   - explicit decision (`approve` or `reject`),

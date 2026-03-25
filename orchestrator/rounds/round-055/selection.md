@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-022`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022`
+- State Snapshot: `orchestrator/rounds/round-055/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 22: execute the `I2` bounded local-binding single-base
@@ -14,7 +22,7 @@ frozen by `I1`.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` already fixes the live controller state at
+`orchestrator/rounds/round-055/state-snapshot.json` already fixes the live controller state at
 `active_round_id: "round-055"`, `active_round_dir:
 "orchestrator/rounds/round-055"`, `stage: "select-task"`,
 `current_task: null`, `retry: null`, and `last_completed_round:
@@ -22,11 +30,11 @@ frozen by `I1`.
 interrupted plan/implement/review stage to continue, and no lawful reason to
 skip fresh roadmap selection.
 
-`orchestrator/roadmap.md` marks items 1 through 21 done and leaves item 22
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/roadmap.md` marks items 1 through 21 done and leaves item 22
 (`I2`) as the lowest-numbered unfinished roadmap entry. Items 23 (`I3`) and
 24 (`I4`) both depend on item 22, so the guider contract requires selecting
 `I2` now unless retry state forces otherwise. The live retry state does not:
-`retry` is `null`, and `orchestrator/retry-subloop.md` therefore does not
+`retry` is `null`, and `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/retry-subloop.md` therefore does not
 authorize staying inside any prior round.
 
 The accepted `I1` evidence makes the immediate successor precise rather than
@@ -40,8 +48,8 @@ the adjacent local-binding single-base `baseTarget -> baseC` fail-closed lane
 in `src/MLF/Elab/Run/ResultType/Fallback.hs`, together with its same-lane
 `targetC` target-selection use, with future ownership limited to:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/test/PipelineSpec.hs`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
 
 Because `I1` already performed the bind/selection step, the next lawful stage
 is the bounded implementation slice `I2`, not another bind, not direct
@@ -66,7 +74,7 @@ state that lawfully reopens replay work or displaces the `I1`-frozen next
 slice.
 
 Current repository status before writing this selection showed only the
-expected controller-state preparation (`M orchestrator/state.json`) and no
+expected controller-state preparation (`M orchestrator/rounds/round-055/state-snapshot.json`) and no
 conflicting implementation diff. That status does not override roadmap order,
 but it does confirm there is no repository-local conflict forcing a different
 selection.

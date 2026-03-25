@@ -20,11 +20,11 @@ Retry state: `null`
 
 - `git diff --check`
   Result: pass.
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-069/state-snapshot.json >/dev/null`
   Result: pass.
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-069/state-snapshot.json`
   Result: pass; matched `contract_version: 2` and `retry: null`.
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-002/roadmap.md`
   Result: pass; matched the ordered roadmap items, including pending `N2`.
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   Result: pass.
@@ -38,9 +38,9 @@ Retry state: `null`
   Result: pass.
 - `test -f tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
   Result: pass.
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-002/retry-subloop.md`
   Result: pass.
-- `rg -n '^2\. \[pending\] Execute the `N2` thesis-backed next live-subject selection inside the accepted planning-only lane' orchestrator/roadmap.md`
+- `rg -n '^2\. \[pending\] Execute the `N2` thesis-backed next live-subject selection inside the accepted planning-only lane' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-002/roadmap.md`
   Result: pass.
 - `rg -n 'N2 — Thesis-backed next live-subject selection|Research the thesis-backed next admissible subject and record explicit deferred alternatives' tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
   Result: pass.

@@ -59,7 +59,7 @@
   - `review_snapshot: "orchestrator/rounds/round-090/reviews/attempt-2.md"`
   - `final_outcome: "same-lane-retained-child-first-breakpoint-localized-to-phase-6-elaboration"`
   - `terminal_reason: "none"`
-- `orchestrator/retry-subloop.md` allows roadmap item `2` to finalize as
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/retry-subloop.md` allows roadmap item `2` to finalize as
   `accepted + finalize`, and the active controller state already places this
   round at `active_round_id: "round-090"`, `stage: "merge"`,
   `current_task: "item-2"`, `branch: "codex/round-090"`, and
@@ -72,8 +72,8 @@
 
 - This round does not reset authority. Completed rounds `round-001` through
   `round-089` remain authoritative historical evidence for the refreshed
-  control plane exactly as `orchestrator/roadmap.md` and
-  `orchestrator/retry-subloop.md` describe.
+  control plane exactly as `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/roadmap.md` and
+  `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/retry-subloop.md` describe.
 - The accepted `round-081` `N14` decision artifact at
   `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
   remains the predecessor continuity anchor for the exact same-lane

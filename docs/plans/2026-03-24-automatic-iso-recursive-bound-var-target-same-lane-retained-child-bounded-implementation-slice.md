@@ -16,10 +16,10 @@ This artifact implements exactly one bounded `N12` slice inside accepted `N11`.
 
 The round makes the already-frozen same-lane local `TypeRef` retained-child
 `boundVarTarget -> targetC` packet reviewer-auditable in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-079/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 and refreshes only the existing focused
 `ARI-C1 feasibility characterization (bounded prototype-only)` block in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-079/test/PipelineSpec.hs`.
+`test/PipelineSpec.hs`.
 
 This artifact does not authorize `N13`, `N14`, roadmap edits,
 `orchestrator/state.json` edits, bug-tracker edits, predecessor-history
@@ -115,7 +115,7 @@ not rewrite this attempt or reviewer-owned history.
 ### TDD Red -> Green
 
 - Source-guard refresh was written first in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-079/test/PipelineSpec.hs`.
+  `test/PipelineSpec.hs`.
 - Focused red run:
   `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'`
   -> fail (`20 examples, 1 failure`) in
@@ -157,9 +157,9 @@ Commands executed in:
 
 This round changed only the bounded round-owned production/test/doc slice:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-079/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-079/test/PipelineSpec.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-079/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-bounded-implementation-slice.md`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
+- `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-bounded-implementation-slice.md`
 
 Accepted predecessor docs, roadmap/controller files, `Bugs.md`, and every
 non-selected route remained unchanged.

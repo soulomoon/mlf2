@@ -27,5 +27,8 @@
     "ITEM2-RETRY-SCHEMA": "pass"
   },
   "final_outcome": "same-lane-retained-child-first-breakpoint-localized-to-phase-6-elaboration",
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002"
 }

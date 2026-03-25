@@ -2,12 +2,12 @@
 
 - Baseline checks:
   - `git diff --check` -> pass.
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`contract_version: 2`, `retry: null` present).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered parseable roadmap items present).
+  - `python3 -m json.tool orchestrator/rounds/round-020/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-020/state-snapshot.json` -> pass (`contract_version: 2`, `retry: null` present).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-001/roadmap.md` -> pass (ordered parseable roadmap items present).
   - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md` -> pass.
   - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` -> pass.
-  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - `test -f orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-001/retry-subloop.md` -> pass.
   - `cabal build all && cabal test` -> pass (`1117 examples, 0 failures`; no post-success Cabal log-permission failure occurred in this reviewer run).
   - Continuity guards:
     - `git diff --name-only | rg '^orchestrator/rounds/round-(00[1-9]|01[0-9])/' || true` -> pass (no matches).
@@ -41,7 +41,7 @@
     - Evidence immutability proof:
       - SHA-256 hashes for all attempt-1 JSON files were identical before and after rejection commands.
   - Forbidden-widening and controller-file checks:
-    - `git diff --name-only` and `git status --short --untracked-files=all` show no edits to `orchestrator/state.json`, `orchestrator/roadmap.md`, `src-public/`, or historical rounds `round-016` through `round-019`.
+    - `git diff --name-only` and `git status --short --untracked-files=all` show no edits to `orchestrator/rounds/round-020/state-snapshot.json`, `orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-001/roadmap.md`, `src-public/`, or historical rounds `round-016` through `round-019`.
 
 - Implemented stage result: `pass`
 - Attempt verdict: `accepted`

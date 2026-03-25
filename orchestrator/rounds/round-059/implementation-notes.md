@@ -19,7 +19,7 @@ fail-closed contrast, and source-guard coverage inside the existing
 - preserved completed `rootLocalSingleBase`, preserved scheme-alias/base-like
   `baseTarget`, `rootLocalMultiInst`, `rootLocalInstArgMultiBase`,
   retained-target behavior, non-local fail-closed behavior, and replay paths;
-- did not edit `orchestrator/state.json` or `/Volumes/src/mlf4/Bugs.md`; and
+- did not edit `orchestrator/rounds/round-059/state-snapshot.json` or `/Volumes/src/mlf4/Bugs.md`; and
 - left the pre-existing round controller files untouched.
 
 ## Verification Posture

@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-016`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-016`
+- State Snapshot: `orchestrator/rounds/round-049/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 16: execute the bounded `G4` next-cycle decision gate for the
@@ -14,12 +22,12 @@ accepted `G3`-reverified repaired `URI-R2-C1` local-binding
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `active_round_id: "round-049"`,
+`orchestrator/rounds/round-049/state-snapshot.json` is parked at `active_round_id: "round-049"`,
 `stage: "select-task"`, `current_task: null`, and `retry: null`, so there is no
 same-round retry to resume and no prior review outcome that overrides normal
 roadmap ordering.
 
-`orchestrator/roadmap.md` now marks items 1 through 15 done. Item 16 (`G4`) is
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-016/roadmap.md` now marks items 1 through 15 done. Item 16 (`G4`) is
 the only remaining pending roadmap entry, so it is the next lawful selection.
 There is no lower-numbered unfinished item left to run first.
 

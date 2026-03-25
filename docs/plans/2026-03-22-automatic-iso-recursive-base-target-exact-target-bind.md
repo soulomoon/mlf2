@@ -77,34 +77,34 @@ already-accepted local `TypeRef` lane and not any repaired-queue reopen.
 The exact narrowing comes from these unchanged code and test anchors in the
 round worktree:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Elab/Run/ResultType/Fallback.hs:367-408`
+1. `src/MLF/Elab/Run/ResultType/Fallback.hs:367-408`
    computes `baseTarget` before any local-lane retention decision. The packet
    under study remains the existing generic `baseTarget` computation for a
    scheme-root alias-bound / base-like root.
-2. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Elab/Run/ResultType/Fallback.hs:521-548`
+2. `src/MLF/Elab/Run/ResultType/Fallback.hs:521-548`
    names the accepted local proof cluster. `rootLocalEmptyCandidateSchemeAliasBaseLike`
    and `rootLocalSchemeAliasBaseLike` are both gated by
    `rootBindingIsLocalType`, so they already own the local lanes and cannot be
    rebound here.
-3. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Elab/Run/ResultType/Fallback.hs:693-728`
+3. `src/MLF/Elab/Run/ResultType/Fallback.hs:693-728`
    keeps `keepTargetFinal` local-only and then consumes the preserved packet via
    the downstream generic `Just baseC | rootIsSchemeAlias && rootBoundIsBaseLike -> baseC`
    `targetC` arm. That same-lane use is the only consumer frozen here.
-4. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/test/PipelineSpec.hs:1244-1269`
+4. `test/PipelineSpec.hs:1244-1269`
    defines `schemeAliasBaseLikeFallback`. It extracts the `AVar` body root,
    optionally localizes that root with `makeLocalTypeRoot`, and then reattaches
    the canonical `Int` base node to `rootNid` with `rebindRootTo`.
-5. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/test/PipelineSpec.hs:1594-1606`
+5. `test/PipelineSpec.hs:1594-1606`
    preserves the already-accepted local contrasts:
    `localEmptyCandidateSchemeAliasBaseLikeFallback True` owns the local
    empty-candidate `baseTarget -> baseC` lane, while
    `schemeAliasBaseLikeFallback True` owns the local retained-final
    `targetC -> rootFinal` continuity lane.
-6. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/test/PipelineSpec.hs:1622-1625`
+6. `test/PipelineSpec.hs:1622-1625`
    preserves the remaining non-local packet. `schemeAliasBaseLikeFallback False`
    returns `TBase (BaseTy "Int")` and `containsMu False`, which distinguishes
    the preserved non-local packet from the accepted local `rootFinal` lane.
-7. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/test/PipelineSpec.hs:1698-1762`
+7. `test/PipelineSpec.hs:1698-1762`
    keeps the source guard ordering explicit: the accepted local predicates stay
    ahead of the generic `rootIsSchemeAlias && rootBoundIsBaseLike` arm, and the
    local `keepTargetFinal` cluster remains separate.
@@ -121,14 +121,14 @@ The only frozen `N4` target is:
 
 the preserved non-local generic scheme-root alias-bound / base-like
 `baseTarget -> baseC` packet in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Elab/Run/ResultType/Fallback.hs`,
+`src/MLF/Elab/Run/ResultType/Fallback.hs`,
 limited to the existing generic `baseTarget` computation at
 `Fallback.hs:367-408` and the downstream same-lane `targetC` consumption at
 `Fallback.hs:700-710`, as exercised by
 `schemeAliasBaseLikeFallback False` in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/test/PipelineSpec.hs:1244-1269`
+`test/PipelineSpec.hs:1244-1269`
 and
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/test/PipelineSpec.hs:1622-1625`.
+`test/PipelineSpec.hs:1622-1625`.
 
 Required interpretation of that one bounded target:
 
@@ -180,7 +180,7 @@ That bounded story is satisfied only in this narrow sense:
    and the graphic presentation does not directly express them. So alias-bound
    handling must stay explicit and local rather than turning into a broader
    fallback or search rule.
-3. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Frontend/Normalize.hs:20-35`
+3. `src/MLF/Frontend/Normalize.hs:20-35`
    already keeps alias-bound normalization explicit and structural: variable
    bounds are inlined only through explicit substitution, with self-bound and
    non-structural cases rejected.
@@ -201,7 +201,7 @@ reconstruction axis:
    because `keepTargetFinal` is gated by `rootBindingIsLocalType` while the
    preserved packet is the non-local `schemeAliasBaseLikeFallback False` case.
 3. The selected packet also stops before any
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Elab/Run/Scope.hs:127-160`
+   `src/MLF/Elab/Run/Scope.hs:127-160`
    `schemeBodyTarget` escape. The frozen same-lane consumer is still the direct
    `targetC -> baseC` arm.
 
@@ -226,7 +226,7 @@ This exact-target bind keeps all other routes out-of-scope:
   `rootLocalInstArgSingleBase` singleton-base lanes;
 - `rootLocalMultiInst`, `rootLocalInstArgMultiBase`, `boundVarTarget`,
   `boundTarget`, and `schemeBodyTarget`;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-071/src/MLF/Elab/Run/ResultType/View.hs`;
+- `src/MLF/Elab/Run/ResultType/View.hs`;
 - repaired `URI-R2-C1` as live work;
 - replay reopen;
 - `MLF.Elab.Inst` and `InstBot`;

@@ -14,7 +14,7 @@
 ## Takeover continuity and predecessor-history note
 
 - Continuity is preserved by referencing accepted predecessor artifacts (`docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`, `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`, and `tasks/todo/2026-03-11-recursive-types-orchestration/`) as reference-only inputs.
-- The approved review confirms predecessor authoritative history remained immutable and this round did not modify `orchestrator/roadmap.md`.
+- The approved review confirms predecessor authoritative history remained immutable and this round did not modify `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-003/roadmap.md`.
 
 ## Follow-up notes
 

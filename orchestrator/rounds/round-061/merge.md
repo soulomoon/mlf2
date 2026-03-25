@@ -41,7 +41,7 @@
   `authoritative_result: pass`,
   `review_snapshot: orchestrator/rounds/round-061/reviews/attempt-1.md`, and
   `artifact_path: docs/plans/2026-03-21-uri-r2-c1-j4-next-cycle-decision-gate.md`.
-- This round stayed at idle `retry: null`, so `orchestrator/retry-subloop.md`
+- This round stayed at idle `retry: null`, so `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-028/retry-subloop.md`
   is satisfied directly by the authoritative `accepted + finalize` review
   snapshot and matching `review-record.json`. No retry-subloop reconciliation
   is needed beyond that match.

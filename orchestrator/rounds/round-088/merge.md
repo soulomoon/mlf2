@@ -50,8 +50,8 @@
   - `artifact_path: "docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md"`
   - `review_snapshot: "orchestrator/rounds/round-088/reviews/attempt-1.md"`
   - `final_outcome: "continue-within-current-architecture-with-same-lane-retained-child-stable-visible-persistence-gate-selected"`
-- `orchestrator/retry-subloop.md` permits merge preparation only after
-  `accepted + finalize`, and `orchestrator/state.json` already places this
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-007/retry-subloop.md` permits merge preparation only after
+  `accepted + finalize`, and `orchestrator/rounds/round-088/state-snapshot.json` already places this
   round at `active_round_id: "round-088"`, `stage: "merge"`,
   `current_task: "item-7"`, and `retry: null`.
 - No same-round retry remains open: `attempt-1` is authoritative and no
@@ -61,8 +61,8 @@
 
 - This round does not reset authority. Completed rounds `round-001` through
   `round-081` remain authoritative historical evidence for the refreshed
-  control plane exactly as `orchestrator/roadmap.md` and
-  `orchestrator/retry-subloop.md` describe.
+  control plane exactly as `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-007/roadmap.md` and
+  `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-007/retry-subloop.md` describe.
 - The accepted `round-081` `N14` decision artifact at
   `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
   remains the predecessor continuity anchor from the prior control plane:

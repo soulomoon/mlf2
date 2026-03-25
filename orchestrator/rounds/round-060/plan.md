@@ -4,7 +4,7 @@
 
 Execute only roadmap item `J3` and prepare one accepted docs/evidence artifact
 at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/docs/plans/2026-03-20-uri-r2-c1-j3-bounded-verification-gate.md`.
+`docs/plans/2026-03-20-uri-r2-c1-j3-bounded-verification-gate.md`.
 
 This is the initial `J3` plan for `attempt-1` with `retry: null`. The round
 must stay docs-only and reverify only the accepted `J2` local-binding
@@ -15,9 +15,9 @@ lane under repaired `URI-R2-C1`.
 `J3` must record current bounded evidence from exactly these surfaces:
 
 1. read-only anchor checks in
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/src/MLF/Elab/Run/ResultType/Fallback.hs`
+   `src/MLF/Elab/Run/ResultType/Fallback.hs`
    and
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/test/PipelineSpec.hs`
+   `test/PipelineSpec.hs`
    for the accepted `rootLocalInstArgSingleBase` /
    `baseTarget -> baseC` / same-lane `targetC` lane only;
 2. one fresh rerun of
@@ -44,7 +44,7 @@ file inside this round.
 - Retry state: `null`
 - Fixed live subject: repaired `URI-R2-C1`
 - Active worktree:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060`
+  `.worktrees/round-060`
 - Fixed inherited boundary:
   `explicit-only / non-equi-recursive / non-cyclic-graph / no second interface / no compatibility or convenience fallback widening`
 - Stage mode: docs-only bounded verification/evidence consolidation only
@@ -85,7 +85,7 @@ Accepted carry-forward facts that must remain binding throughout `J3`:
 
 Current repository state is already non-pristine:
 
-- `M orchestrator/state.json`
+- `M orchestrator/rounds/round-060/state-snapshot.json`
 - `?? orchestrator/rounds/round-060/selection.md`
 
 Treat those as pre-existing controller/guider preparation. Respect them and do
@@ -93,24 +93,24 @@ not revert, rewrite, or expand them while executing `J3`.
 
 ## Authoritative Inputs To Preserve
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/AGENTS.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/orchestrator/roles/planner.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/orchestrator/rounds/round-060/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/docs/plans/2026-03-20-uri-r2-c1-i4-next-cycle-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/docs/plans/2026-03-20-uri-r2-c1-j1-next-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/docs/plans/2026-03-20-uri-r2-c1-j2-bounded-implementation-slice.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/orchestrator/rounds/round-057/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/orchestrator/rounds/round-058/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/orchestrator/rounds/round-059/review-record.json`
+- `AGENTS.md`
+- `orchestrator/roles/planner.md`
+- `orchestrator/rounds/round-060/state-snapshot.json`
+- `orchestrator/rounds/round-060/selection.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/verification.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/retry-subloop.md`
+- `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
+- `docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
+- `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
+- `docs/plans/2026-03-20-uri-r2-c1-i4-next-cycle-decision-gate.md`
+- `docs/plans/2026-03-20-uri-r2-c1-j1-next-target-bind.md`
+- `docs/plans/2026-03-20-uri-r2-c1-j2-bounded-implementation-slice.md`
+- `orchestrator/rounds/round-057/review-record.json`
+- `orchestrator/rounds/round-058/review-record.json`
+- `orchestrator/rounds/round-059/review-record.json`
 - `/Volumes/src/mlf4/Bugs.md`
 
 ## File Ownership For This Round
@@ -128,10 +128,10 @@ not revert, rewrite, or expand them while executing `J3`.
 - `orchestrator/rounds/round-057/review-record.json`
 - `orchestrator/rounds/round-058/review-record.json`
 - `orchestrator/rounds/round-059/review-record.json`
-- `orchestrator/state.json`
+- `orchestrator/rounds/round-060/state-snapshot.json`
 - `orchestrator/rounds/round-060/selection.md`
-- `orchestrator/verification.md`
-- `orchestrator/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/verification.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/retry-subloop.md`
 - `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
 - `docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
@@ -145,8 +145,8 @@ not revert, rewrite, or expand them while executing `J3`.
 
 ### Preserve Unchanged
 
-- `orchestrator/state.json`
-- `orchestrator/roadmap.md`
+- `orchestrator/rounds/round-060/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/roadmap.md`
 - `orchestrator/rounds/round-060/selection.md`
 - `orchestrator/rounds/round-060/implementation-notes.md`
 - `orchestrator/rounds/round-060/review.md`
@@ -205,7 +205,7 @@ Recommended evidence commands for this step:
 ### Task 2 - Collect read-only anchor evidence for the accepted `J2` lane
 
 - Inspect the existing selected-lane logic in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/src/MLF/Elab/Run/ResultType/Fallback.hs`
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`
   without editing it.
 - Capture line-referenced evidence for all of the following:
   - the accepted inst-arg-only singleton-base `baseTarget -> baseC` branch at
@@ -226,7 +226,7 @@ Recommended evidence commands for this step:
 - Inspect the focused
   `describe "ARI-C1 feasibility characterization (bounded prototype-only)"`
   block in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/test/PipelineSpec.hs`
+  `test/PipelineSpec.hs`
   without editing it.
 - Capture line-referenced evidence showing the accepted bounded block still
   includes:
@@ -258,17 +258,17 @@ Recommended evidence commands for this step:
 ### Task 3 - Re-run the bounded verification suite required for `J3`
 
 - Run the baseline checks required by
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/orchestrator/verification.md`:
+  `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/verification.md`:
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `python3 -m json.tool orchestrator/rounds/round-060/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-060/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/roadmap.md`
   - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-  - `test -f orchestrator/retry-subloop.md`
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/retry-subloop.md`
 - Run exactly one fresh focused rerun of the bounded prototype block:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'`
 - Run exactly one fresh full repo gate:
@@ -304,7 +304,7 @@ Recommended evidence commands for this step:
   - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'`
 - In the canonical `J3` artifact, distinguish:
   - pre-existing controller/guider preparation
-    (`orchestrator/state.json` and `orchestrator/rounds/round-060/selection.md`);
+    (`orchestrator/rounds/round-060/state-snapshot.json` and `orchestrator/rounds/round-060/selection.md`);
   - planner-owned round doc `orchestrator/rounds/round-060/plan.md`; and
   - the implement-stage canonical `J3` artifact
     `docs/plans/2026-03-20-uri-r2-c1-j3-bounded-verification-gate.md`.
@@ -314,7 +314,7 @@ Recommended evidence commands for this step:
 ### Task 5 - Author the canonical `J3` verification artifact
 
 - Write
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-060/docs/plans/2026-03-20-uri-r2-c1-j3-bounded-verification-gate.md`
+  `docs/plans/2026-03-20-uri-r2-c1-j3-bounded-verification-gate.md`
   as the sole canonical `J3` evidence artifact.
 - Include reviewer-auditable sections covering:
   - stage metadata (`Date`, `Round`, `Roadmap item`, `Stage`, `Attempt`,
@@ -354,7 +354,7 @@ Recommended evidence commands for this step:
 ### Task 6 - Keep retry semantics and artifact ownership intact
 
 - Treat this plan as the first-attempt `J3` plan only.
-- Because `orchestrator/state.json.retry` is `null`, do not write a retry
+- Because `orchestrator/rounds/round-060/state-snapshot.json.retry` is `null`, do not write a retry
   delta; write the full `attempt-1` plan and keep retry handling deferred
   unless a later review emits `stage_action: retry`.
 - If a later retry occurs, the revised planner must preserve this artifact as
@@ -369,8 +369,8 @@ Recommended evidence commands for this step:
 
 This `attempt-1` `J3` plan does not authorize:
 
-- any change to `orchestrator/state.json`;
-- any rewrite of `orchestrator/roadmap.md` or
+- any change to `orchestrator/rounds/round-060/state-snapshot.json`;
+- any rewrite of `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/roadmap.md` or
   `orchestrator/rounds/round-060/selection.md`;
 - any edit in `src/`, `test/`, `src-public/`, `app/`, or `mlf2.cabal`;
 - any reopening of accepted `I1` / `I2` / `I3` / `I4`, `J1`, or `J2`;
