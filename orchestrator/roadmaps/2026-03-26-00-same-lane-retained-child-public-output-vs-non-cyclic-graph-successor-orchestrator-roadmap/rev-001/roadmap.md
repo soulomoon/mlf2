@@ -1,0 +1,105 @@
+# Same-Lane Retained-Child Public-Output Continuity Vs Non-Cyclic-Graph Successor Orchestrator Roadmap
+
+## Context
+
+- This roadmap revision succeeds the completed same-lane retained-child
+  stable-visible-persistence successor control plane whose accepted execution
+  record ended at `orchestrator/rounds/round-093`.
+- The live controller resolves this roadmap revision through
+  `orchestrator/state.json` fields `roadmap_id`, `roadmap_revision`, and
+  `roadmap_dir`; the top-level `orchestrator/roadmap.md`,
+  `orchestrator/retry-subloop.md`, and `orchestrator/verification.md` files
+  are pointer stubs only.
+- Completed rounds `round-001` through `round-093` remain authoritative
+  historical evidence. They are predecessor evidence for this refreshed
+  control plane and must not be reinterpreted into broader capability.
+- The inherited baseline contract remains unchanged: explicit recursive
+  annotations are the production baseline, recursive meaning remains
+  iso-recursive only, and the explicit-only / non-equi-recursive /
+  non-cyclic-graph / no-second-interface / no-fallback boundary remains live
+  unless an accepted roadmap decision explicitly changes it.
+- The accepted round-093 successor decision recorded the strongest current
+  exact-pocket read as `blocker debt remains within the current architecture`
+  for one exact same-lane retained-child pocket, while explicitly refusing to
+  reopen `non-cyclic-graph` on the current accepted evidence.
+- The exact frozen pocket remains:
+  same-lane retained-child family,
+  `boundVarTargetRoot`,
+  one owner-local retained-child frame,
+  route `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`,
+  and clear quantified-boundary status only.
+- The current unresolved pressure is narrower than broad automatic
+  iso-recursive inference. The exact helper-visible/internal read still
+  carries recursive structure (`TMu ...`, `containsMu True`), while both
+  authoritative public entrypoints return
+  `TForall "a" Nothing (TVar "a")`.
+- The live goal is therefore not broad family search and not immediate
+  architecture revision. The live goal is to determine whether this exact
+  authoritative public-output collapse can be repaired inside the inherited
+  acyclic model, or whether accepted exact-pocket evidence now specifically
+  forces reopening the `non-cyclic-graph` question.
+- A narrow code/test slice is lawful if earlier accepted items show it is
+  required to resolve this exact bounded gate. No broader family expansion,
+  boundary revision, or general automatic-recursive-inference claim is
+  authorized.
+
+## Status Legend
+
+- `pending`
+- `in-progress`
+- `done`
+
+## Items
+
+1. [pending] Freeze the exact public-output continuity case and review ledger
+   Depends on:
+   Completion notes: freeze exactly one same-lane retained-child pocket and
+   its review ledger for this family: the exact frozen packet, the same
+   family / anchor / owner-local frame / route / clear-boundary tuple, the
+   accepted item-1 through item-5 predecessor chain, and the exact
+   internal/public split currently under review
+   (`TMu ...` + `containsMu True` internally versus
+   `TForall "a" Nothing (TVar "a")` authoritatively). Neighboring routes, the
+   non-local alias-bound family, nested-`forall`, replay repair, and broad
+   architecture revision remain excluded.
+
+2. [pending] Audit the exact authoritative public-output path for the frozen pocket
+   Depends on: item 1
+   Completion notes: inspect only the exact same-lane retained-child pocket
+   and localize the first exact owner-local continuity-loss site between the
+   accepted helper-visible reconstruction path and the authoritative public
+   output path (including `checkedAuthoritative` and any exact same-pocket
+   anchors it depends on). Record bounded proof of where the collapse occurs
+   or confirm that the current exact collapse anchor remains unchanged. Do
+   not repair behavior yet and do not widen beyond this pocket.
+
+3. [pending] Clear or confirm the exact authoritative public-output collapse within the current architecture
+   Depends on: items 1, 2
+   Completion notes: either land the minimum bounded docs/code/test slice
+   needed so the exact frozen pocket preserves recursive structure on the
+   authoritative public output surface without changing family, anchor,
+   owner-local frame, route, or clear-boundary status, or record bounded
+   proof that the collapse remains blocker debt under the unchanged current
+   architecture. No alias-bound widening, nested-`forall`, cyclic search,
+   second interface, or fallback path is authorized.
+
+4. [pending] Revalidate the frozen pocket end to end and classify its public-output continuity result
+   Depends on: items 1, 2, 3
+   Completion notes: rerun only the exact frozen pocket across the accepted
+   review ledger after item 3 and record exactly one lawful exact-pocket
+   outcome:
+   `stable visible persistence`,
+   `admitted but not reconstruction-visible / blocker debt`, or
+   `fail-closed rejection`.
+   Preserve honest negative or partial reads if any row still breaks for the
+   same exact pocket.
+
+5. [pending] Decide whether the accepted public-output result keeps the current architecture credible or reopens `non-cyclic-graph`
+   Depends on: items 2, 4
+   Completion notes: consume only the accepted item-4 result for this exact
+   pocket and record exactly one bounded architecture-pressure outcome:
+   either the accepted public-output result keeps the current architecture /
+   `non-cyclic-graph` boundary credible for this exact pressure point, or the
+   accepted exact-pocket evidence specifically reopens the
+   `non-cyclic-graph` revision question. Do not widen into the alias-bound
+   family, nested-`forall`, or a general automatic-recursive-inference claim.
