@@ -1,0 +1,85 @@
+# Round `round-090` Attempt `2` Review (`item-2`)
+
+- Baseline checks:
+  - `git branch --show-current` -> pass (`codex/round-090`).
+  - `git status --short --untracked-files=all` -> pass for the bounded docs-only round payload before reviewer outputs (`M orchestrator/state.json` is the controller-owned state transition, plus `?? docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md`, `?? orchestrator/rounds/round-090/attempt-log.jsonl`, `?? orchestrator/rounds/round-090/implementation-notes.md`, `?? orchestrator/rounds/round-090/plan.md`, `?? orchestrator/rounds/round-090/review.md`, `?? orchestrator/rounds/round-090/reviews/attempt-1.md`, and `?? orchestrator/rounds/round-090/selection.md`).
+  - `git ls-files --others --exclude-standard` -> pass with the same seven untracked round files only before attempt-2 reviewer outputs.
+  - `git diff --check` -> pass (no output).
+  - `rg -n '[ \t]+$' docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md orchestrator/rounds/round-090/implementation-notes.md orchestrator/rounds/round-090/plan.md orchestrator/rounds/round-090/selection.md orchestrator/rounds/round-090/review.md orchestrator/rounds/round-090/reviews/attempt-1.md` -> pass (no trailing-whitespace matches).
+  - `rg -n '^(<<<<<<<|=======|>>>>>>>)' docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md orchestrator/rounds/round-090/implementation-notes.md orchestrator/rounds/round-090/plan.md orchestrator/rounds/round-090/selection.md orchestrator/rounds/round-090/review.md orchestrator/rounds/round-090/reviews/attempt-1.md` -> pass (no conflict-marker matches).
+  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": {`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (item `1` remains done, item `2` remains pending, and items `3` through `5` remain parseable and pending).
+  - Required artifact-presence checks -> pass for `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`, `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`, `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`, `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`, `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`, `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`, `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`, `orchestrator/rounds/round-081/review-record.json`, `orchestrator/rounds/round-088/review-record.json`, and `orchestrator/retry-subloop.md`.
+  - Historical continuity inventory -> pass: `python3` over `orchestrator/rounds` using the schema actually present in completed rounds reported `issues=[]`, `round_001_015_review_only=[round-001..round-015]`, `round_016_019_review_plus_record=[round-016..round-019]`, and `round_020_088_full_review_surface_count=69`, so completed rounds `001` through `088` remain present without review-surface gaps.
+  - Authoritative predecessor chain summary -> pass: `python3` over `round-081`, `round-086`, `round-087`, `round-088`, and `round-089` review records confirmed `round-081: N14 accepted finalize authoritative continue-bounded`, `round-086: item-5 accepted finalize authoritative full-pipeline-reconstruction-and-validation-contract-defined`, `round-087: item-6 accepted finalize authoritative representative-coverage-and-feasibility-campaign-classified-as-bounded-subset-only`, `round-088: item-7 accepted finalize authoritative continue-within-current-architecture-with-same-lane-retained-child-stable-visible-persistence-gate-selected`, and `round-089: item-1 accepted finalize authoritative same-lane-retained-child-persistence-case-and-review-ledger-frozen`.
+  - `rg -n 'BUG-2026-03-16-001|Status: Open' Bugs.md` -> pass (`BUG-2026-03-16-001` remains open predecessor implementation context only).
+  - Repo notes continuity -> pass: root `implementation_notes.md` was reread and still records the round-088 strategic closeout plus the refreshed bounded persistence gate, while `git diff --name-only -- implementation_notes.md` and `git status --short --untracked-files=all -- implementation_notes.md` both returned no output.
+  - Pre-write reviewer-target check -> pass: `find orchestrator/rounds/round-090 -maxdepth 2 -type f | sort` returned `attempt-log.jsonl`, `implementation-notes.md`, `plan.md`, `review.md`, `reviews/attempt-1.md`, and `selection.md`; `test ! -f orchestrator/rounds/round-090/reviews/attempt-2.md` passed; and `review-record.json` was absent before this authoritative write.
+  - `env HOME=/tmp/codex-home CABAL_DIR=/tmp/cabal XDG_STATE_HOME=/tmp/xdg-state XDG_CACHE_HOME=/tmp/xdg-cache XDG_CONFIG_HOME=/tmp/xdg-config cabal --store-dir=/tmp/cabal/store test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'` -> pass (`20 examples, 0 failures`).
+  - `env HOME=/tmp/codex-home CABAL_DIR=/tmp/cabal XDG_STATE_HOME=/tmp/xdg-state XDG_CACHE_HOME=/tmp/xdg-cache XDG_CONFIG_HOME=/tmp/xdg-config cabal --store-dir=/tmp/cabal/store build all && env HOME=/tmp/codex-home CABAL_DIR=/tmp/cabal XDG_STATE_HOME=/tmp/xdg-state XDG_CACHE_HOME=/tmp/xdg-cache XDG_CONFIG_HOME=/tmp/xdg-config cabal --store-dir=/tmp/cabal/store test` -> pass (`1141 examples, 0 failures`).
+
+- Task-specific checks:
+  - `ITEM2-CONTRACT-FREEZE-AND-FROZEN-TUPLE` -> pass: the canonical audit artifact remains bounded to the exact item-1 pocket only: same-lane retained-child family, `boundVarTargetRoot`, one owner-local retained-child frame, route `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`, and clear-boundary status only. No alias-bound family, neighboring route, nested-`forall` success, or general-capability widening is introduced.
+  - `ITEM2-BREAKPOINT-AUDIT-CONTRACT` -> pass: `rg -n 'Attempt: `attempt-2`|runPipelineElab|runPipelineElabChecked|ELet "k"|Phase 6 \(elaboration\)|PhiTranslatabilityError|not credited after earlier breakpoint' docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md orchestrator/rounds/round-090/implementation-notes.md` plus `rg -n '1693-1698|out of pocket|not creditable' docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md` and `rg -n 'Solver admission state|Elaboration handoff / result state|Reification / reconstruction state|Internal output surface|Public output surface|Reviewer-visible evidence trail|satisfied on current evidence|first actual continuity breakpoint|not credited after earlier breakpoint' docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md` all passed. The refreshed audit now excludes the out-of-pocket `PipelineSpec.hs:1693-1698` unannotated variant, credits only the exact frozen packet, records solver admission as the only satisfied row, moves the first actual breakpoint to elaboration, and marks all later rows `not credited after earlier breakpoint`.
+  - `ITEM2-EXACT-POCKET-REPLAY-EVIDENCE` -> pass: rerunning the exact replay command from the canonical artifact through `cabal repl mlf2-test` reproduced the same exact-pocket output on the frozen `let k = (\x : mu a. a -> Int. x) in let u = (\y. y) k in u` packet:
+    - printed expression:
+      `ELet "k" (ELamAnn "x" (STMu "a" (STArrow (STVar "a") (STBase "Int"))) (EVar "x")) (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))`
+    - unchecked pipeline result:
+      `Phase 6 (elaboration): PhiTranslatabilityError ["reifyInst: missing authoritative instantiation translation for edge 3","expansion args=[NodeId {getNodeId = 31}]]`
+    - checked pipeline result:
+      `Phase 6 (elaboration): PhiTranslatabilityError ["reifyInst: missing authoritative instantiation translation for edge 3","expansion args=[NodeId {getNodeId = 31}]]`
+    This independently confirms that both public entrypoints fail before any public output is produced and that elaboration is the earliest exact-pocket break.
+  - `ITEM2-PLAN-ALIGNMENT` -> pass: the attempt-2 plan required exact-pocket evidence only, explicit `runPipelineElab` / `runPipelineElabChecked` replay results, removal of the `PipelineSpec.hs:1693-1698` credit path, and earliest-break ledger repair. The canonical audit and round notes now do exactly that, and source-anchor inspection matches the cited reasoning:
+    - `nl -ba src/MLF/Elab/Run/ResultType/Fallback.hs | sed -n '558,780p'` -> pass; lines `563-647` define `boundHasForallFrom`, lines `691-693` enforce `bndRoot == boundVarTargetRoot` and `not hasForall`, lines `697-735` define the same-lane retained-child route, and lines `758-780` remain the helper-visible reconstruction path that item `2` now refuses to credit after the earlier elaboration break.
+    - `nl -ba src/MLF/Elab/Run/Pipeline.hs | sed -n '127,194p'` -> pass; lines `127-144` assemble `scopeOverrides`, `elabConfig`, and `elabEnv` and call `elaborateWithEnv`, while lines `182-194` show that `checkedAuthoritative` sits strictly after elaboration and result-type reconstruction.
+    - `nl -ba test/PipelineSpec.hs | sed -n '1495,1570p'` -> pass; lines `1495-1499` contain the exact frozen packet, lines `1523-1569` rewire the same-lane local retained-child root, and lines `1569-1570` keep the helper-visible `containsMu True` fact.
+    - `nl -ba test/PipelineSpec.hs | sed -n '1693,1698p'` -> pass; the excluded contrast case is the unrelated unannotated `ELam "x" (EVar "x")` variant with `containsMu False`.
+  - `ITEM2-ITEM5-ITEM6-ITEM7-CONTINUITY` -> pass: the attempt now preserves the accepted item-5 persistence tuple and item-6/item-7 posture exactly. It keeps the same-lane retained-child pocket as the strongest bounded candidate, does not claim `stable visible persistence`, and keeps the lawful starting posture at `admitted but not reconstruction-visible / blocker debt` by localizing the first exact-pocket break to elaboration.
+  - `ITEM2-PREDECESSOR-CONTINUITY` -> pass: accepted `N14`, accepted strategic items `5`, `6`, and `7`, accepted item `1`, and completed rounds `001` through `088` remain bounded predecessor evidence only. No prior round artifact was rewritten, and the continuity inventory plus predecessor-summary commands showed no surface loss or silent reinterpretation.
+  - `ITEM2-BOUNDARY-CONTINUITY` -> pass: the diff stays within the inherited explicit-only / iso-recursive / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary and does not reopen `non-cyclic-graph` revision, alias-bound family work, nested-`forall` success, cyclic search, equi-recursive semantics, or a second executable/interface.
+  - `ITEM2-DOCS-ONLY-DIFF-BOUNDARY` -> pass: `git diff --name-only -- src test src-public app mlf2.cabal` returned no output; `git status --short --untracked-files=all -- src test src-public app mlf2.cabal` returned no output; `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` returned no output; `git status --short --untracked-files=all -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` returned no output; `git diff --name-only -- orchestrator/roadmap.md Bugs.md implementation_notes.md orchestrator/retry-subloop.md orchestrator/verification.md orchestrator/state.json` returned only `orchestrator/state.json`; and `git status --short --untracked-files=all -- orchestrator/roadmap.md Bugs.md implementation_notes.md orchestrator/retry-subloop.md orchestrator/verification.md orchestrator/state.json` returned only `M orchestrator/state.json`. Reviewer found no code/test/public/executable/Cabal drift and no new drift on preserved controller-owned docs beyond the pre-existing controller-owned state transition.
+  - `ITEM2-SKIP-NOTE` -> pass: no skip was used. The exact-pocket replay, the focused `ARI-C1` bounded test, and the fresh full `cabal build all && cabal test` gate were all run in this review.
+  - `ITEM2-IMMUTABILITY` -> pass: rejected `attempt-1` remains preserved in both `orchestrator/rounds/round-090/review.md` history via `reviews/attempt-1.md` and controller-owned `attempt-log.jsonl`; `attempt-2` was absent before this write; and the reviewer-owned authoritative outputs for this acceptance are confined to the current attempt files plus `review-record.json`.
+  - `ITEM2-RETRY-SCHEMA` -> pass: `orchestrator/retry-subloop.md` allows `accepted + finalize` for roadmap item `2`. This review records `Implemented stage result`, `Attempt verdict`, `Stage action`, `Retry reason`, and `Fix hypothesis`, does not emit `rejected + finalize`, and does not use the forbidden `accepted + retry` shape for the terminal bounded-decision item.
+
+- Implemented stage result:
+  - `pass`
+
+- Attempt verdict:
+  - `accepted`
+
+- Stage action:
+  - `finalize`
+
+- Retry reason:
+  - `none`
+
+- Fix hypothesis:
+  - `none`
+
+- Decision summary:
+  - No blocking review finding remains. The retry delta fixed the exact defect named in rejected `attempt-1`: it removed the out-of-pocket unannotated public-output credit path, reran the exact frozen packet, and localized the first real continuity break to `Phase 6 (elaboration)` on that same pocket.
+  - The underlying `PhiTranslatabilityError` remains a bounded implementation blocker for later roadmap work, but it is not a blocker to item `2` acceptance because item `2` owns only honest breakpoint localization, not repair.
+  - The lawful review result is `accepted + finalize`.
+
+- Evidence summary:
+  - Canonical stage artifact: `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md`
+  - Round selection: `orchestrator/rounds/round-090/selection.md`
+  - Round plan: `orchestrator/rounds/round-090/plan.md`
+  - Round implementation notes: `orchestrator/rounds/round-090/implementation-notes.md`
+  - Repo-root notes continuity anchor: `implementation_notes.md`
+  - Inherited baseline contract: `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+  - Accepted predecessor decision gate: `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+  - Accepted strategic architectural audit: `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
+  - Accepted item-5 reconstruction contract: `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
+  - Accepted item-6 coverage campaign: `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
+  - Accepted item-7 architecture decision: `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
+  - Frozen item-1 case and ledger: `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
+  - Live code/test anchors: `src/MLF/Elab/Run/ResultType/Fallback.hs`, `src/MLF/Elab/Run/Pipeline.hs`, and `test/PipelineSpec.hs`
+  - Bug tracker continuity: `Bugs.md`
+  - Authoritative predecessor review records: `orchestrator/rounds/round-081/review-record.json`, `orchestrator/rounds/round-086/review-record.json`, `orchestrator/rounds/round-087/review-record.json`, `orchestrator/rounds/round-088/review-record.json`, and `orchestrator/rounds/round-089/review-record.json`
+  - Retry contract: `orchestrator/retry-subloop.md`
+  - Prior retry snapshot: `orchestrator/rounds/round-090/reviews/attempt-1.md`
+  - Current retry snapshot: `orchestrator/rounds/round-090/reviews/attempt-2.md`
+  - `review-record.json` was written because the stage finalized authoritatively as `accepted + finalize`.
