@@ -51,27 +51,46 @@
 
 ## Items
 
-1. [pending] Freeze the exact public-output continuity case and review ledger
+1. [done] Freeze the exact public-output continuity case and review ledger
    Depends on:
-   Completion notes: freeze exactly one same-lane retained-child pocket and
-   its review ledger for this family: the exact frozen packet, the same
-   family / anchor / owner-local frame / route / clear-boundary tuple, the
-   accepted item-1 through item-5 predecessor chain, and the exact
-   internal/public split currently under review
-   (`TMu ...` + `containsMu True` internally versus
-   `TForall "a" Nothing (TVar "a")` authoritatively). Neighboring routes, the
-   non-local alias-bound family, nested-`forall`, replay repair, and broad
-   architecture revision remain excluded.
+   Completion notes: completed in accepted `round-094` by freezing exactly
+   one same-lane retained-child pocket and its refreshed review ledger in
+   `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-case-and-review-ledger.md`:
+   family `same-lane retained-child`,
+   anchor `boundVarTargetRoot`,
+   one owner-local retained-child frame, route
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`,
+   clear-boundary-only status, the exact `ELet "k" ...` packet with
+   `recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))`, and the
+   exact internal/public split currently under review
+   (`TMu ...` plus `containsMu True` on the helper-visible internal path
+   versus `TForall "a" Nothing (TVar "a")` on both authoritative public
+   entrypoints). The accepted item-1 result keeps the honest starting posture
+   as `admitted but not reconstruction-visible / blocker debt` within the
+   current architecture and hands off only to item `2`. Neighboring routes,
+   the non-local alias-bound family, nested-`forall`, replay repair, and
+   broad architecture revision remain excluded.
 
 2. [pending] Audit the exact authoritative public-output path for the frozen pocket
    Depends on: item 1
-   Completion notes: inspect only the exact same-lane retained-child pocket
-   and localize the first exact owner-local continuity-loss site between the
-   accepted helper-visible reconstruction path and the authoritative public
-   output path (including `checkedAuthoritative` and any exact same-pocket
-   anchors it depends on). Record bounded proof of where the collapse occurs
-   or confirm that the current exact collapse anchor remains unchanged. Do
-   not repair behavior yet and do not widen beyond this pocket.
+   Completion notes: consume only the accepted `round-094` item-1 case freeze
+   from
+   `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-case-and-review-ledger.md`
+   for the exact same-lane retained-child pocket:
+   family `same-lane retained-child`,
+   anchor `boundVarTargetRoot`,
+   one owner-local retained-child frame, route
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`,
+   clear-boundary-only status, and the exact continuity split
+   (`TMu ...` plus `containsMu True` internally versus
+   `TForall "a" Nothing (TVar "a")` authoritatively). Inspect only this exact
+   pocket and localize the first exact owner-local continuity-loss site
+   between the accepted helper-visible reconstruction path and the
+   authoritative public output path (including `checkedAuthoritative` and any
+   exact same-pocket anchors it depends on). Record bounded proof of where
+   the collapse occurs or confirm that the current exact collapse anchor
+   remains unchanged. Do not repair behavior yet and do not widen beyond this
+   pocket.
 
 3. [pending] Clear or confirm the exact authoritative public-output collapse within the current architecture
    Depends on: items 1, 2
