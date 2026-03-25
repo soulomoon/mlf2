@@ -44,54 +44,59 @@
 
 ## Items
 
-1. [pending] Freeze the exact same-lane retained-child persistence case and review ledger
+1. [done] Freeze the exact same-lane retained-child persistence case and review ledger
    Depends on:
-   Completion notes: identify exactly one admitted pocket from accepted item-5
-   and item-6 evidence, freeze the persistence tuple (family, recursive-shape
-   anchor, owner / binder frame, target / consumer route,
-   quantified-boundary-clear status, and output-surface visibility
-   obligation), and name the exact solver / elaboration / reconstruction /
-   internal-output / public-output evidence that later rounds must preserve.
-   The output must exclude neighboring routes, the non-local alias-bound
-   family, nested-`forall` success claims, and any broader architecture
-   argument.
+   Completion notes: completed in accepted `round-089` by freezing exactly one
+   admitted pocket in
+   `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`:
+   same-lane retained-child family, `boundVarTargetRoot`, one owner-local
+   retained-child frame, route
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`,
+   clear quantified-boundary status only, and the contractual solver /
+   elaboration / reconstruction / internal-output / public-output /
+   reviewer-visible ledger. Neighboring routes, the non-local alias-bound
+   family, nested-`forall` success, and architecture revision remain
+   excluded.
 
-2. [pending] Audit the current pipeline against that exact persistence contract
+2. [pending] Audit the live pipeline against the frozen same-lane retained-child tuple and ledger
    Depends on: item 1
-   Completion notes: use the accepted docs plus the current code/test surfaces
-   to determine which ledger rows are already satisfied, where the first
-   missing or ambiguous continuity breakpoint actually occurs, and whether the
-   present blocker is solver-side, elaboration-side, reconstruction-side,
-   internal-output, public-output, or reviewer-evidence drift. The output
-   must stay confined to the one frozen same-lane retained-child pocket and
-   must not reopen general family search.
+   Completion notes: audit only the frozen case from
+   `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
+   and determine which ledger rows are already satisfied for
+   `boundVarTargetRoot` /
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`, where the
+   first actual continuity breakpoint occurs, and whether the blocker sits in
+   solver admission, elaboration, reconstruction, internal output, public
+   output, or reviewer-visible evidence. Keep the read bounded to the one
+   clear-boundary same-lane retained-child pocket only.
 
-3. [pending] Land the minimum bounded slice needed to prove or refute stable visible persistence for the exact pocket
+3. [pending] Land the minimum bounded slice needed to prove or refute stable visible persistence for the frozen pocket
    Depends on: items 1, 2
-   Completion notes: if the audit shows a lawful narrow fix is needed,
-   implement only the minimum docs / code / test change required for the exact
-   same-lane retained-child route and corresponding regression anchors. If the
-   audit shows the current pipeline already satisfies the contract, record
-   that proof without widening the production surface. Do not touch the
-   alias-bound family, quantified-crossing cases, cyclic search, alternate
-   interfaces, or convenience fallback paths.
+   Completion notes: if item 2 finds a lawful narrow gap, change only the
+   minimum docs / code / test surface needed to preserve the frozen tuple for
+   the same-lane retained-child pocket and add only the exact regression
+   anchors required for that route. If item 2 finds no runtime gap, record
+   the proof instead of widening the implementation surface. Do not touch the
+   alias-bound family, neighboring routes, quantified crossing, cyclic
+   search, second interfaces, or fallback paths.
 
-4. [pending] Revalidate the exact pocket end to end and classify the bounded persistence result
+4. [pending] Revalidate the frozen same-lane retained-child pocket end to end and classify its persistence result
    Depends on: items 1, 2, 3
-   Completion notes: rerun the exact same-lane retained-child pocket through
-   the required solver, elaboration, reconstruction, internal/public output,
-   and reviewer-visible checks, and record exactly one bounded item-5 /
-   item-6 vocabulary result for that pocket:
+   Completion notes: rerun the exact same-lane retained-child pocket across
+   the frozen ledger rows and record exactly one bounded item-5 / item-6
+   vocabulary result for that pocket:
    `stable visible persistence`,
    `admitted but not reconstruction-visible / blocker debt`, or
    `fail-closed rejection`. The output must preserve honest negative or
-   partial reads if any ledger row still breaks.
+   partial reads if any frozen tuple field or ledger row still breaks.
 
-5. [pending] Make the bounded successor decision from the persistence-gate result
+5. [pending] Make the bounded successor decision from the frozen-pocket persistence result
    Depends on: items 2, 4
-   Completion notes: record exactly one follow-on outcome for this successor
-   control plane: persistence achieved within the current architecture,
-   blocker debt remains within the current architecture, or the evidence
-   specifically reopens the `non-cyclic-graph` revision question. Keep
+   Completion notes: use the item-4 classification for this one pocket to
+   record exactly one follow-on outcome for this successor control plane:
+   persistence achieved within the current architecture, blocker debt remains
+   within the current architecture, or accepted evidence from this same
+   pocket specifically reopens the `non-cyclic-graph` revision question. Keep
    predecessor truth intact, keep the next move concrete, and do not blur
-   this bounded gate into a general automatic-recursive-inference claim.
+   this bounded gate into alias-bound, nested-`forall`, or general
+   automatic-recursive-inference claims.
