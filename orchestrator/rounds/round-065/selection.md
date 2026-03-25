@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-032`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-032`
+- State Snapshot: `orchestrator/rounds/round-065/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 32: execute the bounded `K4` next-cycle decision gate for the
@@ -14,18 +22,18 @@ no-inst-arg scheme-alias / base-like slice.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` already fixes the live controller state at
+`orchestrator/rounds/round-065/state-snapshot.json` already fixes the live controller state at
 `active_round_id: "round-065"`, `active_round_dir:
 "orchestrator/rounds/round-065"`, `stage: "select-task"`,
 `current_task: null`, `retry: null`, `branch:
 "codex/round-065-k4-next-cycle-decision"`, and `last_completed_round:
 "round-064"`. Under `orchestrator/roles/guider.md` and
-`orchestrator/retry-subloop.md`, that means there is no same-round retry to
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-032/retry-subloop.md`, that means there is no same-round retry to
 resume, no interrupted later stage to continue, and no lawful basis to reopen
 an older round instead of selecting the next roadmap item for the repaired
 live subject.
 
-`orchestrator/roadmap.md` marks item 31 (`K3`) done and item 32 (`K4`)
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-032/roadmap.md` marks item 31 (`K3`) done and item 32 (`K4`)
 pending. Because the guider must prefer the lowest-numbered unfinished item
 when `retry` is `null`, item 32 is the next lawful selection. The roadmap
 completion notes for item 32 already define the exact `K4` contract: record
@@ -103,7 +111,7 @@ stages.
 
 Repository status preserves that continuity rather than changing selection:
 the worktree shows only the existing controller-state modification
-`M orchestrator/state.json`, `/Volumes/src/mlf4/Bugs.md` still has an empty
+`M orchestrator/rounds/round-065/state-snapshot.json`, `/Volumes/src/mlf4/Bugs.md` still has an empty
 `## Open` section, and `orchestrator/rounds/round-065/` had no pre-existing
 round files before this guider artifact. Those facts do not create authority
 to skip the pending decision gate or reorder the roadmap.

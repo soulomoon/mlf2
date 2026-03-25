@@ -25,7 +25,7 @@
   non-cyclic-graph / no-second-interface / no-fallback boundary.
 - No production, test, executable, public API, Cabal, roadmap, or bug-tracker
   change is part of the accepted `K4` stage payload; the accepted review also
-  records that the tracked `orchestrator/state.json` diff is pre-existing
+  records that the tracked `orchestrator/rounds/round-065/state-snapshot.json` diff is pre-existing
   controller-preparation state rather than merger-owned stage content.
 
 ## Review And Retry Consistency Check
@@ -44,9 +44,9 @@
   `authoritative_attempt: 1`, `authoritative_result: pass`,
   `review_snapshot: orchestrator/rounds/round-065/reviews/attempt-1.md`, and
   `artifact_path: docs/plans/2026-03-21-uri-r2-c1-k4-next-cycle-decision-gate.md`.
-- This is consistent with `orchestrator/retry-subloop.md`: `K4` is
+- This is consistent with `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-032/retry-subloop.md`: `K4` is
   aggregate-only, `accepted + retry` is forbidden, the finalized outcome is
-  lawful `accepted + finalize`, and `orchestrator/state.json` is already at
+  lawful `accepted + finalize`, and `orchestrator/rounds/round-065/state-snapshot.json` is already at
   `stage: "merge"` with `current_task: "K4"` and `retry: null`.
 
 ## Readiness Statement

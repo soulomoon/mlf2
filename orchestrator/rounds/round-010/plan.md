@@ -8,7 +8,7 @@ Deliver the smallest bounded item-5 artifact that converts the accepted `R4` out
 
 - This round is docs-only.
 - Do not edit `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
-- Do not edit `orchestrator/state.json` or `orchestrator/roadmap.md`.
+- Do not edit `orchestrator/rounds/round-010/state-snapshot.json` or `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-005/roadmap.md`.
 - Do not rewrite predecessor packet history or prior round artifacts.
 - Do not draft an implementation handoff unless inherited accepted evidence inside the fixed boundary actually contradicts the accepted `R4` `not-yet-go` record.
 - Do not write `review.md`, `merge.md`, or `implementation-notes.md` in this round.
@@ -24,15 +24,15 @@ Rationale: roadmap item 5 is now the terminal decision point for this successor 
   - non-equi-recursive semantics only;
   - non-cyclic structural graph only;
   - fail closed if any claimed progress would require forbidden widening, prototype-backed invention, or reopening earlier accepted stages.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited item-2 invariant audit for acyclicity, binding-tree discipline, occurs-check/termination, reconstruction/reification/witness replay, and principality-risk boundaries.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`, `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection.md`, `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`, and `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-unannotated-iso-recursive-r4-feasibility-decision.md` as authoritative inherited stages; do not reopen `R1`, reselect `R2`, rewrite `R3`, or rerun `R4`.
+- Treat `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited item-2 invariant audit for acyclicity, binding-tree discipline, occurs-check/termination, reconstruction/reification/witness replay, and principality-risk boundaries.
+- Treat `docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`, `docs/plans/2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection.md`, `docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`, and `docs/plans/2026-03-14-unannotated-iso-recursive-r4-feasibility-decision.md` as authoritative inherited stages; do not reopen `R1`, reselect `R2`, rewrite `R3`, or rerun `R4`.
 - Keep the chosen subject fixed to `URI-R2-C1` and carry forward the inherited `URI-R3-O1` through `URI-R3-O5` obligation classes as the reasoned basis for the item-5 decision.
 - Use completed rounds `001` through `009`, the approved successor design spec, and the predecessor recursive-types packet as inherited evidence only; do not reopen them as pending work.
 - If any inherited-evidence review suggests contradictory feasibility, the round may only record that contradiction explicitly and stop for reviewer scrutiny; it must not silently switch to implementation-handoff by reinterpretation.
 
 ## Exact Target File
 
-1. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
+1. Create `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
 
 ## Sequential Tasks
 
@@ -41,13 +41,13 @@ Rationale: roadmap item 5 is now the terminal decision point for this successor 
 Required inputs to cite directly in the artifact:
 
 - accepted `R0` / `ARI-C1` baseline from the completed automatic-recursive-inference chain;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md`;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection.md`, naming `URI-R2-C1`;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`, naming `URI-R3-O1` through `URI-R3-O5`;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-unannotated-iso-recursive-r4-feasibility-decision.md`, naming the accepted outcome `not-yet-go`;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited invariant audit;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/orchestrator/rounds/round-010/selection.md` as the current round-selection authority.
+- `docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md`;
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`;
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection.md`, naming `URI-R2-C1`;
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`, naming `URI-R3-O1` through `URI-R3-O5`;
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r4-feasibility-decision.md`, naming the accepted outcome `not-yet-go`;
+- `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited invariant audit;
+- `orchestrator/rounds/round-010/selection.md` as the current round-selection authority.
 
 Decision-direction rule:
 
@@ -58,7 +58,7 @@ Decision-direction rule:
 
 Target file:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
 
 Required contents:
 
@@ -101,7 +101,7 @@ Required checks before review:
 
 ## Acceptance Criteria (All Required)
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` exists.
+1. `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` exists.
 2. The artifact records item 5 as an explicit bounded `research-stop` decision rather than an implementation-handoff spec.
 3. The artifact cites the accepted `R4` result `not-yet-go` for `URI-R2-C1` as the controlling inherited decision input.
 4. The artifact preserves the approved `R1` -> `R5` staging and the inherited item-2 invariant audit authority.
@@ -109,8 +109,8 @@ Required checks before review:
 6. The artifact explicitly states that the decision remains bounded to `URI-R2-C1` and does not generalize to broader unannotated recursive inference.
 7. The artifact explicitly states that no implementation handoff is authorized from the current evidence.
 8. Diff remains limited to planned docs/round artifacts and does not modify:
-   - `orchestrator/state.json`,
-   - `orchestrator/roadmap.md`,
+   - `orchestrator/rounds/round-010/state-snapshot.json`,
+   - `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-005/roadmap.md`,
    - `src/`, `src-public/`, `app/`, `test/`,
    - `mlf2.cabal`,
    - predecessor packet/task history,
@@ -118,11 +118,11 @@ Required checks before review:
 
 ## Reviewer And Verification Checks
 
-Baseline checks (from `orchestrator/verification.md`):
+Baseline checks (from `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-005/verification.md`):
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-010/state-snapshot.json >/dev/null`
+- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-005/roadmap.md`
 - `cabal build all && cabal test` is not required this round if the diff excludes `src/`, `src-public/`, `app/`, `test/`, and `mlf2.cabal`; reviewer must record that skip rationale explicitly.
 - Reviewer-recorded continuity check against inherited evidence from completed rounds `001` through `009`, the approved successor design spec, and the predecessor recursive-types packet.
 
@@ -149,7 +149,7 @@ Round-specific checks:
 
 Review output requirements:
 
-- Reviewer writes `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-010/orchestrator/rounds/round-010/review.md` with:
+- Reviewer writes `orchestrator/rounds/round-010/review.md` with:
   - baseline checks evidence,
   - round-specific checks evidence,
   - explicit decision (`approve` or `reject`),

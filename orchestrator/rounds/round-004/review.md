@@ -25,9 +25,9 @@ The `PipelineSpec` diff adds exactly one bounded `ARI-C1` characterization block
 
 1. `git diff --check`  
    Result: pass (no output).
-2. `python3 -m json.tool orchestrator/state.json >/dev/null`  
+2. `python3 -m json.tool orchestrator/rounds/round-004/state-snapshot.json >/dev/null`
    Result: pass (`OK`).
-3. `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`  
+3. `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-004/roadmap.md`
    Result: pass (ordered status items found: 1..5).
 4. `cabal build all && cabal test`  
    Result: pass (`1099 examples, 0 failures`).

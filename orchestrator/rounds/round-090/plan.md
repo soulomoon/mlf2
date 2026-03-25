@@ -6,7 +6,7 @@ Execute only the same-round retry for roadmap item `2`.
 
 This rewrite replaces the rejected `attempt-1` plan with the required
 `attempt-2` retry delta only. The retry scope is exactly the recorded fix
-hypothesis from `orchestrator/state.json`, `review.md`, and
+hypothesis from `orchestrator/rounds/round-090/state-snapshot.json`, `review.md`, and
 `reviews/attempt-1.md`: re-run the breakpoint audit against exact-pocket
 evidence only; add reviewer-visible `runPipelineElab` /
 `runPipelineElabChecked` evidence for the frozen
@@ -18,7 +18,7 @@ and every later row must stop receiving credit.
 
 The canonical item-2 artifact path remains:
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md`
+`docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md`
 
 The round remains docs-only, breakpoint-audit-only, and bounded to the frozen
 same-lane retained-child tuple only:
@@ -72,53 +72,53 @@ Carry forward without replanning:
 
 ### Modify
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md`
   - Responsibility: refresh the canonical item-2 audit artifact with
     `attempt-2` metadata, exact-pocket replay evidence, and the corrected
     earliest-break ledger.
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/rounds/round-090/implementation-notes.md`
+- `orchestrator/rounds/round-090/implementation-notes.md`
   - Responsibility: refresh the round-local notes so they report the same
     exact-pocket evidence and the same earliest-break conclusion as the
     canonical artifact.
 
 ### Read-Only Evidence
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/rounds/round-090/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/rounds/round-090/review.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/rounds/round-090/reviews/attempt-1.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/rounds/round-090/attempt-log.jsonl`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/src/MLF/Elab/Run/Pipeline.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/test/PipelineSpec.hs`
+- `orchestrator/rounds/round-090/selection.md`
+- `orchestrator/rounds/round-090/review.md`
+- `orchestrator/rounds/round-090/reviews/attempt-1.md`
+- `orchestrator/rounds/round-090/attempt-log.jsonl`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/verification.md`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/retry-subloop.md`
+- `orchestrator/rounds/round-090/state-snapshot.json`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
+- `Bugs.md`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `src/MLF/Elab/Run/Pipeline.hs`
+- `test/PipelineSpec.hs`
 
 ### Preserve Unchanged
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/rounds/round-090/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/rounds/round-090/review.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/rounds/round-090/reviews/attempt-1.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/orchestrator/rounds/round-090/attempt-log.jsonl`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/src/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/src-public/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/app/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/test/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090/mlf2.cabal`
+- `orchestrator/rounds/round-090/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/roadmap.md`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/verification.md`
+- `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/retry-subloop.md`
+- `orchestrator/rounds/round-090/selection.md`
+- `orchestrator/rounds/round-090/review.md`
+- `orchestrator/rounds/round-090/reviews/attempt-1.md`
+- `orchestrator/rounds/round-090/attempt-log.jsonl`
+- `Bugs.md`
+- `src/`
+- `src-public/`
+- `app/`
+- `test/`
+- `mlf2.cabal`
 
 ## Sequential Retry Tasks
 
@@ -226,12 +226,12 @@ Carry forward without replanning:
 ### Task 5 - Run the docs-only verification needed for retry closure
 
 Run the baseline docs/state checks required by
-`orchestrator/verification.md`:
+`orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/verification.md`:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-090/state-snapshot.json >/dev/null`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-090/state-snapshot.json`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/roadmap.md`
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `test -f docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
 - `test -f docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
@@ -239,7 +239,7 @@ Run the baseline docs/state checks required by
 - `test -f docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
 - `test -f docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
 - `test -f docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/retry-subloop.md`
 
 Run retry-specific evidence checks:
 
@@ -257,7 +257,7 @@ Reconfirm the diff stays docs-only:
 
 - `git diff --name-only -- src test src-public app mlf2.cabal`
 - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'`
-- `git diff --name-only -- orchestrator/roadmap.md Bugs.md orchestrator/retry-subloop.md orchestrator/verification.md orchestrator/state.json`
+- `git diff --name-only -- orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/roadmap.md Bugs.md orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/retry-subloop.md orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/verification.md orchestrator/rounds/round-090/state-snapshot.json`
 
 Do not rerun `cabal build all && cabal test` as part of this retry plan. This
 stage remains docs-only. The required runtime evidence here is the exact-pocket
@@ -283,9 +283,9 @@ This retry plan is complete only if all of the following become true:
 
 This retry delta does not authorize:
 
-- any edit to `orchestrator/state.json`;
-- any edit to `orchestrator/roadmap.md`, `orchestrator/verification.md`, or
-  `orchestrator/retry-subloop.md`;
+- any edit to `orchestrator/rounds/round-090/state-snapshot.json`;
+- any edit to `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/roadmap.md`, `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/verification.md`, or
+  `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/retry-subloop.md`;
 - any edit to `Bugs.md`;
 - any edit under `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`;
 - any rewrite of `selection.md`, `review.md`, `reviews/attempt-1.md`, or

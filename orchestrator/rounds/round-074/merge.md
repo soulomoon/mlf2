@@ -51,7 +51,7 @@
   - `artifact_path: "docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-next-cycle-decision-gate.md"`
   - `review_snapshot: "orchestrator/rounds/round-074/reviews/attempt-1.md"`
   - `final_outcome: "continue-bounded"`
-- `orchestrator/retry-subloop.md` permits merge preparation only after
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-007/retry-subloop.md` permits merge preparation only after
   `accepted + finalize`, and `N7` forbids `accepted + retry`, so no same-round
   retry remains lawful after the authoritative review result.
 

@@ -26,7 +26,7 @@ Stage ordering remains unchanged: `R1` authoritative evidence, `R2` active retry
 
 ## Recorded Retry Cause
 
-Attempt 2 was accepted as bounded `applyInstantiation` / `InstBot` repair evidence, but `R2` still cannot finalize because `cabal build all && cabal test` fails on four inherited expectations in `/Users/ares/.codex/worktrees/d432/mlf4/test/Research/UriR2C1PrototypeP1Spec.hs`:
+Attempt 2 was accepted as bounded `applyInstantiation` / `InstBot` repair evidence, but `R2` still cannot finalize because `cabal build all && cabal test` fails on four inherited expectations in `test/Research/UriR2C1PrototypeP1Spec.hs`:
 
 1. `P2-W` now reports `replay-domain-widening` instead of the historical `partial-replay`.
 2. `D1` now reports `semantic-negative` instead of `pass`.
@@ -43,33 +43,33 @@ Recorded fix hypothesis to execute without widening scope:
 
 Primary files that may change:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/test/Research/UriR2C1PrototypeP1Spec.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Research/URI/R2/C1/Prototype/P2.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Research/URI/R2/C1/Prototype/D1.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Research/URI/R2/C1/Prototype/D2.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Research/URI/R2/C1/Prototype/D3.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md`
+- `test/Research/UriR2C1PrototypeP1Spec.hs`
+- `src/MLF/Research/URI/R2/C1/Prototype/P2.hs`
+- `src/MLF/Research/URI/R2/C1/Prototype/D1.hs`
+- `src/MLF/Research/URI/R2/C1/Prototype/D2.hs`
+- `src/MLF/Research/URI/R2/C1/Prototype/D3.hs`
+- `src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`
+- `docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md`
 
 Files that stay read-only unless a tiny adjacent contract adjustment is proven necessary:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Inst.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/TypeCheck.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/test/ElaborationSpec.hs`
+- `src/MLF/Elab/Inst.hs`
+- `src/MLF/Elab/TypeCheck.hs`
+- `test/ElaborationSpec.hs`
 
 Historical evidence that must not be rewritten:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-016` through `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-024`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025/orchestrator/rounds/round-025/reviews/attempt-1.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025/orchestrator/rounds/round-025/reviews/attempt-2.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-025/orchestrator/rounds/round-025/attempt-log.jsonl`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
+- `orchestrator/rounds/round-016` through `orchestrator/rounds/round-024`
+- `orchestrator/rounds/round-025/reviews/attempt-1.md`
+- `orchestrator/rounds/round-025/reviews/attempt-2.md`
+- `orchestrator/rounds/round-025/attempt-log.jsonl`
+- `Bugs.md`
 
 ## Delta Tasks Only
 
 ### Task 1 - Classify the four failures before changing behavior
 
-- Reproduce only the four failing examples in `/Users/ares/.codex/worktrees/d432/mlf4/test/Research/UriR2C1PrototypeP1Spec.hs`.
+- Reproduce only the four failing examples in `test/Research/UriR2C1PrototypeP1Spec.hs`.
 - Compare each failure against the current prototype contracts in `P2.hs`, `D1.hs`, `D2.hs`, `D3.hs`, and `Artifact.hs`.
 - Decide which of the three bounded outcomes is actually correct:
   - `clear`: the tests are stale and should be updated to the already-intended post-repair contract;
@@ -79,8 +79,8 @@ Historical evidence that must not be rewritten:
 
 ### Task 2 - Prefer contract-scoping over production drift
 
-- If the observed outputs are the direct consequence of the accepted bounded `InstBot` repair, keep `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Inst.hs` unchanged and solve the blocker at the prototype-contract layer.
-- First preference: update `/Users/ares/.codex/worktrees/d432/mlf4/test/Research/UriR2C1PrototypeP1Spec.hs` so the four assertions reflect the intended bounded relationship between:
+- If the observed outputs are the direct consequence of the accepted bounded `InstBot` repair, keep `src/MLF/Elab/Inst.hs` unchanged and solve the blocker at the prototype-contract layer.
+- First preference: update `test/Research/UriR2C1PrototypeP1Spec.hs` so the four assertions reflect the intended bounded relationship between:
   - immutable predecessor authority (`P2 = semantic-negative`, `D1 = pass`, `D2 = pass`, `D3 = pass` as recorded in historical artifacts), and
   - current live replay behavior after the localized `R2` repair.
 - Only if the prototype modules themselves are internally inconsistent with that boundary may the retry edit the adjacent research files `P2.hs`, `D1.hs`, `D2.hs`, `D3.hs`, or `Artifact.hs`.
@@ -88,13 +88,13 @@ Historical evidence that must not be rewritten:
 
 ### Task 3 - Quarantine only if contract-scoping cannot express the boundary cleanly
 
-- If a clean contract-scoped assertion is impossible without reopening predecessor semantics, use the smallest explicit quarantine available inside `/Users/ares/.codex/worktrees/d432/mlf4/test/Research/UriR2C1PrototypeP1Spec.hs`.
+- If a clean contract-scoped assertion is impossible without reopening predecessor semantics, use the smallest explicit quarantine available inside `test/Research/UriR2C1PrototypeP1Spec.hs`.
 - The quarantine must be narrow to these four inherited examples only, documented in-code as an `R2` repair-track gate exception, and must not suppress unrelated research or production checks.
 - Do not hide the reason in review text only; the test surface itself must make the quarantine legible and intentional.
 
 ### Task 4 - Preserve historical evidence while refreshing the `R2` artifact
 
-- Update `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md` for `Attempt: 3`.
+- Update `docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md` for `Attempt: 3`.
 - Record:
   - that the bounded `InstBot` repair from attempt 2 was retained unchanged unless a tiny adjacent prototype-contract fix proved necessary;
   - which of `clear`, `contract-scope`, or `quarantine` was chosen for the four inherited prototype failures;

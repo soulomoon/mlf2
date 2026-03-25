@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-019`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-019`
+- State Snapshot: `orchestrator/rounds/round-052/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 19: execute the `H3` bounded verification and evidence
@@ -13,13 +21,13 @@ consolidation gate for the accepted `H2` slice.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `active_round_id: "round-052"`,
+`orchestrator/rounds/round-052/state-snapshot.json` is parked at `active_round_id: "round-052"`,
 `active_round_dir: "orchestrator/rounds/round-052"`, `stage: "select-task"`,
 `current_task: null`, `retry: null`, and `last_completed_round: "round-051"`.
 That machine state means there is no same-round retry to resume and no prior
 selection to carry forward ahead of normal roadmap ordering.
 
-`orchestrator/roadmap.md` marks items 1 through 18 done. Item 19 (`H3`) is the
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-019/roadmap.md` marks items 1 through 18 done. Item 19 (`H3`) is the
 lowest-numbered unfinished roadmap entry, and item 20 (`H4`) depends on it, so
 `H3` is the next lawful selection under the guider contract.
 
@@ -60,7 +68,7 @@ chain explicitly leaves out of scope. That open bug therefore does not
 override roadmap ordering or authorize replay reopen, `boundVarTarget`
 widening, non-local widening, or broader recursive-inference work in this
 round. Before this artifact was written, repository status showed only the
-expected controller-state preparation (`M orchestrator/state.json`), so there
+expected controller-state preparation (`M orchestrator/rounds/round-052/state-snapshot.json`), so there
 is no conflicting in-progress implementation that changes the next lawful
 selection.
 

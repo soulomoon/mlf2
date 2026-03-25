@@ -23,7 +23,7 @@ still present in `Fallback.hs` / `PipelineSpec.hs`.
 - predecessor authority rechecks for accepted `J4`, `K1`, and `K2` all passed
   without detecting roadmap/design drift or a live blocker in `Bugs.md`; and
 - post-write diff-scope checks showed no tracked diffs in `src/`, `test/`,
-  `app/`, `src-public/`, `mlf2.cabal`, `orchestrator/roadmap.md`,
+  `app/`, `src-public/`, `mlf2.cabal`, `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/roadmap.md`,
   `Fallback.hs`, or `PipelineSpec.hs`.
 
 ## Scope Preserved
@@ -33,5 +33,5 @@ still present in `Fallback.hs` / `PipelineSpec.hs`.
 - preserved `src/MLF/Elab/Run/ResultType/Fallback.hs` and
   `test/PipelineSpec.hs` as strict read-only anchors; and
 - preserved the pre-existing controller preparation state in
-  `orchestrator/state.json`, `orchestrator/rounds/round-064/selection.md`, and
+  `orchestrator/rounds/round-064/state-snapshot.json`, `orchestrator/rounds/round-064/selection.md`, and
   `orchestrator/rounds/round-064/plan.md` untouched.

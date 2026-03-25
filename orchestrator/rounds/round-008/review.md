@@ -6,9 +6,9 @@ Decision: `approve`
 
 - `git diff --check`
   - Result: pass (`no output`).
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-008/state-snapshot.json >/dev/null`
   - Result: pass (`exit 0`, no output).
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-003/roadmap.md`
   - Result:
     - `18:1. [done] Write the R1 gap map from ARI-C1 to unannotated single-SCC, single-binder-family inference`
     - `22:2. [done] Select exactly one bounded unannotated candidate subset and admissibility contract`

@@ -20,5 +20,8 @@
     "U1-CONTINUITY": "pass",
     "U1-NO-WIDEN": "pass"
   },
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap",
+  "roadmap_revision": "rev-006",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-006"
 }

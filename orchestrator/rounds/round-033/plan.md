@@ -71,6 +71,6 @@ Resubmit the corrected `U6` artifact for review with:
 
 ## Non-Goals
 
-- No edits to `orchestrator/state.json`, `orchestrator/roadmap.md`, `Bugs.md`, production code, tests, or `mlf2.cabal`
+- No edits to `orchestrator/rounds/round-033/state-snapshot.json`, `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-011/roadmap.md`, `Bugs.md`, production code, tests, or `mlf2.cabal`
 - No edits to prior attempt artifacts or reviewer history
 - No new implementation slice, roadmap update, or widening decision beyond the file-list correction

@@ -3,21 +3,21 @@
 - Baseline checks:
   - `git branch --show-current` -> pass (`codex/round-044-f3-verification-gate`).
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `F4` list intact; `F3` remains pending pre-merge at line `84` and `F4` remains pending at line `88`).
+  - `python3 -m json.tool orchestrator/rounds/round-044/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-044/state-snapshot.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-011/roadmap.md` -> pass (ordered `C1` through `F4` list intact; `F3` remains pending pre-merge at line `84` and `F4` remains pending at line `88`).
   - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
-  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-011/retry-subloop.md` -> pass.
   - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `replay_repair_track=True`, `initial_successor_cycle=True`, `recursive_types_packet=True`, `boundary_doc=True`, `repair_doc=True`).
   - Authoritative predecessor record recheck via `python3` over `round-039` through `round-043` -> pass (`round-039 E2 accepted finalize authoritative docs/plans/2026-03-18-uri-r2-c1-e2-bounded-implementation-slice.md`, `round-040 E3 accepted finalize authoritative docs/plans/2026-03-18-uri-r2-c1-e3-bounded-verification-gate.md`, `round-041 E4 accepted finalize authoritative docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md`, `round-042 F1 accepted finalize authoritative docs/plans/2026-03-19-uri-r2-c1-f1-next-target-bind.md`, `round-043 F2 accepted finalize authoritative docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md`).
   - Pre-review `git status --short --untracked-files=all` snapshot -> pass (untracked packet files only `docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md`, plus pre-existing round control files `orchestrator/rounds/round-044/plan.md` and `orchestrator/rounds/round-044/selection.md`).
   - Pre-review `git diff --name-only` -> pass (no output; no tracked edits).
   - `git diff --name-only -- src src-public app test mlf2.cabal` -> pass (no output; no production, public API, executable, test, or Cabal drift).
-  - `git diff --name-only -- orchestrator/state.json orchestrator/roadmap.md Bugs.md docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md orchestrator/rounds/round-043/review-record.json` -> pass (no output; no controller-state, roadmap, bug-tracker, predecessor-artifact, or predecessor-review-record drift).
+  - `git diff --name-only -- orchestrator/rounds/round-044/state-snapshot.json orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-011/roadmap.md Bugs.md docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md orchestrator/rounds/round-043/review-record.json` -> pass (no output; no controller-state, roadmap, bug-tracker, predecessor-artifact, or predecessor-review-record drift).
 
 - Task-specific checks:
   - `F3-CONTRACT` -> pass: `nl -ba docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md | sed -n '1,246p'` shows lines `14-33` freeze `round-044` `F3` `attempt-1` as a docs-only verification gate over the accepted `F2` local-binding scheme-alias/base-like `keepTargetFinal` / `targetC` slice, keep the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary, and forbid production/test/controller-state/roadmap/`Bugs.md`/history edits.

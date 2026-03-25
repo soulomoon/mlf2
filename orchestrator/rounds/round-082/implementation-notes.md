@@ -22,12 +22,12 @@
 
 - `git diff --check`
   - Result: passed in
-    `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-082`.
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+    `.worktrees/round-082`.
+- `python3 -m json.tool orchestrator/rounds/round-082/state-snapshot.json >/dev/null`
   - Result: passed.
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-082/state-snapshot.json`
   - Result: matched `contract_version: 2` and `retry: null`.
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-001/roadmap.md`
   - Result: matched the ordered roadmap item list.
 - `test -f docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
   - Result: passed.
@@ -37,7 +37,7 @@
   - Result: passed.
 - `test -f orchestrator/rounds/round-081/review-record.json`
   - Result: passed.
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-001/retry-subloop.md`
   - Result: passed.
 - `rg -n 'Accepted `N14` contributes bounded predecessor evidence only|The honest current repo position therefore remains|For this repo, the target claim \"general automatic iso-recursive inference\" means|P1 local-recursive-shape|N6 termination-pressure|Later success criteria|No-claim or stop conditions|item `2`: audit the inherited constraints|Docs-Only Verification Note' docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
   - Result: passed; matched the continuity statement, honest-current-position

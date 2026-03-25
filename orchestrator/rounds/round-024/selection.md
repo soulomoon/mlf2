@@ -9,15 +9,23 @@ Repair boundary: `witness-replay/applyInstantiation-instbot-precondition`
 Owner boundary: `MLF.Elab.Inst.applyInstantiation` (`InstBot` branch)
 Controlling bug: `BUG-2026-03-16-001`
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap`
+- Roadmap Revision: `rev-001`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-001`
+- State Snapshot: `orchestrator/rounds/round-024/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 1: execute the `R1` repair-boundary reproduction contract for `URI-R2-C1`.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is still parked at `stage: select-task` for `round-024`, with `current_task: null` and `retry: null`. That means no same-round retry is in force, so the guider must select the lowest-numbered unfinished roadmap item unless prior review artifacts require otherwise. No review artifact forces a retry here.
+`orchestrator/rounds/round-024/state-snapshot.json` is still parked at `stage: select-task` for `round-024`, with `current_task: null` and `retry: null`. That means no same-round retry is in force, so the guider must select the lowest-numbered unfinished roadmap item unless prior review artifacts require otherwise. No review artifact forces a retry here.
 
-`orchestrator/roadmap.md` for the repair track lists `R1` through `R4` as pending, so `R1` is the next lawful item. The accepted predecessor chain already finalized the diagnostic gate: `D3` established one bounded repair-supporting direction at the localized `applyInstantiation` / `InstBot` boundary, and `D4` finalized `reopen-repair-track` in `round-023`. The repair-track design then requires the first implementation-side step to be a bounded reproduction contract before any repair attempt (`R2`) or verification (`R3`) can proceed.
+`orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-001/roadmap.md` for the repair track lists `R1` through `R4` as pending, so `R1` is the next lawful item. The accepted predecessor chain already finalized the diagnostic gate: `D3` established one bounded repair-supporting direction at the localized `applyInstantiation` / `InstBot` boundary, and `D4` finalized `reopen-repair-track` in `round-023`. The repair-track design then requires the first implementation-side step to be a bounded reproduction contract before any repair attempt (`R2`) or verification (`R3`) can proceed.
 
 `R1` must therefore run now to restate the locked failure in implementation-facing terms for the fixed `URI-R2-C1` / `uri-r2-c1-only-v1` lane, while preserving the already-approved localization from `BUG-2026-03-16-001`, `D2`, and `D3`. This round must stay inside that single repair boundary and must not widen into broader replay work, alternate scenarios, fallback behavior, or a second executable interface.
 

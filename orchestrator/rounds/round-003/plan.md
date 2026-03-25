@@ -8,7 +8,7 @@ Deliver the smallest docs-only slice that closes roadmap item 3 by selecting exa
 
 - This round is docs-only.
 - Do not edit `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
-- Do not edit `orchestrator/roadmap.md` in this round.
+- Do not edit `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-003/roadmap.md` in this round.
 - Do not implement solver or inference behavior changes.
 - Do not rewrite predecessor authoritative packet history under `tasks/todo/2026-03-11-recursive-types-orchestration/`.
 - Preserve the explicit-only / non-equi-recursive / non-cyclic-graph boundary as mandatory current behavior.
@@ -25,15 +25,15 @@ Deliver the smallest docs-only slice that closes roadmap item 3 by selecting exa
 
 ## Target Files
 
-1. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-003/docs/plans/2026-03-14-automatic-recursive-inference-candidate-subset-selection.md`
-2. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-003/orchestrator/rounds/round-003/implementation-notes.md`
+1. Create `docs/plans/2026-03-14-automatic-recursive-inference-candidate-subset-selection.md`
+2. Create `orchestrator/rounds/round-003/implementation-notes.md`
 
 ## Sequential Tasks
 
 ### Task 1 — Write candidate-subset selection + bounded research-plan artifact
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-003/docs/plans/2026-03-14-automatic-recursive-inference-candidate-subset-selection.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-candidate-subset-selection.md`
 
 Required contents:
 - Inherited-baseline restatement from items 1 and 2 (automatic recursive inference unresolved; explicit-only boundary still active).
@@ -52,7 +52,7 @@ Required contents:
 ### Task 2 — Record round implementation notes
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-003/orchestrator/rounds/round-003/implementation-notes.md`
+- `orchestrator/rounds/round-003/implementation-notes.md`
 
 Required contents:
 - Short summary of the selected subset and why it satisfies roadmap item 3.
@@ -67,14 +67,14 @@ Required contents:
 3. The document includes verifier-visible spike success/failure gates for the next bounded feasibility spike.
 4. The document explicitly preserves explicit-only / non-equi-recursive / non-cyclic-graph boundaries.
 5. `orchestrator/rounds/round-003/implementation-notes.md` exists and accurately records docs-only execution and continuity handling.
-6. Diff remains limited to planned docs/round artifacts and does not modify production code, `orchestrator/roadmap.md`, or predecessor authoritative logs.
+6. Diff remains limited to planned docs/round artifacts and does not modify production code, `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-003/roadmap.md`, or predecessor authoritative logs.
 
 ## Reviewer And Verification Checks
 
-Baseline checks (from `orchestrator/verification.md`):
+Baseline checks (from `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-003/verification.md`):
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-003/state-snapshot.json >/dev/null`
+- `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-003/roadmap.md`
 - Reviewer-recorded guidance sync check for `AGENTS.md`, `tasks/readme`, `TODO.md`, `CHANGELOG.md`, and `implementation_notes.md` (updated or intentionally unchanged, with rationale).
 
 Round-specific checks:
@@ -91,7 +91,7 @@ Round-specific checks:
   - `rg -n 'explicit-only|non-equi-recursive|non-cyclic-graph|success|failure|no-go|stop condition|verifier' docs/plans/2026-03-14-automatic-recursive-inference-candidate-subset-selection.md`
 
 Review output requirements:
-- Reviewer writes `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-003/orchestrator/rounds/round-003/review.md` with:
+- Reviewer writes `orchestrator/rounds/round-003/review.md` with:
   - baseline checks evidence,
   - round-specific checks evidence,
   - explicit decision (`approve` or `reject`),

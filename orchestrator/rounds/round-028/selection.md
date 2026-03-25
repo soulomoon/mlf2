@@ -6,15 +6,23 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: unannotated iso-recursive inference (bounded)
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap`
+- Roadmap Revision: `rev-006`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-006`
+- State Snapshot: `orchestrator/rounds/round-028/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 1: execute `U1` inherited baseline and repaired-subject bind for unannotated iso-recursive inference.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `stage: select-task` for `round-028` with `current_task: null` and `retry: null`, so no same-round retry is active and no earlier stage is forced.
+`orchestrator/rounds/round-028/state-snapshot.json` is parked at `stage: select-task` for `round-028` with `current_task: null` and `retry: null`, so no same-round retry is active and no earlier stage is forced.
 
-`orchestrator/roadmap.md` lists the successor cycle as `U1` through `U6`, all pending; under the guider contract, the next lawful selection is the lowest-numbered unfinished item, `U1`.
+`orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-006/roadmap.md` lists the successor cycle as `U1` through `U6`, all pending; under the guider contract, the next lawful selection is the lowest-numbered unfinished item, `U1`.
 
 Predecessor evidence is already finalized for entry into this successor cycle: `round-027` finalized `R4` as `accepted + finalize` with final outcome `repair-accepted`, and the terminal artifact `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` records that repaired `URI-R2-C1` is the controlling bounded subject for successor work. The approved successor design (`docs/superpowers/specs/2026-03-17-unannotated-iso-recursive-successor-roadmap-design.md`) also explicitly starts new live rounds at `round-028` with `U1` as the first concrete step.
 

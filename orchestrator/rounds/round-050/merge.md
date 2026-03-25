@@ -23,7 +23,7 @@
 - The round remains docs-only. Review evidence confirms no production, test,
   public API, executable, or Cabal drift, and no roadmap or accepted
   predecessor-record drift beyond the preexisting controller-owned
-  `orchestrator/state.json` tracked diff.
+  `orchestrator/rounds/round-050/state-snapshot.json` tracked diff.
 
 ## Review And Retry Consistency Check
 

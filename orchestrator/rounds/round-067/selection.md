@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-034`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034`
+- State Snapshot: `orchestrator/rounds/round-067/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 34: execute the bounded `L2` post-`L1` fail-closed successor
@@ -13,14 +21,14 @@ decision gate for repaired `URI-R2-C1`.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` already fixes the live controller state at
+`orchestrator/rounds/round-067/state-snapshot.json` already fixes the live controller state at
 `active_round_id: "round-067"`, `stage: "select-task"`, `current_task: null`,
 `retry: null`, `branch: "codex/round-067-l2-post-l1-decision-gate"`, and
 `last_completed_round: "round-066"`. Under the guider contract and
-`orchestrator/retry-subloop.md`, that means there is no same-round retry to
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/retry-subloop.md`, that means there is no same-round retry to
 resume and no lawful path that skips fresh roadmap selection before `plan`.
 
-`orchestrator/roadmap.md` now marks item 33 (`L1`) done and item 34 (`L2`)
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/roadmap.md` now marks item 33 (`L1`) done and item 34 (`L2`)
 pending. Because item 34 is the lowest-numbered unfinished roadmap entry,
 `L2` is the default next selection unless accepted continuity blocks it.
 Current continuity does not block it; instead, the accepted `L1` result is

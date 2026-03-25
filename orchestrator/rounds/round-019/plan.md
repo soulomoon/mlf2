@@ -21,25 +21,25 @@ Given the inherited negatives, this round must not assume reopen; it must evalua
 
 - Round id: `round-019`
 - Branch: `codex/round-019`
-- Worktree: `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019`
+- Worktree: `.worktrees/round-019`
 - Active subject boundary: `URI-R2-C1`
 - Scenario boundary: `uri-r2-c1-only-v1`
 - Research entrypoint id: `uri-r2-c1-prototype-entrypoint-v1`
 - Stage selector to add or execute: `P4-prototype-decision-gate`
 - Attempt policy: bounded to `1..3`; first run is `attempt-1`
 - Authoritative inherited records:
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-016/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-017/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-018/review-record.json`
+- `orchestrator/rounds/round-016/review-record.json`
+- `orchestrator/rounds/round-017/review-record.json`
+- `orchestrator/rounds/round-018/review-record.json`
 
 ## Scope
 
 1. Add bounded `P4` routing through the existing shared research entrypoint only.
 2. Implement `P4` decision computation from authoritative `P1` through `P3` records.
 3. Emit canonical `P4` artifact at:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/docs/plans/2026-03-15-uri-r2-c1-p4-prototype-decision-gate.md`
+- `docs/plans/2026-03-15-uri-r2-c1-p4-prototype-decision-gate.md`
 4. Emit attempt-local `P4` machine-readable outputs under:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/orchestrator/rounds/round-019/evidence/P4/attempt-1/`
+- `orchestrator/rounds/round-019/evidence/P4/attempt-1/`
 5. Keep default `cabal run mlf2` behavior unchanged.
 
 ## Non-Goals
@@ -55,25 +55,25 @@ Given the inherited negatives, this round must not assume reopen; it must evalua
 
 Primary files expected in scope:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
-2. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/src/MLF/Research/URI/R2/C1/Prototype/Entrypoint.hs`
-3. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`
-4. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/src/MLF/Research/URI/R2/C1/Prototype/P4.hs` (new)
-5. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/test/Research/UriR2C1PrototypeP1Spec.hs`
-6. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/mlf2.cabal` (module registration only, if required)
-7. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/docs/plans/2026-03-15-uri-r2-c1-p4-prototype-decision-gate.md` (new canonical artifact)
-8. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/orchestrator/rounds/round-019/evidence/P4/attempt-1/`
-9. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/orchestrator/rounds/round-019/implementation-notes.md`
+1. `src/MLF/Research/URI/R2/C1/Prototype/Types.hs`
+2. `src/MLF/Research/URI/R2/C1/Prototype/Entrypoint.hs`
+3. `src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`
+4. `src/MLF/Research/URI/R2/C1/Prototype/P4.hs` (new)
+5. `test/Research/UriR2C1PrototypeP1Spec.hs`
+6. `mlf2.cabal` (module registration only, if required)
+7. `docs/plans/2026-03-15-uri-r2-c1-p4-prototype-decision-gate.md` (new canonical artifact)
+8. `orchestrator/rounds/round-019/evidence/P4/attempt-1/`
+9. `orchestrator/rounds/round-019/implementation-notes.md`
 
 Files expected untouched:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/orchestrator/roadmap.md`
-- any files under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/orchestrator/rounds/round-016/`
-- any files under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/orchestrator/rounds/round-017/`
-- any files under `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/orchestrator/rounds/round-018/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/app/Main.hs`
-- all `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/src-public/*`
+- `orchestrator/rounds/round-019/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-004/roadmap.md`
+- any files under `orchestrator/rounds/round-016/`
+- any files under `orchestrator/rounds/round-017/`
+- any files under `orchestrator/rounds/round-018/`
+- `app/Main.hs`
+- all `src-public/*`
 
 ## Sequential Tasks
 
@@ -95,13 +95,13 @@ Files expected untouched:
 ### Task 3 - Emit `P4` machine-readable outputs and canonical artifact
 
 - Create attempt directory:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/orchestrator/rounds/round-019/evidence/P4/attempt-1/`
+- `orchestrator/rounds/round-019/evidence/P4/attempt-1/`
 - Emit machine-readable decision outputs sufficient for reviewer replay:
 - one stage-consumption summary (authoritative attempts and results for `P1` through `P3`)
 - one final decision object with terminal enum and decision rationale
 - one trace bundle with shared invocation metadata (`research_entrypoint_id`, `stage_selector`, `scenario_id`, `attempt_id`)
 - Write canonical artifact at:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-019/docs/plans/2026-03-15-uri-r2-c1-p4-prototype-decision-gate.md`
+- `docs/plans/2026-03-15-uri-r2-c1-p4-prototype-decision-gate.md`
 - Artifact must record:
 - inherited authoritative stage vector
 - explicit gate logic and triggered stop condition
@@ -127,11 +127,11 @@ Files expected untouched:
 
 ## Reviewer Checks
 
-Baseline checks from `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`:
+Baseline checks from `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-004/verification.md`:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-019/state-snapshot.json >/dev/null`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-004/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`
 - `cabal build all && cabal test`
 
@@ -147,7 +147,7 @@ Round-specific checks:
 - `cabal run mlf2`
 - Verify no forbidden diff widening:
 - `git diff --name-only`
-- no edits to `orchestrator/state.json`, `orchestrator/roadmap.md`, `app/Main.hs`, or `src-public/*`
+- no edits to `orchestrator/rounds/round-019/state-snapshot.json`, `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-004/roadmap.md`, `app/Main.hs`, or `src-public/*`
 
 ## Reviewer Decision Rule
 

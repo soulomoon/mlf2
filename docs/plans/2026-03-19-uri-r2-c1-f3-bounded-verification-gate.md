@@ -35,7 +35,7 @@ test file during `attempt-1`.
 ## Accepted `F2` Evidence Chain Carried Forward
 
 `round-043` remains the authoritative acceptance point for the bounded `F2`
-slice. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-044/orchestrator/rounds/round-043/review-record.json:4-26`
+slice. `orchestrator/rounds/round-043/review-record.json:4-26`
 records:
 
 - `stage_id = "F2"`, `attempt = 1`, `attempt_verdict = "accepted"`,
@@ -47,7 +47,7 @@ records:
   `F2-OUT-OF-SCOPE-TRIGGERS`, `F2-FOCUSED-COVERAGE`, and `F2-FULL-GATE`.
 
 The accepted `F2` artifact at
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-044/docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md:14-98`
+`docs/plans/2026-03-19-uri-r2-c1-f2-bounded-implementation-slice.md:14-98`
 freezes the exact bounded target and exclusions that `F3` rechecks:
 
 - lines `14-34`: one bounded `F2` lane only, with the inherited explicit-only /
@@ -64,7 +64,7 @@ freezes the exact bounded target and exclusions that `F3` rechecks:
 - lines `81-98`: the focused `ARI-C1` block carried exactly one local positive
   example and one matched non-local fail-closed contrast for this slice.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-044/Bugs.md:7-22`
+`Bugs.md:7-22`
 still records replay bug `BUG-2026-03-16-001`, but only as replay-lane
 continuity context. It does not reopen replay repair authority for this `F3`
 verification gate.
@@ -74,7 +74,7 @@ verification gate.
 ### `Fallback.hs`
 
 Read-only inspection of
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-044/src/MLF/Elab/Run/ResultType/Fallback.hs:521-693`
+`src/MLF/Elab/Run/ResultType/Fallback.hs:521-693`
 shows the accepted `F2` slice still present without widening:
 
 - lines `521-528` define `rootIsSchemeAlias`, `rootBoundIsBaseLike`, and
@@ -101,7 +101,7 @@ and out of scope.
 ### `PipelineSpec.hs`
 
 Read-only inspection of
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-044/test/PipelineSpec.hs:1298-1375`
+`test/PipelineSpec.hs:1298-1375`
 shows the focused `ARI-C1 feasibility characterization (bounded prototype-only)`
 block still carries the accepted bounded coverage:
 

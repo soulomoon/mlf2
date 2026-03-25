@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-021`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-021`
+- State Snapshot: `orchestrator/rounds/round-054/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 21: execute the `I1` continue-bounded bind and exact next-slice
@@ -15,7 +23,7 @@ target selection for repaired `URI-R2-C1` after the accepted
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` already parks the live control plane at
+`orchestrator/rounds/round-054/state-snapshot.json` already parks the live control plane at
 `active_round_id: "round-054"`, `active_round_dir:
 "orchestrator/rounds/round-054"`, `stage: "select-task"`,
 `current_task: null`, `retry: null`, and `last_completed_round:
@@ -23,7 +31,7 @@ target selection for repaired `URI-R2-C1` after the accepted
 and no earlier interrupted stage that can lawfully run ahead of fresh roadmap
 selection.
 
-`orchestrator/roadmap.md` marks items 1 through 20 done and leaves item 21
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-021/roadmap.md` marks items 1 through 20 done and leaves item 21
 (`I1`) as the lowest-numbered unfinished roadmap entry. Under the guider
 contract, that makes `I1` the next lawful selection. No later stage may run
 first because any successor implementation, verification, decision, or
@@ -66,7 +74,7 @@ its authority stated explicitly in the `I1` artifact rather than inferred from
 the completed `H` lane.
 
 Current repository status shows only the expected controller-state preparation
-(`M orchestrator/state.json`) and no conflicting implementation diff. That
+(`M orchestrator/rounds/round-054/state-snapshot.json`) and no conflicting implementation diff. That
 status does not override roadmap ordering. Selecting the docs-only `I1`
 bind/selection step therefore advances the live round without rewriting
 accepted history or touching unrelated work.

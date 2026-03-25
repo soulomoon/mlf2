@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-027`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027`
+- State Snapshot: `orchestrator/rounds/round-060/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 27: execute the `J3` bounded verification and evidence
@@ -18,11 +26,11 @@ The controller context for this worktree is already fixed to
 `active_round_id: "round-060"`, `stage: "select-task"`,
 `last_completed_round: "round-059"`, branch
 `codex/round-060-j3-verification-gate`, and `retry: null`. Under
-`orchestrator/retry-subloop.md`, a same-round retry is only forced when a
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/retry-subloop.md`, a same-round retry is only forced when a
 live retry object exists. None is active here, so the guider should select
 the next lawful roadmap item instead of replaying an earlier round.
 
-`orchestrator/roadmap.md` marks items 1 through 26 done and leaves item 27
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/roadmap.md` marks items 1 through 26 done and leaves item 27
 (`J3`) as the lowest-numbered unfinished item, with item 28 (`J4`) still
 waiting on it. Item 27 depends on item 26, and that dependency is already
 satisfied because accepted `round-059` finalized `J2`.
@@ -59,7 +67,7 @@ keeps the round inside that exact non-widening verification role.
 `/Volumes/src/mlf4/Bugs.md` has no open entries, so there is no active bug
 tracker obligation forcing a detour away from roadmap order. Current
 repository status shows only the pre-existing controller-state modification
-`M orchestrator/state.json`, with no competing implementation diff that would
+`M orchestrator/rounds/round-060/state-snapshot.json`, with no competing implementation diff that would
 justify choosing anything other than the next bounded verification gate.
 
 ## Round Scope Guard

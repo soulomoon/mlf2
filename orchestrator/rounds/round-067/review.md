@@ -2,25 +2,25 @@
 
 - Baseline checks:
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `16:  "retry": null`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered roadmap intact; item `34` / `L2` remains pending at line `208` pre-merge).
+  - `python3 -m json.tool orchestrator/rounds/round-067/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-067/state-snapshot.json` -> pass (`2:  "contract_version": 2,`, `16:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/roadmap.md` -> pass (ordered roadmap intact; item `34` / `L2` remains pending at line `208` pre-merge).
   - Required design/boundary presence check -> pass:
     - `docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
     - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
     - `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
     - `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
     - `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-    - `orchestrator/retry-subloop.md`
+    - `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/retry-subloop.md`
   - `test -f docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md` -> pass.
   - `python3 -m json.tool orchestrator/rounds/round-066/review-record.json >/dev/null` -> pass.
   - Predecessor-authority assertion via `python3` over `orchestrator/rounds/round-066/review-record.json` -> pass (`stage_id == "L1"`, `attempt == 1`, `attempt_verdict == "accepted"`, `stage_action == "finalize"`, `status == "authoritative"`, `artifact_path == "docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md"`).
   - `rg -n 'fail closed|no fresh lawful exact successor slice|separate accepted roadmap/selection change' docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md` -> pass (captures the accepted `L1` fail-closed conclusion and future-gate precondition at lines `20` and `215`).
   - `rg -n 'Attempt verdict: `accepted`|Stage action: `finalize`|fail-closed outcome is therefore a valid authoritative `L1` result' orchestrator/rounds/round-066/review.md` -> pass (captures accepted-finalize reviewer continuity at lines `35`, `38`, and `39`).
-  - `rg -n '^34\. \[pending\] Execute the bounded `L2` post-`L1` fail-closed successor decision gate for repaired `URI-R2-C1`' orchestrator/roadmap.md` -> pass (line `208`).
+  - `rg -n '^34\. \[pending\] Execute the bounded `L2` post-`L1` fail-closed successor decision gate for repaired `URI-R2-C1`' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-034/roadmap.md` -> pass (line `208`).
   - Continuity presence check -> pass (`tasks/todo/2026-03-11-recursive-types-orchestration`, `orchestrator/rounds/round-001`, `round-024`, `round-027`, `round-028`, `round-033`, and `round-034` all present).
-  - `git status --short --untracked-files=all` -> pass (`M orchestrator/state.json`, `?? docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`, `?? orchestrator/rounds/round-067/implementation-notes.md`, `?? orchestrator/rounds/round-067/plan.md`, `?? orchestrator/rounds/round-067/selection.md`).
-  - `git diff --name-only` -> pass (`orchestrator/state.json` only tracked diff).
+  - `git status --short --untracked-files=all` -> pass (`M orchestrator/rounds/round-067/state-snapshot.json`, `?? docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`, `?? orchestrator/rounds/round-067/implementation-notes.md`, `?? orchestrator/rounds/round-067/plan.md`, `?? orchestrator/rounds/round-067/selection.md`).
+  - `git diff --name-only` -> pass (`orchestrator/rounds/round-067/state-snapshot.json` only tracked diff).
   - Conditional full repo gate omission -> justified: `cabal build all && cabal test` was not rerun because `L2` is docs-only by contract and the worktree snapshot shows no `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal` edits.
 
 - Task-specific checks:
@@ -29,7 +29,7 @@
   - `L2-QUEUE-STOP` -> pass: the implemented artifact records exactly one bounded decision, `stop-blocked`, and ties it to the accepted `L1` conclusion that no fresh lawful exact successor slice remains inside the inherited repaired `URI-R2-C1` boundary. That is the valid authoritative bounded outcome for the current queue; retry is not required merely because the lawful answer is fail-closed.
   - `L2-FUTURE-GATE` -> pass: any mention of the preserved generic scheme-alias / base-like `baseTarget` route stays future-gate context only. The artifact keeps implementation and verification blocked unless a separate roadmap amendment is accepted first and a fresh selection later authorizes that work; it does not treat preserved broader continuity as present authorization.
   - `L2-NON-REOPEN` -> pass: the artifact explicitly keeps accepted `F1` / `F2` / `F3` / `F4`, accepted `I1` / `I2` / `I3` / `I4`, accepted `J1` / `J2` / `J3` / `J4`, accepted `K1` / `K2` / `K3` / `K4`, accepted `L1`, replay reopen, `MLF.Elab.Inst`, `InstBot`, `boundVarTarget`, `boundTarget`, `schemeBodyTarget`, `src/MLF/Elab/Run/ResultType/View.hs`, equi-recursive reasoning, implicit unfolding, cyclic structural graph encoding, multi-SCC support, cross-family search, a second executable interface, non-local widening, and any broader trigger family or fallback path out of scope.
-  - `L2-DIFF-BOUNDARY` -> pass: the worktree snapshot remains docs/orchestrator only for the round payload. No production or test diff is present for `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`, and the only tracked diff is the pre-existing controller-owned `orchestrator/state.json`.
+  - `L2-DIFF-BOUNDARY` -> pass: the worktree snapshot remains docs/orchestrator only for the round payload. No production or test diff is present for `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`, and the only tracked diff is the pre-existing controller-owned `orchestrator/rounds/round-067/state-snapshot.json`.
   - `L2-SKIP-NOTE` -> pass: `orchestrator/rounds/round-067/implementation-notes.md` and the canonical `L2` artifact both explicitly justify skipping `cabal build all && cabal test` because this round is docs-only and does not touch code/test paths; that matches the observed worktree scope.
   - `L2-RETRY-SCHEMA` -> pass: this review records the required `Implemented stage result`, `Attempt verdict`, `Stage action`, `Retry reason`, and `Fix hypothesis` fields, and finalization is lawful here because the stage already reached an authoritative bounded outcome. `Retry reason: none` and `Fix hypothesis: none` are correct.
   - `L2-SCOPE-ALIGNMENT` -> pass: selection, plan, implementation notes, and the canonical artifact all keep the live subject fixed to repaired `URI-R2-C1`, preserve the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-second-interface / no-fallback boundary, and refuse replay reopen, `MLF.Elab.Inst`, `InstBot`, `boundVarTarget`, `boundTarget`, `schemeBodyTarget`, `ResultType.View`, equi-recursive reasoning, implicit unfolding, cyclic structural graph encoding, multi-SCC support, cross-family search, second-interface work, fallback paths, non-local widening, and broader trigger-family widening. The implementer's `L2 = stop-blocked` result is therefore the valid authoritative bounded decision for this queue.

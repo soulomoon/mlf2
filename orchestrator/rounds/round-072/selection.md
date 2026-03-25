@@ -6,6 +6,14 @@ Role: guider
 Active subject: exact `N4`-frozen preserved non-local generic scheme-root alias-bound / base-like `baseTarget -> baseC` packet
 Successor lane: bounded `N5` minimal-slice lane for the accepted `N4` packet only
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap`
+- Roadmap Revision: `rev-005`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-005`
+- State Snapshot: `orchestrator/rounds/round-072/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 5 (`N5`): execute the `N5` minimal design or implementation
@@ -13,15 +21,15 @@ slice for the exact `N4`-frozen non-local `baseTarget -> baseC` packet.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` fixes the live controller state at
+`orchestrator/rounds/round-072/state-snapshot.json` fixes the live controller state at
 `active_round_id: "round-072"`, `stage: "select-task"`, `current_task: null`,
 `retry: null`, `branch: "codex/round-072-n5-minimal-slice"`, and
-`last_completed_round: "round-071"`. Under `orchestrator/retry-subloop.md`,
+`last_completed_round: "round-071"`. Under `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-005/retry-subloop.md`,
 `N5` may retry within the same round, but the live state records no retry
 object, so there is no same-round retry to resume and no lawful reason to skip
 fresh roadmap selection before `plan`.
 
-`orchestrator/roadmap.md` marks items 1 through 4 (`N1` through `N4`) done and
+`orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-005/roadmap.md` marks items 1 through 4 (`N1` through `N4`) done and
 item 5 (`N5`) pending, with items 6 and 7 depending on it. That makes `N5`
 the lowest-numbered unfinished item and therefore the default next stage unless
 live retry state or accepted review artifacts force something else. They do
@@ -51,7 +59,7 @@ generic `targetC` consumer, and the non-local
 `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
 matches that state exactly: `N5` remains `NO`, and its next action says to
 keep `N5` blocked until `N4` is `YES`, then choose one smallest safe slice
-only. The `N5` completion notes in `orchestrator/roadmap.md` tighten the same
+only. The `N5` completion notes in `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-005/roadmap.md` tighten the same
 boundary: the next slice must stay bounded to the exact `N4` packet, may be
 design-only, tests-only, or code-changing, and must preserve the exact
 owner-binder / owned-bound pair, inverse-translation-safe bound-inlining
@@ -67,7 +75,7 @@ already frozen for the live packet. `Bugs.md` still lists
 `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains read-only
 predecessor context only and does not authorize replay reopen or a different
 stage. Repository status in the controller root shows only the controller-owned
-`M orchestrator/state.json` edit, which does not change selection logic.
+`M orchestrator/rounds/round-072/state-snapshot.json` edit, which does not change selection logic.
 
 `N5` should therefore run now because it is the first pending roadmap item
 that can lawfully act on the accepted `N4` bind without widening scope: it may
@@ -98,7 +106,7 @@ explicitly says otherwise.
   unchanged.
 - Keep replay reopen, `MLF.Elab.Inst`, `InstBot`, `boundVarTarget`,
   `boundTarget`, `schemeBodyTarget`,
-  `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/View.hs`,
+  `src/MLF/Elab/Run/ResultType/View.hs`,
   every other fallback family, every different solver/pipeline subject,
   cross-family search, equi-recursive reasoning, implicit unfolding, cyclic
   structural encoding, graph-cycle exceptions, multi-SCC support, second

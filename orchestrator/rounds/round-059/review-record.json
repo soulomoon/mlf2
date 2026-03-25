@@ -21,5 +21,8 @@
     "J2-DIFF-BOUNDARY": "pass",
     "J2-CONTINUITY": "pass"
   },
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap",
+  "roadmap_revision": "rev-026",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-026"
 }

@@ -29,15 +29,15 @@ Implemented roadmap item `D4` as an aggregate-only terminal decision gate using 
 
 ## Verification Run
 
-Executed in `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-023`:
+Executed in `.worktrees/round-023`:
 
 - `git diff --check` (pass)
-- `python3 -m json.tool orchestrator/state.json >/dev/null` (pass)
-- `rg -n '"contract_version": 2|"retry": null|"retry": \\{' orchestrator/state.json` (pass; contract v2 + retry field present)
-- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md` (pass; ordered status list present)
+- `python3 -m json.tool orchestrator/rounds/round-023/state-snapshot.json >/dev/null` (pass)
+- `rg -n '"contract_version": 2|"retry": null|"retry": \\{' orchestrator/rounds/round-023/state-snapshot.json` (pass; contract v2 + retry field present)
+- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-004/roadmap.md` (pass; ordered status list present)
 - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md` (pass)
 - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` (pass)
-- `test -f orchestrator/retry-subloop.md` (pass)
+- `test -f orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-004/retry-subloop.md` (pass)
 - `python3 -m json.tool orchestrator/rounds/round-023/evidence/D4/attempt-1/stage-verdict.json >/dev/null` (pass)
 - `python3 -m json.tool orchestrator/rounds/round-023/evidence/D4/attempt-1/decision-verdict.json >/dev/null` (pass)
 - `rg -n '^`reopen-repair-track`$' docs/plans/2026-03-16-uri-r2-c1-d4-repair-track-decision-gate.md` (pass)

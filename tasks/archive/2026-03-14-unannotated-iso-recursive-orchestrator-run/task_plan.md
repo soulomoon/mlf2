@@ -31,5 +31,5 @@ Status: COMPLETE
 
 ## Errors Encountered
 
-- 2026-03-14: Initial `git worktree add .worktrees/round-006 -b codex/round-006 ...` attempt failed because a parallel `mkdir -p .worktrees/round-006/orchestrator/rounds/round-006` created the path first. Recovery: keep the already-created `codex/round-006` branch, remove the empty stub directory, and attach a worktree to the existing branch in a serialized step.
+- 2026-03-14: Initial `git worktree add .worktrees/round-006 -b codex/round-006 ...` attempt failed because a parallel `mkdir -p orchestrator/rounds/round-006` created the path first. Recovery: keep the already-created `codex/round-006` branch, remove the empty stub directory, and attach a worktree to the existing branch in a serialized step.
 - 2026-03-14: First delegated guider attempt for `round-006` produced no `selection.md` and no worktree diff after the subagent handoff. Recovery: treat it as a failed delegated attempt, spawn a fresh guider with stricter non-controller instructions, and resume the same incomplete `select-task` stage.

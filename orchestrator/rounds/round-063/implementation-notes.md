@@ -16,7 +16,7 @@ source-guard coverage inside the existing
 
 - preserved the inherited explicit-only / non-equi-recursive /
   non-cyclic-graph / no-second-interface / no-fallback boundary;
-- preserved controller-owned `orchestrator/state.json` and the round
+- preserved controller-owned `orchestrator/rounds/round-063/state-snapshot.json` and the round
   selection/plan artifacts untouched; and
 - preserved accepted `F2/F3` continuity plus the completed
   `rootLocalSingleBase` and `rootLocalInstArgSingleBase` lanes as inherited
@@ -27,6 +27,6 @@ source-guard coverage inside the existing
 - the focused `ARI-C1` block is green with the bounded `K2` helper/example and
   source-guard additions (`20` examples, `0` failures);
 - `git diff --check` passes on the finished diff while preserving the
-  pre-existing `orchestrator/state.json` modification and untracked
+  pre-existing `orchestrator/rounds/round-063/state-snapshot.json` modification and untracked
   `round-063` controller packet; and
 - `cabal build all && cabal test` passes (`1141` examples, `0` failures).

@@ -39,5 +39,8 @@
       },
       "terminal_reason": "blocking-stop-condition"
     }
-  }
+  },
+  "roadmap_id": "2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-004"
 }

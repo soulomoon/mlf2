@@ -4,7 +4,7 @@
 
 Execute only roadmap item `F4` and produce one accepted aggregate decision artifact
 at
-`/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-19-uri-r2-c1-f4-next-cycle-decision-gate.md`.
+`docs/plans/2026-03-19-uri-r2-c1-f4-next-cycle-decision-gate.md`.
 
 This round is an initial plan with `retry: null`, not a delta retry plan. It is
 aggregate-only and docs-only. It must freeze exactly one bounded next-step result
@@ -72,48 +72,48 @@ revert or clean up unrelated changes while preparing the `F4` decision artifact.
 
 ## Authoritative Inputs To Preserve
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-045/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roles/planner.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-044/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
+- `orchestrator/rounds/round-045/selection.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-012/verification.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-012/retry-subloop.md`
+- `orchestrator/roles/planner.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-012/roadmap.md`
+- `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
+- `docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md`
+- `orchestrator/rounds/round-044/review-record.json`
+- `Bugs.md`
 
 ## Files Expected In Scope
 
 Primary writable artifact:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-19-uri-r2-c1-f4-next-cycle-decision-gate.md`
+1. `docs/plans/2026-03-19-uri-r2-c1-f4-next-cycle-decision-gate.md`
    - create the canonical `F4` aggregate decision record.
 
 Optional bounded round note file:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-045/implementation-notes.md`
+1. `orchestrator/rounds/round-045/implementation-notes.md`
    - optional reviewer-facing note file if long docs-only continuity output needs a
      bounded home.
 
 Read-only decision anchors:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md`
-2. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-044/review-record.json`
-3. `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
+1. `docs/plans/2026-03-19-uri-r2-c1-f3-bounded-verification-gate.md`
+2. `orchestrator/rounds/round-044/review-record.json`
+3. `Bugs.md`
 
 Files that must remain untouched by `F4` `attempt-1`:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src-public/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/app/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/test/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/mlf2.cabal`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
+- `src/`
+- `src-public/`
+- `app/`
+- `test/`
+- `mlf2.cabal`
+- `orchestrator/rounds/round-045/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-012/roadmap.md`
+- `Bugs.md`
 - prior artifacts and review history under
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-001/` through
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-044/`
+  `orchestrator/rounds/round-001/` through
+  `orchestrator/rounds/round-044/`
 - any docs outside the canonical `F4` artifact path and the optional round note
   file
 
@@ -156,7 +156,7 @@ Files that must remain untouched by `F4` `attempt-1`:
   - `boundVarTarget` remains absent as authority for the selected slice; and
   - `rootHasMultiInst` / `instArgRootMultiBase` remain unchanged and out of scope.
 - Use
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-044/review-record.json`
+  `orchestrator/rounds/round-044/review-record.json`
   as the authoritative proof that `F3` finalized as `stage_id = "F3"`,
   `attempt = 1`, `attempt_verdict = "accepted"`, `stage_action = "finalize"`,
   `status = "authoritative"`, with artifact path
@@ -166,7 +166,7 @@ Files that must remain untouched by `F4` `attempt-1`:
   `F3-BOUNDVARTARGET-ABSENT`, `F3-OUT-OF-SCOPE-TRIGGERS`, `F3-FOCUSED-RERUN`,
   `F3-FULL-GATE`, `F3-CANONICAL-ARTIFACT`, and `F3-CONTINUITY` all remained
   `pass`.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` only as continuity
+- Treat `Bugs.md` only as continuity
   context. Do not reinterpret `BUG-2026-03-16-001` as current-round repair
   authority.
 - State explicitly that `F4` answers one bounded question only:
@@ -211,18 +211,18 @@ explain why the selected token is lawful and why the other two tokens are not.
 ### Task 4 - Run the docs-only verification and continuity checks required for `F4`
 
 Run the baseline docs/state checks required by
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`:
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-012/verification.md`:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-045/state-snapshot.json >/dev/null`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-045/state-snapshot.json`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-012/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-012/retry-subloop.md`
 
 Reconfirm authoritative continuity with at least these checks:
 
@@ -256,7 +256,7 @@ blocker rather than widening the round.
 ### Task 5 - Author the canonical `F4` aggregate decision artifact
 
 Write
-`/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-19-uri-r2-c1-f4-next-cycle-decision-gate.md`
+`docs/plans/2026-03-19-uri-r2-c1-f4-next-cycle-decision-gate.md`
 as the canonical stage result.
 
 Required sections:

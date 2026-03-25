@@ -13,7 +13,7 @@
 ## Readiness
 
 - Latest review snapshot is `accepted` + `finalize` at attempt `1`, and `review.md` agrees with `review-record.json` on `stage_result: pass`, `retry_reason: none`, and `fix_hypothesis: none`.
-- `orchestrator/retry-subloop.md` is satisfied: `R1` may finalize, `review-record.json` is authoritative on finalization, and no retry remains active for this round.
+- `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-001/retry-subloop.md` is satisfied: `R1` may finalize, `review-record.json` is authoritative on finalization, and no retry remains active for this round.
 - The approved diff stays bounded to the `R1` reproduction slice: tracked code changes are limited to `test/ElaborationSpec.hs`, with supporting plan/doc/round artifacts only.
 - Predecessor continuity is intact: this round consumes the inherited `P1`, `P2`, `D2`, `D3`, and `D4 = reopen-repair-track` authority without rewriting earlier rounds.
 

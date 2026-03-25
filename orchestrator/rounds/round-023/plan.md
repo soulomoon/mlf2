@@ -25,7 +25,7 @@
 ## Sequential Execution Plan (Bounded, Aggregate-Only)
 
 1. Reconfirm gate invariants before aggregation.
-   - Verify `orchestrator/state.json` remains at `contract_version: 2`, `stage: plan`, `current_task: D4`, `retry: null`.
+   - Verify `orchestrator/rounds/round-023/state-snapshot.json` remains at `contract_version: 2`, `stage: plan`, `current_task: D4`, `retry: null`.
    - Reassert that this round is decision-only and does not authorize implementation work.
 
 2. Re-validate authoritative carry-forward eligibility.
@@ -60,5 +60,5 @@
 - No widened scenario, subject, or ownership scope.
 - No second executable interface.
 - No mutation of D1/D2/D3 artifacts or their review records.
-- No edits to `orchestrator/state.json`.
+- No edits to `orchestrator/rounds/round-023/state-snapshot.json`.
 - No code implementation changes in `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.

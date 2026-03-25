@@ -15,10 +15,10 @@ This artifact implements exactly one bounded `G2` fail-closed lane inside
 repaired `URI-R2-C1`:
 
 - the local-binding `rootHasMultiInst` `keepTargetFinal` / `targetC` path in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-047/src/MLF/Elab/Run/ResultType/Fallback.hs`; and
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`; and
 - one bounded extension of the existing
   `ARI-C1 feasibility characterization (bounded prototype-only)` block in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-047/test/PipelineSpec.hs`.
+  `test/PipelineSpec.hs`.
 
 The inherited boundary remains fixed:
 

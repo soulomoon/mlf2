@@ -8,6 +8,14 @@ non-local `baseTarget -> baseC` packet
 Successor lane: bounded `N7` closure / next-cycle decision gate for that
 exact evidence only
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap`
+- Roadmap Revision: `rev-007`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-007`
+- State Snapshot: `orchestrator/rounds/round-074/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 7 (`N7`): execute the `N7` long-horizon automatic
@@ -16,23 +24,23 @@ iso-recursive inference closure / next-cycle decision gate after the accepted
 
 ## Why This Item Should Run Now
 
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json` fixes the
+`orchestrator/rounds/round-074/state-snapshot.json` fixes the
 live controller state at `active_round_id: "round-074"`, `stage:
 "select-task"`, `current_task: null`, `retry: null`, `branch:
 "codex/round-074-n7-closure-decision"`, `worktree_path:
-"/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-074"`, and
+".worktrees/round-074"`, and
 `last_completed_round: "round-073"`. That is a fresh round-selection state,
-not a same-round retry. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
+not a same-round retry. `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-007/retry-subloop.md`
 also makes `N7` aggregate-only: review may reject it back to `plan`, but
 `accepted + retry` is forbidden for `N7`. With `retry: null`, there is no
 live retry obligation to resume and no lawful reason to skip fresh roadmap
 selection.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md` marks items
+`orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-007/roadmap.md` marks items
 1 through 6 (`N1` through `N6`) done and item 7 (`N7`) pending. That makes
 `N7` the lowest-numbered unfinished roadmap item, and its only declared
 dependency is item 6. Accepted predecessor evidence shows that dependency is
-now satisfied: `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-073/review-record.json`
+now satisfied: `orchestrator/rounds/round-073/review-record.json`
 finalized `stage_id: "N6"` with `attempt_verdict: "accepted"`,
 `stage_result: "pass"`, `stage_action: "finalize"`, `retry_reason: "none"`,
 `fix_hypothesis: "none"`, `status: "authoritative"`, and artifact path
@@ -51,7 +59,7 @@ next lawful work is the aggregate closure / next-cycle decision gate, not
 another implementation slice and not another verification packet for a wider
 subject.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+`tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
 still records `N7` as the long-horizon closure row with gate `NO`, and its
 next action is to advance only through verified progress on `N1` through
 `N6`. That progress now exists. Under the accepted post-`L2` successor lane,
@@ -62,20 +70,20 @@ explicit-only / non-equi-recursive / non-cyclic-graph /
 no-second-interface / no-fallback boundary.
 
 Prior accepted round artifacts reinforce that this is a decision-only step.
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-073/selection.md`,
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-073/review.md`,
-and `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-073/merge.md`
+`orchestrator/rounds/round-073/selection.md`,
+`orchestrator/rounds/round-073/review.md`,
+and `orchestrator/rounds/round-073/merge.md`
 all describe `N6` as docs-only evidence consolidation for the exact accepted
 non-local `baseTarget -> baseC` slice, and they explicitly reserve `N7` as
 the next undecided step. Selecting any new implementation, replay reopen, or
 broader fallback-family work here would violate that accepted sequencing.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` still lists open
+`Bugs.md` still lists open
 `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains read-only
 predecessor context only. It can constrain the `N7` decision by supporting a
 `continue-bounded` or `stop-blocked` outcome for future work, but it does not
 authorize widening the live subject in this round. Repository status in the
-controller root shows only the controller-owned `M orchestrator/state.json`
+controller root shows only the controller-owned `M orchestrator/rounds/round-074/state-snapshot.json`
 edit, and the round worktree is otherwise clean on the expected branch, so no
 repository-state blocker forces a different selection.
 
@@ -100,7 +108,7 @@ repository-state blocker forces a different selection.
   non-cyclic-graph / no-second-interface / no-fallback boundary unchanged.
 - Keep replay reopen, `MLF.Elab.Inst`, `InstBot`, `boundVarTarget`,
   `boundTarget`, `schemeBodyTarget`,
-  `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/View.hs`,
+  `src/MLF/Elab/Run/ResultType/View.hs`,
   every other fallback family, every different solver/pipeline subject,
   cross-family search, equi-recursive reasoning, implicit unfolding, cyclic
   encoding, graph-cycle exceptions, multi-SCC support, second-interface work,

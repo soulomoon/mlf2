@@ -40,9 +40,9 @@
   - `cabal run mlf2 -- --research-entrypoint uri-r2-c1-p2-replay-root-cause-v1 --stage-selector D3-fixability-probe --scenario-id uri-r2-c1-only-v1 --attempt-id 1` ✅ (`Prototype result: pass`)
 - Baseline contract checks in round-022 worktree ✅
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `python3 -m json.tool orchestrator/rounds/round-022/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-022/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-003/roadmap.md`
   - existence checks for the roadmap and retry-subloop control files
 - D3-specific checks ✅
   - evidence file set is exact and JSON-valid

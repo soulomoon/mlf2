@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-018`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-018`
+- State Snapshot: `orchestrator/rounds/round-051/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 18: execute the `H2` bounded local-binding
@@ -14,13 +22,13 @@ implementation slice frozen by `H1`.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `active_round_id: "round-051"`,
+`orchestrator/rounds/round-051/state-snapshot.json` is parked at `active_round_id: "round-051"`,
 `active_round_dir: "orchestrator/rounds/round-051"`, `stage: "select-task"`,
 `current_task: null`, `retry: null`, and `last_completed_round: "round-050"`.
 That machine state means there is no same-round retry to resume and no prior
 selection to carry forward ahead of normal roadmap ordering.
 
-`orchestrator/roadmap.md` marks items 1 through 17 done. Item 18 (`H2`) is the
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-018/roadmap.md` marks items 1 through 17 done. Item 18 (`H2`) is the
 lowest-numbered unfinished roadmap entry, and items 19 (`H3`) and 20 (`H4`)
 both depend on it, so `H2` is the next lawful selection under the guider
 contract.
@@ -51,7 +59,7 @@ recursive inference.
 replay-path bug remains continuity context only and does not authorize replay
 reopen, `MLF.Elab.Inst` / `InstBot`, `boundVarTarget` widening, non-local
 widening, or broad recursive-inference work here. Repository status shows only
-the expected controller-state preparation (`M orchestrator/state.json`), so it
+the expected controller-state preparation (`M orchestrator/rounds/round-051/state-snapshot.json`), so it
 does not alter the next lawful roadmap choice.
 
 ## Round Scope Guard

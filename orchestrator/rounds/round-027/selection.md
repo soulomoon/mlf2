@@ -9,15 +9,23 @@ Repair boundary: `witness-replay/applyInstantiation-instbot-precondition`
 Owner boundary: `MLF.Elab.Inst.applyInstantiation` (`InstBot` branch)
 Controlling bug: `BUG-2026-03-16-001`
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap`
+- Roadmap Revision: `rev-004`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004`
+- State Snapshot: `orchestrator/rounds/round-027/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 4: execute the `R4` repair decision gate for `URI-R2-C1`.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` shows a fresh `select-task` transition for `round-027` with `current_task: null` and `retry: null`, so the retry subloop is idle and does not force a same-round return to `R1`, `R2`, or `R3`. Under the guider contract, selection therefore falls to the lowest-numbered unfinished roadmap item.
+`orchestrator/rounds/round-027/state-snapshot.json` shows a fresh `select-task` transition for `round-027` with `current_task: null` and `retry: null`, so the retry subloop is idle and does not force a same-round return to `R1`, `R2`, or `R3`. Under the guider contract, selection therefore falls to the lowest-numbered unfinished roadmap item.
 
-`orchestrator/roadmap.md` marks `R1`, `R2`, and `R3` as `done`, leaving `R4` as the only remaining `pending` item. The last completed round, `round-026`, finalized `R3` attempt `1` as the authoritative verification pass for the locked `URI-R2-C1` / `uri-r2-c1-only-v1` replay lane, so the dependency chain for the terminal decision gate is now satisfied.
+`orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/roadmap.md` marks `R1`, `R2`, and `R3` as `done`, leaving `R4` as the only remaining `pending` item. The last completed round, `round-026`, finalized `R3` attempt `1` as the authoritative verification pass for the locked `URI-R2-C1` / `uri-r2-c1-only-v1` replay lane, so the dependency chain for the terminal decision gate is now satisfied.
 
 `R4` should therefore run now because the repair track has already completed the bounded reproduction (`R1`), bounded `InstBot` repair (`R2`), and locked replay-path verification (`R3`) for the localized `applyInstantiation` / `InstBot` boundary. The only remaining live work is to aggregate those accepted bounded results and record exactly one final outcome, `repair-accepted` or `repair-blocked`, without reopening diagnosis, widening scope, or changing the fixed `URI-R2-C1` scenario and repair target context.
 

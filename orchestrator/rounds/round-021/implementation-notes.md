@@ -37,13 +37,13 @@
 ## Verification run
 
 - `git diff --check` ✅
-- `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json >/dev/null` ✅
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json` ✅
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md` ✅
+- `python3 -m json.tool orchestrator/rounds/round-021/state-snapshot.json >/dev/null` ✅
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-021/state-snapshot.json` ✅
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-002/roadmap.md` ✅
 - Spec/control plane existence checks ✅
   - `docs/superpowers/specs/2026-03-16-uri-r2-c1-p2-replay-root-cause-roadmap-design.md`
   - `docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md`
-  - `orchestrator/retry-subloop.md`
+  - `orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-002/retry-subloop.md`
 - `cabal build all` ✅
 - `cabal test` ✅ (`1119 examples, 0 failures`)
   - Environment caveat: command exits non-zero after success due Cabal log-file permission (`~/.cache/cabal/logs/build.log`).

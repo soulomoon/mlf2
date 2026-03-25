@@ -2,15 +2,15 @@
 
 - Baseline checks:
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `C4` list intact, `C3` still pending pre-merge).
+  - `python3 -m json.tool orchestrator/rounds/round-036/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-036/state-snapshot.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-003/roadmap.md` -> pass (ordered `C1` through `C4` list intact, `C3` still pending pre-merge).
   - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
-  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-003/retry-subloop.md` -> pass.
   - Continuity presence check via `python3` -> pass (`round-001..round-033 directories: True`; replay-repair rounds `round-024..round-027`: True; predecessor recursive-types packet present at `tasks/todo/2026-03-11-recursive-types-orchestration`: True; inherited boundary/repair docs present: True).
   - Predecessor continuity/authority recheck via `python3` -> pass (`C3 continuity check: required predecessor paths exist`; `C3 continuity check: review records round-028 through round-035 present`; `C3 continuity check: C2 authoritative record intact`).
 

@@ -6,21 +6,29 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-010`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-010`
+- State Snapshot: `orchestrator/rounds/round-043/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 10: execute the `F2` bounded local-binding scheme-alias/base-like `keepTargetFinal` / `targetC` fail-closed implementation slice frozen by `F1`.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `active_round_id: round-043`, `stage: select-task`, `current_task: null`, and `retry: null`, so no same-round retry is active and no prior review outcome forces a retry resume ahead of normal roadmap selection.
+`orchestrator/rounds/round-043/state-snapshot.json` is parked at `active_round_id: round-043`, `stage: select-task`, `current_task: null`, and `retry: null`, so no same-round retry is active and no prior review outcome forces a retry resume ahead of normal roadmap selection.
 
-`orchestrator/roadmap.md` marks items 1 through 9 done, leaving item 10 (`F2`) as the lowest-numbered unfinished roadmap entry. Under the guider contract, that makes `F2` the next lawful selection.
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-010/roadmap.md` marks items 1 through 9 done, leaving item 10 (`F2`) as the lowest-numbered unfinished roadmap entry. Under the guider contract, that makes `F2` the next lawful selection.
 
 The accepted predecessor chain fixes both the boundary and the exact implementation lane that must run now. `E2` authoritative `attempt-2` implemented only the bounded same-lane retained-child local-`TypeRef` slice; `E3` authoritative `attempt-1` reverified that exact slice under the focused `ARI-C1 feasibility characterization (bounded prototype-only)` rerun, a fresh full `cabal build all && cabal test` gate, and predecessor continuity checks; `E4` authoritative `attempt-1` finalized `continue-bounded`; and `F1` authoritative `round-042` review finalized the next bind, freezing exactly one `F2` target: the adjacent local-binding `rootIsSchemeAlias && rootBoundIsBaseLike` branch inside `keepTargetFinal` and the downstream `targetC` selection in `src/MLF/Elab/Run/ResultType/Fallback.hs`, with ownership limited to `src/MLF/Elab/Run/ResultType/Fallback.hs` and `test/PipelineSpec.hs`. Because that bind is already accepted, the next lawful step is `F2` implementation, not `F3` verification, `F4` decision work, replay reopen, or any wider target family.
 
 The current boundary remains fixed by the roadmap, retry contract, guider role, and accepted `E2` / `E3` / `E4` / `F1` artifacts. The live subject stays repaired `URI-R2-C1`; the inherited explicit-only / non-equi-recursive / non-cyclic-graph boundary still applies; accepted `U2`, `U3`, and `U4` negative findings remain binding; `boundVarTarget` must be treated as absent for this selected slice; and `rootHasMultiInst`, `instArgRootMultiBase`, replay reopen, `MLF.Elab.Inst`, `InstBot`, non-local binding, equi-recursive reasoning, cyclic structural encoding, second-interface work, and broader widening remain out of scope.
 
-`Bugs.md` still carries open replay-path bug `BUG-2026-03-16-001`, but it remains replay-lane continuity context only and does not authorize reopening `MLF.Elab.Inst.applyInstantiation`, `InstBot`, or broader recursive-inference work in this round. Current repository status is already non-pristine (`orchestrator/state.json` modified and `tasks/todo/2026-03-18-continue-bounded-orchestrator-run/` untracked), so selecting the narrow bounded `F2` implementation slice best respects existing work while advancing the lowest unfinished roadmap item under the live boundary.
+`Bugs.md` still carries open replay-path bug `BUG-2026-03-16-001`, but it remains replay-lane continuity context only and does not authorize reopening `MLF.Elab.Inst.applyInstantiation`, `InstBot`, or broader recursive-inference work in this round. Current repository status is already non-pristine (`orchestrator/rounds/round-043/state-snapshot.json` modified and `tasks/todo/2026-03-18-continue-bounded-orchestrator-run/` untracked), so selecting the narrow bounded `F2` implementation slice best respects existing work while advancing the lowest unfinished roadmap item under the live boundary.
 
 ## Round Scope Guard
 

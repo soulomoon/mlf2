@@ -5,15 +5,15 @@
 - Plan: `orchestrator/rounds/round-005/plan.md`
 - Implementation notes: `orchestrator/rounds/round-005/implementation-notes.md`
 - Decision doc: `docs/plans/2026-03-14-automatic-recursive-inference-item5-handoff-decision.md`
-- Verification contract: `orchestrator/verification.md`
+- Verification contract: `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-005/verification.md`
 
 ## Baseline Checks
 
 1. `git diff --check`  
    Result: pass (no whitespace/conflict-marker issues).
-2. `python3 -m json.tool orchestrator/state.json >/dev/null && echo OK`  
+2. `python3 -m json.tool orchestrator/rounds/round-005/state-snapshot.json >/dev/null && echo OK`
    Result: `OK`.
-3. `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`  
+3. `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-005/roadmap.md`
    Result: pass (items 1-5 parsed with status markers).
 4. `cabal build all && cabal test`  
    Result: intentionally skipped per round plan and verification contract exception, because this round diff excludes `src/`, `src-public/`, `app/`, `test/`, and `mlf2.cabal`.

@@ -9,6 +9,14 @@ Successor lane: selected same-lane local `TypeRef` retained-child
 `boundVarTarget -> targetC` packet only, with `schemeBodyTarget` kept as
 neighboring boundary context and every broader route still blocked
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap`
+- Roadmap Revision: `rev-012`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-012`
+- State Snapshot: `orchestrator/rounds/round-079/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 12 (`N12`): execute the bounded implementation slice for the
@@ -17,28 +25,28 @@ packet.
 
 ## Why This Item Should Run Now
 
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json` fixes the
+`orchestrator/rounds/round-079/state-snapshot.json` fixes the
 live controller state at `active_round_id: "round-079"`, `stage:
 "select-task"`, `current_task: null`, `retry: null`, `branch:
 "codex/round-079-n12-bounded-implementation-slice"`, `worktree_path:
-"/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-079"`, and
+".worktrees/round-079"`, and
 `last_completed_round: "round-078"`. This is a fresh round-selection state,
-not a same-round retry. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
+not a same-round retry. `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-012/retry-subloop.md`
 therefore supplies no live retry obligation that overrides ordinary
 lowest-unfinished-item selection.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md` marks items
+`orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-012/roadmap.md` marks items
 1 through 11 done and item 12 pending. Item 12 is therefore the
 lowest-numbered unfinished roadmap item, and its only dependency is item 11.
 That dependency is satisfied by accepted `round-078`:
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-078/review-record.json`
+`orchestrator/rounds/round-078/review-record.json`
 finalizes `stage_id: "N11"` with `attempt_verdict: "accepted"`,
 `stage_result: "pass"`, `stage_action: "finalize"`, `status:
 "authoritative"`, and `final_outcome:
 "boundVarTarget-exact-target-bind-established"`.
 
 That accepted `N11` result is exactly the authority item 12 must consume.
-`/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`
+`docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-exact-target-bind.md`
 freezes exactly one bounded live packet: the same-lane local `TypeRef`
 retained-child `boundVarTarget -> targetC` route in
 `src/MLF/Elab/Run/ResultType/Fallback.hs`, with `boundVarTargetRoot`,
@@ -51,7 +59,7 @@ claim can be made. Selecting item 12 follows that accepted sequencing
 directly.
 
 The pending item-12 completion notes in
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md` further fix
+`orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-012/roadmap.md` further fix
 the exact bounded job for this round: one accepted minimal code/test slice
 must land only for the selected packet in
 `src/MLF/Elab/Run/ResultType/Fallback.hs` plus focused retained-child
@@ -64,7 +72,7 @@ and explicitly preserve every unchanged blocked route. That is bounded
 implementation work only; it is not verification, a next-cycle decision, or
 authority to widen the live subject.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+`tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
 matches the same lawful sequence. It records that the fresh post-`N8`
 successor lane required one accepted exact bounded target bind before any new
 implementation or verification slice could begin. Accepted `round-078`
@@ -74,10 +82,10 @@ and item 14 next-cycle decision remain downstream and blocked until an
 accepted `N12` slice exists.
 
 The inherited baseline and repaired-queue closure remain unchanged.
-`/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
-`/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`,
+`docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`,
+`docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`,
 and
-`/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+`docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
 still preserve the explicit-only / non-equi-recursive /
 non-cyclic-graph / no-second-interface / no-fallback boundary and require
 fresh accepted authority before any broader preserved route becomes live
@@ -86,15 +94,15 @@ work. Selecting verification, replay reopen, `MLF.Elab.Inst`, `InstBot`,
 fallback family, or a wider solver/pipeline route here would contradict
 those accepted boundaries and the accepted `N11` outcome.
 
-`/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` still lists open
+`Bugs.md` still lists open
 `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains predecessor
 context only for this round. It does not force a retry and does not
 authorize replay reopen, `MLF.Elab.Inst`, `InstBot`, or a wider live
 subject. Repository status in the controller root is already non-pristine due
 to unrelated task/doc updates plus the controller-owned
-`M orchestrator/state.json` change, while the active round worktree on
+`M orchestrator/rounds/round-079/state-snapshot.json` change, while the active round worktree on
 `codex/round-079-n12-bounded-implementation-slice` shows only that
-controller-owned `M orchestrator/state.json` entry. No repository-state
+controller-owned `M orchestrator/rounds/round-079/state-snapshot.json` entry. No repository-state
 blocker forces a different selection.
 
 ## Round Scope Guard
@@ -108,9 +116,9 @@ blocker forces a different selection.
   `N10 = boundVarTarget-safety-acceptance-contract-established`, and
   `N11 = boundVarTarget-exact-target-bind-established`.
 - Limit code/test changes to the selected packet in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-079/src/MLF/Elab/Run/ResultType/Fallback.hs`
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`
   plus focused retained-child coverage in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-079/test/PipelineSpec.hs`.
+  `test/PipelineSpec.hs`.
 - Keep `boundVarTargetRoot`, `boundHasForallFrom`, `boundVarTarget`,
   `keepTargetFinal`, and the downstream `Just v -> v` `targetC` choice
   aligned with accepted `N11`; keep nested-`forall`, nested-owner, and
@@ -121,7 +129,7 @@ blocker forces a different selection.
   packet as predecessor evidence only.
 - Keep verification, replay reopen, `MLF.Elab.Inst`, `InstBot`,
   `boundTarget`, `schemeBodyTarget` as a live subject,
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-079/src/MLF/Elab/Run/ResultType/View.hs`,
+  `src/MLF/Elab/Run/ResultType/View.hs`,
   every other fallback family, every different solver/pipeline subject,
   cross-family search, implicit unfolding, equi-recursive reasoning or
   equality, cyclic structural graph encoding, graph-cycle exceptions,

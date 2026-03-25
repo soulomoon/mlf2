@@ -5,16 +5,16 @@
 - Plan: `orchestrator/rounds/round-006/plan.md`
 - Implementation notes: `orchestrator/rounds/round-006/implementation-notes.md`
 - Gap map: `docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`
-- Verification contract: `orchestrator/verification.md`
+- Verification contract: `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-001/verification.md`
 - Successor design: `docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md`
 
 ## Baseline Checks
 
 1. `git diff --check`
    Result: pass (exit 0; no whitespace or conflict-marker issues).
-2. `python3 -m json.tool orchestrator/state.json >/dev/null`
+2. `python3 -m json.tool orchestrator/rounds/round-006/state-snapshot.json >/dev/null`
    Result: pass (exit 0; machine state remains valid JSON).
-3. `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+3. `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-001/roadmap.md`
    Result: pass; roadmap items 1-5 remain parseable with status markers:
    - `18:1. [pending] ...`
    - `22:2. [pending] ...`
@@ -22,7 +22,7 @@
    - `30:4. [pending] ...`
    - `34:5. [pending] ...`
 4. `cabal build all && cabal test`
-   Result: intentionally skipped. The round diff is docs-only and excludes `src/`, `src-public/`, `app/`, `test/`, and `mlf2.cabal`, so the skip is allowed by `orchestrator/verification.md` and the round plan.
+   Result: intentionally skipped. The round diff is docs-only and excludes `src/`, `src-public/`, `app/`, `test/`, and `mlf2.cabal`, so the skip is allowed by `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-001/verification.md` and the round plan.
 5. Reviewer continuity check against inherited evidence
    Commands/evidence:
    - `ls -1 orchestrator/rounds` -> `round-001` through `round-006` present.

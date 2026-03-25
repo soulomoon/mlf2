@@ -80,7 +80,7 @@ families therefore remain unlawful successors.
 The only frozen future successor slice is:
 
 local-binding single-base `baseTarget -> baseC` fail-closed hardening in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-054/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 centered on `Fallback.hs:367-408`, together with its final target-selection
 use at `Fallback.hs:681-701`.
 
@@ -128,8 +128,8 @@ bounded successor slice. No second implementation family is selected here.
 
 Future ownership is frozen to exactly these files only:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-054/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-054/test/PipelineSpec.hs`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
 
 ## Frozen Future Focused Verification Intent
 
@@ -153,7 +153,7 @@ This `I1` bind does not authorize:
 - `boundVarTarget` widening or non-local fallback widening;
 - reopening the accepted `C`, `E`, `F`, `G`, or `H` chains as live work;
 - selection of `boundTarget` overlay materialization or
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-054/src/MLF/Elab/Run/ResultType/View.hs`;
+  `src/MLF/Elab/Run/ResultType/View.hs`;
 - `schemeBodyTarget` consolidation or reopening the accepted
   local-vs-non-local baseline;
 - any second interface, compatibility shim, convenience fallback, or

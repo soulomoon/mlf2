@@ -8,7 +8,7 @@ bind/selection stage for repaired `URI-R2-C1`.
 The canonical artifact freezes exactly one future bounded successor slice:
 the local-binding single-base `baseTarget -> baseC` fail-closed hardening lane
 in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-054/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 at `Fallback.hs:367-408`, together with its final target-selection use at
 `Fallback.hs:681-701`.
 
@@ -21,7 +21,7 @@ at `Fallback.hs:367-408`, together with its final target-selection use at
   `selection.md`;
 - carried the accepted `C` / `E` / `F` / `G` / `H` chain forward as inherited
   context only; and
-- did not edit production code, tests, `orchestrator/state.json`, roadmap
+- did not edit production code, tests, `orchestrator/rounds/round-054/state-snapshot.json`, roadmap
   state, or the bug tracker.
 
 ## Verification Posture

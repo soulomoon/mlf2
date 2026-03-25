@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-026`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-026`
+- State Snapshot: `orchestrator/rounds/round-059/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 26: execute the `J2` bounded local-binding inst-arg-only
@@ -14,7 +22,7 @@ implementation slice frozen by `J1`.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` already fixes the live controller state at
+`orchestrator/rounds/round-059/state-snapshot.json` already fixes the live controller state at
 `active_round_id: "round-059"`, `active_round_dir:
 "orchestrator/rounds/round-059"`, `stage: "select-task"`,
 `current_task: null`, `retry: null`, and `last_completed_round:
@@ -22,11 +30,11 @@ implementation slice frozen by `J1`.
 interrupted later stage to continue, and no lawful reason to reopen an older
 round instead of selecting the next roadmap item now.
 
-`orchestrator/roadmap.md` marks items 1 through 25 done and leaves only item
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-026/roadmap.md` marks items 1 through 25 done and leaves only item
 26 (`J2`) pending. Under the guider contract, the next lawful choice is the
 lowest-numbered unfinished item unless live retry state forces a same-round
 retry. The live retry state does not: `retry` is `null`, and
-`orchestrator/retry-subloop.md` therefore does not authorize replaying or
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-026/retry-subloop.md` therefore does not authorize replaying or
 replanning any prior round. Item 26 now has its dependency satisfied because
 item 25 completed in accepted `round-058`.
 
@@ -76,7 +84,7 @@ selection authority. That bug status does not displace roadmap ordering and
 does not authorize replay reopen or any out-of-scope successor family here.
 
 Current repository status before writing this selection showed only the
-pre-existing controller-state modification (`M orchestrator/state.json`) and
+pre-existing controller-state modification (`M orchestrator/rounds/round-059/state-snapshot.json`) and
 no competing implementation diff. That status does not override roadmap
 ordering, but it confirms there is no repository-local blocker forcing a
 different selection.

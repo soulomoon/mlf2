@@ -14,7 +14,7 @@ Rationale: the inherited `RE1`, `RE2`, and `RE3` artifacts define reviewer-check
 
 - This round is docs-only.
 - Do not edit `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
-- Do not edit `orchestrator/state.json` or `orchestrator/roadmap.md`.
+- Do not edit `orchestrator/rounds/round-014/state-snapshot.json` or `orchestrator/roadmaps/2026-03-14-02-uri-r2-c1-re-entry-evidence-successor-roadmap/rev-004/roadmap.md`.
 - Do not rewrite predecessor packet history or prior round artifacts.
 - Do not draft `RE5` as a recommendation document in this round.
 - Do not authorize a handoff-track design round inside this artifact.
@@ -34,16 +34,16 @@ Rationale: roadmap item 4 is the bounded gate only. The approved re-entry design
   - non-cyclic structural graph only;
   - no default-on widening;
   - fail closed if a `reopen-handoff-track` case would require prototype-backed evidence, experiment-backed evidence, implementation drift, broadened provenance roots, heuristic ranking, widened ownership, widened search, multi-cluster or multi-SCC salvage, equi-recursive reasoning, cyclic structural encoding, or any other subject broadening.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited invariant audit for acyclicity, binding-tree discipline, occurs-check/termination, reconstruction/reification/witness replay, and principality-risk boundaries.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/superpowers/specs/2026-03-14-uri-r2-c1-reentry-roadmap-design.md` as the staging authority for `RE1` through `RE5`; preserve that ordering exactly.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`, `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`, and `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md` as the controlling stage prerequisites; do not rewrite them, relax them, or smuggle missing evidence past them.
+- Treat `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited invariant audit for acyclicity, binding-tree discipline, occurs-check/termination, reconstruction/reification/witness replay, and principality-risk boundaries.
+- Treat `docs/superpowers/specs/2026-03-14-uri-r2-c1-reentry-roadmap-design.md` as the staging authority for `RE1` through `RE5`; preserve that ordering exactly.
+- Treat `docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`, `docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`, and `docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md` as the controlling stage prerequisites; do not rewrite them, relax them, or smuggle missing evidence past them.
 - Treat the accepted `R5` bounded stop and the predecessor recursive-types packet as inherited historical authority only; do not reopen or rewrite them.
 - Keep the gate judgment tied to inherited evidence only. If the round cannot prove every prerequisite from accepted docs and inherited evidence alone, the gate must record `not-yet-reopen`.
 - If the gate records `reopen-handoff-track`, it may only say that a later roadmap may design a bounded handoff-track. It must not draft that later roadmap, settle `RE5`, or imply implementation authorization.
 
 ## Exact Target Files
 
-1. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+1. Create `docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
 
 Filename note:
 
@@ -56,13 +56,13 @@ Filename note:
 
 Required inherited inputs to cite directly in the artifact:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/superpowers/specs/2026-03-14-uri-r2-c1-reentry-roadmap-design.md`, naming `RE4` as the bounded re-entry gate and preserving the approved `RE1` -> `RE5` ladder;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`, preserving the accepted bounded stop as the immediate predecessor authority;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`, defining the provenance-authority gate that must already be satisfied without manufactured authority;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`, defining the uniqueness gate that must already be satisfied without heuristic ranking or widened comparison;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md`, defining the prototype-free positive-evidence gate that must already be satisfied without implementation drift or widened ownership/search;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`, preserving the authoritative inherited safety boundary;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/orchestrator/rounds/round-014/selection.md` as the current round-selection authority.
+- `docs/superpowers/specs/2026-03-14-uri-r2-c1-reentry-roadmap-design.md`, naming `RE4` as the bounded re-entry gate and preserving the approved `RE1` -> `RE5` ladder;
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`, preserving the accepted bounded stop as the immediate predecessor authority;
+- `docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`, defining the provenance-authority gate that must already be satisfied without manufactured authority;
+- `docs/plans/2026-03-14-uri-r2-c1-re2-uniqueness-evidence-contract.md`, defining the uniqueness gate that must already be satisfied without heuristic ranking or widened comparison;
+- `docs/plans/2026-03-14-uri-r2-c1-re3-positive-evidence-contract.md`, defining the prototype-free positive-evidence gate that must already be satisfied without implementation drift or widened ownership/search;
+- `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`, preserving the authoritative inherited safety boundary;
+- `orchestrator/rounds/round-014/selection.md` as the current round-selection authority.
 
 Task output requirements:
 
@@ -74,7 +74,7 @@ Task output requirements:
 ### Task 2 - Write the `RE4` bounded re-entry gate artifact
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
+- `docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md`
 
 Required contents:
 
@@ -144,7 +144,7 @@ Required checks before review:
 
 ## Acceptance Criteria (All Required)
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md` exists.
+1. `docs/plans/2026-03-14-uri-r2-c1-re4-bounded-reentry-gate.md` exists.
 2. The artifact defines `RE4` as a bounded re-entry gate for `URI-R2-C1`, not as an implementation-handoff document or final successor recommendation.
 3. The artifact explicitly preserves the approved `RE1` -> `RE5` staging, preserves the inherited invariant-audit authority, and treats accepted `RE1`, `RE2`, and `RE3` as prerequisite authority rather than rewritten content.
 4. The artifact keeps the active subject fixed to `URI-R2-C1`, `single-SCC`, `single-binder-family`, non-equi-recursive, non-cyclic, prototype-free boundaries.
@@ -155,8 +155,8 @@ Required checks before review:
 9. If the artifact records `reopen-handoff-track`, it states only that a later bounded roadmap may design a handoff-track and does not itself draft that roadmap or authorize implementation.
 10. The artifact explicitly states that this round does not settle `RE5` beyond the minimal successor-boundary note required by the gate and does not authorize production implementation work.
 11. Diff remains limited to the planned docs/round artifacts and does not modify:
-   - `orchestrator/state.json`,
-   - `orchestrator/roadmap.md`,
+   - `orchestrator/rounds/round-014/state-snapshot.json`,
+   - `orchestrator/roadmaps/2026-03-14-02-uri-r2-c1-re-entry-evidence-successor-roadmap/rev-004/roadmap.md`,
    - `src/`, `src-public/`, `app/`, `test/`,
    - `mlf2.cabal`,
    - predecessor packet/task history,
@@ -164,11 +164,11 @@ Required checks before review:
 
 ## Reviewer And Verification Checks
 
-Baseline checks (from `orchestrator/verification.md`):
+Baseline checks (from `orchestrator/roadmaps/2026-03-14-02-uri-r2-c1-re-entry-evidence-successor-roadmap/rev-004/verification.md`):
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-014/state-snapshot.json >/dev/null`
+- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-14-02-uri-r2-c1-re-entry-evidence-successor-roadmap/rev-004/roadmap.md`
 - `cabal build all && cabal test` is not required this round if the diff excludes `src/`, `src-public/`, `app/`, `test/`, and `mlf2.cabal`; reviewer must record that skip rationale explicitly.
 - Reviewer-recorded continuity check against inherited evidence from completed rounds `001` through `013`, the accepted `R5` stop decision, the approved re-entry design, the accepted `RE1` / `RE2` / `RE3` contracts, the authoritative invariant audit, and the predecessor recursive-types packet.
 
@@ -205,7 +205,7 @@ Round-specific checks:
 
 Review output requirements:
 
-- Reviewer writes `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-014/orchestrator/rounds/round-014/review.md` with:
+- Reviewer writes `orchestrator/rounds/round-014/review.md` with:
   - baseline checks evidence,
   - round-specific checks evidence,
   - explicit decision (`approve` or `reject`),

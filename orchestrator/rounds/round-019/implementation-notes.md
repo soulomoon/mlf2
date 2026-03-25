@@ -56,15 +56,15 @@ For the inherited authoritative vector (`P1=pass`, `P2=semantic-negative`, `P3=s
 - `python3 -m json.tool orchestrator/rounds/round-019/evidence/P4/attempt-1/trace-bundle.json >/dev/null` (pass)
 - `cabal run mlf2` (pass; default production path unchanged)
 - `git diff --check` (pass)
-- `python3 -m json.tool orchestrator/state.json >/dev/null` (pass)
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` (pass)
+- `python3 -m json.tool orchestrator/rounds/round-019/state-snapshot.json >/dev/null` (pass)
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-004/roadmap.md` (pass)
 - `test -f docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md` (pass)
 - `cabal build all && cabal test` (pass)
 
 ## Boundary Compliance
 
-- No edits to `orchestrator/state.json`.
-- No edits to `orchestrator/roadmap.md`.
+- No edits to `orchestrator/rounds/round-019/state-snapshot.json`.
+- No edits to `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-004/roadmap.md`.
 - No edits to `app/Main.hs`.
 - No edits under `src-public/`.
 - No rewrite of predecessor round artifacts (`round-016` through `round-018`).

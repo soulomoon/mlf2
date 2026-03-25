@@ -16,9 +16,16 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   - preserved completed rounds `round-001` through `round-088` as immutable
     predecessor evidence, kept the v2 retry contract, and retuned the
     repo-local orchestrator role agents to the new bounded successor loop.
+  - migrated the repo-local orchestrator to revisioned roadmap bundles under
+    `orchestrator/roadmaps/<roadmap_id>/rev-###/`, so live controller state
+    now resolves the authoritative roadmap through `orchestrator/state.json`
+    `roadmap_id` / `roadmap_revision` / `roadmap_dir`, while archived rounds
+    point at stable bundle paths plus per-round `state-snapshot.json`
+    snapshots.
 - Rolling priorities (next):
-  1. Run item `1`, freezing the exact same-lane retained-child persistence
-     case, tuple, and review ledger for the new live successor control plane.
+  1. Resume `round-091` and execute roadmap item `3`, clearing or confirming
+     the exact Phase 6 elaboration breakpoint for the frozen same-lane
+     retained-child pocket under the revisioned-roadmap contract.
   2. Keep the live subject fixed to the exact same-lane retained-child
      `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC` pocket
      and its stable-visible-persistence gate until an accepted roadmap item
@@ -26,11 +33,11 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
   3. Preserve the inherited explicit-only / non-equi-recursive /
      non-cyclic-graph / no-second-interface / no-fallback boundary unless a
      later accepted decision explicitly changes it.
-  4. Treat accepted `N14`, accepted strategic items `1` through `7`, and
-     completed rounds `round-001` through `round-088` as bounded predecessor
-     evidence only; do not reinterpret them as clearance for the non-local
-     alias-bound family, nested-`forall` success, or a broad
-     automatic-recursive-inference claim.
+  4. Treat accepted `N14`, accepted strategic items `1` through `7`,
+     completed rounds `round-001` through `round-090`, and the migrated
+     roadmap bundles as bounded predecessor evidence only; do not reinterpret
+     them as clearance for the non-local alias-bound family, nested-`forall`
+     success, or a broad automatic-recursive-inference claim.
 
 ## Task 101 post-`L2` automatic iso-recursive next-loop roadmap scaffold (completed 2026-03-21)
 

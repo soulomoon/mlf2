@@ -43,7 +43,7 @@
   `review_snapshot: orchestrator/rounds/round-057/reviews/attempt-2.md`, and
   `artifact_path: docs/plans/2026-03-20-uri-r2-c1-i4-next-cycle-decision-gate.md`.
 - This round used the retry subloop, and the authoritative retry summary is
-  internally consistent with `orchestrator/retry-subloop.md`: the
+  internally consistent with `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/retry-subloop.md`: the
   controller-owned `orchestrator/rounds/round-057/attempt-log.jsonl`
   preserves `attempt: 1` as `rejected + retry` with
   `retry_reason: i4-bug-continuity-authority-mismatch`,
@@ -51,7 +51,7 @@
   the same canonical `I4` artifact path, while
   `orchestrator/rounds/round-057/review-record.json` authoritatively finalizes
   `attempt: 2` with `retry_reason: none` and the same artifact path.
-- `orchestrator/state.json` is already at `stage: "merge"` with `retry: null`,
+- `orchestrator/rounds/round-057/state-snapshot.json` is already at `stage: "merge"` with `retry: null`,
   so no active retry remains to reconcile and the round is in the expected
   post-review merge state.
 

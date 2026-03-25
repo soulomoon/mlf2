@@ -48,14 +48,14 @@
   `review_snapshot: orchestrator/rounds/round-056/reviews/attempt-2.md`, and
   `artifact_path: docs/plans/2026-03-20-uri-r2-c1-i3-bounded-verification-gate.md`.
 - This round used the retry subloop, and the preserved retry lineage is
-  internally consistent with `orchestrator/retry-subloop.md`: the controller
+  internally consistent with `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-023/retry-subloop.md`: the controller
   log in `orchestrator/rounds/round-056/attempt-log.jsonl` preserves the
   accepted `attempt-1` blocker packet with `stage_action: retry`,
   `retry_reason: i3-shell-missing-cabal`,
   `review_snapshot: orchestrator/rounds/round-056/reviews/attempt-1.md`, and
   the same canonical `I3` artifact path, while `review-record.json`
   authoritatively finalizes `attempt-2` with `retry_reason: none` and the same
-  artifact path. `orchestrator/state.json` is now back at `retry: null`, so no
+  artifact path. `orchestrator/rounds/round-056/state-snapshot.json` is now back at `retry: null`, so no
   active retry remains to reconcile.
 
 ## Readiness Statement

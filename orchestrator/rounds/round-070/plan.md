@@ -4,7 +4,7 @@
 
 Execute only roadmap item `N3` and prepare one docs-only safety/acceptance
 artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-070/docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`.
+`docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`.
 
 This is the initial `N3` plan for `attempt-1` with `retry: null`. The round
 must treat accepted `L1` fail-closed closure, accepted `L2 = stop-blocked`,
@@ -29,8 +29,8 @@ this contract.
 
 `N3` is docs-only safety-contract work. It does not bind the exact `N4`
 target, does not authorize `N5` implementation/design work, does not
-authorize `N6` verification, does not edit `orchestrator/roadmap.md`, does
-not edit `orchestrator/state.json`, does not edit `Bugs.md`, and does not
+authorize `N6` verification, does not edit `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/roadmap.md`, does
+not edit `orchestrator/rounds/round-070/state-snapshot.json`, does not edit `Bugs.md`, and does not
 rewrite prior review history.
 
 ## Locked Round Context
@@ -44,7 +44,7 @@ rewrite prior review history.
   planning subject
 - Active branch: `codex/round-070-n3-safety-acceptance-contract`
 - Active worktree:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-070`
+  `.worktrees/round-070`
 - Stage mode: docs-only safety/acceptance contract only
 - Current round review feedback: none yet; this is a full `attempt-1` plan,
   not a retry delta
@@ -60,11 +60,11 @@ and do not revert unrelated work:
   roadmap item `N3` only and explicitly forbids using this round to bind
   `N4` through `N7`, implementation, verification, roadmap/state edits,
   bug-tracker edits, or predecessor-history rewrites.
-- `orchestrator/state.json` in the controller root fixes the live controller
+- `orchestrator/rounds/round-070/state-snapshot.json` in the controller root fixes the live controller
   state at `active_round_id: "round-070"`, `stage: "plan"`,
   `current_task: "N3"`, `branch:
   "codex/round-070-n3-safety-acceptance-contract"`, and `retry: null`.
-- `orchestrator/roadmap.md` makes `N3` the first pending item after accepted
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/roadmap.md` makes `N3` the first pending item after accepted
   `N2`; every later item depends on the safety contract that `N3` freezes and
   therefore cannot run first.
 - `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
@@ -92,11 +92,11 @@ and do not revert unrelated work:
   remains binding predecessor evidence that the only selected live subject is
   the preserved generic scheme-alias / base-like `baseTarget` route, and that
   this subject remains planning-only until `N3` and `N4` complete.
-- `orchestrator/retry-subloop.md` allows retries for `N3`, but it also makes
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/retry-subloop.md` allows retries for `N3`, but it also makes
   prior attempts immutable. This `attempt-1` plan must therefore create one
   new bounded safety-contract artifact without rewriting any prior attempt or
   review artifact.
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` currently carries open
+- `Bugs.md` currently carries open
   `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains read-only
   predecessor context only. It does not widen `N3` into replay reopen,
   `MLF.Elab.Inst`, or any implementation slice.
@@ -105,7 +105,7 @@ and do not revert unrelated work:
 
 ### Modify
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-070/docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
   - Responsibility: record the `N3` docs-only invariant audit and acceptance
     contract for the selected preserved generic scheme-alias / base-like
     `baseTarget` planning subject, including threatened properties,
@@ -114,38 +114,38 @@ and do not revert unrelated work:
 
 ### Read-Only Evidence
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/papers/these-finale-english.txt`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-070/orchestrator/rounds/round-070/selection.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/roadmap.md`
+- `orchestrator/rounds/round-070/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/verification.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/retry-subloop.md`
+- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
+- `papers/these-finale-english.txt`
+- `Bugs.md`
+- `orchestrator/rounds/round-070/selection.md`
 
 ### Preserve Unchanged
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-070/orchestrator/rounds/round-070/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/src-public/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/app/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/test/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/mlf2.cabal`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/roadmap.md`
+- `orchestrator/rounds/round-070/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/verification.md`
+- `orchestrator/rounds/round-070/selection.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
+- `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
+- `Bugs.md`
+- `src/`
+- `src-public/`
+- `app/`
+- `test/`
+- `mlf2.cabal`
 
 ## Sequential Tasks
 
@@ -212,7 +212,7 @@ and do not revert unrelated work:
 ### Task 4 - Write the canonical `N3` artifact as one bounded safety/acceptance contract
 
 - Create
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-070/docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`.
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`.
 - The artifact must include:
   - the stage contract freeze for `round-070` / `N3` / `attempt-1` /
     `retry: null`;
@@ -267,7 +267,7 @@ and do not revert unrelated work:
   - `boundVarTarget`;
   - `boundTarget`;
   - `schemeBodyTarget`;
-  - `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Run/ResultType/View.hs`;
+  - `src/MLF/Elab/Run/ResultType/View.hs`;
   - any other `ResultType.Fallback` family;
   - any different solver/pipeline subject;
   - equi-recursive reasoning;
@@ -278,28 +278,28 @@ and do not revert unrelated work:
   - a second executable interface; or
   - any compatibility, convenience, or default-path fallback.
 - State explicitly that prior attempts and reviewer-owned history remain
-  immutable under `orchestrator/retry-subloop.md`.
+  immutable under `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/retry-subloop.md`.
 
 ### Task 6 - Run the docs-only verification required for `N3`
 
 Run the baseline docs/state checks required by
-`/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`:
+`orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/verification.md`:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-070/state-snapshot.json >/dev/null`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-070/state-snapshot.json`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/roadmap.md`
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
 - `test -f docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
 - `test -f docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
 - `test -f tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/retry-subloop.md`
 
 Run `N3`-specific continuity, thesis, and contract checks:
 
-- `rg -n '^3\\. \\[pending\\] Execute the `N3` reopened-loop safety and acceptance contract for the selected preserved generic scheme-alias / base-like `baseTarget` planning subject' orchestrator/roadmap.md`
+- `rg -n '^3\\. \\[pending\\] Execute the `N3` reopened-loop safety and acceptance contract for the selected preserved generic scheme-alias / base-like `baseTarget` planning subject' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/roadmap.md`
 - `rg -n 'N3 — Safety and acceptance contract for the reopened loop|Write the reopened-loop audit / acceptance contract before authorizing any implementation slice' tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
 - `rg -n 'Invariant audit document|binding/tree discipline|reconstruction/reification obligations|principality/termination risk boundaries|If any prerequisite above is missing' docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `rg -n 'no fresh lawful exact successor slice|generic scheme-alias / base-like `baseTarget` route' docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
@@ -332,5 +332,5 @@ Reviewer should confirm that the implemented `N3` artifact:
   `N4` target;
 - explicitly keeps replay reopen, other families, equi-recursive reasoning,
   cyclic graphs, second-interface work, and fallback widening blocked; and
-- leaves `orchestrator/roadmap.md`, `orchestrator/state.json`, `Bugs.md`, and
+- leaves `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/roadmap.md`, `orchestrator/rounds/round-070/state-snapshot.json`, `Bugs.md`, and
   prior attempt/review history unchanged.

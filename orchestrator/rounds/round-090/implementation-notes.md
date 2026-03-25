@@ -5,7 +5,7 @@
 - Refreshed the canonical docs-only item-2 artifact in
   `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md`
   from `attempt-1` / `retry: null` to `attempt-2` under the active retry
-  object in `orchestrator/state.json`.
+  object in `orchestrator/rounds/round-090/state-snapshot.json`.
 - Removed the rejected `attempt-1` credit path that treated
   `test/PipelineSpec.hs:1693-1698` as public-output evidence for the frozen
   same-lane retained-child pocket. The refreshed artifact now marks that
@@ -38,12 +38,12 @@
     the canonical artifact.
 - `git diff --check`
   - Result: passed in
-    `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-090`.
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+    `.worktrees/round-090`.
+- `python3 -m json.tool orchestrator/rounds/round-090/state-snapshot.json >/dev/null`
   - Result: passed.
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-090/state-snapshot.json`
   - Result: matched `contract_version: 2` plus the active retry object.
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/roadmap.md`
   - Result: passed; the ordered roadmap remains parseable with item `2`
     still pending.
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
@@ -60,7 +60,7 @@
   - Result: passed.
 - `test -f docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
   - Result: passed.
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/retry-subloop.md`
   - Result: passed.
 - `rg -n 'Attempt: `attempt-2`|runPipelineElab|runPipelineElabChecked|ELet "k"|Phase 6 \(elaboration\)|PhiTranslatabilityError|not credited after earlier breakpoint' docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md orchestrator/rounds/round-090/implementation-notes.md`
   - Result: passed; both refreshed docs mention `attempt-2`, the exact frozen
@@ -76,8 +76,8 @@
 - `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'`
   - Result: passed with no output; no non-doc drift was introduced outside
     the allowed docs/orchestrator surfaces.
-- `git diff --name-only -- orchestrator/roadmap.md Bugs.md orchestrator/retry-subloop.md orchestrator/verification.md orchestrator/state.json`
-  - Result: reported only `orchestrator/state.json`, which remains
+- `git diff --name-only -- orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/roadmap.md Bugs.md orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/retry-subloop.md orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/verification.md orchestrator/rounds/round-090/state-snapshot.json`
+  - Result: reported only `orchestrator/rounds/round-090/state-snapshot.json`, which remains
     pre-existing controller-owned drift. No new changes landed on the
     preserved roadmap / bug-tracker / retry-contract / verification surfaces.
 - `cabal build all && cabal test`

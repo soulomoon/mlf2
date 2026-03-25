@@ -19,12 +19,12 @@ Stage task id: `N3`
 
 - `git diff --check`
   - Result: passed in
-    `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-070`.
-- `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json >/dev/null`
+    `.worktrees/round-070`.
+- `python3 -m json.tool orchestrator/rounds/round-070/state-snapshot.json >/dev/null`
   - Result: passed.
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-070/state-snapshot.json`
   - Result: matched `2:  "contract_version": 2,` and `16:  "retry": null`.
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/roadmap.md`
   - Result: matched roadmap items `1` through `7`, including the pending `N3`
     row at line `68`.
 - `test -f ...`
@@ -35,34 +35,34 @@ Stage task id: `N3`
     `docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`,
     `docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`,
     `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`,
-    and `orchestrator/retry-subloop.md`.
-- `rg -n 'N3 — Safety and acceptance contract for the reopened loop|Write the reopened-loop audit / acceptance contract before authorizing any implementation slice' /Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+    and `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-003/retry-subloop.md`.
+- `rg -n 'N3 — Safety and acceptance contract for the reopened loop|Write the reopened-loop audit / acceptance contract before authorizing any implementation slice' tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
   - Result: matched line `20`.
-- `rg -n 'Invariant audit document|binding/tree discipline|reconstruction/reification obligations|principality/termination risk boundaries|If any prerequisite above is missing' /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `rg -n 'Invariant audit document|binding/tree discipline|reconstruction/reification obligations|principality/termination risk boundaries|If any prerequisite above is missing' docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   - Result: matched lines `48`, `50`, `52`, `53`, and `64`.
-- `rg -n 'no fresh lawful exact successor slice|baseTarget' /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
+- `rg -n 'no fresh lawful exact successor slice|baseTarget' docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`
   - Result: matched the preserved `baseTarget` continuity packet, including
     lines `153-176` in the generic scheme-alias / base-like case analysis.
-- `rg -n 'stop-blocked|separate roadmap amendment|fresh selection' /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
+- `rg -n 'stop-blocked|separate roadmap amendment|fresh selection' docs/plans/2026-03-21-uri-r2-c1-l2-post-l1-fail-closed-successor-decision-gate.md`
   - Result: matched the `stop-blocked` outcome and the separate-amendment /
     fresh-selection gate at lines `75`, `95`, `140`, and `144`.
-- `rg -n 'reopen-planning-only|implementation and verification blocked|baseTarget route becomes admissible' /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
+- `rg -n 'reopen-planning-only|implementation and verification blocked|baseTarget route becomes admissible' docs/plans/2026-03-22-automatic-iso-recursive-post-l2-roadmap-amendment-authority-gate.md`
   - Result: matched `reopen-planning-only` and the implementation/verification
     block at lines `64`, `127`, and `132`.
-- `rg -n 'baseTarget|alias-bound / bound-inlining / binding-structure planning subject|verifier-checkable safety and acceptance contract' /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
+- `rg -n 'baseTarget|alias-bound / bound-inlining / binding-structure planning subject|verifier-checkable safety and acceptance contract' docs/plans/2026-03-22-automatic-iso-recursive-next-live-subject-selection.md`
   - Result: matched the selected `baseTarget` planning subject and the `N3`
     prerequisite at lines `51`, `57`, `70`, `90`, `108`, `116`, `122`, `124`,
     and `153`.
-- `rg -n '8\.3\.1 Inlining bounds|we inline the bounds which can be rebuilt unambiguously|reconstruct the binder and the binding flag|usedtwice|structuralancestor' /Users/ares/.codex/worktrees/d432/mlf4/papers/these-finale-english.txt`
+- `rg -n '8\.3\.1 Inlining bounds|we inline the bounds which can be rebuilt unambiguously|reconstruct the binder and the binding flag|usedtwice|structuralancestor' papers/these-finale-english.txt`
   - Result: matched the `8.3.1 Inlining bounds` anchors at lines `6928`,
     `6930`, `6934`, `6936`, `6975`, and `7052`.
-- `rg -n '15\.6\.2 Expressivity of alias bounds|special care must be taken|entirely inline all inert bounds|forbid alias bounds entirely|cannot be expressed at all' /Users/ares/.codex/worktrees/d432/mlf4/papers/these-finale-english.txt`
+- `rg -n '15\.6\.2 Expressivity of alias bounds|special care must be taken|entirely inline all inert bounds|forbid alias bounds entirely|cannot be expressed at all' papers/these-finale-english.txt`
   - Result: matched the `15.6.2 Expressivity of alias bounds` anchors at lines
     `14855` through `14858`.
-- `rg -n '17\.3 Perspectives|recursive types and second-order polymorphism alone is already tricky|Allowing cyclic term-graphs|main difficulties likely lie in the treatment of recursion in the binding structure' /Users/ares/.codex/worktrees/d432/mlf4/papers/these-finale-english.txt`
+- `rg -n '17\.3 Perspectives|recursive types and second-order polymorphism alone is already tricky|Allowing cyclic term-graphs|main difficulties likely lie in the treatment of recursion in the binding structure' papers/these-finale-english.txt`
   - Result: matched the `17.3 Perspectives` anchors at lines `15411` and
     `15422`.
-- `rg -n 'Attempt: `attempt-1`|Retry state: `null`|Invariant audit|Acceptance criteria|No-go|alias-bound ownership|binding-flag reconstruction|explicit-only|non-equi-recursive|non-cyclic-graph|no-fallback' /Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-070/docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
+- `rg -n 'Attempt: `attempt-1`|Retry state: `null`|Invariant audit|Acceptance criteria|No-go|alias-bound ownership|binding-flag reconstruction|explicit-only|non-equi-recursive|non-cyclic-graph|no-fallback' docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
   - Result: matched the required contract markers and boundary language at
     lines `7`, `8`, `20-21`, `31-36`, `88`, `92`, `101`, `160`, `186`, `203`,
     `216`, and `281`.

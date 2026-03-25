@@ -6,15 +6,23 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: unannotated iso-recursive inference (bounded)
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap`
+- Roadmap Revision: `rev-010`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-010`
+- State Snapshot: `orchestrator/rounds/round-032/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 5: execute `U5` bounded solver/pipeline implementation slice for the still-bound live subject under the `U4` refuted result.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `stage: select-task` for `round-032` with `current_task: null` and `retry: null`, so no same-round retry is active and no earlier stage is forced ahead of normal roadmap selection.
+`orchestrator/rounds/round-032/state-snapshot.json` is parked at `stage: select-task` for `round-032` with `current_task: null` and `retry: null`, so no same-round retry is active and no earlier stage is forced ahead of normal roadmap selection.
 
-`orchestrator/roadmap.md` records `U1` through `U4` as done and marks `U5` as the lowest-numbered unfinished item. Under the guider contract, that makes `U5` the next lawful bounded selection.
+`orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-010/roadmap.md` records `U1` through `U4` as done and marks `U5` as the lowest-numbered unfinished item. Under the guider contract, that makes `U5` the next lawful bounded selection.
 
 The predecessor evidence is aligned for this handoff. `round-028`, `round-029`, `round-030`, and `round-031` each finalized cleanly (`accepted + finalize`) for `U1`, `U2`, `U3`, and `U4`, respectively. In particular, `round-031` finalized `U4` with the bounded result token `constructor-acyclic-termination-refuted`, and both the accepted `U4` artifact (`docs/plans/2026-03-17-uri-r2-c1-u4-unannotated-feasibility-clearance.md`) and the live roadmap now explicitly carry forward that `U5` must run on the still-bound repaired `URI-R2-C1` subject without treating `U4` as clearance for broader recursive behavior.
 

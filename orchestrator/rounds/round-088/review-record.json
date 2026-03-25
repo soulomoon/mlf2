@@ -28,5 +28,8 @@
     "ITEM7-RETRY-SCHEMA": "pass"
   },
   "final_outcome": "continue-within-current-architecture-with-same-lane-retained-child-stable-visible-persistence-gate-selected",
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap",
+  "roadmap_revision": "rev-007",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-007"
 }

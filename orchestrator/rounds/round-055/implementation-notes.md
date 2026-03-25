@@ -21,10 +21,10 @@
 - Green: the same focused command passed after the `Fallback.hs` change.
 - Baseline checks passed:
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
-  - required `test -f ...` artifact checks from `orchestrator/verification.md`
+  - `python3 -m json.tool orchestrator/rounds/round-055/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-055/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/roadmap.md`
+  - required `test -f ...` artifact checks from `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/verification.md`
   - the single-lane anchor `rg -n 'rootLocalSingleBase|baseTarget|rootBoundCandidates|keepTargetFinal|targetC|rootLocalMultiInst|rootLocalInstArgMultiBase|rootLocalSchemeAliasBaseLike|boundVarTarget|schemeBodyTarget' src/MLF/Elab/Run/ResultType/Fallback.hs test/PipelineSpec.hs`
 - Full gate: `cabal build all && cabal test` passed.
 
@@ -35,10 +35,10 @@
   - `test/PipelineSpec.hs`
   - `docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md`
   - `orchestrator/rounds/round-055/implementation-notes.md`
-- Left `orchestrator/state.json`, the bug tracker, replay lanes, `InstBot`,
+- Left `orchestrator/rounds/round-055/state-snapshot.json`, the bug tracker, replay lanes, `InstBot`,
   `boundVarTarget` widening, `boundTarget` overlay work, `schemeBodyTarget`
   consolidation, and `ResultType.View` untouched.
 - Pre-existing worktree entries still present after this pass:
-  - `orchestrator/state.json`
+  - `orchestrator/rounds/round-055/state-snapshot.json`
   - `orchestrator/rounds/round-055/plan.md`
   - `orchestrator/rounds/round-055/selection.md`

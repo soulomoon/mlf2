@@ -52,7 +52,7 @@
   - `artifact_path: "docs/plans/2026-03-25-general-automatic-iso-recursive-inference-search-model.md"`
   - `review_snapshot: "orchestrator/rounds/round-085/reviews/attempt-1.md"`
   - `final_outcome: "search-model-established-with-bounded-admissibility-ambiguity-and-termination-read"`
-- `orchestrator/retry-subloop.md` permits merge preparation only after
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-004/retry-subloop.md` permits merge preparation only after
   `accepted + finalize`, and the active worktree controller state for this
   round is already `active_round_id: "round-085"`, `stage: "merge"`,
   `current_task: "item-4"`, and `retry: null`.
@@ -63,8 +63,8 @@
 
 - This round does not reset authority. Completed rounds `round-001` through
   `round-081` remain authoritative historical evidence for the refreshed
-  control plane exactly as `orchestrator/roadmap.md` and
-  `orchestrator/retry-subloop.md` describe.
+  control plane exactly as `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-004/roadmap.md` and
+  `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-004/retry-subloop.md` describe.
 - The accepted `round-082` capability contract, `round-083`
   architectural-constraint audit, and `round-084` mechanism map remain the
   immediate strategic predecessor authorities. Their canonical artifacts still

@@ -6,15 +6,23 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-005`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-005`
+- State Snapshot: `orchestrator/rounds/round-038/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 5: execute `E1` continue-bounded bind and exact next-slice target selection for repaired `URI-R2-C1` after the accepted local-binding-only fail-closed retention baseline.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `active_round_id: round-038`, `stage: select-task`, `current_task: null`, and `retry: null`, so no same-round retry is active and no prior review outcome forces a retry resume ahead of normal roadmap selection.
+`orchestrator/rounds/round-038/state-snapshot.json` is parked at `active_round_id: round-038`, `stage: select-task`, `current_task: null`, and `retry: null`, so no same-round retry is active and no prior review outcome forces a retry resume ahead of normal roadmap selection.
 
-`orchestrator/roadmap.md` marks item 1 (`C1`), item 2 (`C2`), item 3 (`C3`), and item 4 (`C4`) done, leaving item 5 (`E1`) as the lowest-numbered unfinished roadmap entry. Under the guider contract, that makes `E1` the next lawful selection.
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-005/roadmap.md` marks item 1 (`C1`), item 2 (`C2`), item 3 (`C3`), and item 4 (`C4`) done, leaving item 5 (`E1`) as the lowest-numbered unfinished roadmap entry. Under the guider contract, that makes `E1` the next lawful selection.
 
 The accepted `C4` decision artifact in `docs/plans/2026-03-18-uri-r2-c1-c4-next-cycle-decision-gate.md` finalized the previous bounded cycle with result token `continue-bounded`, not `widen-approved` and not `stop-blocked`. The roadmap therefore queues one more bounded non-widening cycle under the same repaired `URI-R2-C1` subject, and that new cycle must begin with another exact bind/selection step before any further implementation slice may start.
 
@@ -22,7 +30,7 @@ The approved follow-on design in `docs/superpowers/specs/2026-03-18-unannotated-
 
 Accepted predecessor findings remain binding. `C1` through `C4` stayed inside repaired `URI-R2-C1`; `C2` and `C3` established only the local-binding-only `rootBindingIsLocalType` fail-closed retention baseline; and accepted `U2`, `U3`, and `U4` still stand as `authority-narrowed`, `uniqueness-owner-stable-refuted`, and `constructor-acyclic-termination-refuted`. `E1` must therefore bind the next cycle from that accepted baseline rather than reinterpret those negative findings as clearance or skip directly to `E2`.
 
-`Bugs.md` still carries open replay-path defect `BUG-2026-03-16-001`, but it remains replay-lane continuity context only and does not authorize replay reopen, `MLF.Elab.Inst` edits, `InstBot` repair, or broader automatic recursive inference selection in this round. Current repository status is already non-pristine (`orchestrator/state.json` modified and `tasks/todo/2026-03-18-continue-bounded-orchestrator-run/` untracked), so selecting the narrow docs-only `E1` bind/selection step best respects existing work while advancing the next bounded roadmap item.
+`Bugs.md` still carries open replay-path defect `BUG-2026-03-16-001`, but it remains replay-lane continuity context only and does not authorize replay reopen, `MLF.Elab.Inst` edits, `InstBot` repair, or broader automatic recursive inference selection in this round. Current repository status is already non-pristine (`orchestrator/rounds/round-038/state-snapshot.json` modified and `tasks/todo/2026-03-18-continue-bounded-orchestrator-run/` untracked), so selecting the narrow docs-only `E1` bind/selection step best respects existing work while advancing the next bounded roadmap item.
 
 ## Round Scope Guard
 

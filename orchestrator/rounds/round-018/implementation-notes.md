@@ -26,8 +26,8 @@
 - `shasum -a 256 orchestrator/rounds/round-018/evidence/P3/attempt-1/*` before/after rerun (identical)
 - `shasum -a 256 orchestrator/rounds/round-018/evidence/P3/attempt-2/*` before/after wrong-scenario and wrong-stage checks (identical)
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-018/state-snapshot.json >/dev/null`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-003/roadmap.md`
 - `python3 -m json.tool` over all `round-018/evidence/P3/attempt-2/*.json`
 - `test ! -f orchestrator/rounds/round-018/evidence/P3/attempt-2/subject-token.json`
 - `cabal build all && cabal test`

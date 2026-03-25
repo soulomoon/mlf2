@@ -4,7 +4,7 @@
 
 Execute only roadmap item `I2` and produce one accepted bounded implementation
 artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md`.
+`docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md`.
 
 This is the initial `I2` plan for `attempt-1` with `retry: null`. The round
 must implement only the accepted `I1`-frozen local-binding single-base
@@ -20,7 +20,7 @@ The selected `I2` implementation intent is:
   `I1` bind unchanged as inherited baseline context, not reopened target
   selection;
 - keep the existing single-base candidate machinery in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/src/MLF/Elab/Run/ResultType/Fallback.hs:361-408`
+  `src/MLF/Elab/Run/ResultType/Fallback.hs:361-408`
   as the only source of `baseTarget`, but surface one new explicit
   reviewer-auditable local single-base proof derived from
   `rootBindingIsLocalType`, singleton `rootBoundCandidates`,
@@ -35,7 +35,7 @@ The selected `I2` implementation intent is:
 - add exactly one bounded same-lane local single-base success example and one
   matched fail-closed non-local contrast inside the existing
   `ARI-C1 feasibility characterization (bounded prototype-only)` block in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/test/PipelineSpec.hs`;
+  `test/PipelineSpec.hs`;
   and
 - keep replay reopen, `MLF.Elab.Inst`, `InstBot`, `boundVarTarget`,
   `boundTarget` overlay materialization, `View.hs`, `schemeBodyTarget`
@@ -90,7 +90,7 @@ Accepted carry-forward facts that must remain unchanged throughout `I2`:
 
 Current repository state is already non-pristine:
 
-- `M orchestrator/state.json`
+- `M orchestrator/rounds/round-055/state-snapshot.json`
 - `?? orchestrator/rounds/round-055/selection.md`
 
 Respect those existing changes. Do not revert or "clean up" unrelated work
@@ -98,30 +98,30 @@ while preparing the `I2` slice.
 
 ## Authoritative Inputs To Preserve
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/AGENTS.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/roles/implementer.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/roles/planner.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/rounds/round-055/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/docs/plans/2026-03-20-uri-r2-c1-h4-next-cycle-decision-gate.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/rounds/round-054/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/test/PipelineSpec.hs`
+- `AGENTS.md`
+- `orchestrator/roles/implementer.md`
+- `orchestrator/roles/planner.md`
+- `orchestrator/rounds/round-055/state-snapshot.json`
+- `orchestrator/rounds/round-055/selection.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/verification.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/roadmap.md`
+- `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
+- `docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u5-bounded-unannotated-implementation-slice.md`
+- `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
+- `docs/plans/2026-03-20-uri-r2-c1-h4-next-cycle-decision-gate.md`
+- `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md`
+- `orchestrator/rounds/round-054/review-record.json`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
 - `/Volumes/src/mlf4/Bugs.md`
 
 ## Files Expected In Scope
 
 ### Modify / Test
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/test/PipelineSpec.hs`
+1. `test/PipelineSpec.hs`
    - Responsibility: add exactly one bounded same-lane local single-base
      success example, one matched fail-closed non-local contrast, and refresh
      the existing source-guard assertion inside the existing
@@ -132,24 +132,24 @@ while preparing the `I2` slice.
 
 ### Modify
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/src/MLF/Elab/Run/ResultType/Fallback.hs`
+1. `src/MLF/Elab/Run/ResultType/Fallback.hs`
    - Responsibility: keep the current `baseTarget` machinery as the source of
      truth, add the minimal explicit reviewer-auditable local single-base proof
      for the selected lane, and route only that lane's `baseTarget -> baseC`
      and same-lane `targetC` behavior without widening other branches.
 
-2. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md`
+2. `docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md`
    - Responsibility: record the canonical bounded `I2` implementation result
      and the exact focused positive/negative evidence for the selected lane.
 
-3. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/rounds/round-055/implementation-notes.md`
+3. `orchestrator/rounds/round-055/implementation-notes.md`
    - Responsibility: summarize the bounded code/test/doc change and
      verification results for reviewer handoff.
 
 ### Evidence-Only, No Planned Edit
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/rounds/round-054/review-record.json`
+- `docs/plans/2026-03-20-uri-r2-c1-i1-next-target-bind.md`
+- `orchestrator/rounds/round-054/review-record.json`
 - `/Volumes/src/mlf4/Bugs.md`
 
 These carry the accepted bounded selection and continuity context that `I2`
@@ -157,14 +157,14 @@ must preserve without rewriting.
 
 Files that must remain untouched by `I2` `attempt-1`:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/rounds/round-055/selection.md`
+- `orchestrator/rounds/round-055/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/roadmap.md`
+- `orchestrator/rounds/round-055/selection.md`
 - `/Volumes/src/mlf4/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/src/MLF/Elab/Inst.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/src/MLF/Elab/Run/ResultType/View.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/TODO.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/implementation_notes.md`
+- `src/MLF/Elab/Inst.hs`
+- `src/MLF/Elab/Run/ResultType/View.hs`
+- `TODO.md`
+- `implementation_notes.md`
 
 If the implementer cannot keep the selected slice confined to `Fallback.hs`
 and `PipelineSpec.hs`, stop and hand the issue back to review rather than
@@ -259,7 +259,7 @@ broadening into replay repair, `ResultType.View`, non-local fallback behavior,
 ### Task 4 - Refresh the canonical `I2` artifact and round notes
 
 - Write
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md`
+  `docs/plans/2026-03-20-uri-r2-c1-i2-bounded-implementation-slice.md`
   for `attempt-1`.
 - Record:
   - the selected local single-base proof and the fact that the current
@@ -281,17 +281,17 @@ broadening into replay repair, `ResultType.View`, non-local fallback behavior,
 ### Task 5 - Run the required bounded verification
 
 - Re-run baseline contract checks from
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/verification.md`:
+  `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/verification.md`:
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `python3 -m json.tool orchestrator/rounds/round-055/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-055/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/roadmap.md`
   - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-  - `test -f orchestrator/retry-subloop.md`
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/retry-subloop.md`
 - Re-run the focused bounded block:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'`
 - Add one focused anchor check proving the selected proof is explicit while the
@@ -333,7 +333,7 @@ broadening into replay repair, `ResultType.View`, non-local fallback behavior,
   equi-recursive reasoning, implicit unfolding, cyclic structural graph
   encoding, compatibility shims, convenience fallbacks, or default-on
   widening.
-- No edits to `orchestrator/state.json`, `orchestrator/roadmap.md`,
+- No edits to `orchestrator/rounds/round-055/state-snapshot.json`, `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/roadmap.md`,
   `orchestrator/rounds/round-055/selection.md`, `/Volumes/src/mlf4/Bugs.md`,
   `src-public/`, `app/`, or `mlf2.cabal`.
 - No preemption of `I3` or `I4` beyond landing the selected `I2` slice and its
@@ -342,7 +342,7 @@ broadening into replay repair, `ResultType.View`, non-local fallback behavior,
 ## Reviewer Checks
 
 Baseline checks from
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-055/orchestrator/verification.md`
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-022/verification.md`
 still apply.
 
 Round-specific checks:

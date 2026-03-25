@@ -6,12 +6,12 @@ Execute only the same-round retry for roadmap item `I3`.
 
 This rewrite replaces the stale `attempt-1` plan with the required
 `attempt-2` retry delta only. The retry scope is exactly the recorded fix
-hypothesis from `orchestrator/state.json`: restore a working `cabal`
+hypothesis from `orchestrator/rounds/round-056/state-snapshot.json`: restore a working `cabal`
 executable on `PATH` in the `round-056` shell, rerun the exact focused
 `ARI-C1 feasibility characterization (bounded prototype-only)` command and the
 exact full repo gate, then refresh the same canonical `I3` artifact at:
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-056/docs/plans/2026-03-20-uri-r2-c1-i3-bounded-verification-gate.md`
+`docs/plans/2026-03-20-uri-r2-c1-i3-bounded-verification-gate.md`
 
 with the actual `attempt-2` outcomes.
 
@@ -69,15 +69,15 @@ Carry forward without replanning:
 - `orchestrator/rounds/round-056/review.md`
 - `orchestrator/rounds/round-056/reviews/attempt-1.md`
 - `orchestrator/rounds/round-056/attempt-log.jsonl`
-- `orchestrator/state.json`
+- `orchestrator/rounds/round-056/state-snapshot.json`
 - `orchestrator/rounds/round-056/selection.md`
-- `orchestrator/verification.md`
-- `orchestrator/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-023/verification.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-023/retry-subloop.md`
 
 ### Preserve Unchanged
 
-- `orchestrator/state.json`
-- `orchestrator/roadmap.md`
+- `orchestrator/rounds/round-056/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-023/roadmap.md`
 - `orchestrator/rounds/round-056/selection.md`
 - `orchestrator/rounds/round-056/review.md`
 - `orchestrator/rounds/round-056/reviews/attempt-1.md`
@@ -171,10 +171,10 @@ of the following limits:
 
 This retry delta does not authorize:
 
-- any change to `orchestrator/state.json`;
+- any change to `orchestrator/rounds/round-056/state-snapshot.json`;
 - any rewrite of `selection.md`, `review.md`, `reviews/attempt-1.md`,
   `attempt-log.jsonl`, `merge.md`, `review-record.json`, or
-  `orchestrator/roadmap.md`;
+  `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-023/roadmap.md`;
 - any production/test/public-API/executable/Cabal edit;
 - any widening beyond repaired `URI-R2-C1`;
 - any reopening of `I1` target selection or `I2` implementation;

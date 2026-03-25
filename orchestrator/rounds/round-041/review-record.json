@@ -23,5 +23,8 @@
     "E4-SKIP-NOTE": "pass",
     "E4-SCOPE-ALIGNMENT": "pass"
   },
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap",
+  "roadmap_revision": "rev-008",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-008"
 }

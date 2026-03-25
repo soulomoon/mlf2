@@ -4,7 +4,7 @@
 
 Execute only roadmap item `K3` and prepare one accepted docs/evidence artifact
 at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/docs/plans/2026-03-21-uri-r2-c1-k3-bounded-verification-gate.md`.
+`docs/plans/2026-03-21-uri-r2-c1-k3-bounded-verification-gate.md`.
 
 This is the initial `K3` plan for `attempt-1` with `retry: null`. The round
 must stay docs-only and reverify only the accepted `K2` local-binding
@@ -15,9 +15,9 @@ empty-candidate / no-inst-arg scheme-alias / base-like
 `K3` must record current bounded evidence from exactly these surfaces:
 
 1. read-only anchor checks in
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/src/MLF/Elab/Run/ResultType/Fallback.hs`
+   `src/MLF/Elab/Run/ResultType/Fallback.hs`
    and
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/test/PipelineSpec.hs`
+   `test/PipelineSpec.hs`
    for the accepted `K2` lane only;
 2. one fresh rerun of
    `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'`;
@@ -46,7 +46,7 @@ file inside this round.
 - Fixed live subject: repaired `URI-R2-C1`
 - Active branch: `codex/round-064-k3-verification-gate`
 - Active worktree:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064`
+  `.worktrees/round-064`
 - Fixed inherited boundary:
   `explicit-only / non-equi-recursive / non-cyclic-graph / no second interface / no compatibility or convenience fallback widening`
 - Stage mode: docs-only bounded verification/evidence consolidation only
@@ -94,7 +94,7 @@ Accepted carry-forward facts that must remain binding throughout `K3`:
 
 Current repository state is already non-pristine:
 
-- `M orchestrator/state.json`
+- `M orchestrator/rounds/round-064/state-snapshot.json`
 - `?? orchestrator/rounds/round-064/selection.md`
 - `?? orchestrator/rounds/round-064/plan.md`
 
@@ -104,22 +104,22 @@ other than authoring the single canonical verification artifact.
 
 ## Authoritative Inputs To Preserve
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/AGENTS.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/roles/planner.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/rounds/round-064/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/rounds/round-063/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/rounds/round-063/plan.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/rounds/round-063/implementation-notes.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/rounds/round-063/review.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/rounds/round-063/reviews/attempt-1.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/rounds/round-063/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/docs/plans/2026-03-21-uri-r2-c1-k1-next-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/docs/plans/2026-03-21-uri-r2-c1-k2-bounded-implementation-slice.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
+- `AGENTS.md`
+- `orchestrator/roles/planner.md`
+- `orchestrator/rounds/round-064/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/roadmap.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/verification.md`
+- `orchestrator/rounds/round-064/selection.md`
+- `orchestrator/rounds/round-063/selection.md`
+- `orchestrator/rounds/round-063/plan.md`
+- `orchestrator/rounds/round-063/implementation-notes.md`
+- `orchestrator/rounds/round-063/review.md`
+- `orchestrator/rounds/round-063/reviews/attempt-1.md`
+- `orchestrator/rounds/round-063/review-record.json`
+- `docs/plans/2026-03-21-uri-r2-c1-k1-next-target-bind.md`
+- `docs/plans/2026-03-21-uri-r2-c1-k2-bounded-implementation-slice.md`
+- `docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md`
 - `/Volumes/src/mlf4/Bugs.md`
 
 ## File Ownership For This Round
@@ -134,10 +134,10 @@ other than authoring the single canonical verification artifact.
 
 - `src/MLF/Elab/Run/ResultType/Fallback.hs`
 - `test/PipelineSpec.hs`
-- `orchestrator/state.json`
-- `orchestrator/roadmap.md`
-- `orchestrator/retry-subloop.md`
-- `orchestrator/verification.md`
+- `orchestrator/rounds/round-064/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/roadmap.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/verification.md`
 - `orchestrator/rounds/round-064/selection.md`
 - `orchestrator/rounds/round-064/plan.md`
 - `orchestrator/rounds/round-061/review-record.json`
@@ -155,8 +155,8 @@ other than authoring the single canonical verification artifact.
 
 ### Preserve Unchanged
 
-- `orchestrator/state.json`
-- `orchestrator/roadmap.md`
+- `orchestrator/rounds/round-064/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/roadmap.md`
 - `orchestrator/rounds/round-064/selection.md`
 - `orchestrator/rounds/round-064/plan.md`
 - `src/`
@@ -214,7 +214,7 @@ Recommended evidence commands for this step:
 ### Task 2 - Collect read-only anchor evidence for the accepted `K2` lane
 
 - Inspect the existing selected-lane logic in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/src/MLF/Elab/Run/ResultType/Fallback.hs`
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`
   without editing it.
 - Capture line-referenced evidence for all of the following:
   - the selected empty-candidate / no-inst-arg `baseTarget -> baseC` branch at
@@ -239,7 +239,7 @@ Recommended evidence commands for this step:
 - Inspect the focused
   `describe "ARI-C1 feasibility characterization (bounded prototype-only)"`
   block in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/test/PipelineSpec.hs`
+  `test/PipelineSpec.hs`
   without editing it.
 - Capture line-referenced evidence showing the accepted bounded block still
   includes:
@@ -281,17 +281,17 @@ Recommended evidence commands for this step:
 ### Task 3 - Re-run the bounded verification suite required for `K3`
 
 - Run the baseline checks required by
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-064/orchestrator/verification.md`:
+  `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/verification.md`:
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `python3 -m json.tool orchestrator/rounds/round-064/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-064/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/roadmap.md`
   - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-  - `test -f orchestrator/retry-subloop.md`
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/retry-subloop.md`
 - Re-run the fresh focused bounded verification command exactly once:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'`
 - Re-run the fresh full repo gate exactly once:
@@ -314,13 +314,13 @@ Recommended evidence commands for this step:
 
 - Capture a pre-artifact or post-artifact `git status --short --untracked-files=all`
   snapshot and explicitly distinguish:
-  - the pre-existing tracked `orchestrator/state.json` modification;
+  - the pre-existing tracked `orchestrator/rounds/round-064/state-snapshot.json` modification;
   - the pre-existing untracked `orchestrator/rounds/round-064/selection.md`;
   - the pre-existing untracked `orchestrator/rounds/round-064/plan.md`; and
   - the one new canonical `K3` verification artifact.
 - Prove the round stays docs-only:
   - `git diff --name-only`
-  - `git diff --name-only -- . ':(exclude)orchestrator/state.json'`
+  - `git diff --name-only -- . ':(exclude)orchestrator/rounds/round-064/state-snapshot.json'`
   - `git status --short --untracked-files=all`
 - The required docs-only conclusion is:
   - no tracked diffs in `src/`, `test/`, `src-public/`, `app/`, or
@@ -335,7 +335,7 @@ Recommended evidence commands for this step:
   that no accepted authority drift accompanied this verification stage:
   - `test -d tasks/todo/2026-03-11-recursive-types-orchestration`
   - `for i in $(seq 1 33); do d=$(printf 'orchestrator/rounds/round-%03d' "$i"); test -d "$d" || exit 1; done`
-  - `git diff --name-only -- orchestrator/roadmap.md docs/plans/2026-03-21-uri-r2-c1-j4-next-cycle-decision-gate.md docs/plans/2026-03-21-uri-r2-c1-k1-next-target-bind.md docs/plans/2026-03-21-uri-r2-c1-k2-bounded-implementation-slice.md orchestrator/rounds/round-061/review-record.json orchestrator/rounds/round-062/review-record.json orchestrator/rounds/round-063/review-record.json docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
+  - `git diff --name-only -- orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/roadmap.md docs/plans/2026-03-21-uri-r2-c1-j4-next-cycle-decision-gate.md docs/plans/2026-03-21-uri-r2-c1-k1-next-target-bind.md docs/plans/2026-03-21-uri-r2-c1-k2-bounded-implementation-slice.md orchestrator/rounds/round-061/review-record.json orchestrator/rounds/round-062/review-record.json orchestrator/rounds/round-063/review-record.json docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
 - Reconfirm `/Volumes/src/mlf4/Bugs.md` remains read-only continuity context
   with an empty `## Open` section and no round-local mutation.
 
@@ -363,7 +363,7 @@ Recommended evidence commands for this step:
   - authorize non-local widening, cross-family widening, multi-SCC widening,
     equi-recursive reasoning, implicit unfolding, cyclic structural encoding,
     a second interface, or fallback widening; or
-  - mutate `orchestrator/state.json`, `orchestrator/roadmap.md`, or
+  - mutate `orchestrator/rounds/round-064/state-snapshot.json`, `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/roadmap.md`, or
     `/Volumes/src/mlf4/Bugs.md`.
 - If every required check passes, the artifact should make the positive claim
   only that the accepted `K2` lane remains stable under current bounded

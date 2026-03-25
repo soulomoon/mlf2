@@ -32,35 +32,35 @@ Roadmap ordering must remain unchanged: `R1` and `R2` stay authoritative evidenc
 
 ## Authoritative Inputs To Preserve
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-026/selection.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-025/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` (`BUG-2026-03-16-001`)
-- predecessor evidence under `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-016/` through `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-025/`
+- `orchestrator/rounds/round-026/selection.md`
+- `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-003/verification.md`
+- `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-003/retry-subloop.md`
+- `docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`
+- `orchestrator/rounds/round-025/review-record.json`
+- `docs/plans/2026-03-17-uri-r2-c1-r2-bounded-instbot-repair.md`
+- `Bugs.md` (`BUG-2026-03-16-001`)
+- predecessor evidence under `orchestrator/rounds/round-016/` through `orchestrator/rounds/round-025/`
 
 ## Files Expected In Scope
 
 Primary writable files:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r3-locked-replay-verification.md`
-2. `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-026/implementation-notes.md` only if one bounded reviewer handoff note is needed
+1. `docs/plans/2026-03-17-uri-r2-c1-r3-locked-replay-verification.md`
+2. `orchestrator/rounds/round-026/implementation-notes.md` only if one bounded reviewer handoff note is needed
 
 Verification evidence to inspect but keep read-only unless a tiny verification-only assertion is strictly required:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Inst.hs`
-2. `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/TypeCheck.hs`
-3. `/Users/ares/.codex/worktrees/d432/mlf4/test/ElaborationSpec.hs`
-4. `/Users/ares/.codex/worktrees/d432/mlf4/test/Research/UriR2C1PrototypeP1Spec.hs`
+1. `src/MLF/Elab/Inst.hs`
+2. `src/MLF/Elab/TypeCheck.hs`
+3. `test/ElaborationSpec.hs`
+4. `test/Research/UriR2C1PrototypeP1Spec.hs`
 
 Files that must remain untouched in this round:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- prior round artifacts, including `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-025/reviews/attempt-3.md` and `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-025/review-record.json`
+- `orchestrator/rounds/round-026/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-003/roadmap.md`
+- `Bugs.md`
+- prior round artifacts, including `orchestrator/rounds/round-025/reviews/attempt-3.md` and `orchestrator/rounds/round-025/review-record.json`
 
 ## Sequential Tasks
 
@@ -94,13 +94,13 @@ Files that must remain untouched in this round:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "runs D2 attempt-1 via the root-cause tuple and reports continuity-blocked localization on live reruns"'`
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "runs D3 attempt-1 via the root-cause tuple and reports bounded-negative continuity drift on live reruns"'`
 - Inspect the current tree to prove the owner boundary remains localized and no alternate interface appeared:
-  - verify current evidence still centers on `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Inst.hs`, adjacent plumbing in `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/TypeCheck.hs`, and the focused verification coverage in `/Users/ares/.codex/worktrees/d432/mlf4/test/ElaborationSpec.hs` plus `/Users/ares/.codex/worktrees/d432/mlf4/test/Research/UriR2C1PrototypeP1Spec.hs`
+  - verify current evidence still centers on `src/MLF/Elab/Inst.hs`, adjacent plumbing in `src/MLF/Elab/TypeCheck.hs`, and the focused verification coverage in `test/ElaborationSpec.hs` plus `test/Research/UriR2C1PrototypeP1Spec.hs`
   - verify there is no new diff under `app/`, `src-public/`, `src/MLF/Research/`, or `mlf2.cabal`
 - Do not add a new verification executable, new replay entrypoint, or a second production interface just to make `R3` easier to demonstrate.
 
 ### Task 4 - Emit the canonical `R3` verification artifact
 
-- Write `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-17-uri-r2-c1-r3-locked-replay-verification.md`.
+- Write `docs/plans/2026-03-17-uri-r2-c1-r3-locked-replay-verification.md`.
 - The artifact must record:
   - `Attempt: 1`
   - the inherited authoritative chain `P1` through `R2`
@@ -115,14 +115,14 @@ Files that must remain untouched in this round:
 
 ### Task 5 - Re-run the full verification gate and prepare reviewer handoff
 
-- Run the baseline checks required by `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`:
+- Run the baseline checks required by `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-003/verification.md`:
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `python3 -m json.tool orchestrator/rounds/round-026/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-026/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-003/roadmap.md`
   - `test -f docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md`
   - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md`
-  - `test -f orchestrator/retry-subloop.md`
+  - `test -f orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-003/retry-subloop.md`
 - Run `cabal build all && cabal test` even if the round changes only docs, because `R3` is itself the locked replay verification stage and must actively re-prove the accepted repair on the full repository gate.
 - Ensure reviewer evidence can confirm:
   1. `R3` stayed inside the locked `URI-R2-C1` / `uri-r2-c1-only-v1` lane.
@@ -134,7 +134,7 @@ Files that must remain untouched in this round:
 
 ## Non-Goals
 
-- No new production repair in `/Users/ares/.codex/worktrees/d432/mlf4/src/MLF/Elab/Inst.hs`
+- No new production repair in `src/MLF/Elab/Inst.hs`
 - No change to `R1`, `R2`, or `R4`
 - No roadmap edits or controller-state edits
 - No rewrite of predecessor evidence, prior retry history, or `Bugs.md`
@@ -143,7 +143,7 @@ Files that must remain untouched in this round:
 
 ## Reviewer Checks
 
-Baseline checks from `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md` still apply.
+Baseline checks from `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-003/verification.md` still apply.
 
 Round-specific checks:
 

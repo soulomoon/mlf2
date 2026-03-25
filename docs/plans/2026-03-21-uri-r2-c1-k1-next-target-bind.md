@@ -102,7 +102,7 @@ The only frozen future `K2` target is:
 
 local-binding empty-candidate / no-inst-arg scheme-alias / base-like
 `baseTarget -> baseC` fail-closed hardening in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-062/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 limited to the existing `baseTarget` branch at `Fallback.hs:377-381` and the
 downstream same-lane `targetC` decision at `Fallback.hs:698-700`.
 
@@ -171,14 +171,14 @@ non-local widening, or cross-family widening is selected here.
 
 Future `K2` ownership is frozen to exactly these files only:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-062/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-062/test/PipelineSpec.hs`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
 
 ## Future Focused Verification Intent
 
 Future `K2` evidence remains one bounded extension of the existing
 `ARI-C1 feasibility characterization (bounded prototype-only)` block in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-062/test/PipelineSpec.hs`
+`test/PipelineSpec.hs`
 only:
 
 - add one local-binding empty-candidate / no-inst-arg scheme-alias /
@@ -211,7 +211,7 @@ This `K1` bind does not authorize:
   `rootLocalSchemeAliasBaseLike` `keepTargetFinal` / `targetC -> rootFinal`
   lane as a second `K2` family;
 - reopening `boundVarTarget`, `boundTarget`,
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-062/src/MLF/Elab/Run/ResultType/View.hs`,
+  `src/MLF/Elab/Run/ResultType/View.hs`,
   or `schemeBodyTarget`;
 - replay reopen, `MLF.Elab.Inst`, `InstBot`, or any replay-path repair as
   active `K2` work;

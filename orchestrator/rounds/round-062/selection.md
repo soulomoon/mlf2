@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-029`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-029`
+- State Snapshot: `orchestrator/rounds/round-062/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 29: execute the `K1` continue-bounded bind and exact next-slice
@@ -15,18 +23,18 @@ singleton-base `J2` / `J3` baseline.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` already fixes the live controller state at
+`orchestrator/rounds/round-062/state-snapshot.json` already fixes the live controller state at
 `active_round_id: "round-062"`, `stage: "select-task"`, `current_task: null`,
 `retry: null`, `branch: "codex/round-062-k1-next-target-bind"`, and
 `last_completed_round: "round-061"`. Under the guider contract and
-`orchestrator/retry-subloop.md`, that means there is no same-round retry to
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-029/retry-subloop.md`, that means there is no same-round retry to
 resume and no lawful basis to skip ahead of fresh roadmap selection.
 
-`orchestrator/roadmap.md` marks item 28 (`J4`) done and item 29 (`K1`) pending.
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-029/roadmap.md` marks item 28 (`J4`) done and item 29 (`K1`) pending.
 Because item 29 is now the lowest-numbered unfinished roadmap entry, `K1` is
 the next lawful selection unless current continuity shows a blocker. Current
 continuity does not: repository status shows only the expected controller-state
-edit (`M orchestrator/state.json`), and `/Volumes/src/mlf4/Bugs.md` remains the
+edit (`M orchestrator/rounds/round-062/state-snapshot.json`), and `/Volumes/src/mlf4/Bugs.md` remains the
 canonical bug-status source with an empty `## Open` section.
 
 The accepted predecessor chain makes `K1` exact rather than speculative.

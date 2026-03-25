@@ -8,9 +8,9 @@
 
 - `git diff --check`
   - pass.
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-018/state-snapshot.json >/dev/null`
   - pass.
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-003/roadmap.md`
   - pass.
   - Evidence: roadmap items `1` through `4` remain parseable with statuses `done`, `done`, `pending`, `pending`.
 - `test -f docs/superpowers/specs/2026-03-15-uri-r2-c1-prototype-evidence-roadmap-design.md`
@@ -89,7 +89,7 @@
   - Result: pass.
   - Evidence:
     - tracked diff paths remain `mlf2.cabal`, `src/MLF/Research/URI/R2/C1/Prototype/Artifact.hs`, `src/MLF/Research/URI/R2/C1/Prototype/Entrypoint.hs`, `src/MLF/Research/URI/R2/C1/Prototype/Types.hs`, and `test/Research/UriR2C1PrototypeP1Spec.hs`, with the expected new `P3` files and round artifacts untracked in the round worktree;
-    - no forbidden tracked path appears for `orchestrator/state.json`, `orchestrator/roadmap.md`, `app/Main.hs`, or `src-public/*`;
+    - no forbidden tracked path appears for `orchestrator/rounds/round-018/state-snapshot.json`, `orchestrator/roadmaps/2026-03-15-00-uri-r2-c1-prototype-evidence-successor-roadmap/rev-003/roadmap.md`, `app/Main.hs`, or `src-public/*`;
     - inherited authority remains `P1` authoritative at attempt `2` with result `pass` and `P2` authoritative at attempt `2` with result `semantic-negative`;
     - the repaired `P3` artifact now cites only `P2` handoff continuity in its stage input interface and records bounded non-pass without widening beyond the approved lane.
 

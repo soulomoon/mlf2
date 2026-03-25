@@ -46,8 +46,8 @@
   - `review_snapshot: "orchestrator/rounds/round-071/reviews/attempt-1.md"`
   - canonical artifact:
     `docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
-- `orchestrator/retry-subloop.md` permits merge preparation after
-  `accepted + finalize`, and `orchestrator/state.json` is already at
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-004/retry-subloop.md` permits merge preparation after
+  `accepted + finalize`, and `orchestrator/rounds/round-071/state-snapshot.json` is already at
   `stage: "merge"` with `current_task: "N4"` and `retry: null`, so no
   same-round retry remains live.
 

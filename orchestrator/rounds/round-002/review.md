@@ -4,9 +4,9 @@
 
 - `git diff --check`
   - Result: pass (no output).
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
+- `python3 -m json.tool orchestrator/rounds/round-002/state-snapshot.json >/dev/null`
   - Result: pass (exit 0).
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-002/roadmap.md`
   - Result: pass; ordered status lines found (items 1-5).
 - `cabal build all && cabal test`
   - Result: pass.
@@ -34,7 +34,7 @@
   - `git diff --name-only | rg '^tasks/todo/2026-03-11-recursive-types-orchestration/'`
     - Result: pass (no matches).
   - Additional continuity evidence:
-    - `git status --short --untracked-files=all orchestrator/roadmap.md` -> no output.
+    - `git status --short --untracked-files=all orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-002/roadmap.md` -> no output.
     - `git status --short --untracked-files=all tasks/todo/2026-03-11-recursive-types-orchestration` -> no output.
 - Audit-content presence
   - `rg -n 'acyclic|binding|occurs-check|termination|reif|reconstruct|principality|explicit-only|non-equi-recursive|non-cyclic' docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`
@@ -56,7 +56,7 @@
 
 ## Takeover continuity statement
 
-Predecessor recursive-types packet history remains intact. This round references predecessor artifacts as evidence only and does not rewrite files under `tasks/todo/2026-03-11-recursive-types-orchestration/` or mutate `orchestrator/roadmap.md`.
+Predecessor recursive-types packet history remains intact. This round references predecessor artifacts as evidence only and does not rewrite files under `tasks/todo/2026-03-11-recursive-types-orchestration/` or mutate `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-002/roadmap.md`.
 
 ## Decision
 

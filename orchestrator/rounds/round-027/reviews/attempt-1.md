@@ -2,12 +2,12 @@
 
 - Baseline checks:
   - `git diff --check` (pass)
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` (pass)
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` (pass; `contract_version: 2` and idle `retry: null` remain intact for the terminal aggregate round)
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` (pass; ordered `R1` through `R4` markers remain parseable and `R4` is still pending before controller advancement)
+  - `python3 -m json.tool orchestrator/rounds/round-027/state-snapshot.json >/dev/null` (pass)
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-027/state-snapshot.json` (pass; `contract_version: 2` and idle `retry: null` remain intact for the terminal aggregate round)
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/roadmap.md` (pass; ordered `R1` through `R4` markers remain parseable and `R4` is still pending before controller advancement)
   - `test -f docs/superpowers/specs/2026-03-17-uri-r2-c1-p2-replay-repair-roadmap-design.md` (pass)
   - `test -f docs/superpowers/specs/2026-03-16-uri-r2-c1-prototype-evidence-retry-subloop-amendment.md` (pass)
-  - `test -f orchestrator/retry-subloop.md` (pass)
+  - `test -f orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/retry-subloop.md` (pass)
   - `cabal build all && cabal test` (not run; justified because this attempt remained docs/orchestrator-only and `git diff --stat -- src src-public app test mlf2.cabal` returned no output)
   - Continuity guards:
   - `git diff --name-only -- orchestrator/rounds/round-{001..026} Bugs.md` (pass; no output, so completed rounds `001` through `026` plus `Bugs.md` remain untouched)
@@ -22,7 +22,7 @@
   - Boundedness and no-widening checks:
   - `git status --short --untracked-files=all` shows only `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` plus the round-027 review/notes artifacts under `orchestrator/rounds/round-027/`; there is no production diff to widen beyond the accepted owner lane
   - `git diff --stat -- src src-public app test mlf2.cabal` (pass; no output, so this round adds no second executable interface, no public-surface drift, no replay-lane widening, and no fallback implementation path)
-  - `git diff --name-only -- orchestrator/state.json orchestrator/roadmap.md orchestrator/attempt-log.jsonl` (pass; no output, so controller-owned files remain untouched)
+  - `git diff --name-only -- orchestrator/rounds/round-027/state-snapshot.json orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-004/roadmap.md orchestrator/attempt-log.jsonl` (pass; no output, so controller-owned files remain untouched)
   - Aggregate decision checks:
   - `python3 -m json.tool orchestrator/rounds/round-024/review-record.json >/dev/null` (pass)
   - `python3 -m json.tool orchestrator/rounds/round-025/review-record.json >/dev/null` (pass)

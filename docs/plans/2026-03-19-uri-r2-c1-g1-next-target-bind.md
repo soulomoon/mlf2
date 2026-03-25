@@ -37,9 +37,9 @@ Only accepted bounded predecessor facts are carried forward here:
 1. `F2` authoritative `attempt-1` landed only the bounded local-binding
    scheme-alias/base-like `rootLocalSchemeAliasBaseLike` / `targetC -> rootFinal`
    fail-closed slice in
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-046/src/MLF/Elab/Run/ResultType/Fallback.hs`
+   `src/MLF/Elab/Run/ResultType/Fallback.hs`
    and
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-046/test/PipelineSpec.hs`.
+   `test/PipelineSpec.hs`.
    It did not reopen replay repair, `MLF.Elab.Inst`, `InstBot`, or any broader
    trigger family.
 2. `F3` authoritative `attempt-1` reverified that exact `F2` local-binding
@@ -71,7 +71,7 @@ repair, `MLF.Elab.Inst.applyInstantiation`, `InstBot`, or the completed
 The only frozen future `G2` target is:
 
 local-binding `rootHasMultiInst` fail-closed hardening in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-046/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 limited to the already-computed per-root multiplicity trigger at
 `Fallback.hs:240-248` and the downstream local `keepTargetFinal` / `targetC`
 selection in `Fallback.hs:668-693`.
@@ -109,14 +109,14 @@ family would widen the next slice beyond the smallest reviewer-auditable step.
 
 Future `G2` ownership is frozen to exactly these files only:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-046/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-046/test/PipelineSpec.hs`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
 
 ### Future Focused Coverage Intent
 
 Future `G2` coverage remains one bounded extension of the existing
 `ARI-C1 feasibility characterization (bounded prototype-only)` block in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-046/test/PipelineSpec.hs`
+`test/PipelineSpec.hs`
 only:
 
 - add one local-binding multi-inst case that directly exercises the selected
@@ -132,7 +132,7 @@ No second implementation family is selected in this artifact.
 
 This `G1` bind does not authorize:
 
-- edits to `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-046/src/MLF/Elab/Inst.hs`;
+- edits to `src/MLF/Elab/Inst.hs`;
 - replay-repair reopen, including `MLF.Elab.Inst.applyInstantiation` /
   `InstBot`, as active `G2` work;
 - reopening the completed `E2` / `E3` / `F1` / `F2` / `F3` / `F4` chain;

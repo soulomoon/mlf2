@@ -6,7 +6,7 @@ Execute only the same-round retry for roadmap item `I4`.
 
 This rewrite replaces the rejected `attempt-1` plan with the required
 `attempt-2` retry delta only. The retry scope is exactly the recorded fix
-hypothesis from `orchestrator/state.json`: repair the `round-057` packet so
+hypothesis from `orchestrator/rounds/round-057/state-snapshot.json`: repair the `round-057` packet so
 this plan and the same canonical `I4` artifact use the live bug tracker plus
 accepted `I3` / `H4` continuity correctly, treating `BUG-2026-03-16-001` as
 resolved continuity context only rather than as an open-bug premise. The round
@@ -16,7 +16,7 @@ continuity packet.
 
 The canonical `I4` artifact path remains:
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-057/docs/plans/2026-03-20-uri-r2-c1-i4-next-cycle-decision-gate.md`
+`docs/plans/2026-03-20-uri-r2-c1-i4-next-cycle-decision-gate.md`
 
 All non-retried `attempt-1` contract facts remain binding: the live subject
 stays repaired `URI-R2-C1`, the inherited explicit-only / non-equi-recursive /
@@ -70,13 +70,13 @@ Carry forward without replanning:
 
 ### Read-Only Evidence
 
-- `orchestrator/state.json`
+- `orchestrator/rounds/round-057/state-snapshot.json`
 - `orchestrator/rounds/round-057/selection.md`
 - `orchestrator/rounds/round-057/review.md`
 - `orchestrator/rounds/round-057/reviews/attempt-1.md`
 - `orchestrator/rounds/round-057/attempt-log.jsonl`
-- `orchestrator/verification.md`
-- `orchestrator/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/verification.md`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/retry-subloop.md`
 - `docs/plans/2026-03-20-uri-r2-c1-i3-bounded-verification-gate.md`
 - `docs/plans/2026-03-20-uri-r2-c1-h4-next-cycle-decision-gate.md`
 - `orchestrator/rounds/round-053/reviews/attempt-1.md`
@@ -89,8 +89,8 @@ Carry forward without replanning:
 
 ### Preserve Unchanged
 
-- `orchestrator/state.json`
-- `orchestrator/roadmap.md`
+- `orchestrator/rounds/round-057/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/roadmap.md`
 - `orchestrator/rounds/round-057/selection.md`
 - `orchestrator/rounds/round-057/review.md`
 - `orchestrator/rounds/round-057/reviews/attempt-1.md`
@@ -178,18 +178,18 @@ Carry forward without replanning:
 
 ### Task 5 - Run the docs-only verification needed to clear the retry reason
 
-Run the baseline docs/state checks required by `orchestrator/verification.md`:
+Run the baseline docs/state checks required by `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/verification.md`:
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-057/state-snapshot.json >/dev/null`
+- `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-057/state-snapshot.json`
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/roadmap.md`
 - `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
 - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
 - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-- `test -f orchestrator/retry-subloop.md`
+- `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/retry-subloop.md`
 
 Reconfirm authoritative continuity with at least these checks:
 
@@ -248,10 +248,10 @@ of the following limits:
 
 This retry delta does not authorize:
 
-- any change to `orchestrator/state.json`;
+- any change to `orchestrator/rounds/round-057/state-snapshot.json`;
 - any rewrite of `selection.md`, `review.md`, `reviews/attempt-1.md`,
   `attempt-log.jsonl`, `implementation-notes.md`, `merge.md`,
-  `review-record.json`, or `orchestrator/roadmap.md`;
+  `review-record.json`, or `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-024/roadmap.md`;
 - any production/test/public-API/executable/Cabal edit;
 - any change to `/Volumes/src/mlf4/Bugs.md`;
 - any reopening of `I1` target selection, `I2` implementation, or `I3`

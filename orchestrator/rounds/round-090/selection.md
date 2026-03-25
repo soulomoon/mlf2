@@ -8,6 +8,14 @@ successor loop after accepted roadmap item `1`
 Successor lane: roadmap item `2` only, auditing the live pipeline against the
 frozen same-lane retained-child tuple and ledger
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap`
+- Roadmap Revision: `rev-002`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002`
+- State Snapshot: `orchestrator/rounds/round-090/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item `2`: audit the live pipeline against the frozen same-lane
@@ -15,15 +23,15 @@ retained-child tuple and ledger.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` fixes the live controller state at
+`orchestrator/rounds/round-090/state-snapshot.json` fixes the live controller state at
 `active_round_id: "round-090"`, `stage: "select-task"`, `current_task: null`,
 `retry: null`, `branch: "codex/round-090"`, `active_round_dir:
 "orchestrator/rounds/round-090"`, and `last_completed_round: "round-089"`.
-`orchestrator/retry-subloop.md` only overrides roadmap order when a live retry
+`orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/retry-subloop.md` only overrides roadmap order when a live retry
 object is present. `retry` is currently `null`, so the normal
 lowest-numbered-unfinished-item rule still governs this round.
 
-`orchestrator/roadmap.md` marks item `1` done and item `2` as the first
+`orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/roadmap.md` marks item `1` done and item `2` as the first
 unfinished item. Items `3` through `5` all depend on item `2` directly or
 indirectly. Item `2` is therefore the lowest-numbered unfinished
 dependency-satisfied successor and the only lawful next round.
@@ -84,7 +92,7 @@ or general automatic-inference claims.
 defect remains predecessor implementation context only and does not create a
 retry obligation or change roadmap order for this successor loop. Repository
 status in the active worktree shows only controller-owned
-`M orchestrator/state.json` drift. No live blocker forces a different
+`M orchestrator/rounds/round-090/state-snapshot.json` drift. No live blocker forces a different
 selection.
 
 ## Round Scope Guard
@@ -116,8 +124,8 @@ selection.
   recursive inference, or a reopened `non-cyclic-graph` revision argument
   without later accepted evidence from this exact same pocket.
 - Do not edit production code, tests, public surfaces, executables, Cabal,
-  `orchestrator/state.json`, `orchestrator/roadmap.md`,
-  `orchestrator/retry-subloop.md`, `Bugs.md`, or any plan/review/merge/task
+  `orchestrator/rounds/round-090/state-snapshot.json`, `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/roadmap.md`,
+  `orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-002/retry-subloop.md`, `Bugs.md`, or any plan/review/merge/task
   packet artifacts.
 
 ## Blockers

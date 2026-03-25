@@ -20,8 +20,8 @@ Owner: implement
 Verification evidence:
 
 - `git diff --check` passed.
-- `python3 -m json.tool orchestrator/state.json >/dev/null` passed.
-- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` passed.
+- `python3 -m json.tool orchestrator/rounds/round-004/state-snapshot.json >/dev/null` passed.
+- `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-004/roadmap.md` passed.
 - Focused spike selector passed:
   - `cabal test --test-show-details=direct --test-options='--match "ARI-C1"'`
   - result: 3 examples, 0 failures.
@@ -29,7 +29,7 @@ Verification evidence:
   - `cabal build all && cabal test`
   - result: 1099 examples, 0 failures.
 - Planned-file boundary checks:
-  - no diff against `orchestrator/roadmap.md`.
+  - no diff against `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-004/roadmap.md`.
   - no diff under `tasks/todo/2026-03-11-recursive-types-orchestration/`.
 
 ## Round Decision Signal

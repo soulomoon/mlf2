@@ -8,7 +8,7 @@ Deliver the smallest docs-only research slice that closes successor roadmap item
 
 - This round is docs-only.
 - Do not edit `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
-- Do not edit `orchestrator/state.json` or `orchestrator/roadmap.md`.
+- Do not edit `orchestrator/rounds/round-006/state-snapshot.json` or `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-001/roadmap.md`.
 - Do not rewrite predecessor packet history or prior round artifacts.
 - Do not select the `R2` subset, write the `R3` obligation contract, make the `R4` feasibility decision, or draft the `R5` handoff.
 
@@ -22,30 +22,30 @@ Rationale: the selected item is `R1` only, and the approved successor design say
   - non-equi-recursive semantics only;
   - non-cyclic structural graph only;
   - fail closed if the gap map discovers that forbidden widening would be required.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative invariant audit for acyclicity, binding-tree discipline, occurs-check/termination, reconstruction/reification/witness replay, and principality risk boundaries.
+- Treat `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative invariant audit for acyclicity, binding-tree discipline, occurs-check/termination, reconstruction/reification/witness replay, and principality risk boundaries.
 - Use completed automatic-recursive-inference rounds `001` through `005` as inherited baseline evidence only; do not reopen them as pending work.
 - Keep the round bounded to docs/orchestrator/task-surface edits only.
 
 ## Exact Target Files
 
-1. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`
-2. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/orchestrator/rounds/round-006/implementation-notes.md`
+1. Create `docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`
+2. Create `orchestrator/rounds/round-006/implementation-notes.md`
 
 ## Sequential Tasks
 
 ### Task 1 - Write the `R1` gap-map artifact
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`
 
 Required contents:
 - A short inherited-baseline section that cites the accepted `ARI-C1` handoff as `R0` and names the authoritative prior evidence inputs:
-  - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/docs/plans/2026-03-14-automatic-recursive-inference-candidate-subset-selection.md`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/docs/plans/2026-03-14-automatic-recursive-inference-ari-c1-feasibility-spike.md`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/docs/plans/2026-03-14-automatic-recursive-inference-item5-handoff-decision.md`
-  - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md`
+  - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+  - `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`
+  - `docs/plans/2026-03-14-automatic-recursive-inference-candidate-subset-selection.md`
+  - `docs/plans/2026-03-14-automatic-recursive-inference-ari-c1-feasibility-spike.md`
+  - `docs/plans/2026-03-14-automatic-recursive-inference-item5-handoff-decision.md`
+  - `docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md`
 - A fixed-boundary section that restates, without weakening, the mandatory boundary phrases:
   - unannotated target is still single-SCC and single-binder-family only;
   - recursion is obligation-level, not cyclic structural-graph encoding;
@@ -74,7 +74,7 @@ Required contents:
 ### Task 2 - Record round implementation notes
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/orchestrator/rounds/round-006/implementation-notes.md`
+- `orchestrator/rounds/round-006/implementation-notes.md`
 
 Required contents:
 - Short summary of the `R1` gap-map artifact and why it satisfies successor roadmap item 1.
@@ -84,27 +84,27 @@ Required contents:
 
 ## Acceptance Criteria (All Required)
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md` exists and presents a finite, concrete gap list from `ARI-C1` to the unannotated single-SCC target.
+1. `docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md` exists and presents a finite, concrete gap list from `ARI-C1` to the unannotated single-SCC target.
 2. The gap-map artifact explicitly separates:
    - anchor-supplied information,
    - potentially locally recoverable information,
    - still-blocked unannotated cases.
 3. The gap-map artifact keeps the inherited item-2 invariant audit authoritative and maps each gap to relevant invariant classes instead of re-auditing them from scratch.
 4. The artifact explicitly preserves the approved `R1` -> `R5` staging by deferring subset selection, obligation-contract writing, feasibility judgment, and handoff drafting.
-5. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/orchestrator/rounds/round-006/implementation-notes.md` exists and records docs-only execution plus staging continuity.
+5. `orchestrator/rounds/round-006/implementation-notes.md` exists and records docs-only execution plus staging continuity.
 6. Diff remains limited to planned docs/round artifacts and does not modify:
-   - `orchestrator/state.json`,
-   - `orchestrator/roadmap.md`,
+   - `orchestrator/rounds/round-006/state-snapshot.json`,
+   - `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-001/roadmap.md`,
    - `src/`, `src-public/`, `app/`, `test/`,
    - `mlf2.cabal`,
    - predecessor packet/task history.
 
 ## Reviewer And Verification Checks
 
-Baseline checks (from `orchestrator/verification.md`):
+Baseline checks (from `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-001/verification.md`):
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-006/state-snapshot.json >/dev/null`
+- `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-001/roadmap.md`
 - `cabal build all && cabal test` is not required this round if the diff excludes `src/`, `src-public/`, `app/`, `test/`, and `mlf2.cabal`; reviewer must record that skip rationale explicitly.
 - Reviewer-recorded continuity check against inherited evidence from completed rounds `001` through `005`, the approved successor design spec, and the predecessor recursive-types packet.
 
@@ -124,7 +124,7 @@ Round-specific checks:
   - `rg -n '2026-03-14-automatic-recursive-inference-baseline-contract|2026-03-14-automatic-recursive-inference-invariant-audit|2026-03-14-automatic-recursive-inference-candidate-subset-selection|2026-03-14-automatic-recursive-inference-ari-c1-feasibility-spike|2026-03-14-automatic-recursive-inference-item5-handoff-decision|2026-03-14-unannotated-iso-recursive-roadmap-design' docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md`
 
 Review output requirements:
-- Reviewer writes `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-006/orchestrator/rounds/round-006/review.md` with:
+- Reviewer writes `orchestrator/rounds/round-006/review.md` with:
   - baseline checks evidence,
   - round-specific checks evidence,
   - explicit decision (`approve` or `reject`),

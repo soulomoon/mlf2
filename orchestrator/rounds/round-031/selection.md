@@ -6,15 +6,23 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: unannotated iso-recursive inference (bounded)
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap`
+- Roadmap Revision: `rev-009`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-009`
+- State Snapshot: `orchestrator/rounds/round-031/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 4: execute `U4` constructor-directed / acyclicity / termination clearance for the live subject.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `stage: select-task` for `round-031` with `current_task: null` and `retry: null`, so there is no same-round retry forcing a return to an earlier stage.
+`orchestrator/rounds/round-031/state-snapshot.json` is parked at `stage: select-task` for `round-031` with `current_task: null` and `retry: null`, so there is no same-round retry forcing a return to an earlier stage.
 
-`orchestrator/roadmap.md` records `U1`, `U2`, and `U3` as done (finalized in rounds `round-028`, `round-029`, and `round-030`) and marks `U4` as the lowest-numbered unfinished item. Under the guider contract, `U4` is therefore the next lawful bounded selection.
+`orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-009/roadmap.md` records `U1`, `U2`, and `U3` as done (finalized in rounds `round-028`, `round-029`, and `round-030`) and marks `U4` as the lowest-numbered unfinished item. Under the guider contract, `U4` is therefore the next lawful bounded selection.
 
 Predecessor evidence is aligned for this handoff: `round-028` finalized the repaired-subject bind (`U1`), `round-029` finalized authority clearance with bounded token `authority-narrowed` (`U2`), and `round-030` finalized uniqueness/owner analysis with bounded token `uniqueness-owner-stable-refuted` (`U3`). The successor roadmap design and live roadmap define `U4` as the next required clearance step to prove or refute admissibility under constructor-directed reasoning without equi-recursion, cyclic structural graphs, or weakened termination guarantees.
 

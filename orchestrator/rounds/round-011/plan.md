@@ -8,7 +8,7 @@ Deliver the smallest bounded `RE1` research artifact that defines reviewer-check
 
 - This round is docs-only.
 - Do not edit `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
-- Do not edit `orchestrator/state.json` or `orchestrator/roadmap.md`.
+- Do not edit `orchestrator/rounds/round-011/state-snapshot.json` or `orchestrator/roadmaps/2026-03-14-02-uri-r2-c1-re-entry-evidence-successor-roadmap/rev-001/roadmap.md`.
 - Do not rewrite predecessor packet history or prior round artifacts.
 - Do not draft `RE2`, `RE3`, `RE4`, or `RE5` outputs in this round.
 - Do not write `implementation-notes.md`, `review.md`, or `merge.md` in this round.
@@ -26,15 +26,15 @@ Rationale: roadmap item 1 is the first re-entry evidence-contract stage only. Th
   - non-cyclic structural graph only;
   - no default-on widening;
   - fail closed if any claimed authority would require prototype-backed invention, replay-domain broadening, or reopening earlier accepted stages.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited invariant audit for reconstruction, reification, witness replay, binding-tree discipline, acyclicity, and occurs-check/termination boundaries.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`, `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/plans/2026-03-14-unannotated-iso-recursive-r4-feasibility-decision.md`, and `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` as authoritative inherited statements of the unresolved `URI-R3-O4` blocker; do not reinterpret them as already-cleared evidence.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/superpowers/specs/2026-03-14-uri-r2-c1-reentry-roadmap-design.md` as the staging authority for `RE1` through `RE5`; preserve that ordering exactly.
+- Treat `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited invariant audit for reconstruction, reification, witness replay, binding-tree discipline, acyclicity, and occurs-check/termination boundaries.
+- Treat `docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`, `docs/plans/2026-03-14-unannotated-iso-recursive-r4-feasibility-decision.md`, and `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` as authoritative inherited statements of the unresolved `URI-R3-O4` blocker; do not reinterpret them as already-cleared evidence.
+- Treat `docs/superpowers/specs/2026-03-14-uri-r2-c1-reentry-roadmap-design.md` as the staging authority for `RE1` through `RE5`; preserve that ordering exactly.
 - Use completed rounds `001` through `010`, the approved re-entry design, the accepted `R5` stop decision, and the predecessor recursive-types packet as inherited evidence only; do not reopen or rewrite them.
 - Keep the artifact prototype-free: if the provenance-authority contract cannot be stated from inherited docs and accepted evidence alone, the artifact must say so explicitly and fail closed rather than authorizing experiments or implementation work.
 
 ## Exact Target File
 
-1. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
+1. Create `docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
 
 ## Sequential Tasks
 
@@ -42,12 +42,12 @@ Rationale: roadmap item 1 is the first re-entry evidence-contract stage only. Th
 
 Required inherited inputs to cite directly in the artifact:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/superpowers/specs/2026-03-14-uri-r2-c1-reentry-roadmap-design.md`, naming `RE1` as the provenance-authority stage and preserving the approved `RE1` -> `RE5` ladder;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`, naming `URI-R3-O4` as the decisive inherited blocker and recording the bounded stop;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/plans/2026-03-14-unannotated-iso-recursive-r4-feasibility-decision.md`, naming the unresolved docs-only provenance gap and its no-go triggers;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`, naming the formal `URI-R3-O4` hard contract and fail-closed rejection condition;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`, naming the authoritative replay/reification path and witness-domain safety constraints;
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/orchestrator/rounds/round-011/selection.md` as the current round-selection authority.
+- `docs/superpowers/specs/2026-03-14-uri-r2-c1-reentry-roadmap-design.md`, naming `RE1` as the provenance-authority stage and preserving the approved `RE1` -> `RE5` ladder;
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`, naming `URI-R3-O4` as the decisive inherited blocker and recording the bounded stop;
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r4-feasibility-decision.md`, naming the unresolved docs-only provenance gap and its no-go triggers;
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`, naming the formal `URI-R3-O4` hard contract and fail-closed rejection condition;
+- `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md`, naming the authoritative replay/reification path and witness-domain safety constraints;
+- `orchestrator/rounds/round-011/selection.md` as the current round-selection authority.
 
 Task output requirements:
 
@@ -58,7 +58,7 @@ Task output requirements:
 ### Task 2 - Write the `RE1` provenance-authority evidence contract artifact
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
+- `docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md`
 
 Required contents:
 
@@ -114,7 +114,7 @@ Required checks before review:
 
 ## Acceptance Criteria (All Required)
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md` exists.
+1. `docs/plans/2026-03-14-uri-r2-c1-re1-provenance-authority-evidence-contract.md` exists.
 2. The artifact defines `RE1` as a provenance-authority evidence contract for `URI-R3-O4`, not as a feasibility decision, re-entry verdict, or implementation-handoff document.
 3. The artifact explicitly preserves the approved `RE1` -> `RE5` staging and the inherited invariant-audit authority.
 4. The artifact keeps the active subject fixed to `URI-R2-C1`, `single-SCC`, `single-binder-family`, non-equi-recursive, non-cyclic, prototype-free boundaries.
@@ -123,8 +123,8 @@ Required checks before review:
 7. The artifact states exactly what would count as clearing `URI-R3-O4` later and what would force it to remain uncleared.
 8. The artifact explicitly states that this round does not settle `RE2`, `RE3`, `RE4`, or `RE5` and does not authorize production implementation work.
 9. Diff remains limited to the planned docs/round artifacts and does not modify:
-   - `orchestrator/state.json`,
-   - `orchestrator/roadmap.md`,
+   - `orchestrator/rounds/round-011/state-snapshot.json`,
+   - `orchestrator/roadmaps/2026-03-14-02-uri-r2-c1-re-entry-evidence-successor-roadmap/rev-001/roadmap.md`,
    - `src/`, `src-public/`, `app/`, `test/`,
    - `mlf2.cabal`,
    - predecessor packet/task history,
@@ -132,11 +132,11 @@ Required checks before review:
 
 ## Reviewer And Verification Checks
 
-Baseline checks (from `orchestrator/verification.md`):
+Baseline checks (from `orchestrator/roadmaps/2026-03-14-02-uri-r2-c1-re-entry-evidence-successor-roadmap/rev-001/verification.md`):
 
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-011/state-snapshot.json >/dev/null`
+- `rg -n '^\\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-14-02-uri-r2-c1-re-entry-evidence-successor-roadmap/rev-001/roadmap.md`
 - `cabal build all && cabal test` is not required this round if the diff excludes `src/`, `src-public/`, `app/`, `test/`, and `mlf2.cabal`; reviewer must record that skip rationale explicitly.
 - Reviewer-recorded continuity check against inherited evidence from completed rounds `001` through `010`, the accepted `R5` stop decision, the approved re-entry design, and the predecessor recursive-types packet.
 
@@ -169,7 +169,7 @@ Round-specific checks:
 
 Review output requirements:
 
-- Reviewer writes `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-011/orchestrator/rounds/round-011/review.md` with:
+- Reviewer writes `orchestrator/rounds/round-011/review.md` with:
   - baseline checks evidence,
   - round-specific checks evidence,
   - explicit decision (`approve` or `reject`),

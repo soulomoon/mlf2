@@ -6,6 +6,14 @@ Role: guider
 Active subject: repaired `URI-R2-C1`
 Successor lane: continue-bounded unannotated iso-recursive inference
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap`
+- Roadmap Revision: `rev-030`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-030`
+- State Snapshot: `orchestrator/rounds/round-063/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 30: execute the `K2` bounded local-binding empty-candidate /
@@ -14,19 +22,19 @@ no-inst-arg scheme-alias / base-like `baseTarget -> baseC` / same-lane
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` already fixes the live controller state at
+`orchestrator/rounds/round-063/state-snapshot.json` already fixes the live controller state at
 `active_round_id: "round-063"`, `stage: "select-task"`, `current_task: null`,
 `retry: null`, `branch: "codex/round-063-k2-empty-candidate-hardening"`, and
 `last_completed_round: "round-062"`. Under the guider contract and
-`orchestrator/retry-subloop.md`, that means there is no same-round retry to
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-030/retry-subloop.md`, that means there is no same-round retry to
 resume, no interrupted earlier stage to continue, and no lawful basis to skip
 selection or reopen an older round instead of choosing the next roadmap item.
 
-`orchestrator/roadmap.md` marks item 29 (`K1`) done and item 30 (`K2`)
+`orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-030/roadmap.md` marks item 29 (`K1`) done and item 30 (`K2`)
 pending. Because item 30 is now the lowest-numbered unfinished roadmap entry,
 `K2` is the next lawful selection unless current continuity shows a blocker.
 Current continuity does not: repository status shows only the existing
-controller-state edit (`M orchestrator/state.json`), and
+controller-state edit (`M orchestrator/rounds/round-063/state-snapshot.json`), and
 `/Volumes/src/mlf4/Bugs.md` still has an empty `## Open` section. Those facts
 preserve continuity only; they do not create authority to widen, replay, or
 reorder the roadmap.

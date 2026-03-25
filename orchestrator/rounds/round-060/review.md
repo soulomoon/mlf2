@@ -3,10 +3,10 @@
 - Baseline checks:
   - `git rev-parse --abbrev-ref HEAD` -> `codex/round-060-j3-verification-gate`
   - `git diff --check` -> pass
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2: "contract_version": 2`, `17: "retry": null`)
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass; reviewer-visible continuity remains `25: [done] J1`, `26: [done] J2`, `27: [pending] J3`, `28: [pending] J4`
-  - required file-presence checks -> pass for the approved `H`-cycle design, baseline contract, research-stop decision, repaired `R4` decision, accepted `U6` decision, accepted `I4`/`J1`/`J2` artifacts, `orchestrator/retry-subloop.md`, and `/Volumes/src/mlf4/Bugs.md`
+  - `python3 -m json.tool orchestrator/rounds/round-060/state-snapshot.json >/dev/null` -> pass
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-060/state-snapshot.json` -> pass (`2: "contract_version": 2`, `17: "retry": null`)
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/roadmap.md` -> pass; reviewer-visible continuity remains `25: [done] J1`, `26: [done] J2`, `27: [pending] J3`, `28: [pending] J4`
+  - required file-presence checks -> pass for the approved `H`-cycle design, baseline contract, research-stop decision, repaired `R4` decision, accepted `U6` decision, accepted `I4`/`J1`/`J2` artifacts, `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-027/retry-subloop.md`, and `/Volumes/src/mlf4/Bugs.md`
   - `orchestrator/rounds/round-060/implementation-notes.md` is absent; non-blocking because the accepted `J3` packet explicitly kept that file out of scope
 
 - Task-specific checks:
@@ -17,7 +17,7 @@
   - Bug continuity -> pass. `/Volumes/src/mlf4/Bugs.md` still has an empty `## Open` section and carries `BUG-2026-03-16-001` only under `## Resolved`, so bugs remain continuity context only for `J3`.
   - Fresh focused rerun -> pass. `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'` reported `19 examples, 0 failures`.
   - Fresh full repo gate -> pass. `cabal build all && cabal test` completed under GHC `9.12.2` with `1140 examples, 0 failures`.
-  - Diff boundary -> pass with note. `git status --short --untracked-files=all` shows pre-existing controller/round prep (`M orchestrator/state.json`, `?? orchestrator/rounds/round-060/selection.md`, `?? orchestrator/rounds/round-060/plan.md`), the canonical `J3` artifact, and two active task-packet bookkeeping files under `tasks/todo/2026-03-20-run-orchestrator-loop-live/`. `git diff --name-only` shows tracked diffs only in `orchestrator/state.json` and those task-packet files. `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` returns only the task-packet bookkeeping files. `git diff --name-only -- src app src-public test mlf2.cabal` returns no output, so the round-authoritative packet still has no code/test/public-API/executable/Cabal diff and no widening from repaired `URI-R2-C1`.
+  - Diff boundary -> pass with note. `git status --short --untracked-files=all` shows pre-existing controller/round prep (`M orchestrator/rounds/round-060/state-snapshot.json`, `?? orchestrator/rounds/round-060/selection.md`, `?? orchestrator/rounds/round-060/plan.md`), the canonical `J3` artifact, and two active task-packet bookkeeping files under `tasks/todo/2026-03-20-run-orchestrator-loop-live/`. `git diff --name-only` shows tracked diffs only in `orchestrator/rounds/round-060/state-snapshot.json` and those task-packet files. `git diff --name-only -- . ':(exclude)docs/**' ':(exclude)orchestrator/**'` returns only the task-packet bookkeeping files. `git diff --name-only -- src app src-public test mlf2.cabal` returns no output, so the round-authoritative packet still has no code/test/public-API/executable/Cabal diff and no widening from repaired `URI-R2-C1`.
 
 - Implemented stage result:
   - `J3` reverified the accepted `J2` `rootLocalInstArgSingleBase` / `baseTarget -> baseC` / same-lane `targetC` lane only, with fresh focused and full verification evidence and without reopening implementation, widening the live subject, or preempting `J4`.

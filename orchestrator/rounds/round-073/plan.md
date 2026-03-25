@@ -4,7 +4,7 @@
 
 Execute only roadmap item `N6` and produce one accepted docs-only
 verification artifact at:
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`.
+`docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`.
 
 This is the initial `N6` plan for `attempt-1` with `retry: null`. The round
 must consolidate verifier-visible evidence for the exact accepted `N5`
@@ -17,11 +17,11 @@ new implementation work, replay reopen, or `N7` closure/decision work.
 surfaces:
 
 1. read-only source anchors in
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/src/MLF/Elab/Run/ResultType/Fallback.hs`
+   `src/MLF/Elab/Run/ResultType/Fallback.hs`
    showing the explicit `rootNonLocalSchemeAliasBaseLike` proof, the preserved
    local proof cluster, and the dedicated same-lane `targetC` arm;
 2. read-only focused test anchors in
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/test/PipelineSpec.hs`
+   `test/PipelineSpec.hs`
    showing `schemeAliasBaseLikeFallback False`, the preserved local
    `schemeAliasBaseLikeFallback True` contrast, and the source guard that keeps
    the non-local proof separate from the local lanes;
@@ -48,7 +48,7 @@ this round.
   `baseTarget -> baseC` packet
 - Active branch: `codex/round-073-n6-verification-evidence`
 - Active worktree:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073`
+  `.worktrees/round-073`
 - Stage mode: docs-only bounded verification/evidence consolidation only
 - Current round review feedback: none yet; this is a full `attempt-1` plan,
   not a retry delta
@@ -60,21 +60,21 @@ and do not revert unrelated work:
 
 ## Accepted Continuity That Remains Binding
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/orchestrator/rounds/round-073/selection.md`
+- `orchestrator/rounds/round-073/selection.md`
   already fixes this round to `N6` only and forbids using it for new
   implementation, target selection, replay relitigation, roadmap/state edits,
   bug-tracker edits, or predecessor-history rewrites.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json` fixes the
+- `orchestrator/rounds/round-073/state-snapshot.json` fixes the
   live controller state at `active_round_id: "round-073"`, `stage: "plan"`,
   `current_task: "N6"`, `branch:
   "codex/round-073-n6-verification-evidence"`, and `retry: null`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md` makes
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-006/roadmap.md` makes
   `N6` the first pending item after accepted `N5`; `N7` depends on accepted
   `N6` evidence and therefore cannot run first.
-- `/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
   still records `N6 = NO`, so this round must stay evidence-only for the
   accepted `N5` slice and must not drift into a decision token.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
   remains the active `N3` contract. `N6` must keep the following axes explicit
   and unchanged:
   - alias-bound ownership remains local to one owner-binder / owned-bound pair;
@@ -85,29 +85,29 @@ and do not revert unrelated work:
     non-cyclic-graph; and
   - confinement remains fixed to the one preserved non-local `baseTarget`
     packet.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
   remains the accepted `N4` bind. It froze exactly one packet: the preserved
   non-local generic scheme-root alias-bound / base-like
   `baseTarget -> baseC` packet plus its downstream same-lane `targetC`
   consumer.
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
   remains the accepted `N5` implementation record. It states that the generic
   `baseTarget` computation stayed unchanged, the explicit
   `rootNonLocalSchemeAliasBaseLike` proof was added, and only the same-lane
   generic `targetC` consumer now routes through that proof.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-072/review-record.json`
+- `orchestrator/rounds/round-072/review-record.json`
   remains the authoritative acceptance proof that `N5` finalized as
   `attempt = 1`, `attempt_verdict = accepted`, `stage_action = finalize`,
   `status = authoritative`, and
   `final_outcome = "baseTarget-non-local-proof-slice-established"`.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-072/review.md`
+- `orchestrator/rounds/round-072/review.md`
   remains the authoritative reviewer-owned evidence that the focused `ARI-C1`
   block and the full repo gate both passed for the accepted `N5` slice.
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` still carries open
+- `Bugs.md` still carries open
   `BUG-2026-03-16-001`, but that replay / `InstBot` defect remains read-only
   predecessor context only and does not authorize replay reopen,
   `MLF.Elab.Inst`, or any different subject in this round.
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-006/retry-subloop.md`
   allows retries for `N6`, but prior attempts remain immutable. This
   `attempt-1` plan must therefore define one bounded verification packet
   without rewriting any prior attempt or review artifact.
@@ -116,48 +116,48 @@ and do not revert unrelated work:
 
 ### Modify
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`
   - Responsibility: canonical `N6` verification/evidence record for the exact
     accepted `N5` slice only, including fresh command evidence, read-only
     anchor evidence, predecessor continuity, and explicit non-authorization.
 
 ### Optional Modify
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/orchestrator/rounds/round-073/implementation-notes.md`
+- `orchestrator/rounds/round-073/implementation-notes.md`
   - Responsibility: bounded command transcript / blocker capture file only if
     long outputs need a round-local home.
 
 ### Read-Only Evidence
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/test/PipelineSpec.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-072/review.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-072/review-record.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
+- `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
+- `orchestrator/rounds/round-072/review.md`
+- `orchestrator/rounds/round-072/review-record.json`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-006/verification.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-006/retry-subloop.md`
+- `tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
+- `Bugs.md`
 
 ### Preserve Unchanged
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/src/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/test/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/src-public/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/app/`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/mlf2.cabal`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/roadmap.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/retry-subloop.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/orchestrator/rounds/round-073/selection.md`
+- `src/`
+- `test/`
+- `src-public/`
+- `app/`
+- `mlf2.cabal`
+- `orchestrator/rounds/round-073/state-snapshot.json`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-006/roadmap.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-006/retry-subloop.md`
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-006/verification.md`
+- `Bugs.md`
+- `orchestrator/rounds/round-073/selection.md`
 - reviewer-owned history under
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-001/`
+  `orchestrator/rounds/round-001/`
   through
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-072/`
+  `orchestrator/rounds/round-072/`
 
 No edit to `Fallback.hs`, `PipelineSpec.hs`, `src-public/`, `app/`, or
 `mlf2.cabal` is authorized during `N6` `attempt-1`. If reverification fails,
@@ -180,7 +180,7 @@ Required interpretation of that one bounded slice:
   accepted `N5` production/test packet.
 - The live source anchors to cite are the existing proof cluster and consumer
   order in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/src/MLF/Elab/Run/ResultType/Fallback.hs`,
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`,
   in particular:
   - `rootLocalInstArgSingleBase` at line `531`;
   - `rootLocalEmptyCandidateSchemeAliasBaseLike` at line `537`;
@@ -192,7 +192,7 @@ Required interpretation of that one bounded slice:
     `rootLocalEmptyCandidateSchemeAliasBaseLike` at line `711` and
     `rootNonLocalSchemeAliasBaseLike` at line `713`.
 - The live focused test anchors to cite are the existing helper/test block in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/test/PipelineSpec.hs`,
+  `test/PipelineSpec.hs`,
   in particular:
   - the `ARI-C1` block at line `1103`;
   - `schemeAliasBaseLikeFallback` at line `1244`;
@@ -229,7 +229,7 @@ Required interpretation of that one bounded slice:
   accepted `N5` non-local proof slice and does not authorize:
   - production/test/public-API/executable/Cabal edits;
   - roadmap edits;
-  - `orchestrator/state.json` edits;
+  - `orchestrator/rounds/round-073/state-snapshot.json` edits;
   - bug-tracker edits;
   - predecessor-history rewrites; or
   - `N7` decision work.
@@ -246,31 +246,31 @@ Required interpretation of that one bounded slice:
 ### Task 2 - Reconfirm the accepted `N3` / `N4` / `N5` authority chain without widening it
 
 - Reconfirm the accepted `N3` contract from
-  `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-safety-acceptance-contract.md`
   and restate that it still binds `N6`.
 - Reconfirm the exact `N4` packet from
-  `/Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
   and restate that `N6` is still confined to that exact packet.
 - Reconfirm the accepted `N5` implementation artifact and review record:
-  - `python3 -m json.tool /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/rounds/round-072/review-record.json >/dev/null`
+  - `python3 -m json.tool orchestrator/rounds/round-072/review-record.json >/dev/null`
   - short `python3` assertion over
     `round-066` through `round-072` review records proving accepted
     authoritative continuity for `L1`, `L2`, `N1`, `N2`, `N3`, `N4`, and `N5`
-  - `test -f /Users/ares/.codex/worktrees/d432/mlf4/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
+  - `test -f docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
 - State explicitly that the accepted `N5` slice still means:
   - `baseTarget` computation unchanged;
   - explicit `rootNonLocalSchemeAliasBaseLike` proof present;
   - only the same-lane generic `targetC` consumer routed through that proof;
   - focused `schemeAliasBaseLikeFallback False` / `True` plus source guard
     remain the bounded test anchors.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/Bugs.md` only as continuity
+- Treat `Bugs.md` only as continuity
   context. Do not reinterpret open `BUG-2026-03-16-001` as current repair or
   widening authority.
 
 ### Task 3 - Collect read-only anchor evidence from the live code/test packet
 
 - Inspect the existing selected-lane logic in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/src/MLF/Elab/Run/ResultType/Fallback.hs`
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`
   without editing it.
 - Capture line-referenced evidence for all of the following:
   - `rootLocalInstArgSingleBase`;
@@ -286,7 +286,7 @@ Required interpretation of that one bounded slice:
 - Inspect the focused
   `describe "ARI-C1 feasibility characterization (bounded prototype-only)"`
   block in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/test/PipelineSpec.hs`
+  `test/PipelineSpec.hs`
   without editing it.
 - Capture line-referenced evidence showing:
   - the helper family remains in the same focused block;
@@ -304,13 +304,13 @@ Required interpretation of that one bounded slice:
 ### Task 4 - Run the required bounded verification suite for `N6`
 
 - Run the baseline checks required by
-  `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/verification.md`:
+  `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-006/verification.md`:
   - `git branch --show-current`
   - `git status --short --untracked-files=all`
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
+  - `python3 -m json.tool orchestrator/rounds/round-073/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-073/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-006/roadmap.md`
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
@@ -320,7 +320,7 @@ Required interpretation of that one bounded slice:
   - `test -f docs/plans/2026-03-22-automatic-iso-recursive-base-target-exact-target-bind.md`
   - `test -f docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
   - `test -f tasks/todo/2026-03-21-automatic-iso-recursive-next-loop/mechanism_table.md`
-  - `test -f orchestrator/retry-subloop.md`
+  - `test -f orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-006/retry-subloop.md`
 - Run the focused bounded test block exactly:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'`
 - Require the focused rerun to stay green and to remain bounded to the existing
@@ -352,7 +352,7 @@ Required interpretation of that one bounded slice:
 ### Task 6 - Author the canonical `N6` artifact and reviewer handoff
 
 - Write the canonical verification artifact at:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`.
+  `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-verification-gate.md`.
 - Structure the artifact so the reviewer can audit, in order:
   - stage contract freeze for `N6` `attempt-1`;
   - accepted `N3` / `N4` / `N5` authority chain carried forward without
@@ -364,7 +364,7 @@ Required interpretation of that one bounded slice:
   - stability conclusion or blocker section; and
   - explicit non-authorization preserving the active `N3` contract boundaries.
 - Update
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/orchestrator/rounds/round-073/implementation-notes.md`
+  `orchestrator/rounds/round-073/implementation-notes.md`
   only if needed to hold long command output or blocker details. Do not create
   any other round artifact during implement stage.
 - Ensure the reviewer can see, without inference, that:

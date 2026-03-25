@@ -2,7 +2,7 @@
 
 - Stage: `H1` docs-only bind/selection freeze for repaired `URI-R2-C1`.
 - Canonical artifact created:
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-050/docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md`
+  `docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md`
 - Bound next target recorded:
   the remaining local-binding `instArgRootMultiBase`
   `keepTargetFinal` / `targetC` family only, centered on
@@ -19,15 +19,15 @@
   second interface, or fallback widening is authorized.
 - Docs/state verification commands run and passed:
   `git diff --check`;
-  `python3 -m json.tool orchestrator/state.json >/dev/null`;
-  `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`;
-  `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`;
+  `python3 -m json.tool orchestrator/rounds/round-050/state-snapshot.json >/dev/null`;
+  `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-050/state-snapshot.json`;
+  `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-017/roadmap.md`;
   `test -f docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`;
   `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`;
   `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`;
   `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`;
   `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`;
-  `test -f orchestrator/retry-subloop.md`;
+  `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-017/retry-subloop.md`;
   `test -f docs/plans/2026-03-19-uri-r2-c1-g4-next-cycle-decision-gate.md`;
   `python3 -m json.tool orchestrator/rounds/round-049/review-record.json >/dev/null`;
   the short `python3` assertion over

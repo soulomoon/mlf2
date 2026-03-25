@@ -3,15 +3,15 @@
 - Baseline checks:
   - `git branch --show-current` -> pass (`codex/round-041-e4-next-cycle-decision`).
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `E4` list intact, `E4` still pending pre-merge).
+  - `python3 -m json.tool orchestrator/rounds/round-041/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-041/state-snapshot.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-008/roadmap.md` -> pass (ordered `C1` through `E4` list intact, `E4` still pending pre-merge).
   - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
-  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-008/retry-subloop.md` -> pass.
   - Continuity presence check via `python3` -> pass (`round_001_033_present=True`, `replay_repair_track=True`, `recursive_types_packet=True`, `boundary_doc=True`, `repair_doc=True`).
   - Authoritative predecessor record recheck via `python3` over `round-037` through `round-040` -> pass (`C4 accepted finalize authoritative`, `E1 accepted finalize authoritative`, `E2 accepted finalize authoritative`, `E3 accepted finalize authoritative`).
   - `git status --short --untracked-files=all` -> pass (only `docs/plans/2026-03-18-uri-r2-c1-e4-next-cycle-decision-gate.md` plus round-local `orchestrator/rounds/round-041/{selection,plan,implementation-notes}.md` are untracked).

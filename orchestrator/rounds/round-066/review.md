@@ -2,24 +2,24 @@
 
 - Baseline checks:
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `16:  "retry": null`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered roadmap intact; item `33` / `L1` remains pending at line `204` pre-merge).
+  - `python3 -m json.tool orchestrator/rounds/round-066/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-066/state-snapshot.json` -> pass (`2:  "contract_version": 2,`, `16:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/roadmap.md` -> pass (ordered roadmap intact; item `33` / `L1` remains pending at line `204` pre-merge).
   - Required design/boundary presence check -> pass:
     - `docs/superpowers/specs/2026-03-20-unannotated-iso-recursive-continue-bounded-h-cycle-design.md`
     - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
     - `docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md`
     - `docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md`
     - `docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md`
-    - `orchestrator/retry-subloop.md`
+    - `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-033/retry-subloop.md`
   - `test -f docs/plans/2026-03-21-uri-r2-c1-k4-next-cycle-decision-gate.md` -> pass.
   - `python3 -m json.tool orchestrator/rounds/round-065/review-record.json >/dev/null` -> pass.
   - Continuity presence check -> pass (`tasks/todo/2026-03-11-recursive-types-orchestration`, `orchestrator/rounds/round-001`, `round-024`, `round-027`, `round-028`, `round-033`, and `round-034` all present).
   - Accepted-authority recheck via `python3` over predecessor review records -> pass (`round-042 F1 accepted finalize authoritative`, `round-057 I4 accepted finalize authoritative`, `round-058 J1 accepted finalize authoritative`, `round-061 J4 accepted finalize authoritative`, `round-062 K1 accepted finalize authoritative`, `round-063 K2 accepted finalize authoritative`, `round-064 K3 accepted finalize authoritative`, `round-065 K4 accepted finalize authoritative`).
   - `/Volumes/src/mlf4/Bugs.md` continuity check -> pass (`## Open` is empty; no bug-driven replay reopen or widening authority).
-  - Pre-review `git status --short` snapshot -> pass (` M orchestrator/state.json`, `?? docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`, `?? orchestrator/rounds/round-066/`).
+  - Pre-review `git status --short` snapshot -> pass (` M orchestrator/rounds/round-066/state-snapshot.json`, `?? docs/plans/2026-03-21-uri-r2-c1-l1-next-target-bind.md`, `?? orchestrator/rounds/round-066/`).
   - Round-packet file inventory check -> pass (`orchestrator/rounds/round-066/selection.md`, `plan.md`, and `implementation-notes.md` only before reviewer artifacts).
-  - Diff-boundary check from status -> pass: no `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal` edits are present in the worktree snapshot; the tracked diff is limited to the pre-existing controller-owned `orchestrator/state.json`, and the implementer payload is docs/orchestrator only.
+  - Diff-boundary check from status -> pass: no `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal` edits are present in the worktree snapshot; the tracked diff is limited to the pre-existing controller-owned `orchestrator/rounds/round-066/state-snapshot.json`, and the implementer payload is docs/orchestrator only.
   - Conditional full repo gate omission -> justified: `cabal build all && cabal test` was not rerun because `L1` is docs-only by contract and the worktree snapshot shows no code-path edits.
 
 - Task-specific checks:

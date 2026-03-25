@@ -20,5 +20,8 @@
     "R3-CONTINUITY": "pass",
     "R3-GATE": "pass"
   },
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-003"
 }

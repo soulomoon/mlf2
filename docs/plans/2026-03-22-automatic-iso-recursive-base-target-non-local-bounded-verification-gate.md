@@ -19,9 +19,9 @@ slice. It records fresh verifier-visible evidence for the exact accepted
 non-local `rootNonLocalSchemeAliasBaseLike` packet only:
 
 - the live read-only source anchors in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/src/MLF/Elab/Run/ResultType/Fallback.hs`;
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`;
 - the live read-only focused test anchors in
-  `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/test/PipelineSpec.hs`;
+  `test/PipelineSpec.hs`;
 - a fresh focused rerun of
   `ARI-C1 feasibility characterization (bounded prototype-only)`;
 - a fresh full repo gate via `cabal build all && cabal test`; and
@@ -102,7 +102,7 @@ Read-only anchor command:
 - `nl -ba src/MLF/Elab/Run/ResultType/Fallback.hs | sed -n '531,719p'`
 
 Observed live anchors in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/src/MLF/Elab/Run/ResultType/Fallback.hs`:
+`src/MLF/Elab/Run/ResultType/Fallback.hs`:
 
 1. `rootLocalInstArgSingleBase` remains the earlier local singleton-base lane
    at lines `531-536`.
@@ -138,7 +138,7 @@ Read-only anchor commands:
 - `nl -ba test/PipelineSpec.hs | sed -n '1595,1768p'`
 
 Observed live anchors in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-073/test/PipelineSpec.hs`:
+`test/PipelineSpec.hs`:
 
 1. The focused helper family remains in the same
    `describe "ARI-C1 feasibility characterization (bounded prototype-only)"`

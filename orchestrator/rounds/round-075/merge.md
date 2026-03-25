@@ -53,10 +53,10 @@
   - `orchestrator/rounds/round-075/attempt-log.jsonl` records only
     `attempt-1` as `rejected + retry` with retry reason
     `artifact-records-stale-live-controller-state-and-omits-required-task-6-predecessor-checks`.
-  - `orchestrator/retry-subloop.md` says `accepted + finalize` clears retry
+  - `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-008/retry-subloop.md` says `accepted + finalize` clears retry
     state and advances the round to `merge`.
   - The live controller state at
-    `/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/state.json` is now
+    `orchestrator/rounds/round-075/state-snapshot.json` is now
     `active_round_id: "round-075"`, `stage: "merge"`, `current_task: "N8"`,
     and `retry: null`.
   - No same-round retry remains open, so squash-merge preparation is lawful.

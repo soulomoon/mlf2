@@ -7,7 +7,7 @@ Repair only the rejected `attempt-1` docs-only control-plane defect recorded as
 
 All repo-local paths in this plan are relative to the active packet rooted at:
 
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-046`
+`.worktrees/round-046`
 
 The canonical `G1` bind artifact remains:
 
@@ -104,7 +104,7 @@ This retry must not edit them.
     already selecting `rootHasMultiInst`.
 - Replace only the stale factual statements the reviewer identified:
   - do not say `BUG-2026-03-16-001` is open if `Bugs.md` records it as resolved;
-  - do not say `orchestrator/state.json` is modified if current packet status is
+  - do not say `orchestrator/rounds/round-046/state-snapshot.json` is modified if current packet status is
     clean in the active round worktree;
   - do not say `tasks/todo/2026-03-18-continue-bounded-orchestrator-run/` is
     untracked if that folder is absent in the active round worktree.
@@ -118,8 +118,8 @@ This retry must not edit them.
 - Do not rewrite its body, rename it, or change the selected
   `rootHasMultiInst` `G2` family.
 - Do not widen toward `instArgRootMultiBase` or any other family.
-- Do not edit `Fallback.hs`, `PipelineSpec.hs`, `Bugs.md`, `orchestrator/state.json`,
-  or `orchestrator/roadmap.md`.
+- Do not edit `Fallback.hs`, `PipelineSpec.hs`, `Bugs.md`, `orchestrator/rounds/round-046/state-snapshot.json`,
+  or `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-013/roadmap.md`.
 
 ### Task 4 - Record the retry scope in round notes only
 
@@ -133,17 +133,17 @@ This retry must not edit them.
 
 - Re-run baseline docs-only checks:
   - `git diff --check`
-  - `python3 -m json.tool orchestrator/state.json >/dev/null`
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json`
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md`
-  - required design/boundary file presence checks from `orchestrator/verification.md`
+  - `python3 -m json.tool orchestrator/rounds/round-046/state-snapshot.json >/dev/null`
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-046/state-snapshot.json`
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-013/roadmap.md`
+  - required design/boundary file presence checks from `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-013/verification.md`
 - Reconfirm the canonical artifact and bounded target remain unchanged:
   - `test -f docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md`
   - `rg -n 'rootHasMultiInst|instArgRootMultiBase|Fallback\\.hs:240-248|Fallback\\.hs:668-693' docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md`
 - Reconfirm the stale-fact repair specifically:
   - `rg -n 'BUG-2026-03-16-001|Status: Resolved' /Volumes/src/mlf4/Bugs.md`
   - `test -e tasks/todo/2026-03-18-continue-bounded-orchestrator-run && echo exists || echo missing`
-  - `git status --short orchestrator/state.json`
+  - `git status --short orchestrator/rounds/round-046/state-snapshot.json`
   - `rg -n 'open replay-path bug|state\\.json modified|tasks/todo/2026-03-18-continue-bounded-orchestrator-run' orchestrator/rounds/round-046/selection.md`
     - expected: no stale-claim matches after the repair
 - Keep docs-only diff evidence:
@@ -162,7 +162,7 @@ This retry must not edit them.
   carry-forward chain.
 - No change to the binding effect of accepted `U2`, `U3`, or `U4`.
 - No edits to `docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md`,
-  `orchestrator/state.json`, `orchestrator/roadmap.md`, `/Volumes/src/mlf4/Bugs.md`,
+  `orchestrator/rounds/round-046/state-snapshot.json`, `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-013/roadmap.md`, `/Volumes/src/mlf4/Bugs.md`,
   production code, tests, public API surfaces, executable entrypoints, or
   `mlf2.cabal`.
 - No rewrite of review history, `reviews/attempt-1.md`, `review.md`, or
@@ -174,7 +174,7 @@ This retry must not edit them.
 1. `plan.md` explicitly names `attempt-2` and frames the retry as a delta-only
    repair for `selection-doc-stale-facts`.
 2. `selection.md` no longer claims `BUG-2026-03-16-001` is open, no longer says
-   `orchestrator/state.json` is modified when the active packet is clean, and
+   `orchestrator/rounds/round-046/state-snapshot.json` is modified when the active packet is clean, and
    no longer cites the absent task folder as untracked packet evidence.
 3. The canonical `G1` artifact path remains
    `docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md`, and the selected

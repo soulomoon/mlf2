@@ -7,13 +7,21 @@ Active subject: `URI-R2-C1`
 Active scenario: `uri-r2-c1-only-v1`
 Research entrypoint: `uri-r2-c1-p2-replay-root-cause-v1`
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap`
+- Roadmap Revision: `rev-001`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-16-00-uri-r2-c1-p2-replay-root-cause-successor-roadmap/rev-001`
+- State Snapshot: `orchestrator/rounds/round-020/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 1: execute the `D1` replay-failure reproduction contract for `URI-R2-C1`.
 
 ## Why This Item Should Run Now
 
-`round-020` begins the successor replay root-cause roadmap, and the live roadmap still shows `D1` through `D4` as pending with no active retry state recorded in `orchestrator/state.json`. Under the guider contract, the next round must therefore select the lowest-numbered unfinished item unless a same-round retry is already in force. No such retry exists here.
+`round-020` begins the successor replay root-cause roadmap, and the live roadmap still shows `D1` through `D4` as pending with no active retry state recorded in `orchestrator/rounds/round-020/state-snapshot.json`. Under the guider contract, the next round must therefore select the lowest-numbered unfinished item unless a same-round retry is already in force. No such retry exists here.
 
 `D1` must run now because the approved successor design requires the new track to anchor itself on the real inherited failure before any localization or fixability claim is lawful. The controlling prior record is already bounded: `P1` attempt 2 is the authoritative subject source, `P2` attempt 2 is the accepted replay-failure artifact, and the accepted mismatch boundary is the `P2-W` `partial-replay` diagnostic with `InstBot expects ⊥, got: t9 -> t9`. Reproducing that exact bounded failure, or recording a bounded inability to do so without widening, is the prerequisite for `D2` localization and any later `D3` fixability probe.
 

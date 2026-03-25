@@ -47,8 +47,8 @@
   - `authoritative_result: pass`
   - `review_snapshot: orchestrator/rounds/round-064/reviews/attempt-1.md`
   - `artifact_path: docs/plans/2026-03-21-uri-r2-c1-k3-bounded-verification-gate.md`
-- `orchestrator/retry-subloop.md` allows merge preparation after
-  `accepted + finalize`, and `orchestrator/state.json` is already at
+- `orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-031/retry-subloop.md` allows merge preparation after
+  `accepted + finalize`, and `orchestrator/rounds/round-064/state-snapshot.json` is already at
   `stage: "merge"` with `current_task: "K3"` and `retry: null`, so no
   same-round retry remains live.
 

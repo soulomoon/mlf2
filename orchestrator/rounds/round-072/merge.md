@@ -47,7 +47,7 @@
   - `review_snapshot: "orchestrator/rounds/round-072/reviews/attempt-1.md"`
   - canonical artifact:
     `docs/plans/2026-03-22-automatic-iso-recursive-base-target-non-local-bounded-implementation-slice.md`
-- `orchestrator/retry-subloop.md` allows merge preparation after
+- `orchestrator/roadmaps/2026-03-22-00-automatic-iso-recursive-inference-post-l2-successor-roadmap/rev-005/retry-subloop.md` allows merge preparation after
   `accepted + finalize`, and the authoritative retry summary leaves no live
   same-round retry to resolve.
 

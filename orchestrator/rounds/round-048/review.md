@@ -3,15 +3,15 @@
 - Baseline checks:
   - `git branch --show-current` -> pass (`codex/round-048-g3-verification-gate`).
   - `git diff --check` -> pass (no output).
-  - `python3 -m json.tool orchestrator/state.json >/dev/null` -> pass.
-  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/state.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
-  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmap.md` -> pass (ordered `C1` through `G4` list intact; `G3` remains pending pre-merge at line `104`).
+  - `python3 -m json.tool orchestrator/rounds/round-048/state-snapshot.json >/dev/null` -> pass.
+  - `rg -n '"contract_version": 2|"retry": null|"retry": \{' orchestrator/rounds/round-048/state-snapshot.json` -> pass (`2:  "contract_version": 2,`, `13:  "retry": null`).
+  - `rg -n '^\d+\. \[(pending|in-progress|done)\]' orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-015/roadmap.md` -> pass (ordered `C1` through `G4` list intact; `G3` remains pending pre-merge at line `104`).
   - `test -f docs/superpowers/specs/2026-03-18-unannotated-iso-recursive-continue-bounded-cycle-design.md` -> pass.
   - `test -f docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md` -> pass.
   - `test -f docs/plans/2026-03-14-unannotated-iso-recursive-r5-research-stop-decision.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-r4-repair-decision-gate.md` -> pass.
   - `test -f docs/plans/2026-03-17-uri-r2-c1-u6-next-widening-decision-gate.md` -> pass.
-  - `test -f orchestrator/retry-subloop.md` -> pass.
+  - `test -f orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-015/retry-subloop.md` -> pass.
   - Continuity presence check via `python3` -> pass (`round-001` through `round-033` evidence present, boundary docs present, predecessor recursive-types packet present).
   - Authoritative predecessor record recheck via `python3` over `round-046` and `round-047` -> pass (`G1` finalized as authoritative on attempt `2` with artifact `docs/plans/2026-03-19-uri-r2-c1-g1-next-target-bind.md`; `G2` finalized as authoritative on attempt `1` with artifact `docs/plans/2026-03-19-uri-r2-c1-g2-bounded-implementation-slice.md`).
   - Pre-review `git status --short --untracked-files=all` snapshot -> pass (untracked packet files only `docs/plans/2026-03-19-uri-r2-c1-g3-bounded-verification-gate.md`, `orchestrator/rounds/round-048/implementation-notes.md`, plus pre-existing round control files `orchestrator/rounds/round-048/plan.md` and `orchestrator/rounds/round-048/selection.md`).

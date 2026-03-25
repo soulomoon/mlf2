@@ -23,5 +23,8 @@
     "H1-RETRY-SCHEMA": "pass",
     "H1-SCOPE-ALIGNMENT": "pass"
   },
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap",
+  "roadmap_revision": "rev-017",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-18-00-unannotated-iso-recursive-inference-continue-bounded-follow-on-roadmap/rev-017"
 }

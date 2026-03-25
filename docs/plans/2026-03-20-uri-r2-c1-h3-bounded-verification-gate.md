@@ -33,20 +33,20 @@ widening, or any controller / review / merge bookkeeping.
 
 Any verification failure in `H3` would be a blocker to record, not permission
 to patch
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-052/src/MLF/Elab/Run/ResultType/Fallback.hs`,
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-052/test/PipelineSpec.hs`,
+`src/MLF/Elab/Run/ResultType/Fallback.hs`,
+`test/PipelineSpec.hs`,
 or any other production/test file during this attempt.
 
 ## Accepted `H1` / `H2` Continuity Carried Forward Without Widening
 
 The authoritative reviewer records still bind this round:
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-052/orchestrator/rounds/round-050/review-record.json`
+1. `orchestrator/rounds/round-050/review-record.json`
    confirms `H1` finalized as `attempt: 1`, `attempt_verdict: "accepted"`,
    `stage_action: "finalize"`, `status: "authoritative"`, with canonical
    artifact path
    `docs/plans/2026-03-20-uri-r2-c1-h1-next-target-bind.md`.
-2. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-052/orchestrator/rounds/round-051/review-record.json`
+2. `orchestrator/rounds/round-051/review-record.json`
    confirms `H2` finalized as `attempt: 1`, `attempt_verdict: "accepted"`,
    `stage_action: "finalize"`, `status: "authoritative"`, with canonical
    artifact path
@@ -87,7 +87,7 @@ current authority to reopen replay work or widen this round beyond the accepted
 ### `Fallback.hs`
 
 Read-only anchor inspection in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-052/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 shows the selected lane is still the live bounded implementation:
 
 - `Fallback.hs:367-402` keeps `baseTarget` fail-closed for the selected family
@@ -115,7 +115,7 @@ shows the selected lane is still the live bounded implementation:
 ### `PipelineSpec.hs`
 
 Read-only anchor inspection in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-052/test/PipelineSpec.hs`
+`test/PipelineSpec.hs`
 shows the focused bounded coverage still matches the accepted `H2` slice:
 
 - `PipelineSpec.hs:1364-1479` still keeps the retained-child same-lane baseline

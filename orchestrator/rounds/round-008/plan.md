@@ -8,7 +8,7 @@ Deliver the smallest docs-only research slice that closes successor roadmap item
 
 - This round is docs-only.
 - Do not edit `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
-- Do not edit `orchestrator/state.json` or `orchestrator/roadmap.md`.
+- Do not edit `orchestrator/rounds/round-008/state-snapshot.json` or `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-003/roadmap.md`.
 - Do not rewrite predecessor packet history or prior round artifacts.
 - Do not reselect the `R2` subset, do not execute the `R4` feasibility decision, and do not draft the `R5` implementation-handoff / research-stop artifact.
 
@@ -23,31 +23,31 @@ Rationale: the selected roadmap item is `R3` only, and the approved successor de
   - non-equi-recursive semantics only;
   - non-cyclic structural graph only;
   - fail closed if any obligation would require forbidden widening.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited invariant audit for acyclicity, binding-tree discipline, occurs-check/termination, reconstruction/reification/witness replay, and principality risk boundaries.
-- Treat `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md` and `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/docs/plans/2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection.md` as authoritative narrowing inputs; do not claim that `R3` reopens `R1` gap discovery or `R2` subset selection.
+- Treat `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited invariant audit for acyclicity, binding-tree discipline, occurs-check/termination, reconstruction/reification/witness replay, and principality risk boundaries.
+- Treat `docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md` and `docs/plans/2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection.md` as authoritative narrowing inputs; do not claim that `R3` reopens `R1` gap discovery or `R2` subset selection.
 - Keep the chosen subject fixed to `URI-R2-C1` and preserve its inherited bounded meaning: unique local obligation root or equivalent local obligation cluster, one closed binder-family cluster, no heuristic tie-breaking, and no provenance-unstable admission.
 - Use completed rounds `001` through `007`, the approved successor design spec, and the predecessor recursive-types packet as inherited evidence only; do not reopen them as pending work.
 - Keep the round bounded to docs/orchestrator/task-surface edits only.
 
 ## Exact Target Files
 
-1. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`
-2. Create `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/orchestrator/rounds/round-008/implementation-notes.md`
+1. Create `docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`
+2. Create `orchestrator/rounds/round-008/implementation-notes.md`
 
 ## Sequential Tasks
 
 ### Task 1 - Write the `R3` inference-obligation contract artifact
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`
+- `docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`
 
 Required contents:
 - A short inherited-baseline section that cites:
   - accepted `R0` / `ARI-C1` as the starting point;
-  - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md` as the gap-map predecessor;
-  - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/docs/plans/2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection.md` as the chosen-subset predecessor, naming `URI-R2-C1` explicitly;
-  - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited invariant audit;
-  - `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md` as the roadmap-design source.
+  - `docs/plans/2026-03-14-unannotated-iso-recursive-r1-gap-map.md` as the gap-map predecessor;
+  - `docs/plans/2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection.md` as the chosen-subset predecessor, naming `URI-R2-C1` explicitly;
+  - `docs/plans/2026-03-14-automatic-recursive-inference-invariant-audit.md` as the authoritative inherited invariant audit;
+  - `docs/superpowers/specs/2026-03-14-unannotated-iso-recursive-roadmap-design.md` as the roadmap-design source.
 - A fixed-boundary section that restates, without weakening, the mandatory boundary phrases:
   - `URI-R2-C1` remains `single-SCC` and `single-binder-family` only;
   - recursion remains obligation-level rather than cyclic structural-graph encoding;
@@ -90,7 +90,7 @@ Required contents:
 ### Task 2 - Record round implementation notes
 
 Target file:
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/orchestrator/rounds/round-008/implementation-notes.md`
+- `orchestrator/rounds/round-008/implementation-notes.md`
 
 Required contents:
 - Short summary of the `R3` obligation-contract artifact and why it satisfies successor roadmap item 3.
@@ -101,7 +101,7 @@ Required contents:
 
 ## Acceptance Criteria (All Required)
 
-1. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md` exists and defines an explicit obligation contract for `URI-R2-C1`.
+1. `docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md` exists and defines an explicit obligation contract for `URI-R2-C1`.
 2. The `R3` artifact preserves the fixed boundary model:
    - `single-SCC` obligation-level recursion only;
    - `single-binder-family` ownership only;
@@ -115,10 +115,10 @@ Required contents:
    - what must still fail closed,
    - what `R4` must later verify as evidence.
 5. The artifact explicitly preserves the approved `R1` -> `R5` staging by stopping at the obligation-contract stage and avoiding any `R4` decision or `R5` handoff output.
-6. `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/orchestrator/rounds/round-008/implementation-notes.md` exists and records docs-only execution plus staging continuity.
+6. `orchestrator/rounds/round-008/implementation-notes.md` exists and records docs-only execution plus staging continuity.
 7. Diff remains limited to planned docs/round artifacts and does not modify:
-   - `orchestrator/state.json`,
-   - `orchestrator/roadmap.md`,
+   - `orchestrator/rounds/round-008/state-snapshot.json`,
+   - `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-003/roadmap.md`,
    - `src/`, `src-public/`, `app/`, `test/`,
    - `mlf2.cabal`,
    - predecessor packet/task history,
@@ -126,10 +126,10 @@ Required contents:
 
 ## Reviewer And Verification Checks
 
-Baseline checks (from `orchestrator/verification.md`):
+Baseline checks (from `orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-003/verification.md`):
 - `git diff --check`
-- `python3 -m json.tool orchestrator/state.json >/dev/null`
-- `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmap.md`
+- `python3 -m json.tool orchestrator/rounds/round-008/state-snapshot.json >/dev/null`
+- `rg -n '^\d+\\. \\[(pending|in-progress|done)\\]' orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-003/roadmap.md`
 - `cabal build all && cabal test` is not required this round if the diff excludes `src/`, `src-public/`, `app/`, `test/`, and `mlf2.cabal`; reviewer must record that skip rationale explicitly.
 - Reviewer-recorded continuity check against inherited evidence from completed rounds `001` through `007`, the approved successor design spec, and the predecessor recursive-types packet.
 
@@ -154,7 +154,7 @@ Round-specific checks:
   - `rg -n '2026-03-14-unannotated-iso-recursive-r1-gap-map|2026-03-14-unannotated-iso-recursive-r2-candidate-subset-selection|2026-03-14-automatic-recursive-inference-invariant-audit|2026-03-14-unannotated-iso-recursive-roadmap-design' docs/plans/2026-03-14-unannotated-iso-recursive-r3-inference-obligation-contract.md`
 
 Review output requirements:
-- Reviewer writes `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-008/orchestrator/rounds/round-008/review.md` with:
+- Reviewer writes `orchestrator/rounds/round-008/review.md` with:
   - baseline checks evidence,
   - round-specific checks evidence,
   - explicit decision (`approve` or `reject`),

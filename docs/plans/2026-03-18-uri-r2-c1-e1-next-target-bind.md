@@ -39,9 +39,9 @@ Only accepted bounded predecessor facts are carried forward here:
    slice in `Fallback.hs` with focused `PipelineSpec.hs` coverage.
 2. `C2` authoritative `attempt-2` landed only that bounded local-binding-only
    fail-closed retention slice in
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-038/src/MLF/Elab/Run/ResultType/Fallback.hs`
+   `src/MLF/Elab/Run/ResultType/Fallback.hs`
    and
-   `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-038/test/PipelineSpec.hs`.
+   `test/PipelineSpec.hs`.
    It did not reopen replay repair, `MLF.Elab.Inst`, or any broader trigger family.
 3. `C3` authoritative `attempt-1` reverified that same accepted `C2` slice with the
    focused `ARI-C1 feasibility characterization (bounded prototype-only)` block plus
@@ -65,7 +65,7 @@ The only frozen future `E2` target is:
 
 local-binding-only `boundVarTarget` / nested-`forall` fail-closed retained-child
 hardening in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-038/src/MLF/Elab/Run/ResultType/Fallback.hs`
+`src/MLF/Elab/Run/ResultType/Fallback.hs`
 limited to the retained-child branch around `boundHasForallFrom`, `boundVarTarget`,
 `keepTargetFinal`, and `targetC` (`Fallback.hs:530-674`).
 
@@ -89,14 +89,14 @@ Required interpretation of that one bounded slice:
 
 Future `E2` ownership is frozen to exactly these files only:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-038/src/MLF/Elab/Run/ResultType/Fallback.hs`
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-038/test/PipelineSpec.hs`
+- `src/MLF/Elab/Run/ResultType/Fallback.hs`
+- `test/PipelineSpec.hs`
 
 ### Future Focused Coverage Intent
 
 Future `E2` coverage remains one bounded extension of the existing
 `ARI-C1 feasibility characterization (bounded prototype-only)` block in
-`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-038/test/PipelineSpec.hs`
+`test/PipelineSpec.hs`
 only:
 
 - add one local-binding retained-child case that directly exercises the selected
@@ -110,7 +110,7 @@ No second implementation family is selected in this artifact.
 
 This `E1` bind does not authorize:
 
-- edits to `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-038/src/MLF/Elab/Inst.hs`;
+- edits to `src/MLF/Elab/Inst.hs`;
 - replay-repair reopen, including `MLF.Elab.Inst.applyInstantiation` / `InstBot`, as
   active `E2` work;
 - `rootHasMultiInst`, `instArgRootMultiBase`, or
@@ -201,7 +201,7 @@ Commands executed in:
   -> pass:
   - `3:The only frozen future `E2` target is:`
   - `5:local-binding-only `boundVarTarget` / nested-`forall` fail-closed retained-child`
-  - `7:`/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-038/src/MLF/Elab/Run/ResultType/Fallback.hs``
+  - `7:`src/MLF/Elab/Run/ResultType/Fallback.hs``
   - `8:limited to the retained-child branch around `boundHasForallFrom`, `boundVarTarget`,`
   - `9:`keepTargetFinal`, and `targetC` (`Fallback.hs:530-674`).`
   - `16:  `boundVarTarget` may offer a child-derived retained candidate for the already`
@@ -209,8 +209,8 @@ Commands executed in:
   - `20:  nested scheme-root ownership as detected by `boundHasForallFrom`;`
   - `25:- no other `keepTargetFinal` trigger family is selected by this artifact.`
   - `29:Future `E2` ownership is frozen to exactly these files only:`
-  - `31:- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-038/src/MLF/Elab/Run/ResultType/Fallback.hs``
-  - `32:- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-038/test/PipelineSpec.hs``
+  - `31:- `src/MLF/Elab/Run/ResultType/Fallback.hs``
+  - `32:- `test/PipelineSpec.hs``
   - `46:No second implementation family is selected in this artifact.`
 - `sed -n '53,60p;111,115p' docs/plans/2026-03-18-uri-r2-c1-e1-next-target-bind.md | rg -n '`authority-narrowed`|`uniqueness-owner-stable-refuted`|`constructor-acyclic-termination-refuted`|does not reinterpret any of them as implementation clearance|does not authorize replay reopen|MLF\\.Elab\\.Inst\\.applyInstantiation|InstBot'`
   -> pass:

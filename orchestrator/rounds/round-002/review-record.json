@@ -1,0 +1,8 @@
+{
+  "status": "historical-pre-review-record-schema",
+  "authoritative_source": "orchestrator/rounds/round-002/review.md",
+  "migration_note": "This round predates repo-local review-record.json. The revisioned-roadmap migration added this file only to preserve roadmap provenance.",
+  "roadmap_id": "2026-03-14-00-automatic-recursive-type-inference-research-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-002"
+}

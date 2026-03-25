@@ -9,15 +9,23 @@ Repair boundary: `witness-replay/applyInstantiation-instbot-precondition`
 Owner boundary: `MLF.Elab.Inst.applyInstantiation` (`InstBot` branch)
 Controlling bug: `BUG-2026-03-16-001`
 
+## Roadmap Provenance
+
+- Roadmap ID: `2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap`
+- Roadmap Revision: `rev-002`
+- Roadmap Dir: `orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-002`
+- State Snapshot: `orchestrator/rounds/round-025/state-snapshot.json`
+- Migration note: backfilled from git history using the last authoritative control-plane anchor available for this round.
+
 ## Selected Roadmap Item
 
 Roadmap item 2: execute the `R2` bounded `InstBot` repair for `URI-R2-C1`.
 
 ## Why This Item Should Run Now
 
-`orchestrator/state.json` is parked at `stage: select-task` for `round-025`, with `current_task: null` and `retry: null`. No same-round retry is active, so the guider must choose the lowest-numbered unfinished roadmap item unless prior review artifacts force otherwise. No live retry state or prior review artifact forces a return to `R1`.
+`orchestrator/rounds/round-025/state-snapshot.json` is parked at `stage: select-task` for `round-025`, with `current_task: null` and `retry: null`. No same-round retry is active, so the guider must choose the lowest-numbered unfinished roadmap item unless prior review artifacts force otherwise. No live retry state or prior review artifact forces a return to `R1`.
 
-`orchestrator/roadmap.md` marks item 1 (`R1`) as `done` and item 2 (`R2`) as the next `pending` stage. `round-024` finalized `R1` attempt 1 as the authoritative reproduction result, and its review record confirms that the locked `URI-R2-C1` / `uri-r2-c1-only-v1` failure is reproduced at the localized `applyInstantiation` / `InstBot` owner boundary without widening scope. With `D4 = reopen-repair-track` already accepted and `R1` complete, the next lawful step is the bounded production repair itself.
+`orchestrator/roadmaps/2026-03-17-00-uri-r2-c1-p2-replay-repair-track-roadmap/rev-002/roadmap.md` marks item 1 (`R1`) as `done` and item 2 (`R2`) as the next `pending` stage. `round-024` finalized `R1` attempt 1 as the authoritative reproduction result, and its review record confirms that the locked `URI-R2-C1` / `uri-r2-c1-only-v1` failure is reproduced at the localized `applyInstantiation` / `InstBot` owner boundary without widening scope. With `D4 = reopen-repair-track` already accepted and `R1` complete, the next lawful step is the bounded production repair itself.
 
 `R2` should therefore run now to attempt the smallest paper-faithful fix at `MLF.Elab.Inst.applyInstantiation` for the already-localized `InstBot` mismatch recorded in `BUG-2026-03-16-001`. This round must stay strictly inside the accepted repair lane and must not broaden into other subjects, scenarios, replay campaigns, fallback behavior, compatibility layers, or a second executable interface.
 

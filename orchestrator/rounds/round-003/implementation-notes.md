@@ -5,7 +5,7 @@ Owner: implement
 
 Round 003 implemented the approved docs-only roadmap item 3 plan by creating the candidate-subset selection artifact at:
 
-- `/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-003/docs/plans/2026-03-14-automatic-recursive-inference-candidate-subset-selection.md`
+- `docs/plans/2026-03-14-automatic-recursive-inference-candidate-subset-selection.md`
 
 Recorded decision:
 
@@ -20,7 +20,7 @@ Execution surface record:
 
 - This round is docs-only.
 - No edits were made under `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`.
-- `orchestrator/roadmap.md` was not edited.
+- `orchestrator/roadmaps/2026-03-14-00-automatic-recursive-type-inference-research-roadmap/rev-003/roadmap.md` was not edited.
 
 Continuity record:
 

@@ -26,5 +26,8 @@
     "ITEM2-RETRY-SCHEMA": "pass"
   },
   "final_outcome": "architectural-constraint-audit-completed-with-non-cyclic-graph-unknown",
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-002"
 }

@@ -58,8 +58,8 @@
   - `artifact_path: "docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md"`
   - `review_snapshot: "orchestrator/rounds/round-087/reviews/attempt-1.md"`
   - `final_outcome: "representative-coverage-and-feasibility-campaign-classified-as-bounded-subset-only"`
-- `orchestrator/retry-subloop.md` permits merge preparation only after
-  `accepted + finalize`, and `orchestrator/state.json` already places this
+- `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-006/retry-subloop.md` permits merge preparation only after
+  `accepted + finalize`, and `orchestrator/rounds/round-087/state-snapshot.json` already places this
   round at `active_round_id: "round-087"`, `stage: "merge"`,
   `current_task: "item-6"`, and `retry: null`.
 - No same-round retry remains open: `attempt-1` is authoritative and no
@@ -69,8 +69,8 @@
 
 - This round does not reset authority. Completed rounds `round-001` through
   `round-081` remain authoritative historical evidence for the refreshed
-  control plane exactly as `orchestrator/roadmap.md` and
-  `orchestrator/retry-subloop.md` describe.
+  control plane exactly as `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-006/roadmap.md` and
+  `orchestrator/roadmaps/2026-03-25-00-general-automatic-iso-recursive-inference-strategic-orchestrator-roadmap/rev-006/retry-subloop.md` describe.
 - The accepted `round-082` capability contract, `round-083`
   architectural-constraint audit, `round-084` mechanism map, `round-085`
   search model, and `round-086` full-pipeline reconstruction contract remain

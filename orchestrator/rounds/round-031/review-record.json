@@ -24,5 +24,8 @@
     "U4-CONTINUITY": "pass",
     "U4-DIFF-BOUNDED": "pass"
   },
-  "terminal_reason": "none"
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap",
+  "roadmap_revision": "rev-009",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-14-01-unannotated-iso-recursive-inference-successor-roadmap/rev-009"
 }
