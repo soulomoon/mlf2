@@ -80,29 +80,39 @@
    The accepted read stays bounded to the one clear-boundary same-lane
    retained-child pocket only.
 
-3. [pending] Clear or confirm the exact Phase 6 elaboration breakpoint for the frozen same-lane retained-child pocket
+3. [done] Clear or confirm the exact Phase 6 elaboration breakpoint for the frozen same-lane retained-child pocket
    Depends on: items 1, 2
-   Completion notes: work only on the exact item-2 breakpoint for
+   Completion notes: completed in accepted `round-091` by clearing the exact
+   item-2 `Phase 6 (elaboration)` breakpoint for the frozen
    `boundVarTargetRoot` /
-   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`: either
-   land the minimum bounded docs / code / test slice needed so the exact
-   packet survives `Phase 6 (elaboration)` without changing family, anchor,
-   owner-local frame, route, or quantified-boundary status, or record bounded
-   proof that this elaboration gap remains blocker debt under the unchanged
-   architecture. Do not touch the alias-bound family, neighboring routes,
-   quantified crossing, cyclic search, second interfaces, or fallback paths.
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC` pocket.
+   The exact frozen packet now survives `Phase 6 (elaboration)` on both
+   `runPipelineElab` and `runPipelineElabChecked`, using only the already
+   recorded edge-`3` authority
+   `ExpInstantiate [NodeId 31]` through a bounded no-fallback translation
+   path. The accepted result stays inside the same family, anchor,
+   owner-local frame, route, and clear quantified-boundary status, and does
+   not yet classify reification / reconstruction, internal output, public
+   output, or the bounded successor decision.
 
 4. [pending] Revalidate the frozen same-lane retained-child pocket end to end and classify its persistence result
    Depends on: items 1, 2, 3
-   Completion notes: after item 3 resolves the exact Phase 6 question one way
-   or the other, rerun the exact same-lane retained-child pocket across the
-   frozen ledger rows and record exactly one bounded item-5 / item-6
+   Completion notes: after the accepted `round-091` item-3 clearance of the
+   exact `Phase 6 (elaboration)` blocker, rerun the exact frozen packet and
+   unchanged tuple only across the frozen ledger rows for this one pocket.
+   Treat solver admission and the cleared elaboration handoff as predecessor
+   evidence, then determine whether the same family / anchor / owner-local
+   frame / route / clear-boundary interpretation remains review-visible
+   through reification / reconstruction, internal output, public output, and
+   reviewer-visible continuity. Record exactly one bounded item-5 / item-6
    vocabulary result for that pocket:
    `stable visible persistence`,
    `admitted but not reconstruction-visible / blocker debt`, or
    `fail-closed rejection`. The output must preserve honest negative or
-   partial reads if `Phase 6 (elaboration)` or any later frozen tuple field
-   or ledger row still breaks on the same exact pocket.
+   partial reads if any later frozen tuple field or ledger row still breaks
+   on the same exact pocket. Do not widen into the alias-bound family,
+   neighboring routes, nested-`forall`, replay / `InstBot`, fallback paths,
+   or a broader capability claim.
 
 5. [pending] Make the bounded successor decision from the frozen-pocket persistence result
    Depends on: items 2, 4
