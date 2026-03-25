@@ -122,31 +122,49 @@
    cyclic search, second interface, fallback path, or reopened
    `non-cyclic-graph` decision was accepted here.
 
-4. [pending] Revalidate the frozen pocket end to end and classify its public-output continuity result
+4. [done] Revalidate the frozen pocket end to end and classify its public-output continuity result
    Depends on: items 1, 2, 3
-   Completion notes: consume the accepted item-3 confirm-only result from
+   Completion notes: completed in accepted `round-097` by consuming the
+   accepted item-3 confirm-only result from
    `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-authoritative-collapse-clear-or-confirm.md`
-   and rerun only the exact frozen pocket across the accepted review ledger
-   for that same pocket and continuity split:
+   and recording the canonical refreshed item-4 revalidation /
+   classification artifact in
+   `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-end-to-end-revalidation-and-classification.md`
+   after rerunning only the exact frozen pocket across the accepted review
+   ledger for that same pocket and continuity split:
    family `same-lane retained-child`,
    anchor `boundVarTargetRoot`,
    one owner-local retained-child frame, route
    `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`,
    clear-boundary-only status, and
    `TMu ...` plus `containsMu True` internally versus
-   `TForall "a" Nothing (TVar "a")` authoritatively. Record exactly one
-   lawful exact-pocket outcome:
-   `stable visible persistence`,
-   `admitted but not reconstruction-visible / blocker debt`, or
-   `fail-closed rejection`.
-   Preserve honest negative or partial reads if any row still breaks for the
-   same exact pocket.
+   `TForall "a" Nothing (TVar "a")` authoritatively. The accepted refreshed
+   end-to-end rerun reproduced the same helper-visible/internal recursive
+   structure and the same two-entrypoint authoritative public `forall`
+   identity result, kept the public output surface as the first actual
+   continuity breakpoint, and therefore fixed the exact item-4 outcome token
+   as `admitted but not reconstruction-visible / blocker debt`. Item `5`
+   remains later work only. No alias-bound widening, nested-`forall`,
+   replay repair, broad capability claim, or reopened `non-cyclic-graph`
+   decision was accepted here.
 
 5. [pending] Decide whether the accepted public-output result keeps the current architecture credible or reopens `non-cyclic-graph`
    Depends on: items 2, 4
-   Completion notes: consume only the accepted item-4 result for this exact
-   pocket and record exactly one bounded architecture-pressure outcome:
-   either the accepted public-output result keeps the current architecture /
+   Completion notes: consume only the accepted refreshed item-4
+   revalidation / classification result from
+   `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-end-to-end-revalidation-and-classification.md`
+   for this exact pocket and continuity split:
+   family `same-lane retained-child`,
+   anchor `boundVarTargetRoot`,
+   one owner-local retained-child frame, route
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`,
+   clear-boundary-only status, and
+   `TMu ...` plus `containsMu True` internally versus
+   `TForall "a" Nothing (TVar "a")` authoritatively, with the accepted
+   exact-pocket item-4 token fixed at
+   `admitted but not reconstruction-visible / blocker debt`.
+   Record exactly one bounded architecture-pressure outcome:
+   either that accepted result keeps the current architecture /
    `non-cyclic-graph` boundary credible for this exact pressure point, or the
    accepted exact-pocket evidence specifically reopens the
    `non-cyclic-graph` revision question. Do not widen into the alias-bound
