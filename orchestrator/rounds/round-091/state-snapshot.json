@@ -1,0 +1,17 @@
+{
+  "contract_version": 2,
+  "base_branch": "codex/automatic-recursive-type-inference",
+  "active_round_id": "round-091",
+  "stage": "select-task",
+  "current_task": null,
+  "branch": "codex/round-091",
+  "worktree_path": "/Users/ares/.codex/worktrees/d432/mlf4/.worktrees/round-091",
+  "active_round_dir": "orchestrator/rounds/round-091",
+  "round_artifacts": {},
+  "last_completed_round": "round-090",
+  "resume_error": null,
+  "retry": null,
+  "roadmap_id": "2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-25-01-same-lane-retained-child-stable-visible-persistence-successor-orchestrator-roadmap/rev-003"
+}

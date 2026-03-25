@@ -1,17 +1,19 @@
 module MLF.Elab.Legacy (
-    expansionToInst
+    expansionToInst,
+    expInstantiateArgsToInstNoFallback
 ) where
 
 import qualified Data.IntMap.Strict as IntMap
+import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
 
-import MLF.Constraint.Types (Expansion, ExpansionF(..))
+import MLF.Constraint.Types (Expansion, ExpansionF(..), NodeId)
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Presolution.View (fromSolved)
+import MLF.Constraint.Presolution.View (PresolutionView(..), fromSolved)
 import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeForBound)
-import MLF.Elab.Types (ElabError, Instantiation(..))
-import MLF.Reify.Core (reifyTypeWithNamesNoFallback)
+import MLF.Elab.Types (ElabError, ElabType, Instantiation(..))
+import MLF.Reify.Core (reifyTypeWithNamedSetNoFallback, reifyTypeWithNamesNoFallback)
 import MLF.Reify.TypeOps (resolveBaseBoundForInstConstraint)
 import MLF.Util.RecursionSchemes (cataM)
 
@@ -42,31 +44,49 @@ import MLF.Util.RecursionSchemes (cataM)
 --     of applications ⟨t⟩, assuming the elaboration context or a later pass
 --     refines this if explicit N is required.
 --     For now: ExpInstantiate [t] -> ⟨t⟩.
+expInstantiateArgsToInstNoFallback
+    :: PresolutionView
+    -> IntSet.IntSet
+    -> [NodeId]
+    -> Either ElabError Instantiation
+expInstantiateArgsToInstNoFallback presolutionView namedSet args = do
+    tys <- mapM reifyArg args
+    instAppsFromTypes presolutionView tys
+  where
+    constraint = pvConstraint presolutionView
+    canonical = pvCanonical presolutionView
+    resolveBaseBound = resolveBaseBoundForInstConstraint constraint canonical
+    reifyArg arg =
+        let argC = canonical arg
+        in case resolveBaseBound argC of
+            Just baseC ->
+                reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet baseC
+            Nothing ->
+                reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet argC
+
 expansionToInst :: Solved -> Expansion -> Either ElabError Instantiation
 expansionToInst solved = cataM alg
   where
     constraint = Solved.originalConstraint solved
     canonical = Solved.canonical solved
-    resolveBaseBound = resolveBaseBoundForInstConstraint constraint canonical
     presolutionView = fromSolved solved
+    resolveBaseBound = resolveBaseBoundForInstConstraint constraint canonical
     reifyArg arg =
         let argC = canonical arg
         in case resolveBaseBound argC of
             Just baseC -> reifyTypeWithNamesNoFallback presolutionView IntMap.empty baseC
             Nothing -> reifyTypeWithNamesNoFallback presolutionView IntMap.empty argC
-    -- See Note [Instantiation arg sanitization] in
-    -- docs/notes/2026-01-27-elab-changes.md.
-    sanitizeArg = inlineBoundVarsTypeForBound presolutionView
     alg layer = case layer of
         ExpIdentityF -> Right InstId
         ExpInstantiateF args -> do
             tys <- mapM reifyArg args
-            let tys' = map sanitizeArg tys
-            -- Build a sequence of type applications.
-            -- In xMLF, simple application is usually sufficient.
-            -- If we needed explicit N, we'd need to know the source type schema.
-            if null tys'
-                then Right InstId
-                else Right $ foldr1 InstSeq (map InstApp tys')
+            instAppsFromTypes presolutionView tys
         ExpForallF _ -> Right InstIntro
         ExpComposeF exps -> Right $ foldr1 InstSeq (NE.toList exps)
+
+instAppsFromTypes :: PresolutionView -> [ElabType] -> Either ElabError Instantiation
+instAppsFromTypes presolutionView tys =
+    let tys' = map (inlineBoundVarsTypeForBound presolutionView) tys
+    in if null tys'
+        then Right InstId
+        else Right $ foldr1 InstSeq (map InstApp tys')

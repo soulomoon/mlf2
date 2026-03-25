@@ -17,13 +17,14 @@ import MLF.Frontend.Syntax (SurfaceExpr, Expr(..), Lit(..), SrcTy(..), SrcType, 
 import qualified MLF.Elab.Pipeline as Elab
 import qualified MLF.Util.Order as Order
 import qualified MLF.Constraint.Finalize as Finalize
-import MLF.Constraint.Types.Graph (BindingError(..))
-import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types
     ( BaseTy(..)
     , BindFlag(..)
+    , BindingError(..)
     , Constraint(..)
     , EdgeId(..)
     , ExpVarId(..)
+    , Expansion(..)
     , GenNode(..)
     , GenNodeId(..)
     , NodeId(..)
@@ -31,12 +32,12 @@ import MLF.Constraint.Types.Graph
     , TyNode(..)
     , UnifyEdge(..)
     , fromListGen
+    , fromListNode
     , genRef
     , getEdgeId
     , getNodeId
     , lookupNodeIn
     , nodeRefKey
-    , fromListNode
     , toListNode
     , typeRef
     )
@@ -76,6 +77,7 @@ import MLF.Elab.Run.ResultType
     , computeResultTypeFallback
     , generalizeWithPlan
     , mkResultTypeInputs
+    , rtcEdgeExpansions
     , rtcEdgeTraces
     , rtcEdgeWitnesses
     )
@@ -1647,6 +1649,58 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
         it "converts ExpForall to InstIntro" $ do
             Elab.pretty Elab.InstIntro `shouldBe` "O"
+
+        it "same-lane retained-child exact edge 3 authoritative instantiation" $ do
+            let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                expr =
+                    ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+                        (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+                extractEdge3 ann0 = case ann0 of
+                    ALet "k" _ schemeRootId _ _ _ (AAnn (ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _) _ _) _ ->
+                        pure (schemeRootId, argEdgeId)
+                    other -> do
+                        expectationFailure ("Expected exact same-lane retained-child packet shape, got: " ++ show other)
+                        fail "sameLaneRetainedChildExactEdge3"
+            artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+            let (inputs, annCanon, _annPre) = resultTypeInputsForArtifacts artifacts
+            (schemeRootId, argEdgeId) <- extractEdge3 annCanon
+            rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 31]
+            scopeRoot <-
+                requireRight
+                    (resolveCanonicalScope
+                        (paConstraintNorm artifacts)
+                        (rtcPresolutionView inputs)
+                        (rtcRedirects inputs)
+                        schemeRootId
+                    )
+            let targetNode = schemeBodyTarget (rtcPresolutionView inputs) schemeRootId
+            (scheme, subst) <-
+                requireRight
+                    (generalizeWithPlan
+                        (rtcPlanBuilder inputs)
+                        (rtcBindParentsGa inputs)
+                        (rtcPresolutionView inputs)
+                        scopeRoot
+                        targetNode
+                    )
+            let schemeInfo = Elab.SchemeInfo scheme subst
+                witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
+                trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
+            phi <-
+                requireRight
+                    (Elab.phiFromEdgeWitnessWithTrace
+                        defaultTraceConfig
+                        (generalizeAtWithActive (paSolved artifacts))
+                        (rtcPresolutionView inputs)
+                        (Just (rtcBindParentsGa inputs))
+                        (Just schemeInfo)
+                        trace
+                        witness
+                    )
+            phi `shouldBe` Elab.InstApp (Elab.TVar "t32")
+            case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+                Left err -> expectationFailure (Elab.renderPipelineError err)
+                Right _ -> pure ()
 
     describe "Paper ≺ ordering (leftmost-lowermost)" $ do
         it "generalizeAt orders binders by ≺ (not by NodeId)" $ do
