@@ -148,10 +148,10 @@
    replay repair, broad capability claim, or reopened `non-cyclic-graph`
    decision was accepted here.
 
-5. [pending] Decide whether the accepted public-output result keeps the current architecture credible or reopens `non-cyclic-graph`
+5. [done] Decide whether the accepted public-output result keeps the current architecture credible or reopens `non-cyclic-graph`
    Depends on: items 2, 4
-   Completion notes: consume only the accepted refreshed item-4
-   revalidation / classification result from
+   Completion notes: completed in accepted `round-098` by consuming only the
+   accepted refreshed item-4 revalidation / classification result from
    `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-end-to-end-revalidation-and-classification.md`
    for this exact pocket and continuity split:
    family `same-lane retained-child`,
@@ -162,10 +162,14 @@
    `TMu ...` plus `containsMu True` internally versus
    `TForall "a" Nothing (TVar "a")` authoritatively, with the accepted
    exact-pocket item-4 token fixed at
-   `admitted but not reconstruction-visible / blocker debt`.
-   Record exactly one bounded architecture-pressure outcome:
-   either that accepted result keeps the current architecture /
-   `non-cyclic-graph` boundary credible for this exact pressure point, or the
-   accepted exact-pocket evidence specifically reopens the
-   `non-cyclic-graph` revision question. Do not widen into the alias-bound
-   family, nested-`forall`, or a general automatic-recursive-inference claim.
+   `admitted but not reconstruction-visible / blocker debt`. The accepted
+   bounded architecture-pressure outcome is
+   `blocker debt remains within the current architecture`, not
+   `reopen the non-cyclic-graph revision question`: the refreshed exact
+   pocket still survives admission, elaboration, reconstruction, and
+   helper-visible internal recursive visibility inside the inherited acyclic
+   model, while the accepted record still does not prove cyclic structure is
+   required for this pressure point. No alias-bound widening, nested-`forall`,
+   broad automatic-recursive-inference claim, or reopened
+   `non-cyclic-graph` decision beyond that accepted bounded result was
+   recorded here.
