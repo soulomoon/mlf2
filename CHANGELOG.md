@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Changed
+- Completed the strategic general automatic iso-recursive inference control
+  plane through accepted rounds `round-082` through `round-088`, selecting
+  `continue within the current architecture` as the authoritative item-7
+  outcome; then refreshed the live top-level `orchestrator/` in place for one
+  bounded same-lane retained-child `stable visible persistence` successor
+  gate, preserving rounds `001` through `088` as predecessor evidence and
+  keeping the v2 retry contract active.
 - Completed the remaining post-`L2` `boundVarTarget` successor lane through
   accepted rounds `round-078` through `round-081`: `N11` froze the exact
   same-lane local `TypeRef` retained-child `boundVarTarget -> targetC`
@@ -10,9 +17,9 @@
   slice in `MLF.Elab.Run.ResultType.Fallback` plus focused
   `PipelineSpec` coverage, `N13` reverified that exact packet with fresh
   focused/full-gate evidence (`20` / `1141` examples, `0 failures`), and
-  `N14` finalized the bounded next-step token `continue-bounded`; the live
-  `orchestrator/roadmap.md` now has no pending successor item, and any future
-  work must begin with a separate roadmap amendment/update.
+  `N14` finalized the bounded next-step token `continue-bounded`; at that
+  stage the live `orchestrator/roadmap.md` had no pending successor item, so
+  any further work required a separate roadmap amendment/update.
 - Accepted `round-077` `N10` as the reopened-loop safety and acceptance
   contract for the selected `boundVarTarget` planning subject: the live
   successor control plane now records the authoritative outcome

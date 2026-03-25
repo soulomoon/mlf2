@@ -1,3 +1,25 @@
+## 2026-03-25 - Strategic loop completed through round-088 and live control plane refreshed for the bounded persistence gate
+
+- The strategic general automatic iso-recursive inference control plane is now
+  complete through accepted rounds `round-082` through `round-088`. That
+  accepted chain produced the repo-level capability contract, architectural
+  constraint audit, mechanism map, search model, full-pipeline reconstruction
+  contract, representative coverage campaign, and the item-7 architecture
+  decision.
+- The authoritative item-7 outcome is
+  `continue within the current architecture`, and the selected successor is
+  one bounded same-lane retained-child `stable visible persistence` gate
+  inside the inherited acyclic model.
+- The live top-level `orchestrator/` is now refreshed in place for that
+  bounded gate. The new roadmap stages are: freeze the exact persistence case
+  and ledger, audit the current continuity breakpoint, land the minimum
+  bounded slice or proof, revalidate end to end, and record the bounded
+  follow-on decision.
+- Completed rounds `round-001` through `round-088` remain predecessor
+  evidence, and the inherited explicit-only / non-equi-recursive /
+  non-cyclic-graph / no-second-interface / no-fallback boundary remains
+  unchanged unless a later accepted round explicitly revises it.
+
 ## 2026-03-24 - `boundVarTarget` same-lane retained-child packet completed through bounded `N14`
 
 - The live post-`L2` successor control plane is now complete through accepted
