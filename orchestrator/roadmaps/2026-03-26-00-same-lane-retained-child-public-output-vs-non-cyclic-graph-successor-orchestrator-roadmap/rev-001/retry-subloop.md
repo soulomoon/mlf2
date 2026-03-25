@@ -1,0 +1,137 @@
+# Retry Subloop Contract
+
+This file defines the live retry behavior for future `contract_version: 2`
+rounds on the current same-lane retained-child public-output continuity vs
+`non-cyclic-graph` successor control plane.
+
+The active roadmap bundle is resolved from `orchestrator/state.json`:
+
+- `roadmap_id`
+- `roadmap_revision`
+- `roadmap_dir`
+
+The current roadmap and subject boundary come from:
+
+- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
+- `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-phase-6-elaboration-resolution.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-end-to-end-revalidation-and-classification.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-successor-decision-gate.md`
+- the authoritative `roadmap_dir/roadmap.md`
+
+## Scope
+
+- roadmap items `1` through `4` may retry inside the same round.
+- roadmap item `5` is aggregate-only:
+  - review may reject it and send the same round back to `plan`;
+  - review may not emit `accepted + retry` for item `5`.
+
+## Machine State
+
+`orchestrator/state.json` must carry:
+
+- `contract_version: 2`
+- `roadmap_id`
+- `roadmap_revision`
+- `roadmap_dir`
+- `retry: null` when idle, or a retry object when the same round is looping
+
+Retry object fields:
+
+- `stage_id`
+- `attempt`
+- `max_attempts`
+- `latest_accepted_attempt`
+- `latest_accepted_result`
+- `latest_attempt_verdict`
+- `latest_stage_action`
+- `retry_reason`
+- `fix_hypothesis`
+
+## Review Output
+
+Every public-output / architecture-pressure review must record:
+
+- `Implemented stage result`
+- `Attempt verdict`
+- `Stage action`
+- `Retry reason`
+- `Fix hypothesis`
+
+Allowed combinations:
+
+- `accepted + finalize`
+- `accepted + retry`
+- `rejected + retry`
+
+Forbidden combinations:
+
+- `rejected + finalize`
+- `accepted + retry` for item `5`
+
+Use `Retry reason: none` and `Fix hypothesis: none` when a stage finalizes
+without another retry.
+
+## Artifact Ownership
+
+- reviewer owns `review.md`
+- reviewer owns `reviews/attempt-<n>.md`
+- reviewer owns `review-record.json` only on finalization
+- controller owns `attempt-log.jsonl`
+- planner, implementer, reviewer, and merger must not rewrite prior attempts
+
+## Transition Rules
+
+After review:
+
+- `accepted + finalize`
+  - controller clears `retry`
+  - controller advances to `merge`
+- `accepted + retry`
+  - controller records the attempt in `attempt-log.jsonl`
+  - controller updates `latest_accepted_*`
+  - controller increments `retry.attempt`
+  - controller returns the same round to `plan`
+- `rejected + retry`
+  - controller records the attempt in `attempt-log.jsonl`
+  - controller leaves `latest_accepted_*` unchanged
+  - controller increments `retry.attempt`
+  - controller returns the same round to `plan`
+
+## Budget Rules
+
+- `max_attempts` is `100` for roadmap items `1` through `4`
+- on exhaustion:
+  - finalize the latest accepted attempt if one exists
+  - otherwise stop with a controller blockage in `orchestrator/state.json`
+
+## Resume Rules
+
+- preserve the same round id, branch, and worktree during retries
+- resume the exact recorded `plan`, `implement`, or `review` stage when
+  interrupted
+- do not create a replacement round merely because a retry was interrupted
+
+## Roadmap-Update Rule
+
+After an accepted round finalizes and merges:
+
+- the guider may mark the completed item done;
+- the guider may refine later pending items or append the next bounded
+  follow-on gate or decision gate; and
+- the guider may not rewrite completed-item truth or silently widen the live
+  subject into the alias-bound family, nested-`forall`, general automatic
+  recursive inference, or architecture revision without saying so.
+
+## Historical Compatibility
+
+Rounds `round-001` through `round-093` remain historical predecessor
+evidence. New roadmap-family scaffolding may advance active roadmap metadata,
+but it must not reinterpret accepted stage results into broader capability or
+architecture claims.

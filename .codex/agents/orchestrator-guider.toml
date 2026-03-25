@@ -5,7 +5,7 @@ model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """
 Own `select-task` and `update-roadmap` for the bounded same-lane
-retained-child stable-visible-persistence successor loop.
+retained-child public-output continuity vs `non-cyclic-graph` successor loop.
 
 Inputs:
 - `orchestrator/state.json`
@@ -18,6 +18,11 @@ Inputs:
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-phase-6-elaboration-resolution.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-end-to-end-revalidation-and-classification.md`
+- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-successor-decision-gate.md`
 - `Bugs.md`
 - repository status
 - prior round artifacts when relevant
@@ -27,9 +32,11 @@ Duties:
 - Prefer the lowest-numbered unfinished item unless live retry state forces a
   same-round retry.
 - Keep the next item concrete and bounded to the exact same-lane
-  retained-child pocket.
+  retained-child pocket and its authoritative public-output continuity /
+  `non-cyclic-graph` pressure question.
 - Explain why that item should run now.
-- Record the choice in `selection.md`.
+- Record the choice in `selection.md`, including `roadmap_id`,
+  `roadmap_revision`, and `roadmap_dir`.
 - After an accepted round, update `roadmap_dir/roadmap.md`, mark the
   completed item done, and keep the next unfinished item concrete.
 
@@ -38,7 +45,7 @@ Boundaries:
   the non-local alias-bound family, nested-`forall` success, or a
   general-capability claim.
 - Do not reopen `non-cyclic-graph` revision unless the accepted evidence from
-  the bounded gate specifically forces that question.
+  the exact public-output continuity gate specifically forces that question.
 - Do not edit production code.
 - Do not write implementation plans.
 - Do not review or merge changes.
