@@ -1,35 +1,40 @@
-# General Automatic Iso-Recursive Inference Strategic Orchestrator Roadmap
+# Same-Lane Retained-Child Stable-Visible-Persistence Successor Orchestrator Roadmap
 
 ## Context
 
-- This top-level `orchestrator/` now succeeds the completed post-`L2`
-  automatic iso-recursive successor loop whose accepted execution record ended
-  at `orchestrator/rounds/round-081`.
-- Completed rounds `round-001` through `round-081` remain authoritative
+- This top-level `orchestrator/` now succeeds the completed strategic
+  general automatic iso-recursive inference control plane whose accepted
+  execution record ended at `orchestrator/rounds/round-088`.
+- Completed rounds `round-001` through `round-088` remain authoritative
   historical evidence. They are predecessor evidence for this refreshed
   control plane and must not be silently rewritten.
 - The inherited baseline contract remains: explicit recursive annotations are
-  supported, automatic recursive-type inference is unresolved and disabled, and
-  the explicit-only / non-equi-recursive / non-cyclic-graph /
+  supported, automatic recursive-type inference is unresolved and disabled,
+  and the explicit-only / non-equi-recursive / non-cyclic-graph /
   no-second-interface / no-fallback boundary remains binding unless an
   accepted roadmap decision explicitly changes it.
-- The accepted `N14` decision artifact at
-  `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
-  remains the immediate predecessor result: one exact same-lane retained-child
-  `boundVarTarget -> targetC` packet is accepted bounded evidence only, the
-  long-horizon goal remains unresolved, and no successor lane is yet
-  authorized or bound.
-- The strategic human roadmap at
-  `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-strategic-roadmap.md`
-  is now the source document for this refreshed control plane.
-- The new live goal is not "pick the next packet." The live goal is to decide
-  whether general automatic iso-recursive inference is reachable, under which
-  architecture, and what evidence or revisions are required before broader
-  implementation can be justified.
-- Early rounds in this refreshed control plane are expected to be docs-first.
-  Production changes, broader inference experiments, or boundary revisions are
-  not lawful until the corresponding strategic roadmap items explicitly make
-  them so.
+- The accepted item-7 decision artifact at
+  `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
+  is the immediate predecessor result. It selected
+  `continue within the current architecture` and bound exactly one successor
+  gate: same-lane retained-child `stable visible persistence`.
+- The controlling persistence ledger and outcome vocabulary come from
+  `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
+  and
+  `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`.
+- The exact predecessor packet for this bounded gate remains the accepted
+  same-lane retained-child `boundVarTarget -> targetC` chain recorded through
+  accepted `N14` at
+  `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`.
+- The live goal is not broad general automatic recursive inference and not a
+  fresh architecture choice. The live goal is to decide whether the strongest
+  admitted same-lane retained-child pocket can cross from blocker debt into
+  accepted `stable visible persistence` while the inherited acyclic model
+  stays unchanged.
+- Early rounds in this refreshed control plane may stay docs-first, but one
+  narrow code/test slice is lawful if earlier accepted items show it is
+  required to resolve this exact bounded gate. No broader family expansion,
+  boundary revision, or product-posture claim is authorized.
 
 ## Status Legend
 
@@ -39,114 +44,54 @@
 
 ## Items
 
-1. [done] Define the repo-level capability contract and evaluation corpus for general automatic iso-recursive inference
+1. [pending] Freeze the exact same-lane retained-child persistence case and review ledger
    Depends on:
-   Completion notes: accepted in `round-082` via
-   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`.
-   The repo now has a docs-first capability contract that defines the
-   repo-level target, separates bounded predecessor evidence from any general
-   capability claim, names the minimum positive / negative family matrix
-   (`P1`-`P6`, `N1`-`N6`), and records later success / no-claim gates around
-   soundness, thesis-faithfulness, termination, and explainability. The
-   inherited explicit-only / iso-recursive / non-equi-recursive /
-   non-cyclic-graph / no-second-interface / no-fallback boundary remains
-   unchanged, and no production behavior was widened.
+   Completion notes: identify exactly one admitted pocket from accepted item-5
+   and item-6 evidence, freeze the persistence tuple (family, recursive-shape
+   anchor, owner / binder frame, target / consumer route,
+   quantified-boundary-clear status, and output-surface visibility
+   obligation), and name the exact solver / elaboration / reconstruction /
+   internal-output / public-output evidence that later rounds must preserve.
+   The output must exclude neighboring routes, the non-local alias-bound
+   family, nested-`forall` success claims, and any broader architecture
+   argument.
 
-2. [done] Audit the current architectural constraints against the capability contract
+2. [pending] Audit the current pipeline against that exact persistence contract
    Depends on: item 1
-   Completion notes: accepted in `round-083` via
-   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`.
-   The inherited four-constraint audit is now complete: `iso-recursive =
-   keep`, `non-equi-recursive = keep`, `non-cyclic-graph = unknown`, and
-   `no-fallback = keep`. The accepted item-2 read is still bounded and
-   docs-only: the repo-level target remains unresolved because the
-   `non-cyclic-graph` constraint is not yet shown either sufficient or
-   blocking for representative `P2`-`P6` pressure, especially around
-   non-local propagation, binder/owner sensitivity, nested polymorphism,
-   reconstruction visibility, and bounded `N6` termination pressure. No
-   architecture revision, semantic widening, interface addition, or fallback
-   widening was authorized.
+   Completion notes: use the accepted docs plus the current code/test surfaces
+   to determine which ledger rows are already satisfied, where the first
+   missing or ambiguous continuity breakpoint actually occurs, and whether the
+   present blocker is solver-side, elaboration-side, reconstruction-side,
+   internal-output, public-output, or reviewer-evidence drift. The output
+   must stay confined to the one frozen same-lane retained-child pocket and
+   must not reopen general family search.
 
-3. [done] Generalize the accepted packet history into a reusable mechanism map
+3. [pending] Land the minimum bounded slice needed to prove or refute stable visible persistence for the exact pocket
    Depends on: items 1, 2
-   Completion notes: accepted in `round-084` via
-   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-mechanism-map.md`.
-   The accepted mechanism map now explains two bounded predecessor chains
-   (`N4`-`N7` `baseTarget -> baseC` and `N11`-`N14`
-   `boundVarTarget -> targetC`) through one seven-family vocabulary covering
-   recursive-shape discovery, binder / owner placement, target / consumer
-   alignment, local versus non-local propagation, interaction with
-   polymorphism and instantiation, reconstruction obligations, and
-   fail-closed ambiguity / unsafe-case handling. The bounded acyclic-model
-   read is still partial: `P2`-`P4` are only partially explained, `P5`
-   remains negative-only / unresolved, and the accepted record still depends
-   on named packet guards rather than a general search policy. No search
-   model, full reconstruction contract, coverage campaign, or architecture
-   decision was authorized.
+   Completion notes: if the audit shows a lawful narrow fix is needed,
+   implement only the minimum docs / code / test change required for the exact
+   same-lane retained-child route and corresponding regression anchors. If the
+   audit shows the current pipeline already satisfies the contract, record
+   that proof without widening the production surface. Do not touch the
+   alias-bound family, quantified-crossing cases, cyclic search, alternate
+   interfaces, or convenience fallback paths.
 
-4. [done] Design the search, ambiguity, and termination model for general recursive inference
+4. [pending] Revalidate the exact pocket end to end and classify the bounded persistence result
    Depends on: items 1, 2, 3
-   Completion notes: accepted in `round-085` via
-   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-search-model.md`.
-   The repo now has one bounded search / admissibility / ambiguity /
-   termination model for the inherited acyclic architecture: recursive
-   inference is anchor-first, lawful candidates are limited to the accepted
-   non-local alias-bound / base-like family and the accepted same-lane
-   retained-child family, the named item-3 guards are lifted into bounded
-   admissibility rules, nested-`forall` / owner-crossing /
-   competing-candidate situations remain fail-closed, and bounded termination
-   is tied to finite acyclic anchors, finite ancestry, finite lane-bounded
-   routes, and no reopening loops. This remains bounded evidence only:
-   positive `P5` success, full-pipeline reconstruction, representative
-   coverage, and the architecture decision remain open.
+   Completion notes: rerun the exact same-lane retained-child pocket through
+   the required solver, elaboration, reconstruction, internal/public output,
+   and reviewer-visible checks, and record exactly one bounded item-5 /
+   item-6 vocabulary result for that pocket:
+   `stable visible persistence`,
+   `admitted but not reconstruction-visible / blocker debt`, or
+   `fail-closed rejection`. The output must preserve honest negative or
+   partial reads if any ledger row still breaks.
 
-5. [done] Define the full-pipeline reconstruction and validation contract
-   Depends on: items 1, 3, 4
-   Completion notes: accepted in `round-086` via
-   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`.
-   The repo now has one bounded full-pipeline persistence contract for the
-   two item-4-admitted families. It freezes one persistence tuple
-   (family, recursive-shape anchor, owner / binder frame, target / consumer
-   route, quantified-boundary-clear status, and output-surface recursive
-   visibility), one phase-and-surface ledger from solver admission through
-   public output, and one lawful outcome vocabulary:
-   `stable visible persistence`, `admitted but not reconstruction-visible /
-   blocker debt`, and `fail-closed rejection`. The non-local alias-bound /
-   base-like family remains blocker debt while the visible read stays
-   `TBase (BaseTy "Int")` / `containsMu False`; the same-lane retained-child
-   family remains the strongest bounded candidate but still needs explicit
-   end-to-end continuity evidence before it counts as stable visible
-   persistence. Representative coverage and the architecture decision remain
-   open.
-
-6. [done] Run a representative coverage and feasibility campaign
-   Depends on: items 2, 4, 5
-   Completion notes: accepted in `round-087` via
-   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`.
-   The repo now has one bounded seven-row representative matrix spanning the
-   two item-4-admitted families plus nested-`forall` reject-side,
-   ambiguity-reject, termination-pressure, binder-sensitive, and
-   reconstruction-heavy pressure. The accepted tally is zero `stable visible
-   persistence` rows, four `admitted but not reconstruction-visible / blocker
-   debt` rows (`C1`, `C2`, `C5`, `C7`), and three `fail-closed rejection`
-   rows (`C3`, `C4`, `C6`), so the strongest lawful aggregate read is
-   `bounded subset only`. Broad generality is still not justified, but the
-   current architecture is also not yet proven a dead end because two bounded
-   admitted pockets remain inside the inherited acyclic model and the
-   accepted item-2 `non-cyclic-graph = unknown` risk is still unresolved.
-
-7. [done] Make the architecture decision and successor-plan choice from the bounded-subset-only coverage result
-   Depends on: items 2, 6
-   Completion notes: accepted in `round-088` via
-   `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`.
-   The refreshed control plane now records exactly one strategic outcome from
-   the accepted item-2 audit plus accepted item-6 `bounded subset only`
-   result: `continue within the current architecture`. The accepted bounded
-   successor choice is one same-lane retained-child stable-visible-persistence
-   gate inside the inherited acyclic model. This remains bounded evidence
-   only: zero rows have reached `stable visible persistence`, both admitted
-   families still carry blocker debt, nested-`forall` pressure remains
-   reject-side only, and `non-cyclic-graph = unknown` remains a live
-   architecture-pressure point. No targeted boundary revision, broad
-   general-capability claim, product-posture decision, or production widening
-   was authorized.
+5. [pending] Make the bounded successor decision from the persistence-gate result
+   Depends on: items 2, 4
+   Completion notes: record exactly one follow-on outcome for this successor
+   control plane: persistence achieved within the current architecture,
+   blocker debt remains within the current architecture, or the evidence
+   specifically reopens the `non-cyclic-graph` revision question. Keep
+   predecessor truth intact, keep the next move concrete, and do not blur
+   this bounded gate into a general automatic-recursive-inference claim.
