@@ -95,32 +95,44 @@
    not yet classify reification / reconstruction, internal output, public
    output, or the bounded successor decision.
 
-4. [pending] Revalidate the frozen same-lane retained-child pocket end to end and classify its persistence result
+4. [done] Revalidate the frozen same-lane retained-child pocket end to end and classify its persistence result
    Depends on: items 1, 2, 3
-   Completion notes: after the accepted `round-091` item-3 clearance of the
-   exact `Phase 6 (elaboration)` blocker, rerun the exact frozen packet and
-   unchanged tuple only across the frozen ledger rows for this one pocket.
-   Treat solver admission and the cleared elaboration handoff as predecessor
-   evidence, then determine whether the same family / anchor / owner-local
-   frame / route / clear-boundary interpretation remains review-visible
-   through reification / reconstruction, internal output, public output, and
-   reviewer-visible continuity. Record exactly one bounded item-5 / item-6
-   vocabulary result for that pocket:
-   `stable visible persistence`,
-   `admitted but not reconstruction-visible / blocker debt`, or
-   `fail-closed rejection`. The output must preserve honest negative or
-   partial reads if any later frozen tuple field or ledger row still breaks
-   on the same exact pocket. Do not widen into the alias-bound family,
-   neighboring routes, nested-`forall`, replay / `InstBot`, fallback paths,
-   or a broader capability claim.
+   Completion notes: completed in accepted `round-092` by rerunning only the
+   exact frozen same-lane retained-child tuple and packet across the frozen
+   ledger rows for the one admitted pocket:
+   family `same-lane retained-child`,
+   anchor `boundVarTargetRoot`,
+   one owner-local retained-child frame, route
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`, and
+   clear-boundary-only status. Solver admission plus the accepted item-3
+   `Phase 6 (elaboration)` clearance remain predecessor evidence; current
+   exact-pocket evidence shows reification / reconstruction and helper-visible
+   internal output still carry recursive structure (`TMu ...`,
+   `containsMu True`), but the authoritative public outputs of both
+   `runPipelineElab` and `runPipelineElabChecked` collapse to
+   `TForall "a" Nothing (TVar "a")`. The accepted item-4 classification for
+   this pocket is therefore
+   `admitted but not reconstruction-visible / blocker debt`, not
+   `stable visible persistence` and not `fail-closed rejection`. The accepted
+   read stays inside the same frozen pocket only and does not widen into the
+   alias-bound family, neighboring routes, nested-`forall`, replay /
+   `InstBot`, fallback paths, or a broader capability claim.
 
 5. [pending] Make the bounded successor decision from the frozen-pocket persistence result
    Depends on: items 2, 4
-   Completion notes: use the item-4 classification for this one pocket to
-   record exactly one follow-on outcome for this successor control plane:
-   persistence achieved within the current architecture, blocker debt remains
-   within the current architecture, or accepted evidence from this same
-   pocket specifically reopens the `non-cyclic-graph` revision question. Keep
-   predecessor truth intact, keep the next move concrete, and do not blur
-   this bounded gate into alias-bound, nested-`forall`, or general
-   automatic-recursive-inference claims.
+   Completion notes: consume only the accepted `round-092` item-4
+   classification for the exact frozen pocket:
+   family `same-lane retained-child`,
+   anchor `boundVarTargetRoot`,
+   one owner-local retained-child frame, route
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`, and
+   clear-boundary-only status. The bounded decision to make now is whether
+   that exact-pocket result,
+   `admitted but not reconstruction-visible / blocker debt`,
+   means blocker debt remains within the current architecture, or whether the
+   same exact public-output collapse to
+   `TForall "a" Nothing (TVar "a")` specifically forces reopening the
+   `non-cyclic-graph` revision question. Do not relitigate solver admission
+   or item-3 elaboration clearance, do not upgrade the pocket to
+   `stable visible persistence`, and do not widen into the alias-bound
+   family, nested-`forall`, or a general automatic-recursive-inference claim.
