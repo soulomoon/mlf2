@@ -71,11 +71,13 @@
    the non-local alias-bound family, nested-`forall`, replay repair, and
    broad architecture revision remain excluded.
 
-2. [pending] Audit the exact authoritative public-output path for the frozen pocket
+2. [done] Audit the exact authoritative public-output path for the frozen pocket
    Depends on: item 1
-   Completion notes: consume only the accepted `round-094` item-1 case freeze
-   from
+   Completion notes: completed in accepted `round-095` by auditing only the
+   accepted `round-094` item-1 case freeze from
    `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-case-and-review-ledger.md`
+   and recording the canonical exact-pocket authoritative-path audit in
+   `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-authoritative-path-audit.md`
    for the exact same-lane retained-child pocket:
    family `same-lane retained-child`,
    anchor `boundVarTargetRoot`,
@@ -83,24 +85,37 @@
    `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`,
    clear-boundary-only status, and the exact continuity split
    (`TMu ...` plus `containsMu True` internally versus
-   `TForall "a" Nothing (TVar "a")` authoritatively). Inspect only this exact
-   pocket and localize the first exact owner-local continuity-loss site
-   between the accepted helper-visible reconstruction path and the
-   authoritative public output path (including `checkedAuthoritative` and any
-   exact same-pocket anchors it depends on). Record bounded proof of where
-   the collapse occurs or confirm that the current exact collapse anchor
-   remains unchanged. Do not repair behavior yet and do not widen beyond this
-   pocket.
+   `TForall "a" Nothing (TVar "a")` authoritatively). The accepted audit keeps
+   the current exact collapse anchor unchanged: the first exact owner-local
+   continuity-loss site remains the `checkedAuthoritative` return choice in
+   `src/MLF/Elab/Run/Pipeline.hs`, with `termClosed` and
+   `typeCheck termClosed` as the same-pocket dependencies that feed that
+   authoritative result. The accepted read stays bounded to this one frozen
+   pocket only, does not repair behavior yet, and does not widen into the
+   non-local alias-bound family, nested-`forall`, replay repair, or
+   architecture revision.
 
 3. [pending] Clear or confirm the exact authoritative public-output collapse within the current architecture
    Depends on: items 1, 2
-   Completion notes: either land the minimum bounded docs/code/test slice
-   needed so the exact frozen pocket preserves recursive structure on the
-   authoritative public output surface without changing family, anchor,
-   owner-local frame, route, or clear-boundary status, or record bounded
-   proof that the collapse remains blocker debt under the unchanged current
-   architecture. No alias-bound widening, nested-`forall`, cyclic search,
-   second interface, or fallback path is authorized.
+   Completion notes: consume only the accepted item-2 unchanged-anchor audit
+   from
+   `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-authoritative-path-audit.md`
+   for the same exact frozen pocket and continuity split:
+   family `same-lane retained-child`,
+   anchor `boundVarTargetRoot`,
+   one owner-local retained-child frame, route
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`,
+   clear-boundary-only status, and
+   `TMu ...` plus `containsMu True` internally versus
+   `TForall "a" Nothing (TVar "a")` authoritatively. Either land the minimum
+   bounded docs/code/test slice needed so this exact pocket preserves
+   recursive structure on the authoritative public output surface without
+   changing family, anchor, owner-local frame, route, or clear-boundary
+   status, or record bounded proof that the collapse remains blocker debt
+   under the unchanged current architecture with `checkedAuthoritative` as
+   the first exact break and `termClosed` / `typeCheck termClosed` as its
+   same-pocket dependencies. No alias-bound widening, nested-`forall`, cyclic
+   search, second interface, or fallback path is authorized.
 
 4. [pending] Revalidate the frozen pocket end to end and classify its public-output continuity result
    Depends on: items 1, 2, 3
