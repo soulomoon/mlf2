@@ -58,37 +58,45 @@
    family, nested-`forall` success, and architecture revision remain
    excluded.
 
-2. [pending] Audit the live pipeline against the frozen same-lane retained-child tuple and ledger
+2. [done] Audit the live pipeline against the frozen same-lane retained-child tuple and ledger
    Depends on: item 1
-   Completion notes: audit only the frozen case from
+   Completion notes: completed in accepted `round-090` by auditing only the
+   frozen case from
    `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
-   and determine which ledger rows are already satisfied for
-   `boundVarTargetRoot` /
-   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`, where the
-   first actual continuity breakpoint occurs, and whether the blocker sits in
-   solver admission, elaboration, reconstruction, internal output, public
-   output, or reviewer-visible evidence. Keep the read bounded to the one
-   clear-boundary same-lane retained-child pocket only.
+   and localizing the first actual breakpoint for `boundVarTargetRoot` /
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`. Solver
+   admission is satisfied on current evidence, but both `runPipelineElab` and
+   `runPipelineElabChecked` fail on the exact packet in `Phase 6
+   (elaboration)` with
+   `PhiTranslatabilityError ["reifyInst: missing authoritative instantiation translation for edge 3","expansion args=[NodeId {getNodeId = 31}]]`;
+   reification / reconstruction, internal output, public output, and
+   reviewer-visible evidence remain `not credited after earlier breakpoint`.
+   The accepted read stays bounded to the one clear-boundary same-lane
+   retained-child pocket only.
 
-3. [pending] Land the minimum bounded slice needed to prove or refute stable visible persistence for the frozen pocket
+3. [pending] Clear or confirm the exact Phase 6 elaboration breakpoint for the frozen same-lane retained-child pocket
    Depends on: items 1, 2
-   Completion notes: if item 2 finds a lawful narrow gap, change only the
-   minimum docs / code / test surface needed to preserve the frozen tuple for
-   the same-lane retained-child pocket and add only the exact regression
-   anchors required for that route. If item 2 finds no runtime gap, record
-   the proof instead of widening the implementation surface. Do not touch the
-   alias-bound family, neighboring routes, quantified crossing, cyclic
-   search, second interfaces, or fallback paths.
+   Completion notes: work only on the exact item-2 breakpoint for
+   `boundVarTargetRoot` /
+   `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC`: either
+   land the minimum bounded docs / code / test slice needed so the exact
+   packet survives `Phase 6 (elaboration)` without changing family, anchor,
+   owner-local frame, route, or quantified-boundary status, or record bounded
+   proof that this elaboration gap remains blocker debt under the unchanged
+   architecture. Do not touch the alias-bound family, neighboring routes,
+   quantified crossing, cyclic search, second interfaces, or fallback paths.
 
 4. [pending] Revalidate the frozen same-lane retained-child pocket end to end and classify its persistence result
    Depends on: items 1, 2, 3
-   Completion notes: rerun the exact same-lane retained-child pocket across
-   the frozen ledger rows and record exactly one bounded item-5 / item-6
+   Completion notes: after item 3 resolves the exact Phase 6 question one way
+   or the other, rerun the exact same-lane retained-child pocket across the
+   frozen ledger rows and record exactly one bounded item-5 / item-6
    vocabulary result for that pocket:
    `stable visible persistence`,
    `admitted but not reconstruction-visible / blocker debt`, or
    `fail-closed rejection`. The output must preserve honest negative or
-   partial reads if any frozen tuple field or ledger row still breaks.
+   partial reads if `Phase 6 (elaboration)` or any later frozen tuple field
+   or ledger row still breaks on the same exact pocket.
 
 5. [pending] Make the bounded successor decision from the frozen-pocket persistence result
    Depends on: items 2, 4
