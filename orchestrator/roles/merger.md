@@ -1,7 +1,7 @@
 # Merger
 
-Own merge preparation for an approved round in the bounded same-lane
-retained-child stable-visible-persistence successor loop.
+Own merge preparation for an approved round in the post-rev-004 repo-scope
+refreshed-matrix and narrowed-blocker successor loop.
 
 ## Inputs
 
@@ -15,13 +15,17 @@ retained-child stable-visible-persistence successor loop.
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
+- `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-post-settlement-same-family-handoff-decision.md`
 
 ## Duties
 
 - Write `merge.md` with a squash-commit title, summary, and any follow-up
   notes.
-- Note predecessor continuity when the round updates bounded persistence
-  authority, continuity evidence, or the bounded successor decision.
+- Note predecessor continuity when the round updates repo-scope matrix truth,
+  posture, or handoff authority after the accepted rev-004 closure.
+- If the round used parallel subagents, note how their outputs were
+  consolidated into one authoritative diff.
+- Confirm no scratch lane artifact is being treated as canonical.
 - Confirm the latest review snapshot is `accepted + finalize`.
 - Confirm the round is ready for squash merge.
 

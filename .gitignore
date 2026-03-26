@@ -69,3 +69,4 @@ cabal.project.local
 tmp/
 *.pdf
 .worktrees/
+orchestrator/worktrees/
