@@ -64,31 +64,32 @@
 
 ## Items
 
-1. [pending] Freeze the exact rev-003 same-pocket architecture-amendment contract and writable slice
+1. [done] Freeze the exact rev-003 same-pocket architecture-amendment contract and writable slice
    Depends on:
-   Completion notes: complete when an accepted docs-only artifact consumes
-   accepted `round-108` and freezes exactly this much, and no more:
-   the same selected rows `C2`, `C5`, and `C7`; the same exact packet; the
-   same family / anchor / owner-local frame / route /
-   clear-boundary-only status; one single-component cyclic-structure
-   architecture-amendment lane centered on the exact
+   Completion notes: accepted `round-109` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-authoritative-handoff-architecture-amendment-contract-and-writable-slice-freeze.md`
+   with authoritative review in
+   `orchestrator/rounds/round-109/review-record.json`. That docs-only
+   aggregate artifact froze exactly one same-pocket rev-003
+   architecture-amendment lane for the already-selected `C2` / `C5` / `C7`
+   pocket only: the same exact packet, the same family / anchor /
+   owner-local frame / route / clear-boundary-only status, the exact
    `runPipelineElabWith` / `checkedAuthoritative` /
-   `typeCheck termClosed` authoritative-handoff slice; and one exact
+   `typeCheck termClosed` authoritative-handoff slice, one exact future
    writable implementation boundary limited to
    `src/MLF/Elab/Run/Pipeline.hs`,
-   `src/MLF/Elab/TermClosure.hs`, and `test/PipelineSpec.hs`.
-   The artifact must also freeze
+   `src/MLF/Elab/TermClosure.hs`, and `test/PipelineSpec.hs`, and the
+   read-only audit anchors
    `src/MLF/Elab/Run/ResultType/Fallback.hs`,
    `src/MLF/Elab/Run/ResultType.hs`,
    `src/MLF/Elab/Run.hs`,
    `src/MLF/Elab/Pipeline.hs`, and
-   `src-public/MLF/Pipeline.hs`
-   as read-only audit anchors unless a later accepted successor revision
-   changes that boundary explicitly. It must preserve
-   `iso-recursive = keep`,
-   `non-equi-recursive = keep`, and `no-fallback = keep`; continue to block
-   multi-SCC search, second interfaces, fallback widening, hardening, and
-   broad capability claims; and keep rev-001 items `6` through `8` blocked.
+   `src-public/MLF/Pipeline.hs`.
+   The accepted result preserved `iso-recursive = keep`,
+   `non-equi-recursive = keep`, and `no-fallback = keep`; kept rev-001
+   items `6` through `8` blocked; kept multi-SCC search, second interfaces,
+   fallback widening, hardening, and broad capability claims blocked; and
+   made rev-003 item `2` the next lawful move.
 
 2. [pending] Land the bounded same-pocket authoritative-handoff architecture amendment
    Depends on: item 1
