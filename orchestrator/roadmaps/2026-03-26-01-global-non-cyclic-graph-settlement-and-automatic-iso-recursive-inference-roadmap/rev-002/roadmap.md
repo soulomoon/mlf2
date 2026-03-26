@@ -56,17 +56,24 @@
 
 ## Items
 
-1. [pending] Freeze the reopened non-cyclic-graph revision authority and candidate boundary
+1. [done] Freeze the reopened non-cyclic-graph revision authority and candidate boundary
    Depends on:
-   Completion notes: complete when an accepted docs-only artifact consumes
-   accepted rev-001 item `5`, preserves completed rev-001 item truth, keeps
-   rev-001 items `6` through `8` blocked, and freezes the reopened subject
-   to one planning-only candidate boundary:
-   whether a bounded single-component cyclic-structure successor lane is
+   Completion notes: accepted `round-104` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-reopened-revision-authority-and-candidate-boundary-freeze.md`
+   with authoritative review in
+   `orchestrator/rounds/round-104/review-record.json`. That docs-only
+   artifact preserved accepted rev-001 truth, explicitly kept rev-001
+   items `6` through `8` blocked, froze rev-002 as planning-only and
+   architecture-only, and froze exactly one planning-only candidate
+   boundary:
+   whether one bounded single-component cyclic-structure successor lane is
    needed for the strongest admitted retained-child/output continuity
-   pressure. This item must explicitly keep multi-SCC search,
-   equi-recursive semantics, second interfaces, fallback widening, and
-   production implementation blocked.
+   pressure, with non-local `C1` continuity available only as contrast
+   context. It did not select the exact live reopened subject, define the
+   safety contract, bind the exact audit target, or decide open-vs-stop,
+   and it explicitly kept multi-SCC search, equi-recursive semantics,
+   second interfaces, fallback widening, and production implementation
+   blocked.
 
 2. [pending] Select the exact live reopened subject inside the candidate boundary
    Depends on: item 1
