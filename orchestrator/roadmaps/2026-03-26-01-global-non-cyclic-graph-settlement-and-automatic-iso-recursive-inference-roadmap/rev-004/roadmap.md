@@ -65,7 +65,7 @@
    item-3 result, stay exact-pocket-only, preserve predecessor immutability,
    and do not silently widen into broader family or rollout claims.
 
-4. [pending] Decide the post-settlement same-family handoff
+4. [done] Decide the post-settlement same-family handoff
    Depends on: items 1, 2, 3
    Completion notes: complete when an accepted aggregate artifact records
    exactly one lawful follow-on outcome for rev-004:
