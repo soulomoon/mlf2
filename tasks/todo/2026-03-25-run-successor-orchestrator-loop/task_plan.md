@@ -4,7 +4,7 @@ Task: Run the repo-local successor orchestrator loop from the stale `done`
 state until the roadmap is complete or the controller records a precise
 blockage.
 Created: 2026-03-25
-Status: in_progress
+Status: complete
 
 ## Objective
 
@@ -22,8 +22,8 @@ Status: in_progress
 | 1. Load controller contract, role sources, and current state | complete | Read the shared runtime skill, repo-local orchestrator docs, retry rules, and repo-local agent definitions. |
 | 2. Create current task packet and log controller context | complete | New active task folder for this loop run. |
 | 3. Resume or start the next lawful round from machine state | complete | Opened `round-089`, recovered one non-observable guider launch, and advanced to `plan` after the relaunch produced `selection.md` for `item-1`. |
-| 4. Drive stage delegation and controller bookkeeping through round finalization | in_progress | Completed `round-089` and `round-090` through merge and roadmap update; `round-091` is now open at `select-task`. |
-| 5. Continue round-by-round until roadmap completion or precise blockage | pending | No lawful stop condition is currently present; continue through the round stages. |
+| 4. Drive stage delegation and controller bookkeeping through round finalization | complete | Completed `round-089` through `round-093` through merge and roadmap update. |
+| 5. Continue round-by-round until roadmap completion or precise blockage | complete | The authoritative roadmap bundle now has all items marked done, so the controller can lawfully stop. |
 
 ## Decisions
 
