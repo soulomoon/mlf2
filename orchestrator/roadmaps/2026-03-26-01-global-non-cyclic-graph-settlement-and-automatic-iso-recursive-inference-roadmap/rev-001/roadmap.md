@@ -10,9 +10,11 @@
   `roadmap_dir`; the top-level `orchestrator/roadmap.md`,
   `orchestrator/retry-subloop.md`, and `orchestrator/verification.md` files
   are pointer stubs only.
-- Completed rounds `round-001` through `round-098` remain authoritative
-  historical evidence. They are predecessor evidence for this refreshed
-  control plane and must not be reinterpreted into broader capability.
+- Completed rounds `round-001` through `round-103` remain authoritative
+  historical evidence. Rounds `round-001` through `round-098` are
+  predecessor evidence for this control plane, and rounds `round-099`
+  through `round-103` are the accepted records within this revision. None
+  of them may be reinterpreted into broader capability.
 - The inherited baseline contract remains unchanged: explicit recursive
   annotations are the production baseline, recursive meaning remains
   iso-recursive only, and the explicit-only / non-equi-recursive /
@@ -36,6 +38,12 @@
   sufficient for the intended automatic iso-recursive inference family; then,
   only if that settlement gate keeps `non-cyclic-graph`, continue directly
   into production implementation, hardening, and capability-claim work.
+- Accepted `round-103` finalized item `5` as
+  `reopen the non-cyclic-graph revision question`. That accepted result
+  preserves this revision as authoritative predecessor evidence only through
+  the aggregate settlement gate; it does not continue directly into item `6`.
+  The next lawful move is published in same-family successor revision
+  `rev-002`.
 - No repo-level automatic iso-recursive inference claim is lawful before
   accepted production-surface evidence shows representative success for
   `P1` through `P6`, bounded or fail-closed behavior for the required
@@ -118,49 +126,45 @@
    widen into cyclic search, multi-SCC search, second interfaces, fallback
    paths, or production implementation.
 
-5. [pending] Decide the global non-cyclic-graph settlement gate
+5. [done] Decide the global non-cyclic-graph settlement gate
    Depends on: items 1, 2, 3, 4
-   Completion notes: consume only the accepted item-1 freeze, the accepted
-   item-2 and item-3 bounded slices, and the accepted item-4 representative
-   matrix refresh to record exactly one outcome for the current
-   architecture: `non-cyclic-graph = keep` or
-   `reopen the non-cyclic-graph revision question`. Treat the accepted
-   item-4 matrix as binding input: zero `stable visible persistence` rows,
-   five blocker-debt rows (`P1-row`, `C1`, `C2`, `C5`, `C7`), three
-   fail-closed rows (`C3`, `C4`, `C6`), `P5` reject-side only, `P6` below
-   visible persistence, and `N4` still pressure context only unless this
-   aggregate gate explicitly concludes otherwise. The accepted `keep`
-   outcome is lawful only if the accumulated production-surface evidence now
-   makes representative family-matrix settlement credible inside the
-   inherited acyclic model. The accepted `reopen` outcome is lawful only if
-   the evidence shows that a required positive family cannot be carried in
-   that model without crossing the current architecture boundary. This item
-   is aggregate-only: no new evidence reruns, production implementation,
-   hardening, cyclic search, multi-SCC search, second interfaces, or
-   fallback widening. No production implementation item may run unless item
-   `5` records `non-cyclic-graph = keep`.
+   Completion notes: accepted `round-103` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-keep-vs-reopen-decision-gate.md`
+   with authoritative review in
+   `orchestrator/rounds/round-103/review-record.json`. That aggregate-only
+   artifact consumed only the accepted item-1 freeze, item-2 and item-3
+   bounded slices, and item-4 representative matrix refresh, then recorded
+   exactly one lawful outcome:
+   `reopen the non-cyclic-graph revision question`. The accepted result
+   keeps `iso-recursive = keep`, `non-equi-recursive = keep`, and
+   `no-fallback = keep`, does not authorize cyclic search, multi-SCC search,
+   second interfaces, fallback widening, or production implementation, and
+   blocks rev-001 item `6` pending a same-family successor revision. The
+   next lawful move is now carried by
+   `orchestrator/roadmaps/2026-03-26-01-global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-roadmap/rev-002/roadmap.md`.
 
 6. [pending] Land the production automatic iso-recursive inference implementation under the settled architecture
    Depends on: item 5
-   Completion notes: if and only if accepted item `5` records
-   `non-cyclic-graph = keep`, land the remaining production docs / code /
-   test work needed for automatic iso-recursive inference on the settled
-   architecture and existing pipeline surfaces. If item `5` records reopen,
-   this item remains blocked pending a later same-family roadmap revision.
+   Completion notes: rev-001 no longer selects this item. Because accepted
+   item `5` recorded
+   `reopen the non-cyclic-graph revision question`, production
+   implementation remains blocked on this revision. Any later implementation
+   work now requires a later same-family roadmap revision to settle the
+   reopened architecture question and explicitly re-authorize implementation
+   scope.
 
 7. [pending] Harden regression coverage, bounded fail-closed behavior, and operator docs for production automatic iso-recursive inference
    Depends on: items 4, 6
-   Completion notes: strengthen regression coverage, negative-family
-   fail-closed behavior, operator-facing docs, and any remaining reviewable
-   evidence needed to keep the production implementation honest on the
-   settled scope. Preserve exact predecessor truth and do not silently widen
-   the capability surface beyond what item `5` settled.
+   Completion notes: rev-001 no longer selects this item. Hardening remains
+   blocked behind the same later same-family revision that would have to
+   settle the reopened architecture question and lawfully re-open item `6`.
+   Preserve exact predecessor truth and do not silently widen the capability
+   surface beyond what accepted item `5` and any later revision settle.
 
 8. [pending] Decide the repo-level automatic iso-recursive inference claim and remaining blockers
    Depends on: items 5, 6, 7
-   Completion notes: record exactly one final outcome for this roadmap
-   family: the repo-level automatic iso-recursive inference claim is now
-   supported on the settled scope, bounded blocker debt still remains with a
-   concrete next follow-on gate, or the implementation effort must stop
-   pending a later revision. Preserve honest scope limits and predecessor
-   evidence either way.
+   Completion notes: rev-001 no longer selects this item. The repo-level
+   capability claim remains blocked until a later same-family revision
+   resolves the reopened `non-cyclic-graph` question and, if lawful, any
+   successor implementation and hardening work. Preserve honest scope limits
+   and predecessor evidence either way.
