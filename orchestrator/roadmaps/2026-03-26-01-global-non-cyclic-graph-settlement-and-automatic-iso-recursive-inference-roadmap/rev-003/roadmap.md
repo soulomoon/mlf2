@@ -91,19 +91,26 @@
    fallback widening, hardening, and broad capability claims blocked; and
    made rev-003 item `2` the next lawful move.
 
-2. [pending] Land the bounded same-pocket authoritative-handoff architecture amendment
+2. [done] Land the bounded same-pocket authoritative-handoff architecture amendment
    Depends on: item 1
-   Completion notes: complete when an accepted implementation round changes
-   only the writable slice frozen by item `1` to carry one bounded
-   single-component cyclic-structure result through the exact
+   Completion notes: accepted `round-110` finalized this item through
+   bounded implementation changes in
+   `src/MLF/Elab/Run/Pipeline.hs`,
+   `src/MLF/Elab/TermClosure.hs`, and
+   `test/PipelineSpec.hs`,
+   with authoritative review in
+   `orchestrator/rounds/round-110/review-record.json`. That accepted
+   implementation preserved the exact same selected packet and the exact
    `runPipelineElabWith` / `checkedAuthoritative` /
-   `typeCheck termClosed` authoritative-handoff path for the one selected
-   same-lane pocket, without changing subject selection, helper-route
-   ownership, public-entrypoint count, fallback behavior, or the inherited
-   keep axes. Any necessary test updates must stay exact-pocket-only in
-   `test/PipelineSpec.hs`. No new interface, no multi-SCC search, no
-   fallback widening, no broad family claim, and no repo-level capability
-   claim are lawful here.
+   `typeCheck termClosed` handoff path, and it carried one bounded
+   recursive component through the authoritative public output by removing
+   only the trivial retained-child `forall identity` wrapper inside the
+   selected root closure path. The accepted result preserved
+   `iso-recursive = keep`,
+   `non-equi-recursive = keep`, and `no-fallback = keep`; kept one public
+   interface; kept helper-route ownership unchanged; kept multi-SCC search,
+   second interfaces, fallback widening, and broad capability claims
+   blocked; and made rev-003 item `3` the next lawful move.
 
 3. [pending] Validate the bounded amendment on the frozen same-pocket evidence surface
    Depends on: item 2
