@@ -103,37 +103,42 @@
    cyclic search, multi-SCC search, second interfaces, fallback paths, or
    production implementation.
 
-4. [pending] Run the representative end-to-end settlement campaign across the family matrix
+4. [done] Run the representative end-to-end settlement campaign across the family matrix
    Depends on: items 1, 2, 3
-   Completion notes: starting from the accepted item-2 and item-3 row reads,
-   rerun the representative corpus and reviewable evidence chain across the
-   intended positive families `P1` through `P6` together with the required
-   negative or bounded families, especially `N1`, `N2`, and `N6`, and
-   record whether any claimed `N4` pressure is truly out of scope or
-   actually required by the intended positive set. Preserve the frozen
-   pre-campaign truths unless the reruns themselves prove otherwise on the
-   same existing production surfaces: `P5` is still reject-side only
-   through `C3`, `P6` still has only one bounded same-lane blocker-debt
-   route through `C7`, and the matrix currently has zero
-   `stable visible persistence` rows. This item is representative replay
-   only. It must stay honest about any remaining blocker debt,
-   fail-closed behavior, or architecture pressure, and it must not itself
-   decide item `5`, revise the architecture, or widen into cyclic search,
-   multi-SCC search, second interfaces, fallback paths, or production
-   implementation.
+   Completion notes: accepted `round-102` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-representative-family-matrix-end-to-end-settlement-campaign.md`.
+   That artifact refreshed the representative matrix as `P1-row` plus
+   `C1` through `C7`, kept zero `stable visible persistence` rows, recorded
+   five `admitted but not reconstruction-visible / blocker debt` rows
+   (`P1-row`, `C1`, `C2`, `C5`, `C7`), recorded three
+   `fail-closed rejection` rows (`C3`, `C4`, `C6`), and kept `P5`
+   reject-side only, `P6` below visible persistence, and `N4` as pressure
+   context only. The lawful aggregate read remained `bounded subset only`,
+   so this item did not itself settle item `5`, reopen the architecture, or
+   widen into cyclic search, multi-SCC search, second interfaces, fallback
+   paths, or production implementation.
 
 5. [pending] Decide the global non-cyclic-graph settlement gate
    Depends on: items 1, 2, 3, 4
-   Completion notes: record exactly one outcome for the current architecture:
-   `non-cyclic-graph = keep` or
-   `reopen the non-cyclic-graph revision question`. The accepted
-   `keep` outcome is lawful only if the accumulated production-surface
-   evidence now makes representative family-matrix settlement credible inside
-   the inherited acyclic model. The accepted `reopen` outcome is lawful only
-   if the evidence shows that a required positive family cannot be carried in
-   that model without crossing the current architecture boundary. No
-   production implementation item may run unless item `5` records
-   `non-cyclic-graph = keep`.
+   Completion notes: consume only the accepted item-1 freeze, the accepted
+   item-2 and item-3 bounded slices, and the accepted item-4 representative
+   matrix refresh to record exactly one outcome for the current
+   architecture: `non-cyclic-graph = keep` or
+   `reopen the non-cyclic-graph revision question`. Treat the accepted
+   item-4 matrix as binding input: zero `stable visible persistence` rows,
+   five blocker-debt rows (`P1-row`, `C1`, `C2`, `C5`, `C7`), three
+   fail-closed rows (`C3`, `C4`, `C6`), `P5` reject-side only, `P6` below
+   visible persistence, and `N4` still pressure context only unless this
+   aggregate gate explicitly concludes otherwise. The accepted `keep`
+   outcome is lawful only if the accumulated production-surface evidence now
+   makes representative family-matrix settlement credible inside the
+   inherited acyclic model. The accepted `reopen` outcome is lawful only if
+   the evidence shows that a required positive family cannot be carried in
+   that model without crossing the current architecture boundary. This item
+   is aggregate-only: no new evidence reruns, production implementation,
+   hardening, cyclic search, multi-SCC search, second interfaces, or
+   fallback widening. No production implementation item may run unless item
+   `5` records `non-cyclic-graph = keep`.
 
 6. [pending] Land the production automatic iso-recursive inference implementation under the settled architecture
    Depends on: item 5
