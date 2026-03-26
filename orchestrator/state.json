@@ -8,10 +8,10 @@
   "worktree_path": null,
   "active_round_dir": null,
   "round_artifacts": {},
-  "last_completed_round": "round-093",
+  "last_completed_round": "round-098",
   "resume_error": null,
   "retry": null,
-  "roadmap_id": "2026-03-26-00-same-lane-retained-child-public-output-vs-non-cyclic-graph-successor-orchestrator-roadmap",
+  "roadmap_id": "2026-03-26-01-global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-roadmap",
   "roadmap_revision": "rev-001",
-  "roadmap_dir": "orchestrator/roadmaps/2026-03-26-00-same-lane-retained-child-public-output-vs-non-cyclic-graph-successor-orchestrator-roadmap/rev-001"
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-26-01-global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-roadmap/rev-001"
 }

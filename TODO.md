@@ -4,40 +4,57 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
-## Task 103 same-lane retained-child public-output continuity vs non-cyclic-graph successor loop scaffold (in progress 2026-03-26)
+## Task 104 global non-cyclic-graph settlement and automatic iso-recursive inference loop scaffold (in progress 2026-03-26)
 
 - Completed:
-  - completed the bounded same-lane retained-child stable-visible-persistence
-    successor loop through accepted rounds `round-089` through `round-093`,
-    preserving the exact frozen pocket as
-    `admitted but not reconstruction-visible / blocker debt` and recording
-    the bounded successor decision
+  - completed the bounded same-lane retained-child public-output continuity
+    vs `non-cyclic-graph` successor loop through accepted rounds
+    `round-094` through `round-098`, ending with the exact-pocket outcome
     `blocker debt remains within the current architecture`;
-  - selected the exact next bounded question for automatic
-    iso-recursive-inference progress: whether the same frozen pocket's
-    authoritative public-output collapse can be repaired inside the current
-    architecture or now specifically forces reopening `non-cyclic-graph`;
+  - selected the next repo-level question for automatic
+    iso-recursive-inference progress: whether representative
+    production-surface evidence across the intended family matrix keeps
+    `non-cyclic-graph` globally or reopens that architecture question;
+  - scaffolded a fresh revisioned roadmap bundle under
+    `orchestrator/roadmaps/2026-03-26-01-global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-roadmap/rev-001/`,
+    advanced the live `orchestrator/state.json` pointer to that family, and
+    retuned the repo-local orchestrator role agents so the same roadmap
+    family continues directly into implementation, hardening, and
+    capability-claim work if item `5` records `non-cyclic-graph = keep`.
+- Rolling priorities (next):
+  1. Start `round-099` and execute roadmap item `1`, freezing the global
+     settlement contract and unresolved family evidence ledger.
+  2. Keep the live subject on repo-level production-surface settlement
+     evidence for representative `P1` through `P6` plus bounded `N1` /
+     `N2` / `N6` until item `5`.
+  3. Treat accepted strategic items `2`, `5`, `6`, and `7`, together with
+     accepted rounds `round-094` through `round-098`, as predecessor
+     evidence only; do not reinterpret them as global settlement or
+     production implementation clearance.
+  4. If item `5` records `non-cyclic-graph = keep`, continue in the same
+     roadmap family into items `6` through `8`; if it records reopen, follow
+     a later same-family roadmap revision instead of silently continuing
+     implementation.
+
+## Task 103 same-lane retained-child public-output continuity vs non-cyclic-graph successor loop scaffold (completed 2026-03-26)
+
+- Completed:
   - scaffolded a fresh revisioned roadmap bundle under
     `orchestrator/roadmaps/2026-03-26-00-same-lane-retained-child-public-output-vs-non-cyclic-graph-successor-orchestrator-roadmap/rev-001/`,
     advanced the live `orchestrator/state.json` pointer to that family, and
-    retuned the repo-local orchestrator role agents for the new bounded
-    successor question.
-- Rolling priorities (next):
-  1. Start `round-094` and execute roadmap item `1`, freezing the exact
-     public-output continuity case and review ledger for the same frozen
-     same-lane retained-child pocket.
-  2. Keep the live subject fixed to the exact same-lane retained-child
-     `sameLaneLocalRetainedChildTarget -> keepTargetFinal -> targetC` pocket
-     and its authoritative public-output continuity question until an
-     accepted roadmap item explicitly changes it.
-  3. Preserve the inherited explicit-only / non-equi-recursive /
-     non-cyclic-graph / no-second-interface / no-fallback boundary unless a
-     later accepted decision explicitly changes it.
-  4. Treat accepted strategic items `2`, `5`, `6`, and `7`, plus accepted
-     rounds `round-089` through `round-093`, as bounded predecessor evidence
-     only; do not reinterpret them as clearance for the non-local alias-bound
-     family, nested-`forall` success, or a broad automatic-recursive-inference
-     claim.
+    retuned the repo-local orchestrator role agents for the exact-pocket
+    successor question;
+  - completed that bounded exact-pocket successor loop through accepted
+    rounds `round-094` through `round-098`, freezing the same-lane
+    retained-child public-output continuity case, localizing the exact
+    authoritative-path breakpoint, confirming the unchanged authoritative
+    collapse, revalidating the frozen pocket end to end, and recording the
+    bounded architecture-pressure outcome
+    `blocker debt remains within the current architecture`, not
+    `reopen the non-cyclic-graph revision question`;
+  - scaffolded a fresh revisioned roadmap bundle under
+    `orchestrator/roadmaps/2026-03-26-01-global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-roadmap/rev-001/`
+    as the next repo-level successor family after that bounded result.
 
 ## Task 102 same-lane retained-child stable-visible-persistence successor loop scaffold (completed 2026-03-26)
 

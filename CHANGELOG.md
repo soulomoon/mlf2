@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Completed the bounded same-lane retained-child public-output continuity vs
+  `non-cyclic-graph` successor loop through accepted rounds `round-094`
+  through `round-098`, ending with the exact-pocket outcome
+  `blocker debt remains within the current architecture`; then scaffolded a
+  fresh repo-level settlement-and-implementation control plane under
+  `2026-03-26-01-global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-roadmap`
+  so the same roadmap family can continue directly into production
+  implementation once the global settlement gate keeps
+  `non-cyclic-graph`.
 - Completed the bounded same-lane retained-child stable-visible-persistence
   successor loop through accepted rounds `round-089` through `round-093`,
   clearing the exact Phase 6 elaboration breakpoint, freezing the exact
