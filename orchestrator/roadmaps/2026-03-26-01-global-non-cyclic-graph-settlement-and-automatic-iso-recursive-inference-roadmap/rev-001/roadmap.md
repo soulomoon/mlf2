@@ -68,29 +68,39 @@
    `round-094` through `round-098` remain exact-pocket predecessor evidence
    only, not global settlement by themselves.
 
-2. [pending] Produce the bounded production-surface settlement evidence slice for `C1`, `C2`, and `C5`
+2. [done] Produce the bounded production-surface settlement evidence slice for `C1`, `C2`, and `C5`
    Depends on: item 1
-   Completion notes: produce reviewable settlement evidence for the frozen
-   `C1` non-local propagation, `C2` retained-child owner-local placement, and
-   `C5` binder-sensitive / owner-sensitive placement cases on the existing
+   Completion notes: accepted `round-100` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-c1-c2-c5-production-surface-settlement-evidence-slice.md`.
+   That artifact reran the frozen `C1` non-local propagation,
+   `C2` retained-child owner-local placement, and `C5`
+   binder-sensitive / owner-sensitive placement rows on the existing
    solver -> elaboration -> reconstruction -> internal/public output
-   surfaces. Classify each case honestly against item `1`'s frozen ledger for
-   `P2`, `P3`, and `P4`: `stable visible persistence`,
-   `admitted but not reconstruction-visible / blocker debt`, or
-   `fail-closed rejection`. This item is settlement-evidence only. It must
-   not claim repo-level settlement and must not widen into cyclic search,
-   multi-SCC search, second interfaces, fallback paths, or broad production
-   implementation.
+   surfaces and kept all three rows at
+   `admitted but not reconstruction-visible / blocker debt`.
+   It preserved the exact family mapping for `P2`, `P3`, and `P4`,
+   kept `C5` as the same exact `C2` pocket rather than a second packet,
+   and did not widen into repo-level settlement, cyclic search,
+   multi-SCC search, second interfaces, fallback paths, or
+   production implementation.
 
-3. [pending] Implement the minimum production-surface acyclic proof slices for polymorphism and reconstruction-visible output families
+3. [pending] Produce the bounded production-surface settlement evidence slice for `C3` nested-`forall` pressure and `C7` output-surface continuity
    Depends on: items 1, 2
-   Completion notes: land only the minimum docs / code / test changes needed
-   to produce representative production-surface evidence for the remaining
-   unresolved polymorphism and output-surface families inside the inherited
-   acyclic model, especially `P5` nested-`forall` pressure and `P6`
-   reconstruction-visible public-output continuity. The output must prove or
-   refute those families on the existing pipeline surfaces rather than on a
-   solver-only or helper-only path.
+   Completion notes: produce one reviewable settlement-evidence slice for the
+   remaining unresolved `P5 polymorphism-nested-forall` and
+   `P6 reconstruction-visible-output` rows on the existing
+   solver -> elaboration -> reconstruction -> internal/public output
+   surfaces. Use `C3` nested-`forall` / quantified-crossing pressure and
+   `C7` reconstruction-heavy output-surface pressure as the controlling
+   cases, with `C7` staying tied to the strongest same-lane retained-child
+   route rather than introducing a new family. Reconfirm whether `C3`
+   remains `fail-closed rejection` under the unchanged owner / binder and
+   quantified-boundary guard, and whether `C7` reaches
+   `stable visible persistence` or remains
+   `admitted but not reconstruction-visible / blocker debt`. This item is
+   settlement-evidence only. It must not widen into the representative
+   campaign, item `5` global settlement, cyclic search, multi-SCC search,
+   second interfaces, fallback paths, or production implementation.
 
 4. [pending] Run the representative end-to-end settlement campaign across the family matrix
    Depends on: items 1, 2, 3
