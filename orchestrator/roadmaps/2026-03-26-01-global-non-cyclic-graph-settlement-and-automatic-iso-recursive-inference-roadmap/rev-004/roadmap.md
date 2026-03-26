@@ -39,7 +39,7 @@
 
 ## Items
 
-1. [pending] Freeze the exact rev-004 post-amendment settlement surface and successor boundary
+1. [done] Freeze the exact rev-004 post-amendment settlement surface and successor boundary
    Depends on:
    Completion notes: complete when an accepted docs-only artifact freezes the
    exact same-pocket post-amendment settlement scope for rev-004 only:
