@@ -92,17 +92,23 @@
    broader family search, multi-SCC search, second interfaces, fallback
    widening, and production implementation.
 
-3. [pending] Establish the safety and acceptance contract for the selected reopened subject
+3. [done] Establish the safety and acceptance contract for the selected reopened subject
    Depends on: item 2
-   Completion notes: complete when an accepted docs-only artifact defines
-   the evidence bar for the selected reopened subject, including what would
-   count as:
+   Completion notes: accepted `round-106` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-safety-and-acceptance-contract.md`
+   with authoritative review in
+   `orchestrator/rounds/round-106/review-record.json`. That docs-only
+   contract artifact defined exactly three lawful outcome bars for the one
+   selected same-lane `C2` / `C5` / `C7` pocket only:
    `acyclic still sufficient`,
-   `single-component cyclic-structure successor lane justified`, or
-   `stop without opening an architecture-amendment lane`. The contract must
-   preserve `iso-recursive = keep`, `non-equi-recursive = keep`, and
-   `no-fallback = keep`, and must keep multi-SCC search, second interfaces,
-   fallback behavior, and production implementation blocked.
+   `single-component cyclic-structure successor lane justified`, and
+   `stop without opening an architecture-amendment lane`.
+   It preserved `iso-recursive = keep`,
+   `non-equi-recursive = keep`, and `no-fallback = keep`; kept
+   multi-SCC search, second interfaces, fallback widening, and production
+   implementation blocked; failed closed on subject drift or broadened
+   scope; and explicitly deferred exact audit binding to item `4` and the
+   lane-open-or-stop decision to item `5`.
 
 4. [pending] Bind the exact architecture-pressure audit target and evaluation surface for the selected subject
    Depends on: item 3
