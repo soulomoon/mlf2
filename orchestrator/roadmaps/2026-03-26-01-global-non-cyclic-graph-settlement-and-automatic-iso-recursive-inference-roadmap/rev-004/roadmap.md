@@ -58,7 +58,7 @@
    The artifact must preserve the exact-pocket-only boundary and must not
    widen into broad same-family or repo-level success claims.
 
-3. [pending] Validate the bounded post-amendment settlement on the same exact pocket surface
+3. [done] Validate the bounded post-amendment settlement on the same exact pocket surface
    Depends on: item 2
    Completion notes: complete when an accepted validation artifact proves the
    new rev-004 settlement surfaces stay aligned with the accepted rev-003
