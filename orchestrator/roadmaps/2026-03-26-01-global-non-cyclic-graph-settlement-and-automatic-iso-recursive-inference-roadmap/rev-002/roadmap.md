@@ -75,16 +75,22 @@
    second interfaces, fallback widening, and production implementation
    blocked.
 
-2. [pending] Select the exact live reopened subject inside the candidate boundary
+2. [done] Select the exact live reopened subject inside the candidate boundary
    Depends on: item 1
-   Completion notes: complete when an accepted docs-only artifact chooses
-   exactly one next live architecture-pressure subject inside the frozen
-   candidate boundary, grounded in the accepted representative matrix. The
-   chosen subject must stay concrete and bounded to the strongest admitted
-   retained-child/output continuity route, with non-local `C1` continuity as
-   contrast context only unless the accepted selection says otherwise. This
-   item must fail closed rather than selecting multiple subjects or
-   reopening broad family search.
+   Completion notes: accepted `round-105` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-reopened-subject-selection.md`
+   with authoritative review in
+   `orchestrator/rounds/round-105/review-record.json`. That docs-only
+   artifact chose exactly one next live architecture-pressure subject inside
+   the frozen candidate boundary:
+   the same exact same-lane retained-child / public-output continuity
+   pocket already carried by accepted rows `C2`, `C5`, and `C7`, with
+   non-local `C1` continuity retained only as contrast context. It froze
+   that subject in bounded continuity terms as one family, one anchor, one
+   owner-local frame, one route, one clear-boundary status, and one exact
+   packet, and it failed closed on multiple subjects, multiple packets,
+   broader family search, multi-SCC search, second interfaces, fallback
+   widening, and production implementation.
 
 3. [pending] Establish the safety and acceptance contract for the selected reopened subject
    Depends on: item 2
