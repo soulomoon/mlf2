@@ -50,7 +50,7 @@
    immutability. This item may not authorize code changes, second packets,
    second interfaces, or broad capability narration.
 
-2. [pending] Publish one bounded same-pocket post-amendment settlement ledger
+2. [done] Publish one bounded same-pocket post-amendment settlement ledger
    Depends on: item 1
    Completion notes: complete when an accepted docs-only artifact records the
    current exact-pocket post-amendment read on new bounded settlement
