@@ -112,18 +112,25 @@
    second interfaces, fallback widening, and broad capability claims
    blocked; and made rev-003 item `3` the next lawful move.
 
-3. [pending] Validate the bounded amendment on the frozen same-pocket evidence surface
+3. [done] Validate the bounded amendment on the frozen same-pocket evidence surface
    Depends on: item 2
-   Completion notes: complete when an accepted validation artifact reruns
-   only the exact `C2` / `C5` / `C7` rows, the same exact packet, the exact
-   command set, and the exact six review-visible surfaces frozen by
-   accepted rev-002 item `4`, and then proves or honestly fail-closes
-   whether the bounded implementation preserves helper-visible continuity,
-   changes authoritative public output on the same one public-entrypoint
-   chain as intended, preserves the clear-boundary and fail-closed guards,
-   and avoids subject drift or broader family claims. This item may not
-   widen into a second packet, a second interface, multi-SCC search,
-   fallback widening, hardening, or repo-level success narration.
+   Completion notes: accepted `round-111` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-authoritative-handoff-bounded-amendment-frozen-same-pocket-evidence-surface-validation.md`
+   with authoritative review in
+   `orchestrator/rounds/round-111/review-record.json`. That accepted
+   validation reran only the exact `C2` / `C5` / `C7` rows, the same exact
+   packet, the exact command set, and the exact six review-visible surfaces
+   frozen by accepted rev-002 item `4`, and it validated the bounded
+   amendment on that same frozen pocket only: helper-visible/internal
+   recursive continuity remained present, both authoritative public
+   entrypoints now carried bounded recursive structure on the same one
+   public-entrypoint chain, the same clear-boundary and fail-closed guards
+   remained green, and no subject drift or broader family claim was
+   admitted. The accepted result preserved `iso-recursive = keep`,
+   `non-equi-recursive = keep`, and `no-fallback = keep`; kept multi-SCC
+   search, second interfaces, fallback widening, hardening, rollout, and
+   repo-level capability claims blocked; and made rev-003 item `4` the next
+   lawful move.
 
 4. [pending] Decide the exact-pocket post-amendment handoff
    Depends on: items 1, 2, 3
