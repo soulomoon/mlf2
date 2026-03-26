@@ -110,15 +110,19 @@
    scope; and explicitly deferred exact audit binding to item `4` and the
    lane-open-or-stop decision to item `5`.
 
-4. [pending] Bind the exact architecture-pressure audit target and evaluation surface for the selected subject
+4. [done] Bind the exact architecture-pressure audit target and evaluation surface for the selected subject
    Depends on: item 3
-   Completion notes: complete when an accepted docs-only artifact freezes
-   the exact accepted rows, packets, modules, and review-visible output
-   surfaces that later work may inspect for the selected reopened subject.
-   The bind must stay within one bounded same-family successor lane, must
-   name exact continuity obligations carried forward from the accepted
-   `C2` / `C5` / `C7` chain and any accepted `C1` contrast use, and must
-   not authorize code changes by itself.
+   Completion notes: accepted `round-107` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-architecture-pressure-audit-target-and-evaluation-surface-bind.md`
+   with authoritative review in
+   `orchestrator/rounds/round-107/review-record.json`. That docs-only bind
+   artifact froze the exact accepted rows `C2`, `C5`, and `C7`, the exact
+   packet, the exact source/test module set, the exact command set, and the
+   exact six review-visible output surfaces for the one selected same-lane
+   pocket only. It kept any `C1` mention contrast-only, preserved
+   `iso-recursive = keep`, `non-equi-recursive = keep`, and `no-fallback =
+   keep`, and explicitly deferred the final lane-open-or-stop decision to
+   item `5` without authorizing code changes by implication.
 
 5. [pending] Decide whether to open one bounded architecture-amendment lane or stop
    Depends on: item 4
