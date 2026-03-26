@@ -39,7 +39,11 @@ import MLF.Elab.PipelineError
     )
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
-import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded, substInTerm)
+import MLF.Elab.TermClosure
+    ( closeTermWithSchemeSubstIfNeeded
+    , preserveRetainedChildAuthoritativeResult
+    , substInTerm
+    )
 import MLF.Elab.Run.Annotation (annNode, redirectAndCanonicalizeAnn)
 import MLF.Elab.Run.Generalize
     ( constraintForGeneralization
@@ -164,7 +168,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
                 c1
                 (prRedirects pres)
                 traceCfg
-        termClosed =
+        termClosed0 =
             case typeCheck termSubst of
                 Right ty | null (freeTypeVarsType ty) -> termSubst
                 Right ty ->
@@ -179,6 +183,10 @@ runPipelineElabWith traceCfg genConstraints expr = do
                                 in closeTermWithSchemeSubstIfNeeded IntMap.empty freeScheme termSubst
                         _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
                 Left _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
+        termClosed =
+            case preserveRetainedChildAuthoritativeResult termClosed0 of
+                Just termAdjusted -> termAdjusted
+                Nothing -> termClosed0
     let checkedAuthoritative = do
             tyChecked <- fromTypeCheckError (typeCheck termClosed)
             pure (termClosed, tyChecked)
