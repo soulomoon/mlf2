@@ -84,33 +84,43 @@
    multi-SCC search, second interfaces, fallback paths, or
    production implementation.
 
-3. [pending] Produce the bounded production-surface settlement evidence slice for `C3` nested-`forall` pressure and `C7` output-surface continuity
+3. [done] Produce the bounded production-surface settlement evidence slice for `C3` nested-`forall` pressure and `C7` output-surface continuity
    Depends on: items 1, 2
-   Completion notes: produce one reviewable settlement-evidence slice for the
-   remaining unresolved `P5 polymorphism-nested-forall` and
-   `P6 reconstruction-visible-output` rows on the existing
+   Completion notes: accepted `round-101` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-c3-c7-production-surface-settlement-evidence-slice.md`.
+   That artifact reran the bounded `C3` nested-`forall` /
+   quantified-crossing pressure and the exact same-lane `C7`
+   reconstruction-heavy output-surface pressure on the existing
    solver -> elaboration -> reconstruction -> internal/public output
-   surfaces. Use `C3` nested-`forall` / quantified-crossing pressure and
-   `C7` reconstruction-heavy output-surface pressure as the controlling
-   cases, with `C7` staying tied to the strongest same-lane retained-child
-   route rather than introducing a new family. Reconfirm whether `C3`
-   remains `fail-closed rejection` under the unchanged owner / binder and
-   quantified-boundary guard, and whether `C7` reaches
-   `stable visible persistence` or remains
-   `admitted but not reconstruction-visible / blocker debt`. This item is
-   settlement-evidence only. It must not widen into the representative
-   campaign, item `5` global settlement, cyclic search, multi-SCC search,
-   second interfaces, fallback paths, or production implementation.
+   surfaces, kept `C3` at `fail-closed rejection` under the unchanged
+   owner / binder and quantified-boundary guard, and kept `C7` at
+   `admitted but not reconstruction-visible / blocker debt` because the
+   helper-visible/internal recursive structure still collapses to
+   `forall identity` on both authoritative public entrypoints. It preserved
+   `P5` as reject-side only, `P6` as unresolved blocker debt, and the
+   current matrix tally at zero `stable visible persistence` rows, without
+   widening into the representative campaign, item `5` global settlement,
+   cyclic search, multi-SCC search, second interfaces, fallback paths, or
+   production implementation.
 
 4. [pending] Run the representative end-to-end settlement campaign across the family matrix
    Depends on: items 1, 2, 3
-   Completion notes: rerun the representative corpus and reviewable evidence
-   chain across the intended positive families `P1` through `P6` together
-   with the required negative or bounded families, especially `N1`, `N2`,
-   and `N6`, and record whether any claimed `N4` pressure is truly out of
-   scope or actually required by the intended positive set. The output must
-   stay honest about any remaining blocker debt, fail-closed behavior, or
-   architecture pressure.
+   Completion notes: starting from the accepted item-2 and item-3 row reads,
+   rerun the representative corpus and reviewable evidence chain across the
+   intended positive families `P1` through `P6` together with the required
+   negative or bounded families, especially `N1`, `N2`, and `N6`, and
+   record whether any claimed `N4` pressure is truly out of scope or
+   actually required by the intended positive set. Preserve the frozen
+   pre-campaign truths unless the reruns themselves prove otherwise on the
+   same existing production surfaces: `P5` is still reject-side only
+   through `C3`, `P6` still has only one bounded same-lane blocker-debt
+   route through `C7`, and the matrix currently has zero
+   `stable visible persistence` rows. This item is representative replay
+   only. It must stay honest about any remaining blocker debt,
+   fail-closed behavior, or architecture pressure, and it must not itself
+   decide item `5`, revise the architecture, or widen into cyclic search,
+   multi-SCC search, second interfaces, fallback paths, or production
+   implementation.
 
 5. [pending] Decide the global non-cyclic-graph settlement gate
    Depends on: items 1, 2, 3, 4
