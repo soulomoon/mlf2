@@ -55,28 +55,32 @@
 
 ## Items
 
-1. [pending] Freeze the global non-cyclic-graph settlement contract and unresolved family evidence ledger
+1. [done] Freeze the global non-cyclic-graph settlement contract and unresolved family evidence ledger
    Depends on:
-   Completion notes: define the exact acceptance bar for
+   Completion notes: accepted `round-099` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-settlement-contract-and-unresolved-family-evidence-ledger.md`.
+   That artifact freezes the exact acceptance bar for
    `non-cyclic-graph = keep` versus
-   `reopen the non-cyclic-graph revision question`, freeze the current
-   unresolved family ledger across representative `P1` through `P6` and the
-   required negative or bounded families, and name the accepted predecessor
-   evidence that later rounds must preserve without overclaiming. The output
-   must make explicit that accepted rounds `round-094` through `round-098`
-   are exact-pocket predecessor evidence only, not global settlement by
-   themselves.
+   `reopen the non-cyclic-graph revision question`, freezes the unresolved
+   representative-family ledger across `P1` through `P6` and the required
+   negative or bounded families, and preserves the accepted predecessor
+   evidence without overclaiming. It also makes explicit that accepted rounds
+   `round-094` through `round-098` remain exact-pocket predecessor evidence
+   only, not global settlement by themselves.
 
-2. [pending] Implement the minimum production-surface acyclic proof slices for propagation and placement families
+2. [pending] Produce the bounded production-surface settlement evidence slice for `C1`, `C2`, and `C5`
    Depends on: item 1
-   Completion notes: land only the minimum docs / code / test changes needed
-   to produce representative production-surface evidence for the current
-   unresolved propagation and placement families inside the inherited acyclic
-   model, especially `P2` non-local propagation, `P3` owner-sensitive
-   placement, and `P4` binder-sensitive placement. The output must stay on
-   the existing pipeline and reviewable output surfaces and must not widen
-   into cyclic search, multi-SCC search, second interfaces, or fallback
-   paths.
+   Completion notes: produce reviewable settlement evidence for the frozen
+   `C1` non-local propagation, `C2` retained-child owner-local placement, and
+   `C5` binder-sensitive / owner-sensitive placement cases on the existing
+   solver -> elaboration -> reconstruction -> internal/public output
+   surfaces. Classify each case honestly against item `1`'s frozen ledger for
+   `P2`, `P3`, and `P4`: `stable visible persistence`,
+   `admitted but not reconstruction-visible / blocker debt`, or
+   `fail-closed rejection`. This item is settlement-evidence only. It must
+   not claim repo-level settlement and must not widen into cyclic search,
+   multi-SCC search, second interfaces, fallback paths, or broad production
+   implementation.
 
 3. [pending] Implement the minimum production-surface acyclic proof slices for polymorphism and reconstruction-visible output families
    Depends on: items 1, 2
