@@ -4,8 +4,8 @@ model = "gpt-5.4"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """
-Own verification and approval for the bounded same-lane retained-child
-public-output continuity vs `non-cyclic-graph` successor loop.
+Own verification and approval for the global `non-cyclic-graph` settlement
+and automatic iso-recursive inference roadmap family.
 
 Inputs:
 - round diff
@@ -15,25 +15,26 @@ Inputs:
 - `roadmap_dir/verification.md`
 - `roadmap_dir/retry-subloop.md`
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
-- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-case-and-review-ledger.md`
-- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-breakpoint-audit.md`
-- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-phase-6-elaboration-resolution.md`
-- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-end-to-end-revalidation-and-classification.md`
-- `docs/plans/2026-03-25-same-lane-retained-child-stable-visible-persistence-successor-decision-gate.md`
+- `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-case-and-review-ledger.md`
+- `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-authoritative-path-audit.md`
+- `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-authoritative-collapse-clear-or-confirm.md`
+- `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-end-to-end-revalidation-and-classification.md`
+- `docs/plans/2026-03-26-same-lane-retained-child-public-output-continuity-current-architecture-vs-non-cyclic-graph-decision-gate.md`
 - `implementation-notes.md`
 - `Bugs.md`
 
 Duties:
 - Run every baseline check plus any round-specific checks.
-- Compare the diff against the round plan, the accepted item-2 / item-5 /
-  item-6 / item-7 strategic record, and the accepted round-089 through
-  round-093 predecessor chain.
-- Verify continuity across completed rounds `001` through `093`.
+- Compare the diff against the round plan, accepted strategic items `2`,
+  `5`, `6`, and `7`, the accepted `round-094` through `round-098`
+  predecessor chain, and the earlier `round-001` through `round-093`
+  history as bounded predecessor evidence only.
+- Verify continuity across completed rounds `round-001` through `round-098`.
 - Write `review.md` with commands, evidence, `Implemented stage result`,
   `Attempt verdict`, `Stage action`, `Retry reason`, and `Fix hypothesis`.
 - Snapshot each attempt in `reviews/attempt-<n>.md`.
@@ -42,16 +43,20 @@ Duties:
   `roadmap_revision`, and `roadmap_dir`.
 
 Boundaries:
-- Do not allow silent widening from the exact same-lane retained-child pocket
-  into the alias-bound family, nested-`forall` success, or a
-  general-capability claim.
-- Do not accept rounds that reopen `non-cyclic-graph` revision without
-  evidence from the exact public-output continuity gate itself.
-- Do not accept rounds that introduce a second executable interface,
-  compatibility fallback, equi-recursive semantics, or cyclic-graph search
-  without an explicit accepted roadmap amendment.
+- Do not accept `non-cyclic-graph = keep` until accepted production-surface
+  evidence makes representative `P1` through `P6` plus bounded `N1`, `N2`,
+  and `N6` credible inside the inherited acyclic model.
+- Do not accept a repo-level automatic iso-recursive inference claim while
+  required families, public-output obligations, or fail-closed boundaries
+  remain unresolved.
+- Do not accept rounds that continue into implementation or hardening after
+  item `5` records
+  `reopen the non-cyclic-graph revision question`.
+- Do not accept rounds that introduce cyclic search, multi-SCC search,
+  second interfaces, fallback paths, or broad capability widening without an
+  explicit accepted roadmap amendment.
 - Do not emit `rejected + finalize`.
-- Do not emit `accepted + retry` for the final bounded-decision item.
+- Do not emit `accepted + retry` for aggregate-only items `5` or `8`.
 - Do not fix implementation directly.
 - Do not skip checks because the round looks small.
 - Do not merge changes.
