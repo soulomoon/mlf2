@@ -4,7 +4,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
-## Task 104 global non-cyclic-graph settlement and automatic iso-recursive inference loop scaffold (in progress 2026-03-26)
+## Task 104 global non-cyclic-graph settlement and automatic iso-recursive inference loop scaffold (in progress 2026-03-27)
 
 - Completed:
   - completed the bounded same-lane retained-child public-output continuity
@@ -21,20 +21,34 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     retuned the repo-local orchestrator role agents so the same roadmap
     family continues directly into implementation, hardening, and
     capability-claim work if item `5` records `non-cyclic-graph = keep`.
+  - completed that repo-level roadmap family through accepted
+    `rev-004` / `round-116`, including the pre-amendment representative
+    matrix, the March 26 global reopen gate, the exact-pocket same-lane
+    authoritative public-output repair, the rev-004 bounded settlement
+    surfaces, and the exact-pocket handoff outcome
+    `stop after bounded settlement`.
+  - added bounded research harnesses for the remaining repo-scope blocker
+    reads:
+    `test/Research/C1AuthoritativeSurfaceSpec.hs` confirms `C1` still ends
+    visibly non-recursive on authoritative surfaces, and
+    `test/Research/P5ClearBoundarySpec.hs` confirms the clear-boundary control
+    stays recursive while the nested-`forall` contrast still fails closed.
 - Rolling priorities (next):
-  1. Start `round-099` and execute roadmap item `1`, freezing the global
-     settlement contract and unresolved family evidence ledger.
-  2. Keep the live subject on repo-level production-surface settlement
-     evidence for representative `P1` through `P6` plus bounded `N1` /
-     `N2` / `N6` until item `5`.
-  3. Treat accepted strategic items `2`, `5`, `6`, and `7`, together with
-     accepted rounds `round-094` through `round-098`, as predecessor
-     evidence only; do not reinterpret them as global settlement or
-     production implementation clearance.
-  4. If item `5` records `non-cyclic-graph = keep`, continue in the same
-     roadmap family into items `6` through `8`; if it records reopen, follow
-     a later same-family roadmap revision instead of silently continuing
-     implementation.
+  1. Freeze one post-`rev-004` repo-scope successor boundary that keeps the
+     March 25 / March 26 aggregate matrix/gate artifacts immutable as
+     historical evidence and treats the current refresh packet as
+     non-authoritative input only.
+  2. Publish one authoritative refreshed representative matrix that carries
+     forward the accepted repaired exact-pocket `C2` / `C5` / `C7` read and
+     the bounded `C1` / `P5` probe results.
+  3. Re-run the repo-scope decision honestly on that refreshed matrix:
+     `keep` is still unearned, and the old March 26 reopen rationale is now
+     stale unless new evidence shows the remaining `C1` / `P5` blockers
+     really force a boundary revision.
+  4. Keep the narrowed remaining blocker set explicit:
+     `P1` local unannotated automatic success,
+     `P2` non-local visibility through `C1`, and
+     `P5` nested-`forall` interaction through `C3`.
 
 ## Task 103 same-lane retained-child public-output continuity vs non-cyclic-graph successor loop scaffold (completed 2026-03-26)
 
