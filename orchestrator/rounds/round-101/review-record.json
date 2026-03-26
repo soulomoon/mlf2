@@ -1,0 +1,33 @@
+{
+  "subject_id": "GLOBAL-NON-CYCLIC-GRAPH-SETTLEMENT-AND-AUTOMATIC-ISO-RECURSIVE-INFERENCE",
+  "scenario_id": "global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-control-plane-v1",
+  "stage_id": "item-3",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 1,
+  "authoritative_result": "pass",
+  "artifact_path": "docs/plans/2026-03-26-global-non-cyclic-graph-c3-c7-production-surface-settlement-evidence-slice.md",
+  "review_snapshot": "orchestrator/rounds/round-101/reviews/attempt-1.md",
+  "checks": {
+    "ITEM3-SETTLEMENT-SLICE-CONTRACT-AND-FAMILY-MAPPING": "pass",
+    "ITEM3-FOCUSED-EVIDENCE-RERUNS": "pass",
+    "ITEM3-IMPLEMENTATION-NOTES-CONTINUITY": "pass",
+    "ITEM3-PLAN-ALIGNMENT": "pass",
+    "ITEM3-PREDECESSOR-CONTINUITY": "pass",
+    "ITEM3-BOUNDARY-CONTINUITY": "pass",
+    "ITEM3-DOCS-ONLY-DIFF-BOUNDARY": "pass",
+    "ITEM3-SKIP-NOTE": "pass",
+    "ITEM3-IMMUTABILITY": "pass",
+    "ITEM3-RETRY-SCHEMA": "pass"
+  },
+  "final_outcome": "global-non-cyclic-graph-c3-c7-production-surface-settlement-slice-keeps-p5-reject-side-and-p6-bounded-as-blocker-debt",
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-26-01-global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-26-01-global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-roadmap/rev-001"
+}
