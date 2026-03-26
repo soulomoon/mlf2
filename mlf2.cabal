@@ -375,6 +375,8 @@ test-suite mlf2-test
                       FrozenParitySpec,
                       PublicSurfaceSpec,
                       RepoGuardSpec,
+                      Research.C1AuthoritativeSurfaceSpec,
+                      Research.P5ClearBoundarySpec,
                       Research.UriR2C1PrototypeP1Spec,
                       PresolutionFacadeSpec,
                       Constraint.SolvedSpec,
