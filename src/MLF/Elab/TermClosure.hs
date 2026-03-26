@@ -3,6 +3,7 @@ module MLF.Elab.TermClosure (
     closeTermWithSchemeSubstIfNeeded,
     alignTermTypeVarsToScheme,
     alignTermTypeVarsToTopTyAbs,
+    preserveRetainedChildAuthoritativeResult,
     substInTerm
 ) where
 
@@ -12,7 +13,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import MLF.Elab.Inst (schemeToType)
-import MLF.Elab.TypeCheck (typeCheck)
+import MLF.Elab.TypeCheck (Env(..), emptyEnv, typeCheck, typeCheckWithEnv)
 import MLF.Elab.Types
 import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, freshNameLike, substTypeSimple)
 import MLF.Util.Names (parseNameId)
@@ -33,6 +34,51 @@ closeTermWithSchemeSubstIfNeeded subst sch term =
         _ ->
             let termAlignedBody = maybe termSubst id (alignTermTypeVarsToSchemeBody sch' termSubst)
             in wrapTermWithScheme sch' termAlignedBody
+
+preserveRetainedChildAuthoritativeResult :: ElabTerm -> Maybe ElabTerm
+preserveRetainedChildAuthoritativeResult = go emptyEnv
+  where
+    go env term = case term of
+        ELet v sch rhs body
+            | isTrivialRetainedChildBody v body
+            , isForallIdentityScheme sch ->
+                case typeCheckWithEnv env rhs of
+                    Right rhsTy
+                        | hasRecursiveComponent rhsTy ->
+                            Just rhs
+                    _ -> descend env v sch rhs body
+            | otherwise -> descend env v sch rhs body
+        _ -> Nothing
+
+    descend env v sch rhs body =
+        let env' = env { termEnv = Map.insert v (schemeToType sch) (termEnv env) }
+        in fmap (ELet v sch rhs) (go env' body)
+
+isTrivialRetainedChildBody :: String -> ElabTerm -> Bool
+isTrivialRetainedChildBody v body = case body of
+    EVar bodyV -> bodyV == v
+    _ -> False
+
+isForallIdentityScheme :: ElabScheme -> Bool
+isForallIdentityScheme sch = case schemeToType sch of
+    TForall v Nothing body -> body == TVar v
+    _ -> False
+
+hasRecursiveComponent :: ElabType -> Bool
+hasRecursiveComponent ty = case ty of
+    TMu _ _ -> True
+    TArrow dom cod -> hasRecursiveComponent dom || hasRecursiveComponent cod
+    TCon _ args -> any hasRecursiveComponent args
+    TForall _ mb body -> maybe False hasRecursiveBound mb || hasRecursiveComponent body
+    _ -> False
+  where
+    hasRecursiveBound bound = case bound of
+        TArrow dom cod -> hasRecursiveComponent dom || hasRecursiveComponent cod
+        TBase _ -> False
+        TCon _ args -> any hasRecursiveComponent args
+        TForall _ mb body -> maybe False hasRecursiveBound mb || hasRecursiveComponent body
+        TMu _ _ -> True
+        TBottom -> False
 
 wrapTermWithScheme :: ElabScheme -> ElabTerm -> ElabTerm
 wrapTermWithScheme (Forall binds _) term =

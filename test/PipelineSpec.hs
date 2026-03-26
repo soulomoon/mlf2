@@ -1588,11 +1588,25 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     expr =
                         ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
                             (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
-                    expectedTy = TForall "a" Nothing (TVar "a")
-                (_uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-                (_checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-                uncheckedTy `shouldBe` expectedTy
-                checkedTy `shouldBe` expectedTy
+                    collapsedTy = TForall "a" Nothing (TVar "a")
+                (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+                when (uncheckedTy == collapsedTy) $
+                    expectationFailure
+                        ( "unchecked term collapsed: "
+                            ++ show uncheckedTerm
+                            ++ " :: "
+                            ++ show uncheckedTy
+                        )
+                when (checkedTy == collapsedTy) $
+                    expectationFailure
+                        ( "checked term collapsed: "
+                            ++ show checkedTerm
+                            ++ " :: "
+                            ++ show checkedTy
+                        )
+                containsMu uncheckedTy `shouldBe` True
+                containsMu checkedTy `shouldBe` True
 
             it "keeps retained-child lookup bounded to the same local TypeRef lane" $ do
                 fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
