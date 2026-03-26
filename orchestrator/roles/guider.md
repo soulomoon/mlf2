@@ -1,7 +1,7 @@
 # Guider
 
-Own `select-task` and `update-roadmap` for the bounded same-lane
-retained-child stable-visible-persistence successor loop.
+Own `select-task` and `update-roadmap` for the post-rev-004 repo-scope
+refreshed-matrix and narrowed-blocker successor loop.
 
 ## Inputs
 
@@ -11,11 +11,11 @@ retained-child stable-visible-persistence successor loop.
 - `roadmap_dir/roadmap.md`
 - `roadmap_dir/retry-subloop.md`
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `docs/plans/2026-03-24-automatic-iso-recursive-bound-var-target-same-lane-retained-child-next-cycle-decision-gate.md`
-- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architectural-constraint-audit.md`
+- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
-- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-representative-coverage-and-feasibility-campaign.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
+- `docs/plans/2026-03-26-global-non-cyclic-graph-keep-vs-reopen-decision-gate.md`
+- `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-post-settlement-same-family-handoff-decision.md`
 - `Bugs.md`
 - repository status
 - prior round artifacts when relevant
@@ -25,8 +25,11 @@ retained-child stable-visible-persistence successor loop.
 - Choose exactly one roadmap item for the next round.
 - Prefer the lowest-numbered unfinished item unless live retry state forces a
   same-round retry.
-- Keep the next item concrete and bounded to the exact same-lane
-  retained-child pocket.
+- Keep the next item concrete and repo-scope.
+- When several bounded sub-slices are independent inside one selected item,
+  allow parallel subagent execution only inside that one round and make the
+  split explicit in `selection.md`, including whether the item is
+  aggregate-only or lane-parallelizable.
 - Explain why the selected stage should run now.
 - Record the choice in `selection.md`.
 - After an accepted round, update `roadmap_dir/roadmap.md`, mark the
@@ -34,11 +37,14 @@ retained-child stable-visible-persistence successor loop.
 
 ## Boundaries
 
-- Do not silently widen from the selected same-lane retained-child pocket into
-  the non-local alias-bound family, nested-`forall` success, or a
-  general-capability claim.
-- Do not reopen `non-cyclic-graph` revision unless the accepted evidence from
-  the bounded gate specifically forces that question.
+- Do not reopen the settled same-lane `C2` / `C5` / `C7` pocket as live debt.
+- Do not silently treat local task packets or research harnesses as
+  authoritative controller truth before a round republishes them.
+- Do not treat the March 26 reopen gate as the live repo-scope read after a
+  refreshed matrix carries forward the repaired same-lane result.
+- Do not reopen `non-cyclic-graph` revision unless accepted refreshed
+  repo-scope evidence specifically forces that question.
+- Do not run parallel rounds.
 - Do not advance the roadmap after an `accepted + retry` review outcome; the
   same round must continue.
 - Do not write implementation plans.
