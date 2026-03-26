@@ -1,0 +1,32 @@
+{
+  "subject_id": "GLOBAL-NON-CYCLIC-GRAPH-SETTLEMENT-AND-AUTOMATIC-ISO-RECURSIVE-INFERENCE",
+  "scenario_id": "global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-control-plane-v1",
+  "stage_id": "item-5",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 1,
+  "authoritative_result": "pass",
+  "artifact_path": "docs/plans/2026-03-26-global-non-cyclic-graph-keep-vs-reopen-decision-gate.md",
+  "review_snapshot": "orchestrator/rounds/round-103/reviews/attempt-1.md",
+  "checks": {
+    "ITEM5-AGGREGATE-DECISION-CONTRACT-AND-PLAN-ALIGNMENT": "pass",
+    "ITEM5-DECISION-LEDGER-CONTINUITY": "pass",
+    "ITEM5-REOPEN-JUSTIFICATION-VS-KEEP-BAR": "pass",
+    "ITEM5-BOUNDARY-AND-BLOCKED-NEXT-STEP": "pass",
+    "ITEM5-DOCS-ONLY-DIFF-BOUNDARY": "pass",
+    "ITEM5-IMPLEMENTATION-NOTES-FORBIDDEN": "pass",
+    "ITEM5-SKIP-NOTE": "pass",
+    "ITEM5-IMMUTABILITY": "pass",
+    "ITEM5-RETRY-SCHEMA": "pass"
+  },
+  "final_outcome": "global-non-cyclic-graph-decision-gate-reopens-non-cyclic-graph-revision-question",
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-26-01-global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-26-01-global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-roadmap/rev-001"
+}
