@@ -132,15 +132,19 @@
    repo-level capability claims blocked; and made rev-003 item `4` the next
    lawful move.
 
-4. [pending] Decide the exact-pocket post-amendment handoff
+4. [done] Decide the exact-pocket post-amendment handoff
    Depends on: items 1, 2, 3
-   Completion notes: complete when an accepted aggregate artifact records
-   exactly one lawful follow-on outcome for this revision:
-   either publish one later same-family successor revision for any further
-   bounded post-amendment settlement, or stop without broader rollout.
-   This gate must remain exact-pocket-only, preserve
-   `iso-recursive = keep`,
-   `non-equi-recursive = keep`, and `no-fallback = keep`, and must not by
-   implication reopen rev-001 items `6` through `8`, authorize hardening,
-   production rollout, second interfaces, multi-SCC search, fallback
-   widening, or broad capability claims.
+   Completion notes: accepted `round-112` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-post-amendment-handoff-decision.md`
+   with authoritative review in
+   `orchestrator/rounds/round-112/review-record.json`. That accepted
+   aggregate artifact recorded exactly one lawful follow-on outcome for this
+   revision: publish one later same-family successor revision for bounded
+   post-amendment settlement. The accepted result stayed exact-pocket-only,
+   preserved `iso-recursive = keep`,
+   `non-equi-recursive = keep`, and `no-fallback = keep`, kept rev-001
+   items `6` through `8` blocked, and published the rev-004 roadmap bundle
+   at
+   `orchestrator/roadmaps/2026-03-26-01-global-non-cyclic-graph-settlement-and-automatic-iso-recursive-inference-roadmap/rev-004/`.
+   That successor revision remains docs-first and exact-pocket-only and made
+   rev-004 item `1` the next lawful move.
