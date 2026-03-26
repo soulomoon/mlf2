@@ -124,11 +124,18 @@
    keep`, and explicitly deferred the final lane-open-or-stop decision to
    item `5` without authorizing code changes by implication.
 
-5. [pending] Decide whether to open one bounded architecture-amendment lane or stop
+5. [done] Decide whether to open one bounded architecture-amendment lane or stop
    Depends on: item 4
-   Completion notes: complete when an accepted aggregate-only docs artifact
-   records exactly one lawful outcome for this reopened revision:
-   open one bounded same-family architecture-amendment lane for the selected
-   subject, or stop without opening that lane. This item may not silently
-   authorize multi-SCC search, second interfaces, fallback behavior,
-   production implementation, hardening, or repo-level capability claims.
+   Completion notes: accepted `round-108` finalized this item through
+   `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-architecture-amendment-lane-open-or-stop-decision.md`
+   with authoritative review in
+   `orchestrator/rounds/round-108/review-record.json`. That aggregate-only
+   artifact recorded exactly one lawful outcome for this reopened revision:
+   `open one bounded same-family architecture-amendment lane` for the one
+   already-selected same-lane `C2` / `C5` / `C7` pocket only. The accepted
+   result preserved `iso-recursive = keep`,
+   `non-equi-recursive = keep`, and `no-fallback = keep`; kept
+   multi-SCC search, second interfaces, fallback widening, production
+   implementation, hardening, and broad capability claims blocked; and
+   explicitly made the next lawful move the same-family successor revision
+   `rev-003`.
