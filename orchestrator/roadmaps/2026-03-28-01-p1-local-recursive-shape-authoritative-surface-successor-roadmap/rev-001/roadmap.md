@@ -74,39 +74,40 @@
    widening into equi-recursive reasoning, cyclic search, multi-SCC search, a
    second interface, fallback behavior, or unrelated family work.
 
-3. [pending] Publish one post-implementation `P1` settlement surface and exact repo-impact read
+3. [done] Publish one post-implementation `P1` settlement surface and exact repo-impact read
    Item id: `item-3`
    Depends on: `item-1`, `item-2`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-2`
-   Completion notes: complete when an accepted aggregate artifact republishes
-   the exact current `P1` read after item `2`, validates provenance for any
-   cited focused reruns or full-gate evidence, and records whether the exact
-   frozen unannotated local packet now reaches lawful recursive visibility on
-   the authoritative surfaces or remains blocker debt. The artifact must not
-   silently widen one exact-packet result into general `P1` family settlement
-   or repo-level readiness.
+   Completion notes: accepted in `round-126` via
+   `docs/plans/2026-03-28-post-implementation-p1-local-recursive-shape-settlement-surface-and-exact-repo-impact-read.md`,
+   which republishes the exact post-item-2 read for the frozen packet
+   `ELam "x" (EVar "x")`, validates provenance through the accepted item-1
+   freeze, round-125 implementation notes, review, review record, and the
+   strengthened exact-packet regression in `test/PipelineSpec.hs`, and records
+   the exact repo-impact read: the internal fallback route plus both
+   authoritative entrypoints remain `containsMu False`, no lawful recursive
+   carrier was found for the packet inside the frozen writable slice, the
+   inherited architecture remains unchanged, and the result is settled as a
+   bounded fail-closed exact-packet read rather than general `P1` family
+   success or repo-level readiness.
 
-4. [pending] Record one successor gate and immediate handoff after the bounded `P1` lane
+4. [done] Record one successor gate and immediate handoff after the bounded `P1` lane
    Item id: `item-4`
    Depends on: `item-1`, `item-2`, `item-3`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-3`
-   Completion notes: complete when an accepted aggregate artifact records
-   exactly one current outcome and exactly one immediate handoff. Lawful
-   outcomes are:
+   Completion notes: accepted in `round-127` via
+   `docs/plans/2026-03-28-post-p1-local-recursive-shape-successor-gate-and-immediate-handoff-decision.md`,
+   which records exactly one current outcome,
    `exact P1 packet settled within the current architecture`,
-   `continue bounded on P1`,
-   or
-   `reopen the boundary question from P1 evidence`.
-   Lawful handoffs are:
-   stop,
-   open one next bounded current-architecture family after `P1`,
-   or
-   open one explicit boundary-revision family only if the accepted record
-   proves that is necessary. The artifact must keep `C1` settled, keep the
-   same-lane pocket settled, keep `P5` out of scope unless explicitly
-   reopened, preserve the inherited keep axes unless an accepted decision
-   changes them, and avoid any silent repo-level capability claim.
+   and exactly one immediate handoff,
+   `open one next bounded current-architecture family after P1`,
+   narrowed explicitly to `P5 polymorphism-nested-forall authoritative-surface`.
+   The accepted gate rejects both `continue bounded on P1` and
+   `reopen the boundary question from P1 evidence`, keeps `C1` and the
+   same-lane pocket settled, promotes `P5` only through the explicit new
+   handoff, preserves the inherited keep axes, and makes no repo-level
+   capability claim.
