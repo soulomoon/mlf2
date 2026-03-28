@@ -41,7 +41,7 @@ This roadmap now matches the implementation: Elab is *thin* and consumes explici
 
 **Syntax/frontend status (2026-03-11):** parser/pretty modules exist for both eMLF (`MLF.Frontend.Parse`, `MLF.Frontend.Pretty`) and xMLF (`MLF.XMLF.Parse`, `MLF.XMLF.Pretty`). `MLF.API` exposes surface syntax + parse/pretty/normalization, while `MLF.Pipeline` exposes the normalized constraint/elaboration/runtime path and `MLF.XMLF` exposes explicit xMLF tooling. Canonical syntax and migration deltas are documented in `docs/syntax.md`.
 
-**Known deviations / proof gaps (tracked):** `docs/thesis-deviations.yaml` is the live deviation register, and `docs/paper-map.md` / `docs/thesis-claims.yaml` / `docs/thesis-obligations.yaml` are the live paper-to-code ledgers. The current register records proof gaps and implementation choices rather than open semantic roadmap blockers.
+**Known deviations / proof gaps (tracked):** `docs/thesis-deviations.yaml` is the live deviation register, and `docs/paper-map.md` / `docs/thesis-claims.yaml` / `docs/thesis-obligations.yaml` are the live paper-to-code ledgers. The current register records proof gaps, implementation choices, and the `DEV-AUTO-ISO-RECURSIVE` semantic extension for automatic μ-introduction (see `docs/thesis-deviations.yaml`).
 
 ### Public entrypoints in this repo
 
@@ -151,7 +151,7 @@ Now that we have an xMLF term, we must treat it as a runnable program.
     *   Rules include: `(β)`, `(let)`, and significantly, the **instantiation reductions** (`ι-rules`) like `(Λ(α ≥ τ) a) N ⟶ a{!α ← 1}{α ← τ}`.
     *   These rules allow executing the code and simplifying the type instantiations.
 
-**Status in this repo:** Phase 7 is implemented. See `MLF.Elab.TypeCheck` (typing rules) and `MLF.Elab.Reduce` (small-step semantics), with downstream helpers re-exported by `MLF.Pipeline` and regression coverage in `test/TypeCheckSpec.hs`, `test/ReduceSpec.hs`, and `test/TypeSoundnessSpec.hs`.
+**Status in this repo:** Phase 7 is implemented. See `MLF.Elab.TypeCheck` (typing rules) and `MLF.Elab.Reduce` (small-step semantics), with downstream helpers re-exported by `MLF.Pipeline` and regression coverage in `test/TypeCheckSpec.hs`, `test/ReduceSpec.hs`, and `test/TypeSoundnessSpec.hs`. Phase 7 also handles **automatic iso-recursive types**: `TMu` type checking, `ERoll`/`EUnroll` reduction, and the full pipeline works end-to-end for automatically-inferred recursive types (see `DEV-AUTO-ISO-RECURSIVE` in `docs/thesis-deviations.yaml`).
 
 ⸻
 

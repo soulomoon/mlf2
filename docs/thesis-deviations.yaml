@@ -88,6 +88,45 @@ deviations:
         file: test/PresolutionSpec.hs
     status: implementation-choice
 
+  - id: DEV-AUTO-ISO-RECURSIVE
+    chapter: 9
+    section: "9.3"
+    thesis_ref: "Section 9.3 (acyclicity of instantiation constraints)"
+    description: >
+      The thesis assumes that constraint graphs are acyclic (Section 9.3,
+      acyclicity check). This implementation extends the solver to detect
+      cycles in the constraint graph and automatically introduce iso-recursive
+      TyMu nodes to break them, enabling automatic inference of recursive
+      types without explicit annotations. The mechanism: (1) cycle detection
+      in breakCyclesAndCheckAcyclicity, (2) TyMu node introduction at cycle
+      points, (3) reification producing TMu types, (4) elaboration emitting
+      ERoll/EUnroll coercions, (5) Phase 7 type checker and reducer accepting
+      and reducing recursive types. Non-recursive programs remain unaffected.
+    impact: semantic-extension
+    rationale: >
+      Iso-recursive types are a natural extension for practical ML-family
+      languages. The extension is safe because: (a) non-recursive programs
+      produce identical results to the acyclic-only solver, (b) recursive
+      types use iso-recursive (not equi-recursive) semantics with explicit
+      roll/unroll, (c) contractiveness validation rejects non-contractive
+      recursive types, and (d) the full pipeline (inference, elaboration,
+      type checking, reduction) is tested end-to-end.
+    code_paths:
+      - src/MLF/Constraint/Acyclicity.hs
+      - src/MLF/Reify/Type.hs
+      - src/MLF/Elab/TypeCheck.hs
+      - src/MLF/Elab/Reduce.hs
+      - src/MLF/Constraint/Normalize.hs
+      - src/MLF/Frontend/ConstraintGen/Translate.hs
+    test_evidence:
+      - matcher: "automatic recursive"
+        file: test/PipelineSpec.hs
+      - matcher: "iso-recursive"
+        file: test/TypeSoundnessSpec.hs
+      - matcher: "Phase 7"
+        file: test/TypeSoundnessSpec.hs
+    status: semantic-extension
+
 history:
   resolved:
     - id: TA-001
