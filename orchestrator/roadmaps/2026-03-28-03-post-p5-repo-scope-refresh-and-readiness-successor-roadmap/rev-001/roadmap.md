@@ -37,7 +37,7 @@
 
 ## Items
 
-1. [pending] Freeze the post-`P5` repo-scope successor authority, evidence inputs, and non-widening boundary
+1. [done] Freeze the post-`P5` repo-scope successor authority, evidence inputs, and non-widening boundary
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
