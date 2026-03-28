@@ -1,3 +1,31 @@
+## 2026-03-29 - Automatic iso-recursive type inference implemented and tested
+
+Automatic iso-recursive type inference is now fully implemented and tested
+end-to-end across all pipeline phases. The mechanism works as follows:
+
+1. **Cycle detection** in `MLF.Constraint.Acyclicity`
+   (`breakCyclesAndCheckAcyclicity`) detects cycles in the constraint graph
+   and automatically introduces `TyMu` nodes to break them.
+2. **Reification** in `MLF.Reify.Type` produces `TMu` types from `TyMu` graph
+   nodes.
+3. **Elaboration** emits `ERoll`/`EUnroll` coercions for recursive type
+   boundaries.
+4. **Phase 7 type checker** (`MLF.Elab.TypeCheck`) accepts recursive types
+   including `TMu`, `ERoll`, and `EUnroll`.
+5. **Phase 7 reducer** (`MLF.Elab.Reduce`) handles roll/unroll reduction steps.
+
+This is an **extension beyond the core thesis**, which assumes acyclic
+constraint graphs (Section 9.3). The extension is documented in
+`docs/thesis-deviations.yaml` under `DEV-AUTO-ISO-RECURSIVE`.
+
+Non-recursive programs remain unaffected — the cycle detection is a no-op when
+no cycles exist, so all existing behavior is preserved identically.
+
+**Test evidence:** all 1168+ tests pass, including focused integration tests in
+`test/TypeSoundnessSpec.hs` and `test/PipelineSpec.hs` covering simple
+self-recursion, nested lets, recursive data patterns, polymorphic recursion,
+μ/∀ interaction, higher-order recursion, and explicit-μ stability.
+
 ## 2026-03-25 - Repo-local orchestrator migrated to revisioned roadmap bundles
 
 - The repo-local orchestrator now resolves its live control plane through
