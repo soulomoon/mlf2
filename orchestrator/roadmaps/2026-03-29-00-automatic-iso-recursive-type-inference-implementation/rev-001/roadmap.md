@@ -28,7 +28,7 @@
 
 ## Items
 
-1. [pending] Implement cycle detection and automatic μ-introduction in the constraint solver
+1. [done] Implement cycle detection and automatic μ-introduction in the constraint solver
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
