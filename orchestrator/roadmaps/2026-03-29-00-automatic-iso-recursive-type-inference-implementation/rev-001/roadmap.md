@@ -60,7 +60,7 @@
    - non-recursive programs still produce identical results
    All tests pass via `cabal build all && cabal test`.
 
-3. [pending] Ensure reification and elaboration produce correct μ-types and roll/unroll terms
+3. [done] Ensure reification and elaboration produce correct μ-types and roll/unroll terms
    Item id: `item-3`
    Depends on: `item-2`
    Parallel safe: no
