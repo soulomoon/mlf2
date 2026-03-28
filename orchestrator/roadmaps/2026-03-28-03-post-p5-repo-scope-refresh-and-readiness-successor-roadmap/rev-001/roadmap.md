@@ -55,36 +55,33 @@
    cyclic search, second interfaces, fallback widening, and broad capability
    claims blocked, and make item `2` the next lawful move.
 
-2. [pending] Publish and validate one refreshed post-`P5` representative family-matrix readiness surface
+2. [done] Publish and validate one refreshed post-`P5` representative family-matrix readiness surface
    Item id: `item-2`
    Depends on: `item-1`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-1`
-   Completion notes: complete when an accepted artifact republishes the
-   repo-scope representative matrix while carrying forward the settled exact
-   same-lane, `C1`, `P1`, and `P5` reads honestly, validates provenance for
-   any fresh carry-forward, and records the current repo-scope readiness read
-   without silently promoting settled exact packets into general family
-   success. The artifact must not back-edit older matrix or gate artifacts in
-   place.
+   Completion notes: accepted in `round-133` via
+   `docs/plans/2026-03-28-post-p5-repo-scope-refreshed-representative-family-matrix-readiness-surface-and-provenance-validation.md`.
+   The accepted artifact republishes the repo-scope representative matrix
+   while carrying forward the settled exact same-lane, `C1`, `P1`, and `P5`
+   reads honestly, validates provenance without promoting any exact packet
+   into general family success, and records the current repo-scope read
+   without selecting the readiness posture yet. The artifact does not
+   back-edit older matrix or gate artifacts in place.
 
-3. [pending] Record one repo-scope readiness successor gate after the exact `P5` settlement
+3. [done] Record one repo-scope readiness successor gate after the exact `P5` settlement
    Item id: `item-3`
    Depends on: `item-1`, `item-2`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-2`
-   Completion notes: complete when an accepted aggregate artifact records
-   exactly one current repo-scope posture and exactly one immediate handoff:
-   `automatic iso-recursive-type inference ready`,
-   `narrowed unresolved / continue within the current architecture`, or
-   `reopen the boundary question`.
-   The same accepted artifact must then record exactly one handoff:
-   stop,
-   open one bounded current-architecture successor family only if a remaining
-   exact family is still live, or
-   open one explicit boundary-revision family only if the refreshed record
-   proves that is necessary.
-   The artifact must preserve the inherited keep axes unless an explicit
-   accepted decision changes them and avoid any silent capability claim.
+   Completion notes: accepted in `round-134` via
+   `docs/plans/2026-03-28-post-p5-repo-scope-readiness-successor-gate-and-immediate-handoff-decision.md`.
+   The accepted aggregate artifact records exactly one current repo-scope
+   posture and exactly one immediate handoff. The selected posture is
+   `narrowed unresolved / continue within the current architecture`. The
+   selected handoff is `open one bounded current-architecture successor
+   family`, narrowed to the remaining same-lane retained-child
+   representative-gap across `P3` / `P4` / `P6`. The artifact preserves the
+   inherited keep axes and avoids any silent readiness or boundary claim.
