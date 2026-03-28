@@ -231,21 +231,34 @@ runCycleRewrite c pivotEdge recursiveNodes =
           rhsParent = lookupBindParentInfo c (typeRef originalRhs)
           action = do
             binderId <- freshNodeIdCR
-            insertNodeCR
-              TyVar
-                { tnId = binderId,
-                  tnBound = Nothing
-                }
             bodyId <- cloneWithSubstitution originalNodes recursiveNodes binderId originalRhs
-            muId <- freshNodeIdCR
-            insertNodeCR
-              TyMu
-                { tnId = muId,
-                  tnBody = bodyId
-                }
-            attachClonedBindParents c bodyId binderId muId rhsParent
-            pure muId
+            bodyUsesBinder <- clonedBodyMentionsBinder bodyId binderId
+            if bodyUsesBinder && bodyId /= binderId
+              then do
+                insertNodeCR
+                  TyVar
+                    { tnId = binderId,
+                      tnBound = Nothing
+                    }
+                muId <- freshNodeIdCR
+                insertNodeCR
+                  TyMu
+                    { tnId = muId,
+                      tnBody = bodyId
+                    }
+                attachClonedBindParentsWithMu c bodyId binderId muId rhsParent
+                pure muId
+              else do
+                attachClonedBindParentsNoMu c bodyId rhsParent
+                pure bodyId
        in runState action
+
+clonedBodyMentionsBinder :: NodeId -> NodeId -> CycleRewriteM Bool
+clonedBodyMentionsBinder bodyId binderId =
+  gets $ \st ->
+    IntSet.member
+      (getNodeId binderId)
+      (collectReachableNodes (crsNodes st) bodyId)
 
 cloneWithSubstitution ::
   NodeMap TyNode ->
@@ -325,19 +338,40 @@ cloneWithSubstitution originalNodes recursiveNodes binderId nid
               insertNodeCR cloneNode
               pure cloneId
 
-attachClonedBindParents ::
+attachClonedBindParentsWithMu ::
   Constraint ->
   NodeId ->
   NodeId ->
   NodeId ->
   Maybe (NodeRef, BindFlag) ->
   CycleRewriteM ()
-attachClonedBindParents c bodyId binderId muId rhsParent = do
+attachClonedBindParentsWithMu c bodyId binderId muId rhsParent = do
   mapM_ (setBindParentCR (typeRef muId)) rhsParent
   setBindParentCR (typeRef binderId) (typeRef muId, BindFlex)
   if bodyId == binderId
     then pure ()
     else setBindParentCR (typeRef bodyId) (typeRef muId, BindFlex)
+  clones <- gets crsCloneMap
+  mapM_
+    (attachOneCloneParent clones)
+    (IntMap.toList clones)
+  where
+    attachOneCloneParent clones (originalKey, cloneId)
+      | cloneId == bodyId = pure ()
+      | otherwise =
+          let originalRef = typeRef (NodeId originalKey)
+           in case lookupBindParentInfo c originalRef of
+                Nothing -> pure ()
+                Just (parentRef, flag) ->
+                  setBindParentCR (typeRef cloneId) (translateParent clones parentRef, flag)
+
+attachClonedBindParentsNoMu ::
+  Constraint ->
+  NodeId ->
+  Maybe (NodeRef, BindFlag) ->
+  CycleRewriteM ()
+attachClonedBindParentsNoMu c bodyId rhsParent = do
+  mapM_ (setBindParentCR (typeRef bodyId)) rhsParent
   clones <- gets crsCloneMap
   mapM_
     (attachOneCloneParent clones)
