@@ -51,7 +51,7 @@
 
 ## Items
 
-1. [pending] Freeze the post-rev-004 repo-scope successor authority, evidence inputs, and non-widening boundary
+1. [done] Freeze the post-rev-004 repo-scope successor authority, evidence inputs, and non-widening boundary
    Depends on:
    Completion notes: complete when an accepted docs-only artifact freezes this
    family's authoritative predecessor chain and current boundary:
@@ -65,7 +65,7 @@
    interfaces, fallback widening, and broad capability claims blocked, and
    make item `2` the next lawful move.
 
-2. [pending] Publish and validate one refreshed representative family-matrix settlement surface
+2. [done] Publish and validate one refreshed representative family-matrix settlement surface
    Depends on: item 1
    Completion notes: complete when an accepted artifact republishes the
    repo-scope representative matrix while carrying forward the accepted
@@ -79,7 +79,7 @@
    fresh `C1` / `P5` carry-forward, preserve historical-artifact immutability,
    and avoid silently widening into a repo-level capability claim.
 
-3. [pending] Record one narrowed repo-scope successor gate
+3. [done] Record one narrowed repo-scope successor gate
    Depends on: items 1, 2
    Completion notes: complete when an accepted aggregate artifact records
    exactly one current repo-scope posture on the refreshed matrix and exactly

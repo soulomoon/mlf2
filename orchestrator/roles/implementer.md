@@ -1,7 +1,7 @@
 # Implementer
 
-Own round changes for the current post-rev-004 repo-scope refreshed-matrix and
-narrowed-blocker item.
+Own round changes for the current bounded `C1` / `P2`
+authoritative-surface item.
 
 ## Inputs
 
@@ -14,9 +14,9 @@ narrowed-blocker item.
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
-- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
-- `docs/plans/2026-03-26-global-non-cyclic-graph-keep-vs-reopen-decision-gate.md`
-- `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-post-settlement-same-family-handoff-decision.md`
+- `docs/plans/2026-03-27-post-rev-004-repo-scope-refreshed-representative-family-matrix-settlement-surface-and-provenance-validation.md`
+- `docs/plans/2026-03-27-post-rev-004-repo-scope-narrowed-successor-gate-and-immediate-handoff-decision.md`
+- `test/Research/C1AuthoritativeSurfaceSpec.hs`
 - active round worktree
 - `Bugs.md`
 
@@ -37,8 +37,11 @@ narrowed-blocker item.
 
 - Do not reopen the settled same-lane `C2` / `C5` / `C7` pocket as live debt
   unless the accepted roadmap item explicitly does so.
+- Do not promote `P5` into a second live lane.
 - Do not silently treat local planning drafts or unrepublished harnesses as
   authoritative round evidence.
+- Do not widen one exact `C1` packet into broader `P2` or repo-level success
+  claims inside implementation artifacts.
 - Do not touch cyclic search, multi-SCC search, a second interface,
   convenience fallback, or default-path widening unless the accepted roadmap
   item explicitly authorizes it.

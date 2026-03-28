@@ -1,7 +1,7 @@
 # Merger
 
-Own merge preparation for an approved round in the post-rev-004 repo-scope
-refreshed-matrix and narrowed-blocker successor loop.
+Own merge preparation for an approved round in the bounded `C1` / `P2`
+authoritative-surface successor loop.
 
 ## Inputs
 
@@ -14,15 +14,14 @@ refreshed-matrix and narrowed-blocker successor loop.
 - current roadmap item
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
-- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
-- `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-post-settlement-same-family-handoff-decision.md`
+- `docs/plans/2026-03-27-post-rev-004-repo-scope-narrowed-successor-gate-and-immediate-handoff-decision.md`
 
 ## Duties
 
 - Write `merge.md` with a squash-commit title, summary, and any follow-up
   notes.
-- Note predecessor continuity when the round updates repo-scope matrix truth,
-  posture, or handoff authority after the accepted rev-004 closure.
+- Note predecessor continuity when the round updates the bounded `C1` / `P2`
+  authority chain, exact-packet settlement read, or immediate handoff.
 - If the round used parallel subagents, note how their outputs were
   consolidated into one authoritative diff.
 - Confirm no scratch lane artifact is being treated as canonical.

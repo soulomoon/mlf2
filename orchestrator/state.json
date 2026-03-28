@@ -1,17 +1,22 @@
 {
   "contract_version": 2,
   "base_branch": "codex/automatic-recursive-type-inference",
+  "roadmap_id": "2026-03-28-00-c1-p2-authoritative-surface-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-28-00-c1-p2-authoritative-surface-successor-roadmap/rev-001",
   "active_round_id": null,
-  "stage": "select-task",
+  "stage": "done",
+  "controller_stage": "done",
+  "max_parallel_rounds": 1,
+  "active_rounds": [],
+  "pending_merge_rounds": [],
   "current_task": null,
   "branch": null,
   "worktree_path": null,
   "active_round_dir": null,
   "round_artifacts": {},
-  "last_completed_round": "round-116",
+  "last_completed_round": "round-119",
   "resume_error": null,
-  "retry": null,
-  "roadmap_id": "2026-03-27-00-repo-scope-refreshed-matrix-and-narrowed-blocker-successor-roadmap",
-  "roadmap_revision": "rev-001",
-  "roadmap_dir": "orchestrator/roadmaps/2026-03-27-00-repo-scope-refreshed-matrix-and-narrowed-blocker-successor-roadmap/rev-001"
+  "resume_errors": {},
+  "retry": null
 }
