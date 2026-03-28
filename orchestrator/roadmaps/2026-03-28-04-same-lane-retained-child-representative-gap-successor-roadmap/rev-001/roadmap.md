@@ -73,7 +73,7 @@
    rerun the repo full gate `cabal build all && cabal test` unless the
    reviewer records a specific contract-allowed reason otherwise.
 
-3. [pending] Publish one post-item-2 narrower current-architecture blocker settlement surface and exact repo-impact read
+3. [done] Publish one post-item-2 narrower current-architecture blocker settlement surface and exact repo-impact read
    Item id: `item-3`
    Depends on: `item-1`, `item-2`
    Parallel safe: no
@@ -95,7 +95,13 @@
    Parallel group: none
    Merge after: `item-3`
    Completion notes: complete when an accepted aggregate artifact records
-   exactly one current outcome and exactly one immediate handoff:
+   exactly one current outcome and exactly one immediate handoff, starting
+   from the accepted item-3 settlement that
+   `sameLaneAliasFrameClearBoundaryExpr` remains a `narrower
+   current-architecture blocker` on `runPipelineElab` and
+   `runPipelineElabChecked` within the inherited explicit-only /
+   iso-recursive / non-equi-recursive / non-cyclic-graph / no-fallback
+   baseline:
    `exact representative-gap packet settled within the current architecture`,
    `continue bounded on the representative gap`,
    or
