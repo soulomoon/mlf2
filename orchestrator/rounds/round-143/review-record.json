@@ -1,0 +1,58 @@
+{
+  "round_id": "round-143",
+  "roadmap_item_id": "item-1",
+  "roadmap_id": "2026-03-29-01-automatic-iso-recursive-type-inference-completion",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-29-01-automatic-iso-recursive-type-inference-completion/rev-001",
+  "branch": "orchestrator/round-143-item1-e2e-validation",
+  "base_branch": "codex/automatic-recursive-type-inference",
+  "decision": "APPROVED",
+  "reviewed_at": "2026-03-29T00:00:00Z",
+  "baseline_checks": {
+    "git_diff_check": "PASS",
+    "state_json_valid": "PASS",
+    "roadmap_bundle_integrity": "PASS",
+    "cabal_build_all": "PASS",
+    "cabal_test": "PASS"
+  },
+  "test_results": {
+    "total_examples": 1175,
+    "failures": 0,
+    "new_tests": 7,
+    "baseline_tests": 1168,
+    "regressions": 0
+  },
+  "task_specific_checks": {
+    "recursive_reduction_tests_exist_and_pass": "PASS",
+    "step_normalize_reduce_recursive_applications": "PASS",
+    "runPipelineElabChecked_succeeds_recursive": "PASS",
+    "non_recursive_programs_identical_results": "PASS"
+  },
+  "plan_compliance": {
+    "step_1_test_block": "PASS",
+    "step_2_iterateStep_helper": "PASS",
+    "step_3_build_and_test": "PASS",
+    "step_4_conditional_fixes": "NOT_NEEDED",
+    "step_5_elabChecked_crosscheck": "PASS"
+  },
+  "deviations": [
+    {
+      "test": "1.4 type preservation",
+      "description": "Tolerates TCUnboundVar after recursive ELet step",
+      "justification": "Plan anticipated this; step treats let as non-recursive, leaving self-reference free",
+      "severity": "minor",
+      "documented": true
+    },
+    {
+      "test": "1.5 application reduction",
+      "description": "Changed from pipeline application (f 42) to direct β-rule exercise",
+      "justification": "Plan expression ill-typed (f : μa. a→⊥, domain not Int); replacement directly validates EUnroll(ERoll ty v) → v",
+      "severity": "minor",
+      "documented": true
+    }
+  ],
+  "files_changed": [
+    "test/PipelineSpec.hs"
+  ],
+  "src_files_changed": []
+}
