@@ -1743,10 +1743,19 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
             it "does not infer recursive shape for the corresponding unannotated variant" $ do
                 let expr = ELam "x" (EVar "x")
-                case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-                    Left err -> expectationFailure (renderPipelineError err)
-                    Right (_term, ty) ->
-                        containsMu ty `shouldBe` False
+                artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+                let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
+                fallbackTy <- requireRight (computeResultTypeFallback inputs annCanon annPre)
+                containsMu fallbackTy `shouldBe` False
+                let pipelineRuns =
+                        [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                        , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+                        ]
+                forM_ pipelineRuns $ \(label, result) ->
+                    case result of
+                        Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
+                        Right (_term, ty) ->
+                            containsMu ty `shouldBe` False
 
             it "keeps non-local proxy fallback fail-closed in result-type reconstruction" $ do
                 let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))

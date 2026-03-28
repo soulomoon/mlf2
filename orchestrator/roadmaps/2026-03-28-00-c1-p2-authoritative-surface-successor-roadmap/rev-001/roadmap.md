@@ -39,72 +39,71 @@
 
 ## Items
 
-1. [pending] Freeze the bounded `C1` / `P2` successor authority, exact packet, success bar, and writable slice
+1. [done] Freeze the bounded `C1` / `P2` successor authority, exact packet, success bar, and writable slice
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
    Parallel group: none
    Merge after: none
-   Completion notes: complete when an accepted docs-only artifact freezes the
-   direct predecessor authority chain from the March 14 baseline, the March 25
-   capability and full-pipeline contracts, the accepted March 27 refreshed
-   matrix and successor gate, the exact `C1` packet and route
-   `baseTarget -> baseC -> targetC`, the exact success bar for this family,
-   and the permitted writable slice for a bounded current-architecture
-   implementation attempt. The artifact must keep the settled same-lane
-   `C2` / `C5` / `C7` pocket closed, keep `P5` reject-side only, preserve the
-   inherited non-cyclic / no-fallback / one-interface-only boundary, and make
-   item `2` the next lawful move.
+   Completion notes: accepted in `round-120` via
+   `docs/plans/2026-03-28-c1-p2-authoritative-surface-successor-authority-success-bar-and-writable-slice-freeze.md`,
+   which freezes the direct predecessor authority chain from the March 14
+   baseline, the March 25 capability and full-pipeline contracts, the accepted
+   March 27 refreshed matrix and successor gate, the exact `C1` packet and
+   route `baseTarget -> baseC -> targetC`, the exact success bar for this
+   family, and the permitted writable slice for one bounded
+   current-architecture implementation attempt. The accepted freeze keeps the
+   settled same-lane `C2` / `C5` / `C7` pocket closed, keeps `P5`
+   reject-side only, preserves the inherited non-cyclic / no-fallback /
+   one-interface-only boundary, and makes item `2` the next lawful move.
 
-2. [pending] Implement and validate one bounded current-architecture `C1` authoritative-surface continuation slice
+2. [done] Implement and validate one bounded current-architecture `C1` authoritative-surface continuation slice
    Item id: `item-2`
    Depends on: `item-1`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-1`
-   Completion notes: complete when an accepted round introduces one bounded
-   code-and-test slice aimed only at the exact admitted non-local `C1` packet,
-   refreshes focused regression coverage, and records lawful evidence for the
-   resulting authoritative-surface read. If this item touches `src/`,
-   `src-public/`, `app/`, `test/`, or `mlf2.cabal`, the round must rerun the
-   repo full gate `cabal build all && cabal test` unless the reviewer records
-   a specific contract-allowed reason otherwise. The round must not widen into
+   Completion notes: accepted in `round-121`, which keeps the final code diff
+   inside the item-1 writable slice, restores `TermClosure.hs` to the inherited
+   same-lane behavior, adds one bounded `C1` preservation step on
+   `src/MLF/Elab/Run/Pipeline.hs`, updates the focused
+   `C1AuthoritativeSurfaceSpec` and the matching `PipelineSpec` regression, and
+   passes both focused reruns plus the required full repo gate
+   `cabal build all && cabal test` (`1149 examples, 0 failures`). The accepted
+   round records recursive authoritative output for the exact admitted `C1`
+   packet while keeping fallback evidence honest and without widening into
    equi-recursive reasoning, cyclic search, multi-SCC search, a second
    interface, fallback behavior, or unrelated family work.
 
-3. [pending] Publish one post-implementation `C1` / `P2` settlement surface and exact repo-impact read
+3. [done] Publish one post-implementation `C1` / `P2` settlement surface and exact repo-impact read
    Item id: `item-3`
    Depends on: `item-1`, `item-2`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-2`
-   Completion notes: complete when an accepted aggregate artifact republishes
-   the exact current `C1` / `P2` read after item `2`, validates provenance for
-   any cited focused reruns or full-gate evidence, and records whether the
-   exact admitted non-local packet now reaches lawful recursive visibility on
-   the authoritative surfaces or remains blocker debt. The artifact must not
-   silently widen one exact-packet result into general `P2` family settlement
-   or repo-level readiness.
+   Completion notes: accepted in `round-122` via
+   `docs/plans/2026-03-28-post-implementation-c1-p2-settlement-surface-and-exact-repo-impact-read.md`,
+   which republishes the exact post-item-2 `C1` read, binds provenance to the
+   accepted focused reruns, the full repo gate, and the accepted round-121
+   review record, records that the exact admitted packet is now recursively
+   visible on both authoritative pipeline entrypoints while fallback remains
+   non-recursive, and states the exact repo-impact read without widening into
+   general `P2` family settlement or repo-level readiness.
 
-4. [pending] Record one successor gate and immediate handoff after the bounded `C1` / `P2` lane
+4. [done] Record one successor gate and immediate handoff after the bounded `C1` / `P2` lane
    Item id: `item-4`
    Depends on: `item-1`, `item-2`, `item-3`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-3`
-   Completion notes: complete when an accepted aggregate artifact records
-   exactly one current outcome and exactly one immediate handoff. Lawful
-   outcomes are:
+   Completion notes: accepted in `round-123` via
+   `docs/plans/2026-03-28-post-c1-p2-successor-gate-and-immediate-handoff-decision.md`,
+   which records exactly one current outcome,
    `exact C1/P2 packet settled within the current architecture`,
-   `continue bounded on C1/P2`,
-   or
-   `reopen the boundary question from C1/P2 evidence`.
-   Lawful handoffs are:
-   stop,
-   open one next bounded current-architecture family after `C1/P2`,
-   or
-   open one explicit boundary-revision family only if the accepted record
-   proves that is necessary. The artifact must keep the same-lane pocket
-   settled, keep `P5` out of scope unless explicitly reopened, preserve the
-   inherited keep axes unless an accepted decision changes them, and avoid any
-   silent repo-level capability claim.
+   and exactly one immediate handoff,
+   `open one next bounded current-architecture family after C1/P2`,
+   narrowed to a new `P1 local automatic-success authoritative-surface`
+   successor family. The accepted gate explicitly rejects both
+   `continue bounded on C1/P2` and `reopen the boundary question from C1/P2
+   evidence`, keeps the same-lane pocket settled, keeps `P5` out of scope, and
+   does not claim repo-level readiness.
