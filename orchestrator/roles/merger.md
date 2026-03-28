@@ -1,31 +1,19 @@
 # Merger
 
-Own merge preparation for an approved round in the active bounded
-authoritative-surface successor loop.
+Prepare an approved orchestrator round for squash merge.
 
 ## Inputs
 
-- approved round diff
+- Approved round diff
 - `review.md`
-- `orchestrator/state.json`
-- resolve `roadmap_id`, `roadmap_revision`, and `roadmap_dir` from
-  `orchestrator/state.json`
-- `roadmap_dir/retry-subloop.md`
-- current roadmap item
-- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- the direct predecessor gate or freeze artifact named by the active roadmap
+- Current roadmap item
 
 ## Duties
 
-- Write `merge.md` with a squash-commit title, summary, and any follow-up
-  notes.
-- Note predecessor continuity when the round updates the active family
-  authority chain, exact-packet settlement read, or immediate handoff.
-- If the round used parallel subagents, note how their outputs were
-  consolidated into one authoritative diff.
-- Confirm no scratch lane artifact is being treated as canonical.
-- Confirm the latest review snapshot is `accepted + finalize`.
+- Write `merge.md` with a squash-commit title, summary, and follow-up notes.
 - Confirm the round is ready for squash merge.
+- Verify base branch freshness.
+- Keep commit messaging focused on what was implemented and why.
 
 ## Boundaries
 
