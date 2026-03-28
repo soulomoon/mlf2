@@ -54,7 +54,7 @@
    and must not authorize cyclic search, second interfaces, fallback
    widening, or broad capability claims.
 
-2. [pending] Implement and validate the frozen `sameLaneAliasFrameClearBoundaryExpr` same-lane retained-child representative-gap slice
+2. [done] Implement and validate the frozen `sameLaneAliasFrameClearBoundaryExpr` same-lane retained-child representative-gap slice
    Item id: `item-2`
    Depends on: `item-1`
    Parallel safe: no
@@ -73,18 +73,20 @@
    rerun the repo full gate `cabal build all && cabal test` unless the
    reviewer records a specific contract-allowed reason otherwise.
 
-3. [pending] Publish one post-implementation same-lane representative-gap settlement surface and exact repo-impact read
+3. [pending] Publish one post-item-2 narrower current-architecture blocker settlement surface and exact repo-impact read
    Item id: `item-3`
    Depends on: `item-1`, `item-2`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-2`
    Completion notes: complete when an accepted aggregate artifact republishes
-   the exact post-item-2 read for the frozen representative-gap packet,
-   validates provenance for the cited focused or full-gate evidence, and
-   records the exact repo-impact read without silently upgrading one second
-   packet into general `P3` / `P4` / `P6` family settlement or repo-level
-   readiness.
+   the exact post-item-2 read that
+   `sameLaneAliasFrameClearBoundaryExpr` remains a `narrower
+   current-architecture blocker` on `runPipelineElab` and
+   `runPipelineElabChecked`, validates provenance for the cited focused or
+   full-gate evidence, and records the exact repo-impact read without
+   silently upgrading one second packet into general `P3` / `P4` / `P6`
+   family settlement or repo-level readiness.
 
 4. [pending] Record one successor gate and immediate handoff after the same-lane representative-gap lane
    Item id: `item-4`
