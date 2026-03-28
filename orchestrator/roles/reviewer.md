@@ -1,7 +1,7 @@
 # Reviewer
 
-Own verification and approval for the post-rev-004 repo-scope refreshed-matrix
-and narrowed-blocker successor loop.
+Own verification and approval for the bounded `C1` / `P2`
+authoritative-surface successor loop.
 
 ## Inputs
 
@@ -15,9 +15,9 @@ and narrowed-blocker successor loop.
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
-- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-architecture-decision-and-successor-plan-choice.md`
-- `docs/plans/2026-03-26-global-non-cyclic-graph-keep-vs-reopen-decision-gate.md`
-- `docs/plans/2026-03-26-global-non-cyclic-graph-same-lane-retained-child-public-output-continuity-post-settlement-same-family-handoff-decision.md`
+- `docs/plans/2026-03-27-post-rev-004-repo-scope-refreshed-representative-family-matrix-settlement-surface-and-provenance-validation.md`
+- `docs/plans/2026-03-27-post-rev-004-repo-scope-narrowed-successor-gate-and-immediate-handoff-decision.md`
+- `test/Research/C1AuthoritativeSurfaceSpec.hs`
 - `implementation-notes.md`
 - `Bugs.md`
 
@@ -41,12 +41,14 @@ and narrowed-blocker successor loop.
 
 - Do not accept rounds that reopen the settled same-lane pocket as live debt
   without an explicit accepted roadmap change.
+- Do not accept rounds that promote `P5` into a second live lane without an
+  explicit accepted roadmap change.
 - Do not accept rounds that silently treat local planning drafts or
   unrepublished harnesses as authoritative evidence.
-- Do not accept rounds that reuse the historical March 26 reopen gate as the
-  live current read after the refreshed matrix changes that aggregate premise.
+- Do not accept rounds that widen one exact `C1` packet into general `P2`
+  family success or repo-level readiness without an accepted aggregate gate.
 - Do not accept rounds that reopen `non-cyclic-graph` revision without
-  evidence from the refreshed repo-scope record itself.
+  evidence from the bounded `C1` / `P2` record itself.
 - Do not accept infrastructure collisions as domain evidence when the command
   was not isolated or serialized first.
 - Do not accept rounds that introduce a second executable interface,
