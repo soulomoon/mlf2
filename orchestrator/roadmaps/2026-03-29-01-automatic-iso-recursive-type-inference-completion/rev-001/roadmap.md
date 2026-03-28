@@ -35,7 +35,7 @@
 
 ## Items
 
-1. [pending] End-to-end validation: Phase 7 reduction of iso-recursive elaborated terms
+1. [done] End-to-end validation: Phase 7 reduction of iso-recursive elaborated terms
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
