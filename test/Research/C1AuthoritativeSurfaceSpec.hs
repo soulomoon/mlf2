@@ -69,16 +69,16 @@ spec =
             fallbackTy `shouldBe` TBase (BaseTy "Int")
             containsMu fallbackTy `shouldBe` False
 
-        it "keeps the exact source packet non-recursive on both current pipeline entrypoints" $ do
-            let expected = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
+        it "keeps the exact source packet recursive on both current pipeline entrypoints" $ do
+            let blocked = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
             (_uncheckedTerm, uncheckedTy) <-
                 requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1Expr))
             (_checkedTerm, checkedTy) <-
                 requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr c1Expr))
-            uncheckedTy `shouldBe` expected
-            checkedTy `shouldBe` expected
-            containsMu uncheckedTy `shouldBe` False
-            containsMu checkedTy `shouldBe` False
+            uncheckedTy `shouldNotBe` blocked
+            checkedTy `shouldNotBe` blocked
+            containsMu uncheckedTy `shouldBe` True
+            containsMu checkedTy `shouldBe` True
 
 c1Expr :: SurfaceExpr
 c1Expr = ELet "k" (ELamAnn "x" recursiveAnn (EVar "x")) (EVar "k")

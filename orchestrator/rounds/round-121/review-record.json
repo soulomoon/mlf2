@@ -1,0 +1,31 @@
+{
+  "subject_id": "C1-P2-AUTHORITATIVE-SURFACE-SUCCESSOR",
+  "scenario_id": "c1-p2-authoritative-surface-successor-control-plane-v1",
+  "stage_id": "item-2",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 1,
+  "authoritative_result": "pass",
+  "artifact_path": "orchestrator/rounds/round-121/implementation-notes.md",
+  "review_snapshot": "orchestrator/rounds/round-121/reviews/attempt-1.md",
+  "checks": {
+    "ITEM2-WRITABLE-SLICE-DISCIPLINE": "pass",
+    "ITEM2-PIPELINE-SURFACE-BOUND": "pass",
+    "ITEM2-FOCUSED-C1-HARNESS": "pass",
+    "ITEM2-PRODUCTION-PATH-REGRESSION": "pass",
+    "ITEM2-FULL-CABAL-GATE": "pass",
+    "ITEM2-DIFF-HYGIENE": "pass",
+    "ITEM2-BOUNDARY-DISCIPLINE": "pass"
+  },
+  "final_outcome": "c1-p2-authoritative-surface-bounded-implementation-slice-validated",
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-28-00-c1-p2-authoritative-surface-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-28-00-c1-p2-authoritative-surface-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-2"
+}
