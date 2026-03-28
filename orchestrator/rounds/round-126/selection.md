@@ -21,11 +21,25 @@ exact repo-impact read.
 
 ## Why This Runs Now
 
-Items `1` and `2` are accepted and marked done, `retry` is `null`, and
-item `3` is the lowest-numbered unfinished item in the active roadmap.
-The next lawful move is therefore to republish the accepted post-item-2 read
-for the exact frozen `P1` packet without silently widening it into family or
-repo-level success.
+- Item `1` freeze is already accepted in `round-124`, and item `2` is already
+  accepted in `round-125`; the roadmap therefore leaves item `3` as the
+  lowest-numbered unfinished step in this bounded `P1` family.
+- The retry contract makes item `3` aggregate-only, so there is no lawful
+  same-round retry branch to run instead of settlement publication once
+  item `2` has finalized.
+- The accepted round-125 implementation notes and review already fix the exact
+  post-item-2 read for the frozen packet `ELam "x" (EVar "x")`: no lawful
+  recursive carrier was found inside the frozen writable slice, and the
+  internal fallback route plus both authoritative entrypoints remain
+  `containsMu False`.
+- `Bugs.md` does not introduce a newer `P1`-specific blocker that would force
+  this family off the settlement path, and repository status does not create a
+  round-126 retry obligation.
+
+The next lawful move is therefore to publish the post-item-2 settlement
+surface for the exact frozen packet, preserving the accepted fail-closed read
+without silently widening it into general `P1` success or repo-level
+readiness.
 
 ## Frozen Authority For This Aggregate Round
 
