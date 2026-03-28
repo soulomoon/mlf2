@@ -47,6 +47,7 @@ import MLF.Elab.Pipeline
     typeCheck,
     pattern Forall,
   )
+import MLF.Elab.Pipeline qualified as Elab
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.ResultType
   ( ResultTypeInputs (..),
@@ -144,6 +145,30 @@ containsMu ty = case ty of
       TForall _ mb body -> maybe False containsMuBound mb || containsMu body
       TMu _ _ -> True
       TBottom -> False
+
+containsRollTerm :: Elab.ElabTerm -> Bool
+containsRollTerm term = case term of
+  Elab.EVar _ -> False
+  Elab.ELit _ -> False
+  Elab.ELam _ _ body -> containsRollTerm body
+  Elab.EApp f a -> containsRollTerm f || containsRollTerm a
+  Elab.ELet _ _ rhs body -> containsRollTerm rhs || containsRollTerm body
+  Elab.ETyAbs _ _ body -> containsRollTerm body
+  Elab.ETyInst e _ -> containsRollTerm e
+  Elab.ERoll _ _ -> True
+  Elab.EUnroll body -> containsRollTerm body
+
+containsUnrollTerm :: Elab.ElabTerm -> Bool
+containsUnrollTerm term = case term of
+  Elab.EVar _ -> False
+  Elab.ELit _ -> False
+  Elab.ELam _ _ body -> containsUnrollTerm body
+  Elab.EApp f a -> containsUnrollTerm f || containsUnrollTerm a
+  Elab.ELet _ _ rhs body -> containsUnrollTerm rhs || containsUnrollTerm body
+  Elab.ETyAbs _ _ body -> containsUnrollTerm body
+  Elab.ETyInst e _ -> containsUnrollTerm e
+  Elab.ERoll _ body -> containsUnrollTerm body
+  Elab.EUnroll _ -> True
 
 expectAlignedPipelineSuccessType :: SurfaceExpr -> IO ElabType
 expectAlignedPipelineSuccessType expr =
@@ -1288,6 +1313,30 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         ty `shouldSatisfy` containsForallTy
         cBroken <- automaticMuConstraint expr
         cBroken `shouldNotSatisfy` constraintContainsTyMu
+
+    describe "Automatic μ-introduction (item-3)" $ do
+      it "elaborates recursive uses with explicit ERoll/EUnroll and passes Phase 7" $ do
+        let expr = ELet "f" (ELam "x" (EApp (EVar "f") (EVar "x"))) (EVar "f")
+        case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+          Left err -> expectationFailure (renderPipelineError err)
+          Right (termUnchecked, tyUnchecked) -> do
+            unless (containsMu tyUnchecked) $
+              expectationFailure
+                ( "expected TMu in type, got: "
+                    ++ show tyUnchecked
+                    ++ " term: "
+                    ++ show termUnchecked
+                )
+            unless (containsRollTerm termUnchecked) $
+              expectationFailure ("expected ERoll in term: " ++ show termUnchecked)
+            unless (containsUnrollTerm termUnchecked) $
+              expectationFailure ("expected EUnroll in term: " ++ show termUnchecked)
+            typeCheck termUnchecked `shouldBe` Right tyUnchecked
+            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+              Left err -> expectationFailure (renderPipelineError err)
+              Right (termChecked, tyChecked) -> do
+                tyChecked `shouldBe` tyUnchecked
+                typeCheck termChecked `shouldBe` Right tyChecked
 
     describe "ARI-C1 feasibility characterization (bounded prototype-only)" $ do
       let ariSetVarBound nid newBound constraint =

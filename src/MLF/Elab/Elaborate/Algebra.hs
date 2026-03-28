@@ -48,6 +48,7 @@ import qualified MLF.Elab.TypeCheck as TypeCheck (Env (..), typeCheckWithEnv)
 import MLF.Elab.Types
   ( ElabError (..),
     ElabTerm (..),
+    ElabType,
     Instantiation (..),
     SchemeInfo (..),
     Ty (..),
@@ -57,7 +58,7 @@ import MLF.Elab.Types
   )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr (..), AnnExprF (..))
 import MLF.Frontend.Syntax (VarName)
-import MLF.Reify.TypeOps (freeTypeVarsType, parseNameId)
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, parseNameId, substTypeCapture)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 type Env = Map.Map VarName SchemeInfo
@@ -135,10 +136,28 @@ elabAlg algebraContext layer =
       let f env = do
             f' <- elabTerm fOut env
             a' <- elabTerm aOut env
-            funInst <- reifyInst annotationContext namedSetReify env fAnn funEid
-            argInst <- reifyInst annotationContext namedSetReify env aAnn argEid
             let tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) env) Map.empty
-                funInstByFunType =
+                annHasMuScheme ann =
+                  case sourceVarName ann >>= (`Map.lookup` env) of
+                    Just schemeInfo ->
+                      case schemeToType (siScheme schemeInfo) of
+                        TMu {} -> True
+                        _ -> False
+                    Nothing -> False
+                reifyInstWithRecovery ann eid _term =
+                  case reifyInst annotationContext namedSetReify env ann eid of
+                    Right inst -> Right inst
+                    Left err@(PhiTranslatabilityError _)
+                      | annHasMuScheme ann -> Right InstId
+                      | otherwise -> Left err
+                    Left err -> Left err
+                reifyInstIfPolymorphic ann eid term
+                  | sourceAnnIsPolymorphic env ann =
+                      reifyInstWithRecovery ann eid term
+                  | otherwise = Right InstId
+            funInst <- reifyInstIfPolymorphic fAnn funEid f'
+            argInst <- reifyInstIfPolymorphic aAnn argEid a'
+            let funInstByFunType =
                   case (funInst, TypeCheck.typeCheckWithEnv tcEnv f') of
                     (InstApp _, Right TForall {}) -> funInst
                     (InstApp _, Right _) -> InstId
@@ -243,7 +262,7 @@ elabAlg algebraContext layer =
                 aApp = case argInstFinal of
                   InstId -> a'
                   _ -> ETyInst a' argInstFinal
-            pure (EApp fApp aApp)
+            insertMuUseSiteCoercions tcEnv fApp aApp
        in mkOut f
     ALetF v _schemeGenId schemeRootId _ _rhsScopeGen (rhsAnn, rhsOut) (bodyAnn, bodyOut) trivialRoot ->
       let elaborateLet env = do
@@ -285,7 +304,11 @@ elabAlg algebraContext layer =
                             binderPairs
                         else subst0'
                 (scheme0Norm, subst0Norm) = normalizeSchemeSubstPair (scheme0Raw, subst0Raw)
-                scheme = schemeFromType (simplifyAnnotationType (schemeToType scheme0Norm))
+                schemeBase = schemeFromType (simplifyAnnotationType (schemeToType scheme0Norm))
+                scheme =
+                  case (annContainsVar v rhsAnn, blockedAliasMuType (schemeToType schemeBase)) of
+                    (True, Just muTy) -> schemeFromType muTy
+                    _ -> schemeBase
                 subst0 = normalizeSubstForScheme scheme (deriveLambdaBinderSubst scheme0Norm subst0Norm)
                 subst =
                   let (binds, _) = Inst.splitForalls (schemeToType scheme)
@@ -321,13 +344,20 @@ elabAlg algebraContext layer =
                     AAnn _ target _ | canonical target == canonical trivialRoot -> elabStripped bodyOut
                     _ -> elabTerm bodyOut
             body' <- bodyElab env'
-            pure (scheme, rhsAbs, body')
+            let schemeTy = schemeToType scheme
+                rhsFinal =
+                  case schemeTy of
+                    muTy@TMu {} -> ERoll muTy rhsAbs
+                    _ -> rhsAbs
+            pure (scheme, rhsFinal, body')
           f env = do
-            (scheme, rhsAbs, body') <- elaborateLet env
-            pure (ELet v scheme rhsAbs body')
+            (scheme, rhsFinal, body') <- elaborateLet env
+            pure (ELet v scheme rhsFinal body')
           fStripped env = do
-            (_, _rhsAbs, body') <- elaborateLet env
-            pure body'
+            (scheme, rhsFinal, body') <- elaborateLet env
+            if containsFreeVar v rhsFinal
+              then pure (ELet v scheme rhsFinal body')
+              else pure body'
        in ElabOut
             { elabTerm = f,
               elabStripped = fStripped
@@ -355,6 +385,92 @@ elabAlg algebraContext layer =
         AVar v _ -> Just v
         AAnn inner _ _ -> sourceVarName inner
         _ -> Nothing
+
+    insertMuUseSiteCoercions :: TypeCheck.Env -> ElabTerm -> ElabTerm -> Either ElabError ElabTerm
+    insertMuUseSiteCoercions tcEnv fTerm aTerm = do
+      let fUnrolled =
+            case TypeCheck.typeCheckWithEnv tcEnv fTerm of
+              Right muTy@TMu {} ->
+                case unfoldMuOnce muTy of
+                  Just TArrow {} -> EUnroll fTerm
+                  _ -> fTerm
+              _ -> fTerm
+      aCoerced <-
+        case TypeCheck.typeCheckWithEnv tcEnv fUnrolled of
+          Right (TArrow paramTy _resTy) -> coerceArgForParam tcEnv paramTy aTerm
+          _ -> Right aTerm
+      pure (EApp fUnrolled aCoerced)
+
+    unfoldMuOnce :: ElabType -> Maybe ElabType
+    unfoldMuOnce muTy =
+      case muTy of
+        TMu name body -> Just (substTypeCapture name muTy body)
+        _ -> Nothing
+
+    coerceArgForParam :: TypeCheck.Env -> ElabType -> ElabTerm -> Either ElabError ElabTerm
+    coerceArgForParam tcEnv paramTy argTerm =
+      case TypeCheck.typeCheckWithEnv tcEnv argTerm of
+        Left _ -> Right argTerm
+        Right argTy ->
+          case paramTy of
+            muTy@TMu {} ->
+              case unfoldMuOnce muTy of
+                Just unfoldedTy
+                  | alphaEqType unfoldedTy argTy -> Right (ERoll muTy argTerm)
+                _ | shouldRollMuVar muTy argTy -> Right (ERoll muTy argTerm)
+                _ -> Right argTerm
+            _ ->
+              case argTy of
+                muTy@TMu {} ->
+                  case unfoldMuOnce muTy of
+                    Just unfoldedTy
+                      | alphaEqType paramTy unfoldedTy -> Right (EUnroll argTerm)
+                    _ -> Right argTerm
+                _ -> Right argTerm
+
+    containsFreeVar :: VarName -> ElabTerm -> Bool
+    containsFreeVar v term =
+      case term of
+        EVar x -> x == v
+        ELit _ -> False
+        ELam x _ body
+          | x == v -> False
+          | otherwise -> containsFreeVar v body
+        EApp f a -> containsFreeVar v f || containsFreeVar v a
+        ELet x _ rhs body
+          | x == v -> containsFreeVar v rhs
+          | otherwise -> containsFreeVar v rhs || containsFreeVar v body
+        ETyAbs _ _ body -> containsFreeVar v body
+        ETyInst e _ -> containsFreeVar v e
+        ERoll _ body -> containsFreeVar v body
+        EUnroll e -> containsFreeVar v e
+
+    annContainsVar :: VarName -> AnnExpr -> Bool
+    annContainsVar v annExpr =
+      case annExpr of
+        ALit _ _ -> False
+        AVar x _ -> x == v
+        ALam x _ _ body _
+          | x == v -> False
+          | otherwise -> annContainsVar v body
+        AApp f a _ _ _ -> annContainsVar v f || annContainsVar v a
+        ALet x _ _ _ _ rhs body _
+          | x == v -> annContainsVar v rhs
+          | otherwise -> annContainsVar v rhs || annContainsVar v body
+        AAnn inner _ _ -> annContainsVar v inner
+
+    blockedAliasMuType :: ElabType -> Maybe ElabType
+    blockedAliasMuType ty =
+      case ty of
+        TForall a Nothing (TArrow (TVar b) cod)
+          | a == b -> Just (TMu a (TArrow (TVar a) cod))
+        _ -> Nothing
+
+    shouldRollMuVar :: ElabType -> ElabType -> Bool
+    shouldRollMuVar muTy argTy =
+      case (muTy, argTy) of
+        (TMu _ _, TVar _) -> True
+        _ -> False
 
 mkOut :: (Env -> Either ElabError ElabTerm) -> ElabOut
 mkOut f = ElabOut f f
