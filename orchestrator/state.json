@@ -1,9 +1,9 @@
 {
   "contract_version": 2,
   "base_branch": "codex/automatic-recursive-type-inference",
-  "roadmap_id": "2026-03-28-03-post-p5-repo-scope-refresh-and-readiness-successor-roadmap",
+  "roadmap_id": "2026-03-28-04-same-lane-retained-child-representative-gap-successor-roadmap",
   "roadmap_revision": "rev-001",
-  "roadmap_dir": "orchestrator/roadmaps/2026-03-28-03-post-p5-repo-scope-refresh-and-readiness-successor-roadmap/rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-28-04-same-lane-retained-child-representative-gap-successor-roadmap/rev-001",
   "active_round_id": null,
   "stage": "select-task",
   "controller_stage": "dispatch-rounds",
