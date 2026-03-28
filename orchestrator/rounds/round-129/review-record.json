@@ -1,0 +1,31 @@
+{
+  "subject_id": "P5-POLYMORPHISM-NESTED-FORALL-AUTHORITATIVE-SURFACE-SUCCESSOR",
+  "scenario_id": "p5-polymorphism-nested-forall-authoritative-surface-successor-control-plane-v1",
+  "stage_id": "item-2",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 1,
+  "authoritative_result": "pass",
+  "artifact_path": "orchestrator/rounds/round-129/implementation-notes.md",
+  "review_snapshot": "orchestrator/rounds/round-129/reviews/attempt-1.md",
+  "checks": {
+    "ITEM2-P5-WRITABLE-SLICE-DISCIPLINE": "pass",
+    "ITEM2-P5-EXACT-PACKET-DISCIPLINE": "pass",
+    "ITEM2-P5-AUTHORITATIVE-FAIL-CLOSED-EVIDENCE": "pass",
+    "ITEM2-P5-FOCUSED-ISOLATED-RERUNS": "pass",
+    "ITEM2-P5-FULL-CABAL-GATE": "pass",
+    "ITEM2-P5-DIFF-HYGIENE": "pass",
+    "ITEM2-P5-NON-WIDENING-BOUNDARY": "pass"
+  },
+  "final_outcome": "p5-polymorphism-nested-forall-bounded-fail-closed-evidence-slice-validated",
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-28-02-p5-polymorphism-nested-forall-authoritative-surface-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-28-02-p5-polymorphism-nested-forall-authoritative-surface-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-2"
+}
