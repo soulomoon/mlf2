@@ -4,7 +4,7 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
-## Task 104 global non-cyclic-graph settlement and automatic iso-recursive inference loop scaffold (in progress 2026-03-27)
+## Task 104 global non-cyclic-graph settlement and automatic iso-recursive inference loop scaffold (in progress 2026-03-28)
 
 - Completed:
   - completed the bounded same-lane retained-child public-output continuity
@@ -34,21 +34,19 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
     `test/Research/P5ClearBoundarySpec.hs` confirms the clear-boundary control
     stays recursive while the nested-`forall` contrast still fails closed.
 - Rolling priorities (next):
-  1. Freeze one post-`rev-004` repo-scope successor boundary that keeps the
-     March 25 / March 26 aggregate matrix/gate artifacts immutable as
-     historical evidence and treats the current refresh packet as
-     non-authoritative input only.
-  2. Publish one authoritative refreshed representative matrix that carries
-     forward the accepted repaired exact-pocket `C2` / `C5` / `C7` read and
-     the bounded `C1` / `P5` probe results.
-  3. Re-run the repo-scope decision honestly on that refreshed matrix:
-     `keep` is still unearned, and the old March 26 reopen rationale is now
-     stale unless new evidence shows the remaining `C1` / `P5` blockers
-     really force a boundary revision.
-  4. Keep the narrowed remaining blocker set explicit:
-     `P1` local unannotated automatic success,
-     `P2` non-local visibility through `C1`, and
-     `P5` nested-`forall` interaction through `C3`.
+  1. Freeze one post-`P5` repo-scope successor boundary that treats the
+     settled same-lane pocket plus the settled exact `C1`, `P1`, and `P5`
+     packets as predecessor truth only.
+  2. Publish one refreshed repo-scope representative matrix that carries
+     forward the settled exact same-lane, `C1`, `P1`, and `P5` reads without
+     silently promoting them into general family success.
+  3. Re-run the repo-scope readiness decision honestly on that refreshed
+     matrix:
+     `automatic iso-recursive-type inference ready`,
+     `narrowed unresolved / continue within the current architecture`, or
+     `reopen the boundary question`.
+  4. Keep the remaining readiness gap explicit until a repo-scope gate says
+     otherwise.
 
 ## Task 103 same-lane retained-child public-output continuity vs non-cyclic-graph successor loop scaffold (completed 2026-03-26)
 
