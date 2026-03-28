@@ -1,0 +1,12 @@
+{
+  "round_id": "round-137",
+  "item_id": "item-3",
+  "stage": "review",
+  "attempt": 2,
+  "implemented_stage_result": "canonical exact-packet blocker settlement republished at March 29 path",
+  "attempt_verdict": "accepted",
+  "stage_action": "finalize",
+  "roadmap_id": "2026-03-28-04-same-lane-retained-child-representative-gap-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-28-04-same-lane-retained-child-representative-gap-successor-roadmap/rev-001"
+}
