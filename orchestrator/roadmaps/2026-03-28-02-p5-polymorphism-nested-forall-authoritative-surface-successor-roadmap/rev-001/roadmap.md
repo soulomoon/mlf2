@@ -57,57 +57,56 @@
    predecessor truth only, preserves the inherited non-cyclic / no-fallback /
    one-interface-only boundary, and makes item `2` the next lawful move.
 
-2. [pending] Implement and validate one bounded current-architecture `P5` authoritative-surface continuation slice
+2. [done] Implement and validate one bounded current-architecture `P5` authoritative-surface continuation slice
    Item id: `item-2`
    Depends on: `item-1`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-1`
-   Completion notes: complete when an accepted round introduces one bounded
-   code-and-test slice aimed only at the exact frozen `P5` packet, refreshes
-   focused regression coverage, and records lawful evidence for whether the
-   current authoritative surfaces now expose recursive structure for that exact
-   quantified-crossing packet or fail closed with the guard still intact. If
-   this item touches `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`,
-   the round must rerun the repo full gate `cabal build all && cabal test`
-   unless the reviewer records a specific contract-allowed reason otherwise.
-   The round must not widen into equi-recursive reasoning, cyclic search,
-   multi-SCC search, a second interface, fallback behavior, or unrelated
-   family work.
+   Completion notes: accepted in `round-129`, merged as base commit `11b19ea`
+   (`Record fail-closed P5 authoritative-surface evidence`). The accepted
+   bounded slice retained no production-code change, refreshed
+   `test/Research/P5ClearBoundarySpec.hs` for the exact frozen packet only,
+   and validated the lawful fail-closed read on current authoritative
+   surfaces: the clear-boundary control `sameLaneClearBoundaryExpr` remains
+   recursive on both authoritative pipeline entrypoints, while the exact
+   quantified-crossing packet `nestedForallContrastExpr` fails on both
+   `runPipelineElab` and `runPipelineElabChecked` with the same Phase 6
+   `PhiTranslatabilityError` about missing authoritative instantiation
+   translation. Review accepted the round with `accepted + finalize`,
+   the serialized full gate
+   `cabal build all -j1 --builddir=dist-newstyle-round129-full-serial && cabal test -j1 --builddir=dist-newstyle-round129-full-serial`
+   passed, and the inherited architecture remained unchanged: no widened
+   semantics, no reopened `C1`, no reopened same-lane pocket, and no reopened
+   exact settled `P1` packet. The merge record leaves item `3` as the next
+   lawful move: publish one post-implementation `P5` settlement surface and
+   exact repo-impact read without widening this exact-packet fail-closed
+   result.
 
-3. [pending] Publish one post-implementation `P5` settlement surface and exact repo-impact read
+3. [done] Publish one post-implementation `P5` settlement surface and exact repo-impact read
    Item id: `item-3`
    Depends on: `item-1`, `item-2`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-2`
-   Completion notes: complete when an accepted aggregate artifact republishes
-   the exact current `P5` read after item `2`, validates provenance for any
-   cited focused reruns or full-gate evidence, and records whether the exact
-   frozen quantified-crossing packet now reaches lawful recursive visibility on
-   the authoritative surfaces or remains fail-closed / blocker debt. The
-   artifact must not silently widen one exact-packet result into general `P5`
-   family settlement or repo-level readiness.
+   Completion notes: accepted in `round-130` via
+   `docs/plans/2026-03-28-post-implementation-p5-polymorphism-nested-forall-settlement-surface-and-exact-repo-impact-read.md`
+   plus the round-owned review artifacts. The accepted settlement surface
+   republishes the exact post-item-2 control/contrast read, validates
+   provenance for the focused rerun and serialized full gate, and records the
+   exact repo-impact read as bounded fail-closed evidence only.
 
-4. [pending] Record one successor gate and immediate handoff after the bounded `P5` lane
+4. [done] Record one successor gate and immediate handoff after the bounded `P5` lane
    Item id: `item-4`
    Depends on: `item-1`, `item-2`, `item-3`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-3`
-   Completion notes: complete when an accepted aggregate artifact records
-   exactly one current outcome and exactly one immediate handoff. Lawful
-   outcomes are:
-   `exact P5 packet settled within the current architecture`,
-   `continue bounded on P5`,
-   or
-   `reopen the boundary question from P5 evidence`.
-   Lawful handoffs are:
-   stop,
-   open one next bounded current-architecture family after `P5`,
-   or
-   open one explicit boundary-revision family only if the accepted record
-   proves that is necessary. The artifact must keep `C1`, the same-lane
-   pocket, and the exact settled `P1` packet closed unless explicitly
-   reopened, preserve the inherited keep axes unless an accepted decision
-   changes them, and avoid any silent repo-level capability claim.
+   Completion notes: accepted in `round-131` via
+   `docs/plans/2026-03-28-post-p5-polymorphism-nested-forall-successor-gate-and-immediate-handoff-decision.md`
+   plus the round-owned review artifacts. The accepted outcome is
+   `exact P5 packet settled within the current architecture`, and the accepted
+   immediate handoff is `open one next bounded current-architecture family
+   after P5`, narrowed to a post-`P5` repo-scope refresh and
+   readiness-successor family. No repo-level readiness claim or mandatory
+   boundary-revision claim was made.
