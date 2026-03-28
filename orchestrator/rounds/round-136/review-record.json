@@ -1,0 +1,12 @@
+{
+  "round_id": "round-136",
+  "item_id": "item-2",
+  "stage": "review",
+  "attempt": 1,
+  "implemented_stage_result": "narrower current-architecture blocker",
+  "attempt_verdict": "accepted",
+  "stage_action": "finalize",
+  "roadmap_id": "2026-03-28-04-same-lane-retained-child-representative-gap-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-28-04-same-lane-retained-child-representative-gap-successor-roadmap/rev-001"
+}

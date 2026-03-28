@@ -28,6 +28,7 @@ import qualified PublicSurfaceSpec
 import qualified RepoGuardSpec
 import qualified Research.C1AuthoritativeSurfaceSpec
 import qualified Research.P5ClearBoundarySpec
+import qualified Research.SameLaneRetainedChildRepresentativeGapSpec
 import qualified Research.UriR2C1PrototypeP1Spec
 import qualified PresolutionSpec
 import qualified Presolution.UnificationClosureSpec
@@ -66,6 +67,7 @@ main = do
         RepoGuardSpec.spec
         Research.C1AuthoritativeSurfaceSpec.spec
         Research.P5ClearBoundarySpec.spec
+        Research.SameLaneRetainedChildRepresentativeGapSpec.spec
         Research.UriR2C1PrototypeP1Spec.spec
         PresolutionFacadeSpec.spec
         ThesisFixDirectionSpec.spec

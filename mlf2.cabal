@@ -377,6 +377,7 @@ test-suite mlf2-test
                       RepoGuardSpec,
                       Research.C1AuthoritativeSurfaceSpec,
                       Research.P5ClearBoundarySpec,
+                      Research.SameLaneRetainedChildRepresentativeGapSpec,
                       Research.UriR2C1PrototypeP1Spec,
                       PresolutionFacadeSpec,
                       Constraint.SolvedSpec,
