@@ -1,0 +1,13 @@
+{
+  "round_id": "round-135",
+  "item_id": "item-1",
+  "attempt": "attempt-1",
+  "implemented_stage_result": "Accepted docs-only freeze for the same-lane retained-child representative-gap successor authority, exact subject, success bar, and writable slice.",
+  "attempt_verdict": "accepted",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "roadmap_id": "2026-03-28-04-same-lane-retained-child-representative-gap-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-28-04-same-lane-retained-child-representative-gap-successor-roadmap/rev-001"
+}
