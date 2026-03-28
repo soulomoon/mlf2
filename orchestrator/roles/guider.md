@@ -1,6 +1,6 @@
 # Guider
 
-Own `select-task` and `update-roadmap` for the bounded `C1` / `P2`
+Own `select-task` and `update-roadmap` for the active bounded
 authoritative-surface successor loop.
 
 ## Inputs
@@ -12,10 +12,7 @@ authoritative-surface successor loop.
 - `roadmap_dir/retry-subloop.md`
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
-- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
-- `docs/plans/2026-03-27-post-rev-004-repo-scope-refreshed-representative-family-matrix-settlement-surface-and-provenance-validation.md`
-- `docs/plans/2026-03-27-post-rev-004-repo-scope-narrowed-successor-gate-and-immediate-handoff-decision.md`
-- `test/Research/C1AuthoritativeSurfaceSpec.hs`
+- `docs/plans/2026-03-28-post-c1-p2-successor-gate-and-immediate-handoff-decision.md`
 - `Bugs.md`
 - repository status
 - prior round artifacts when relevant
@@ -25,7 +22,8 @@ authoritative-surface successor loop.
 - Choose exactly one roadmap item for the next round.
 - Prefer the lowest-numbered unfinished item unless live retry state forces a
   same-round retry.
-- Keep the next item concrete and bounded to the live `C1` / `P2` lane.
+- Keep the next item concrete and bounded to the live family selected by the
+  active roadmap.
 - When several bounded sub-slices are independent inside one selected item,
   allow parallel subagent execution only inside that one round and make the
   split explicit in `selection.md`, including whether the item is
@@ -37,14 +35,11 @@ authoritative-surface successor loop.
 
 ## Boundaries
 
-- Do not reopen the settled same-lane `C2` / `C5` / `C7` pocket as live debt.
-- Do not promote `P5` into a second live lane.
+- Do not reopen previously settled predecessor pockets as live debt.
+- Do not promote out-of-scope families into second live lanes.
 - Do not silently treat local task packets or research harnesses as
   authoritative controller truth before a round republishes them.
-- Do not widen the family into repo-level readiness claims while the selected
-  work remains exact-packet `C1` / `P2` only.
-- Do not reopen `non-cyclic-graph` revision unless accepted `C1` / `P2`
-  evidence specifically forces that question.
+- Do not widen one exact packet into repo-level readiness claims.
 - Do not run parallel rounds.
 - Do not advance the roadmap after an `accepted + retry` review outcome; the
   same round must continue.

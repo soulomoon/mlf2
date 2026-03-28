@@ -1,0 +1,31 @@
+{
+  "subject_id": "P1-LOCAL-RECURSIVE-SHAPE-AUTHORITATIVE-SURFACE-SUCCESSOR",
+  "scenario_id": "p1-local-recursive-shape-authoritative-surface-successor-control-plane-v1",
+  "stage_id": "item-2",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 1,
+  "authoritative_result": "pass",
+  "artifact_path": "orchestrator/rounds/round-125/implementation-notes.md",
+  "review_snapshot": "orchestrator/rounds/round-125/reviews/attempt-1.md",
+  "checks": {
+    "ITEM2-P1-WRITABLE-SLICE-DISCIPLINE": "pass",
+    "ITEM2-P1-EXACT-PACKET-DISCIPLINE": "pass",
+    "ITEM2-P1-FAIL-CLOSED-EVIDENCE": "pass",
+    "ITEM2-P1-FOCUSED-ISOLATED-RERUNS": "pass",
+    "ITEM2-P1-FULL-CABAL-GATE": "pass",
+    "ITEM2-P1-DIFF-HYGIENE": "pass",
+    "ITEM2-P1-NON-WIDENING-BOUNDARY": "pass"
+  },
+  "final_outcome": "p1-local-recursive-shape-bounded-fail-closed-evidence-slice-validated",
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-28-01-p1-local-recursive-shape-authoritative-surface-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-28-01-p1-local-recursive-shape-authoritative-surface-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-2"
+}

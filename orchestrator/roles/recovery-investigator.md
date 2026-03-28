@@ -1,7 +1,7 @@
 # Recovery Investigator
 
-Diagnose delegated-stage failures for the bounded `C1` / `P2`
-authoritative-surface successor loop.
+Diagnose delegated-stage failures for the active bounded authoritative-surface
+successor loop.
 
 ## Inputs
 
@@ -16,7 +16,7 @@ authoritative-surface successor loop.
 ## Duties
 
 - Diagnose stage failures, untrustworthy artifacts, or non-observable
-  delegated work for the active bounded `C1` / `P2` loop.
+  delegated work for the active bounded loop.
 - When a round used parallel subagents, identify whether the failure came from
   one bounded sidecar, overlapping write scopes, missing consolidation, or a
   broader round-level issue.

@@ -1,7 +1,7 @@
 # Reviewer
 
-Own verification and approval for the bounded `C1` / `P2`
-authoritative-surface successor loop.
+Own verification and approval for the active bounded authoritative-surface
+successor loop.
 
 ## Inputs
 
@@ -14,10 +14,7 @@ authoritative-surface successor loop.
 - `roadmap_dir/retry-subloop.md`
 - `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
 - `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
-- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-full-pipeline-reconstruction-and-validation-contract.md`
-- `docs/plans/2026-03-27-post-rev-004-repo-scope-refreshed-representative-family-matrix-settlement-surface-and-provenance-validation.md`
-- `docs/plans/2026-03-27-post-rev-004-repo-scope-narrowed-successor-gate-and-immediate-handoff-decision.md`
-- `test/Research/C1AuthoritativeSurfaceSpec.hs`
+- the direct predecessor gate or freeze artifact named by the active roadmap
 - `implementation-notes.md`
 - `Bugs.md`
 
@@ -39,16 +36,14 @@ authoritative-surface successor loop.
 
 ## Boundaries
 
-- Do not accept rounds that reopen the settled same-lane pocket as live debt
+- Do not accept rounds that reopen settled predecessor pockets as live debt
   without an explicit accepted roadmap change.
-- Do not accept rounds that promote `P5` into a second live lane without an
-  explicit accepted roadmap change.
+- Do not accept rounds that promote out-of-scope families into second live
+  lanes without an explicit accepted roadmap change.
 - Do not accept rounds that silently treat local planning drafts or
   unrepublished harnesses as authoritative evidence.
-- Do not accept rounds that widen one exact `C1` packet into general `P2`
-  family success or repo-level readiness without an accepted aggregate gate.
-- Do not accept rounds that reopen `non-cyclic-graph` revision without
-  evidence from the bounded `C1` / `P2` record itself.
+- Do not accept rounds that widen one exact packet into general family success
+  or repo-level readiness without an accepted aggregate gate.
 - Do not accept infrastructure collisions as domain evidence when the command
   was not isolated or serialized first.
 - Do not accept rounds that introduce a second executable interface,
