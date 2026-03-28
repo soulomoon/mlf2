@@ -37,7 +37,7 @@
 
 ## Items
 
-1. [pending] Freeze the same-lane representative-gap successor authority, exact subject, success bar, and writable slice
+1. [done] Freeze the same-lane representative-gap successor authority, exact subject, success bar, and writable slice
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
@@ -54,21 +54,24 @@
    and must not authorize cyclic search, second interfaces, fallback
    widening, or broad capability claims.
 
-2. [pending] Implement and validate one bounded same-lane retained-child representative-gap slice
+2. [pending] Implement and validate the frozen `sameLaneAliasFrameClearBoundaryExpr` same-lane retained-child representative-gap slice
    Item id: `item-2`
    Depends on: `item-1`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-1`
    Completion notes: complete when an accepted round introduces one bounded
-   code-and-test slice aimed only at the exact frozen representative-gap
-   packet, refreshes focused regression coverage, and records whether that
-   second retained-child packet now reaches lawful authoritative-surface
+   code-and-test slice aimed only at the exact frozen second packet
+   `sameLaneAliasFrameClearBoundaryExpr` with the added alias binder `hold`,
+   keeps the work confined to the current-architecture writable slice frozen
+   by `item-1`, refreshes focused regression coverage, and records whether
+   that exact retained-child packet now reaches lawful authoritative-surface
    recursive visibility, remains fail-closed, or exposes a narrower current
-   architecture blocker. If this item touches `src/`, `src-public/`, `app/`,
-   `test/`, or `mlf2.cabal`, the round must rerun the repo full gate
-   `cabal build all && cabal test` unless the reviewer records a specific
-   contract-allowed reason otherwise.
+   architecture blocker. This item must not widen into general `P3` / `P4` /
+   `P6` family settlement or repo-level readiness. If this item touches
+   `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`, the round must
+   rerun the repo full gate `cabal build all && cabal test` unless the
+   reviewer records a specific contract-allowed reason otherwise.
 
 3. [pending] Publish one post-implementation same-lane representative-gap settlement surface and exact repo-impact read
    Item id: `item-3`
