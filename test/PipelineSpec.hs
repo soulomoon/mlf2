@@ -1338,6 +1338,108 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 tyChecked `shouldBe` tyUnchecked
                 typeCheck termChecked `shouldBe` Right tyChecked
 
+    describe "Automatic μ-introduction (item-4 edge cases)" $ do
+      it "characterizes nested recursive lets as Phase-3-safe with current Phase-4 witness normalization rejection" $ do
+        let expr =
+              ELet
+                "f"
+                (ELam "x" (ELet "g" (ELam "y" (EApp (EVar "f") (EApp (EVar "g") (EVar "y")))) (EVar "g")))
+                (EVar "f")
+        expectAlignedPipelinePastPhase3 expr
+        cBroken <- automaticMuConstraint expr
+        constraintContainsTyMu cBroken `shouldBe` True
+        let pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err -> do
+              let rendered = renderPipelineError err
+              rendered `shouldSatisfy` isInfixOf "Phase 4 (presolution)"
+              rendered `shouldSatisfy` isInfixOf "WitnessNormalizationError"
+            Right (_term, ty) ->
+              expectationFailure
+                (label ++ " unexpectedly succeeded with type " ++ show ty)
+
+      it "characterizes polymorphic recursion with annotation without Phase-3 regression" $ do
+        let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
+            expr =
+              ELet
+                "f"
+                (EAnn (ELam "x" (EApp (EVar "f") (EVar "x"))) ann)
+                (EVar "f")
+        expectAlignedPipelinePastPhase3 expr
+        cBroken <- automaticMuConstraint expr
+        constraintContainsTyMu cBroken `shouldBe` False
+        case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+          Left err -> do
+            let rendered = renderPipelineError err
+            rendered `shouldSatisfy` (not . isInfixOf "Phase 3 (acyclicity)")
+          Right (termUnchecked, tyUnchecked) -> do
+            typeCheck termUnchecked `shouldBe` Right tyUnchecked
+            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+              Left errChecked -> do
+                let rendered = renderPipelineError errChecked
+                rendered `shouldSatisfy` (not . isInfixOf "Phase 3 (acyclicity)")
+              Right (termChecked, tyChecked) -> do
+                typeCheck termChecked `shouldBe` Right tyChecked
+
+      it "characterizes μ/∀ interaction as recursive-at-constraint level with current Phase-6 fail-closed behavior" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "x" (EVar "x"))
+                (ELet "f" (ELam "x" (EApp (EVar "f") (EApp (EVar "id") (EVar "x")))) (EVar "f"))
+        expectAlignedPipelinePastPhase3 expr
+        cBroken <- automaticMuConstraint expr
+        constraintContainsTyMu cBroken `shouldBe` True
+        let pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err -> do
+              let rendered = renderPipelineError err
+              rendered `shouldSatisfy` isInfixOf "Phase 6 (elaboration)"
+              rendered `shouldSatisfy` isInfixOf "alias bounds survived scheme finalization"
+            Right (_term, ty) ->
+              expectationFailure
+                (label ++ " unexpectedly succeeded with type " ++ show ty)
+
+      it "characterizes higher-order recursion as recursive-at-constraint level with current Phase-6 fail-closed behavior" $ do
+        let expr =
+              ELet
+                "f"
+                (ELam "x" (ELam "y" (EApp (EApp (EVar "f") (EVar "x")) (EVar "y"))))
+                (EVar "f")
+        expectAlignedPipelinePastPhase3 expr
+        cBroken <- automaticMuConstraint expr
+        constraintContainsTyMu cBroken `shouldBe` False
+        let pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err -> do
+              let rendered = renderPipelineError err
+              rendered `shouldSatisfy` isInfixOf "Phase 6 (elaboration)"
+              rendered `shouldSatisfy` isInfixOf "alias bounds survived scheme finalization"
+            Right (_term, ty) ->
+              expectationFailure
+                (label ++ " unexpectedly succeeded with type " ++ show ty)
+
+      it "keeps already-annotated μ behavior stable" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr = ELet "k" (ELamAnn "x" recursiveAnn (EVar "x")) (EVar "k")
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+        case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+          Left err -> expectationFailure (renderPipelineError err)
+          Right (term, tyUnchecked) -> typeCheck term `shouldBe` Right tyUnchecked
+
     describe "ARI-C1 feasibility characterization (bounded prototype-only)" $ do
       let ariSetVarBound nid newBound constraint =
             let tweak node = case node of
