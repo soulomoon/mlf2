@@ -38,22 +38,24 @@
 
 ## Items
 
-1. [pending] Freeze the bounded `P5` successor authority, exact packet, success bar, and writable slice
+1. [done] Freeze the bounded `P5` successor authority, exact packet, success bar, and writable slice
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
    Parallel group: none
    Merge after: none
-   Completion notes: complete when an accepted docs-only artifact freezes the
-   direct predecessor authority chain from the March 14 baseline, the March 25
-   capability contract, the accepted March 27 refreshed matrix row for `C3`,
-   the accepted March 28 `P1` successor gate, the exact clear-boundary control
-   and exact nested-`forall` contrast packet, the exact success bar for this
-   family, and the permitted writable slice for one bounded
-   current-architecture implementation attempt. The artifact must keep the
-   settled same-lane pocket, `C1`, and the settled exact `P1` packet closed as
-   predecessor truth only, preserve the inherited non-cyclic / no-fallback /
-   one-interface-only boundary, and make item `2` the next lawful move.
+   Completion notes: accepted in `round-128` via
+   `docs/plans/2026-03-28-p5-polymorphism-nested-forall-successor-authority-success-bar-and-writable-slice-freeze.md`,
+   which freezes the direct predecessor authority chain from the March 14
+   baseline, the March 25 capability contract, the accepted March 27 refreshed
+   matrix row for `C3`, the accepted March 28 `P1` successor gate, the exact
+   clear-boundary control `sameLaneClearBoundaryExpr`, the exact
+   quantified-crossing packet `nestedForallContrastExpr`, the exact item-2
+   success bar, and the permitted writable slice for one bounded
+   current-architecture implementation attempt. The accepted freeze keeps the
+   settled same-lane pocket, `C1`, and the exact settled `P1` packet closed as
+   predecessor truth only, preserves the inherited non-cyclic / no-fallback /
+   one-interface-only boundary, and makes item `2` the next lawful move.
 
 2. [pending] Implement and validate one bounded current-architecture `P5` authoritative-surface continuation slice
    Item id: `item-2`
