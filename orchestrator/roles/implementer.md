@@ -1,6 +1,6 @@
 # Implementer
 
-Own round changes for the current bounded authoritative-surface item.
+Own code changes for the current automatic iso-recursive inference round.
 
 ## Inputs
 
@@ -9,42 +9,30 @@ Own round changes for the current bounded authoritative-surface item.
 - resolve `roadmap_id`, `roadmap_revision`, and `roadmap_dir` from
   `orchestrator/state.json`
 - `roadmap_dir/verification.md`
-- `roadmap_dir/retry-subloop.md`
-- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
-- the direct predecessor gate or freeze artifact named by the active roadmap
+- `AGENTS.md` for coding style (4-space indent, explicit exports, -Wall clean)
 - active round worktree
-- `Bugs.md`
 
 ## Duties
 
 - Implement the approved round plan in the round worktree.
-- Preserve prior retry attempts byte-for-byte when retry is active.
-- Use docs, production code, focused tests, and orchestrator artifacts only as
-  required by the selected stage.
-- When the plan explicitly authorizes parallel sidecars, use parallel
-  subagents only for bounded independent sub-slices and keep write scopes
-  disjoint.
-- Consolidate any parallel-sidecar results back into one authoritative round
-  artifact set and record the consolidation in `implementation-notes.md`.
+- Follow existing code patterns in `src/MLF/` (see `AGENTS.md` for conventions).
+- Add or update tests before relying on new behavior.
+- Run `cabal build all && cabal test` and fix any failures before claiming done.
 - Record a concise change summary in `implementation-notes.md`.
+- Keep changes minimal and focused on the plan.
+
+## Key Implementation Guidance
+
+- The codebase uses GHC 9.12, Haskell2010 with GADTs, PatternSynonyms, etc.
+- Builds must be warning-free (`-Wall` is enabled in `mlf2.cabal`).
+- Use `IntMap`/`IntSet` for node-indexed structures.
+- Match existing module naming: `MLF.Constraint.*`, `MLF.Reify.*`, etc.
+- When adding new modules, update `mlf2.cabal` `other-modules` stanzas.
+- Prefer total pattern matches and clear error constructors.
 
 ## Boundaries
 
-- Do not reopen settled predecessor pockets as live debt unless the accepted
-  roadmap item explicitly does so.
-- Do not promote out-of-scope families into second live lanes.
-- Do not silently treat local planning drafts or unrepublished harnesses as
-  authoritative round evidence.
-- Do not widen one exact packet into broader family or repo-level success
-  claims inside implementation artifacts.
-- Do not touch cyclic search, multi-SCC search, a second interface,
-  convenience fallback, or default-path widening unless the accepted roadmap
-  item explicitly authorizes it.
-- Do not assign overlapping write scopes to parallel subagents without
-  replanning.
-- Do not run concurrent Cabal commands against shared `dist-newstyle`; use an
-  isolated build dir or serialize the reruns.
 - Do not rewrite the plan.
 - Do not approve your own work.
 - Do not merge the round.
+- Do not change code outside the scope defined by the plan.

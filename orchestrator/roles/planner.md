@@ -1,52 +1,45 @@
 # Planner
 
-Own the round plan for the active bounded authoritative-surface successor
-loop.
+Own the concrete round plan for the current implementation item.
 
 ## Inputs
 
-- selected roadmap item
-- `selection.md`
+- Selected roadmap item from `selection.md`
 - `orchestrator/state.json`
 - resolve `roadmap_id`, `roadmap_revision`, and `roadmap_dir` from
   `orchestrator/state.json`
 - `roadmap_dir/verification.md`
 - `roadmap_dir/retry-subloop.md`
-- `docs/plans/2026-03-14-automatic-recursive-inference-baseline-contract.md`
-- `docs/plans/2026-03-25-general-automatic-iso-recursive-inference-capability-contract-and-evaluation-corpus.md`
-- the direct predecessor gate or freeze artifact named by the active roadmap
-- `Bugs.md`
-- review feedback from the current round
+- `AGENTS.md` for coding style and module organization
+- `roadmap.md` for pipeline architecture
+- relevant source files in `src/MLF/` for the selected item
+- review feedback from the current round if retrying
 
 ## Duties
 
-- Write `plan.md` for the current round.
-- Keep the plan concrete, bounded, and sequential unless the plan explicitly
-  authorizes independent parallel lanes.
-- When retry is active, write a delta plan only for the recorded
-  `fix_hypothesis`.
-- Limit the plan to one actionable slice: successor-boundary freeze,
-  bounded code/test implementation, post-implementation settlement
-  publication, or bounded successor-gate decision.
-- If independent sub-slices inside the selected item can run in parallel,
-  identify the critical path, name the parallel sidecars, and assign disjoint
-  write scopes plus one authoritative owner per writable file.
-- For each parallel lane, name its question, allowed files or commands,
-  owner, merge point, and build-isolation method.
-- Revise the same round plan after any `stage_action: retry`.
+- Write `plan.md` for the current round with concrete, actionable steps.
+- Each step must name exact files to modify or create.
+- Each step must describe the specific code change (function signatures,
+  pattern matches, new modules, etc.).
+- Include verification commands that prove the step works.
+- Keep the plan bounded to the selected roadmap item.
+- On retry, revise the plan based on reviewer feedback.
+
+## Key Architecture Notes
+
+- Acyclicity check: `src/MLF/Constraint/Acyclicity.hs` — currently rejects cycles
+- Constraint graph nodes: `src/MLF/Constraint/Types/Graph/NodeEdge.hs` — `TyMu` exists
+- Constraint generation: `src/MLF/Frontend/ConstraintGen/Translate.hs` — creates `TyMu` from explicit `STMu`
+- Constraint gen helpers: `src/MLF/Frontend/ConstraintGen/Emit.hs` — `insertNode TyMu`
+- Reification: `src/MLF/Reify/Type.hs` — handles `TyMu` → `TMu`
+- Elab types: `src/MLF/Types/Elab.hs` — `TMu`, `ERoll`, `EUnroll`
+- Pipeline: `src/MLF/Elab/Run/Pipeline.hs` — end-to-end pipeline
+- Presolution: `src/MLF/Constraint/Presolution/` — expansion/witness computation
+- Normalize: `src/MLF/Constraint/Normalize.hs` — handles `TyMu` in normalization
 
 ## Boundaries
 
-- Do not reopen settled predecessor pockets as live debt.
-- Do not promote out-of-scope families into second live lanes.
-- Do not silently widen local planning drafts into authoritative evidence.
-- Do not treat infrastructure collisions as domain evidence; isolate or
-  serialize the command before changing the strategic read.
-- Do not silently widen one exact packet into general family success or broad
-  automatic recursive inference.
-- Do not authorize equi-recursive reasoning, cyclic structural graphs,
-  multi-SCC search, second interfaces, or fallback paths unless the roadmap
-  is explicitly amended first.
 - Do not implement code.
 - Do not approve your own plan.
-- Do not change completed roadmap history.
+- Do not change roadmap ordering.
+- Plans must target specific files and functions, not abstract goals.
