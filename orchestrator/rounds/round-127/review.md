@@ -17,20 +17,23 @@
 
 - The round is docs-only and aggregate-only. No production or test file was
   changed.
-- The gate records exactly one lawful outcome:
+- The gate records exactly one lawful current outcome:
   `exact P1 packet settled within the current architecture`.
 - The gate records exactly one lawful immediate handoff:
-  `open one next bounded current-architecture family after P1`,
-  narrowed explicitly to `P5 polymorphism-nested-forall authoritative-surface`.
-- The rejected alternatives are explained explicitly:
-  no narrower continuation remains on the exact frozen packet, and the exact
-  accepted evidence does not show that an architecture boundary blocked a
-  lawful recursive result for that packet.
-- The artifact keeps the claim non-widening: it does not claim general `P1`
-  family success or repo-level readiness, and it does not silently reopen
-  settled predecessor pockets.
-- The full Cabal gate is correctly skipped because this round is
-  docs/orchestrator-only.
+  `open one next bounded current-architecture family after P1`, narrowed to
+  `P5 polymorphism-nested-forall authoritative-surface family`.
+- The rejected alternatives are explicit and coherent with the accepted
+  record:
+  `continue bounded on P1` is rejected because the exact frozen packet is now
+  settled, and `reopen the boundary question from P1 evidence` is rejected
+  because the accepted item-2/item-3 record found no lawful recursive carrier
+  for that exact packet rather than a boundary-blocked recursive result.
+- The artifact stays non-widening: it does not claim general `P1` success,
+  repo-level automatic iso-recursive-type inference readiness, or a mandatory
+  architecture reopen.
+- The full Cabal gate is correctly skipped for this round because the diff is
+  docs/orchestrator-only; the accepted round-125 full gate remains
+  predecessor evidence only.
 
 ## Parallel Execution Summary
 

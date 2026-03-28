@@ -1,11 +1,22 @@
-# Review Snapshot (`round-127` / `item-4` / `attempt-1`)
+# Review Attempt 1 (`round-127` / `item-4`)
 
-- Implemented stage result: `pass`
-- Attempt verdict: `accepted`
+- Result: `accepted`
 - Stage action: `finalize`
+- Implemented stage result: `pass`
 - Retry reason: `none`
 - Fix hypothesis: `none`
-- Key decision:
-  the exact frozen `P1` packet is settled within the current architecture,
-  and the next bounded family is `P5 polymorphism-nested-forall
-  authoritative-surface`.
+
+## Accepted Read
+
+- Exact outcome:
+  `exact P1 packet settled within the current architecture`
+- Exact immediate handoff:
+  `open one next bounded current-architecture family after P1`
+- Next bounded family:
+  `P5 polymorphism-nested-forall authoritative-surface family`
+
+## Notes
+
+- Docs-only aggregate gate; no production or test change.
+- No silent widening into general `P1` family success or repo-level
+  readiness.
