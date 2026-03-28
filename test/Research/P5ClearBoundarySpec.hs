@@ -1,6 +1,7 @@
 module Research.P5ClearBoundarySpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
+import Data.List (isInfixOf)
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -32,6 +33,9 @@ import MLF.Constraint.Types.Graph
 import MLF.Elab.Pipeline
     ( applyRedirectsToAnn
     , canonicalizeAnn
+    , renderPipelineError
+    , runPipelineElab
+    , runPipelineElabChecked
     )
 import MLF.Elab.Run.ResultType
     ( ResultTypeInputs(..)
@@ -56,6 +60,7 @@ import SpecUtil
     , defaultTraceConfig
     , requireRight
     , runPipelineArtifactsDefault
+    , unsafeNormalizeExpr
     )
 
 spec :: Spec
@@ -68,6 +73,48 @@ spec =
         it "fails closed once the same wrapper crosses a nested forall boundary" $ do
             fallbackTy <- fallbackType nestedForallContrastExpr
             containsMu fallbackTy `shouldBe` False
+
+        it "keeps the clear-boundary control recursive on both current pipeline entrypoints" $ do
+            let pipelineRuns =
+                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
+                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
+                    ]
+            mapM_
+                (\(label, result) -> case result of
+                    Left err ->
+                        expectationFailure (label ++ ": " ++ renderPipelineError err)
+                    Right (_term, ty) ->
+                        containsMu ty `shouldBe` True
+                )
+                pipelineRuns
+
+        it "hits the same authoritative instantiation-translation blocker on both current pipeline entrypoints once the wrapper crosses a nested forall boundary" $ do
+            let expectedSnippets =
+                    [ "Phase 6 (elaboration): PhiTranslatabilityError"
+                    , "reifyInst: missing authoritative instantiation translation"
+                    , "expansion args="
+                    ]
+                pipelineRuns =
+                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))
+                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))
+                    ]
+            mapM_
+                (\(label, result) -> case result of
+                    Left err -> do
+                        let rendered = renderPipelineError err
+                        mapM_
+                            (\snippet ->
+                                rendered `shouldSatisfy` isInfixOf snippet
+                            )
+                            expectedSnippets
+                    Right (_term, ty) ->
+                        expectationFailure
+                            ( label
+                                ++ ": expected authoritative translation failure, got "
+                                ++ show ty
+                            )
+                )
+                pipelineRuns
 
 sameLaneClearBoundaryExpr :: SurfaceExpr
 sameLaneClearBoundaryExpr =
