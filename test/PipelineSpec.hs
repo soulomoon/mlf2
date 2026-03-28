@@ -13,9 +13,11 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.Maybe (catMaybes, isJust, listToMaybe)
 import Data.Set qualified as Set
 import MLF.Binding.Tree qualified as Binding
+import MLF.Constraint.Acyclicity (breakCyclesAndCheckAcyclicity)
 import MLF.Constraint.Canonicalizer (canonicalizeNode, canonicalizerFrom)
 import MLF.Constraint.Finalize qualified as Finalize
 import MLF.Constraint.NodeAccess qualified as NodeAccess
+import MLF.Constraint.Normalize qualified as ConstraintNormalize
 import MLF.Constraint.Presolution
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents (..))
 import MLF.Constraint.Presolution.TestSupport
@@ -142,6 +144,92 @@ containsMu ty = case ty of
       TForall _ mb body -> maybe False containsMuBound mb || containsMu body
       TMu _ _ -> True
       TBottom -> False
+
+expectAlignedPipelineSuccessType :: SurfaceExpr -> IO ElabType
+expectAlignedPipelineSuccessType expr =
+  let normExpr = unsafeNormalizeExpr expr
+      unchecked = runPipelineElab Set.empty normExpr
+      checked = runPipelineElabChecked Set.empty normExpr
+      bothFailed errUnchecked errChecked =
+        expectationFailure
+          ( unlines
+              [ "Expected both authoritative pipeline entrypoints to succeed.",
+                "unchecked: " ++ renderPipelineError errUnchecked,
+                "checked: " ++ renderPipelineError errChecked
+              ]
+          )
+          *> pure TBottom
+      uncheckedFailed errUnchecked =
+        expectationFailure
+          ( unlines
+              [ "Unchecked pipeline failed while checked pipeline succeeded.",
+                "unchecked: " ++ renderPipelineError errUnchecked
+              ]
+          )
+          *> pure TBottom
+      checkedFailed errChecked =
+        expectationFailure
+          ( unlines
+              [ "Checked pipeline failed while unchecked pipeline succeeded.",
+                "checked: " ++ renderPipelineError errChecked
+              ]
+          )
+          *> pure TBottom
+   in case (unchecked, checked) of
+        (Left errUnchecked, Left errChecked) -> bothFailed errUnchecked errChecked
+        (Left errUnchecked, Right _) -> uncheckedFailed errUnchecked
+        (Right _, Left errChecked) -> checkedFailed errChecked
+        (Right (termUnchecked, tyUnchecked), Right (termChecked, tyChecked)) -> do
+          typeCheck termUnchecked `shouldBe` Right tyUnchecked
+          typeCheck termChecked `shouldBe` Right tyChecked
+          tyUnchecked `shouldBe` tyChecked
+          pure tyChecked
+
+expectAlignedPipelinePastPhase3 :: SurfaceExpr -> Expectation
+expectAlignedPipelinePastPhase3 expr =
+  let normExpr = unsafeNormalizeExpr expr
+      unchecked = runPipelineElab Set.empty normExpr
+      checked = runPipelineElabChecked Set.empty normExpr
+      assertNotPhase3 err =
+        renderPipelineError err
+          `shouldSatisfy` (not . isInfixOf "Phase 3 (acyclicity)")
+   in case (unchecked, checked) of
+        (Left errUnchecked, Left errChecked) -> do
+          assertNotPhase3 errUnchecked
+          assertNotPhase3 errChecked
+        (Left errUnchecked, Right _) ->
+          expectationFailure
+            ( unlines
+                [ "Unchecked pipeline failed while checked pipeline succeeded.",
+                  "unchecked: " ++ renderPipelineError errUnchecked
+                ]
+            )
+        (Right _, Left errChecked) ->
+          expectationFailure
+            ( unlines
+                [ "Checked pipeline failed while unchecked pipeline succeeded.",
+                  "checked: " ++ renderPipelineError errChecked
+                ]
+            )
+        (Right (termUnchecked, tyUnchecked), Right (termChecked, tyChecked)) -> do
+          typeCheck termUnchecked `shouldBe` Right tyUnchecked
+          typeCheck termChecked `shouldBe` Right tyChecked
+          tyUnchecked `shouldBe` tyChecked
+
+automaticMuConstraint :: SurfaceExpr -> IO Constraint
+automaticMuConstraint expr = do
+  ConstraintResult {crConstraint = c0} <-
+    requireRight (runConstraintDefault Set.empty expr)
+  let c1 = ConstraintNormalize.normalize c0
+  fst <$> requireRight (breakCyclesAndCheckAcyclicity c1)
+
+constraintContainsTyMu :: Constraint -> Bool
+constraintContainsTyMu constraint =
+  any isTyMu (map snd (toListNode (cNodes constraint)))
+  where
+    isTyMu node = case node of
+      TyMu {} -> True
+      _ -> False
 
 resultTypeInputsForArtifacts :: PipelineArtifacts -> (ResultTypeInputs, AnnExpr, AnnExpr)
 resultTypeInputsForArtifacts
@@ -1164,6 +1252,42 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               containsMu tyChecked `shouldBe` False
               tyChecked `shouldSatisfy` containsArrowTy
               tyChecked `shouldSatisfy` containsForallTy
+
+    describe "Automatic μ-introduction (item-2)" $ do
+      it "self-recursive function infers μ on both authoritative entrypoints" $ do
+        let expr = ELet "f" (ELam "x" (EApp (EVar "f") (EVar "x"))) (EVar "f")
+        expectAlignedPipelinePastPhase3 expr
+        cBroken <- automaticMuConstraint expr
+        cBroken `shouldSatisfy` constraintContainsTyMu
+
+      it "nested-let mutually recursive aliases stay Phase-3-safe even when no structural μ rewrite is needed" $ do
+        let expr =
+              ELet
+                "f"
+                (ELet "g" (ELam "x" (EApp (EVar "f") (EVar "x"))) (EVar "g"))
+                (EVar "f")
+        expectAlignedPipelinePastPhase3 expr
+        cBroken <- automaticMuConstraint expr
+        cBroken `shouldNotSatisfy` constraintContainsTyMu
+
+      it "recursive data-like constructor shape stays Phase-3-safe even when no structural μ rewrite is needed" $ do
+        let expr =
+              ELet
+                "lst"
+                (ELam "x" (ELam "xs" (EApp (EApp (EVar "lst") (EVar "x")) (EVar "xs"))))
+                (EVar "lst")
+        expectAlignedPipelinePastPhase3 expr
+        cBroken <- automaticMuConstraint expr
+        cBroken `shouldNotSatisfy` constraintContainsTyMu
+
+      it "non-recursive control expression stays μ-free on both authoritative entrypoints" $ do
+        let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` False
+        ty `shouldSatisfy` containsArrowTy
+        ty `shouldSatisfy` containsForallTy
+        cBroken <- automaticMuConstraint expr
+        cBroken `shouldNotSatisfy` constraintContainsTyMu
 
     describe "ARI-C1 feasibility characterization (bounded prototype-only)" $ do
       let ariSetVarBound nid newBound constraint =
