@@ -1,0 +1,28 @@
+{
+  "subject_id": "P1-LOCAL-RECURSIVE-SHAPE-AUTHORITATIVE-SURFACE-SUCCESSOR",
+  "scenario_id": "p1-local-recursive-shape-authoritative-surface-successor-control-plane-v1",
+  "stage_id": "item-4",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "status": "authoritative",
+  "authoritative_attempt": 1,
+  "authoritative_result": "pass",
+  "artifact_path": "docs/plans/2026-03-28-post-p1-local-recursive-shape-successor-gate-and-immediate-handoff-decision.md",
+  "review_snapshot": "orchestrator/rounds/round-127/reviews/attempt-1.md",
+  "checks": {
+    "ITEM4-P1-ONE-OUTCOME": "pass",
+    "ITEM4-P1-ONE-HANDOFF": "pass",
+    "ITEM4-P1-NON-WIDENING-BOUNDARY": "pass",
+    "ITEM4-P1-DOCS-ONLY-ROUND": "pass"
+  },
+  "final_outcome": "p1-local-recursive-shape-successor-gate-recorded",
+  "terminal_reason": "none",
+  "roadmap_id": "2026-03-28-01-p1-local-recursive-shape-authoritative-surface-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-28-01-p1-local-recursive-shape-authoritative-surface-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-4"
+}
