@@ -1675,6 +1675,18 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 fallbackTy `shouldBe` TBase (BaseTy "Int")
                 containsMu fallbackTy `shouldBe` False
 
+            it "keeps the selected non-local scheme-alias/base-like packet recursive on both authoritative pipeline entrypoints" $ do
+                let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+                    expr =
+                        ELet "k" (ELamAnn "x" recursiveAnn (EVar "x")) (EVar "k")
+                    blockedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
+                (_uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+                (_checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+                uncheckedTy `shouldNotBe` blockedTy
+                checkedTy `shouldNotBe` blockedTy
+                containsMu uncheckedTy `shouldBe` True
+                containsMu checkedTy `shouldBe` True
+
             it "keeps local multi-inst fallback on the local TypeRef lane" $ do
                 fallbackTy <- localMultiInstFallback True
                 case fallbackTy of
