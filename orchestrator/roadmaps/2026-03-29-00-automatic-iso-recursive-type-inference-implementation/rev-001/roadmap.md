@@ -43,7 +43,7 @@
    identically. The implementation must pass `cabal build all && cabal test`
    with zero regressions.
 
-2. [pending] Wire automatic μ-introduction into the pipeline and add focused test coverage
+2. [done] Wire automatic μ-introduction into the pipeline and add focused test coverage
    Item id: `item-2`
    Depends on: `item-1`
    Parallel safe: no
