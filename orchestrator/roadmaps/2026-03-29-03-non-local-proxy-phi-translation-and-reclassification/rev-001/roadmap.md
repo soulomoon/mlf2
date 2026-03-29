@@ -73,7 +73,7 @@
    - No code changes beyond test descriptions and documentation
    - `cabal build all && cabal test` passes
 
-2. [pending] Fix reifyInst TyMu without authoritative binder child for non-local proxy
+2. [done] Fix reifyInst TyMu without authoritative binder child for non-local proxy
    Item id: `item-2`
    Depends on: none
    Parallel safe: no
@@ -90,7 +90,7 @@
    - Existing tests do not regress (1175 examples, 0 failures)
    - `cabal build all && cabal test` passes
 
-3. [pending] Fix OpRaise non-spine missing computation context for non-local bind-parent
+3. [done] Fix OpRaise non-spine missing computation context for non-local bind-parent
    Item id: `item-3`
    Depends on: `item-2`
    Parallel safe: no
