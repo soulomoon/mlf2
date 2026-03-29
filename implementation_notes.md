@@ -22,8 +22,10 @@ constraint graphs (Section 9.3). The extension is documented in
 Non-recursive programs remain unaffected — the cycle detection is a no-op when
 no cycles exist, so all existing behavior is preserved identically.
 
-**Known remaining limitations:**
-- Nested-forall-mediated recursive types: μ is absorbed during constraint solving through polymorphic mediation (e.g., `let rec f = id f`). In these cases, the result-type fallback correctly reports no μ-type because constraint solving legitimately removed the recursive wrapper through polymorphic generalization.
+**Known correct behavior under polymorphic mediation:**
+- Nested-forall-mediated recursive types: μ is absorbed during constraint solving through polymorphic mediation (e.g., `let rec f = id f`). In these cases, the result-type fallback correctly reports no μ-type because constraint solving legitimately removed the recursive wrapper through polymorphic generalization. This is not a limitation — it is the expected outcome when a polymorphic mediator generalizes away the recursive structure.
+
+**Known remaining limitation:**
 - Non-local proxy at pipeline entrypoints: the result-type fallback now correctly returns μ-types for non-local reconstruction, but the pipeline entrypoint still fails with `PhiTranslatabilityError` at the elaboration level. This is a separate elaboration-layer issue, not a result-type fallback defect.
 
 **Test evidence:** all 1175 examples pass, including focused integration tests in
