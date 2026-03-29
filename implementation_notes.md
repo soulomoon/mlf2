@@ -1,7 +1,8 @@
 ## 2026-03-29 - Automatic iso-recursive type inference implemented and tested
 
-Automatic iso-recursive type inference is now fully implemented and tested
-end-to-end across all pipeline phases. The mechanism works as follows:
+Automatic iso-recursive type inference is now implemented and tested end-to-end across all pipeline phases. An initial implementation in round-144 was followed by a gap-fix campaign (rounds 146-149) that addressed four specific robustness gaps: witness normalization for TyMu nodes, alias-bounds resolution for recursive types, ELet fixpoint reduction for recursive let-bindings, and result-type fallback opening for non-local recursive reconstruction.
+
+The 5-step mechanism works as follows:
 
 1. **Cycle detection** in `MLF.Constraint.Acyclicity`
    (`breakCyclesAndCheckAcyclicity`) detects cycles in the constraint graph
@@ -21,10 +22,14 @@ constraint graphs (Section 9.3). The extension is documented in
 Non-recursive programs remain unaffected — the cycle detection is a no-op when
 no cycles exist, so all existing behavior is preserved identically.
 
-**Test evidence:** all 1168+ tests pass, including focused integration tests in
+**Known remaining limitations:**
+- Nested-forall-mediated recursive types: μ is absorbed during constraint solving through polymorphic mediation (e.g., `let rec f = id f`). In these cases, the result-type fallback correctly reports no μ-type because constraint solving legitimately removed the recursive wrapper through polymorphic generalization.
+- Non-local proxy at pipeline entrypoints: the result-type fallback now correctly returns μ-types for non-local reconstruction, but the pipeline entrypoint still fails with `PhiTranslatabilityError` at the elaboration level. This is a separate elaboration-layer issue, not a result-type fallback defect.
+
+**Test evidence:** all 1175 examples pass, including focused integration tests in
 `test/TypeSoundnessSpec.hs` and `test/PipelineSpec.hs` covering simple
-self-recursion, nested lets, recursive data patterns, polymorphic recursion,
-μ/∀ interaction, higher-order recursion, and explicit-μ stability.
+self-recursion, nested recursive lets, recursive data patterns, polymorphic recursion,
+μ/∀ interaction, higher-order recursion, non-local recursive result types, and explicit-μ stability.
 
 ## 2026-03-25 - Repo-local orchestrator migrated to revisioned roadmap bundles
 

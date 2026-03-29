@@ -8,23 +8,22 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 - Completed:
   - Completed the automatic iso-recursive type inference campaign through the
-    `2026-03-29-01-automatic-iso-recursive-type-inference-completion` roadmap
-    family: item-1 validated end-to-end Phase 7 reduction for auto-inferred
-    recursive terms (inference → elaboration → type checking → reduction),
-    item-2 recorded the completed capability across all project documentation
-    surfaces.
-  - The mechanism: cycle detection in the constraint graph automatically
-    introduces `TyMu` nodes; reification produces `TMu` types; elaboration
-    emits `ERoll`/`EUnroll` coercions; Phase 7 type checker and reducer accept
-    and reduce recursive types end-to-end.
+    `2026-03-29-01-automatic-iso-recursive-type-inference-completion` and
+    `2026-03-29-02-iso-recursive-inference-gap-fixes` roadmaps.
+  - Initial implementation (round-144) established the end-to-end mechanism: cycle detection introduces `TyMu` nodes, reification produces `TMu` types, elaboration emits `ERoll`/`EUnroll` coercions, and Phase 7 type-checks and reduces recursive types.
+  - Gap-fix campaign (rounds 146-149) addressed four specific robustness gaps:
+    - Item-1: Fixed Phase 4 witness normalization and validation for `TyMu` nodes.
+    - Item-2: Fixed Phase 6 alias-bounds resolution for recursive types (μ/∀ interaction and higher-order recursion).
+    - Item-3: Added ELet fixpoint reduction to handle recursive let-bindings correctly.
+    - Item-4: Opened result-type fallback to correctly reconstruct non-local μ-types.
+    - Item-5: Corrected all project documentation to accurately reflect the final supported scope and remaining limitations.
   - This is an extension beyond the core thesis (which assumes acyclic
     constraint graphs), documented in `docs/thesis-deviations.yaml` as
     `DEV-AUTO-ISO-RECURSIVE`.
 - Verification:
-  - `cabal build all && cabal test`: PASS (1168+ examples, 0 failures)
+  - `cabal build all && cabal test`: PASS (1175 examples, 0 failures)
 - Rolling priorities (next):
-  1. Item-3 final readiness gate: clean up orchestrator state and declare
-     readiness.
+  - No further work needed — iso-recursive inference gap-fix campaign complete.
 
 ## Task 104 global non-cyclic-graph settlement and automatic iso-recursive inference loop scaffold (in progress 2026-03-28)
 

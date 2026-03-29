@@ -3,13 +3,7 @@
 ## Unreleased
 
 ### Changed
-- Implemented automatic iso-recursive type inference end-to-end: the constraint
-  solver now detects cycles and automatically introduces `TyMu` nodes,
-  reification produces `TMu` types, elaboration emits `ERoll`/`EUnroll`
-  coercions, and Phase 7 type-checks and reduces recursive types including
-  roll/unroll steps. This is an extension beyond the core thesis (which assumes
-  acyclic constraint graphs), documented in `docs/thesis-deviations.yaml` as
-  `DEV-AUTO-ISO-RECURSIVE`. Validated with 1168+ tests, 0 failures.
+- Implemented and hardened automatic iso-recursive type inference end-to-end: the constraint solver detects cycles and automatically introduces `TyMu` nodes, reification produces `TMu` types, elaboration emits `ERoll`/`EUnroll` coercions, and Phase 7 type-checks and reduces recursive types including roll/unroll steps. An initial implementation in round-144 was followed by a gap-fix campaign (rounds 146-149) that addressed four specific robustness gaps: witness normalization for TyMu nodes, alias-bounds resolution for recursive types, ELet fixpoint reduction for recursive let-bindings, and result-type fallback opening for non-local recursive reconstruction. Documented known remaining limitations in `implementation_notes.md`. This is an extension beyond the core thesis (which assumes acyclic constraint graphs), documented in `docs/thesis-deviations.yaml` as `DEV-AUTO-ISO-RECURSIVE`. Validated with 1175 examples, 0 failures.
 - Completed the bounded same-lane retained-child public-output continuity vs
   `non-cyclic-graph` successor loop through accepted rounds `round-094`
   through `round-098`, ending with the exact-pocket outcome
