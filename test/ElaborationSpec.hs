@@ -1304,7 +1304,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
             Elab.prettyDisplay sch `shouldBe` "∀(a ⩾ ⊥) a -> a"
 
-        it "generalizeAt rejects alias bounds (no ∀(b ⩾ a))" $ do
+        it "generalizeAt normalizes inter-binder alias bounds to unbounded (no ∀(b ⩾ a))" $ do
             let a = NodeId 1
                 b = NodeId 2
                 arrow = NodeId 3
@@ -1327,11 +1327,13 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
             solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
             solved <- requireRight (Solved.fromSolveOutput solveOut)
+            -- Inter-binder alias bounds are now normalized to unbounded
+            -- (see Note [Inter-binder alias bounds in recursive types] in ReifyPlan.hs)
             case generalizeAt solved (typeRef forallNode) forallNode of
                 Left err ->
-                    show err `shouldSatisfy` isInfixOf "alias bounds survived"
+                    expectationFailure ("Expected success but got: " ++ show err)
                 Right _ ->
-                    expectationFailure "Expected alias bounds to be rejected"
+                    pure ()
 
         it "originalConstraint preserves solved-away binder after unification" $ do
             -- Construct ∀α. α → α with a unify edge α = Int.
