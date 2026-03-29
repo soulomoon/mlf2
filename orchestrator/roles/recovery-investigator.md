@@ -15,6 +15,11 @@ Diagnose delegated-stage failures and recommend recovery steps.
 - Diagnose why a delegated stage failed.
 - Recommend whether to retry with the same or different mechanism.
 - Recommend whether the controller can safely continue.
+- When workflow or gate failures are involved, distinguish between:
+  - stale generated artifacts or docs drift,
+  - workflow-shape mistakes,
+  - real repo bugs exposed by the new matrix,
+  - unsupported runner assumptions.
 
 ## Boundaries
 

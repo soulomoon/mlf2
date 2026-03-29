@@ -25,6 +25,28 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Rolling priorities (next):
   - No further work needed — iso-recursive inference gap-fix campaign complete.
 
+## Task 106 CI test-matrix and failure-repair successor loop scaffold (in progress 2026-03-30)
+
+- Completed:
+  - surveyed the current CI surface and verified that the repo still has only
+    one GitHub Actions lane in `.github/workflows/thesis-conformance.yml`
+    (`ubuntu-latest`, `ghc-version: 9.12.2`) with no matrix;
+  - captured the current local verification baseline:
+    - `cabal build all && cabal test`: PASS (`1177 examples, 0 failures`)
+    - `./scripts/thesis-conformance-gate.sh`: FAIL because
+      `/Volumes/src/mlf4/docs/thesis-obligations.md` is out of date;
+  - scaffolded a fresh successor roadmap bundle under
+    `orchestrator/roadmaps/2026-03-30-00-test-matrix-and-failure-repair-successor-roadmap/rev-001/`
+    and advanced the live controller to that family at
+    `dispatch-rounds`.
+- Rolling priorities (next):
+  1. Freeze the bounded matrix scope and repair the red thesis-conformance
+     baseline honestly at the source of truth.
+  2. Add the selected GitHub Actions matrix around that repaired baseline.
+  3. Fix any runner- or test-exposed failures at the root cause, without
+     CI-only bypasses.
+  4. Publish the resulting CI scope and maintenance guidance in repo docs.
+
 ## Task 104 global non-cyclic-graph settlement and automatic iso-recursive inference loop scaffold (in progress 2026-03-28)
 
 - Completed:
