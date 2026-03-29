@@ -1096,6 +1096,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                                         in if parentC == rootC
                                             || case lookupNodePV parentC of
                                                 Just TyForall{} -> True
+                                                Just TyMu{} -> True
                                                 _ -> False
                                             then
                                                 let nodeTyBoundInlined = inlineBaseBounds nodeTyBound'
