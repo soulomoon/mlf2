@@ -72,7 +72,7 @@
      unchanged (zero regressions)
    - `cabal build all && cabal test` passes
 
-2. [pending] Phase 6: Fix alias-bound resolution for recursive types
+2. [done] Phase 6: Fix alias-bound resolution for recursive types
    Item id: `item-2`
    Depends on: `item-1`
    Parallel safe: no
