@@ -126,7 +126,7 @@
    - Test description updated to reflect the successful behavior
    - `cabal build all && cabal test` passes
 
-5. [pending] Update documentation to reflect completed non-local proxy support
+5. [done] Update documentation to reflect completed non-local proxy support
    Item id: `item-5`
    Depends on: `item-1`, `item-2`, `item-3`, `item-4`
    Parallel safe: no
