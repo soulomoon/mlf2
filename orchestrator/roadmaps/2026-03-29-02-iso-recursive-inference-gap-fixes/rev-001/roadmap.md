@@ -91,7 +91,7 @@
    - Existing non-recursive scheme finalization is unchanged
    - `cabal build all && cabal test` passes
 
-3. [pending] ELet: Add recursive-let (fixpoint) reduction support
+3. [done] ELet: Add recursive-let (fixpoint) reduction support
    Item id: `item-3`
    Depends on: none
    Parallel safe: yes
