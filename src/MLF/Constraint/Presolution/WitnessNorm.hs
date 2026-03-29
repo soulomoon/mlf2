@@ -140,6 +140,9 @@ normalizeEdgeWitnessesM = do
                         Just TyVar{ tnBound = Just bnd } ->
                             let viaBound = orderedUnder bnd
                             in if null direct then viaBound else direct
+                        Just TyMu{ tnBody = muBody } ->
+                            let viaMu = orderedUnder muBody
+                            in if null direct then viaMu else direct
                         _ -> direct
         let orderBase = edgeRoot
             orderRoot = orderBase
@@ -248,6 +251,8 @@ normalizeEdgeWitnessesM = do
                 in case NodeAccess.lookupNode c0 (canonical nid) of
                     Just TyVar{ tnBound = Just bnd } ->
                         go IntSet.empty bnd
+                    Just TyMu{ tnBody = muBody } ->
+                        go IntSet.empty muBody
                     _ ->
                         False
             keepFinalizedOp op =
@@ -314,8 +319,18 @@ normalizeEdgeWitnessesM = do
                     OpMerge{} -> True
                     OpRaiseMerge{} -> True
                     _ -> False
+            interiorContainsTyMu =
+                any
+                    (\nid ->
+                        case NodeAccess.lookupNode c0 (NodeId nid) of
+                            Just TyMu{} -> True
+                            _ -> False
+                    )
+                    (IntSet.toList interiorWithBinders)
             residualNoReplayOp
                 | strictWithReplayCodomain =
+                    Nothing
+                | interiorContainsTyMu =
                     Nothing
                 | otherwise =
                     find disallowedNoReplayOp opsNormFinalized
