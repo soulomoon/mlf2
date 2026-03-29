@@ -514,6 +514,44 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                 Just TyBottom{} -> True
                                 _ -> False
                         Nothing -> False
+                {- Note [Recursive type opening for non-local fallback]
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                   The result-type fallback is fail-closed for non-local types:
+                   it returns the quantified rootFinal variable, producing a ∀a. …
+                   shell that loses any μ-structure in the type's bound chain.
+
+                   For well-formed recursive types (μ-types introduced by explicit
+                   annotations), this quantified shell is too lossy — the surface
+                   type should preserve the μ.  We detect this by walking the
+                   rootFinal bound chain through TyVar bounds, TyForall/TyExp
+                   bodies, looking for a TyMu node.  When found, we route through
+                   schemeBodyTarget to unwrap the scheme root and expose the
+                   actual recursive type for generalization.
+
+                   This opening is controlled:
+                   - The bound chain and arrow children are walked
+                   - Only affects the non-local targetC fallback (line 735)
+                   - Local-type behavior is completely unchanged
+                   - Non-recursive non-local types still get rootFinal -}
+                rootFinalInvolvesMu =
+                    let go visited nid0 =
+                            let nid = canonicalFinal nid0
+                                key = getNodeId nid
+                            in if IntSet.member key visited
+                                then False
+                                else case lookupNodeIn nodesFinal nid of
+                                    Just TyMu{} -> True
+                                    Just TyVar{ tnBound = Just bnd } ->
+                                        go (IntSet.insert key visited) bnd
+                                    Just TyForall{ tnBody = b } ->
+                                        go (IntSet.insert key visited) b
+                                    Just TyExp{ tnBody = b } ->
+                                        go (IntSet.insert key visited) b
+                                    Just TyArrow{ tnDom = l, tnCod = r } ->
+                                        let visited' = IntSet.insert key visited
+                                        in go visited' l || go visited' r
+                                    _ -> False
+                    in go IntSet.empty rootFinal
                 rootIsSchemeRoot =
                     any
                         (\gen -> any (\root -> canonicalFinal root == rootFinal) (gnSchemes gen))
@@ -732,7 +770,9 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                 else
                                     if rootBindingIsLocalType
                                         then schemeBodyTarget targetPresolutionView rootC
-                                        else rootFinal
+                                        else if rootFinalInvolvesMu
+                                            then schemeBodyTarget presolutionViewFinal rootC
+                                            else rootFinal
             let bindParentsGaFinal =
                     case boundTarget of
                         Just baseN ->
@@ -774,6 +814,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     ++ show scopeRoot
                     ++ " rootBindingIsLocalType="
                     ++ show rootBindingIsLocalType
+                    ++ " rootFinalInvolvesMu="
+                    ++ show rootFinalInvolvesMu
                 )
             let ty = case sch of
                     Forall binds body -> foldr (\(n, b) t -> TForall n b t) body binds

@@ -2098,7 +2098,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           `shouldSatisfy` isInfixOf
             "case sameLaneLocalRetainedChildTarget of\n                                                        Just v -> v\n                                                        Nothing -> schemeBodyTarget targetPresolutionView rootC"
 
-      it "keeps retained-child fallback fail-closed when the same wrapper crosses a nested forall boundary" $ do
+      it "keeps retained-child fallback open for recursive types even when the same wrapper crosses a nested forall boundary" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -2229,7 +2229,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Right (_term, ty) ->
               containsMu ty `shouldBe` False
 
-      it "keeps non-local proxy fallback fail-closed in result-type reconstruction" $ do
+      it "keeps non-local proxy fallback open for recursive types in result-type reconstruction" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -2239,7 +2239,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
         let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
         fallbackTy <- requireRight (computeResultTypeFallback inputs annCanon annPre)
-        containsMu fallbackTy `shouldBe` False
+        containsMu fallbackTy `shouldBe` True
 
       it "keeps the explicit non-local scheme-alias/base-like proof separate from the preserved local lanes" $ do
         fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
@@ -2274,7 +2274,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                           )
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "then schemeBodyTarget targetPresolutionView rootC\n                                        else rootFinal"
+            "then schemeBodyTarget targetPresolutionView rootC\n                                        else if rootFinalInvolvesMu\n                                            then schemeBodyTarget presolutionViewFinal rootC\n                                            else rootFinal"
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "keepTargetFinal =\n                    rootBindingIsLocalType\n                        && ( rootLocalMultiInst\n                                || rootLocalInstArgMultiBase"
@@ -2300,7 +2300,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           `shouldSatisfy` isInfixOf
             "then rootFinal"
 
-      it "keeps the same non-local proxy wrapper fail-closed at pipeline entrypoints" $ do
+      it "hits elaboration blocker for non-local proxy wrapper despite open fallback at pipeline entrypoints" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
