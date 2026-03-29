@@ -1,0 +1,33 @@
+{
+  "round": 154,
+  "roadmap_id": "2026-03-29-03-non-local-proxy-phi-translation-and-reclassification",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-29-03-non-local-proxy-phi-translation-and-reclassification/rev-001",
+  "roadmap_item_id": "item-4",
+  "branch": "orchestrator/round-154-upgrade-pipeline-test",
+  "commit": "4b8392f",
+  "decision": "APPROVED",
+  "date": "2026-03-29",
+  "checks": {
+    "git_diff_check": "PASS",
+    "state_json_valid": "PASS",
+    "roadmap_bundle_resolves": "PASS",
+    "cabal_build_all": "PASS",
+    "cabal_test": "PASS",
+    "test_count": 1176,
+    "failure_count": 0,
+    "warnings": 0
+  },
+  "task_specific_checks": {
+    "test_description_updated": "PASS",
+    "elaboration_spec_survey_complete": "PASS",
+    "survey_finding": "all_13_sites_legitimate_untranslatable",
+    "pipeline_error_type": "TCArgumentMismatch_not_PhiTranslatabilityError"
+  },
+  "files_changed": [
+    "test/PipelineSpec.hs"
+  ],
+  "insertions": 1,
+  "deletions": 1,
+  "notes": "Test description updated from 'hits elaboration blocker' to 'elaboration succeeds but produces TCArgumentMismatch'. All 13 ElaborationSpec PhiTranslatabilityError sites surveyed — none match non-local proxy pattern. Full upgrade to success deferred: requires fixing TCArgumentMismatch in elaboration output."
+}
