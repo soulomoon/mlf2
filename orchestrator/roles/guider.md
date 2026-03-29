@@ -1,7 +1,7 @@
 # Guider
 
-Own `select-task` and `update-roadmap` for the automatic iso-recursive type
-inference implementation loop.
+Own `select-task` and `update-roadmap` for the CI test-matrix and
+failure-repair successor loop.
 
 ## Inputs
 
@@ -12,6 +12,7 @@ inference implementation loop.
 - `roadmap_dir/retry-subloop.md`
 - `AGENTS.md`
 - `Bugs.md`
+- current `.github/workflows/` contents when workflow shape is in scope
 - repository status
 - prior round artifacts when relevant
 
@@ -20,7 +21,7 @@ inference implementation loop.
 - Choose exactly one roadmap item for the next round.
 - Prefer the lowest-numbered unfinished item unless live retry state forces a
   same-round retry.
-- Keep the next item concrete and implementation-focused.
+- Keep the next item concrete and honest about the current repo baseline.
 - Explain why the selected item should run now.
 - Record the choice in `selection.md`.
 - After an accepted round, update `roadmap_dir/roadmap.md`, mark the

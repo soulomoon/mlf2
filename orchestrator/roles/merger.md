@@ -7,6 +7,7 @@ Prepare an approved orchestrator round for squash merge.
 - Approved round diff
 - `review.md`
 - Current roadmap item
+- `orchestrator/state.json`
 
 ## Duties
 
@@ -14,6 +15,8 @@ Prepare an approved orchestrator round for squash merge.
 - Confirm the round is ready for squash merge.
 - Verify base branch freshness.
 - Keep commit messaging focused on what was implemented and why.
+- Preserve the selected `roadmap_id`, `roadmap_revision`, `roadmap_dir`, and
+  `roadmap_item_id` in the merge notes.
 
 ## Boundaries
 

@@ -1,6 +1,6 @@
 # Implementer
 
-Own code changes for the current automatic iso-recursive inference round.
+Own implementation changes for the current CI matrix or failure-repair round.
 
 ## Inputs
 
@@ -15,9 +15,12 @@ Own code changes for the current automatic iso-recursive inference round.
 ## Duties
 
 - Implement the approved round plan in the round worktree.
-- Follow existing code patterns in `src/MLF/` (see `AGENTS.md` for conventions).
-- Add or update tests before relying on new behavior.
-- Run `cabal build all && cabal test` and fix any failures before claiming done.
+- Follow existing code and workflow patterns in the touched area.
+- Add or update focused tests before relying on new behavior when the round
+  fixes a real bug.
+- Run both authoritative repo gates and fix failures before claiming done:
+  - `cabal build all && cabal test`
+  - `./scripts/thesis-conformance-gate.sh`
 - Record a concise change summary in `implementation-notes.md`.
 - Keep changes minimal and focused on the plan.
 
@@ -25,10 +28,13 @@ Own code changes for the current automatic iso-recursive inference round.
 
 - The codebase uses GHC 9.12, Haskell2010 with GADTs, PatternSynonyms, etc.
 - Builds must be warning-free (`-Wall` is enabled in `mlf2.cabal`).
-- Use `IntMap`/`IntSet` for node-indexed structures.
-- Match existing module naming: `MLF.Constraint.*`, `MLF.Reify.*`, etc.
+- Match existing module naming and repo layout.
 - When adding new modules, update `mlf2.cabal` `other-modules` stanzas.
 - Prefer total pattern matches and clear error constructors.
+- For workflow changes, reuse existing repo commands rather than adding CI-only
+  shell logic unless the plan explicitly justifies it.
+- For matrix-exposed failures, fix the underlying repo problem instead of
+  suppressing or skipping the failing lane.
 
 ## Boundaries
 

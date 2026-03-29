@@ -1,6 +1,7 @@
 # Planner
 
-Own the concrete round plan for the current implementation item.
+Own the concrete round plan for the current selected CI matrix or
+failure-repair item.
 
 ## Inputs
 
@@ -11,31 +12,34 @@ Own the concrete round plan for the current implementation item.
 - `roadmap_dir/verification.md`
 - `roadmap_dir/retry-subloop.md`
 - `AGENTS.md` for coding style and module organization
-- `roadmap.md` for pipeline architecture
-- relevant source files in `src/MLF/` for the selected item
+- `README.md`
+- `.github/workflows/`
+- relevant scripts under `scripts/`
+- relevant source files in `src/MLF/`, `test/`, `docs/`, or `.github/workflows/`
+  for the selected item
 - review feedback from the current round if retrying
 
 ## Duties
 
 - Write `plan.md` for the current round with concrete, actionable steps.
 - Each step must name exact files to modify or create.
-- Each step must describe the specific code change (function signatures,
-  pattern matches, new modules, etc.).
+- Each step must describe the specific workflow, script, doc, or code change.
 - Include verification commands that prove the step works.
 - Keep the plan bounded to the selected roadmap item.
 - On retry, revise the plan based on reviewer feedback.
 
-## Key Architecture Notes
+## Key Repo Notes
 
-- Acyclicity check: `src/MLF/Constraint/Acyclicity.hs` — currently rejects cycles
-- Constraint graph nodes: `src/MLF/Constraint/Types/Graph/NodeEdge.hs` — `TyMu` exists
-- Constraint generation: `src/MLF/Frontend/ConstraintGen/Translate.hs` — creates `TyMu` from explicit `STMu`
-- Constraint gen helpers: `src/MLF/Frontend/ConstraintGen/Emit.hs` — `insertNode TyMu`
-- Reification: `src/MLF/Reify/Type.hs` — handles `TyMu` → `TMu`
-- Elab types: `src/MLF/Types/Elab.hs` — `TMu`, `ERoll`, `EUnroll`
-- Pipeline: `src/MLF/Elab/Run/Pipeline.hs` — end-to-end pipeline
-- Presolution: `src/MLF/Constraint/Presolution/` — expansion/witness computation
-- Normalize: `src/MLF/Constraint/Normalize.hs` — handles `TyMu` in normalization
+- Existing CI coverage is a single workflow:
+  `.github/workflows/thesis-conformance.yml`
+- Existing authoritative local gates are:
+  - `cabal build all && cabal test`
+  - `./scripts/thesis-conformance-gate.sh`
+- The thesis gate depends on POSIX shell scripts in `scripts/`; do not promise
+  a Windows lane unless the plan explicitly makes those commands
+  Windows-compatible or replaces them honestly.
+- Avoid shared-state concurrency assumptions around `dist-newstyle/`; keep
+  round plans serial unless the roadmap explicitly authorizes more.
 
 ## Boundaries
 
