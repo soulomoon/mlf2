@@ -54,7 +54,7 @@
    - verify that non-recursive programs still produce identical results
    All tests pass via `cabal build all && cabal test`.
 
-2. [pending] Update documentation and record iso-recursive inference readiness
+2. [done] Update documentation and record iso-recursive inference readiness
    Item id: `item-2`
    Depends on: `item-1`
    Parallel safe: no
@@ -73,7 +73,7 @@
      graphs (document the extension clearly)
    - Final `cabal build all && cabal test` gate passes with zero regressions
 
-3. [pending] Final readiness gate: clean up orchestrator state and declare readiness
+3. [done] Final readiness gate: clean up orchestrator state and declare readiness
    Item id: `item-3`
    Depends on: `item-2`
    Parallel safe: no
