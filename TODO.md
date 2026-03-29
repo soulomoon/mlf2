@@ -25,27 +25,16 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 - Rolling priorities (next):
   - No further work needed — iso-recursive inference gap-fix campaign complete.
 
-## Task 106 CI test-matrix and failure-repair successor loop scaffold (in progress 2026-03-30)
+## Task 106 CI test-matrix and failure-repair campaign (completed 2026-03-30)
 
 - Completed:
-  - surveyed the current CI surface and verified that the repo still has only
-    one GitHub Actions lane in `.github/workflows/thesis-conformance.yml`
-    (`ubuntu-latest`, `ghc-version: 9.12.2`) with no matrix;
-  - captured the current local verification baseline:
-    - `cabal build all && cabal test`: PASS (`1177 examples, 0 failures`)
-    - `./scripts/thesis-conformance-gate.sh`: FAIL because
-      `/Volumes/src/mlf4/docs/thesis-obligations.md` is out of date;
-  - scaffolded a fresh successor roadmap bundle under
-    `orchestrator/roadmaps/2026-03-30-00-test-matrix-and-failure-repair-successor-roadmap/rev-001/`
-    and advanced the live controller to that family at
-    `dispatch-rounds`.
-- Rolling priorities (next):
-  1. Freeze the bounded matrix scope and repair the red thesis-conformance
-     baseline honestly at the source of truth.
-  2. Add the selected GitHub Actions matrix around that repaired baseline.
-  3. Fix any runner- or test-exposed failures at the root cause, without
-     CI-only bypasses.
-  4. Publish the resulting CI scope and maintenance guidance in repo docs.
+  - Item-1 (round-156): Froze bounded matrix scope (ubuntu-latest / GHC 9.12.2, Windows excluded). Repaired thesis-conformance baseline: fixed 18 stale code_anchor paths in thesis-obligations.yaml, fixed thesis-claims.yaml code_path, resolved orphan deviation, made check script ROOT-portable.
+  - Item-2 (round-157): Split `.github/workflows/thesis-conformance.yml` into two matrix-parameterized jobs: `build-and-test` (cabal build all && cabal test) and `thesis-conformance` (thesis-conformance gate script). Both use strategy.matrix with os: [ubuntu-latest], ghc: ['9.12.2'].
+  - Item-3 (round-158): Converted 262 absolute `/Volumes/src/mlf4/` paths in `docs/thesis-obligations.yaml` to repo-relative paths. Updated `check-thesis-obligations-ledger.sh` to use ROOT-join pattern. Regenerated `docs/thesis-obligations.md`.
+  - Item-4 (round-159): Updated README.md, TODO.md, and CHANGELOG.md to document the CI matrix, runner boundaries, and local-vs-CI authoritative commands.
+- Verification:
+  - `cabal build all && cabal test`: PASS
+  - `./scripts/thesis-conformance-gate.sh`: PASS
 
 ## Task 104 global non-cyclic-graph settlement and automatic iso-recursive inference loop scaffold (in progress 2026-03-28)
 
