@@ -110,7 +110,7 @@
    - Non-recursive `ELet` reduction is unchanged
    - `cabal build all && cabal test` passes
 
-4. [pending] Result-type: Open fallback reconstruction for recursive types
+4. [done] Result-type: Open fallback reconstruction for recursive types
    Item id: `item-4`
    Depends on: none
    Parallel safe: yes
