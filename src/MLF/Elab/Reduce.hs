@@ -32,6 +32,12 @@ step term = case term of
                 _ -> Nothing
     ELet v sch rhs body
         | not (isValue rhs) -> (\rhs' -> ELet v sch rhs' body) <$> step rhs
+        | v `Set.member` freeTermVars rhs ->
+            -- Recursive let: unfold one step.
+            -- See Note [Recursive let reduction]
+            let selfRef = ELet v sch rhs (EVar v)
+                rhs'    = substTermVar v selfRef rhs
+            in Just (substTermVar v rhs' body)
         | otherwise -> Just (substTermVar v rhs body)
     ETyInst e inst
         | not (isValue e) -> (`ETyInst` inst) <$> step e
@@ -51,6 +57,31 @@ normalize :: ElabTerm -> ElabTerm
 normalize term = case step term of
     Nothing -> term
     Just term' -> normalize term'
+
+{- Note [Recursive let reduction]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+For recursive bindings (where the bound variable v appears free in rhs),
+we cannot simply substitute rhs for v in body because rhs itself contains
+v — that occurrence would become free.
+
+Instead we perform a standard one-step letrec unfolding:
+
+  let v = V in body  →  body[v := V[v := let v = V in v]]
+
+where V is the evaluated rhs (a value). This replaces each occurrence of v
+in rhs with a "re-entry point" (the original letrec applied to just v),
+producing rhs'. Then rhs' is substituted for v in body.
+
+For example:
+  let f = \x. f x in f
+  → (\x. (let f = \x. f x in f) x)
+
+The result is a lambda (value), so normalize stops. When the lambda is later
+applied, the inner letrec unfolds again — giving lazy recursive unfolding
+without infinite expansion.
+
+Non-recursive lets (v not free in rhs) use the original direct substitution
+path and are completely unaffected. -}
 
 reduceInst :: ElabTerm -> Instantiation -> Maybe ElabTerm
 reduceInst v inst = do
