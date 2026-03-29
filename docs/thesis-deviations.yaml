@@ -100,11 +100,14 @@ deviations:
       types without explicit annotations. An initial implementation was
       hardened in a gap-fix campaign (rounds 146-149) that addressed witness
       normalization, alias-bounds resolution, recursive let-bindings, and
-      non-local result types. The mechanism: (1) cycle detection in
-      breakCyclesAndCheckAcyclicity, (2) TyMu node introduction at cycle
-      points, (3) reification producing TMu types, (4) elaboration emitting
-      ERoll/EUnroll coercions, (5) Phase 7 type checker and reducer accepting
-      and reducing recursive types. Non-recursive programs remain unaffected.
+      non-local result types. A follow-up campaign (rounds 151-154) resolved
+      non-local proxy PhiTranslatabilityError at pipeline entrypoints via
+      reifyInst TyMu 0-binder fallback and OpRaise bind-parent mu-guard.
+      The mechanism: (1) cycle detection in breakCyclesAndCheckAcyclicity,
+      (2) TyMu node introduction at cycle points, (3) reification producing
+      TMu types, (4) elaboration emitting ERoll/EUnroll coercions,
+      (5) Phase 7 type checker and reducer accepting and reducing recursive
+      types. Non-recursive programs remain unaffected.
     impact: semantic-extension
     rationale: >
       Iso-recursive types are a natural extension for practical ML-family
@@ -127,6 +130,7 @@ deviations:
       - src/MLF/Constraint/Presolution/WitnessValidation.hs
       - src/MLF/Reify/Plan.hs
       - src/MLF/Elab/Run/ResultType/Fallback.hs
+      - src/MLF/Elab/Phi/Omega/Interpret.hs
     test_evidence:
       - matcher: "automatic recursive"
         file: test/PipelineSpec.hs
@@ -137,6 +141,8 @@ deviations:
       - matcher: "gap-fix"
         file: test/PipelineSpec.hs
       - matcher: "iso-recursive gap"
+        file: test/PipelineSpec.hs
+      - matcher: "non-local proxy"
         file: test/PipelineSpec.hs
     status: semantic-extension
 

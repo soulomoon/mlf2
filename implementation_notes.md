@@ -25,13 +25,14 @@ no cycles exist, so all existing behavior is preserved identically.
 **Known correct behavior under polymorphic mediation:**
 - Nested-forall-mediated recursive types: μ is absorbed during constraint solving through polymorphic mediation (e.g., `let rec f = id f`). In these cases, the result-type fallback correctly reports no μ-type because constraint solving legitimately removed the recursive wrapper through polymorphic generalization. This is not a limitation — it is the expected outcome when a polymorphic mediator generalizes away the recursive structure.
 
-**Known remaining limitation:**
-- Non-local proxy at pipeline entrypoints: the result-type fallback now correctly returns μ-types for non-local reconstruction, but the pipeline entrypoint still fails with `PhiTranslatabilityError` at the elaboration level. This is a separate elaboration-layer issue, not a result-type fallback defect.
+**Resolved gap (non-local proxy elaboration):**
+- Non-local proxy `PhiTranslatabilityError` at pipeline entrypoints has been resolved. The `reifyInst` TyMu 0-binder fallback (round 152) and `OpRaise` non-spine bind-parent guard for μ-type nodes (round 153) fixed the two `PhiTranslatabilityError` crash sites. The pipeline now reaches type checking for non-local proxy wrappers. A downstream `TCArgumentMismatch` remains for the full non-local proxy expression (`let g = (λx:μα.α→Int. x) in g g`), indicating that further fold/unfold coercion work is needed in elaboration, but the `PhiTranslatabilityError` barrier is cleared. Survey of all 13 `ElaborationSpec` `PhiTranslatabilityError` assertion sites (round 154) confirmed none match the non-local proxy pattern — all are legitimate untranslatable cases.
 
-**Test evidence:** all 1175 examples pass, including focused integration tests in
+**Test evidence:** all 1176 examples pass, including focused integration tests in
 `test/TypeSoundnessSpec.hs` and `test/PipelineSpec.hs` covering simple
 self-recursion, nested recursive lets, recursive data patterns, polymorphic recursion,
-μ/∀ interaction, higher-order recursion, non-local recursive result types, and explicit-μ stability.
+μ/∀ interaction, higher-order recursion, non-local recursive result types, explicit-μ stability,
+and non-local proxy elaboration boundary tests.
 
 ## 2026-03-25 - Repo-local orchestrator migrated to revisioned roadmap bundles
 
