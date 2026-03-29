@@ -97,8 +97,11 @@ deviations:
       acyclicity check). This implementation extends the solver to detect
       cycles in the constraint graph and automatically introduce iso-recursive
       TyMu nodes to break them, enabling automatic inference of recursive
-      types without explicit annotations. The mechanism: (1) cycle detection
-      in breakCyclesAndCheckAcyclicity, (2) TyMu node introduction at cycle
+      types without explicit annotations. An initial implementation was
+      hardened in a gap-fix campaign (rounds 146-149) that addressed witness
+      normalization, alias-bounds resolution, recursive let-bindings, and
+      non-local result types. The mechanism: (1) cycle detection in
+      breakCyclesAndCheckAcyclicity, (2) TyMu node introduction at cycle
       points, (3) reification producing TMu types, (4) elaboration emitting
       ERoll/EUnroll coercions, (5) Phase 7 type checker and reducer accepting
       and reducing recursive types. Non-recursive programs remain unaffected.
@@ -110,7 +113,9 @@ deviations:
       types use iso-recursive (not equi-recursive) semantics with explicit
       roll/unroll, (c) contractiveness validation rejects non-contractive
       recursive types, and (d) the full pipeline (inference, elaboration,
-      type checking, reduction) is tested end-to-end.
+      type checking, reduction) is tested end-to-end. The gap-fix campaign
+      demonstrated robustness across a wide matrix of recursive families
+      including nested recursive lets, μ/∀ interaction, and non-local types.
     code_paths:
       - src/MLF/Constraint/Acyclicity.hs
       - src/MLF/Reify/Type.hs
@@ -118,6 +123,10 @@ deviations:
       - src/MLF/Elab/Reduce.hs
       - src/MLF/Constraint/Normalize.hs
       - src/MLF/Frontend/ConstraintGen/Translate.hs
+      - src/MLF/Constraint/Presolution/WitnessNorm.hs
+      - src/MLF/Constraint/Presolution/WitnessValidation.hs
+      - src/MLF/Reify/Plan.hs
+      - src/MLF/Elab/Run/ResultType/Fallback.hs
     test_evidence:
       - matcher: "automatic recursive"
         file: test/PipelineSpec.hs
@@ -125,6 +134,10 @@ deviations:
         file: test/TypeSoundnessSpec.hs
       - matcher: "Phase 7"
         file: test/TypeSoundnessSpec.hs
+      - matcher: "gap-fix"
+        file: test/PipelineSpec.hs
+      - matcher: "iso-recursive gap"
+        file: test/PipelineSpec.hs
     status: semantic-extension
 
 history:
