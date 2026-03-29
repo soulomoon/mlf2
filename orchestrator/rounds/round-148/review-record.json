@@ -1,0 +1,12 @@
+{
+  "round_id": "round-148",
+  "roadmap_item_id": "item-3",
+  "roadmap_id": "2026-03-29-02-iso-recursive-inference-gap-fixes",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-29-02-iso-recursive-inference-gap-fixes/rev-001",
+  "decision": "APPROVED",
+  "test_results": "1175 examples, 0 failures",
+  "commit": "f4b5875",
+  "branch": "orchestrator/round-148-elet-fixpoint-reduction",
+  "reviewed_at": "2026-03-29"
+}
