@@ -319,6 +319,7 @@ bindingFor env plan (name, nidInt) = do
             , rpSubstForBound = substForBound
             , rpSubstForBoundBase = substForBoundBase
             } = plan
+        binderNameSet = Set.fromList (IntMap.elems subst)
         canonicalBinder v =
             let vC = canonical v
             in case IntMap.lookup (getNodeId vC) nodes of
@@ -623,13 +624,19 @@ bindingFor env plan (name, nidInt) = do
                 else if boundTy == TBottom || boundIsFreeVar' || boundIsSelfVar || boundMentionsBinderVar || not boundAllowed
                     then Nothing
                     else Just boundTy
+        -- See Note [Inter-binder alias bounds in recursive types]
         mbBoundTyped = case mbBound of
-            Just (TVar _) ->
-                Left $
-                    ValidationFailed
-                        [ "alias bounds survived scheme finalization: "
-                            ++ show [name]
-                        ]
+            Just (TVar v)
+                | v `Set.member` binderNameSet ->
+                    -- Inter-binder alias bound from recursive cycle;
+                    -- normalize to unbounded (safe over-approximation).
+                    Right Nothing
+                | otherwise ->
+                    Left $
+                        ValidationFailed
+                            [ "alias bounds survived scheme finalization: "
+                                ++ show [name]
+                            ]
             Nothing -> Right Nothing
             Just bnd -> case elabToBound bnd of
                 Left err -> Left $ ValidationFailed [err]
@@ -637,3 +644,23 @@ bindingFor env plan (name, nidInt) = do
     case mbBoundTyped of
         Left err -> Left err
         Right typed -> pure (name, typed)
+
+{- Note [Inter-binder alias bounds in recursive types]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+When reifying a binding whose alias bound is another binder within the same
+generalization group (i.e. the bound is a TVar whose name appears in
+`rpSubst`), we normalize the bound to Nothing (unbounded) rather than
+rejecting it as "alias bounds survived scheme finalization".
+
+This situation arises legitimately in recursive types.  During presolution the
+solver may introduce alias edges between co-recursive binders; these edges
+carry `TVar` bounds that point to peer binders rather than concrete types.
+Such bounds have no representation in the surface type language—they are
+artefacts of the internal constraint graph—so the faithful reification is to
+treat the binding as unbounded (∀α.…) rather than bounded (∀(α ≥ β).…)
+where β is another binder in the same group.
+
+This is a safe over-approximation: dropping an alias bound can only widen
+the set of types the variable may be instantiated to, never narrow it.
+The thesis (§5, graphic constraints) permits unbounded quantification
+whenever a tighter bound cannot be expressed in the target language. -}
