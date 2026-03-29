@@ -35,7 +35,6 @@ import MLF.Constraint.Types.Witness (EdgeWitness (..), InstanceOp (..), Instance
 import MLF.Elab.Pipeline
   ( ElabType,
     Pretty (..),
-    TypeCheckError (..),
     applyRedirectsToAnn,
     canonicalizeAnn,
     generalizeAtWithBuilder,
@@ -1484,16 +1483,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           Right (term, ty) -> do
             typeCheck term `shouldBe` Right ty
             -- Check type preservation for each step.
-            -- Note: recursive ELet substitution leaves the bound variable
-            -- free in the RHS (step treats let as non-recursive), so
-            -- typeCheck on the post-step term may fail with TCUnboundVar.
-            -- This is a known limitation; we tolerate it here.
             let checkPreservation t = case step t of
                   Nothing -> pure ()
                   Just t' -> do
                     case typeCheck t' of
                       Right ty' -> ty' `shouldBe` ty
-                      Left (TCUnboundVar _) -> pure () -- expected for recursive let step
                       Left tcErr ->
                         expectationFailure
                           ( "Type preservation failed after step:\n"
