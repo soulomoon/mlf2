@@ -130,6 +130,9 @@ validateNormalizedWitness env ops = do
             Just TyVar{ tnBound = Just bnd } ->
                 let viaBound = orderedUnder bnd
                 in if null direct then viaBound else direct
+            Just TyMu{ tnBody = muBody } ->
+                let viaMu = orderedUnder muBody
+                in if null direct then viaMu else direct
             _ -> direct
 
     replayBinderDomain =
@@ -215,6 +218,7 @@ validateNormalizedWitness env ops = do
                 else case NodeAccess.lookupNode (constraint env) nC of
                     Just TyVar{ tnBound = Just bnd }
                         | not (isBottomNode bnd) -> Left (GraftOnNonBottomBound nC (canon bnd))
+                    Just TyMu{} -> Right ()
                     _ -> Right ()
 
     checkOp op =

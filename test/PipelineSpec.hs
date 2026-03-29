@@ -1347,7 +1347,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 typeCheck termChecked `shouldBe` Right tyChecked
 
     describe "Automatic μ-introduction (item-4 edge cases)" $ do
-      it "characterizes nested recursive lets as Phase-3-safe with current Phase-4 witness normalization rejection" $ do
+      it "characterizes nested recursive lets as Phase-4-safe with current Phase-7 type-checking rejection" $ do
         let expr =
               ELet
                 "f"
@@ -1360,12 +1360,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
                 ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
               ]
+        -- Phase 4 witness normalization now handles TyMu; downstream Phase 7 type-checking rejects
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err -> do
               let rendered = renderPipelineError err
-              rendered `shouldSatisfy` isInfixOf "Phase 4 (presolution)"
-              rendered `shouldSatisfy` isInfixOf "WitnessNormalizationError"
+              rendered `shouldSatisfy` isInfixOf "Phase 7 (type checking)"
+              rendered `shouldSatisfy` isInfixOf "TCRollBodyMismatch"
             Right (_term, ty) ->
               expectationFailure
                 (label ++ " unexpectedly succeeded with type " ++ show ty)
