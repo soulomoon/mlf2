@@ -52,7 +52,7 @@
 
 ## Items
 
-1. [pending] Phase 4: Extend witness normalization to handle TyMu nodes
+1. [done] Phase 4: Extend witness normalization to handle TyMu nodes
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
