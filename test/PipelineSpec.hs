@@ -2333,7 +2333,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           `shouldSatisfy` isInfixOf
             "then rootFinal"
 
-      it "hits elaboration blocker for non-local proxy wrapper despite open fallback at pipeline entrypoints" $ do
+      it "elaboration succeeds but produces TCArgumentMismatch for non-local proxy wrapper" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
