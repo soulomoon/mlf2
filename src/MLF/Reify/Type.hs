@@ -351,25 +351,28 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                            in pure (markDone cache', t)
                       | TyMu {tnBody = b} <- node -> do
                           binders <- orderedFlexChildren mode namedExtra n
-                          binder <-
-                            case binders of
-                              [bndr] -> pure (canonical bndr)
-                              [] ->
-                                Left $
-                                  PhiTranslatabilityError
-                                    [ "reifyInst: missing authoritative instantiation translation for TyMu without binder child",
-                                      "expansion args=[]"
-                                    ]
-                              _ ->
-                                Left $
-                                  BindingTreeError $
-                                    InvalidBindingTree $
-                                      "reifyType: TyMu " ++ show n ++ " has multiple binder children " ++ show binders
-                          let namedExtra' = IntSet.insert (getNodeId binder) namedExtra
-                          (cache', bodyTy) <- vChild cache0 namedExtra' mode (canonical b)
-                          let t = TMu (varName binder) bodyTy
-                              cacheFinal = cacheInsertLocal mode key t cache' namedExtra
-                          pure (markDone cacheFinal, t)
+                          case binders of
+                            [bndr] -> do
+                              let binder = canonical bndr
+                                  namedExtra' = IntSet.insert (getNodeId binder) namedExtra
+                              (cache', bodyTy) <- vChild cache0 namedExtra' mode (canonical b)
+                              let t = TMu (varName binder) bodyTy
+                                  cacheFinal = cacheInsertLocal mode key t cache' namedExtra
+                              pure (markDone cacheFinal, t)
+                            [] -> do
+                              -- Non-local proxy TyMu: no binder child in binding tree.
+                              -- Synthesize binder from the TyMu node itself.
+                              let synthBinder = n
+                                  namedExtra' = IntSet.insert (getNodeId synthBinder) namedExtra
+                              (cache', bodyTy) <- vChild cache0 namedExtra' mode (canonical b)
+                              let t = TMu (varName synthBinder) bodyTy
+                                  cacheFinal = cacheInsertLocal mode key t cache' namedExtra
+                              pure (markDone cacheFinal, t)
+                            _ ->
+                              Left $
+                                BindingTreeError $
+                                  InvalidBindingTree $
+                                    "reifyType: TyMu " ++ show n ++ " has multiple binder children " ++ show binders
                       | otherwise -> do
                           binders <- orderedFlexChildren mode namedExtra n
                           let binderKeys =

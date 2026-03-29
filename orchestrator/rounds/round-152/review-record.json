@@ -1,0 +1,51 @@
+{
+  "round_id": "round-152",
+  "round_dir": "orchestrator/rounds/round-152",
+  "roadmap_id": "2026-03-29-03-non-local-proxy-phi-translation-and-reclassification",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-29-03-non-local-proxy-phi-translation-and-reclassification/rev-001",
+  "roadmap_item_id": "item-2",
+  "branch": "orchestrator/round-152-fix-reifyinst-tymu-binder",
+  "base_branch": "codex/automatic-recursive-type-inference",
+  "verdict": "APPROVED",
+  "reviewer_date": "2026-03-29",
+  "checks": {
+    "baseline": {
+      "git_diff_check": "pass",
+      "state_json_valid": "pass",
+      "roadmap_bundle_resolves": "pass",
+      "cabal_build_test": "pass"
+    },
+    "item_specific": {
+      "reifyinst_handles_0_binder_tymu": "pass",
+      "existing_1_binder_path_unchanged": "pass",
+      "new_targeted_test": "pass",
+      "targeted_non_local_proxy_test": "pass",
+      "targeted_tymu_without_binder_test": "pass",
+      "no_test_regressions": "pass"
+    }
+  },
+  "test_results": {
+    "full_suite": {
+      "examples": 1176,
+      "failures": 0
+    },
+    "targeted_non_local_proxy": {
+      "examples": 3,
+      "failures": 0
+    },
+    "targeted_tymu_without_binder": {
+      "examples": 1,
+      "failures": 0
+    }
+  },
+  "files_changed": [
+    "src/MLF/Reify/Type.hs",
+    "test/PipelineSpec.hs",
+    "test/Research/SameLaneRetainedChildRepresentativeGapSpec.hs"
+  ],
+  "deviation_notes": [
+    "TyMu branch restructured from binder-extraction pattern to three self-contained arms — justified by type incompatibility in plan's literal replacement",
+    "SameLaneRetainedChildRepresentativeGapSpec error predicate widened to accept TCLetTypeMismatch — not anticipated by plan but correct"
+  ]
+}
