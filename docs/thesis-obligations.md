@@ -4,8 +4,8 @@ Generated from `docs/thesis-obligations.yaml` by `scripts/render-thesis-obligati
 
 ## Summary
 
-- Total obligations: **104**
-- Status counts: `anchored`=104
+- Total obligations: **107**
+- Status counts: `anchored`=107
 - Chapters covered: 4, 5, 7, 8, 9, 10, 11, 12, 14, 15
 
 ## Chapter 4
@@ -138,6 +138,9 @@ Generated from `docs/thesis-obligations.yaml` by `scripts/render-thesis-obligati
 | `O15-TRANS-NO-INERT-LOCKED` | `15.2.7` | `Definition 15.2.10` | Definition 15.2.10(1) | `O15-TRANS-NO-INERT-LOCKED` | `/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs` | `CLM-TRANSLATABLE-PRESOLUTION` |
 | `O15-TRANS-NON-INTERIOR-RIGID` | `15.2.7` | `Definition 15.2.10` | Definition 15.2.10(4) | `O15-TRANS-NON-INTERIOR-RIGID` | `/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs` | `CLM-TRANSLATABLE-PRESOLUTION` |
 | `O15-TRANS-SCHEME-ROOT-RIGID` | `15.2.7` | `Definition 15.2.10` | Definition 15.2.10(2) | `O15-TRANS-SCHEME-ROOT-RIGID` | `/Volumes/src/mlf4/test/Presolution/EnforcementSpec.hs` | `CLM-TRANSLATABLE-PRESOLUTION` |
+| `O15-ENV-LAMBDA` | `15.3.3` | `Definition 15.3.6` | Typing environment lambda extension | `O15-ENV-LAMBDA` | `/Volumes/src/mlf4/test/ElaborationSpec.hs` | `CLM-ELABORATION-CORRECTNESS` |
+| `O15-ENV-LET` | `15.3.3` | `Definition 15.3.6` | Typing environment let extension | `O15-ENV-LET` | `/Volumes/src/mlf4/test/ElaborationSpec.hs` | `CLM-ELABORATION-CORRECTNESS` |
+| `O15-ENV-WF` | `15.3.3` | `Property 15.3.7` | Typing environments are well formed | `O15-ENV-WF` | `/Volumes/src/mlf4/test/ElaborationSpec.hs` | `CLM-ELABORATION-CORRECTNESS` |
 | `O15-CONTEXT-FIND` | `15.3.4` | `Computation contexts` | O15-CONTEXT-FIND | `O15-CONTEXT-FIND` | `/Volumes/src/mlf4/test/ElaborationSpec.hs` | `CLM-PHI-CORRECTNESS` |
 | `O15-CONTEXT-REJECT` | `15.3.4` | `Computation contexts` | O15-CONTEXT-REJECT | `O15-CONTEXT-REJECT` | `/Volumes/src/mlf4/test/ElaborationSpec.hs` | `CLM-PHI-CORRECTNESS` |
 | `O15-REORDER-IDENTITY` | `15.3.4` | `Definition 15.3.4` | O15-REORDER-IDENTITY | `O15-REORDER-IDENTITY` | `/Volumes/src/mlf4/test/ElaborationSpec.hs` | `CLM-SIGMA-REORDER` |

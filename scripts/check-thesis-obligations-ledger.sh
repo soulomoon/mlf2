@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-ROOT="/Volumes/src/mlf4"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LEDGER="${ROOT}/docs/thesis-obligations.yaml"
 RENDER="${ROOT}/scripts/render-thesis-obligations-ledger.rb"
 
@@ -63,6 +63,7 @@ expected_ids.concat(
   ].map { |s| "O15-TR-#{s}" }
 )
 expected_ids << 'O15-EDGE-TRANSLATION'
+expected_ids.concat(%w[LAMBDA LET WF].map { |s| "O15-ENV-#{s}" })
 expected_ids.concat(%w[LAMBDA-VAR LET-VAR ABS APP LET].map { |s| "O15-ELAB-#{s}" })
 
 def fail_grouped!(groups)
@@ -96,8 +97,8 @@ groups = {
   'invalid-code-anchors' => []
 }
 
-if obligations.size != 104
-  groups['count'] << "expected 104 obligations, got #{obligations.size}"
+if obligations.size != 107
+  groups['count'] << "expected 107 obligations, got #{obligations.size}"
 end
 
 missing = expected_ids - ids

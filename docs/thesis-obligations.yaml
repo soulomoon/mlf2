@@ -745,8 +745,8 @@ obligations:
   judgment_or_equation: Γ_{a′} extends with x:S′ for the immediately enclosing λ(x)a′
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs#runPipelineElab"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#scopeRootForNode"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#generalizeAtNode"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate/Scope.hs#scopeRootForNode"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate/Scope.hs#generalizeAtNode"
   test_anchor:
     matcher: O15-ENV-LAMBDA
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
@@ -761,8 +761,8 @@ obligations:
   judgment_or_equation: Γ_{a′} extends with x:Typ(b) for the immediately enclosing let x = b in a′
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs#runPipelineElab"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#scopeRootForNode"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#generalizeAtNode"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate/Scope.hs#scopeRootForNode"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate/Scope.hs#generalizeAtNode"
   test_anchor:
     matcher: O15-ENV-LET
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
@@ -777,7 +777,7 @@ obligations:
   judgment_or_equation: Γ_{a′} is a well-formed xMLF environment
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Run/Pipeline.hs#runPipelineElab"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate.hs#generalizeAtNode"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Elaborate/Scope.hs#generalizeAtNode"
   - "/Volumes/src/mlf4/src/MLF/Elab/Run/Scope.hs#resolveCanonicalScope"
   test_anchor:
     matcher: O15-ENV-WF
@@ -793,7 +793,7 @@ obligations:
   judgment_or_equation: Trχ() = ε
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-SEQ-EMPTY
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
@@ -809,7 +809,7 @@ obligations:
   judgment_or_equation: Trχ(o;I) = Trχ(o);Tro(χ)(I)
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-SEQ-CONS
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
@@ -825,7 +825,7 @@ obligations:
   judgment_or_equation: Rigid Raise translates to ε under rigid condition
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-RIGID-RAISE
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
@@ -841,7 +841,7 @@ obligations:
   judgment_or_equation: Rigid Merge translates to ε under rigid condition
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-RIGID-MERGE
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
@@ -857,7 +857,7 @@ obligations:
   judgment_or_equation: Rigid RaiseMerge translates to ε under rigid condition
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-RIGID-RAISEMERGE
     file: "/Volumes/src/mlf4/test/ElaborationSpec.hs"
@@ -873,7 +873,7 @@ obligations:
   judgment_or_equation: Root Graft translates to ⊲S(τ)
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-ROOT-GRAFT
     file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
@@ -889,7 +889,7 @@ obligations:
   judgment_or_equation: Root RaiseMerge translates to abstraction
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-ROOT-RAISEMERGE
     file: "/Volumes/src/mlf4/test/Presolution/MergeEmissionSpec.hs"
@@ -905,7 +905,7 @@ obligations:
   judgment_or_equation: Root Weaken translates to ε
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-ROOT-WEAKEN
     file: "/Volumes/src/mlf4/test/Presolution/MergeEmissionSpec.hs"
@@ -921,7 +921,7 @@ obligations:
   judgment_or_equation: Node Graft translates through C^{r→n}(∀(⩾⊲S(τ)))
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-NODE-GRAFT
     file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
@@ -937,7 +937,7 @@ obligations:
   judgment_or_equation: Node Merge translates through C^{r→n}(∀(⩾αn′⊳);N)
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-NODE-MERGE
     file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
@@ -953,7 +953,7 @@ obligations:
   judgment_or_equation: Node RaiseMerge translation mirrors merge context path
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-NODE-RAISEMERGE
     file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
@@ -969,7 +969,7 @@ obligations:
   judgment_or_equation: Node Weaken translates through C^{r→n}(N)
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-NODE-WEAKEN
     file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
@@ -985,7 +985,7 @@ obligations:
   judgment_or_equation: Node Raise translates via O/inside/under context composition
   code_anchors:
   - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega"
-  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega.hs#resolveTraceBinderTarget"
+  - "/Volumes/src/mlf4/src/MLF/Elab/Phi/Omega/Domain.hs#resolveTraceBinderTarget"
   test_anchor:
     matcher: O15-TR-NODE-RAISE
     file: "/Volumes/src/mlf4/test/Presolution/WitnessSpec.hs"
@@ -1171,7 +1171,7 @@ obligations:
   thesis_rule_label: Generalized unification
   judgment_or_equation: Batch Rebind after first-order unification in Solve phase
   code_anchors:
-  - "src/MLF/Constraint/Solve.hs#batchHarmonize"
+  - "src/MLF/Constraint/Unify/Closure.hs#batchHarmonize"
   - "src/MLF/Binding/Adjustment.hs#harmonizeBindParentsMulti"
   test_anchor:
     matcher: "Generalized unification (Ch 7.6)"
