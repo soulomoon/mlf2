@@ -1,0 +1,12 @@
+{
+  "round_id": "round-149",
+  "roadmap_item_id": "item-4",
+  "roadmap_id": "2026-03-29-02-iso-recursive-inference-gap-fixes",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-29-02-iso-recursive-inference-gap-fixes/rev-001",
+  "decision": "APPROVED",
+  "test_results": "1175 examples, 0 failures",
+  "commit": "040051eb4d51bbd0d2586869735087640b5b3895",
+  "branch": "orchestrator/round-149-resulttype-fallback-opening",
+  "reviewed_at": "2026-03-29"
+}

@@ -128,7 +128,7 @@
    - Local-type fallback behavior for non-recursive types is unchanged
    - `cabal build all && cabal test` passes
 
-5. [pending] Correct documentation to reflect accurate iso-recursive scope
+5. [done] Correct documentation to reflect accurate iso-recursive scope
    Item id: `item-5`
    Depends on: `item-1`, `item-2`, `item-3`, `item-4`
    Parallel safe: no
