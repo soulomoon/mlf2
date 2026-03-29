@@ -70,7 +70,7 @@ spec =
             fallbackTy <- sameLaneClearBoundaryFallbackType
             containsMu fallbackTy `shouldBe` True
 
-        it "fails closed once the same wrapper crosses a nested forall boundary" $ do
+        it "correctly absorbs μ when polymorphic mediation crosses a nested forall boundary" $ do
             fallbackTy <- fallbackType nestedForallContrastExpr
             containsMu fallbackTy `shouldBe` False
 
@@ -88,7 +88,7 @@ spec =
                 )
                 pipelineRuns
 
-        it "hits the same authoritative instantiation-translation blocker on both current pipeline entrypoints once the wrapper crosses a nested forall boundary" $ do
+        it "reports PhiTranslatabilityError at pipeline entrypoints as a downstream consequence of correct non-recursive nested-forall outcome" $ do
             let expectedSnippets =
                     [ "Phase 6 (elaboration): PhiTranslatabilityError"
                     , "reifyInst: missing authoritative instantiation translation"
