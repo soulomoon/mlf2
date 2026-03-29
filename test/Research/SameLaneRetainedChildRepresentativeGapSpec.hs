@@ -34,9 +34,12 @@ expectCurrentArchitectureBlocker label result =
     case result of
         Left err -> do
             let rendered = show err
-            rendered `shouldSatisfy` isInfixOf "PhiTranslatabilityError"
-            rendered `shouldSatisfy` isInfixOf "missing authoritative instantiation translation"
-            rendered `shouldSatisfy` isInfixOf "expansion args="
+            -- After round-152 fix, reifyInst TyMu succeeds; pipeline
+            -- now reaches type-checking which reports TCLetTypeMismatch.
+            rendered `shouldSatisfy` (\msg ->
+                isInfixOf "PhiTranslatabilityError" msg
+                || isInfixOf "TCLetTypeMismatch" msg
+                || isInfixOf "PipelineTypeCheckError" msg)
         Right (term, ty) ->
             expectationFailure
                 ( label

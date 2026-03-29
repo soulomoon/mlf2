@@ -51,7 +51,7 @@
 
 ## Items
 
-1. [pending] Reclassify nested-forall μ absorption as known correct behavior
+1. [done] Reclassify nested-forall μ absorption as known correct behavior
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
