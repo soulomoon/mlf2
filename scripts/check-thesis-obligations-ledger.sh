@@ -23,11 +23,12 @@ tmp_rows="$(mktemp)"
 trap 'rm -f "${tmp_rows}"' EXIT
 
 echo "[thesis-obligations] Validating ledger schema, ID set, and anchors"
-ruby - "${LEDGER}" >"${tmp_rows}" <<'RUBY'
+ruby - "${LEDGER}" "${ROOT}" >"${tmp_rows}" <<'RUBY'
 require 'yaml'
 
 ledger_path = ARGV.fetch(0)
 doc = YAML.load_file(ledger_path)
+root = ARGV.fetch(1)
 
 expected_ids = []
 # Chapter 4: Binding Trees & Graph Operations
@@ -120,7 +121,7 @@ obligations.each do |o|
   end
   if test_file.empty?
     groups['unmapped-rules'] << "#{id}: blank test file"
-  elsif !File.exist?(test_file)
+  elsif !File.exist?(File.join(root, test_file))
     groups['missing-files'] << "#{id}: test file not found: #{test_file}"
   end
   if status != 'anchored'
@@ -141,11 +142,12 @@ obligations.each do |o|
         groups['invalid-code-anchors'] << "#{id}: invalid code anchor #{anchor.inspect}"
         next
       end
-      unless File.exist?(path)
+      full_path = File.join(root, path)
+      unless File.exist?(full_path)
         groups['missing-files'] << "#{id}: code file not found: #{path}"
         next
       end
-      contents = File.read(path)
+      contents = File.read(full_path)
       unless contents.include?(symbol)
         groups['missing-symbols'] << "#{id}: symbol #{symbol.inspect} not found in #{path}"
       end
