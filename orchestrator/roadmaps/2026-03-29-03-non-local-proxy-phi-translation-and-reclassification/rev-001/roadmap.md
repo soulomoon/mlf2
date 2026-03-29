@@ -107,7 +107,7 @@
    - Existing tests do not regress
    - `cabal build all && cabal test` passes
 
-4. [pending] Upgrade pipeline entrypoint test from expected-failure to success
+4. [done] Upgrade pipeline entrypoint test from expected-failure to success
    Item id: `item-4`
    Depends on: `item-2`, `item-3`
    Parallel safe: no
