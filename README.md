@@ -34,6 +34,34 @@ cabal repl mlf2
 cabal repl mlf2-test
 ```
 
+## Continuous integration
+
+GitHub Actions runs two matrix-parameterized jobs on every push and pull
+request, defined in `.github/workflows/thesis-conformance.yml`:
+
+| Job                  | What it runs                                      |
+|----------------------|---------------------------------------------------|
+| `build-and-test`     | `cabal build all` then `cabal test`               |
+| `thesis-conformance` | `./scripts/thesis-conformance-gate.sh` (after build) |
+
+**Supported matrix lane:** `ubuntu-latest` / GHC 9.12.2.
+
+**Excluded lane:** Windows — the thesis-conformance gate and supporting
+scripts under `scripts/` are Unix shell; no Windows lane is promised until
+those scripts are made portable.
+
+### Authoritative verification commands
+
+These two commands are the authoritative verification gates both locally and
+in CI:
+
+```bash
+cabal build all && cabal test
+./scripts/thesis-conformance-gate.sh
+```
+
+CI reuses the same repo commands; there is no CI-only verification logic.
+
 ## Public entry points
 
 - `MLF.API` — surface syntax, parsing, pretty-printing, and normalization helpers
