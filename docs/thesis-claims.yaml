@@ -127,7 +127,8 @@ claims:
       property_tests: []
       code_paths:
         - src/MLF/Constraint/Acyclicity.hs#checkAcyclicity
-    deviations: []
+    deviations:
+      - DEV-AUTO-ISO-RECURSIVE
     status: defended
     notes: ""
 
@@ -190,7 +191,7 @@ claims:
           file: test/SolveSpec.hs
           kind: example
       code_paths:
-        - src/MLF/Constraint/Solve.hs#batchHarmonize
+        - src/MLF/Constraint/Unify/Closure.hs#batchHarmonize
         - src/MLF/Binding/Adjustment.hs#harmonizeBindParentsMulti
     deviations: []
     status: defended
