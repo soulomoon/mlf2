@@ -194,6 +194,7 @@ library mlf2-internal
                       MLF.Parse.Type,
                       MLF.Util.Trace,
                       MLF.Reify.Cache,
+                       MLF.Reify.Type.Core,
                       MLF.Elab.Inst,
                       MLF.Elab.Elaborate,
                       MLF.Elab.Elaborate.Algebra,
