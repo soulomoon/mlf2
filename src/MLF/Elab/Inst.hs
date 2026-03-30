@@ -1,25 +1,26 @@
 {-# LANGUAGE GADTs #-}
-module MLF.Elab.Inst (
-    InstEvalSpec(..),
+
+module MLF.Elab.Inst
+  ( InstEvalSpec (..),
     applyInstantiation,
     composeInst,
     evalInstantiationWith,
     instMany,
     renameInstBound,
     schemeToType,
-    splitForalls
-) where
+    splitForalls,
+  )
+where
 
-import qualified Data.Map.Strict as Map
 import Data.Functor.Foldable (para)
-
+import qualified Data.Map.Strict as Map
 import MLF.Elab.Types
-import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, freshTypeNameFromCounter, substTypeCapture, splitForalls)
+import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, freshTypeNameFromCounter, splitForalls, substTypeCapture)
 
 -- | Turn a scheme into its corresponding type (nested `∀`).
 schemeToType :: ElabScheme -> ElabType
 schemeToType (Forall binds body) =
-    buildForalls binds body
+  buildForalls binds body
 
 composeInst :: Instantiation -> Instantiation -> Instantiation
 composeInst InstId i = i
@@ -30,95 +31,96 @@ instMany :: [Instantiation] -> Instantiation
 instMany = foldr composeInst InstId
 
 data InstEvalSpec env err = InstEvalSpec
-    { instBot :: ElabType -> (Int, env, ElabType) -> Either err (Int, env, ElabType)
-    , instAbstr :: String -> (Int, env, ElabType) -> Either err (Int, env, ElabType)
-    , instElimError :: Instantiation -> ElabType -> err
-    , instInsideError :: Instantiation -> ElabType -> err
-    , instUnderError :: Instantiation -> ElabType -> err
-    , instElimEnv :: String -> ElabType -> env -> env
-    , instUnderEnv :: String -> ElabType -> env -> env
-    , renameBound :: String -> String -> Instantiation -> Instantiation
-    }
+  { instBot :: ElabType -> (Int, env, ElabType) -> Either err (Int, env, ElabType),
+    instAbstr :: String -> (Int, env, ElabType) -> Either err (Int, env, ElabType),
+    instElimError :: Instantiation -> ElabType -> err,
+    instInsideError :: Instantiation -> ElabType -> err,
+    instUnderError :: Instantiation -> ElabType -> err,
+    instElimEnv :: String -> ElabType -> env -> env,
+    instUnderEnv :: String -> ElabType -> env -> env,
+    renameBound :: String -> String -> Instantiation -> Instantiation
+  }
 
-evalInstantiationWith
-    :: InstEvalSpec env err
-    -> Instantiation
-    -> (Int, env, ElabType)
-    -> Either err (Int, env, ElabType)
+evalInstantiationWith ::
+  InstEvalSpec env err ->
+  Instantiation ->
+  (Int, env, ElabType) ->
+  Either err (Int, env, ElabType)
 evalInstantiationWith spec inst = eval inst
   where
     eval = para instAlg
 
     instElimFn errInst (k, env', t) = case t of
-        TForall v mbBound body -> do
-            let bTy = maybe TBottom tyToElab mbBound
-                env'' = instElimEnv spec v bTy env'
-            Right (k, env'', substTypeCapture v bTy body)
-        _ -> Left (instElimError spec errInst t)
+      TForall v mbBound body -> do
+        let bTy = maybe TBottom tyToElab mbBound
+            env'' = instElimEnv spec v bTy env'
+        Right (k, env'', substTypeCapture v bTy body)
+      _ -> Left (instElimError spec errInst t)
 
     instInsideFn errInst phiFn (k, env', t) = case t of
-        TForall v mbBound body -> do
-            let b0 = maybe TBottom tyToElab mbBound
-            (k1, _env'', b1) <- phiFn (k, env', b0)
-            let mb' = case b1 of
-                    TBottom -> Nothing
-                    TVar{} -> Nothing
-                    _ -> either (const Nothing) Just (elabToBound b1)
-            Right (k1, env', TForall v mb' body)
-        _ -> Left (instInsideError spec errInst t)
+      TForall v mbBound body -> do
+        let b0 = maybe TBottom tyToElab mbBound
+        (k1, _env'', b1) <- phiFn (k, env', b0)
+        let mb' = case b1 of
+              TBottom -> Nothing
+              TVar {} -> Nothing
+              _ -> either (const Nothing) Just (elabToBound b1)
+        Right (k1, env', TForall v mb' body)
+      _ -> Left (instInsideError spec errInst t)
 
     -- InstApp applies a concrete type argument directly to the front forall,
     -- but first validates it against the binder bound via instBot semantics.
     -- For explicit non-bottom bounds, a bound-matching InstApp is accepted
     -- directly and substitutes the binder with that bound type.
     instAppFn argTy (k, env', t) = case t of
-        TForall v mbBound body -> do
-            let b0 = maybe TBottom tyToElab mbBound
-            (k1, env'', checkedArg) <-
-                case mbBound of
-                    Just _ | alphaEqType argTy b0 ->
-                        Right (k, env', b0)
-                    _ ->
-                        instBot spec argTy (k, env', b0)
-            let env''' = instElimEnv spec v checkedArg env''
-            Right (k1, env''', substTypeCapture v checkedArg body)
-        _ ->
-            Left
-                (instElimError spec (InstSeq (InstInside (InstBot argTy)) InstElim) t)
+      TForall v mbBound body -> do
+        let b0 = maybe TBottom tyToElab mbBound
+        (k1, env'', checkedArg) <-
+          case mbBound of
+            Just _
+              | alphaEqType argTy b0 ->
+                  Right (k, env', b0)
+            _ ->
+              instBot spec argTy (k, env', b0)
+        let env''' = instElimEnv spec v checkedArg env''
+        Right (k1, env''', substTypeCapture v checkedArg body)
+      _ ->
+        Left
+          (instElimError spec (InstSeq (InstInside (InstBot argTy)) InstElim) t)
 
     instAlg inst0 = case inst0 of
-        InstIdF -> \(k, env', t) -> Right (k, env', t)
-        InstSeqF (left, i1) (right, i2) ->
-            \(k, env', t) ->
-                case (left, right) of
-                    (InstInside (InstAbstr v), InstElim) ->
-                        case t of
-                            TForall name _mbBound body ->
-                                let env'' = instElimEnv spec name (TVar v) env'
-                                in Right (k, env'', substTypeCapture name (TVar v) body)
-                            _ -> Left (instElimError spec InstElim t)
-                    _ -> do
-                        (k1, env'', t1) <- i1 (k, env', t)
-                        i2 (k1, env'', t1)
-        InstAppF argTy -> instAppFn argTy
-        InstBotF tArg -> instBot spec tArg
-        InstAbstrF v -> instAbstr spec v
-        InstIntroF ->
-            \(k, env', t) -> do
-                let used = freeTypeVarsType t
-                    (fresh, k') = freshTypeNameFromCounter k used
-                Right (k', env', TForall fresh Nothing t)
-        InstElimF -> instElimFn InstElim
-        InstInsideF (_, phiFn) -> instInsideFn InstId phiFn
-        InstUnderF vParam (phiInst, _phiFn) ->
-            \(k, env', t) -> case t of
-                TForall v mbBound body -> do
-                    let b0 = maybe TBottom tyToElab mbBound
-                        env'' = instUnderEnv spec v b0 env'
-                        phi' = renameBound spec vParam v phiInst
-                    (k1, _env''', body') <- eval phi' (k, env'', body)
-                    Right (k1, env', TForall v mbBound body')
-                _ -> Left (instUnderError spec phiInst t)
+      InstIdF -> \(k, env', t) -> Right (k, env', t)
+      InstSeqF (left, i1) (right, i2) ->
+        \(k, env', t) ->
+          case (left, right) of
+            (InstInside (InstAbstr v), InstElim) ->
+              case t of
+                TForall name _mbBound body ->
+                  let env'' = instElimEnv spec name (TVar v) env'
+                   in Right (k, env'', substTypeCapture name (TVar v) body)
+                _ -> Left (instElimError spec InstElim t)
+            _ -> do
+              (k1, env'', t1) <- i1 (k, env', t)
+              i2 (k1, env'', t1)
+      InstAppF argTy -> instAppFn argTy
+      InstBotF tArg -> instBot spec tArg
+      InstAbstrF v -> instAbstr spec v
+      InstIntroF ->
+        \(k, env', t) -> do
+          let used = freeTypeVarsType t
+              (fresh, k') = freshTypeNameFromCounter k used
+          Right (k', env', TForall fresh Nothing t)
+      InstElimF -> instElimFn InstElim
+      InstInsideF (_, phiFn) -> instInsideFn InstId phiFn
+      InstUnderF vParam (phiInst, _phiFn) ->
+        \(k, env', t) -> case t of
+          TForall v mbBound body -> do
+            let b0 = maybe TBottom tyToElab mbBound
+                env'' = instUnderEnv spec v b0 env'
+                phi' = renameBound spec vParam v phiInst
+            (k1, _env''', body') <- eval phi' (k, env'', body)
+            Right (k1, env', TForall v mbBound body')
+          _ -> Left (instUnderError spec phiInst t)
 
 -- | Apply an xMLF instantiation to an xMLF type (xmlf Fig. 3).
 --
@@ -129,36 +131,54 @@ applyInstantiation ty inst = (\(_, _, ty') -> ty') <$> evalInstantiationWith spe
   where
     resolveReplayVars :: Map.Map String ElabType -> ElabType -> ElabType
     resolveReplayVars replayEnv ty0 =
-        Map.foldlWithKey'
-            (\tyAcc var replacement -> substTypeCapture var replacement tyAcc)
-            ty0
-            replayEnv
+      Map.foldlWithKey'
+        (\tyAcc var replacement -> substTypeCapture var replacement tyAcc)
+        ty0
+        replayEnv
 
+    {- Note [InstBot replay-bound match]
+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+       The thesis (§15.3.4) specifies that InstBot (⊥-instantiation) should only
+       match a bottom type.  However, during witness replay the bounded no-fallback
+       path (reifyTypeWithNamedSetNoFallback) can carry a localized shape such as
+       t9 -> t9 through the replay environment, replacing what was originally ⊥ at
+       the constraint graph level.
+
+       allowReplayBoundMatch detects this situation: if resolving replay-environment
+       variables in tArg produces a *different* type that is alpha-equivalent to the
+       current scrutinee t, the InstBot step is accepted.  This is sound because the
+       replay environment records the specific instantiation that was already
+       validated during presolution — we are merely replaying a witness that was
+       correct at solve time.
+
+       See: BUG-2026-03-16-001, test "BUG-2026-03-16-001 regression" in
+       ElaborationSpec.hs.
+    -}
     allowReplayBoundMatch :: Map.Map String ElabType -> ElabType -> ElabType -> Bool
     allowReplayBoundMatch replayEnv tArg t =
-        let resolvedArg = resolveReplayVars replayEnv tArg
-        in not (alphaEqType resolvedArg tArg)
+      let resolvedArg = resolveReplayVars replayEnv tArg
+       in not (alphaEqType resolvedArg tArg)
             && alphaEqType resolvedArg t
 
-    spec = InstEvalSpec
+    spec =
+      InstEvalSpec
         { instBot = \tArg (k, replayEnv, t) -> case t of
             TBottom -> Right (k, replayEnv, tArg)
             _
-                | allowReplayBoundMatch replayEnv tArg t ->
-                    Right (k, replayEnv, t)
-            _ -> Left (InstantiationError ("InstBot expects ⊥, got: " ++ pretty t))
-        , instAbstr = \v (k, replayEnv, _t) -> Right (k, replayEnv, TVar v)
-        , instElimError = \_inst0 t ->
-            InstantiationError ("InstElim expects ∀, got: " ++ pretty t)
-        , instInsideError = \_inst0 t ->
-            InstantiationError ("InstInside expects ∀, got: " ++ pretty t)
-        , instUnderError = \_inst0 t ->
-            InstantiationError ("InstUnder expects ∀, got: " ++ pretty t)
-        , instElimEnv = \v replacement replayEnv -> Map.insert v replacement replayEnv
-        , instUnderEnv = \_v _bound replayEnv -> replayEnv
-        , renameBound = renameInstBound
+              | allowReplayBoundMatch replayEnv tArg t ->
+                  Right (k, replayEnv, t)
+            _ -> Left (InstantiationError ("InstBot expects ⊥, got: " ++ pretty t)),
+          instAbstr = \v (k, replayEnv, _t) -> Right (k, replayEnv, TVar v),
+          instElimError = \_inst0 t ->
+            InstantiationError ("InstElim expects ∀, got: " ++ pretty t),
+          instInsideError = \_inst0 t ->
+            InstantiationError ("InstInside expects ∀, got: " ++ pretty t),
+          instUnderError = \_inst0 t ->
+            InstantiationError ("InstUnder expects ∀, got: " ++ pretty t),
+          instElimEnv = \v replacement replayEnv -> Map.insert v replacement replayEnv,
+          instUnderEnv = \_v _bound replayEnv -> replayEnv,
+          renameBound = renameInstBound
         }
-
 
 -- Rename bound variable occurrences inside an instantiation body.
 -- This is α-renaming of the instantiation’s binder: occurrences of `old`
@@ -167,14 +187,14 @@ renameInstBound :: String -> String -> Instantiation -> Instantiation
 renameInstBound old new = para alg
   where
     alg inst0 = case inst0 of
-        InstIdF -> InstId
-        InstAppF t -> InstApp t
-        InstBotF t -> InstBot t
-        InstIntroF -> InstIntro
-        InstElimF -> InstElim
-        InstAbstrF v -> InstAbstr (if v == old then new else v)
-        InstInsideF i -> InstInside (snd i)
-        InstSeqF a b -> InstSeq (snd a) (snd b)
-        InstUnderF v i
-            | v == old -> InstUnder v (fst i)  -- shadowing: stop renaming under this binder
-            | otherwise -> InstUnder v (snd i)
+      InstIdF -> InstId
+      InstAppF t -> InstApp t
+      InstBotF t -> InstBot t
+      InstIntroF -> InstIntro
+      InstElimF -> InstElim
+      InstAbstrF v -> InstAbstr (if v == old then new else v)
+      InstInsideF i -> InstInside (snd i)
+      InstSeqF a b -> InstSeq (snd a) (snd b)
+      InstUnderF v i
+        | v == old -> InstUnder v (fst i) -- shadowing: stop renaming under this binder
+        | otherwise -> InstUnder v (snd i)
