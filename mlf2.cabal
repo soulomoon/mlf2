@@ -132,7 +132,10 @@ library mlf2-internal
                       MLF.Reify.Type,
                       MLF.Reify.Bound,
                       MLF.Constraint.Unify.Decompose
-    other-modules:    MLF.Constraint.Solved.Internal,
+    other-modules:    MLF.Constraint.Normalize.Internal,
+                       MLF.Constraint.Normalize.Graft,
+                       MLF.Constraint.Normalize.Merge,
+                       MLF.Constraint.Solved.Internal,
                       MLF.Constraint.Types.Ids,
                       MLF.Constraint.Types.SynthesizedExpVar,
                       MLF.Constraint.Presolution.Base,

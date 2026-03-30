@@ -1996,6 +1996,7 @@ Legacy code is isolated in `MLF.Elab.Legacy` (e.g., `expansionToInst`).
 - **`rewriteConstraint`**: Ensures Identity `TyExp` wrappers are erased even when they are not the Union-Find root (redirecting the whole UF class to the wrapper’s body). This fixes over-generalization bugs in paper-alignment baselines like `let id = (\x. x) in id id` and `\y. let id = (\x. x) in id y`.
 
 ### 2. src/MLF/Constraint/Normalize.hs
+- **Module split**: `MLF.Constraint.Normalize` is now a thin façade over `MLF.Constraint.Normalize.Internal`, `MLF.Constraint.Normalize.Graft`, and `MLF.Constraint.Normalize.Merge`; the split preserves the existing public exports and behavior while keeping the parent module under 200 lines.
 - **`applyUnionFindToConstraint`**: Enhanced to perform "grafting". When a `TyVar` node is unified with a structural node (e.g., `TyBase`), the `TyVar` node in the graph is destructively updated to become a copy of that structure. This ensures that external references to the variable (like the expression root) see the inferred structure.
 - **Binding-edge Raise harmonization**: Var-var merging harmonizes `Constraint.cBindParents` (paper `Raise(n)`) before unioning, keeping scope stable regardless of UF representative choice.
 
