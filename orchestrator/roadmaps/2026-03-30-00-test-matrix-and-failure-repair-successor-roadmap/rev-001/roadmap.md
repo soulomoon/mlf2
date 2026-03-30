@@ -24,7 +24,7 @@
 
 ## Items
 
-1. [pending] Freeze bounded matrix scope and repair the current thesis-conformance baseline
+1. [done] Freeze bounded matrix scope and repair the current thesis-conformance baseline
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
@@ -43,7 +43,7 @@
    - no GitHub Actions matrix expansion lands yet beyond any minimal change
      needed to support the repaired baseline
 
-2. [pending] Add a bounded GitHub Actions build-and-test matrix around the repaired baseline
+2. [done] Add a bounded GitHub Actions build-and-test matrix around the repaired baseline
    Item id: `item-2`
    Depends on: `item-1`
    Parallel safe: no
@@ -60,7 +60,7 @@
    - `cabal build all && cabal test` passes
    - `./scripts/thesis-conformance-gate.sh` passes
 
-3. [pending] Fix any matrix-exposed runner or test failures at the root cause
+3. [done] Fix any matrix-exposed runner or test failures at the root cause
    Item id: `item-3`
    Depends on: `item-2`
    Parallel safe: no
@@ -78,7 +78,7 @@
    - `cabal build all && cabal test` passes
    - `./scripts/thesis-conformance-gate.sh` passes
 
-4. [pending] Update repo guidance and handoff for ongoing CI maintenance
+4. [done] Update repo guidance and handoff for ongoing CI maintenance
    Item id: `item-4`
    Depends on: `item-2`, `item-3`
    Parallel safe: no

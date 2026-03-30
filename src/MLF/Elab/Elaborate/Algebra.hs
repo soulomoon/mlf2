@@ -112,10 +112,19 @@ elabAlg algebraContext layer =
                             Forall [(name, Just bnd)] bodyTy
                               | bodyTy == TVar name -> tyToElab bnd
                             _ -> schemeToType paramScheme
+                          -- If generalizeAtNode returned a bare TVar (over-generalized),
+                          -- fall back to reifyNodeTypePreferringBound which resolves
+                          -- through the constraint graph's bound/canonical chain.
+                          paramTyResolved = case paramTy0 of
+                            TVar {} ->
+                              case reifyNodeTypePreferringBound scopeContext annNodeId of
+                                Right ty@TMu {} -> ty
+                                _ -> paramTy0
+                            _ -> paramTy0
                        in pure
-                            ( paramTy0,
+                            ( paramTyResolved,
                               SchemeInfo
-                                { siScheme = schemeFromType paramTy0,
+                                { siScheme = schemeFromType paramTyResolved,
                                   siSubst = IntMap.empty
                                 }
                             )
@@ -305,10 +314,66 @@ elabAlg algebraContext layer =
                         else subst0'
                 (scheme0Norm, subst0Norm) = normalizeSchemeSubstPair (scheme0Raw, subst0Raw)
                 schemeBase = schemeFromType (simplifyAnnotationType (schemeToType scheme0Norm))
+                {- Note [Mu-type annotation override for let schemes]
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                   When a let-bound RHS is a lambda with a μ-type annotation on its
+                   parameter (e.g. let g = (λx:μα.α→Int. x) in …), the generalization
+                   may produce an overly-generic scheme (∀a.∀b. a→b) because the
+                   constraint graph's μ-node lives under the lambda scope and is not
+                   visible as a binder-bound at the let scope.
+
+                   We detect this case by inspecting the RHS annotation structure for
+                   a desugared annotated lambda whose annotation node reifies to TMu.
+                   When found, we override the scheme with a monomorphic function type
+                   that uses the μ-type as both domain and codomain (identity-like), or
+                   more precisely, domain = μ-type and codomain = μ-type when the body
+                   simply returns the parameter. -}
+                rhsLambdaMuAnnotationTy =
+                  case rhsAnn of
+                    ALam lamParam _ _ lamBody _ ->
+                      case desugaredAnnLambdaInfo lamParam lamBody of
+                        Just (annNodeId, _) ->
+                          case reifyNodeTypePreferringBound scopeContext annNodeId of
+                            Right annTy@TMu {} -> Just annTy
+                            _ -> Nothing
+                        Nothing -> Nothing
+                    _ -> Nothing
                 scheme =
                   case (annContainsVar v rhsAnn, blockedAliasMuType (schemeToType schemeBase)) of
                     (True, Just muTy) -> schemeFromType muTy
-                    _ -> schemeBase
+                    _ -> case rhsLambdaMuAnnotationTy of
+                      Just muTy ->
+                        {- Note [Selective codomain override for μ-annotated lambdas]
+                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                           The domain is always overridden to the μ-type since
+                           rhsLambdaMuAnnotationTy detects that the lambda parameter has
+                           an explicit μ-annotation (e.g. λx:μα.α→Int. x).
+
+                           For the codomain: when the scheme is fully polymorphic
+                           (e.g. ∀a.∀b. a→b with both vars quantified), generalization
+                           captured the correct parametricity and downstream elaboration
+                           handles the μ-type through normal instantiation — so we leave
+                           schemeBase intact. When the codomain is a constraint-internal
+                           variable (e.g. TVar "t10" that wasn't quantified), generalization
+                           lost track of its relationship to the μ-annotated parameter,
+                           and we override it to the μ-type. -}
+                        let schemeBody = case schemeToType schemeBase of
+                              TForall _ _ inner -> go inner
+                              other -> other
+                              where
+                                go (TForall _ _ inner) = go inner
+                                go t = t
+                            quantVars = Set.fromList [n | (n, _) <- fst (Inst.splitForalls (schemeToType schemeBase))]
+                            isUnquantifiedTVar (TVar v') = not (Set.member v' quantVars)
+                            isUnquantifiedTVar _ = False
+                         in case schemeBody of
+                              TArrow _dom cod
+                                | isUnquantifiedTVar cod ->
+                                    -- Codomain is an unquantified internal variable:
+                                    -- override both domain and codomain to μ.
+                                    schemeFromType (TArrow muTy muTy)
+                              _ -> schemeBase
+                      Nothing -> schemeBase
                 subst0 = normalizeSubstForScheme scheme (deriveLambdaBinderSubst scheme0Norm subst0Norm)
                 subst =
                   let (binds, _) = Inst.splitForalls (schemeToType scheme)
@@ -326,14 +391,12 @@ elabAlg algebraContext layer =
             case debugGeneralize
               ( "elaborate let("
                   ++ v
-                  ++ "): sch0="
-                  ++ show scheme
-                  ++ " subst0="
-                  ++ show subst
-                  ++ " scheme="
+                  ++ "): scheme="
                   ++ show scheme
                   ++ " subst="
                   ++ show subst
+                  ++ " rhsAbs="
+                  ++ show rhsAbs
                   ++ " rhsAbsTy="
                   ++ show rhsAbsTyChecked
               )

@@ -1,0 +1,31 @@
+{
+  "round_id": "round-157",
+  "roadmap_id": "2026-03-30-00-test-matrix-and-failure-repair-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-30-00-test-matrix-and-failure-repair-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-2",
+  "implemented_stage_result": "Single-file change (.github/workflows/thesis-conformance.yml, +35 -3): split monolithic job into build-and-test and thesis-conformance jobs with 1x1 strategy.matrix (ubuntu-latest / GHC 9.12.2), needs dependency, repo-standard commands only.",
+  "attempt_verdict": "accepted",
+  "stage_action": "finalize",
+  "retry_reason": null,
+  "fix_hypothesis": null,
+  "baseline_checks": {
+    "git_diff_check": "PASS",
+    "state_json_valid": "PASS",
+    "roadmap_bundle_exists": "PASS",
+    "cabal_build_all": "PASS",
+    "cabal_test": "PASS (1177 examples, 0 failures)",
+    "thesis_conformance_gate": "PASS"
+  },
+  "item_checks": {
+    "matrix_scope_implemented": "PASS — os: [ubuntu-latest], ghc: ['9.12.2'] in both jobs",
+    "reuses_repo_commands": "PASS — cabal build all, cabal test, thesis-conformance-gate.sh only",
+    "two_jobs_exist": "PASS — build-and-test (line 8), thesis-conformance (line 35)",
+    "needs_dependency": "PASS — needs: [build-and-test] on line 37",
+    "single_lane_no_windows": "PASS",
+    "yaml_syntax_valid": "PASS",
+    "no_files_outside_plan": "PASS — only .github/workflows/thesis-conformance.yml changed",
+    "no_test_regression": "PASS"
+  },
+  "test_result": "1177 examples, 0 failures"
+}

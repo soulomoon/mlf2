@@ -1,0 +1,30 @@
+{
+  "round_id": "round-156",
+  "roadmap_id": "2026-03-30-00-test-matrix-and-failure-repair-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-30-00-test-matrix-and-failure-repair-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-1",
+  "base_branch": "codex/automatic-recursive-type-inference",
+  "branch": "orchestrator/round-156-freeze-scope-repair-baseline",
+  "commit": "31b9157",
+  "decision": "APPROVED",
+  "reviewer_date": "2026-03-30",
+  "gates": {
+    "git_diff_check": "PASS",
+    "state_json_valid": "PASS",
+    "roadmap_bundle_exists": "PASS",
+    "cabal_build_test": "PASS",
+    "thesis_conformance_gate": "PASS"
+  },
+  "test_count": 1176,
+  "test_failures": 0,
+  "files_changed": [
+    "scripts/check-thesis-obligations-ledger.sh",
+    "docs/thesis-obligations.md",
+    "docs/thesis-obligations.yaml",
+    "docs/thesis-claims.yaml"
+  ],
+  "escalation_triggered": true,
+  "escalation_reason": "Broken code_anchor paths in YAML due to prior module splits (Elaborate→Elaborate/Scope, Phi/Omega→Phi/Omega/Domain, Solve→Unify/Closure); orphan deviation DEV-AUTO-ISO-RECURSIVE for CLM-ACYCLICITY",
+  "notes": "1177→1176 test count difference is a phantom from uncommitted PipelineSpec.hs edits in the main repo working tree; the committed baseline has always been 1176. No Haskell source code modified."
+}
