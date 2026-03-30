@@ -231,6 +231,7 @@ library mlf2-internal
                       MLF.Elab.Run.Pipeline,
                       MLF.Elab.Run.ResultType.Ann,
                       MLF.Elab.Run.ResultType.Fallback,
+                      MLF.Elab.Run.ResultType.Fallback.Core,
                       MLF.Elab.Run.ResultType.Types,
                       MLF.Elab.Run.ResultType.Util,
                       MLF.Elab.Run.ResultType.View,
