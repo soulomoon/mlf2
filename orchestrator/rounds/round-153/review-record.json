@@ -1,0 +1,33 @@
+{
+  "round": 153,
+  "roadmap_id": "2026-03-29-03-non-local-proxy-phi-translation-and-reclassification",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-29-03-non-local-proxy-phi-translation-and-reclassification/rev-001",
+  "roadmap_item_id": "item-3",
+  "branch": "orchestrator/round-153-fix-opraise-non-spine-context",
+  "commit": "47ca69797cf74406a39138201072570f0cb99828",
+  "decision": "APPROVED",
+  "date": "2026-03-29",
+  "checks": {
+    "git_diff_check": "PASS",
+    "state_json_valid": "PASS",
+    "roadmap_bundle_resolves": "PASS",
+    "cabal_build_all": "PASS",
+    "cabal_test": "PASS",
+    "test_count": 1176,
+    "failure_count": 0,
+    "warnings": 0
+  },
+  "task_specific_checks": {
+    "opraise_handles_nonlocal_bind_parent": "PASS",
+    "existing_spine_opraise_unchanged": "PASS",
+    "existing_local_nonspine_opraise_unchanged": "PASS",
+    "pipelinespec_blocker_status": "still_expects_failure_case_a"
+  },
+  "files_changed": [
+    "src/MLF/Elab/Phi/Omega/Interpret.hs"
+  ],
+  "insertions": 1,
+  "deletions": 0,
+  "notes": "Single-line addition of Just TyMu{} -> True to mbRootInst bind-parent guard. PipelineSpec blocker test still passes with expectStrictPipelineFailure (case a: additional downstream blocker exists). Test upgrade deferred to item-4."
+}

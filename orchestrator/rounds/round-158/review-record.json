@@ -1,0 +1,30 @@
+{
+  "round_id": "round-158",
+  "roadmap_id": "2026-03-30-00-test-matrix-and-failure-repair-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-30-00-test-matrix-and-failure-repair-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-3",
+  "implemented_stage_result": "3 files changed (+374 −372): 262 absolute /Volumes/src/mlf4/ paths stripped to relative in docs/thesis-obligations.yaml, ROOT-join pattern added to scripts/check-thesis-obligations-ledger.sh, docs/thesis-obligations.md regenerated with 106 relative paths",
+  "attempt_verdict": "accepted",
+  "stage_action": "finalize",
+  "retry_reason": null,
+  "fix_hypothesis": null,
+  "baseline_checks": {
+    "git_diff_check": "PASS — exit 0, no whitespace or conflict markers",
+    "state_json_valid": "PASS — exit 0, valid JSON",
+    "roadmap_bundle_exists": "PASS — roadmap.md, retry-subloop.md, verification.md all present",
+    "cabal_build_test": "PASS — build succeeds, 1176 examples, 0 failures (from round-158 worktree)",
+    "thesis_conformance_gate": "PASS — [thesis-gate] PASS: thesis conformance anchors are green"
+  },
+  "item_checks": {
+    "zero_absolute_paths_yaml": "PASS — grep -c '/Volumes/src/mlf4' returns 0",
+    "zero_absolute_paths_md": "PASS — grep -c '/Volumes/src/mlf4' returns 0",
+    "no_ci_bypass": "PASS — ROOT-join pattern matches existing check-thesis-claims.sh",
+    "ruby_script_edits_match_plan": "PASS — ARGV passing, root variable, File.join at lines 124, 145-146, 150",
+    "render_check_passes": "PASS — ruby render-thesis-obligations-ledger.rb --check exit 0",
+    "bash_syntax_check": "PASS — bash -n exit 0",
+    "scope_within_plan": "PASS — only 3 files modified, all within plan scope",
+    "plan_step_compliance": "PASS — all 4 plan steps verified against diff"
+  },
+  "test_result": "1176 examples, 0 failures (round-158 worktree)"
+}

@@ -422,35 +422,36 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             _ -> expectationFailure $ "Expected TCon, got: " ++ show ty
         Left err -> expectationFailure $ "Reify error: " ++ show err
 
-
     it "reifies TyMu without binder child (non-local proxy fallback)" $ do
       -- Construct a minimal constraint with a TyMu whose μ-variable has NO
       -- binding-tree entry as a flex-child of the TyMu.  This simulates
       -- the non-local proxy scenario.
-      let muVarId  = NodeId 0   -- the μ-variable (TyVar)
-          intId    = NodeId 1   -- base type Int
-          arrowId  = NodeId 2   -- arrow: muVar -> Int
-          muId     = NodeId 3   -- TyMu node (body = arrow)
-          muVar    = TyVar  muVarId Nothing
-          intNode  = TyBase intId (BaseTy "Int")
-          arrowNd  = TyArrow arrowId muVarId intId
-          muNode   = TyMu   muId arrowId
-          nodes    = fromListNode
-                       [ (muVarId, muVar)
-                       , (intId,   intNode)
-                       , (arrowId, arrowNd)
-                       , (muId,    muNode)
-                       ]
+      let muVarId = NodeId 0 -- the μ-variable (TyVar)
+          intId = NodeId 1 -- base type Int
+          arrowId = NodeId 2 -- arrow: muVar -> Int
+          muId = NodeId 3 -- TyMu node (body = arrow)
+          muVar = TyVar muVarId Nothing
+          intNode = TyBase intId (BaseTy "Int")
+          arrowNd = TyArrow arrowId muVarId intId
+          muNode = TyMu muId arrowId
+          nodes =
+            fromListNode
+              [ (muVarId, muVar),
+                (intId, intNode),
+                (arrowId, arrowNd),
+                (muId, muNode)
+              ]
           -- NO bind-parent entry for muVarId under muId
-          constraint = emptyConstraint { cNodes = nodes }
+          constraint = emptyConstraint {cNodes = nodes}
           solved = SolvedTest.mkTestSolved constraint IntMap.empty
       case reifyType (PresolutionViewBoundary.fromSolved solved) muId of
         Right ty -> do
           -- Should produce a TMu wrapping the body type
           case ty of
             TMu _ _ -> pure ()
-            _       -> expectationFailure $
-                         "Expected TMu, got: " ++ show ty
+            _ ->
+              expectationFailure $
+                "Expected TMu, got: " ++ show ty
         Left err ->
           expectationFailure $
             "Non-local proxy TyMu reify should not error: " ++ show err
@@ -2333,7 +2334,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           `shouldSatisfy` isInfixOf
             "then rootFinal"
 
-      it "elaboration succeeds but produces TCArgumentMismatch for non-local proxy wrapper" $ do
+      it "non-local proxy wrapper g g fails with TCArgumentMismatch (correct semantic error)" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -2345,7 +2346,35 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
               ]
         forM_ pipelineRuns $ \(label, result) ->
-          expectStrictPipelineFailure (label ++ " non-local proxy wrapper") result
+          case result of
+            Left err ->
+              show err `shouldSatisfy` isInfixOf "TCArgumentMismatch"
+            Right (_term, ty) ->
+              expectationFailure
+                ("Expected TCArgumentMismatch for " ++ label ++ ", but got type " ++ show ty)
+
+      it "non-local proxy wrapper let g = (λx:μα.α→Int. x) in g succeeds with correct arrow type" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr =
+              ELet
+                "g"
+                (ELamAnn "x" recursiveAnn (EVar "x"))
+                (EVar "g")
+            muTy = TMu "t6" (TArrow (TVar "t6") (TBase (BaseTy "Int")))
+            expectedTy = TArrow muTy muTy
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Right (_term, ty) ->
+              unless (matchesRecursiveArrow ty expectedTy) $
+                expectationFailure
+                  (label ++ " non-local proxy: expected arrow of μ-types, got " ++ show ty)
+            Left err ->
+              expectationFailure
+                (label ++ " non-local proxy: expected success, got error " ++ show err)
 
     it "uses presolution-native solved artifacts" $ do
       artifacts <- requireRight (runPipelineArtifactsDefault Set.empty (ELam "x" (EVar "x")))

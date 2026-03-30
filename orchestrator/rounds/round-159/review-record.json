@@ -1,0 +1,36 @@
+{
+  "round": "round-159",
+  "roadmap_id": "2026-03-30-00-test-matrix-and-failure-repair-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-30-00-test-matrix-and-failure-repair-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-4",
+  "branch": "orchestrator/round-159-update-repo-guidance",
+  "base_branch": "codex/automatic-recursive-type-inference",
+  "decision": "APPROVED",
+  "timestamp": "2026-03-30T21:45:00Z",
+  "baseline_checks": {
+    "git_diff_check": "PASS",
+    "state_json_valid": "PASS",
+    "roadmap_bundle_exists": "PASS",
+    "cabal_build_test": "PASS",
+    "thesis_conformance_gate": "PASS"
+  },
+  "item_checks": {
+    "readme_ci_section": "PASS",
+    "todo_completed": "PASS",
+    "changelog_entry": "PASS",
+    "handoff_local_vs_ci": "PASS",
+    "windows_exclusion_documented": "PASS",
+    "docs_only_verified": "PASS"
+  },
+  "test_results": {
+    "examples": 1177,
+    "failures": 0
+  },
+  "files_changed": [
+    "CHANGELOG.md",
+    "README.md",
+    "TODO.md"
+  ],
+  "diff_stats": "+39 -21 (3 files)"
+}
