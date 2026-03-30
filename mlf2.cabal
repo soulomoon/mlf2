@@ -130,7 +130,8 @@ library mlf2-internal
                       MLF.Reify.TypeOps,
                       MLF.Reify.Named,
                       MLF.Reify.Type,
-                      MLF.Reify.Bound
+                      MLF.Reify.Bound,
+                      MLF.Constraint.Unify.Decompose
     other-modules:    MLF.Constraint.Solved.Internal,
                       MLF.Constraint.Types.Ids,
                       MLF.Constraint.Types.SynthesizedExpVar,
@@ -180,7 +181,6 @@ library mlf2-internal
                       MLF.Constraint.Canonicalization.Shared,
                       MLF.Constraint.Traversal,
                       MLF.Constraint.Unify.Core,
-                      MLF.Constraint.Unify.Decompose,
                       MLF.Constraint.BindingUtil,
                       MLF.Util.IntMapUtils,
                       Util.IndexedRecursion,
@@ -388,6 +388,7 @@ test-suite mlf2-test
                       Util.UnionFindSpec,
                       SolvedFacadeTestUtil,
                       Parity.FrozenArtifacts,
+                      Property.QuickCheckPropertySpec,
                       SpecUtil,
 
     -- LANGUAGE extensions used by modules in this package.

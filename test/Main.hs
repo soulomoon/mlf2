@@ -27,6 +27,7 @@ import PipelineSpec qualified
 import Presolution.UnificationClosureSpec qualified
 import PresolutionFacadeSpec qualified
 import PresolutionSpec qualified
+import Property.QuickCheckPropertySpec qualified
 import PublicSurfaceSpec qualified
 import ReduceSpec qualified
 import Reify.CoreSpec qualified
@@ -106,3 +107,4 @@ main = do
     Reify.NamedSpec.spec
     Reify.TypeSpec.spec
     Reify.CoreSpec.spec
+    Property.QuickCheckPropertySpec.spec
