@@ -1,16 +1,17 @@
-{- |
-Module      : MLF.Constraint.Presolution.EdgeProcessing.Unify
-Description : Edge-local unification helpers for presolution
-Copyright   : (c) 2024
-License     : BSD-3-Clause
-
-Helpers for applying expansions and executing edge-local unification.
--}
-module MLF.Constraint.Presolution.EdgeProcessing.Unify (
-    EdgeExpansionResult(..),
+-- |
+-- Module      : MLF.Constraint.Presolution.EdgeProcessing.Unify
+-- Description : Edge-local unification helpers for presolution
+-- Copyright   : (c) 2024
+-- License     : BSD-3-Clause
+--
+-- Helpers for applying expansions and executing edge-local unification.
+module MLF.Constraint.Presolution.EdgeProcessing.Unify
+  ( EdgeExpansionInput (..),
+    EdgeExpansionResult (..),
     runExpansionUnify,
-    setBindParentIfUpper
-) where
+    setBindParentIfUpper,
+  )
+where
 
 {- Note [Edge-local omega execution]
 Edge-local unification executes the paper's χe operations (Raise, Merge, Weaken)
@@ -41,160 +42,175 @@ import Control.Monad.Reader (ask)
 import Control.Monad.State (runStateT)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-
 import qualified MLF.Binding.Tree as Binding
-import MLF.Util.Trace (traceBindingM)
-
-import MLF.Constraint.Types
-import MLF.Constraint.Presolution.Base (
-    CopyMap,
+import MLF.Constraint.Presolution.Base
+  ( CopyMap,
     FrontierSet,
     InteriorSet,
-    PresolutionError(..),
+    PresolutionError (..),
     PresolutionM,
-    pendingWeakenOwnerFromMaybe,
-    getConstraint,
+    bindExpansionArgs,
     edgeInteriorExact,
+    getConstraint,
     getCopyMapping,
     lookupCopy,
-    bindExpansionArgs
-    )
-import MLF.Constraint.Presolution.Ops (
-    findRoot,
-    setBindParentM
-    )
-import MLF.Constraint.Presolution.StateAccess (getCanonical)
-import MLF.Constraint.Presolution.Expansion (
-    applyExpansionEdgeTraced,
-    bindExpansionRootLikeTarget
-    )
-import MLF.Constraint.Presolution.EdgeUnify (
-    EdgeUnifyState(eusOps),
+    pendingWeakenOwnerFromMaybe,
+  )
+import MLF.Constraint.Presolution.EdgeUnify
+  ( EdgeUnifyState (eusOps),
     executeEdgeLocalOmegaOps,
     initEdgeUnifyState,
     mkOmegaExecEnv,
     unifyAcyclicEdge,
-    unifyStructureEdge
-    )
+    unifyStructureEdge,
+  )
+import MLF.Constraint.Presolution.Expansion
+  ( applyExpansionEdgeTraced,
+    bindExpansionRootLikeTarget,
+  )
+import MLF.Constraint.Presolution.Ops
+  ( findRoot,
+    setBindParentM,
+  )
+import MLF.Constraint.Presolution.StateAccess (getCanonical)
 import MLF.Constraint.Presolution.Witness (binderArgsFromExpansion)
+import MLF.Constraint.Types
+import MLF.Util.Trace (traceBindingM)
+
+-- | Input bundle for edge-expansion unification.
+data EdgeExpansionInput = EdgeExpansionInput
+  { -- | Gen-node owning this edge
+    eeiGenId :: GenNodeId,
+    -- | The edge being processed
+    eeiEdgeId :: EdgeId,
+    -- | Raw type at the source node
+    eeiLeftRaw :: TyNode,
+    -- | Raw type at the target node
+    eeiRightRaw :: TyNode,
+    -- | Expansion recipe for this edge
+    eeiExpansion :: Expansion
+  }
 
 -- | Result of applying an expansion and running edge-local unification.
 data EdgeExpansionResult = EdgeExpansionResult
-    { eerTrace :: (CopyMap, InteriorSet, FrontierSet)
-    , eerExtraOps :: [InstanceOp]
-    }
+  { eerTrace :: (CopyMap, InteriorSet, FrontierSet),
+    eerExtraOps :: [InstanceOp]
+  }
 
 -- | Apply an expansion and run edge-local unification for a single edge.
-runExpansionUnify
-    :: GenNodeId
-    -> EdgeId
-    -> TyNode
-    -> TyNode
-    -> Expansion
-    -> [InstanceOp]
-    -> PresolutionM EdgeExpansionResult
-runExpansionUnify gid edgeId leftRaw target expn baseOps =
-    case leftRaw of
-        TyExp{ tnBody = _bodyId } -> do
-            (resNodeId, (copyMap0, interior0, frontier0)) <- applyExpansionEdgeTraced gid expn leftRaw
-            debugBindParents
-                ( "processInstEdge: expansion result resNodeId="
-                    ++ show resNodeId
-                    ++ " copyMap0="
-                    ++ show copyMap0
-                    ++ " frontier0="
-                    ++ show frontier0
-                )
+runExpansionUnify ::
+  EdgeExpansionInput ->
+  [InstanceOp] ->
+  PresolutionM EdgeExpansionResult
+runExpansionUnify input baseOps =
+  let gid = eeiGenId input
+      edgeId = eeiEdgeId input
+      leftRaw = eeiLeftRaw input
+      target = eeiRightRaw input
+      expn = eeiExpansion input
+   in case leftRaw of
+        TyExp {tnBody = _bodyId} -> do
+          (resNodeId, (copyMap0, interior0, frontier0)) <- applyExpansionEdgeTraced gid expn leftRaw
+          debugBindParents
+            ( "processInstEdge: expansion result resNodeId="
+                ++ show resNodeId
+                ++ " copyMap0="
+                ++ show copyMap0
+                ++ " frontier0="
+                ++ show frontier0
+            )
 
-            let targetNodeId = tnId target
-            cBeforeBind <- getConstraint
-            let targetParent = Binding.lookupBindParent cBeforeBind (typeRef targetNodeId)
-            debugBindParents
-                ( "processInstEdge: expansion root bind target="
-                    ++ show targetNodeId
-                    ++ " parent="
-                    ++ show targetParent
-                )
-            targetBinder <- bindExpansionRootLikeTarget resNodeId targetNodeId
+          let targetNodeId = tnId target
+          cBeforeBind <- getConstraint
+          let targetParent = Binding.lookupBindParent cBeforeBind (typeRef targetNodeId)
+          debugBindParents
+            ( "processInstEdge: expansion root bind target="
+                ++ show targetNodeId
+                ++ " parent="
+                ++ show targetParent
+            )
+          targetBinder <- bindExpansionRootLikeTarget resNodeId targetNodeId
 
-            canonical <- getCanonical
-            let copyMapCanon =
-                    IntMap.fromListWith
-                        const
-                        [ (getNodeId (canonical (NodeId orig)), copy)
-                        | (orig, copy) <- IntMap.toList (getCopyMapping copyMap0)
-                        ]
-            forM_ (IntSet.toList frontier0) $ \nidInt ->
-                case IntMap.lookup nidInt copyMapCanon of
-                    Nothing -> pure ()
-                    Just copy -> setBindParentIfUpper copy targetBinder
+          canonical <- getCanonical
+          let copyMapCanon =
+                IntMap.fromListWith
+                  const
+                  [ (getNodeId (canonical (NodeId orig)), copy)
+                  | (orig, copy) <- IntMap.toList (getCopyMapping copyMap0)
+                  ]
+          forM_ (IntSet.toList frontier0) $ \nidInt ->
+            case IntMap.lookup nidInt copyMapCanon of
+              Nothing -> pure ()
+              Just copy -> setBindParentIfUpper copy targetBinder
 
-            bas <- binderArgsFromExpansion gid leftRaw expn
-            binderMetas <- forM bas $ \(bv, _arg) ->
-                case lookupCopy bv copyMap0 of
-                    Just meta -> pure (bv, meta)
-                    Nothing ->
-                        throwError (InternalError ("runExpansionUnify: missing binder-meta copy for " ++ show bv))
+          bas <- binderArgsFromExpansion gid leftRaw expn
+          binderMetas <- forM bas $ \(bv, _arg) ->
+            case lookupCopy bv copyMap0 of
+              Just meta -> pure (bv, meta)
+              Nothing ->
+                throwError (InternalError ("runExpansionUnify: missing binder-meta copy for " ++ show bv))
 
-            canonInterior <- getCanonical
-            let canonInteriorSet =
-                    IntSet.fromList
-                        [ getNodeId (canonInterior (NodeId i))
-                        | i <- IntSet.toList interior0
-                        ]
-            interiorExact <- edgeInteriorExact resNodeId
-            let interior = IntSet.union canonInteriorSet interiorExact
+          canonInterior <- getCanonical
+          let canonInteriorSet =
+                IntSet.fromList
+                  [ getNodeId (canonInterior (NodeId i))
+                  | i <- IntSet.toList interior0
+                  ]
+          interiorExact <- edgeInteriorExact resNodeId
+          let interior = IntSet.union canonInteriorSet interiorExact
 
-            eu0 <- initEdgeUnifyState binderMetas interior resNodeId (pendingWeakenOwnerFromMaybe (Just gid))
-            let omegaEnv = mkOmegaExecEnv copyMap0
-            (_a, eu1) <- runStateT
-                (executeEdgeLocalOmegaOps omegaEnv baseOps $ do
-                    bindExpansionArgs resNodeId bas
-                    forM_ (IntSet.toList frontier0) $ \nidInt ->
-                        case IntMap.lookup nidInt copyMapCanon of
-                            Nothing -> pure ()
-                            Just copy -> unifyStructureEdge copy (NodeId nidInt)
-                    unifyStructureEdge resNodeId (tnId target)
-                    unifyAcyclicEdge (tnId leftRaw) resNodeId
-                )
-                eu0
+          eu0 <- initEdgeUnifyState binderMetas interior resNodeId (pendingWeakenOwnerFromMaybe (Just gid))
+          let omegaEnv = mkOmegaExecEnv copyMap0
+          (_a, eu1) <-
+            runStateT
+              ( executeEdgeLocalOmegaOps omegaEnv baseOps $ do
+                  bindExpansionArgs resNodeId bas
+                  forM_ (IntSet.toList frontier0) $ \nidInt ->
+                    case IntMap.lookup nidInt copyMapCanon of
+                      Nothing -> pure ()
+                      Just copy -> unifyStructureEdge copy (NodeId nidInt)
+                  unifyStructureEdge resNodeId (tnId target)
+                  unifyAcyclicEdge (tnId leftRaw) resNodeId
+              )
+              eu0
 
-            resRoot <- findRoot resNodeId
-            setBindParentIfUpper resRoot targetBinder
-            setBindParentIfUpper (tnId leftRaw) targetBinder
+          resRoot <- findRoot resNodeId
+          setBindParentIfUpper resRoot targetBinder
+          setBindParentIfUpper (tnId leftRaw) targetBinder
 
-            cAfterBind <- getConstraint
-            let resParent = Binding.lookupBindParent cAfterBind (typeRef resRoot)
-            debugBindParents
-                ( "processInstEdge: expansion root bound resRoot="
-                    ++ show resRoot
-                    ++ " parent="
-                    ++ show resParent
-                    ++ " targetBinder="
-                    ++ show targetBinder
-                )
+          cAfterBind <- getConstraint
+          let resParent = Binding.lookupBindParent cAfterBind (typeRef resRoot)
+          debugBindParents
+            ( "processInstEdge: expansion root bound resRoot="
+                ++ show resRoot
+                ++ " parent="
+                ++ show resParent
+                ++ " targetBinder="
+                ++ show targetBinder
+            )
 
-            c1 <- getConstraint
-            case Binding.lookupBindParent c1 (typeRef resRoot) of
-                Nothing -> setBindParentIfUpper resRoot targetBinder
-                Just _ -> pure ()
+          c1 <- getConstraint
+          case Binding.lookupBindParent c1 (typeRef resRoot) of
+            Nothing -> setBindParentIfUpper resRoot targetBinder
+            Just _ -> pure ()
 
-            pure EdgeExpansionResult
-                { eerTrace = (copyMap0, interior, frontier0)
-                , eerExtraOps = eusOps eu1
-                }
+          pure
+            EdgeExpansionResult
+              { eerTrace = (copyMap0, interior, frontier0),
+                eerExtraOps = eusOps eu1
+              }
         _ ->
-            throwError (InternalError ("runExpansionUnify: expected TyExp for edge " ++ show edgeId))
+          throwError (InternalError ("runExpansionUnify: expected TyExp for edge " ++ show edgeId))
 
 -- | Set a binding parent if the parent is upper than the child in the binding tree.
 setBindParentIfUpper :: NodeId -> NodeRef -> PresolutionM ()
 setBindParentIfUpper child parent = do
-    cBind <- getConstraint
-    when (Binding.isUpper cBind parent (TypeRef child)) $
-        setBindParentM (TypeRef child) (parent, BindFlex)
+  cBind <- getConstraint
+  when (Binding.isUpper cBind parent (TypeRef child)) $
+    setBindParentM (TypeRef child) (parent, BindFlex)
 
 -- | Debug binding operations (uses explicit trace config).
 debugBindParents :: String -> PresolutionM ()
 debugBindParents msg = do
-    cfg <- ask
-    traceBindingM cfg msg
+  cfg <- ask
+  traceBindingM cfg msg

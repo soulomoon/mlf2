@@ -19,8 +19,11 @@ import Data.Maybe (listToMaybe)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.Plan.BinderPlan
-  ( BinderPlan (..),
+  ( AliasEnv (..),
+    BinderPlan (..),
     BinderPlanInput (..),
+    BinderSelectionEnv (..),
+    SelectBindersArgs (..),
     bindableChildrenUnder,
     buildBinderPlan,
     computeAliasBinders,
@@ -289,31 +292,41 @@ planGeneralizeAt
         nodesMap = NodeMap nodes
     (aliasBinderBases, aliasBinderNodes) <-
       computeAliasBinders
-        canonical
+        AliasEnv
+          { aeCanonical = canonical,
+            aeConstraint = constraint,
+            aeNodes = nodesMap,
+            aeBindParents = bindParents,
+            aeDepthMap = IntMap.empty,
+            aeScopeSchemeRoots = scopeSchemeRoots,
+            aeNodeChildren = const IntSet.empty
+          }
         canonKey
-        constraint
-        nodesMap
-        bindParents
-        scopeSchemeRoots
         scopeRootC
         (traceGeneralizeM env)
     let bindableChildrenUnder' =
           bindableChildrenUnder canonical bindParents isBindable
         hasExplicitBound' = hasExplicitBoundFor canonical nodesMap constraint
+        bseEnv =
+          BinderSelectionEnv
+            { bseCanonical = canonical,
+              bseBindParents = bindParents,
+              bseNodes = nodesMap,
+              bseConstraint = constraint,
+              bseIsBindable = isBindable
+            }
     binders0 <-
       selectBinders
-        canonical
-        bindParents
-        nodesMap
-        constraint
-        isBindable
-        canonKey
-        scopeSchemeRoots
-        hasExplicitBound'
-        aliasBinderNodes
-        (traceGeneralizeM env)
-        scopeGen
-        scopeRootC
+        bseEnv
+        SelectBindersArgs
+          { sbaCanonKey = canonKey,
+            sbaScopeSchemeRoots = scopeSchemeRoots,
+            sbaHasExplicitBoundP = hasExplicitBound',
+            sbaCandidatePool = aliasBinderNodes,
+            sbaTraceWarn = traceGeneralizeM env,
+            sbaMGenId = scopeGen,
+            sbaNodeRef = scopeRootC
+          }
         target0
     let schemeRootSkipSet =
           IntSet.difference
