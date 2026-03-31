@@ -1,55 +1,101 @@
-{- |
-Module      : MLF.API
-Description : Stable umbrella API for downstream eMLF/xMLF users
-
-`MLF.API` is the frontend-oriented umbrella API for downstream callers that
-want surface syntax, parsing/pretty-printing, and normalization helpers.
-
-Choose `MLF.Pipeline` for constraint generation, elaboration, execution,
-typechecking, and runtime-facing xMLF helpers. Choose `MLF.XMLF` when you only
-need explicit xMLF syntax tooling.
--}
 {-# LANGUAGE PatternSynonyms #-}
-module MLF.API
-    ( -- * Frontend syntax (raw and staged types)
-      module MLF.Frontend.Syntax
-    -- * Parse error types
-    , EmlfParseError
-    , NormParseError (..)
-    , renderEmlfParseError
-    , renderNormParseError
-    -- * Raw parser entrypoints
-    , parseRawEmlfExpr
-    , parseRawEmlfType
-    -- * Normalized parser entrypoints
-    , parseNormEmlfExpr
-    , parseNormEmlfType
-    -- * Normalization (raw → normalized)
-    , NormalizationError (..)
-    , normalizeType
-    , normalizeExpr
-    -- * Pretty-printing
-    , prettyEmlfExpr
-    , prettyEmlfType
-    ) where
 
-import MLF.Frontend.Syntax
-import MLF.Frontend.Parse
-    ( EmlfParseError
-    , NormParseError (..)
-    , parseRawEmlfExpr
-    , parseRawEmlfType
-    , parseNormEmlfExpr
-    , parseNormEmlfType
-    , renderEmlfParseError
-    , renderNormParseError
-    )
+-- |
+-- Module      : MLF.API
+-- Description : Stable umbrella API for downstream eMLF/xMLF users
+--
+-- `MLF.API` is the frontend-oriented umbrella API for downstream callers that
+-- want surface syntax, parsing/pretty-printing, normalization helpers, and
+-- constraint graph introspection.
+--
+-- Choose `MLF.Pipeline` for constraint generation, elaboration, execution,
+-- typechecking, and runtime-facing xMLF helpers. Choose `MLF.XMLF` when you only
+-- need explicit xMLF syntax tooling.
+module MLF.API
+  ( -- * Frontend syntax (raw and staged types)
+    module MLF.Frontend.Syntax,
+
+    -- * Parse error types
+    EmlfParseError,
+    NormParseError (..),
+    renderEmlfParseError,
+    renderNormParseError,
+
+    -- * Raw parser entrypoints
+    parseRawEmlfExpr,
+    parseRawEmlfType,
+
+    -- * Normalized parser entrypoints
+    parseNormEmlfExpr,
+    parseNormEmlfType,
+
+    -- * Normalization (raw → normalized)
+    NormalizationError (..),
+    normalizeType,
+    normalizeExpr,
+
+    -- * Pretty-printing
+    prettyEmlfExpr,
+    prettyEmlfType,
+
+    -- * Constraint graph introspection
+    Constraint (..),
+    NodeId (..),
+    TyNode (..),
+    InstEdge (..),
+    UnifyEdge (..),
+    GenNode (..),
+    GenNodeId (..),
+    BindFlag (..),
+    BindParents,
+    NodeMap,
+    GenNodeMap,
+    lookupNode,
+    constraintNodeCount,
+    constraintEdgeCount,
+  )
+where
+
+import MLF.Constraint.Types.Graph
+  ( BindFlag (..),
+    BindParents,
+    Constraint (..),
+    GenNode (..),
+    GenNodeId (..),
+    GenNodeMap,
+    InstEdge (..),
+    NodeId (..),
+    NodeMap,
+    TyNode (..),
+    UnifyEdge (..),
+    lookupNode,
+    toListNode,
+  )
 import MLF.Frontend.Normalize
-    ( NormalizationError (..)
-    , normalizeType
-    , normalizeExpr
-    )
+  ( NormalizationError (..),
+    normalizeExpr,
+    normalizeType,
+  )
+import MLF.Frontend.Parse
+  ( EmlfParseError,
+    NormParseError (..),
+    parseNormEmlfExpr,
+    parseNormEmlfType,
+    parseRawEmlfExpr,
+    parseRawEmlfType,
+    renderEmlfParseError,
+    renderNormParseError,
+  )
 import MLF.Frontend.Pretty
-    ( prettyEmlfExpr
-    , prettyEmlfType
-    )
+  ( prettyEmlfExpr,
+    prettyEmlfType,
+  )
+import MLF.Frontend.Syntax
+
+-- | Number of type nodes in a constraint graph.
+constraintNodeCount :: Constraint -> Int
+constraintNodeCount = length . toListNode . cNodes
+
+-- | Total number of edges (instantiation + unification) in a constraint graph.
+constraintEdgeCount :: Constraint -> Int
+constraintEdgeCount c = length (cInstEdges c) + length (cUnifyEdges c)
