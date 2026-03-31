@@ -41,7 +41,11 @@ module MLF.Pipeline
     , defaultTraceConfig
     -- * Pipeline entrypoints (normalized-only)
     , PipelineError(..)
+    , CycleError(..)
     , renderPipelineError
+    , formatPipelineError
+    , pipelineErrorPhase
+    , pipelineErrorPhaseName
     , runPipelineElab
     , runPipelineElabChecked
     , runPipelineElabWithConfig
@@ -53,6 +57,9 @@ module MLF.Pipeline
     , isValue
     ) where
 
+import Data.Text (Text)
+import qualified Data.Text as T
+import MLF.Constraint.Acyclicity (CycleError(..))
 import MLF.Frontend.Syntax (NormSurfaceExpr, NormSrcType, StructBound)
 import MLF.Frontend.Normalize (NormalizationError(..), normalizeExpr, normalizeType)
 import MLF.Frontend.ConstraintGen (ConstraintError(..), ConstraintResult(..), generateConstraints)
@@ -87,3 +94,60 @@ import MLF.Elab.Pipeline
 
 inferConstraintGraph :: PolySyms -> NormSurfaceExpr -> Either ConstraintError ConstraintResult
 inferConstraintGraph = generateConstraints
+
+-- | Extract the numeric pipeline phase where the error occurred.
+--
+-- Phase mapping:
+--
+--   * 1 \u2014 Constraint generation
+--   * 3 \u2014 Acyclicity check
+--   * 4 \u2014 Presolution
+--   * 5 \u2014 Solve (unification)
+--   * 6 \u2014 Elaboration
+--   * 7 \u2014 Type checking
+pipelineErrorPhase :: PipelineError -> Int
+pipelineErrorPhase err = case err of
+    PipelineConstraintError {}  -> 1
+    PipelineCycleError {}       -> 3
+    PipelinePresolutionError {} -> 4
+    PipelineSolveError {}       -> 5
+    PipelineElabError {}        -> 6
+    PipelineTypeCheckError {}   -> 7
+
+-- | Human-readable name of the pipeline phase where the error occurred.
+pipelineErrorPhaseName :: PipelineError -> String
+pipelineErrorPhaseName err = case err of
+    PipelineConstraintError {}  -> "constraint generation"
+    PipelineCycleError {}       -> "acyclicity check"
+    PipelinePresolutionError {} -> "presolution"
+    PipelineSolveError {}       -> "solve"
+    PipelineElabError {}        -> "elaboration"
+    PipelineTypeCheckError {}   -> "type checking"
+
+-- | Structured, multi-line 'Text' rendering of a 'PipelineError'.
+--
+-- Returns output in the format:
+--
+-- @
+-- [Phase N] phase-name error:
+--   \<detail from Show instance\>
+-- @
+--
+-- Use 'renderPipelineError' for a single-line 'String' alternative.
+formatPipelineError :: PipelineError -> Text
+formatPipelineError err =
+    T.pack $
+        "[Phase "
+            ++ show (pipelineErrorPhase err)
+            ++ "] "
+            ++ pipelineErrorPhaseName err
+            ++ " error:\n  "
+            ++ detail err
+  where
+    detail e = case e of
+        PipelineConstraintError ce  -> show ce
+        PipelineCycleError ce       -> show ce
+        PipelinePresolutionError pe -> show pe
+        PipelineSolveError se       -> show se
+        PipelineElabError ee        -> show ee
+        PipelineTypeCheckError te   -> show te

@@ -297,6 +297,7 @@ library
     build-depends:    base ^>=4.21.0.0,
                       containers,
                       mtl,
+                      text,
                       mlf2:mlf2-internal
 
     -- Directories containing source files.
@@ -439,6 +440,7 @@ test-suite mlf2-test
         directory,
         filepath,
         mtl,
+        text,
         mlf2,
         mlf2:mlf2-internal,
         mlf2:mlf2-research,
