@@ -20,6 +20,7 @@ import MLF.Constraint.Presolution.Plan.Context
   )
 import MLF.Constraint.Presolution.View (PresolutionView (..))
 import MLF.Constraint.Types hiding (lookupNode)
+import MLF.Util.ElabError (ElabError)
 import MLF.Util.Trace (TraceConfig, tcGeneralize)
 
 lookupNodeInMap :: IntMap.IntMap TyNode -> NodeId -> Maybe TyNode

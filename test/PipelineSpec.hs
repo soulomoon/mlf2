@@ -532,7 +532,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       chiQuerySrc <- readFile "src/MLF/Elab/Run/ChiQuery.hs"
       viewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"
       annSrc <- readFile "src/MLF/Elab/Run/ResultType/Ann.hs"
-      fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+      fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
       forM_
         [ "rtvSolved ::",
           "rtvOriginalConstraint ::",
@@ -1052,7 +1052,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
     it "chi-first guard: ChiQuery no longer defines chiCanonicalBindParents" $ do
       chiSrc <- readFile "src/MLF/Elab/Run/ChiQuery.hs"
-      fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+      fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
       chiSrc `shouldSatisfy` (not . isInfixOf "chiCanonicalBindParents")
       fallbackSrc `shouldSatisfy` (not . isInfixOf "ChiQuery.chiCanonicalBindParents")
 
@@ -1131,7 +1131,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
     it "result-type root peeling stays single-sourced" $ do
       rtSrc <- readFile "src/MLF/Elab/Run/ResultType.hs"
-      fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+      fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
       utilSrc <- readFile "src/MLF/Elab/Run/ResultType/Util.hs"
       forM_ [rtSrc, fallbackSrc] $ \src -> do
         src `shouldSatisfy` (not . isInfixOf "let schemeRootSet =")
@@ -1143,7 +1143,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       utilSrc `shouldSatisfy` isInfixOf "resultTypeRoots"
 
     it "scheme-root owner bookkeeping stays single-sourced" $ do
-      fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+      fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
       phase4Src <- readFile "src/MLF/Elab/Run/Generalize/Phase4.hs"
       commonSrc <- readFile "src/MLF/Elab/Run/Generalize/Common.hs"
       forM_ [fallbackSrc, phase4Src] $ \src -> do
@@ -2115,22 +2115,22 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         containsMu checkedTy `shouldBe` True
 
       it "keeps retained-child lookup bounded to the same local TypeRef lane" $ do
-        fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+        fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "sameLocalTypeLane child =\n                            case bindingScopeRefCanonical presolutionViewFinal child of"
+            "sameLocalTypeLane child =\n                  case bindingScopeRefCanonical presolutionViewFinal child of"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "in if rootBindingIsLocalType\n                        then pickCandidate (\\_parentRef child -> sameLocalTypeLane child)\n                        else pickCandidate (\\parentRef _child -> parentRef == scopeRoot)"
+            "in if rootBindingIsLocalType\n                  then pickCandidate (\\_parentRef child -> sameLocalTypeLane child)\n                  else pickCandidate (\\parentRef _child -> parentRef == scopeRoot)"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "sameLaneLocalRetainedChildTarget =\n                    if rootBindingIsLocalType\n                        then boundVarTarget\n                        else Nothing"
+            "sameLaneLocalRetainedChildTarget =\n            if rootBindingIsLocalType\n              then boundVarTarget\n              else Nothing"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "keepTargetFinal =\n                    rootBindingIsLocalType\n                        && ( rootLocalMultiInst\n                                || rootLocalInstArgMultiBase\n                                || rootLocalSchemeAliasBaseLike\n                                || maybe False (const True) sameLaneLocalRetainedChildTarget\n                           )"
+            "keepTargetFinal =\n            rootBindingIsLocalType\n              && ( rootLocalMultiInst\n                     || rootLocalInstArgMultiBase\n                     || rootLocalSchemeAliasBaseLike\n                     || maybe False (const True) sameLaneLocalRetainedChildTarget\n                 )"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "case sameLaneLocalRetainedChildTarget of\n                                                        Just v -> v\n                                                        Nothing -> schemeBodyTarget targetPresolutionView rootC"
+            "case sameLaneLocalRetainedChildTarget of\n                            Just v -> v\n                            Nothing -> schemeBodyTarget targetPresolutionView rootC"
 
       it "keeps retained-child fallback open for recursive types even when the same wrapper crosses a nested forall boundary" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -2276,31 +2276,31 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         containsMu fallbackTy `shouldBe` True
 
       it "keeps the explicit non-local scheme-alias/base-like proof separate from the preserved local lanes" $ do
-        fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback.hs"
+        fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "rootLocalEmptyCandidateSchemeAliasBaseLike =\n                    rootBindingIsLocalType\n                        && rootIsSchemeAlias\n                        && rootBoundIsBaseLike\n                        && IntSet.null rootBoundCandidates\n                        && IntSet.null instArgBaseBounds\n                        && not rootHasMultiInst\n                        && not instArgRootMultiBase"
+            "rootLocalEmptyCandidateSchemeAliasBaseLike =\n            rootBindingIsLocalType\n              && rootIsSchemeAlias\n              && rootBoundIsBaseLike\n              && IntSet.null rootBoundCandidates\n              && IntSet.null instArgBaseBounds\n              && not rootHasMultiInst\n              && not instArgRootMultiBase"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "rootLocalSingleBase =\n                    rootBindingIsLocalType\n                        && IntSet.size rootBoundCandidates == 1\n                        && not rootHasMultiInst\n                        && not instArgRootMultiBase"
+            "rootLocalSingleBase =\n            rootBindingIsLocalType\n              && IntSet.size rootBoundCandidates == 1\n              && not rootHasMultiInst\n              && not instArgRootMultiBase"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "rootLocalInstArgSingleBase =\n                    rootBindingIsLocalType\n                        && IntSet.null rootBaseBounds\n                        && IntSet.size instArgBaseBounds == 1\n                        && not rootHasMultiInst\n                        && not instArgRootMultiBase"
+            "rootLocalInstArgSingleBase =\n            rootBindingIsLocalType\n              && IntSet.null rootBaseBounds\n              && IntSet.size instArgBaseBounds == 1\n              && not rootHasMultiInst\n              && not instArgRootMultiBase"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "rootNonLocalSchemeAliasBaseLike =\n                    not rootBindingIsLocalType\n                        && rootIsSchemeAlias\n                        && rootBoundIsBaseLike"
+            "rootNonLocalSchemeAliasBaseLike =\n            not rootBindingIsLocalType\n              && rootIsSchemeAlias\n              && rootBoundIsBaseLike"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "let targetC =\n                    case baseTarget of\n                        Just baseC\n                            | rootLocalSingleBase -> baseC"
+            "let targetC =\n            case baseTarget of\n              Just baseC\n                | rootLocalSingleBase -> baseC"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "Just baseC\n                            | rootLocalEmptyCandidateSchemeAliasBaseLike -> baseC"
+            "Just baseC\n                | rootLocalEmptyCandidateSchemeAliasBaseLike -> baseC"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "Just baseC\n                            | rootLocalInstArgSingleBase -> baseC"
+            "Just baseC\n                | rootLocalInstArgSingleBase -> baseC"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "Just baseC\n                            | rootLocalEmptyCandidateSchemeAliasBaseLike -> baseC\n                        Just baseC\n                            | rootNonLocalSchemeAliasBaseLike -> baseC"
+            "Just baseC\n                | rootLocalEmptyCandidateSchemeAliasBaseLike -> baseC\n              Just baseC\n                | rootNonLocalSchemeAliasBaseLike -> baseC"
         fallbackSrc
           `shouldSatisfy` ( not
                               . isInfixOf
@@ -2308,19 +2308,19 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                           )
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "then schemeBodyTarget targetPresolutionView rootC\n                                        else if rootFinalInvolvesMu\n                                            then schemeBodyTarget presolutionViewFinal rootC\n                                            else rootFinal"
+            "then schemeBodyTarget targetPresolutionView rootC\n                      else\n                        if rootFinalInvolvesMu\n                          then schemeBodyTarget presolutionViewFinal rootC\n                          else rootFinal"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "keepTargetFinal =\n                    rootBindingIsLocalType\n                        && ( rootLocalMultiInst\n                                || rootLocalInstArgMultiBase"
+            "keepTargetFinal =\n            rootBindingIsLocalType\n              && ( rootLocalMultiInst\n                     || rootLocalInstArgMultiBase"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "rootLocalMultiInst =\n                    rootBindingIsLocalType\n                        && rootHasMultiInst"
+            "rootLocalMultiInst =\n            rootBindingIsLocalType\n              && rootHasMultiInst"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "rootLocalInstArgMultiBase =\n                    rootBindingIsLocalType\n                        && instArgRootMultiBase"
+            "rootLocalInstArgMultiBase =\n            rootBindingIsLocalType\n              && instArgRootMultiBase"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "rootLocalSchemeAliasBaseLike =\n                    rootBindingIsLocalType\n                        && rootIsSchemeAlias\n                        && rootBoundIsBaseLike"
+            "rootLocalSchemeAliasBaseLike =\n            rootBindingIsLocalType\n              && rootIsSchemeAlias\n              && rootBoundIsBaseLike"
         fallbackSrc `shouldSatisfy` isInfixOf "|| rootLocalSchemeAliasBaseLike"
         fallbackSrc `shouldSatisfy` isInfixOf "|| rootLocalInstArgMultiBase"
         fallbackSrc `shouldSatisfy` isInfixOf "|| rootLocalMultiInst"
@@ -2329,7 +2329,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             "if rootLocalSchemeAliasBaseLike"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "if rootLocalSchemeAliasBaseLike\n                                        || rootLocalMultiInst\n                                        || rootLocalInstArgMultiBase\n                                        then rootFinal"
+            "if rootLocalSchemeAliasBaseLike\n                      || rootLocalMultiInst\n                      || rootLocalInstArgMultiBase\n                      then rootFinal"
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "then rootFinal"
