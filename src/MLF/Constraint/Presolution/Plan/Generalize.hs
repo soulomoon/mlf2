@@ -13,6 +13,25 @@ module MLF.Constraint.Presolution.Plan.Generalize
   )
 where
 
+{- Note [Generalization plan construction — planGeneralizeAt]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+'planGeneralizeAt' builds a 'GeneralizePlan' for a single generalization scope
+(one gen node in the constraint graph).  This is the core of the thesis §15.3
+generalization algorithm:
+
+  1. Identify the scope root and type root for the gen node.
+  2. Collect bindable children (variables under the gen scope).
+  3. Build binder plans: determine which variables become ∀-binders, their
+     ordering (via the <P topological sort), and their bounds.
+  4. Determine scheme roots and handle alias/wrapper nodes.
+  5. Compute the reify plan for type structure reconstruction.
+
+The plan is a pure data structure ('GeneralizePlan') consumed later by
+elaboration ('MLF.Elab.Elaborate') and reification ('MLF.Reify.Type.Core').
+Separating planning from execution keeps presolution logic deterministic and
+testable independently of the elaboration pipeline.
+-}
+
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)

@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-03-30-01-codebase-quality-and-coverage-improvements",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-30-01-codebase-quality-and-coverage-improvements/rev-001",
+  "roadmap_item_id": "item-7",
+  "decision": "approved",
+  "evidence_summary": "All three gates pass (build 0, test 0 with 1296 examples/0 failures, thesis-conformance 0). 8 golden files checked in under test/golden/ (5 xmlf + 3 constraint), all non-empty. GoldenSpec wired into mlf2.cabal and test/Main.hs. Note [Golden test workflow] documents GOLDEN_ACCEPT=1. constraintSummary is deterministic (sorted by NodeId). rank2-app→simple-app deviation documented in implementation-notes.md. No production code modified."
+}

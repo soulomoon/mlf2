@@ -13,6 +13,24 @@ module MLF.Constraint.Presolution.Plan.ReifyStep
   )
 where
 
+{- Note [Reification step planning — planReify]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+'planReify' constructs a 'ReifyPlan' that determines how to reify the type
+structure for a generalized scope.  Given a 'GeneralizePlan' (from
+'planGeneralizeAt'), it computes:
+
+  * 'rpSubst' — the binder name substitution map (NodeId → String)
+  * 'rpExtraBinders' — additional binder candidates beyond the plan's flex
+    children (used for alias binders that must appear in the reified type)
+  * 'rpTypeRoot' — the adjusted type root for reification (may differ from
+    the plan root when alias/wrapper nodes are present)
+
+This module is separate from 'Plan.Generalize' because reification planning
+depends on the completed generalization plan, including finalized binder
+names and scheme structure, while generalization planning is independent of
+reification details.
+-}
+
 import qualified Data.IntMap.Strict as IntMap
 import MLF.Constraint.Presolution.Plan.BinderPlan
   ( BinderPlan (..),
