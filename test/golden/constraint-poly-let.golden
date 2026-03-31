@@ -1,0 +1,26 @@
+-- Constraint graph summary for: poly-let
+root: 3
+node-count: 17
+inst-edge-count: 6
+unify-edge-count: 0
+bind-parent-count: 23
+nodes:
+  0: TyVar
+  1: TyArrow
+  2: TyVar
+  3: TyVar
+  4: TyExp
+  5: TyBase(Int)
+  6: TyVar
+  7: TyVar
+  8: TyVar
+  9: TyArrow
+  10: TyVar
+  11: TyExp
+  12: TyBase(Bool)
+  13: TyVar
+  14: TyVar
+  15: TyVar
+  16: TyArrow
+
+

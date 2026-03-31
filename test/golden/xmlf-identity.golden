@@ -1,0 +1,3 @@
+-- xMLF golden output for: identity
+term: Λ(a ⩾ ⊥) λ(x : a) x
+type: ∀(a ⩾ ⊥) a -> a

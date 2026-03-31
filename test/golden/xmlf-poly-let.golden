@@ -1,0 +1,3 @@
+-- xMLF golden output for: poly-let
+term: let id : ∀(a ⩾ ⊥) a -> a = Λ(a ⩾ ⊥) λ(x : a) x in let a : Int = id[∀(⩾ ⊲Int); N] 1 in id[∀(⩾ ⊲Bool); N] true
+type: Bool

@@ -1,0 +1,15 @@
+-- Constraint graph summary for: choose
+root: 5
+node-count: 6
+inst-edge-count: 0
+unify-edge-count: 0
+bind-parent-count: 6
+nodes:
+  0: TyVar
+  1: TyVar
+  2: TyArrow
+  3: TyVar
+  4: TyArrow
+  5: TyVar
+
+
