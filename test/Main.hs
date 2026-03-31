@@ -17,6 +17,7 @@ import FrontendParseSpec qualified
 import FrontendPrettySpec qualified
 import FrozenParitySpec qualified
 import GeneralizeSpec qualified
+import GoldenSpec qualified
 import GraphOpsSpec qualified
 import InertSpec qualified
 import NormalizeSpec qualified
@@ -108,3 +109,4 @@ main = do
     Reify.TypeSpec.spec
     Reify.CoreSpec.spec
     Property.QuickCheckPropertySpec.spec
+    GoldenSpec.spec
