@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-03-30-01-codebase-quality-and-coverage-improvements",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-30-01-codebase-quality-and-coverage-improvements/rev-001",
+  "roadmap_item_id": "item-4",
+  "decision": "approved",
+  "evidence_summary": "Build passes (exit 0, no warnings). Tests pass (1288 examples, 0 failures, above 1177 baseline). All 5 facade modules under 200 lines (121, 179, 138, 69, 22). All 9 new sub-modules listed in mlf2.cabal other-modules. Diff is 17 files, +4608/-4269, scoped entirely to item-4 module decomposition plus minimal doc/test updates. implementation_notes.md updated. Split-facade guardrail tests in PipelineSpec.hs pass."
+}

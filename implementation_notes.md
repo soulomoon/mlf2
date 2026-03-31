@@ -1997,6 +1997,10 @@ Legacy code is isolated in `MLF.Elab.Legacy` (e.g., `expansionToInst`).
 
 ### 2. src/MLF/Constraint/Normalize.hs
 - **Module split**: `MLF.Constraint.Normalize` is now a thin façade over `MLF.Constraint.Normalize.Internal`, `MLF.Constraint.Normalize.Graft`, and `MLF.Constraint.Normalize.Merge`; the split preserves the existing public exports and behavior while keeping the parent module under 200 lines.
+- **Module split**: `MLF.Reify.Type` is now a thin façade over `MLF.Reify.Type.Core`; the core reification algorithm (`reifyWith`, `reifyWithAs`, `ReifyRoot`) lives in `Type.Core`, while public wrapper functions (`reifyType`, `reifyTypeWithNames*`, `solvedFromView`, `freeVars`) remain in the façade.
+- **Module split**: `MLF.Elab.Run.ResultType.Fallback` is now a thin façade over `MLF.Elab.Run.ResultType.Fallback.Core`; the bulk fallback computation (`computeResultTypeFallbackCore`) lives in `Fallback.Core`, while entry points (`computeResultTypeFallback`, `computeResultTypeFallbackWithView`) remain in the façade.
+- **Module split**: `MLF.Constraint.Presolution.Plan` is now a thin façade over `MLF.Constraint.Presolution.Plan.Env`, `MLF.Constraint.Presolution.Plan.Generalize`, and `MLF.Constraint.Presolution.Plan.ReifyStep`; environment construction, generalization planning, and reification planning are separated into focused submodules, while `buildGeneralizePlans` remains in the façade.
+- **Module split**: `MLF.Elab.Phi.Omega.Interpret` is now a pure re-export façade over `MLF.Elab.Phi.Omega.Interpret.Internal`; the full `phiWithSchemeOmega` implementation lives in the Internal submodule.
 - **`applyUnionFindToConstraint`**: Enhanced to perform "grafting". When a `TyVar` node is unified with a structural node (e.g., `TyBase`), the `TyVar` node in the graph is destructively updated to become a copy of that structure. This ensures that external references to the variable (like the expression root) see the inferred structure.
 - **Binding-edge Raise harmonization**: Var-var merging harmonizes `Constraint.cBindParents` (paper `Raise(n)`) before unioning, keeping scope stable regardless of UF representative choice.
 

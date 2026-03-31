@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-03-30-01-codebase-quality-and-coverage-improvements",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-30-01-codebase-quality-and-coverage-improvements/rev-001",
+  "roadmap_item_id": "item-1",
+  "decision": "approved",
+  "evidence_summary": "All 3 gates pass (cabal build all exit 0, cabal test 1273 examples 0 failures, thesis-conformance-gate PASS). 6 new spec files created covering MLF.Util.UnionFind, MLF.Util.Graph, MLF.Reify.TypeOps, MLF.Reify.Named, MLF.Reify.Type, and MLF.Reify.Core with 96 new test examples. Every tested function has >= 3 meaningful examples. All 8 plan steps implemented. Test count increased from 1177 to 1273 with no regressions."
+}

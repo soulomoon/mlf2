@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-03-30-01-codebase-quality-and-coverage-improvements",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-30-01-codebase-quality-and-coverage-improvements/rev-001",
+  "roadmap_item_id": "item-6",
+  "decision": "approved",
+  "evidence_summary": "cabal build all exits 0 (no warnings), cabal test exits 0 (1288 examples, 0 failures). 5 record types created (BinderSelectionEnv, SelectBindersArgs, AliasEnv, EdgeWitnessInput, EdgeExpansionInput) with correct 2-3 letter field prefixes following ElabConfig/ElabEnv convention. All 8 targeted functions reduced to ≤4 non-self parameters. 7+ call sites bundled across Generalize.hs, ReifyPlan.hs, Interpreter.hs, and Selection.hs. Scope strictly limited to 8 presolution files with no behavioral changes (identical test count and results)."
+}

@@ -6,6 +6,33 @@ module MLF.Reify.Type.Core
     , reifyWithAs
     ) where
 
+{- Note [Core reification algorithm — reifyWith]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This module contains the core graph-to-type reification algorithm, implementing
+the walk from constraint-graph nodes to elaborated 'ElabType' terms.
+
+'reifyWith' is the main entry point.  Given a 'ReifyRoot' mode, a set of named
+nodes, and a starting node, it walks the solved/canonical constraint graph and
+produces an 'ElabType'.  The algorithm handles:
+
+  * TyVar → TVar (with optional bound reification)
+  * TyArrow → TArrow (recursive descent into domain/codomain)
+  * TyForall → TForall (binder name assignment + body reification)
+  * TyBase → TBase
+  * TyBottom → TBottom
+  * TyExp → body reification (expansion nodes are transparent)
+  * TyMu → TMu (recursive type binder)
+
+Binder ordering follows the presolution plan's <P order (thesis §15.3) via
+topological sort of flex children.  The 'RootType' vs 'RootTypeNoFallback'
+dispatch controls whether missing-node fallbacks are permitted.
+
+Paper references:
+  * Yakobowski PhD thesis (2008), Chapter 15 — type reification from solved
+    graphic constraints
+  * Rémy & Yakobowski (FLOPS 2010) — xMLF type structure
+-}
+
 import Control.Monad (foldM, unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet

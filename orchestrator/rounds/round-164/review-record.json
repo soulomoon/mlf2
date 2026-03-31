@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-03-30-01-codebase-quality-and-coverage-improvements",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-03-30-01-codebase-quality-and-coverage-improvements/rev-001",
+  "roadmap_item_id": "item-5",
+  "decision": "approved",
+  "evidence_summary": "cabal build all exits 0 (no warnings); cabal test: 1288 examples, 0 failures; mlf2-internal builds independently without Research modules; mlf2-research builds independently; all 10 .hs files are pure renames (100% similarity, zero content diff); 4 promoted modules have zero content diff; scope limited to mlf2.cabal + AGENTS.md + 10 file moves"
+}

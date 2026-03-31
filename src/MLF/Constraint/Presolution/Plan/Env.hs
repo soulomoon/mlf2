@@ -11,6 +11,23 @@ module MLF.Constraint.Presolution.Plan.Env
   )
 where
 
+{- Note [Generalization planning environment]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+'PresolutionEnv' bundles the inputs needed by the generalization planner
+('planGeneralizeAt') and the reification planner ('planReify'):
+
+  * The original and canonical constraints
+  * Presolution view (node maps, canonical function, bind parents)
+  * Trace config for conditional debug output
+  * The node-lookup helper 'lookupNodeInMap'
+
+'mkGeneralizeEnv' constructs a 'GeneralizeEnv' for a single generalization
+scope by sanitizing the canonical map and projecting scope-local binding
+structure.  'softenBindParents' downgrades rigid bindings to flex when nodes
+are outside the generalization scope, ensuring the planner sees only
+scope-relevant rigidity.
+-}
+
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import MLF.Constraint.Finalize (stepSanitizeSnapshotUf)

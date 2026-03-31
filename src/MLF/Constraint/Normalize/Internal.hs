@@ -17,6 +17,23 @@ module MLF.Constraint.Normalize.Internal (
     unionNodes
 ) where
 
+{- Note [Normalization state and shared helpers]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+This module provides the shared mutable state ('NormalizeState', 'NormalizeM')
+and primitive operations used by both the grafting ('Normalize.Graft') and
+merging ('Normalize.Merge') normalization submodules.
+
+Key state components:
+  * 'nsConstraint'        — the constraint being normalized (modified in place)
+  * 'nsUnionFind'         — union-find forest for merging (applied at end)
+  * 'nsNextNodeId'        — fresh node-ID counter for grafted copies
+  * 'nsSynthExpVarSupply'  — fresh expansion-variable allocator
+
+The helpers ('freshVar', 'insertNode', 'findRoot', 'unionNodes', etc.) are
+intentionally low-level primitives; higher-level normalization logic lives in
+'Normalize.Graft' and 'Normalize.Merge'.
+-}
+
 import Control.Monad (when)
 import Control.Monad.State.Strict (State, gets, modify')
 import Data.IntMap.Strict (IntMap)

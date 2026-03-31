@@ -16,6 +16,37 @@ module MLF.Elab.Phi.Omega.Interpret.Internal
   )
 where
 
+{- Note [Omega/Step witness interpretation]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+'phiWithSchemeOmega' is the core of the Φ translation for witness edges with
+Ω (instance-operation) payloads, as described in the thesis §15.3.4 and
+xMLF paper (Fig. 10).
+
+The interpretation proceeds in three stages:
+
+  1. **Binder reordering (Σ)**: Reorder quantifier binders from graph <P order
+     to the target scheme's binder order, emitting 'InstUnder' context steps
+     where the two orders differ (thesis Def. 15.3.4 / Fig. 15.3.5).
+
+  2. **Forall introduction**: Emit 'InstInside' steps for the ∀-intro count
+     recorded per edge during presolution.
+
+  3. **Omega loop ('go')**: Walk the list of 'InstanceOp' values (OpRaise,
+     OpMerge, OpWeaken, OpGraft) and translate each into xMLF instantiation
+     steps.  'continueRaise' handles the multi-step OpRaise translation that
+     involves context navigation and binder application.
+
+The function captures the presolution view, edge trace, scheme info, and
+constraint structure in a large closure environment.  All reification helpers
+('reifyTypeArg', 'inferredOmegaInst', 'applyInferredArgs', etc.) are local
+to this closure because they depend on the shared canonical/constraint/trace
+context.
+
+Paper references:
+  * Yakobowski PhD thesis (2008), §15.3.4 — Φ translation and Ω execution
+  * xMLF paper (Rémy & Yakobowski, FLOPS 2010), Fig. 10 — Ω operational rules
+-}
+
 import Control.Applicative ((<|>))
 import Control.Monad (foldM, unless, when)
 import qualified Data.IntMap.Strict as IntMap
