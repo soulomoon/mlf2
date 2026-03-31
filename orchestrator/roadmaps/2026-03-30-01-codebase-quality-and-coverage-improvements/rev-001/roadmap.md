@@ -157,8 +157,8 @@ Items are sequenced to maximize early value and minimize cross-item interference
 - Parallel safe: no
 - Parallel group: none
 - Merge after: item-8
-- Status: [pending]
-- Completion notes:
+- Status: [done]
+- Completion notes: Merged in round-168 (commit fd85b86). 6 `{- Note -}` blocks added to item-4 submodules, implementation_notes.md updated with 4 module-split entries, CHANGELOG.md documentation-hygiene entry. Tests unchanged at 1302, 0 failures. All gates passed.
 
 **Deliverable**: Audit all `{- Note [...] -}` blocks across `src/` for: (a) stale function/type name references that no longer exist after item-4 splits, (b) missing Notes for newly-created submodules from item-4, (c) alignment with current `implementation_notes.md` content. Fix stale references, add Notes to new modules that lack design rationale, and update `implementation_notes.md` if needed. Update `CHANGELOG.md` with a documentation-hygiene entry.
 
