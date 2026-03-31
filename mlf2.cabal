@@ -91,16 +91,6 @@ library mlf2-internal
                       MLF.Constraint.Unify.Closure,
                       MLF.Constraint.Solved,
                       MLF.Elab.Pipeline,
-                      MLF.Research.URI.R2.C1.Prototype.Types,
-                      MLF.Research.URI.R2.C1.Prototype.D1,
-                      MLF.Research.URI.R2.C1.Prototype.D2,
-                      MLF.Research.URI.R2.C1.Prototype.D3,
-                      MLF.Research.URI.R2.C1.Prototype.P1,
-                      MLF.Research.URI.R2.C1.Prototype.P2,
-                      MLF.Research.URI.R2.C1.Prototype.P3,
-                      MLF.Research.URI.R2.C1.Prototype.P4,
-                      MLF.Research.URI.R2.C1.Prototype.Artifact,
-                      MLF.Research.URI.R2.C1.Prototype.Entrypoint,
                       MLF.Elab.Generalize,
                       MLF.Elab.Run.Provenance,
                       MLF.Elab.Run.Util,
@@ -131,14 +121,17 @@ library mlf2-internal
                       MLF.Reify.Named,
                       MLF.Reify.Type,
                       MLF.Reify.Bound,
-                      MLF.Constraint.Unify.Decompose
+                      MLF.Constraint.Unify.Decompose,
+                      MLF.Constraint.Presolution.Base,
+                      MLF.Elab.Run.Annotation,
+                      MLF.Elab.Run.Generalize,
+                      MLF.Elab.Types
     other-modules:    MLF.Constraint.Normalize.Internal,
                        MLF.Constraint.Normalize.Graft,
                        MLF.Constraint.Normalize.Merge,
                        MLF.Constraint.Solved.Internal,
                       MLF.Constraint.Types.Ids,
                       MLF.Constraint.Types.SynthesizedExpVar,
-                      MLF.Constraint.Presolution.Base,
                       MLF.Constraint.Presolution.Copy,
                       MLF.Constraint.Presolution.Driver,
                       MLF.Constraint.Presolution.EdgeUnify,
@@ -219,10 +212,8 @@ library mlf2-internal
                       MLF.Elab.PipelineError,
                       MLF.Elab.Reduce,
                       MLF.Elab.Run,
-                      MLF.Elab.Run.Annotation,
                       MLF.Elab.Run.ChiQuery,
                       MLF.Elab.Run.Debug,
-                      MLF.Elab.Run.Generalize,
                       MLF.Elab.Run.Generalize.Common,
                       MLF.Elab.Run.Generalize.Constraint,
                       MLF.Elab.Run.Generalize.Finalize,
@@ -246,8 +237,7 @@ library mlf2-internal
                       MLF.Frontend.ConstraintGen.State,
                       MLF.Frontend.ConstraintGen.Scope,
                       MLF.Frontend.ConstraintGen.Emit,
-                      MLF.Frontend.ConstraintGen.Translate,
-                      MLF.Elab.Types
+                      MLF.Frontend.ConstraintGen.Translate
 
     -- Other library packages from which modules are imported.
     build-depends:    base ^>=4.21.0.0,
@@ -262,6 +252,34 @@ library mlf2-internal
     hs-source-dirs:   src
 
     -- Base language which the package is written in.
+    default-language: Haskell2010
+
+    default-extensions: LambdaCase
+
+library mlf2-research
+    import:           warnings
+
+    visibility:       private
+
+    exposed-modules:  MLF.Research.URI.R2.C1.Prototype.Types,
+                      MLF.Research.URI.R2.C1.Prototype.D1,
+                      MLF.Research.URI.R2.C1.Prototype.D2,
+                      MLF.Research.URI.R2.C1.Prototype.D3,
+                      MLF.Research.URI.R2.C1.Prototype.P1,
+                      MLF.Research.URI.R2.C1.Prototype.P2,
+                      MLF.Research.URI.R2.C1.Prototype.P3,
+                      MLF.Research.URI.R2.C1.Prototype.P4,
+                      MLF.Research.URI.R2.C1.Prototype.Artifact,
+                      MLF.Research.URI.R2.C1.Prototype.Entrypoint
+
+    build-depends:    base ^>=4.21.0.0,
+                      containers,
+                      directory,
+                      filepath,
+                      mlf2:mlf2-internal
+
+    hs-source-dirs:   src-research
+
     default-language: Haskell2010
 
     default-extensions: LambdaCase
@@ -304,7 +322,8 @@ executable mlf2
     build-depends:
         base ^>=4.21.0.0,
         mlf2,
-        mlf2:mlf2-internal
+        mlf2:mlf2-internal,
+        mlf2:mlf2-research
 
     -- Directories containing source files.
     hs-source-dirs:   app
@@ -421,5 +440,6 @@ test-suite mlf2-test
         mtl,
         mlf2,
         mlf2:mlf2-internal,
+        mlf2:mlf2-research,
         hspec >=2.11 && <2.12,
         QuickCheck >=2.14 && <2.18

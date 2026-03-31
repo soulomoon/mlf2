@@ -18,6 +18,7 @@
 ## Project Structure & Module Organization
 
 - `src/` contains the private implementation library (`mlf2-internal`). Most logic lives in `src/MLF/` and is organized by domain: `MLF.Frontend.*`, `MLF.Constraint.*`, `MLF.Binding.*`, `MLF.Witness.*`, `MLF.Elab.*`, `MLF.XMLF.*`, `MLF.Reify.*`, `MLF.Types.*`, `MLF.Util.*`.
+- `MLF.Research.*` modules live in a separate internal library (`mlf2-research`) with its own source directory `src-research/`. They depend on `mlf2-internal` but `mlf2-internal` must not depend on them. Test files and executables that use Research modules must add `mlf2:mlf2-research` to their `build-depends`.
 - `src-public/` contains the public library entry points intended for downstream users: `MLF.API`, `MLF.Pipeline`, and `MLF.XMLF`.
 - `app/` contains the executable entry point (`app/Main.hs`) for the `mlf2` binary.
 - `test/` contains the Hspec suite (`*Spec.hs`), the manual test runner (`test/Main.hs`), and frozen parity tooling/artifacts (`test/Parity/FrozenParityGenMain.hs`, `test/golden/legacy-replay-baseline-v1.json`).
