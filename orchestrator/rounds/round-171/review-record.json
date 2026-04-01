@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-04-01-00-general-automatic-iso-recursive-inference-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-01-00-general-automatic-iso-recursive-inference-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-3",
+  "decision": "approved",
+  "evidence_summary": "The item-3 settlement surface stays packet-bounded, keeps focused/full-gate evidence anchored in accepted round-170 artifacts, and now rebinds merged commit 45d765b to the active roadmap item-2 completion notes that actually record it."
+}
