@@ -42,7 +42,7 @@
 
 ## Items
 
-1. [pending] Freeze successor authority, exact inherited blocker lane, and current writable slice
+1. [done] Freeze successor authority, exact inherited blocker lane, and current writable slice
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
