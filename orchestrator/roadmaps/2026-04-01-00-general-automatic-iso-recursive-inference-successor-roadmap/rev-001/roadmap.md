@@ -84,22 +84,27 @@
    does not settle general `P3` / `P4` / `P6` readiness or reopen any settled
    March predecessor packet.
 
-3. [pending] Publish one post-item-2 narrow-success settlement surface and exact repo-impact read for the frozen lane
+3. [done] Publish one post-item-2 narrow-success settlement surface and exact repo-impact read for the frozen lane
    Item id: `item-3`
    Depends on: `item-1`, `item-2`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-2`
-   Completion notes: complete when an accepted aggregate artifact republishes
-   the exact post-item-2 narrow-success read for
-   `sameLaneAliasFrameClearBoundaryExpr`: the frozen alias-frame packet now
-   preserves recursive output on `runPipelineElab` and
-   `runPipelineElabChecked` within the inherited current architecture. The
-   same artifact must bind the supporting focused reruns and full-gate
-   provenance from accepted `round-170`, record the exact repo-impact read as
-   one settled packet only, and keep the broader `P3` / `P4` / `P6`
-   representative-gap and repo-readiness questions unresolved unless later
-   accepted evidence says otherwise.
+   Completion notes: accepted in `round-171`, merged as commit `34f3e50`
+   (`Publish post-item-2 settlement surface for frozen alias-frame packet`)
+   via
+   `docs/plans/2026-04-02-general-automatic-iso-recursive-post-item-2-settlement-surface-and-exact-repo-impact-read.md`.
+   The accepted aggregate artifact republishes the exact post-item-2
+   narrow-success read for `sameLaneAliasFrameClearBoundaryExpr`: the frozen
+   alias-frame packet preserves recursive output on both `runPipelineElab`
+   and `runPipelineElabChecked` within the inherited current architecture.
+   It binds supporting focused reruns and full-gate provenance to accepted
+   round-170 artifacts plus the active item-2 completion notes recording
+   merged commit `45d765b`, records the exact repo-impact read as one settled
+   packet only, and keeps the broader `P3` / `P4` / `P6`
+   representative-gap, repo-level readiness, and item-4 decision / handoff
+   questions unresolved without reopening any settled March predecessor
+   packet.
 
 4. [pending] Record one successor decision and immediate handoff after the bounded lane
    Item id: `item-4`
@@ -109,11 +114,17 @@
    Merge after: `item-3`
    Completion notes: complete when an accepted aggregate artifact records
    exactly one explicit outcome token and exactly one immediate handoff token,
-   based on the accepted item-3 settlement, choosing among:
+   starting from the accepted item-3 settlement that exactly one frozen
+   packet is now settled narrow success:
+   `sameLaneAliasFrameClearBoundaryExpr` preserves recursive output on both
+   `runPipelineElab` and `runPipelineElabChecked` within the inherited
+   explicit-only / iso-recursive / non-equi-recursive / non-cyclic-graph /
+   no-fallback architecture, while broader `P3` / `P4` / `P6` and
+   repo-level readiness remain unresolved, choosing among:
    `continue-bounded`,
    `stop-blocked`,
    or `reopen-boundary-question`.
-   The same artifact must then record exactly one immediate handoff:
+   The same accepted artifact must then record exactly one immediate handoff:
    stop,
    open one next bounded current-architecture family,
    or open one explicit boundary-revision family only if the accepted record
