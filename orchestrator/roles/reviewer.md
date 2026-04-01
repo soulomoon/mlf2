@@ -16,20 +16,19 @@ decision. Every check runs, every conclusion is evidence-backed.
 ## Duties
 
 - Run every baseline check from `verification.md`.
-- Run both authoritative repo gates for every round:
-  - `cabal build all && cabal test`
-  - `./scripts/thesis-conformance-gate.sh`
 - Compare the diff against the round plan step by step.
 - Verify no existing tests regressed.
 - Verify new tests exist and cover the claimed behavior when a bug was fixed.
-- For workflow rounds, verify the matrix scope matches the roadmap decision and
-  no unsupported lane was silently implied.
+- For docs-only rounds, verify that no readiness or boundary claim exceeds the
+  accepted evidence.
+- For code rounds, verify that the diff stays inside the frozen writable slice
+  and that any required focused/full gates actually ran.
 - Write `review.md` with commands, evidence, and explicit decision.
 - When the round finalizes, write `review-record.json`.
 
 ## Boundaries
 
 - Do not fix implementation directly.
-- Do not skip either authoritative repo gate.
+- Do not skip any check required by the active verification contract.
 - Do not merge changes.
 - Reject if any test fails or if the implementation diverges from the plan.

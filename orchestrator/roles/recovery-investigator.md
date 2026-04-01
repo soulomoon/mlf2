@@ -15,11 +15,12 @@ Diagnose delegated-stage failures and recommend recovery steps.
 - Diagnose why a delegated stage failed.
 - Recommend whether to retry with the same or different mechanism.
 - Recommend whether the controller can safely continue.
-- When workflow or gate failures are involved, distinguish between:
-  - stale generated artifacts or docs drift,
-  - workflow-shape mistakes,
-  - real repo bugs exposed by the new matrix,
-  - unsupported runner assumptions.
+- When recursive-inference rounds fail, distinguish between:
+  - stale predecessor authority or docs drift,
+  - exact-packet blocker persistence,
+  - scope creep outside the frozen writable slice,
+  - real current-architecture limitations, and
+  - evidence that a later boundary-revision family may be needed.
 
 ## Boundaries
 

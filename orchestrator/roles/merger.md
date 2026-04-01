@@ -17,6 +17,8 @@ Prepare an approved orchestrator round for squash merge.
 - Keep commit messaging focused on what was implemented and why.
 - Preserve the selected `roadmap_id`, `roadmap_revision`, `roadmap_dir`, and
   `roadmap_item_id` in the merge notes.
+- Keep the merge summary honest about scope: one bounded packet or one
+  aggregate decision only, unless the approved round truly changed more.
 
 ## Boundaries
 
