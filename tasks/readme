@@ -12,7 +12,8 @@ Each active task folder should contain:
 - optionally `mechanism_table.md`, `orchestrator_prompt.md`, and `orchestrator-log.jsonl` for YES/NO-gated orchestration campaigns
 
 Source of truth:
-- detailed workflow rules live in `AGENTS.md`;
+- detailed workflow and policy rules live in `AGENTS.md`;
+- detailed repo layout and module ownership notes live in `docs/architecture.md`;
 - adjacent planning surfaces (`TODO.md`, `implementation_notes.md`, `CHANGELOG.md`, `Bugs.md`) must stay synchronized when relevant;
-- a repo-local top-level `orchestrator/` (when present) is a separate successor control plane for repo-wide round execution, not a replacement for the active task folder;
+- a repo-local top-level `orchestrator/` (when present) is a separate successor control plane for repo-wide round execution; runtime roadmap files are resolved from `orchestrator/state.json` via `roadmap_dir`, not from the top-level roadmap stubs;
 - root-level `task_plan.md`, `findings.md`, and `progress.md` are historical artifacts, not the current active-task workflow.

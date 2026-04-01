@@ -21,6 +21,15 @@ Active implementation planning lives under `tasks/todo/YYYY-MM-DD-description/`.
 Root-level `task_plan.md`, `findings.md`, and `progress.md` are historical
 artifacts and are not part of the current task workflow.
 
+## Repo layout
+
+- `src/` builds the private implementation library `mlf2-internal`.
+- `src-public/` contains the public entry modules `MLF.API`, `MLF.Pipeline`, and `MLF.XMLF`.
+- `src-research/` contains `MLF.Research.*` modules for the separate internal library `mlf2-research`; `mlf2-internal` must not depend on it.
+- `app/` contains the `mlf2` executable entrypoint.
+- `test/` contains the Hspec suite, the manual test runner, and frozen parity tooling/artifacts.
+- `papers/` contains the thesis/reference texts used for paper-faithful implementation work.
+
 ## Internal implementation (package-private)
 
 All implementation modules live under `src/` and are built as a private sublibrary:
@@ -34,7 +43,32 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Binding.*` — binding tree queries + executable χe ops + harmonization
 - `MLF.Witness.*` — ω execution helpers (base χe operations)
 - `MLF.Elab.*` — elaboration to xMLF (Φ/Σ translation, reify/generalize, plus xMLF typechecking/reduction)
+- `MLF.XMLF.*` — explicit xMLF syntax and related helpers
+- `MLF.Reify.*` — graph-to-type reification and related type operations
+- `MLF.Types.*` — elaborated/runtime term and type representations
 - `MLF.Util.*` — shared utilities (order keys, union-find, etc.)
+
+Tests and executables that need `MLF.Research.*` must add `mlf2:mlf2-research`
+to `build-depends`.
+
+## Key graph and witness types
+
+- `Expr` (`MLF.Frontend.Syntax`) — surface eMLF terms
+- `Constraint` (`MLF.Constraint.Types`) — constraint graph plus binding tree
+- `TyNode` — graph nodes (`TyVar`, `TyArrow`, `TyForall`, `TyBase`, `TyExp`, `TyBottom`)
+- `InstEdge` — instantiation edges (`<=`)
+- `BindParents` — child-to-parent binding tree map with `BindFlag`
+- `Expansion` — presolution recipes (identity, forall-intro, instantiation, composition)
+- `EdgeWitness` — per-edge xMLF instantiation reconstruction metadata
+
+## Shared ownership notes
+
+- Core graph node/edge/binding identifiers and types live in `MLF.Constraint.Types.Graph`; witness metadata lives in `MLF.Constraint.Types.Witness`; presolution-only state/types live in `MLF.Constraint.Types.Presolution`. `MLF.Constraint.Types` re-exports these for compatibility.
+- Shared unification flow lives in `MLF.Constraint.Unify.Core`; shared structural decomposition lives in `MLF.Constraint.Unify.Decompose`.
+- Prefer `MLF.Constraint.Canonicalizer` for redirect + union-find canonicalization instead of ad hoc chase helpers.
+- Legacy expansion-to-instantiation translation lives in `MLF.Elab.Legacy` and is re-exported by `MLF.Elab.Elaborate` and `MLF.Elab.Pipeline`.
+- Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops` and `StateAccess`; edge processing is split across planner/interpreter passes with typed `EdgePlan`.
+- Elaboration entrypoints bundle inputs as `ElabConfig`/`ElabEnv`, and tracing is explicit via `TraceConfig`.
 
 ## `Solved` boundary and thesis-exact cleanup rule
 
