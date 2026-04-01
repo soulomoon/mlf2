@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-04-01-00-general-automatic-iso-recursive-inference-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-01-00-general-automatic-iso-recursive-inference-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-4",
+  "decision": "approved",
+  "evidence_summary": "The item-4 decision artifact stays docs-only, selects exactly one explicit outcome token (`continue-bounded`) and one immediate handoff token (`open one bounded current-architecture family`), and keeps readiness and boundary claims inside the accepted item-3 settlement."
+}
