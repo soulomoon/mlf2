@@ -106,26 +106,26 @@
    questions unresolved without reopening any settled March predecessor
    packet.
 
-4. [pending] Record one successor decision and immediate handoff after the bounded lane
+4. [done] Record one successor decision and immediate handoff after the bounded lane
    Item id: `item-4`
    Depends on: `item-1`, `item-2`, `item-3`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-3`
-   Completion notes: complete when an accepted aggregate artifact records
-   exactly one explicit outcome token and exactly one immediate handoff token,
-   starting from the accepted item-3 settlement that exactly one frozen
-   packet is now settled narrow success:
-   `sameLaneAliasFrameClearBoundaryExpr` preserves recursive output on both
-   `runPipelineElab` and `runPipelineElabChecked` within the inherited
-   explicit-only / iso-recursive / non-equi-recursive / non-cyclic-graph /
-   no-fallback architecture, while broader `P3` / `P4` / `P6` and
-   repo-level readiness remain unresolved, choosing among:
-   `continue-bounded`,
-   `stop-blocked`,
-   or `reopen-boundary-question`.
-   The same accepted artifact must then record exactly one immediate handoff:
-   stop,
-   open one next bounded current-architecture family,
-   or open one explicit boundary-revision family only if the accepted record
-   proves that is necessary.
+   Completion notes: accepted in `round-172`, merged as commit `53996e3`
+   (`Record bounded successor decision and handoff after item-3 settlement`)
+   via
+   `docs/plans/2026-04-02-general-automatic-iso-recursive-post-item-3-successor-decision-and-immediate-handoff-after-bounded-lane.md`.
+   The accepted aggregate artifact records exactly one item-4 outcome token
+   `continue-bounded` and exactly one immediate handoff token
+   `open one bounded current-architecture family`, grounded in the accepted
+   item-3 baseline that `sameLaneAliasFrameClearBoundaryExpr` is one settled
+   `narrow success` packet on both `runPipelineElab` and
+   `runPipelineElabChecked` within the inherited explicit-only /
+   iso-recursive / non-equi-recursive / non-cyclic-graph / no-fallback
+   architecture while broader `P3` / `P4` / `P6` and repo-level readiness
+   remain unresolved. This closes `rev-001` honestly: no unfinished items
+   remain in this roadmap family, the family stops after recording this
+   decision/handoff, and any continuation must begin as a fresh bounded
+   current-architecture successor family rather than another item inside this
+   roadmap or an implicit boundary revision.
