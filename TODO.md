@@ -4,6 +4,20 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 107 GHC 9.14 toolchain upgrade (completed 2026-04-01)
+
+- Completed:
+  - moved the declared project compiler lane from GHC `9.12.2` / `base-4.21`
+    to GHC `9.14.1` / `base-4.22`;
+  - updated `mlf2.cabal` package metadata and all component `base` bounds to
+    target `base ^>=4.22.0.0`, and added `tested-with: GHC == 9.14.1`;
+  - updated the local `cabal.project` pin, README CI documentation, current
+    orchestrator implementer guidance, and the GitHub Actions matrix to the
+    same compiler lane.
+- Verification:
+  - pending in this task packet until the `ghc-9.14.1` build/test gate reruns
+    complete.
+
 ## Task 105 Automatic iso-recursive type inference completion (completed 2026-03-29)
 
 - Completed:

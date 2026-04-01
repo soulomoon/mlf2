@@ -1,7 +1,6 @@
 packages: .
 
--- Pin to GHC 9.12.2 (base 4.21); GHC 9.14+ ships base 4.22 which
--- breaks transitive deps (indexed-traversable, recursion-schemes).
-with-compiler: ghc-9.12.2
+-- Pin to the supported local and CI compiler lane.
+with-compiler: ghc-9.14.1
 
 tests: True

@@ -105,16 +105,16 @@ unifyStructure n1 n2 = do
                 unifyStructureNonExp node1 node2
   where
     unifyExpansionNode :: TyNode -> NodeId -> PresolutionM ()
-    unifyExpansionNode expNode targetId = do
+    unifyExpansionNode expNode@TyExp { tnExpVar = expVar, tnBody = expBody } targetId = do
         (c0, canonical) <- getConstraintAndCanonical
-        gid <- findSchemeIntroducerM canonical c0 (tnBody expNode)
+        gid <- findSchemeIntroducerM canonical c0 expBody
         targetNode <- getCanonicalNode targetId
-        currentExp <- getExpansion (tnExpVar expNode)
+        currentExp <- getExpansion expVar
         debugBindParents
             ( "unifyExpansionNode: expNode="
                 ++ show (tnId expNode)
                 ++ " body="
-                ++ show (tnBody expNode)
+                ++ show expBody
                 ++ " target="
                 ++ show targetId
                 ++ " targetNode="
@@ -129,18 +129,18 @@ unifyStructure n1 n2 = do
                 ++ " unifications="
                 ++ show unifications
             )
-        finalExp <- mergeExpansions (tnExpVar expNode) currentExp reqExp
+        finalExp <- mergeExpansions expVar currentExp reqExp
         debugBindParents
             ( "unifyExpansionNode: expNode="
                 ++ show (tnId expNode)
                 ++ " finalExp="
                 ++ show finalExp
             )
-        setExpansion (tnExpVar expNode) finalExp
+        setExpansion expVar finalExp
         mapM_ (uncurry unifyStructure) unifications
         case finalExp of
             ExpIdentity ->
-                unifyStructure (tnBody expNode) targetId
+                unifyStructure expBody targetId
             _ -> do
                 (resNodeId, (copyMap, _interior, frontier)) <- applyExpansionEdgeTraced gid finalExp expNode
                 _targetBinder <- bindExpansionRootLikeTarget resNodeId targetId
@@ -163,6 +163,8 @@ unifyStructure n1 n2 = do
                         Just copy -> unifyStructure copy (NodeId nidInt)
                 unifyStructure resNodeId targetId
                 unifyAcyclic (tnId expNode) resNodeId
+    unifyExpansionNode _ _ =
+        error "unifyExpansionNode: expected TyExp node"
     unifyStructureNonExp :: TyNode -> TyNode -> PresolutionM ()
     unifyStructureNonExp node1 node2 = do
         let isVarNode node = case node of

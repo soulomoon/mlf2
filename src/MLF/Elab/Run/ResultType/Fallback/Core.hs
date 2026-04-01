@@ -149,8 +149,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
               TBase base ->
                 listToMaybe
                   [ tnId node
-                  | node@TyBase {} <- nodeList,
-                    tnBase node == base
+                  | node@TyBase { tnBase = nodeBase } <- nodeList,
+                    nodeBase == base
                   ]
               _ -> Nothing
           instAppBasesFromWitness funEid =
@@ -348,8 +348,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                   other -> show (annNode other)
                 ++ " baseNames="
                 ++ show
-                  [ tnBase node
-                  | node@TyBase {} <- map snd (toListNode nodes)
+                  [ nodeBase
+                  | TyBase { tnBase = nodeBase } <- map snd (toListNode nodes)
                   ]
                 ++ " perEdgeBases="
                 ++ show perEdge

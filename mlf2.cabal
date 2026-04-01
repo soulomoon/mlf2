@@ -43,6 +43,7 @@ maintainer:         patrickwalesss@gmail.com
 -- A copyright notice.
 -- copyright:
 build-type:         Simple
+tested-with:        GHC == 9.14.1
 
 -- Extra doc files to be distributed with the package, such as a CHANGELOG or a README.
 extra-doc-files:    CHANGELOG.md
@@ -130,6 +131,7 @@ library mlf2-internal
                        MLF.Constraint.Normalize.Graft,
                        MLF.Constraint.Normalize.Merge,
                        MLF.Constraint.Solved.Internal,
+                      Data.Functor.Foldable,
                       MLF.Constraint.Types.Ids,
                       MLF.Constraint.Types.SynthesizedExpVar,
                       MLF.Constraint.Presolution.Copy,
@@ -240,13 +242,12 @@ library mlf2-internal
                       MLF.Frontend.ConstraintGen.Translate
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.21.0.0,
+    build-depends:    base ^>=4.22.0.0,
                       containers,
                       directory,
                       filepath,
                       megaparsec,
-                      mtl,
-                      recursion-schemes
+                      mtl
 
     -- Directories containing source files.
     hs-source-dirs:   src
@@ -272,7 +273,7 @@ library mlf2-research
                       MLF.Research.URI.R2.C1.Prototype.Artifact,
                       MLF.Research.URI.R2.C1.Prototype.Entrypoint
 
-    build-depends:    base ^>=4.21.0.0,
+    build-depends:    base ^>=4.22.0.0,
                       containers,
                       directory,
                       filepath,
@@ -294,7 +295,7 @@ library
                       MLF.XMLF
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.21.0.0,
+    build-depends:    base ^>=4.22.0.0,
                       containers,
                       mtl,
                       text,
@@ -321,7 +322,7 @@ executable mlf2
 
     -- Other library packages from which modules are imported.
     build-depends:
-        base ^>=4.21.0.0,
+        base ^>=4.22.0.0,
         mlf2,
         mlf2:mlf2-internal,
         mlf2:mlf2-research
@@ -341,7 +342,7 @@ executable frozen-parity-gen
                       SolvedFacadeTestUtil
 
     build-depends:
-        base ^>=4.21.0.0,
+        base ^>=4.22.0.0,
         containers,
         mlf2,
         mlf2:mlf2-internal
@@ -435,7 +436,7 @@ test-suite mlf2-test
 
     -- Test dependencies.
     build-depends:
-        base ^>=4.21.0.0,
+        base ^>=4.22.0.0,
         containers,
         directory,
         filepath,

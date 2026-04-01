@@ -37,7 +37,7 @@ import SpecUtil
     , nodeMapMember
     , rootedConstraint
     )
-import Presolution.Util (expectForall, nodeAt)
+import Presolution.Util (expectForallBody, nodeAt)
 
 spec :: Spec
 spec = do
@@ -534,8 +534,7 @@ spec = do
                                 Just TyVar{ tnBound = mb } -> mb
                                 _ -> Nothing
 
-                    forallNode <- expectForall nodes1 forallId
-                    tnBody forallNode `shouldBe` arrowId
+                    expectForallBody nodes1 forallId `shouldReturn` arrowId
 
                     IntMap.lookup (nodeRefKey (typeRef arrowId)) bp1 `shouldBe` Just (typeRef forallId, BindFlex)
                     IntMap.lookup (nodeRefKey (typeRef domVarId)) bp1 `shouldBe` Just (typeRef forallId, BindFlex)

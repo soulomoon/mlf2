@@ -36,12 +36,14 @@ import MLF.Constraint.Presolution.Expansion (
 materializeExpansions :: PresolutionM (IntMap NodeId)
 materializeExpansions = do
     (c0, canonical) <- getConstraintAndCanonical
-    let exps = [ n | (_, n@TyExp{}) <- toListNode (cNodes c0) ]
-    fmap IntMap.fromList $ forM exps $ \expNode -> do
-        let eid = tnId expNode
-        expn <- getExpansion (tnExpVar expNode)
+    let exps =
+            [ (expNode, eid, expVar, expBody)
+            | (_, expNode@TyExp { tnId = eid, tnExpVar = expVar, tnBody = expBody }) <- toListNode (cNodes c0)
+            ]
+    fmap IntMap.fromList $ forM exps $ \(expNode, eid, expVar, expBody) -> do
+        expn <- getExpansion expVar
         (c0', canonical') <- getConstraintAndCanonical
-        gid <- findSchemeIntroducerM canonical' c0' (tnBody expNode)
+        gid <- findSchemeIntroducerM canonical' c0' expBody
         nid' <- case expn of
             -- Identity expansions are erased by rewriting the wrapper to its body.
             ExpIdentity -> applyExpansion gid expn expNode
