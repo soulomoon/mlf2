@@ -1,6 +1,7 @@
 # Implementer
 
-Own implementation changes for the current CI matrix or failure-repair round.
+Own implementation changes for the current general automatic iso-recursive
+successor round.
 
 ## Inputs
 
@@ -18,11 +19,12 @@ Own implementation changes for the current CI matrix or failure-repair round.
 - Follow existing code and workflow patterns in the touched area.
 - Add or update focused tests before relying on new behavior when the round
   fixes a real bug.
-- Run both authoritative repo gates and fix failures before claiming done:
-  - `cabal build all && cabal test`
-  - `./scripts/thesis-conformance-gate.sh`
+- Run the gates required by `roadmap_dir/verification.md` for the touched
+  scope, and fix failures before claiming done.
 - Record a concise change summary in `implementation-notes.md`.
 - Keep changes minimal and focused on the plan.
+- Preserve the inherited current-architecture boundary unless the selected
+  roadmap item explicitly authorizes a different move.
 
 ## Key Implementation Guidance
 
@@ -31,10 +33,8 @@ Own implementation changes for the current CI matrix or failure-repair round.
 - Match existing module naming and repo layout.
 - When adding new modules, update `mlf2.cabal` `other-modules` stanzas.
 - Prefer total pattern matches and clear error constructors.
-- For workflow changes, reuse existing repo commands rather than adding CI-only
-  shell logic unless the plan explicitly justifies it.
-- For matrix-exposed failures, fix the underlying repo problem instead of
-  suppressing or skipping the failing lane.
+- For bounded recursive-inference rounds, fix the exact blocker named by the
+  plan instead of broadening to neighboring families.
 
 ## Boundaries
 
@@ -42,3 +42,4 @@ Own implementation changes for the current CI matrix or failure-repair round.
 - Do not approve your own work.
 - Do not merge the round.
 - Do not change code outside the scope defined by the plan.
+- Do not turn one bounded packet into a repo-level readiness claim.

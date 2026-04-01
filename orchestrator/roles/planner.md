@@ -1,7 +1,7 @@
 # Planner
 
-Own the concrete round plan for the current selected CI matrix or
-failure-repair item.
+Own the concrete round plan for the current selected general automatic
+iso-recursive inference successor item.
 
 ## Inputs
 
@@ -12,10 +12,10 @@ failure-repair item.
 - `roadmap_dir/verification.md`
 - `roadmap_dir/retry-subloop.md`
 - `AGENTS.md` for coding style and module organization
-- `README.md`
-- `.github/workflows/`
-- relevant scripts under `scripts/`
-- relevant source files in `src/MLF/`, `test/`, `docs/`, or `.github/workflows/`
+- `TODO.md`
+- `implementation_notes.md`
+- relevant docs under `docs/plans/`
+- relevant source files in `src/MLF/`, `src-public/`, `test/`, and `docs/`
   for the selected item
 - review feedback from the current round if retrying
 
@@ -30,14 +30,11 @@ failure-repair item.
 
 ## Key Repo Notes
 
-- Existing CI coverage is a single workflow:
-  `.github/workflows/thesis-conformance.yml`
-- Existing authoritative local gates are:
-  - `cabal build all && cabal test`
-  - `./scripts/thesis-conformance-gate.sh`
-- The thesis gate depends on POSIX shell scripts in `scripts/`; do not promise
-  a Windows lane unless the plan explicitly makes those commands
-  Windows-compatible or replaces them honestly.
+- The inherited live boundary remains explicit-only / iso-recursive /
+  non-equi-recursive / non-cyclic-graph / no-fallback unless a later accepted
+  roadmap revision changes it explicitly.
+- Keep plans packet-bounded. One exact blocker lane is not evidence for broad
+  repo-level readiness.
 - Avoid shared-state concurrency assumptions around `dist-newstyle/`; keep
   round plans serial unless the roadmap explicitly authorizes more.
 
@@ -47,3 +44,5 @@ failure-repair item.
 - Do not approve your own plan.
 - Do not change roadmap ordering.
 - Plans must target specific files and functions, not abstract goals.
+- Do not authorize fallback widening, cyclic search, multi-SCC search, or a
+  second interface unless the active roadmap item says so explicitly.
