@@ -47,12 +47,37 @@ preserveRetainedChildAuthoritativeResult = go emptyEnv
                         | hasRecursiveComponent rhsTy ->
                             Just rhs
                     _ -> descend env v sch rhs body
+            | Just bodyPreserved <- preserveRetainedChildAliasBoundary env v sch rhs body ->
+                Just bodyPreserved
             | otherwise -> descend env v sch rhs body
+        ETyAbs v mbBound body ->
+            let env' =
+                    env
+                        { typeEnv =
+                            Map.insert v (maybe TBottom tyToElab mbBound) (typeEnv env)
+                        }
+            in fmap (ETyAbs v mbBound) (go env' body)
         _ -> Nothing
 
     descend env v sch rhs body =
         let env' = env { termEnv = Map.insert v (schemeToType sch) (termEnv env) }
         in fmap (ELet v sch rhs) (go env' body)
+
+    preserveRetainedChildAliasBoundary env v sch rhs body = case body of
+        ELet child childSch childRhs childBody
+            | isTrivialRetainedChildBody child childBody
+            , isForallIdentityScheme childSch
+            , usesTermVar v childRhs
+            , isAliasFrameRhs rhs ->
+                case typeCheckWithEnv env (ELet v sch rhs body) of
+                    Left (TCLetTypeMismatch _ _) ->
+                        case typeCheckWithEnv env rhs of
+                            Right rhsTy
+                                | hasRecursiveComponent rhsTy ->
+                                    Just rhs
+                            _ -> Nothing
+                    _ -> Nothing
+        _ -> Nothing
 
 isTrivialRetainedChildBody :: String -> ElabTerm -> Bool
 isTrivialRetainedChildBody v body = case body of
@@ -248,6 +273,29 @@ renameName renames name =
     case lookup name renames of
         Just renamed -> renamed
         Nothing -> name
+
+isAliasFrameRhs :: ElabTerm -> Bool
+isAliasFrameRhs rhs = case rhs of
+    EVar _ -> True
+    ETyAbs _ _ body -> isAliasFrameRhs body
+    _ -> False
+
+usesTermVar :: String -> ElabTerm -> Bool
+usesTermVar target = go
+  where
+    go term = case term of
+        EVar v -> v == target
+        ELit _ -> False
+        ELam v _ body
+            | v == target -> False
+            | otherwise -> go body
+        EApp f a -> go f || go a
+        ELet v _ rhs body ->
+            go rhs || ((v /= target) && go body)
+        ETyAbs _ _ body -> go body
+        ETyInst e _ -> go e
+        ERoll _ body -> go body
+        EUnroll body -> go body
 
 typeAbsNamesInTerm :: ElabTerm -> Set.Set String
 typeAbsNamesInTerm = cata alg
