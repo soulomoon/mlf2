@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-04-01-00-general-automatic-iso-recursive-inference-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-01-00-general-automatic-iso-recursive-inference-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-1",
+  "decision": "approved",
+  "evidence_summary": "Docs-only freeze matches the round-169 plan: the predecessor chain is explicit and non-widening, the inherited packet sameLaneAliasFrameClearBoundaryExpr is frozen with the current exact blocker read PipelineTypeCheckError (TCLetTypeMismatch ...), the writable slice is explicit and fail-closed, and no code/test/roadmap/Bugs paths changed."
+}
