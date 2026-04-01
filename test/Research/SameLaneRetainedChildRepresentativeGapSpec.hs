@@ -1,6 +1,5 @@
 module Research.SameLaneRetainedChildRepresentativeGapSpec (spec) where
 
-import Data.List (isInfixOf)
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -9,45 +8,49 @@ import MLF.Elab.Pipeline
     , runPipelineElabChecked
     )
 import MLF.Frontend.Syntax
-import MLF.Types.Elab (ElabTerm, ElabType)
+import MLF.Types.Elab (ElabTerm, ElabType, Ty(..))
 import SpecUtil (unsafeNormalizeExpr)
 
 spec :: Spec
 spec =
     describe "same-lane retained-child representative-gap probes" $ do
-        it "sameLaneAliasFrameClearBoundaryExpr surfaces a narrower current-architecture blocker on runPipelineElab" $
-            expectCurrentArchitectureBlocker
+        it "sameLaneAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
+            expectRecursivePipelineSuccess
                 "unchecked"
                 (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))
 
-        it "sameLaneAliasFrameClearBoundaryExpr surfaces a narrower current-architecture blocker on runPipelineElabChecked" $
-            expectCurrentArchitectureBlocker
+        it "sameLaneAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElabChecked" $
+            expectRecursivePipelineSuccess
                 "checked"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))
 
-expectCurrentArchitectureBlocker
+expectRecursivePipelineSuccess
     :: Show err
     => String
     -> Either err (ElabTerm, ElabType)
     -> Expectation
-expectCurrentArchitectureBlocker label result =
+expectRecursivePipelineSuccess label result =
     case result of
-        Left err -> do
-            let rendered = show err
-            -- After round-152 fix, reifyInst TyMu succeeds; pipeline
-            -- now reaches type-checking which reports TCLetTypeMismatch.
-            rendered `shouldSatisfy` (\msg ->
-                isInfixOf "PhiTranslatabilityError" msg
-                || isInfixOf "TCLetTypeMismatch" msg
-                || isInfixOf "PipelineTypeCheckError" msg)
-        Right (term, ty) ->
-            expectationFailure
-                ( label
-                    ++ ": expected narrower current-architecture blocker, got "
-                    ++ show term
-                    ++ " :: "
-                    ++ show ty
-                )
+        Left err ->
+            expectationFailure (label ++ ": expected recursive success, got " ++ show err)
+        Right (_term, ty) ->
+            containsMu ty `shouldBe` True
+
+containsMu :: ElabType -> Bool
+containsMu ty = case ty of
+    TMu _ _ -> True
+    TArrow dom cod -> containsMu dom || containsMu cod
+    TCon _ args -> any containsMu args
+    TForall _ mb body -> maybe False containsMuBound mb || containsMu body
+    _ -> False
+  where
+    containsMuBound bound = case bound of
+        TArrow dom cod -> containsMu dom || containsMu cod
+        TBase _ -> False
+        TCon _ args -> any containsMu args
+        TForall _ mb body -> maybe False containsMuBound mb || containsMu body
+        TMu _ _ -> True
+        TBottom -> False
 
 sameLaneAliasFrameClearBoundaryExpr :: SurfaceExpr
 sameLaneAliasFrameClearBoundaryExpr =

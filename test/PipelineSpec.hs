@@ -2114,6 +2114,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         containsMu uncheckedTy `shouldBe` True
         containsMu checkedTy `shouldBe` True
 
+      it "sameLaneAliasFrameClearBoundaryExpr alias-frame clear-boundary packet preserves recursive output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr =
+              ELet
+                "k"
+                (ELamAnn "x" recursiveAnn (EVar "x"))
+                ( ELet
+                    "hold"
+                    (EVar "k")
+                    (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "hold")) (EVar "u"))
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
       it "keeps retained-child lookup bounded to the same local TypeRef lane" $ do
         fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
         fallbackSrc

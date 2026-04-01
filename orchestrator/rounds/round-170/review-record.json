@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-04-01-00-general-automatic-iso-recursive-inference-successor-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-01-00-general-automatic-iso-recursive-inference-successor-roadmap/rev-001",
+  "roadmap_item_id": "item-2",
+  "decision": "approved",
+  "evidence_summary": "Diff stays within the frozen item-1 slice, the focused packet and retained-child regression checks pass on both authoritative entrypoints, and cabal build all && cabal test passed."
+}
