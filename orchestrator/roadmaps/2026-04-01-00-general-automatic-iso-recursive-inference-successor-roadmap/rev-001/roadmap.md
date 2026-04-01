@@ -62,31 +62,44 @@
    equi-recursive reasoning, fallback widening, second-interface work, or a
    repo-level readiness claim.
 
-2. [pending] Implement and validate one bounded current-architecture slice on the frozen blocker lane
+2. [done] Implement and validate one bounded current-architecture slice on the frozen blocker lane
    Item id: `item-2`
    Depends on: `item-1`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-1`
-   Completion notes: complete when an accepted round lands exactly one bounded
-   code-and-test slice inside the item-1 writable slice, refreshes focused
-   regression coverage for the frozen blocker lane, and records whether that
-   exact lane now reaches a narrow success, remains fail-closed, or exposes a
-   narrower current-architecture blocker. Any code/test-touching round under
-   this item must rerun `cabal build all && cabal test`. This item must not
-   widen one packet into general family settlement or repo-level readiness.
+   Completion notes: accepted in `round-170`, merged as commit `45d765b`
+   (`Preserve recursive output for frozen alias-frame packet`). The accepted
+   bounded slice stayed inside the frozen writable slice, changed only
+   `src/MLF/Elab/TermClosure.hs`,
+   `test/PipelineSpec.hs`, and
+   `test/Research/SameLaneRetainedChildRepresentativeGapSpec.hs`, and
+   extended authoritative retained-child preservation just enough to descend
+   through top-level `ETyAbs` wrappers and one same-lane alias-frame boundary.
+   The exact frozen packet `sameLaneAliasFrameClearBoundaryExpr` now reaches
+   the bounded item-2 outcome `narrow success`: recursive output is preserved
+   on both `runPipelineElab` and `runPipelineElabChecked` for that packet.
+   Focused reruns and the required full gate `cabal build all && cabal test`
+   passed in review, and the accepted result remains packet-bounded only: it
+   does not settle general `P3` / `P4` / `P6` readiness or reopen any settled
+   March predecessor packet.
 
-3. [pending] Publish one settlement surface and exact repo-impact read for the bounded slice
+3. [pending] Publish one post-item-2 narrow-success settlement surface and exact repo-impact read for the frozen lane
    Item id: `item-3`
    Depends on: `item-1`, `item-2`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-2`
    Completion notes: complete when an accepted aggregate artifact republishes
-   the exact item-2 result for the frozen lane, records the supporting focused
-   and full-gate provenance, and states the exact repo-impact read without
-   silently upgrading one bounded packet into general `P3` / `P4` / `P6`
-   settlement or repo-level readiness.
+   the exact post-item-2 narrow-success read for
+   `sameLaneAliasFrameClearBoundaryExpr`: the frozen alias-frame packet now
+   preserves recursive output on `runPipelineElab` and
+   `runPipelineElabChecked` within the inherited current architecture. The
+   same artifact must bind the supporting focused reruns and full-gate
+   provenance from accepted `round-170`, record the exact repo-impact read as
+   one settled packet only, and keep the broader `P3` / `P4` / `P6`
+   representative-gap and repo-readiness questions unresolved unless later
+   accepted evidence says otherwise.
 
 4. [pending] Record one successor decision and immediate handoff after the bounded lane
    Item id: `item-4`
