@@ -44,7 +44,7 @@ request, defined in `.github/workflows/thesis-conformance.yml`:
 | `build-and-test`     | `cabal build all` then `cabal test`               |
 | `thesis-conformance` | `./scripts/thesis-conformance-gate.sh` (after build) |
 
-**Supported matrix lane:** `ubuntu-latest` / GHC 9.12.2.
+**Supported matrix lane:** `ubuntu-latest` / GHC 9.14.1.
 
 **Excluded lane:** Windows — the thesis-conformance gate and supporting
 scripts under `scripts/` are Unix shell; no Windows lane is promised until

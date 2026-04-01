@@ -351,13 +351,17 @@ rewriteConstraint mapping = do
     -- programs like `\y. let id = (\x. x) in id y` lose the “result = argument”
     -- relationship and get over-generalized types.
     identityRootMap <- do
-        let exps = [ n | nid <- tyExpNodeIds c, Just n@TyExp{} <- [NodeAccess.lookupNode c nid] ]
-        pairs <- forM exps $ \expNode -> do
-            expn <- getExpansion (tnExpVar expNode)
+        let exps =
+                [ (expNode, expVar, expBody)
+                | nid <- tyExpNodeIds c
+                , Just expNode@TyExp { tnExpVar = expVar, tnBody = expBody } <- [NodeAccess.lookupNode c nid]
+                ]
+        pairs <- forM exps $ \(expNode, expVar, expBody) -> do
+            expn <- getExpansion expVar
             pure $ case expn of
                 ExpIdentity ->
                     let root = canonicalUf (tnId expNode)
-                    in Just (getNodeId root, tnBody expNode)
+                    in Just (getNodeId root, expBody)
                 _ -> Nothing
         let chooseMin a b = min a b
         pure $ IntMap.fromListWith chooseMin (catMaybes pairs)

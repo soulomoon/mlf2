@@ -2,7 +2,9 @@ module Presolution.Util
     ( -- * Node lookup helpers
       nodeAt
     , expectArrow
+    , expectArrowNodes
     , expectForall
+    , expectForallBody
       -- * Test constraint builders
     , mkNormalizeConstraint
     , mkNormalizeEnv
@@ -46,9 +48,23 @@ expectArrow nodes nid = case lookupNodeMaybe nodes nid of
         let msg = "Expected TyArrow at " ++ show nid ++ ", found " ++ show other
         expectationFailure msg >> fail msg
 
+expectArrowNodes :: HasCallStack => NodeMap TyNode -> NodeId -> IO (NodeId, NodeId)
+expectArrowNodes nodes nid = case lookupNodeMaybe nodes nid of
+    Just TyArrow { tnDom = dom, tnCod = cod } -> return (dom, cod)
+    other -> do
+        let msg = "Expected TyArrow at " ++ show nid ++ ", found " ++ show other
+        expectationFailure msg >> fail msg
+
 expectForall :: HasCallStack => NodeMap TyNode -> NodeId -> IO TyNode
 expectForall nodes nid = case lookupNodeMaybe nodes nid of
     Just f@TyForall{} -> return f
+    other -> do
+        let msg = "Expected TyForall at " ++ show nid ++ ", found " ++ show other
+        expectationFailure msg >> fail msg
+
+expectForallBody :: HasCallStack => NodeMap TyNode -> NodeId -> IO NodeId
+expectForallBody nodes nid = case lookupNodeMaybe nodes nid of
+    Just TyForall { tnBody = body } -> return body
     other -> do
         let msg = "Expected TyForall at " ++ show nid ++ ", found " ++ show other
         expectationFailure msg >> fail msg

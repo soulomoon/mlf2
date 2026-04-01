@@ -22,7 +22,7 @@ import SpecUtil
     , nodeMapFromList
     , rootedConstraint
     )
-import Presolution.Util (expectArrow, expectForall)
+import Presolution.Util (expectArrowNodes, expectForall, expectForallBody)
 
 spec :: Spec
 spec = describe "instantiateScheme" $ do
@@ -48,9 +48,7 @@ spec = describe "instantiateScheme" $ do
         case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
             Right (root, st1) -> do
-                arrow <- expectArrow (cNodes (psConstraint st1)) root
-                let d = tnDom arrow
-                    c = tnCod arrow
+                (d, c) <- expectArrowNodes (cNodes (psConstraint st1)) root
                 d `shouldBe` fresh
                 c `shouldBe` fresh
 
@@ -84,9 +82,7 @@ spec = describe "instantiateScheme" $ do
         case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
             Right (root, st1) -> do
-                arrow <- expectArrow (cNodes (psConstraint st1)) root
-                let d = tnDom arrow
-                    c = tnCod arrow
+                (d, c) <- expectArrowNodes (cNodes (psConstraint st1)) root
                 d `shouldBe` fresh
                 c `shouldBe` outer -- shared, not copied
 
@@ -146,14 +142,13 @@ spec = describe "instantiateScheme" $ do
         case runPresolutionM defaultTraceConfig st0 (instantiateSchemeWithTrace bodyArrow [(b, meta)]) of
             Left err -> expectationFailure ("instantiateSchemeWithTrace failed: " ++ show err)
             Right ((root, copyMap, _interior, frontier), st1) -> do
-                arrow <- expectArrow (cNodes (psConstraint st1)) root
-                let dom = tnDom arrow
+                (dom, cod) <- expectArrowNodes (cNodes (psConstraint st1)) root
                 case lookupNodeMaybe (cNodes (psConstraint st1)) dom of
                     Just TyBottom{} -> pure ()
                     other ->
                         expectationFailure $
                             "Expected frontier copy to be ⊥, found " ++ show other
-                tnCod arrow `shouldBe` meta
+                cod `shouldBe` meta
                 IntSet.member (getNodeId outerArrow) frontier `shouldBe` True
                 case lookupCopy outerArrow copyMap of
                     Nothing -> expectationFailure "Expected outerArrow to be frontier-copied"
@@ -205,8 +200,7 @@ spec = describe "instantiateScheme" $ do
         case runPresolutionM defaultTraceConfig st0 (instantiateSchemeWithTrace bodyArrow []) of
             Left err -> expectationFailure ("instantiateSchemeWithTrace failed: " ++ show err)
             Right ((root, copyMap, _interior, frontier), st1) -> do
-                arrow <- expectArrow (cNodes (psConstraint st1)) root
-                let dom = tnDom arrow
+                (dom, cod) <- expectArrowNodes (cNodes (psConstraint st1)) root
                 case lookupNodeMaybe (cNodes (psConstraint st1)) dom of
                     Just TyBottom{} -> pure ()
                     other ->
@@ -217,7 +211,7 @@ spec = describe "instantiateScheme" $ do
                     Nothing -> expectationFailure "Expected b to be copied (in I(g))"
                     Just b' -> do
                         b' `shouldNotBe` b
-                        tnCod arrow `shouldBe` b'
+                        cod `shouldBe` b'
 
                 IntSet.member (getNodeId y) frontier `shouldBe` True
                 case lookupCopy y copyMap of
@@ -250,15 +244,12 @@ spec = describe "instantiateScheme" $ do
         case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
             Right (root, st1) -> do
-                arrow <- expectArrow (cNodes (psConstraint st1)) root
-                let d = tnDom arrow
-                    c = tnCod arrow
-                innerArrow <- expectArrow (cNodes (psConstraint st1)) d
+                (d, c) <- expectArrowNodes (cNodes (psConstraint st1)) root
                 -- dom and cod of outer arrow should point to the same copied sub-node
                 d `shouldBe` c
                 -- inner arrow's dom/cod both use the same fresh substitution
-                tnDom innerArrow `shouldBe` fresh
-                tnCod innerArrow `shouldBe` fresh
+                innerArrow <- expectArrowNodes (cNodes (psConstraint st1)) d
+                innerArrow `shouldBe` (fresh, fresh)
 
     it "shares base nodes (base sharing optimization)" $ do
         -- Body uses the same base node twice; instantiate should not duplicate it.
@@ -284,9 +275,9 @@ spec = describe "instantiateScheme" $ do
         case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
             Right (root, st1) -> do
-                arrow <- expectArrow (cNodes (psConstraint st1)) root
-                tnDom arrow `shouldBe` base
-                tnCod arrow `shouldBe` base
+                (dom, cod) <- expectArrowNodes (cNodes (psConstraint st1)) root
+                dom `shouldBe` base
+                cod `shouldBe` base
 
     it "copies nested forall inside the body" $ do
         -- Nested binder is copied, and substitutions apply under it.
@@ -323,17 +314,12 @@ spec = describe "instantiateScheme" $ do
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
             Right (root, st1) -> do
                 let nodes' = cNodes (psConstraint st1)
-                arrow <- expectArrow nodes' root
-                let d = tnDom arrow
-                    c = tnCod arrow
-                forall1 <- expectForall nodes' d
-                forall2 <- expectForall nodes' c
-                let innerCopy = tnBody forall1
-                    innerCopy2 = tnBody forall2
-                innerArrow <- expectArrow nodes' innerCopy
+                (d, c) <- expectArrowNodes nodes' root
+                innerCopy <- expectForallBody nodes' d
+                innerCopy2 <- expectForallBody nodes' c
                 innerCopy `shouldBe` innerCopy2
-                tnDom innerArrow `shouldBe` freshInner
-                tnCod innerArrow `shouldBe` freshOuter
+                innerArrow <- expectArrowNodes nodes' innerCopy
+                innerArrow `shouldBe` (freshInner, freshOuter)
 
     it "copies nested expansion nodes inside the body" $ do
         -- When copying in presolution, an expansion node with identity recipe is inlined.
@@ -368,9 +354,7 @@ spec = describe "instantiateScheme" $ do
             Left err -> expectationFailure $ "Instantiation failed: " ++ show err
             Right (root, st1) -> do
                 let nodes' = cNodes (psConstraint st1)
-                arrow <- expectArrow nodes' root
-                let d = tnDom arrow
-                    c = tnCod arrow
+                (d, c) <- expectArrowNodes nodes' root
 
                 _ <- expectForall nodes' d
                 _ <- expectForall nodes' c
@@ -380,12 +364,9 @@ spec = describe "instantiateScheme" $ do
                 d `shouldNotBe` forallNode
 
                 let forallCopy = d
-                fNode <- expectForall nodes' forallCopy
-
-                let bodyArrowId = tnBody fNode
-                bArrow <- expectArrow nodes' bodyArrowId
-                tnDom bArrow `shouldBe` fresh
-                tnCod bArrow `shouldBe` fresh
+                bodyArrowId <- expectForallBody nodes' forallCopy
+                bArrow <- expectArrowNodes nodes' bodyArrowId
+                bArrow `shouldBe` (fresh, fresh)
 
     it "returns error when a node is missing" $ do
         -- Substitution refers to a missing node; should throw NodeLookupFailed.

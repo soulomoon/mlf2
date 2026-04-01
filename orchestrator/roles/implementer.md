@@ -26,7 +26,7 @@ Own implementation changes for the current CI matrix or failure-repair round.
 
 ## Key Implementation Guidance
 
-- The codebase uses GHC 9.12, Haskell2010 with GADTs, PatternSynonyms, etc.
+- The codebase uses GHC 9.14, Haskell2010 with GADTs, PatternSynonyms, etc.
 - Builds must be warning-free (`-Wall` is enabled in `mlf2.cabal`).
 - Match existing module naming and repo layout.
 - When adding new modules, update `mlf2.cabal` `other-modules` stanzas.

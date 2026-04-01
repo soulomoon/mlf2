@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Updated the supported compiler lane from GHC 9.12.2 / `base-4.21` to GHC
+  9.14.1 / `base-4.22` across Cabal metadata, the local `cabal.project` pin,
+  the GitHub Actions matrix, README guidance, TODO tracking, and current
+  orchestrator implementer guidance.
 - Documentation hygiene: audited all 47 `{- Note [...] -}` blocks across `src/` for stale references after round-163 module splits, added design-rationale Notes to 6 new submodules that lacked them (`Normalize.Internal`, `Reify.Type.Core`, `Plan.Env`, `Plan.Generalize`, `Plan.ReifyStep`, `Interpret.Internal`), and documented the remaining 4 round-163 module splits in `implementation_notes.md`.
 - Documentation follow-up: added `{- Note [Scheme finalization] -}` to `Plan.Finalize` and `{- Note [Generalization planning context] -}` to `Plan.Context`, completing design-rationale coverage for all large `Constraint.Presolution.Plan` submodules.
 - Completed CI test-matrix and failure-repair campaign (rounds 156–159): froze a bounded GitHub Actions matrix (ubuntu-latest / GHC 9.12.2, Windows excluded while thesis-conformance gates remain Unix-only), repaired the thesis-conformance baseline by fixing 18 stale code-anchor paths and converting 262 absolute paths to repo-relative, split the workflow into two matrix-parameterized jobs (`build-and-test` and `thesis-conformance`), and documented the CI matrix scope, runner boundaries, and authoritative verification commands in README.md, TODO.md, and CHANGELOG.md. Validated with `cabal build all && cabal test` (1176+ examples, 0 failures) and `./scripts/thesis-conformance-gate.sh` (PASS).
