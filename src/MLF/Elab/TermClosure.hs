@@ -79,11 +79,15 @@ preserveRetainedChildAuthoritativeResult = go emptyEnv
     hasRetainedChildAliasBoundary :: String -> ElabTerm -> Int -> Bool
     hasRetainedChildAliasBoundary source term remainingAliasFrames = case term of
         ELet child childSch childRhs childBody
-            | usesTermVar source childRhs ->
-                (isForallIdentityScheme childSch && isTrivialRetainedChildBody child childBody)
-                    || (remainingAliasFrames > 0
-                        && isAliasFrameRhs childRhs
-                        && hasRetainedChildAliasBoundary child childBody (remainingAliasFrames - 1))
+            | isClearBoundaryRetainedChildRhs source childRhs
+                && isForallIdentityScheme childSch
+                && isTrivialRetainedChildBody child childBody ->
+                    True
+            | usesTermVar source childRhs
+                && remainingAliasFrames > 0
+                && isAliasFrameRhs childRhs
+                && hasRetainedChildAliasBoundary child childBody (remainingAliasFrames - 1) ->
+                    True
         _ -> False
 
 isTrivialRetainedChildBody :: String -> ElabTerm -> Bool
@@ -285,6 +289,27 @@ isAliasFrameRhs :: ElabTerm -> Bool
 isAliasFrameRhs rhs = case rhs of
     EVar _ -> True
     ETyAbs _ _ body -> isAliasFrameRhs body
+    _ -> False
+
+isClearBoundaryRetainedChildRhs :: String -> ElabTerm -> Bool
+isClearBoundaryRetainedChildRhs source rhs = case rhs of
+    EApp f arg -> isIdentityBoundaryLambda f && usesTermVar source arg
+    ETyAbs _ _ body -> isClearBoundaryRetainedChildRhs source body
+    ETyInst e _ -> isClearBoundaryRetainedChildRhs source e
+    _ -> False
+
+isIdentityBoundaryLambda :: ElabTerm -> Bool
+isIdentityBoundaryLambda term = case term of
+    ELam v _ body -> isIdentityBoundaryBody v body
+    ETyAbs _ _ body -> isIdentityBoundaryLambda body
+    ETyInst e _ -> isIdentityBoundaryLambda e
+    _ -> False
+
+isIdentityBoundaryBody :: String -> ElabTerm -> Bool
+isIdentityBoundaryBody v body = case body of
+    EVar bodyV -> bodyV == v
+    ETyAbs _ _ inner -> isIdentityBoundaryBody v inner
+    ETyInst e _ -> isIdentityBoundaryBody v e
     _ -> False
 
 usesTermVar :: String -> ElabTerm -> Bool
