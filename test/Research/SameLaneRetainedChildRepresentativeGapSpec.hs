@@ -1,8 +1,11 @@
+{-# LANGUAGE GADTs #-}
+
 module Research.SameLaneRetainedChildRepresentativeGapSpec (spec) where
 
 import qualified Data.Set as Set
 import Test.Hspec
 
+import MLF.Constraint.Types.Graph (BaseTy(..))
 import MLF.Elab.Pipeline
     ( runPipelineElab
     , runPipelineElabChecked
@@ -15,12 +18,12 @@ spec :: Spec
 spec =
     describe "same-lane retained-child representative-gap probes" $ do
         it "sameLaneAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectRecursivePipelineSuccess
+            expectExactRetainedChildAuthoritativeOutput
                 "unchecked"
                 (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))
 
         it "sameLaneAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElabChecked" $
-            expectRecursivePipelineSuccess
+            expectExactRetainedChildAuthoritativeOutput
                 "checked"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))
 
@@ -45,6 +48,62 @@ expectRecursivePipelineSuccess label result =
             expectationFailure (label ++ ": expected recursive success, got " ++ show err)
         Right (_term, ty) ->
             containsMu ty `shouldBe` True
+
+expectExactRetainedChildAuthoritativeOutput
+    :: Show err
+    => String
+    -> Either err (ElabTerm, ElabType)
+    -> Expectation
+expectExactRetainedChildAuthoritativeOutput label result =
+    case result of
+        Left err ->
+            expectationFailure (label ++ ": expected recursive success, got " ++ show err)
+        Right (_term, ty) -> do
+            countLeadingUnboundedForalls ty `shouldBe` 2
+            matchesRecursiveArrow (stripLeadingUnboundedForalls ty) expectedRecursiveArrow
+                `shouldBe` True
+
+countLeadingUnboundedForalls :: ElabType -> Int
+countLeadingUnboundedForalls ty = case ty of
+    TForall _ Nothing body -> 1 + countLeadingUnboundedForalls body
+    _ -> 0
+
+stripLeadingUnboundedForalls :: ElabType -> ElabType
+stripLeadingUnboundedForalls ty = case ty of
+    TForall _ Nothing body -> stripLeadingUnboundedForalls body
+    _ -> ty
+
+matchesRecursiveArrow :: ElabType -> ElabType -> Bool
+matchesRecursiveArrow actual expected = case (actual, expected) of
+    (TArrow domA codA, TArrow domE codE) ->
+        matchesRecursiveMu domA domE && matchesRecursiveMu codA codE
+    _ -> False
+  where
+    matchesRecursiveMu tyA tyE = case (tyA, tyE) of
+        (TMu _ bodyA, TMu _ bodyE) -> stripMuNames bodyA == stripMuNames bodyE
+        _ -> False
+
+    stripMuNames ty = case ty of
+        TVar _ -> TVar "_"
+        TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
+        TBase base -> TBase base
+        TCon con args -> TCon con (fmap stripMuNames args)
+        TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
+        TMu _ body -> TMu "_" (stripMuNames body)
+        TBottom -> TBottom
+
+    stripBoundNames bound = case bound of
+        TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
+        TBase base -> TBase base
+        TCon con args -> TCon con (fmap stripMuNames args)
+        TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
+        TMu _ body -> TMu "_" (stripMuNames body)
+        TBottom -> TBottom
+
+expectedRecursiveArrow :: ElabType
+expectedRecursiveArrow =
+    let recursiveTy = TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int")))
+    in TArrow recursiveTy recursiveTy
 
 containsMu :: ElabType -> Bool
 containsMu ty = case ty of

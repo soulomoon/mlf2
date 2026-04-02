@@ -130,6 +130,21 @@ matchesRecursiveArrow actual expected = case (actual, expected) of
       TMu _ body -> TMu "_" (stripMuNames body)
       TBottom -> TBottom
 
+countLeadingUnboundedForalls :: ElabType -> Int
+countLeadingUnboundedForalls ty = case ty of
+  TForall _ Nothing body -> 1 + countLeadingUnboundedForalls body
+  _ -> 0
+
+stripLeadingUnboundedForalls :: ElabType -> ElabType
+stripLeadingUnboundedForalls ty = case ty of
+  TForall _ Nothing body -> stripLeadingUnboundedForalls body
+  _ -> ty
+
+expectedSameLaneAliasFrameClearBoundaryArrow :: ElabType
+expectedSameLaneAliasFrameClearBoundaryArrow =
+  let recursiveTy = TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int")))
+   in TArrow recursiveTy recursiveTy
+
 containsMu :: ElabType -> Bool
 containsMu ty = case ty of
   TMu _ _ -> True
@@ -2115,6 +2130,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         containsMu checkedTy `shouldBe` True
 
       it "sameLaneAliasFrameClearBoundaryExpr alias-frame clear-boundary packet preserves recursive output on both authoritative entrypoints" $ do
+        termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
+        termClosureSrc `shouldSatisfy` isInfixOf "isClearBoundaryRetainedChildRhs :: String -> ElabTerm -> Bool"
+        termClosureSrc `shouldSatisfy` isInfixOf "isClearBoundaryRetainedChildRhs source childRhs"
+        termClosureSrc `shouldSatisfy` isInfixOf "EApp f arg -> isIdentityBoundaryLambda f && usesTermVar source arg"
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -2125,8 +2144,16 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EVar "k")
                     (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "hold")) (EVar "u"))
                 )
-        ty <- expectAlignedPipelineSuccessType expr
-        containsMu ty `shouldBe` True
+        (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
+        typeCheck checkedTerm `shouldBe` Right checkedTy
+        uncheckedTy `shouldBe` checkedTy
+        countLeadingUnboundedForalls uncheckedTy `shouldBe` 2
+        matchesRecursiveArrow
+          (stripLeadingUnboundedForalls uncheckedTy)
+          expectedSameLaneAliasFrameClearBoundaryArrow
+          `shouldBe` True
 
       it "sameLaneDoubleAliasFrameClearBoundaryExpr double-alias clear-boundary packet preserves recursive output on both authoritative entrypoints" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
