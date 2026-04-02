@@ -1,0 +1,15 @@
+{
+  "roadmap_id": "2026-04-02-00-general-automatic-iso-recursive-current-architecture-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-00-general-automatic-iso-recursive-current-architecture-follow-on-roadmap/rev-001",
+  "roadmap_item_id": "item-2",
+  "attempt": 2,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "decision": "approved",
+  "review_snapshot": "orchestrator/rounds/round-174/reviews/attempt-2.md",
+  "evidence_summary": "Attempt 2 tightened the retained-child alias helper to admit exactly one extra alias shell at the current boundary, kept the exact focused double-alias packet tests unchanged, and passed `cabal build all && cabal test` with 1306 examples and 0 failures."
+}
