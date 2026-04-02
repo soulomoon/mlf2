@@ -1,0 +1,14 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-3",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "decision": "approved",
+  "evidence_summary": "The docs-only item-3 search-contract artifact freezes candidate generation to `rootNonLocalSchemeAliasBaseLike`, `sameLaneLocalRetainedChildTarget`, and the `boundHasForallFrom` / `keepTargetFinal` / `targetC` guard cluster only, rejects ambiguous owner / binder / anchor cases under `N1` and `N2`, and keeps `N6` bounded without fallback, cyclic search, multi-SCC handling, or equi-recursive widening while preserving the inherited explicit-only / iso-recursive / non-equi-recursive / non-cyclic-graph / no-fallback boundary."
+}
