@@ -1,0 +1,14 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-1",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "decision": "approved",
+  "evidence_summary": "The docs-only item-1 freeze artifact binds the required predecessor authority chain, preserves the accepted same-lane packet wins as bounded predecessor truth only, freezes live `P2`-`P6` and `N1` / `N2` / `N6` obligations plus out-of-scope `N3`-`N5`, and fixes the first mechanism-map deliverable plus fail-closed writable slice without widening the inherited current-architecture boundary."
+}
