@@ -86,33 +86,44 @@
    settle broader `P3` / `P4` / `P6`, repo-level readiness, fallback widening,
    cyclic search, equi-recursive reasoning, or any boundary revision.
 
-3. [pending] Publish one post-item-2 settlement surface and exact repo-impact read for the frozen representative-gap packet
+3. [done] Publish one post-item-2 settlement surface and exact repo-impact read for the frozen representative-gap packet
    Item id: `item-3`
    Depends on: `item-1`, `item-2`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-2`
-   Completion notes: complete when an accepted aggregate artifact republishes
-   the exact post-item-2 result for the frozen packet, binds the supporting
-   focused and full-gate provenance to accepted sources only, records the exact
-   repo-impact read as one settled packet only, and keeps broader `P3` / `P4`
-   / `P6`, repo-level readiness, and boundary-revision questions unresolved
-   unless later accepted evidence says otherwise.
+   Completion notes: accepted in `round-175`, merged as commit `0b4739b`
+   (`Publish post-item-2 settlement surface for frozen double-alias packet`).
+   The accepted docs-only aggregate artifact
+   `docs/plans/2026-04-02-general-automatic-iso-recursive-current-architecture-follow-on-post-item-2-settlement-surface-and-exact-repo-impact-read.md`
+   republishes the exact post-item-2 result for the frozen packet
+   `sameLaneDoubleAliasFrameClearBoundaryExpr` only:
+   `narrow success` on both `runPipelineElab` and
+   `runPipelineElabChecked` within the inherited explicit-only /
+   iso-recursive / non-equi-recursive / non-cyclic-graph / no-fallback
+   architecture.
+   It binds the supporting focused reruns and full-gate provenance to accepted
+   round-174 sources only, records the exact repo-impact read as one settled
+   packet only, and keeps broader `P3` / `P4` / `P6`, repo-level readiness,
+   and boundary-revision questions unresolved.
 
-4. [pending] Record one successor decision and immediate handoff after the bounded follow-on lane
+4. [done] Record one successor decision and immediate handoff after the bounded follow-on lane
    Item id: `item-4`
    Depends on: `item-1`, `item-2`, `item-3`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-3`
-   Completion notes: complete when an accepted aggregate artifact records
-   exactly one explicit outcome token and exactly one immediate handoff token,
-   based on the accepted item-3 settlement for this family, choosing among:
+   Completion notes: accepted in `round-176`, merged as commit `a0567a0`
+   (`Record bounded successor decision and handoff after item-3 settlement`).
+   The accepted docs-only aggregate artifact
+   `docs/plans/2026-04-02-general-automatic-iso-recursive-current-architecture-follow-on-post-item-3-successor-decision-and-immediate-handoff-after-bounded-lane.md`
+   records exactly one explicit outcome token,
    `continue-bounded`,
-   `stop-blocked`,
-   or `reopen-boundary-question`.
-   The same artifact must then record exactly one immediate handoff:
-   `stop`,
+   from the accepted item-3 settlement that
+   `sameLaneDoubleAliasFrameClearBoundaryExpr` is one settled `narrow success`
+   packet on both `runPipelineElab` and `runPipelineElabChecked` within the
+   inherited current architecture.
+   The same artifact records exactly one immediate handoff token,
    `open one bounded current-architecture family`,
-   or `open one explicit boundary-revision family`.
-   It must not smuggle in broader readiness or an implicit boundary revision.
+   while keeping broader `P3` / `P4` / `P6`, repo-level readiness,
+   next-packet selection, and any implicit boundary revision unresolved.
