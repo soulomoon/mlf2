@@ -44,25 +44,29 @@
 
 ## Items
 
-1. [pending] Freeze predecessor authority, unresolved semantic matrix, family success bar, and first concrete deliverable
+1. [done] Freeze predecessor authority, unresolved semantic matrix, family success bar, and first concrete deliverable
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
    Parallel group: none
    Merge after: none
-   Completion notes: produce one docs-only artifact that binds the predecessor
-   authority chain from the baseline contract, the March 25 capability
-   contract, the March 25 architectural audit, the accepted March/April
+   Completion notes: accepted `round-177` finalized this item through
+   `docs/plans/2026-04-02-general-automatic-iso-recursive-full-inference-predecessor-authority-unresolved-semantic-matrix-family-success-bar-and-first-concrete-deliverable-freeze.md`
+   with authoritative review in
+   `orchestrator/rounds/round-177/review-record.json`. That docs-only
+   artifact bound the predecessor authority chain from the March baseline
+   contract, the March 25 capability contract, the March 25 architectural
+   audit, the March 25 reconstruction contract, the accepted March/April
    bounded-settlement chain, and the April 2 `continue-bounded` handoff;
-   restates the exact family goal as a repo-level full-inference readiness
-   question under the inherited current architecture; enumerates the still-live
-   positive-family obligations (`P2`-`P6`) and negative obligations
-   (`N1`, `N2`, `N6`) while preserving `N3`-`N5` as out of scope unless a
-   later accepted decision says otherwise; freezes the family success bar; and
-   freezes the first actionable deliverable as one docs-first semantic
-   mechanism artifact plus an explicit fail-closed writable slice.
-   This item must not change production behavior, widen semantics, or start a
-   code campaign.
+   preserved `sameLaneAliasFrameClearBoundaryExpr` and
+   `sameLaneDoubleAliasFrameClearBoundaryExpr` as bounded predecessor truth
+   only; froze the exact repo-level full-inference readiness question under
+   the inherited explicit-only / iso-recursive / non-equi-recursive /
+   non-cyclic-graph / no-fallback current architecture; froze still-live
+   `P2`-`P6` plus `N1` / `N2` / `N6` while keeping `N3`-`N5` out of scope;
+   and fixed the first concrete deliverable plus fail-closed docs-only
+   writable slice without widening semantics, interfaces, search shape, or
+   the repo-level readiness claim.
 
 2. [pending] Publish the current-architecture semantic mechanism map for automatic iso-recursive inference
    Item id: `item-2`
@@ -70,16 +74,19 @@
    Parallel safe: no
    Parallel group: none
    Merge after: `item-1`
-   Completion notes: produce one reviewable docs artifact that explains, in
-   semantic terms, how the current implementation does or does not support
-   recursive-shape discovery, non-local propagation, owner-sensitive
-   placement, binder-sensitive placement, polymorphism / nested-`forall`
-   interaction, and reconstruction visibility inside the inherited
-   explicit-only / iso-recursive / non-equi-recursive / non-cyclic-graph /
-   no-fallback boundary. The artifact must distinguish settled predecessor
-   fragments from still-missing general rules, explain where packet-specific
-   handling remains, and identify the smallest code-facing seams that later
-   bounded rounds may lawfully touch without claiming full readiness.
+   Completion notes: starting from the accepted item-1 freeze, publish exactly
+   `docs/plans/2026-04-02-general-automatic-iso-recursive-full-inference-current-architecture-semantic-mechanism-map.md`
+   as one reviewable docs artifact that explains, in semantic terms, how the
+   current implementation does or does not support recursive-shape discovery,
+   non-local propagation, owner-sensitive placement, binder-sensitive
+   placement, polymorphism / nested-`forall` interaction, and reconstruction
+   visibility inside the inherited explicit-only / iso-recursive /
+   non-equi-recursive / non-cyclic-graph / no-fallback boundary. The
+   artifact must distinguish settled predecessor fragments from still-missing
+   general rules, explain where packet-specific handling remains, keep the
+   inherited boundary unchanged, and identify the smallest code-facing seams
+   that later bounded rounds may lawfully touch without claiming full
+   readiness.
 
 3. [pending] Define fail-closed candidate generation, ambiguity rejection, and bounded termination discipline
    Item id: `item-3`
