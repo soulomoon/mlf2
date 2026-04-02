@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-5",
+  "decision": "approved",
+  "evidence_summary": "The item-5 diff stayed inside the bounded test/notes slice; the selected double-alias research and pipeline checks now assert the exact two-forall recursive authoritative result plus the bounded one-extra-alias-shell TermClosure guard; focused reruns and cabal build all && cabal test all passed."
+}

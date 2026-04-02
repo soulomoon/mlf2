@@ -28,26 +28,14 @@ spec =
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))
 
         it "sameLaneDoubleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
-            expectRecursivePipelineSuccess
+            expectExactRetainedChildAuthoritativeOutput
                 "unchecked"
                 (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDoubleAliasFrameClearBoundaryExpr))
 
         it "sameLaneDoubleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElabChecked" $
-            expectRecursivePipelineSuccess
+            expectExactRetainedChildAuthoritativeOutput
                 "checked"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneDoubleAliasFrameClearBoundaryExpr))
-
-expectRecursivePipelineSuccess
-    :: Show err
-    => String
-    -> Either err (ElabTerm, ElabType)
-    -> Expectation
-expectRecursivePipelineSuccess label result =
-    case result of
-        Left err ->
-            expectationFailure (label ++ ": expected recursive success, got " ++ show err)
-        Right (_term, ty) ->
-            containsMu ty `shouldBe` True
 
 expectExactRetainedChildAuthoritativeOutput
     :: Show err
@@ -104,22 +92,6 @@ expectedRecursiveArrow :: ElabType
 expectedRecursiveArrow =
     let recursiveTy = TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int")))
     in TArrow recursiveTy recursiveTy
-
-containsMu :: ElabType -> Bool
-containsMu ty = case ty of
-    TMu _ _ -> True
-    TArrow dom cod -> containsMu dom || containsMu cod
-    TCon _ args -> any containsMu args
-    TForall _ mb body -> maybe False containsMuBound mb || containsMu body
-    _ -> False
-  where
-    containsMuBound bound = case bound of
-        TArrow dom cod -> containsMu dom || containsMu cod
-        TBase _ -> False
-        TCon _ args -> any containsMu args
-        TForall _ mb body -> maybe False containsMuBound mb || containsMu body
-        TMu _ _ -> True
-        TBottom -> False
 
 sameLaneAliasFrameClearBoundaryExpr :: SurfaceExpr
 sameLaneAliasFrameClearBoundaryExpr =
