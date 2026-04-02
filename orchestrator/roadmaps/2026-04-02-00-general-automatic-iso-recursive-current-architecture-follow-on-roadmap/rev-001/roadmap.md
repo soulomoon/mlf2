@@ -35,23 +35,32 @@
 
 ## Items
 
-1. [pending] Freeze successor authority, inherited boundary, next exact representative-gap packet, and writable slice
+1. [done] Freeze successor authority, inherited boundary, next exact representative-gap packet, and writable slice
    Item id: `item-1`
    Depends on: none
    Parallel safe: no
    Parallel group: none
    Merge after: none
-   Completion notes: complete when an accepted docs-only artifact freezes the
-   predecessor authority chain from the completed April 1 successor family plus
-   the accepted April 2 item-3 settlement and item-4 decision / handoff;
-   preserves `sameLaneAliasFrameClearBoundaryExpr` as settled predecessor truth
-   only; selects and freezes one next exact same-lane retained-child
-   representative-gap packet inside the broader unresolved `P3` / `P4` / `P6`
-   family; records the current exact live read for that packet; freezes the
-   item-2 success bar for that packet; and freezes one fail-closed writable
-   slice for a bounded current-architecture attempt. This item must not
-   authorize cyclic search, multi-SCC search, fallback widening, equi-recursive
-   reasoning, second-interface work, or a repo-level readiness claim.
+   Completion notes: accepted in `round-173`, merged as commit `cb4442e`
+   (`Freeze next current-architecture representative-gap packet`) via
+   `docs/plans/2026-04-02-general-automatic-iso-recursive-current-architecture-follow-on-successor-authority-next-exact-representative-gap-packet-current-live-read-success-bar-and-writable-slice-freeze.md`.
+   The accepted docs-only freeze carries the predecessor authority chain from
+   the March baseline/capability sources through the accepted April 1 / April 2
+   settlement-and-handoff chain, preserves
+   `sameLaneAliasFrameClearBoundaryExpr` as settled predecessor truth only, and
+   freezes the next exact packet
+   `sameLaneDoubleAliasFrameClearBoundaryExpr`.
+   It records the current exact live read for that packet as the shared
+   `PipelineTypeCheckError (TCLetTypeMismatch ...)` blocker on
+   `runPipelineElab` and `runPipelineElabChecked`, freezes the exact item-2
+   success bar (`narrow success`, `fail-closed`, or
+   `narrower current-architecture blocker`), and keeps the writable slice
+   fail-closed around `src/MLF/Elab/TermClosure.hs`,
+   `test/PipelineSpec.hs`, and
+   `test/Research/SameLaneRetainedChildRepresentativeGapSpec.hs` only. The
+   accepted result remains packet-bounded and does not authorize cyclic search,
+   multi-SCC search, fallback widening, equi-recursive reasoning,
+   second-interface work, or a repo-level readiness claim.
 
 2. [pending] Implement and validate one bounded current-architecture slice on the frozen representative-gap packet
    Item id: `item-2`
