@@ -63,21 +63,28 @@ preserveRetainedChildAuthoritativeResult = go emptyEnv
         let env' = env { termEnv = Map.insert v (schemeToType sch) (termEnv env) }
         in fmap (ELet v sch rhs) (go env' body)
 
-    preserveRetainedChildAliasBoundary env v sch rhs body = case body of
+    preserveRetainedChildAliasBoundary env v sch rhs body
+        | isAliasFrameRhs rhs
+        , hasRetainedChildAliasBoundary v body 1 =
+            case typeCheckWithEnv env (ELet v sch rhs body) of
+                Left (TCLetTypeMismatch _ _) ->
+                    case typeCheckWithEnv env rhs of
+                        Right rhsTy
+                            | hasRecursiveComponent rhsTy ->
+                                Just rhs
+                        _ -> Nothing
+                _ -> Nothing
+        | otherwise = Nothing
+
+    hasRetainedChildAliasBoundary :: String -> ElabTerm -> Int -> Bool
+    hasRetainedChildAliasBoundary source term remainingAliasFrames = case term of
         ELet child childSch childRhs childBody
-            | isTrivialRetainedChildBody child childBody
-            , isForallIdentityScheme childSch
-            , usesTermVar v childRhs
-            , isAliasFrameRhs rhs ->
-                case typeCheckWithEnv env (ELet v sch rhs body) of
-                    Left (TCLetTypeMismatch _ _) ->
-                        case typeCheckWithEnv env rhs of
-                            Right rhsTy
-                                | hasRecursiveComponent rhsTy ->
-                                    Just rhs
-                            _ -> Nothing
-                    _ -> Nothing
-        _ -> Nothing
+            | usesTermVar source childRhs ->
+                (isForallIdentityScheme childSch && isTrivialRetainedChildBody child childBody)
+                    || (remainingAliasFrames > 0
+                        && isAliasFrameRhs childRhs
+                        && hasRetainedChildAliasBoundary child childBody (remainingAliasFrames - 1))
+        _ -> False
 
 isTrivialRetainedChildBody :: String -> ElabTerm -> Bool
 isTrivialRetainedChildBody v body = case body of
