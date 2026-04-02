@@ -179,9 +179,14 @@
    on `runPipelineElab` and `runPipelineElabChecked` only via a narrowed
    shared `src/MLF/Elab/TermClosure.hs` clear-boundary retained-child rule,
    with the item-3 route / guard cluster and pipeline facades unchanged.
-   Item-5 remains pending because these are still two representative packets
-   only; later bounded positive-family slices and the required aggregate
-   artifact remain outstanding.
+   Accepted `round-183` settles one adjacent same-lane packet only:
+   `sameLaneDoubleAliasFrameClearBoundaryExpr` remains honest on the
+   authoritative entrypoints only via the existing bounded one-extra-alias-shell
+   `TermClosure` rule, and the current round needed only exact
+   authoritative-output / mechanism-guard test tightening rather than a new
+   production edit. Item-5 remains pending because these are still three
+   representative packets only; later bounded positive-family slices and the
+   required aggregate artifact remain outstanding.
 
 6. [pending] Run the fail-closed negative-family and termination-pressure campaign
    Item id: `item-6`
