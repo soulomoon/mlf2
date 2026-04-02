@@ -164,7 +164,18 @@
    code/test changes justified by the frozen contracts, and end in one
    aggregate artifact that states which positive families now have credible
    general support, which still reduce to packet-specific folklore, and which
-   remain current-architecture blockers.
+   remain current-architecture blockers. Accepted `round-181` settles the
+   first bounded `P2` slice only: on the exact `C1` non-local
+   scheme-alias/base-like packet from
+   `test/Research/C1AuthoritativeSurfaceSpec.hs` and `test/PipelineSpec.hs`,
+   removing `preserveC1AuthoritativeRecursiveAlias` /
+   `isBlockedC1AliasScheme` from `src/MLF/Elab/Run/Pipeline.hs` leaves the
+   fallback `baseTarget -> baseC` lane honestly non-recursive while
+   `runPipelineElab` and `runPipelineElabChecked` remain recursively
+   reconstruction-visible, so that packet no longer depends on a packet-local
+   `Run/Pipeline` rescue. Item-5 remains pending because this is still one
+   representative `P2` packet only; later bounded positive-family slices and
+   the required aggregate artifact remain outstanding.
 
 6. [pending] Run the fail-closed negative-family and termination-pressure campaign
    Item id: `item-6`
