@@ -174,8 +174,14 @@
    `runPipelineElab` and `runPipelineElabChecked` remain recursively
    reconstruction-visible, so that packet no longer depends on a packet-local
    `Run/Pipeline` rescue. Item-5 remains pending because this is still one
-   representative `P2` packet only; later bounded positive-family slices and
-   the required aggregate artifact remain outstanding.
+   representative `P2` packet only. Accepted `round-182` settles one bounded
+   same-lane packet only: `sameLaneAliasFrameClearBoundaryExpr` remains honest
+   on `runPipelineElab` and `runPipelineElabChecked` only via a narrowed
+   shared `src/MLF/Elab/TermClosure.hs` clear-boundary retained-child rule,
+   with the item-3 route / guard cluster and pipeline facades unchanged.
+   Item-5 remains pending because these are still two representative packets
+   only; later bounded positive-family slices and the required aggregate
+   artifact remain outstanding.
 
 6. [pending] Run the fail-closed negative-family and termination-pressure campaign
    Item id: `item-6`
