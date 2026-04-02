@@ -2225,6 +2225,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         containsMu uncheckedTy `shouldBe` True
         containsMu checkedTy `shouldBe` True
 
+      it "keeps the selected non-local scheme-alias/base-like packet recursive without the packet-local C1 shortcut in Run/Pipeline" $ do
+        pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+        pipelineSrc `shouldSatisfy` (not . isInfixOf "preserveC1AuthoritativeRecursiveAlias")
+        pipelineSrc `shouldSatisfy` (not . isInfixOf "isBlockedC1AliasScheme")
+
       it "keeps local multi-inst fallback on the local TypeRef lane" $ do
         fallbackTy <- localMultiInstFallback True
         case fallbackTy of

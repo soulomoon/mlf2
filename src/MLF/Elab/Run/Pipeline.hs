@@ -10,7 +10,6 @@ where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Acyclicity (breakCyclesAndCheckAcyclicity)
 import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode)
@@ -27,7 +26,6 @@ import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types (Constraint, NodeId, PolySyms, cNodes, lookupNodeIn)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot (..))
 import MLF.Elab.Elaborate (ElabConfig (..), ElabEnv (..), elaborateWithEnv)
-import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
   ( PipelineError (..),
@@ -62,7 +60,7 @@ import MLF.Elab.TermClosure
     preserveRetainedChildAuthoritativeResult,
     substInTerm,
   )
-import MLF.Elab.TypeCheck (Env (..), emptyEnv, typeCheck, typeCheckWithEnv)
+import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr (..), ConstraintError, ConstraintResult (..), generateConstraints)
 import MLF.Frontend.Syntax (NormSurfaceExpr)
@@ -195,9 +193,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
               case preserveRetainedChildAuthoritativeResult termClosed0 of
                 Just termAdjusted -> termAdjusted
                 Nothing -> termClosed0
-         in case preserveC1AuthoritativeRecursiveAlias preservedTerm of
-              Just termAdjusted -> termAdjusted
-              Nothing -> preservedTerm
+         in preservedTerm
   let checkedAuthoritative = do
         tyChecked <- fromTypeCheckError (typeCheck termClosed)
         pure (termClosed, tyChecked)
@@ -257,53 +253,3 @@ prepareTraceCopyArtifacts baseConstraint presolutionView redirects canonNode edg
           tcaInstCopyNodes = instCopyNodes,
           tcaInstCopyMapFull = instCopyMapFull
         }
-
-preserveC1AuthoritativeRecursiveAlias :: ElabTerm -> Maybe ElabTerm
-preserveC1AuthoritativeRecursiveAlias = go emptyEnv
-  where
-    go env term = case term of
-      ELet v sch rhs body
-        | isTrivialRetainedChildBody v body ->
-            case typeCheckWithEnv env rhs of
-              Right rhsTy
-                | shouldPreserveC1RecursiveAlias sch rhsTy ->
-                    Just rhs
-              _ -> descend env v sch rhs body
-        | otherwise -> descend env v sch rhs body
-      _ -> Nothing
-
-    descend env v sch rhs body =
-      let env' = env {termEnv = Map.insert v (schemeToType sch) (termEnv env)}
-       in fmap (ELet v sch rhs) (go env' body)
-
-shouldPreserveC1RecursiveAlias :: ElabScheme -> ElabType -> Bool
-shouldPreserveC1RecursiveAlias sch rhsTy =
-  hasRecursiveComponent rhsTy
-    && Set.null (freeTypeVarsType rhsTy)
-    && isBlockedC1AliasScheme sch
-
-isBlockedC1AliasScheme :: ElabScheme -> Bool
-isBlockedC1AliasScheme sch = case schemeToType sch of
-  TForall v Nothing body -> body == TArrow (TVar v) (TVar v)
-  _ -> False
-
-isTrivialRetainedChildBody :: String -> ElabTerm -> Bool
-isTrivialRetainedChildBody v body = case body of
-  EVar bodyV -> bodyV == v
-  _ -> False
-
-hasRecursiveComponent :: ElabType -> Bool
-hasRecursiveComponent ty = case ty of
-  TMu _ _ -> True
-  TArrow dom cod -> hasRecursiveComponent dom || hasRecursiveComponent cod
-  TCon _ args -> any hasRecursiveComponent args
-  TForall _ mb body -> maybe False hasRecursiveBound mb || hasRecursiveComponent body
-  _ -> False
-  where
-    hasRecursiveBound bound = case bound of
-      TArrow dom cod -> hasRecursiveComponent dom || hasRecursiveComponent cod
-      TBase _ -> False
-      TCon _ args -> any hasRecursiveComponent args
-      TForall _ mb body -> maybe False hasRecursiveBound mb || hasRecursiveComponent body
-      TMu _ _ -> True
-      TBottom -> False
