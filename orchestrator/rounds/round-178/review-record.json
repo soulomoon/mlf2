@@ -1,0 +1,14 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-2",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "decision": "approved",
+  "evidence_summary": "The docs-only item-2 mechanism map distinguishes settled predecessor packets from still-missing general rules across all required semantic axes, names the current read-only code and test seams accurately, and keeps the inherited explicit-only / iso-recursive / non-equi-recursive / non-cyclic-graph / no-fallback boundary plus the repo-level readiness question explicitly unresolved."
+}
