@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-04-02-00-general-automatic-iso-recursive-current-architecture-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-00-general-automatic-iso-recursive-current-architecture-follow-on-roadmap/rev-001",
+  "roadmap_item_id": "item-1",
+  "decision": "approved",
+  "evidence_summary": "The docs-only item-1 freeze binds the predecessor authority chain, freezes `sameLaneDoubleAliasFrameClearBoundaryExpr` with an exact shared `PipelineTypeCheckError (TCLetTypeMismatch ...)` live read on both authoritative entrypoints, and keeps the item-2 writable slice fail-closed around `src/MLF/Elab/TermClosure.hs` plus focused packet tests."
+}
