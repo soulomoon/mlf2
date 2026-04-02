@@ -96,26 +96,27 @@
    iso-recursive / non-equi-recursive / non-cyclic-graph / no-fallback
    boundary plus the repo-level readiness question explicitly unresolved.
 
-3. [pending] Define fail-closed candidate generation, ambiguity rejection, and bounded termination discipline
+3. [done] Define fail-closed candidate generation, ambiguity rejection, and bounded termination discipline
    Item id: `item-3`
    Depends on: `item-1`, `item-2`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-2`
-   Completion notes: starting from the accepted item-2 mechanism map, produce
-   one docs-first artifact that defines fail-closed candidate generation,
-   ambiguity rejection, and bounded termination for the currently named route
-   arms only: the non-local `rootNonLocalSchemeAliasBaseLike` arm, the
-   same-lane `sameLaneLocalRetainedChildTarget` arm, and the retained-child
-   guards centered on `boundHasForallFrom`, `keepTargetFinal`, and `targetC`.
-   The artifact must state when those routes may introduce or preserve
-   recursive candidates, how competing anchors / owners / binder-side
-   placements are compared or rejected, and why representative `N1`, `N2`,
-   and `N6` pressure remains bounded without fallback, heuristic guessing,
-   cyclic search, multi-SCC handling, or equi-recursive equality. It may
-   include bounded pseudo-algorithm or harness planning, but it must keep
-   runtime semantics unchanged unless a later roadmap revision authorizes
-   code.
+   Completion notes: accepted `round-179` finalized this item through
+   `docs/plans/2026-04-03-general-automatic-iso-recursive-full-inference-fail-closed-candidate-generation-ambiguity-rejection-and-bounded-termination-discipline.md`
+   with authoritative review in
+   `orchestrator/rounds/round-179/review-record.json`. That docs-only
+   artifact froze fail-closed candidate generation to the currently named
+   route arms `rootNonLocalSchemeAliasBaseLike` and
+   `sameLaneLocalRetainedChildTarget` plus the retained-child guard cluster
+   centered on `boundHasForallFrom`, `keepTargetFinal`, and `targetC`;
+   rejected competing anchors / owners / binder-side placements under `N1`
+   and `N2` instead of ranking or guessing among them; explained why `N6`
+   stays bounded through a finite serial search over those named families and
+   guards only; and preserved the inherited explicit-only / iso-recursive /
+   non-equi-recursive / non-cyclic-graph / no-fallback boundary while
+   leaving runtime semantics unchanged and deferring reconstruction-visible
+   readiness, implementation, and repo-level decision work to later items.
 
 4. [pending] Define the reconstruction-visible readiness contract and authoritative evaluation surfaces
    Item id: `item-4`
@@ -124,8 +125,12 @@
    Parallel group: none
    Merge after: `item-3`
    Completion notes: starting from the accepted item-2 mechanism map and the
-   item-3 search contract, produce one docs-first artifact that states what it
-   means for inferred recursive structure to stay review-visible on
+   accepted item-3 fail-closed search contract for
+   `rootNonLocalSchemeAliasBaseLike`,
+   `sameLaneLocalRetainedChildTarget`, and the
+   `boundHasForallFrom` / `keepTargetFinal` / `targetC` guard cluster,
+   produce one docs-first artifact that states what it means for inferred
+   recursive structure to stay review-visible on
    `runPipelineElab`, `runPipelineElabChecked`, and the matching public
    pipeline facade, including when `TyMu` / `TMu` and `ERoll` / `EUnroll`
    continuity counts as sufficient evidence for positive `P6`. The artifact
