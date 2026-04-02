@@ -1,0 +1,34 @@
+# Review Snapshot (`round-181` / `item-5` / `attempt-1`)
+
+- Commands run:
+  - `python3 -m json.tool orchestrator/state.json >/dev/null`
+  - `roadmap_dir="$(jq -r '.roadmap_dir' orchestrator/state.json)" && test -f "$roadmap_dir/roadmap.md" && test -f "$roadmap_dir/retry-subloop.md" && test -f "$roadmap_dir/verification.md"`
+  - `roadmap_dir="$(jq -r '.roadmap_dir' orchestrator/state.json)" && rg -n 'Item id:|Depends on:|Parallel safe:|Parallel group:|Merge after:' "$roadmap_dir/roadmap.md"`
+  - `git diff --name-only`
+  - `rg -n 'preserveC1AuthoritativeRecursiveAlias|isBlockedC1AliasScheme' src/MLF/Elab/Run/Pipeline.hs test/PipelineSpec.hs`
+  - `python3 - <<'PY' ... C1_SHORTCUT_REMOVED ... PY`
+  - `git diff --check`
+  - `cabal test mlf2-test --builddir=dist-newstyle-round181-review-c1 --test-show-details=direct --test-options='--match "C1 authoritative-surface harness"'`
+  - `cabal test mlf2-test --builddir=dist-newstyle-round181-review-pipeline --test-show-details=direct --test-options='--match "keeps the selected non-local scheme-alias/base-like packet"'`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization (bounded prototype-only)"'`
+  - `cabal build all`
+  - `cabal test`
+- Pass or fail result:
+  - pass
+- Evidence summary:
+  - final diff stays inside the bounded item-5 C1 writable slice only
+  - packet-local C1 shortcut removal is enforced in `Run/Pipeline`
+  - focused C1 and ARI-C1 evidence stay green
+  - full repo gate passed cleanly
+- Implemented stage result:
+  - `pass`
+- Attempt verdict:
+  - `accepted`
+- Stage action:
+  - `finalize`
+- Retry reason:
+  - `none`
+- Fix hypothesis:
+  - `none`
+- Approve or reject decision:
+  - approve

@@ -1,0 +1,15 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-5",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "review_snapshot": "orchestrator/rounds/round-181/reviews/attempt-1.md",
+  "decision": "approved",
+  "evidence_summary": "Round 181 removes `preserveC1AuthoritativeRecursiveAlias` and `isBlockedC1AliasScheme` from `src/MLF/Elab/Run/Pipeline.hs`, keeps the exact C1 non-local scheme-alias/base-like packet recursive on `runPipelineElab` and `runPipelineElabChecked`, adds focused `test/PipelineSpec.hs` regression coverage for shortcut absence, records the bounded packet result in `orchestrator/rounds/round-181/implementation-notes.md`, and passes the focused C1 reruns plus `cabal build all && cabal test` (1307 examples, 0 failures) without widening beyond the authorized item-5 slice."
+}
