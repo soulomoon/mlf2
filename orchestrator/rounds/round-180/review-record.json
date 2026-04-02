@@ -1,0 +1,14 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-4",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "decision": "approved",
+  "evidence_summary": "The docs-only item-4 artifact names `runPipelineElab`, `runPipelineElabChecked`, and the matching internal/public pipeline facades as the authoritative current surfaces, requires reconstruction-visible `TyMu` to `TMu` plus `ERoll` / `EUnroll` continuity on those surfaces rather than solver-only success, binds representative `P2`-`P6` and `N1` / `N2` / `N6` corpus obligations concretely, and stays inside the inherited explicit-only / iso-recursive / non-equi-recursive / non-cyclic-graph / no-fallback boundary without any code, test, Cabal, roadmap, or controller-state changes in scope."
+}
