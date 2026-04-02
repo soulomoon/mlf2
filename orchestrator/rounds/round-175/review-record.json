@@ -1,0 +1,14 @@
+{
+  "roadmap_id": "2026-04-02-00-general-automatic-iso-recursive-current-architecture-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-00-general-automatic-iso-recursive-current-architecture-follow-on-roadmap/rev-001",
+  "roadmap_item_id": "item-3",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "decision": "approved",
+  "evidence_summary": "The docs-only item-3 settlement surface republishes the accepted round-174 narrow-success result for `sameLaneDoubleAliasFrameClearBoundaryExpr`, binds merged commit `0f44acd` to roadmap item-2 completion notes, and keeps the repo-impact read packet-bounded."
+}
