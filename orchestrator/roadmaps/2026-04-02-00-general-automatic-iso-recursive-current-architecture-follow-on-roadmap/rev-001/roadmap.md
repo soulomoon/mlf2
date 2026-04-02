@@ -62,22 +62,29 @@
    multi-SCC search, fallback widening, equi-recursive reasoning,
    second-interface work, or a repo-level readiness claim.
 
-2. [pending] Implement and validate one bounded current-architecture slice on the frozen representative-gap packet
+2. [done] Implement and validate one bounded current-architecture slice on the frozen representative-gap packet
    Item id: `item-2`
    Depends on: `item-1`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-1`
-   Completion notes: complete when an accepted round lands exactly one bounded
-   code-and-test or docs-only fail-closed slice inside the item-1 writable
-   boundary, refreshes focused verification honestly for the frozen packet, and
-   records one bounded result only for that packet:
-   `narrow success`,
-   `fail-closed`, or
-   `narrower current-architecture blocker`.
-   Any round touching `src/`, `src-public/`, `app/`, `test/`, or `mlf2.cabal`
-   must rerun `cabal build all && cabal test`. This item must not upgrade one
-   packet into broader family settlement or repo-level readiness.
+   Completion notes: accepted in `round-174` attempt `2`, merged as commit
+   `0f44acd` (`Implement bounded double-alias retained-child packet`).
+   The accepted round stayed inside the frozen item-1 writable slice only:
+   `src/MLF/Elab/TermClosure.hs`,
+   `test/PipelineSpec.hs`, and
+   `test/Research/SameLaneRetainedChildRepresentativeGapSpec.hs`.
+   It tightened `preserveRetainedChildAliasBoundary` so the current `hold`
+   boundary admits exactly one additional same-lane alias shell for the frozen
+   packet `sameLaneDoubleAliasFrameClearBoundaryExpr`, preserved the exact
+   packet-bounded focused tests, and landed one bounded result only:
+   `narrow success` on both `runPipelineElab` and
+   `runPipelineElabChecked`.
+   The round reran `cabal build all && cabal test` and passed with
+   `1306 examples, 0 failures`.
+   This remains one bounded packet implementation slice only and does not
+   settle broader `P3` / `P4` / `P6`, repo-level readiness, fallback widening,
+   cyclic search, equi-recursive reasoning, or any boundary revision.
 
 3. [pending] Publish one post-item-2 settlement surface and exact repo-impact read for the frozen representative-gap packet
    Item id: `item-3`
