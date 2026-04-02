@@ -14,22 +14,25 @@
 ## Summary
 
 - `review.md` is approved, `review-record.json` records attempt `2` as
-  `accepted` + `finalize`, and controller state now marks active `round-174`
-  `merge_ready: true`.
-- The approved diff stays inside the item-1 writable slice only:
+  `accepted` + `finalize`, and controller state marks active `round-174`
+  `merge_ready: true`, so the round is approved for merge on attempt 2.
+- Attempt 1 was rejected because the retained-child alias helper depth was too
+  broad at the current boundary.
+- Attempt 2 narrowed that behavior to exactly one extra same-lane alias shell
+  at the current `hold` boundary, which is enough for the frozen packet
+  `sameLaneDoubleAliasFrameClearBoundaryExpr` and does not authorize any
+  deeper alias chain.
+- The approved diff stays inside the frozen item-1 writable slice only:
   `src/MLF/Elab/TermClosure.hs`,
   `test/PipelineSpec.hs`, and
   `test/Research/SameLaneRetainedChildRepresentativeGapSpec.hs`, plus
   round-owned orchestrator artifacts.
-- The production correction tightens retained-child alias preservation to admit
-  exactly one additional same-lane alias shell at the current `hold` boundary,
-  which is enough for the frozen packet
-  `sameLaneDoubleAliasFrameClearBoundaryExpr` and no deeper alias chain.
 - The focused packet checks passed and `cabal build all && cabal test` passed
   with `1306 examples, 0 failures`, so the accepted item-2 result is one
-  bounded `narrow success` packet only.
-- The merge summary must stay bounded to this one implementation slice only. It
-  does not settle broader `P3` / `P4` / `P6`, repo-level readiness, fallback
+  bounded `narrow success` packet only for
+  `sameLaneDoubleAliasFrameClearBoundaryExpr`.
+- The merge summary must stay honest about one bounded packet only. It does
+  not settle broader `P3` / `P4` / `P6`, repo-level readiness, fallback
   widening, cyclic search, equi-recursive reasoning, or any implicit boundary
   revision.
 
@@ -44,11 +47,12 @@
 
 ## Follow-Up Notes
 
-- Carry the preserved roadmap identity above unchanged in post-merge bookkeeping for this round.
+- Carry the preserved roadmap identity above unchanged in post-merge
+  bookkeeping for this round.
 - Squash-merge only the bounded item-2 implementation slice and round-owned
   artifacts; do not include controller-owned `orchestrator/state.json`.
-- After squash merge, update the roadmap to mark item `2` done and keep later
-  items packet-bounded.
+- After squash merge, update the roadmap to mark item `2` done while keeping
+  later items packet-bounded.
 
 ## Merge Readiness
 
