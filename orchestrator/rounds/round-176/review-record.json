@@ -1,0 +1,14 @@
+{
+  "roadmap_id": "2026-04-02-00-general-automatic-iso-recursive-current-architecture-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-00-general-automatic-iso-recursive-current-architecture-follow-on-roadmap/rev-001",
+  "roadmap_item_id": "item-4",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "decision": "approved",
+  "evidence_summary": "The docs-only item-4 artifact consumes the accepted item-3 settlement for `sameLaneDoubleAliasFrameClearBoundaryExpr`, records the authoritative outcome token `continue-bounded`, records the immediate handoff token `open one bounded current-architecture family`, and keeps broader readiness and boundary-revision questions unresolved."
+}
