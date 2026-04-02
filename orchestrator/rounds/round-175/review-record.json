@@ -10,5 +10,5 @@
   "retry_reason": "none",
   "fix_hypothesis": "none",
   "decision": "approved",
-  "evidence_summary": "The round republishes the accepted round-174 `sameLaneDoubleAliasFrameClearBoundaryExpr` result as one bounded `narrow success`, binds the exact focused/full provenance to accepted sources only, and keeps the repo-impact read non-widening."
+  "evidence_summary": "The docs-only item-3 settlement surface republishes the accepted round-174 narrow-success result for `sameLaneDoubleAliasFrameClearBoundaryExpr`, binds merged commit `0f44acd` to roadmap item-2 completion notes, and keeps the repo-impact read packet-bounded."
 }
