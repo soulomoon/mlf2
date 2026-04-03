@@ -65,7 +65,7 @@ preserveRetainedChildAuthoritativeResult = go emptyEnv
 
     preserveRetainedChildAliasBoundary env v sch rhs body
         | isAliasFrameRhs rhs
-        , hasRetainedChildAliasBoundary v body 1 =
+        , hasRetainedChildAliasBoundary v body 2 =
             case typeCheckWithEnv env (ELet v sch rhs body) of
                 Left (TCLetTypeMismatch _ _) ->
                     case typeCheckWithEnv env rhs of

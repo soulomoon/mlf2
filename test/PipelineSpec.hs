@@ -2157,8 +2157,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
       it "sameLaneDoubleAliasFrameClearBoundaryExpr double-alias clear-boundary packet preserves recursive output on both authoritative entrypoints" $ do
         termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
-        termClosureSrc `shouldSatisfy` isInfixOf "hasRetainedChildAliasBoundary v body 1 ="
-        termClosureSrc `shouldSatisfy` (not . isInfixOf "hasRetainedChildAliasBoundary v body 2 =")
         termClosureSrc `shouldSatisfy` isInfixOf "remainingAliasFrames > 0"
         termClosureSrc `shouldSatisfy` isInfixOf "&& isAliasFrameRhs childRhs"
         termClosureSrc
@@ -2221,12 +2219,59 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneTripleAliasFrameClearBoundaryExpr keeps alias-shell preservation exact at depth 2" $ do
+      it "sameLaneQuadrupleAliasFrameClearBoundaryExpr quadruple-alias clear-boundary packet preserves recursive output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr =
+              ELet
+                "k"
+                (ELamAnn "x" recursiveAnn (EVar "x"))
+                ( ELet
+                    "hold"
+                    (EVar "k")
+                    ( ELet
+                        "keep"
+                        (EVar "hold")
+                        ( ELet
+                            "more"
+                            (EVar "keep")
+                            ( ELet
+                                "deep"
+                                (EVar "more")
+                                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "deep")) (EVar "u"))
+                            )
+                        )
+                    )
+                )
+        (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
+        typeCheck checkedTerm `shouldBe` Right checkedTy
+        uncheckedTy `shouldBe` checkedTy
+        countLeadingUnboundedForalls uncheckedTy `shouldBe` 2
+        matchesRecursiveArrow
+          (stripLeadingUnboundedForalls uncheckedTy)
+          expectedSameLaneAliasFrameClearBoundaryArrow
+          `shouldBe` True
+
+      it "sameLaneTripleAliasFrameClearBoundaryExpr keeps alias-shell preservation within the bounded entry budget" $ do
         termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
-        termClosureSrc `shouldSatisfy` isInfixOf "hasRetainedChildAliasBoundary v body 1 ="
+        termClosureSrc `shouldSatisfy` isInfixOf "hasRetainedChildAliasBoundary v body 2 ="
         termClosureSrc `shouldSatisfy` isInfixOf "remainingAliasFrames == 0"
         termClosureSrc `shouldSatisfy` isInfixOf "&& hasRetainedChildClearBoundary child childBody ->"
-        termClosureSrc `shouldSatisfy` (not . isInfixOf "hasRetainedChildAliasBoundary v body 2 =")
+        termClosureSrc `shouldSatisfy` isInfixOf "remainingAliasFrames > 0"
+        termClosureSrc `shouldSatisfy` isInfixOf "&& isAliasFrameRhs childRhs"
+        termClosureSrc
+          `shouldSatisfy` isInfixOf "&& hasRetainedChildAliasBoundary child childBody (remainingAliasFrames - 1) ->"
+        termClosureSrc `shouldSatisfy` isInfixOf "isClearBoundaryRetainedChildRhs source childRhs"
+        termClosureSrc `shouldSatisfy` isInfixOf "&& isForallIdentityScheme childSch"
+        termClosureSrc `shouldSatisfy` isInfixOf "&& isTrivialRetainedChildBody child childBody ->"
+
+      it "sameLaneQuadrupleAliasFrameClearBoundaryExpr keeps alias-shell preservation exact at depth 3" $ do
+        termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
+        termClosureSrc `shouldSatisfy` isInfixOf "hasRetainedChildAliasBoundary v body 2 ="
+        termClosureSrc `shouldSatisfy` isInfixOf "remainingAliasFrames == 0"
+        termClosureSrc `shouldSatisfy` isInfixOf "&& hasRetainedChildClearBoundary child childBody ->"
+        termClosureSrc `shouldSatisfy` (not . isInfixOf "hasRetainedChildAliasBoundary v body 3 =")
         termClosureSrc `shouldSatisfy` isInfixOf "remainingAliasFrames > 0"
         termClosureSrc `shouldSatisfy` isInfixOf "&& isAliasFrameRhs childRhs"
         termClosureSrc

@@ -1,0 +1,15 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-5",
+  "attempt": 2,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "none",
+  "review_snapshot": "orchestrator/rounds/round-185/reviews/attempt-2.md",
+  "decision": "approved",
+  "evidence_summary": "Retry attempt 2 keeps the frozen TermClosure and research-spec baselines hash-locked, restores the double-alias predecessor block in test/PipelineSpec.hs to read-only evidence while leaving the shared v body 2 narration in the triple guard and the exact depth-3 boundary read in the selected quadruple guard, and passes the focused alias/double/triple/quadruple reruns plus cabal build all && cabal test with 1315 examples and 0 failures."
+}
