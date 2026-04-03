@@ -184,7 +184,13 @@
    authoritative entrypoints only via the existing bounded one-extra-alias-shell
    `TermClosure` rule, and the current round needed only exact
    authoritative-output / mechanism-guard test tightening rather than a new
-   production edit. Item-5 remains pending because these are still three
+   production edit. Accepted `round-184` settles one further adjacent
+   same-lane packet only:
+   `sameLaneTripleAliasFrameClearBoundaryExpr` remains honest on
+   `runPipelineElab` and `runPipelineElabChecked` only via an exact depth-2 /
+   two-extra-alias-shell `TermClosure` preservation rule on the authoritative
+   entrypoints, with the retained-child route / guard cluster and pipeline
+   facades unchanged. Item-5 remains pending because these are still four
    representative packets only; later bounded positive-family slices and the
    required aggregate artifact remain outstanding.
 

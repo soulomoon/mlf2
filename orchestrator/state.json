@@ -4,43 +4,17 @@
   "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
   "roadmap_revision": "rev-001",
   "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
-  "stage": "implement",
-  "controller_stage": "dispatch-rounds",
+  "stage": "update-roadmap",
+  "controller_stage": "update-roadmap",
   "max_parallel_rounds": 1,
-  "active_round_id": "round-184",
-  "active_rounds": [
-    {
-      "round_id": "round-184",
-      "round_dir": "orchestrator/rounds/round-184",
-      "stage": "implement",
-      "roadmap_item_id": "item-5",
-      "current_task": "item-5",
-      "branch": "orchestrator/round-184-bounded-positive-family-slice",
-      "worktree_path": "/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/worktrees/round-184",
-      "round_artifacts": {
-        "selection": "orchestrator/rounds/round-184/selection.md",
-        "plan": "orchestrator/rounds/round-184/plan.md"
-      },
-      "retry": null,
-      "worker_mode": "none",
-      "merge_after_item_ids": [
-        "item-4"
-      ]
-    }
-  ],
+  "active_round_id": null,
+  "active_rounds": [],
   "pending_merge_rounds": [],
-  "current_task": "item-5",
-  "branch": "orchestrator/round-184-bounded-positive-family-slice",
-  "worktree_path": "/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/worktrees/round-184",
-  "active_round_dir": "orchestrator/rounds/round-184",
-  "round_artifacts": {
-    "selection": "orchestrator/rounds/round-184/selection.md",
-    "plan": "orchestrator/rounds/round-184/plan.md"
-  },
-  "last_completed_round": "round-183",
-  "resume_error": "round-184 implement is blocked: builtin implementer delegation produced partial scoped edits in /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/worktrees/round-184 (src/MLF/Elab/TermClosure.hs, test/PipelineSpec.hs, test/Research/SameLaneRetainedChildRepresentativeGapSpec.hs) but no observable orchestrator/rounds/round-184/implementation-notes.md or controller-usable completion signal after repeated waits; attempted recovery-investigator delegation also produced no controller-usable diagnosis after repeated waits.",
-  "resume_errors": {
-    "round-184": "builtin implementer produced partial scoped edits in src/MLF/Elab/TermClosure.hs, test/PipelineSpec.hs, and test/Research/SameLaneRetainedChildRepresentativeGapSpec.hs but no observable implementation-notes.md or controller-usable completion signal after repeated waits; attempted recovery-investigator delegation also produced no controller-usable diagnosis"
-  },
+  "current_task": null,
+  "branch": null,
+  "worktree_path": null,
+  "active_round_dir": null,
+  "round_artifacts": {},
+  "last_completed_round": "round-184",
   "retry": null
 }
