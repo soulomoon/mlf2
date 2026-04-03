@@ -4,7 +4,7 @@
   "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
   "roadmap_revision": "rev-001",
   "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
-  "stage": "plan",
+  "stage": "implement",
   "controller_stage": "dispatch-rounds",
   "max_parallel_rounds": 1,
   "active_round_id": "round-184",
@@ -12,13 +12,14 @@
     {
       "round_id": "round-184",
       "round_dir": "orchestrator/rounds/round-184",
-      "stage": "plan",
+      "stage": "implement",
       "roadmap_item_id": "item-5",
       "current_task": "item-5",
       "branch": "orchestrator/round-184-bounded-positive-family-slice",
       "worktree_path": "/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/worktrees/round-184",
       "round_artifacts": {
-        "selection": "orchestrator/rounds/round-184/selection.md"
+        "selection": "orchestrator/rounds/round-184/selection.md",
+        "plan": "orchestrator/rounds/round-184/plan.md"
       },
       "retry": null,
       "worker_mode": "none",
@@ -33,12 +34,13 @@
   "worktree_path": "/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/worktrees/round-184",
   "active_round_dir": "orchestrator/rounds/round-184",
   "round_artifacts": {
-    "selection": "orchestrator/rounds/round-184/selection.md"
+    "selection": "orchestrator/rounds/round-184/selection.md",
+    "plan": "orchestrator/rounds/round-184/plan.md"
   },
   "last_completed_round": "round-183",
-  "resume_error": "round-184 plan is blocked: builtin planner delegation produced no observable orchestrator/rounds/round-184/plan.md in /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/worktrees/round-184 after repeated waits and queued controller nudges; attempted recovery-investigator delegation also produced no controller-usable diagnosis after repeated waits.",
+  "resume_error": "round-184 implement is blocked: builtin implementer delegation produced partial scoped edits in /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/worktrees/round-184 (src/MLF/Elab/TermClosure.hs, test/PipelineSpec.hs, test/Research/SameLaneRetainedChildRepresentativeGapSpec.hs) but no observable orchestrator/rounds/round-184/implementation-notes.md or controller-usable completion signal after repeated waits; attempted recovery-investigator delegation also produced no controller-usable diagnosis after repeated waits.",
   "resume_errors": {
-    "round-184": "builtin planner produced no observable orchestrator/rounds/round-184/plan.md after repeated waits and queued controller nudges; attempted recovery-investigator delegation also produced no controller-usable diagnosis"
+    "round-184": "builtin implementer produced partial scoped edits in src/MLF/Elab/TermClosure.hs, test/PipelineSpec.hs, and test/Research/SameLaneRetainedChildRepresentativeGapSpec.hs but no observable implementation-notes.md or controller-usable completion signal after repeated waits; attempted recovery-investigator delegation also produced no controller-usable diagnosis"
   },
   "retry": null
 }
