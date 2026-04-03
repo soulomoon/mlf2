@@ -197,11 +197,20 @@
    shared `src/MLF/Elab/TermClosure.hs` retained-child alias-boundary entry
    budget from `1` to `2`, while keeping `hasRetainedChildClearBoundary` as
    the terminal bounded rule and leaving the retained-child route / guard
-   cluster, pipeline facades, and fallback seams unchanged. Item-5 remains
-   pending because these are still five representative packets only; the next
-   unfinished work should stay concrete by testing exactly one more adjacent
-   same-lane retained-child packet beyond the accepted quadruple case, and
-   the required aggregate artifact still remains outstanding.
+   cluster, pipeline facades, and fallback seams unchanged. Accepted
+   `round-186` settles one further adjacent same-lane packet only:
+   `sameLaneQuintupleAliasFrameClearBoundaryExpr` remains honest on
+   `runPipelineElab` and `runPipelineElabChecked` only via keeping the outer
+   `src/MLF/Elab/TermClosure.hs` retained-child alias-boundary entry budget
+   fixed at `2` while adding a bounded one-step alias budget inside the
+   terminal clear-boundary helper, with the retained-child route / guard
+   cluster, pipeline facades, and fallback seams unchanged. Fresh sextuple
+   probes still fail closed on both authoritative entrypoints before any
+   further widening. Item-5 remains pending because these are still six
+   representative packets only; the next unfinished work should stay concrete
+   by testing exactly one more adjacent same-lane retained-child packet
+   beyond the accepted quintuple case, and the required aggregate artifact
+   still remains outstanding.
 
 6. [pending] Run the fail-closed negative-family and termination-pressure campaign
    Item id: `item-6`
