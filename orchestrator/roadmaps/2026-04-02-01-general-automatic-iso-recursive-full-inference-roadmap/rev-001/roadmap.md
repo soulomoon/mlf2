@@ -190,9 +190,18 @@
    `runPipelineElab` and `runPipelineElabChecked` only via an exact depth-2 /
    two-extra-alias-shell `TermClosure` preservation rule on the authoritative
    entrypoints, with the retained-child route / guard cluster and pipeline
-   facades unchanged. Item-5 remains pending because these are still four
-   representative packets only; later bounded positive-family slices and the
-   required aggregate artifact remain outstanding.
+   facades unchanged. Accepted `round-185` settles one further adjacent
+   same-lane packet only:
+   `sameLaneQuadrupleAliasFrameClearBoundaryExpr` remains honest on
+   `runPipelineElab` and `runPipelineElabChecked` only via extending the
+   shared `src/MLF/Elab/TermClosure.hs` retained-child alias-boundary entry
+   budget from `1` to `2`, while keeping `hasRetainedChildClearBoundary` as
+   the terminal bounded rule and leaving the retained-child route / guard
+   cluster, pipeline facades, and fallback seams unchanged. Item-5 remains
+   pending because these are still five representative packets only; the next
+   unfinished work should stay concrete by testing exactly one more adjacent
+   same-lane retained-child packet beyond the accepted quadruple case, and
+   the required aggregate artifact still remains outstanding.
 
 6. [pending] Run the fail-closed negative-family and termination-pressure campaign
    Item id: `item-6`
