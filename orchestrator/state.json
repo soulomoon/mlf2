@@ -4,17 +4,41 @@
   "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
   "roadmap_revision": "rev-001",
   "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
-  "stage": "update-roadmap",
-  "controller_stage": "update-roadmap",
+  "stage": "plan",
+  "controller_stage": "dispatch-rounds",
   "max_parallel_rounds": 1,
-  "active_round_id": null,
-  "active_rounds": [],
+  "active_round_id": "round-185",
+  "active_rounds": [
+    {
+      "round_id": "round-185",
+      "round_dir": "orchestrator/rounds/round-185",
+      "stage": "plan",
+      "roadmap_item_id": "item-5",
+      "current_task": "item-5",
+      "branch": "orchestrator/round-185-bounded-positive-family-slice",
+      "worktree_path": "/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/worktrees/round-185",
+      "round_artifacts": {
+        "selection": "orchestrator/rounds/round-185/selection.md"
+      },
+      "retry": null,
+      "worker_mode": "none",
+      "merge_after_item_ids": [
+        "item-4"
+      ]
+    }
+  ],
   "pending_merge_rounds": [],
-  "current_task": null,
-  "branch": null,
-  "worktree_path": null,
-  "active_round_dir": null,
-  "round_artifacts": {},
+  "current_task": "item-5",
+  "branch": "orchestrator/round-185-bounded-positive-family-slice",
+  "worktree_path": "/Users/ares/.codex/worktrees/d432/mlf4/orchestrator/worktrees/round-185",
+  "active_round_dir": "orchestrator/rounds/round-185",
+  "round_artifacts": {
+    "selection": "orchestrator/rounds/round-185/selection.md"
+  },
   "last_completed_round": "round-184",
+  "resume_error": "round-185 plan is blocked: builtin planner delegation produced no observable orchestrator/rounds/round-185/plan.md in /Users/ares/.codex/worktrees/d432/mlf4/orchestrator/worktrees/round-185 after repeated waits; attempted recovery-investigator delegation also produced no controller-usable diagnosis after repeated waits.",
+  "resume_errors": {
+    "round-185": "builtin planner produced no observable plan.md after repeated waits; attempted recovery-investigator delegation also produced no controller-usable diagnosis"
+  },
   "retry": null
 }
