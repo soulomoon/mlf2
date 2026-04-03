@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-5",
+  "decision": "approved",
+  "evidence_summary": "Round-184 stays inside the authorized triple-alias item-5 slice, extends only the bounded TermClosure alias-shell seam, passes focused alias/double-alias/triple-alias checks, and passes cabal build all && cabal test with 1311 examples and 0 failures."
+}
