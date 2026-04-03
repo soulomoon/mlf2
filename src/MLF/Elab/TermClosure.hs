@@ -96,11 +96,20 @@ preserveRetainedChildAuthoritativeResult = go emptyEnv
         _ -> False
 
     hasRetainedChildClearBoundary :: String -> ElabTerm -> Bool
-    hasRetainedChildClearBoundary source term = case term of
+    hasRetainedChildClearBoundary source term =
+        hasRetainedChildClearBoundaryWithAliasBudget source term 1
+
+    hasRetainedChildClearBoundaryWithAliasBudget :: String -> ElabTerm -> Int -> Bool
+    hasRetainedChildClearBoundaryWithAliasBudget source term remainingAliasFrames = case term of
         ELet child childSch childRhs childBody
             | isClearBoundaryRetainedChildRhs source childRhs
                 && isForallIdentityScheme childSch
                 && isTrivialRetainedChildBody child childBody ->
+                    True
+            | remainingAliasFrames > 0
+                && usesTermVar source childRhs
+                && isAliasFrameRhs childRhs
+                && hasRetainedChildClearBoundaryWithAliasBudget child childBody (remainingAliasFrames - 1) ->
                     True
         _ -> False
 

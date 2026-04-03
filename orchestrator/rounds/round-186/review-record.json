@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-5",
+  "decision": "approved",
+  "evidence_summary": "Round 186 stayed inside the exact sameLaneQuintupleAliasFrameClearBoundaryExpr slice: only TermClosure plus matching tests changed; quintuple and same-lane predecessor focused checks passed; a sextuple probe still fails closed; cabal build all && cabal test passed with 1319 examples and 0 failures."
+}
