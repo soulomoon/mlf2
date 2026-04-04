@@ -97,6 +97,16 @@ spec =
                 "checked"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneOctupleAliasFrameClearBoundaryExpr))
 
+        it "sameLaneNonupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
+            expectExactRetainedChildAuthoritativeOutput
+                "unchecked"
+                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneNonupleAliasFrameClearBoundaryExpr))
+
+        it "sameLaneNonupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElabChecked" $
+            expectExactRetainedChildAuthoritativeOutput
+                "checked"
+                (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneNonupleAliasFrameClearBoundaryExpr))
+
 expectExactRetainedChildAuthoritativeOutput
     :: Show err
     => String
@@ -227,7 +237,21 @@ sameLaneOctupleAliasFrameClearBoundaryExpr =
                             (ELet "leaf" (EVar "tail")
                                 (ELet "tip" (EVar "leaf")
                                     (ELet "bud" (EVar "tip")
-                                        (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "bud")) (EVar "u"))))))))))
+                                    (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "bud")) (EVar "u"))))))))))
+
+sameLaneNonupleAliasFrameClearBoundaryExpr :: SurfaceExpr
+sameLaneNonupleAliasFrameClearBoundaryExpr =
+    ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+        (ELet "hold" (EVar "k")
+            (ELet "keep" (EVar "hold")
+                (ELet "more" (EVar "keep")
+                    (ELet "deep" (EVar "more")
+                        (ELet "tail" (EVar "deep")
+                            (ELet "leaf" (EVar "tail")
+                                (ELet "tip" (EVar "leaf")
+                                    (ELet "bud" (EVar "tip")
+                                        (ELet "seed" (EVar "bud")
+                                            (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "seed")) (EVar "u")))))))))))
 
 recursiveAnn :: SrcType
 recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
