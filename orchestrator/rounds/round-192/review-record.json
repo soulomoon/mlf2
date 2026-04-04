@@ -1,0 +1,15 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-6",
+  "attempt": 1,
+  "attempt_verdict": "accepted",
+  "stage_result": "pass",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "The item-6 aggregate artifact is already lawful as written: it stays docs-only, classifies only representative N1/N2/N6 rows from the focused authoritative evidence, and keeps non-cyclic-graph, item-7, and repo-level readiness unresolved.",
+  "review_snapshot": "orchestrator/rounds/round-192/reviews/attempt-1.md",
+  "decision": "approved",
+  "evidence_summary": "Approved as a docs-only item-6 aggregate only: focused P5 clear-boundary and PipelineSpec negative-pressure reruns all pass; the live source still exposes the frozen rootNonLocalSchemeAliasBaseLike / sameLaneLocalRetainedChildTarget / boundHasForallFrom / keepTargetFinal / targetC route-guard cluster; the artifact classifies N1, N2, and N6 as fail-closed rejection from those focused surfaces only; and it keeps non-cyclic-graph, item-7, and repo-level readiness unresolved."
+}
