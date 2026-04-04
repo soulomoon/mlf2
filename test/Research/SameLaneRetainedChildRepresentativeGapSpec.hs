@@ -67,6 +67,16 @@ spec =
                 "checked"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneQuintupleAliasFrameClearBoundaryExpr))
 
+        it "sameLaneSextupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
+            expectExactRetainedChildAuthoritativeOutput
+                "unchecked"
+                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr))
+
+        it "sameLaneSextupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElabChecked" $
+            expectExactRetainedChildAuthoritativeOutput
+                "checked"
+                (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr))
+
 expectExactRetainedChildAuthoritativeOutput
     :: Show err
     => String
@@ -162,6 +172,17 @@ sameLaneQuintupleAliasFrameClearBoundaryExpr =
                     (ELet "deep" (EVar "more")
                         (ELet "tail" (EVar "deep")
                             (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "tail")) (EVar "u")))))))
+
+sameLaneSextupleAliasFrameClearBoundaryExpr :: SurfaceExpr
+sameLaneSextupleAliasFrameClearBoundaryExpr =
+    ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+        (ELet "hold" (EVar "k")
+            (ELet "keep" (EVar "hold")
+                (ELet "more" (EVar "keep")
+                    (ELet "deep" (EVar "more")
+                        (ELet "tail" (EVar "deep")
+                            (ELet "leaf" (EVar "tail")
+                                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "leaf")) (EVar "u"))))))))
 
 recursiveAnn :: SrcType
 recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
