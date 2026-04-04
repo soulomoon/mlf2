@@ -206,10 +206,20 @@
    terminal clear-boundary helper, with the retained-child route / guard
    cluster, pipeline facades, and fallback seams unchanged. Fresh sextuple
    probes still fail closed on both authoritative entrypoints before any
-   further widening. Item-5 remains pending because these are still six
+   further widening. Accepted `round-187` settles one further adjacent
+   same-lane packet only:
+   `sameLaneSextupleAliasFrameClearBoundaryExpr` remains honest on
+   `runPipelineElab` and `runPipelineElabChecked` only via raising the
+   terminal `src/MLF/Elab/TermClosure.hs`
+   `hasRetainedChildClearBoundaryWithAliasBudget source term` entry budget
+   from `1` to `2` while keeping the outer
+   `hasRetainedChildAliasBoundary v body 2 =` seam fixed, with the
+   retained-child route / guard cluster, pipeline facades, and fallback seams
+   unchanged. Fresh septuple probes still fail closed on both authoritative
+   entrypoints. Item-5 remains pending because these are still seven
    representative packets only; the next unfinished work should stay concrete
    by testing exactly one more adjacent same-lane retained-child packet
-   beyond the accepted quintuple case, and the required aggregate artifact
+   beyond the accepted sextuple case, and the required aggregate artifact
    still remains outstanding.
 
 6. [pending] Run the fail-closed negative-family and termination-pressure campaign
