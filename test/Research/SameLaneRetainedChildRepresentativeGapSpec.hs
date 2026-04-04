@@ -87,6 +87,16 @@ spec =
                 "checked"
                 (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneSeptupleAliasFrameClearBoundaryExpr))
 
+        it "sameLaneOctupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElab" $
+            expectExactRetainedChildAuthoritativeOutput
+                "unchecked"
+                (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneOctupleAliasFrameClearBoundaryExpr))
+
+        it "sameLaneOctupleAliasFrameClearBoundaryExpr preserves recursive output on runPipelineElabChecked" $
+            expectExactRetainedChildAuthoritativeOutput
+                "checked"
+                (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneOctupleAliasFrameClearBoundaryExpr))
+
 expectExactRetainedChildAuthoritativeOutput
     :: Show err
     => String
@@ -205,6 +215,19 @@ sameLaneSeptupleAliasFrameClearBoundaryExpr =
                             (ELet "leaf" (EVar "tail")
                                 (ELet "tip" (EVar "leaf")
                                     (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "tip")) (EVar "u")))))))))
+
+sameLaneOctupleAliasFrameClearBoundaryExpr :: SurfaceExpr
+sameLaneOctupleAliasFrameClearBoundaryExpr =
+    ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+        (ELet "hold" (EVar "k")
+            (ELet "keep" (EVar "hold")
+                (ELet "more" (EVar "keep")
+                    (ELet "deep" (EVar "more")
+                        (ELet "tail" (EVar "deep")
+                            (ELet "leaf" (EVar "tail")
+                                (ELet "tip" (EVar "leaf")
+                                    (ELet "bud" (EVar "tip")
+                                        (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "bud")) (EVar "u"))))))))))
 
 recursiveAnn :: SrcType
 recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
