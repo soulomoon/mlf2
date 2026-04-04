@@ -224,10 +224,19 @@
    `hasRetainedChildAliasBoundary v body 2 =` seam fixed, with the
    retained-child route / guard cluster, pipeline facades, and fallback seams
    unchanged. Fresh octuple probes still fail closed on both authoritative
-   entrypoints. Item-5 remains pending because these are still eight
+   entrypoints. Accepted `round-189` settles one further adjacent same-lane
+   packet only: `sameLaneOctupleAliasFrameClearBoundaryExpr` remains honest
+   on `runPipelineElab` and `runPipelineElabChecked` only via raising the
+   terminal `src/MLF/Elab/TermClosure.hs`
+   `hasRetainedChildClearBoundaryWithAliasBudget source term` entry budget
+   from `3` to `4` while keeping the outer
+   `hasRetainedChildAliasBoundary v body 2 =` seam fixed, with the
+   retained-child route / guard cluster, pipeline facades, and fallback seams
+   unchanged. Fresh nonuple probes still fail closed on both authoritative
+   entrypoints. Item-5 remains pending because these are still nine
    representative packets only; the next unfinished work should stay concrete
    by testing exactly one more adjacent same-lane retained-child packet
-   beyond the accepted septuple case, and the required aggregate artifact
+   beyond the accepted octuple case, and the required aggregate artifact
    still remains outstanding.
 
 6. [pending] Run the fail-closed negative-family and termination-pressure campaign
