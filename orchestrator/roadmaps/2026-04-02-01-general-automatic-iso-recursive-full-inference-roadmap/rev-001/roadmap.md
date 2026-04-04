@@ -143,29 +143,25 @@
    / non-cyclic-graph / no-fallback boundary while leaving implementation,
    aggregate evidence, and the repo-level readiness decision to later items.
 
-5. [pending] Run the bounded positive-family implementation and evidence campaign
+5. [done] Run the bounded positive-family implementation and evidence campaign
    Item id: `item-5`
    Depends on: `item-1`, `item-2`, `item-3`, `item-4`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-4`
-   Completion notes: execute the minimum bounded implementation and verification
-   rounds needed to push the unresolved positive families toward an honest
-   current-architecture answer. Start with one bounded slice at a time on the
-   item-4 authoritative surfaces `runPipelineElab`,
-   `runPipelineElabChecked`, `src/MLF/Elab/Pipeline.hs`, and
-   `src-public/MLF/Pipeline.hs`, reusing the representative positive corpus
-   anchors `test/Research/C1AuthoritativeSurfaceSpec.hs`,
-   `test/Research/SameLaneRetainedChildRepresentativeGapSpec.hs`, the
-   positive-control row in `test/Research/P5ClearBoundarySpec.hs`, and
-   `test/PipelineSpec.hs` while keeping the item-3-admitted route families
-   and guard cluster unchanged. The campaign must target representative
-   `P2`-`P6` cases one bounded slice at a time, land only the minimum
-   code/test changes justified by the frozen contracts, and end in one
-   aggregate artifact that states which positive families now have credible
-   general support, which still reduce to packet-specific folklore, and which
-   remain current-architecture blockers. Accepted `round-181` settles the
-   first bounded `P2` slice only: on the exact `C1` non-local
+   Completion notes: accepted `round-191` finalized this item through
+   `docs/plans/2026-04-05-general-automatic-iso-recursive-full-inference-positive-family-aggregate-classification.md`
+   with authoritative review in
+   `orchestrator/rounds/round-191/review-record.json`. That docs-only
+   aggregate artifact closed the bounded positive-family campaign on the
+   item-4 authoritative surfaces and classified `P2` as
+   `packet-specific folklore`, `P3` / `P4` / `P6` as
+   `credible general support`, and `P5` as
+   `current-architecture blockers` from the accepted `C1` packet, the
+   alias-through-nonuple same-lane chain, and the decuple fail-closed
+   frontier while keeping `non-cyclic-graph`, item `6`, and repo-level
+   readiness unresolved. Accepted `round-181` settled the first bounded `P2`
+   slice only: on the exact `C1` non-local
    scheme-alias/base-like packet from
    `test/Research/C1AuthoritativeSurfaceSpec.hs` and `test/PipelineSpec.hs`,
    removing `preserveC1AuthoritativeRecursiveAlias` /
@@ -173,9 +169,10 @@
    fallback `baseTarget -> baseC` lane honestly non-recursive while
    `runPipelineElab` and `runPipelineElabChecked` remain recursively
    reconstruction-visible, so that packet no longer depends on a packet-local
-   `Run/Pipeline` rescue. Item-5 remains pending because this is still one
-   representative `P2` packet only. Accepted `round-182` settles one bounded
-   same-lane packet only: `sameLaneAliasFrameClearBoundaryExpr` remains honest
+   `Run/Pipeline` rescue. At that stage the campaign still lacked
+   positive-family closure because this was one representative `P2` packet
+   only. Accepted `round-182` settled one bounded same-lane packet only:
+   `sameLaneAliasFrameClearBoundaryExpr` remains honest
    on `runPipelineElab` and `runPipelineElabChecked` only via a narrowed
    shared `src/MLF/Elab/TermClosure.hs` clear-boundary retained-child rule,
    with the item-3 route / guard cluster and pipeline facades unchanged.
@@ -242,13 +239,10 @@
    `hasRetainedChildAliasBoundary v body 2 =` seam fixed, with the
    retained-child route / guard cluster, pipeline facades, and fallback seams
    unchanged. Fresh decuple probes still fail closed on both authoritative
-   entrypoints. Item-5 remains pending because these are still ten
-   representative packets only, not a general positive-family closure; the
-   next unfinished work should now stay concrete by producing the required
-   aggregate item-5 artifact from the accepted `C1` packet, the
-   alias-through-nonuple same-lane chain, and the fresh decuple fail-closed
-   frontier instead of extending the adjacent same-lane packet ladder by one
-   more step.
+   entrypoints. Those accepted bounded packets remained below general
+   positive-family closure until `round-191` closed over them with the
+   required aggregate artifact instead of extending the adjacent same-lane
+   packet ladder by one more step.
 
 6. [pending] Run the fail-closed negative-family and termination-pressure campaign
    Item id: `item-6`
@@ -256,7 +250,9 @@
    Parallel safe: no
    Parallel group: none
    Merge after: `item-5`
-   Completion notes: execute the minimum bounded evidence campaign needed to
+   Completion notes: now that accepted `round-191` closed item `5` with the
+   bounded positive-family aggregate classification, this is the next concrete
+   unfinished work. Execute the minimum bounded evidence campaign needed to
    validate ambiguity rejection, soundness guards, and bounded termination for
    representative `N1`, `N2`, and `N6` cases under the same current
    architecture. Use the item-4 authoritative surfaces and the already-frozen
