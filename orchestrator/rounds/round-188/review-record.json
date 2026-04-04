@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-5",
+  "decision": "approved",
+  "evidence_summary": "Approved as one bounded item-5 septuple slice only: TermClosure raises the terminal clear-boundary helper entry from budget 2 to 3 while keeping the outer alias-boundary budget at 2; septuple authoritative tests pass, alias-through-sextuple predecessors remain green, fresh octuple probes still fail closed on both authoritative entrypoints, and cabal build all && cabal test passed."
+}
