@@ -97,7 +97,7 @@ preserveRetainedChildAuthoritativeResult = go emptyEnv
 
     hasRetainedChildClearBoundary :: String -> ElabTerm -> Bool
     hasRetainedChildClearBoundary source term =
-        hasRetainedChildClearBoundaryWithAliasBudget source term 1
+        hasRetainedChildClearBoundaryWithAliasBudget source term 2
 
     hasRetainedChildClearBoundaryWithAliasBudget :: String -> ElabTerm -> Int -> Bool
     hasRetainedChildClearBoundaryWithAliasBudget source term remainingAliasFrames = case term of
