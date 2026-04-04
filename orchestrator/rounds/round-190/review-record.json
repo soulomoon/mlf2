@@ -1,0 +1,8 @@
+{
+  "roadmap_id": "2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-02-01-general-automatic-iso-recursive-full-inference-roadmap/rev-001",
+  "roadmap_item_id": "item-5",
+  "decision": "approved",
+  "evidence_summary": "Approved as one bounded item-5 nonuple slice only: TermClosure raises the terminal clear-boundary helper entry from budget 4 to 5 while keeping the outer alias-boundary budget at 2; reconstructed red verification fails the new nonuple checks against the old budget-4 baseline; alias-through-nonuple focused checks are green in the round worktree; a fresh decuple probe still fails closed on both authoritative entrypoints; and cabal build all && cabal test passed."
+}
