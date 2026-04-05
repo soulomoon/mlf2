@@ -264,24 +264,26 @@
    `N3`-`N5` as out of scope; and kept `non-cyclic-graph`, item `7`, and
    repo-level readiness unresolved.
 
-7. [pending] Record the repo-level readiness and architecture decision for full automatic iso-recursive inference
+7. [done] Record the repo-level readiness and architecture decision for full automatic iso-recursive inference
    Item id: `item-7`
    Depends on: `item-5`, `item-6`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-6`
-   Completion notes: now that accepted `round-192` closed item `6` with the
-   bounded negative-family and termination-pressure aggregate classification,
-   this is the next concrete unfinished work. Compare the accepted item-5 and
-   item-6 aggregate artifacts against the item-4 readiness classifications
-   `stable visible persistence`,
-   `admitted but not reconstruction-visible / blocker debt`, and
-   `fail-closed rejection` on the authoritative current surfaces and record
-   exactly one end-state decision for this family:
-   repo-level readiness reached inside the current architecture,
-   `continue-bounded` with named unresolved semantic families,
-   or an explicit boundary-revision candidate. If readiness is reached, bind
-   the final enablement or hardening handoff concretely. If readiness is not
-   reached, record the exact semantic reason the broader claim is still not
-   honest and the precise next lawful successor move without silently
-   reopening `non-cyclic-graph` or pre-authorizing implementation work.
+   Completion notes: accepted `round-193` finalized this item through
+   `docs/plans/2026-04-05-general-automatic-iso-recursive-full-inference-repo-level-readiness-and-architecture-decision.md`
+   with authoritative review in
+   `orchestrator/rounds/round-193/review-record.json`. That docs-only
+   aggregate decision artifact used only the accepted item-4 readiness
+   contract plus the accepted item-5 and item-6 aggregate classifications as
+   the decision ledger; recorded `P3`, `P4`, and `P6` as credible current
+   support and `N1`, `N2`, and `N6` as bounded fail-closed rejection on the
+   authoritative surfaces; selected `continue-bounded` as the strongest
+   honest family end-state; kept repo-level readiness unearned because
+   `P2 non-local-propagation` remains `packet-specific folklore` and
+   `P5 polymorphism-nested-forall` remains `current-architecture blockers`;
+   rejected an explicit boundary-revision decision as weaker than bounded
+   continuation on the accepted ledger; and limited the next lawful successor
+   move to one planning-only `P5` successor gate without reopening
+   `non-cyclic-graph`, widening the architecture, or pre-authorizing
+   implementation work.
