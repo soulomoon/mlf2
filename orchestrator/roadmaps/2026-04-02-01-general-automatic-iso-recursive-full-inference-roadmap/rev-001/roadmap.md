@@ -244,25 +244,25 @@
    required aggregate artifact instead of extending the adjacent same-lane
    packet ladder by one more step.
 
-6. [pending] Run the fail-closed negative-family and termination-pressure campaign
+6. [done] Run the fail-closed negative-family and termination-pressure campaign
    Item id: `item-6`
    Depends on: `item-1`, `item-3`, `item-4`, `item-5`
    Parallel safe: no
    Parallel group: none
    Merge after: `item-5`
-   Completion notes: now that accepted `round-191` closed item `5` with the
-   bounded positive-family aggregate classification, this is the next concrete
-   unfinished work. Execute the minimum bounded evidence campaign needed to
-   validate ambiguity rejection, soundness guards, and bounded termination for
-   representative `N1`, `N2`, and `N6` cases under the same current
-   architecture. Use the item-4 authoritative surfaces and the already-frozen
-   negative / pressure rows, including the nested-`forall` contrast in
-   `test/Research/P5ClearBoundarySpec.hs` plus the disagreement, ambiguity,
-   and widened-search pressure checks in `test/PipelineSpec.hs`, without
-   reopening the item-3 route-family or guard contract. The resulting
-   aggregate read must show fail-closed or bounded behavior honestly,
-   preserve `N3`-`N5` as out of scope unless explicitly revised later, and
-   avoid counting any ambiguous or unsafe case as positive success.
+   Completion notes: accepted `round-192` finalized this item through
+   `docs/plans/2026-04-05-general-automatic-iso-recursive-full-inference-negative-family-and-termination-pressure-aggregate-classification.md`
+   with authoritative review in
+   `orchestrator/rounds/round-192/review-record.json`. That docs-only
+   aggregate artifact closed the bounded negative-family /
+   termination-pressure campaign on the item-4 authoritative surfaces;
+   classified representative `N1`, `N2`, and `N6` as
+   `fail-closed rejection` from the focused
+   `test/Research/P5ClearBoundarySpec.hs`,
+   `test/PipelineSpec.hs`, and
+   `src/MLF/Elab/Run/ResultType/Fallback/Core.hs` evidence ledger; preserved
+   `N3`-`N5` as out of scope; and kept `non-cyclic-graph`, item `7`, and
+   repo-level readiness unresolved.
 
 7. [pending] Record the repo-level readiness and architecture decision for full automatic iso-recursive inference
    Item id: `item-7`
@@ -270,14 +270,18 @@
    Parallel safe: no
    Parallel group: none
    Merge after: `item-6`
-   Completion notes: record exactly one end-state decision for this family
-   after the item-5 and item-6 aggregate evidence is compared against the
-   item-4 readiness classifications `stable visible persistence`,
+   Completion notes: now that accepted `round-192` closed item `6` with the
+   bounded negative-family and termination-pressure aggregate classification,
+   this is the next concrete unfinished work. Compare the accepted item-5 and
+   item-6 aggregate artifacts against the item-4 readiness classifications
+   `stable visible persistence`,
    `admitted but not reconstruction-visible / blocker debt`, and
-   `fail-closed rejection` on the authoritative current surfaces:
+   `fail-closed rejection` on the authoritative current surfaces and record
+   exactly one end-state decision for this family:
    repo-level readiness reached inside the current architecture,
    `continue-bounded` with named unresolved semantic families,
    or an explicit boundary-revision candidate. If readiness is reached, bind
    the final enablement or hardening handoff concretely. If readiness is not
    reached, record the exact semantic reason the broader claim is still not
-   honest and the precise next lawful successor move.
+   honest and the precise next lawful successor move without silently
+   reopening `non-cyclic-graph` or pre-authorizing implementation work.
