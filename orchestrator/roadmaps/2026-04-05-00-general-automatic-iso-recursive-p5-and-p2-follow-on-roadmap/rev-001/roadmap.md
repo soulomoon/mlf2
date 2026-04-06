@@ -128,7 +128,7 @@ Accepted direction lineage:
   `milestone-2` campaign on that exact lane and writable slice as the only
   lawful next move in `rev-001`.
 
-### 2. [in-progress] Run one bounded post-item-7 `P5` authoritative-surface campaign
+### 2. [done] Run one bounded post-item-7 `P5` authoritative-surface campaign
 
 - Milestone id: `milestone-2`
 - Depends on: `milestone-1`
@@ -157,11 +157,19 @@ Accepted direction lineage:
   `test/Research/P5ClearBoundarySpec.hs` and `test/PipelineSpec.hs`, pinned
   the selected alias-frame retained-child specimen to `runPipelineElab` and
   `runPipelineElabChecked`, preserved `nestedForallContrastExpr` as the
-  fail-closed contrast, and passed `cabal build all && cabal test`. Milestone-2
-  therefore now carries accepted current-architecture execution evidence for
-  the frozen lane, and
-  `direction-2b-publish-post-implementation-p5-settlement` is the next
-  unfinished move before any post-`P5` routing.
+  fail-closed contrast, and passed `cabal build all && cabal test`. Accepted
+  `round-197`, merged as base commit `f7aaee8`
+  (`Document the post-implementation P5 settlement surface and exact repo impact`),
+  then finalized `direction-2b-publish-post-implementation-p5-settlement`
+  with authoritative review in
+  `orchestrator/rounds/round-197/review-record.json`. That docs-only
+  settlement surface republishes the merged `round-196` evidence as one exact
+  repo-impact read: `sameLaneAliasFrameClearBoundaryExpr` now has bounded
+  current-architecture support on `runPipelineElab` /
+  `runPipelineElabChecked`, `nestedForallContrastExpr` remains fail-closed
+  with `PhiTranslatabilityError`, and the merged implementation payload stayed
+  `test-only`. Milestone-2 is therefore complete, and milestone-3 now owns
+  the next unresolved routing reread.
 
 Accepted direction lineage:
 
@@ -173,49 +181,16 @@ Accepted direction lineage:
   `runPipelineElab` / `runPipelineElabChecked` while keeping the nested-forall
   contrast fail-closed.
 
-Candidate directions:
-
 - Direction id: `direction-2b-publish-post-implementation-p5-settlement`
-  Summary: publish the exact post-implementation settlement surface and
-  repo-impact read for the selected post-item-7 retained-child guard-cluster
-  `P5` lane, grounded in the merged `round-196` authoritative-entrypoint
-  evidence without silently upgrading it into general family closure.
-  Why it matters now: accepted `round-196` supplied the bounded
-  current-architecture execution evidence, so `rev-001` now needs one stable
-  accepted settlement surface before comparing `P5` against the remaining `P2`
-  frontier.
-  Preconditions: accepted `round-196` / `direction-2a` is merged on the base
-  branch, including the authoritative evidence in
-  `test/Research/P5ClearBoundarySpec.hs`,
-  `test/PipelineSpec.hs`, and
-  `orchestrator/rounds/round-196/review-record.json`.
-  Parallel hints: serial only; the settlement surface must consume the merged
-  milestone-2 evidence before any post-`P5` routing begins.
-  Boundary notes: docs-only; keep the claim bounded to the selected lane, do
-  not relitigate predecessor packets, and do not jump ahead to repo-level
-  readiness.
-  Extraction notes: expected extracted item shape is a settlement-surface
-  artifact that records the exact current-architecture impact, cites the
-  merged authoritative evidence anchors, and preserves the non-claims.
+  Status: accepted in `round-197`, merged as `f7aaee8`.
+  Outcome: published one stable post-implementation settlement surface and
+  exact repo-impact read for the frozen retained-child guard-cluster `P5`
+  lane, confirming bounded current-architecture support for
+  `sameLaneAliasFrameClearBoundaryExpr` on `runPipelineElab` /
+  `runPipelineElabChecked` while keeping `nestedForallContrastExpr`
+  fail-closed and the merged implementation payload `test-only`.
 
-- Direction id: `direction-2c-classify-p5-boundary-pressure-if-needed`
-  Summary: if the merged milestone-2 evidence cannot honestly be settled as
-  current-architecture support for the selected lane, record the narrowest
-  explicit boundary-pressure classification for that same lane.
-  Why it matters now: keep one lawful contingency only if the post-implementation
-  settlement reread shows that bounded continuation is no longer the strongest
-  honest read despite the accepted `round-196` evidence.
-  Preconditions: `direction-2b-publish-post-implementation-p5-settlement` or
-  an equivalent accepted reread shows bounded continuation is no longer the
-  strongest honest classification for the selected lane.
-  Parallel hints: serial after the merged execution evidence is reread.
-  Boundary notes: docs-only first; do not widen production code or tests in
-  the same extracted item that records the pressure classification.
-  Extraction notes: expected extracted item shape is a decision-surface round
-  that names the exact boundary under pressure and the precise evidence making
-  it stronger than the merged bounded-execution read.
-
-### 3. [pending] Route the refreshed positive-family frontier after `P5`
+### 3. [in-progress] Route the refreshed positive-family frontier after `P5`
 
 - Milestone id: `milestone-3`
 - Depends on: `milestone-2`
@@ -229,6 +204,20 @@ Candidate directions:
 - Coordination notes: do not reopen settled same-lane or negative-family
   material; this milestone exists only to route the remaining positive-family
   frontier honestly after the refreshed `P5` read.
+- Progress notes: accepted `round-197`, merged as base commit `f7aaee8`
+  (`Document the post-implementation P5 settlement surface and exact repo impact`),
+  completed `milestone-2` by publishing the exact retained-child
+  guard-cluster `P5` settlement surface in
+  `docs/plans/2026-04-06-post-item-7-p5-post-implementation-settlement-surface-and-exact-repo-impact-read.md`
+  with authoritative review in
+  `orchestrator/rounds/round-197/review-record.json`. The live settled read is
+  now explicit: `sameLaneAliasFrameClearBoundaryExpr` has bounded
+  current-architecture support on `runPipelineElab` /
+  `runPipelineElabChecked`, `nestedForallContrastExpr` remains fail-closed,
+  and the merged implementation payload stayed `test-only`.
+  `direction-3a-refresh-the-p5-vs-p2-gap-ledger` is therefore the next
+  unfinished move, because `rev-001` now needs one exact reread of whether
+  `P5` still outranks `P2` from that settled baseline.
 
 Candidate directions:
 
@@ -236,10 +225,16 @@ Candidate directions:
   Summary: publish a docs-only reread of the remaining positive-family gap
   after milestone-2, keeping `P5` and `P2` distinct and naming the current
   strongest blocker honestly.
-  Why it matters now: accepted round-193 left both `P5` and `P2` unresolved,
-  but it ranked `P5` as the sharpest blocker. After milestone-2, that ranking
-  must be refreshed from evidence rather than carried forward by inertia.
-  Preconditions: milestone-2 settlement surface exists.
+  Why it matters now: accepted `round-197` settled the selected `P5` lane as
+  bounded current-architecture support without upgrading it into general
+  family closure. `rev-001` now needs one explicit reread of the remaining
+  `P5` vs `P2` gap from that exact baseline rather than carrying forward the
+  pre-settlement ranking by inertia.
+  Preconditions: accepted `round-197` / `direction-2b` is merged on the base
+  branch, including the settlement surface in
+  `docs/plans/2026-04-06-post-item-7-p5-post-implementation-settlement-surface-and-exact-repo-impact-read.md`
+  and the authoritative review in
+  `orchestrator/rounds/round-197/review-record.json`.
   Parallel hints: serial only; the refreshed ledger determines what the next
   lawful frontier actually is.
   Boundary notes: docs-only; no implementation or roadmap-wide boundary
