@@ -190,7 +190,7 @@ Accepted direction lineage:
   `runPipelineElabChecked` while keeping `nestedForallContrastExpr`
   fail-closed and the merged implementation payload `test-only`.
 
-### 3. [in-progress] Route the refreshed positive-family frontier after `P5`
+### 3. [done] Route the refreshed positive-family frontier after `P5`
 
 - Milestone id: `milestone-3`
 - Depends on: `milestone-2`
@@ -227,7 +227,18 @@ Accepted direction lineage:
   `direction-3b-freeze-one-bounded-p2-follow-on-lane` gated because the
   current ledger does not make `P2` next, and therefore makes
   `direction-3c-record-p5-dominant-boundary-pressure` the next unfinished
-  move.
+  move. Accepted `round-199`, merged as base commit `23e02af`
+  (`Document the milestone-3 P5-dominant routing note keeping P2 unopened`),
+  then finalized `direction-3c-record-p5-dominant-boundary-pressure` through
+  `docs/plans/2026-04-07-post-item-7-p5-dominant-boundary-pressure-routing-note-keeping-p2-unopened-on-the-current-ledger.md`
+  with authoritative review in
+  `orchestrator/rounds/round-199/review-record.json`. That accepted docs-only
+  routing note recorded that `P5 remains the stronger blocker / pressure
+  source`, kept `P2` unopened on the current ledger because the accepted `P2`
+  read is still packet-specific `C1` folklore only, routed the family
+  forward only to the later `milestone-4` decision surface, and therefore
+  completed `milestone-3` without opening
+  `direction-3b-freeze-one-bounded-p2-follow-on-lane`.
 
 Accepted direction lineage:
 
@@ -239,45 +250,15 @@ Accepted direction lineage:
   and routed the milestone forward only to
   `direction-3c-record-p5-dominant-boundary-pressure`.
 
-Candidate directions:
-
 - Direction id: `direction-3c-record-p5-dominant-boundary-pressure`
-  Summary: record why the refreshed milestone-3 ledger keeps `P5` above `P2`
-  and why opening a fresh `P2` lane would be weaker than routing the family
-  through a later explicit architecture-decision branch.
-  Why it matters now: accepted `round-198` refreshed the `P5` vs `P2`
-  remaining-frontier ledger and still ranked `P5` above `P2`, so `rev-001`
-  now needs the bounded pressure note that explains why the current revision
-  should keep `P2` unopened.
-  Preconditions: accepted `round-198` /
-  `direction-3a-refresh-the-p5-vs-p2-gap-ledger` is merged on the base
-  branch, including the remaining-frontier ledger in
-  `docs/plans/2026-04-06-post-item-7-p5-vs-p2-remaining-frontier-ledger.md`
-  and the authoritative review in
-  `orchestrator/rounds/round-198/review-record.json`.
-  Parallel hints: serial after the accepted refreshed gap ledger.
-  Boundary notes: docs-only; do not promote this pressure note into an
-  immediate boundary revision without the later decision milestone.
-  Extraction notes: expected extracted item shape is a routing artifact that
-  names why `P2` should stay unopened in the current revision.
+  Status: accepted in `round-199`, merged as `23e02af`.
+  Outcome: recorded the bounded milestone-3 routing consequence of the
+  accepted post-`P5` ledger: `P5` still outranks `P2`, `P2` stays unopened on
+  the current ledger, `direction-3b-freeze-one-bounded-p2-follow-on-lane`
+  remains unopened in `rev-001`, and the only lawful downstream route is the
+  later `milestone-4` readiness / architecture decision surface.
 
-- Direction id: `direction-3b-freeze-one-bounded-p2-follow-on-lane`
-  Summary: if a future accepted reread no longer leaves `P5` dominant, freeze
-  one exact non-local propagation lane that can test whether `P2` can be
-  upgraded beyond packet-specific folklore.
-  Why it matters now: this remains the only lawful `P2` follow-on shape if a
-  later reread actually makes `P2` the next strongest unresolved front; it is
-  not the next move on the current ledger.
-  Preconditions: a future accepted reread beyond `round-198` identifies `P2`
-  as the next strongest unresolved front; accepted `round-198` does not.
-  Parallel hints: serial only after such a reread; no co-scheduling with fresh
-  `P5` work in `rev-001`.
-  Boundary notes: docs-only freeze first; do not reopen the exact accepted `C1`
-  packet or silently widen into broad non-local search.
-  Extraction notes: expected extracted item shape is a freeze artifact naming
-  one exact `P2` lane, success bar, and writable slice.
-
-### 4. [pending] Reissue the repo-level readiness / architecture decision from the refreshed `P5` / `P2` ledger
+### 4. [in-progress] Reissue the repo-level readiness / architecture decision from the refreshed `P5` / `P2` ledger
 
 - Milestone id: `milestone-4`
 - Depends on: `milestone-3`
@@ -294,6 +275,18 @@ Candidate directions:
 - Coordination notes: this milestone owns the next repo-level reread only. Do
   not pre-authorize production work, boundary revision, or a new family until
   the refreshed decision itself is accepted.
+- Progress notes: entry into `milestone-4` became lawful when accepted
+  `round-199`, merged as base commit `23e02af`
+  (`Document the milestone-3 P5-dominant routing note keeping P2 unopened`),
+  completed `milestone-3` by publishing
+  `docs/plans/2026-04-07-post-item-7-p5-dominant-boundary-pressure-routing-note-keeping-p2-unopened-on-the-current-ledger.md`
+  with authoritative review in
+  `orchestrator/rounds/round-199/review-record.json`. That accepted routing
+  note kept `P2` unopened because `P5 remains the stronger blocker / pressure
+  source`, routed the family forward only to this later readiness /
+  architecture decision surface, and made
+  `direction-4a-publish-refreshed-readiness-decision` the next concrete
+  unfinished move in `rev-001`.
 
 Candidate directions:
 
@@ -301,10 +294,16 @@ Candidate directions:
   Summary: publish the refreshed aggregate readiness / architecture decision
   from the updated `P5` / `P2` ledger and the preserved negative-family
   settlements.
-  Why it matters now: the prior item-7 decision is authoritative only for the
-  pre-follow-on ledger. The repo needs a fresh end-state read after the
-  post-item-7 frontier moves.
-  Preconditions: milestone-3 has produced an accepted routing artifact.
+  Why it matters now: accepted `round-199` completed the milestone-3 routing
+  reread by recording that `P5` still outranks `P2` and keeps `P2` unopened,
+  so the repo now needs the refreshed end-state read for the current ledger
+  rather than another frontier-routing note.
+  Preconditions: accepted `round-199` /
+  `direction-3c-record-p5-dominant-boundary-pressure` is merged on the base
+  branch, including the routing note in
+  `docs/plans/2026-04-07-post-item-7-p5-dominant-boundary-pressure-routing-note-keeping-p2-unopened-on-the-current-ledger.md`
+  and the authoritative review in
+  `orchestrator/rounds/round-199/review-record.json`.
   Parallel hints: serial only; the refreshed decision consumes the entire
   current ledger.
   Boundary notes: docs-only; no implementation or roadmap amendment in the
