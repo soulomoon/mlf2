@@ -16,6 +16,9 @@ successor round.
 ## Duties
 
 - Implement the approved round plan in the round worktree.
+- Treat the active canonical round worktree as the source of truth for stage
+  outputs, and write `implementation-notes.md` under
+  `orchestrator/rounds/<round-id>/implementation-notes.md` there.
 - Follow existing code and workflow patterns in the touched area.
 - Add or update focused tests before relying on new behavior when the round
   fixes a real bug.

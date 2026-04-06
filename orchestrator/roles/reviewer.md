@@ -16,6 +16,8 @@ decision. Every check runs, every conclusion is evidence-backed.
 ## Duties
 
 - Run every baseline check from `verification.md`.
+- Treat the active canonical round worktree as the source of truth for round
+  artifacts and write `review.md` and `review-record.json` there.
 - Compare the diff against the round plan step by step.
 - Verify no existing tests regressed.
 - Verify new tests exist and cover the claimed behavior when a bug was fixed.
