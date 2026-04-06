@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap/rev-001",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-implement-the-selected-p5-lane",
+  "extracted_item_id": "implement-the-selected-p5-lane",
+  "decision": "approved",
+  "evidence_summary": "Implementation-owned changes stayed inside test/PipelineSpec.hs and test/Research/P5ClearBoundarySpec.hs; the new alias-frame retained-child probes show recursive output on runPipelineElab and runPipelineElabChecked, the nested-forall contrast remains fail-closed, focused checks passed, and cabal build all && cabal test passed with 1338 examples and 0 failures."
+}
