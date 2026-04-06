@@ -128,7 +128,7 @@ Accepted direction lineage:
   `milestone-2` campaign on that exact lane and writable slice as the only
   lawful next move in `rev-001`.
 
-### 2. [pending] Run one bounded post-item-7 `P5` authoritative-surface campaign
+### 2. [in-progress] Run one bounded post-item-7 `P5` authoritative-surface campaign
 
 - Milestone id: `milestone-2`
 - Depends on: `milestone-1`
@@ -145,74 +145,75 @@ Accepted direction lineage:
 - Coordination notes: keep the same-lane chain, the exact March 28 `P5`
   packet, the accepted `P2` packet, and the negative-family settlements closed
   as predecessor or aggregate truth only.
-- Progress notes: entry into `milestone-2` is now lawful because accepted
+- Progress notes: entry into `milestone-2` became lawful when accepted
   `round-195` fixed the milestone-1 outcome as
-  `bounded current-architecture continuation` and bound
-  `direction-2a-implement-the-selected-p5-lane` as the next unfinished move
-  on the frozen retained-child guard-cluster lane only.
+  `bounded current-architecture continuation`. Accepted `round-196`, merged
+  as base commit `34f88bc`
+  (`Pin the selected P5 retained-child lane to authoritative pipeline tests`),
+  then finalized `direction-2a-implement-the-selected-p5-lane` with
+  authoritative review in
+  `orchestrator/rounds/round-196/review-record.json`. That accepted bounded
+  execution slice stayed inside
+  `test/Research/P5ClearBoundarySpec.hs` and `test/PipelineSpec.hs`, pinned
+  the selected alias-frame retained-child specimen to `runPipelineElab` and
+  `runPipelineElabChecked`, preserved `nestedForallContrastExpr` as the
+  fail-closed contrast, and passed `cabal build all && cabal test`. Milestone-2
+  therefore now carries accepted current-architecture execution evidence for
+  the frozen lane, and
+  `direction-2b-publish-post-implementation-p5-settlement` is the next
+  unfinished move before any post-`P5` routing.
+
+Accepted direction lineage:
+
+- Direction id: `direction-2a-implement-the-selected-p5-lane`
+  Status: accepted in `round-196`, merged as `34f88bc`.
+  Outcome: promoted the frozen retained-child guard-cluster `P5` lane into
+  reviewer-visible authoritative pipeline tests and source guards without
+  widening production code, confirming bounded current-architecture support on
+  `runPipelineElab` / `runPipelineElabChecked` while keeping the nested-forall
+  contrast fail-closed.
 
 Candidate directions:
 
-- Direction id: `direction-2a-implement-the-selected-p5-lane`
-  Summary: execute one bounded current-architecture campaign on the frozen
-  retained-child guard-cluster `P5` lane only, centered on
-  `boundHasForallFrom`, `sameLaneLocalRetainedChildTarget`,
-  `keepTargetFinal`, `targetC`, and
-  `preserveRetainedChildAuthoritativeResult`, with reviewer-visible outcome on
-  `runPipelineElab` / `runPipelineElabChecked` plus the matching internal /
-  public pipeline facades.
-  Why it matters now: accepted `round-195` closed milestone-1 with the outcome
-  `bounded current-architecture continuation` and made this exact bounded
-  campaign the only lawful next move before any post-`P5` routing.
-  Preconditions: accepted `round-194` and `round-195` have fixed the exact
-  lane, success bar, classification outcome, and writable slice through the
-  two 2026-04-06 milestone-1 docs artifacts plus their review records.
-  Parallel hints: serial only; authoritative-surface evidence and full-gate
-  verification must stay coupled.
-  Boundary notes: keep exactly the round-194 writable slice; do not open a
-  fresh `P2` lane, reopen the exact March 28 packet, relitigate round-151, or
-  smuggle in cyclic, multi-SCC, fallback, or second-interface behavior.
-  Extraction notes: expected extracted item shape is one bounded
-  implementation/verification round on the frozen lane only; any writable
-  files must stay within
-  `src/MLF/Elab/Run/ResultType/Fallback/Core.hs`,
-  `src/MLF/Elab/TermClosure.hs`,
-  `src/MLF/Elab/Run/Pipeline.hs`,
-  `src/MLF/Elab/Pipeline.hs`,
-  `src-public/MLF/Pipeline.hs`,
-  `test/Research/P5ClearBoundarySpec.hs`, and
-  `test/PipelineSpec.hs`, with exact authoritative evidence anchors cited.
-
 - Direction id: `direction-2b-publish-post-implementation-p5-settlement`
-  Summary: republish the exact post-implementation settlement surface and
-  repo-impact read for the selected post-item-7 `P5` lane without silently
-  upgrading it into general family closure.
-  Why it matters now: the family needs a stable accepted settlement surface
-  before comparing `P5` against the remaining `P2` frontier.
-  Preconditions: at least one bounded milestone-2 execution slice has been
-  accepted.
-  Parallel hints: serial after the selected lane has been executed.
-  Boundary notes: docs-only; do not relitigate predecessor packets or jump
-  ahead to repo-level readiness.
+  Summary: publish the exact post-implementation settlement surface and
+  repo-impact read for the selected post-item-7 retained-child guard-cluster
+  `P5` lane, grounded in the merged `round-196` authoritative-entrypoint
+  evidence without silently upgrading it into general family closure.
+  Why it matters now: accepted `round-196` supplied the bounded
+  current-architecture execution evidence, so `rev-001` now needs one stable
+  accepted settlement surface before comparing `P5` against the remaining `P2`
+  frontier.
+  Preconditions: accepted `round-196` / `direction-2a` is merged on the base
+  branch, including the authoritative evidence in
+  `test/Research/P5ClearBoundarySpec.hs`,
+  `test/PipelineSpec.hs`, and
+  `orchestrator/rounds/round-196/review-record.json`.
+  Parallel hints: serial only; the settlement surface must consume the merged
+  milestone-2 evidence before any post-`P5` routing begins.
+  Boundary notes: docs-only; keep the claim bounded to the selected lane, do
+  not relitigate predecessor packets, and do not jump ahead to repo-level
+  readiness.
   Extraction notes: expected extracted item shape is a settlement-surface
-  artifact that records exact current-architecture impact and preserved
-  non-claims.
+  artifact that records the exact current-architecture impact, cites the
+  merged authoritative evidence anchors, and preserves the non-claims.
 
 - Direction id: `direction-2c-classify-p5-boundary-pressure-if-needed`
-  Summary: if the selected lane cannot remain inside the current architecture
-  without illegal widening, record the narrowest explicit boundary-pressure
-  classification for that lane.
-  Why it matters now: the roadmap needs a lawful branch if milestone-2 turns
-  out to be blocked by a named inherited boundary rather than by missing
-  current-architecture evidence.
-  Preconditions: milestone-2 execution evidence shows bounded continuation is
-  no longer the strongest honest read for the selected lane.
-  Parallel hints: serial after the execution evidence is settled.
+  Summary: if the merged milestone-2 evidence cannot honestly be settled as
+  current-architecture support for the selected lane, record the narrowest
+  explicit boundary-pressure classification for that same lane.
+  Why it matters now: keep one lawful contingency only if the post-implementation
+  settlement reread shows that bounded continuation is no longer the strongest
+  honest read despite the accepted `round-196` evidence.
+  Preconditions: `direction-2b-publish-post-implementation-p5-settlement` or
+  an equivalent accepted reread shows bounded continuation is no longer the
+  strongest honest classification for the selected lane.
+  Parallel hints: serial after the merged execution evidence is reread.
   Boundary notes: docs-only first; do not widen production code or tests in
   the same extracted item that records the pressure classification.
   Extraction notes: expected extracted item shape is a decision-surface round
   that names the exact boundary under pressure and the precise evidence making
-  it stronger than continued bounded execution.
+  it stronger than the merged bounded-execution read.
 
 ### 3. [pending] Route the refreshed positive-family frontier after `P5`
 
