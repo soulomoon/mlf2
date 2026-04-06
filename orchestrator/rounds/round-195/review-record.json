@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1b-publish-p5-current-architecture-vs-boundary-gate",
+  "extracted_item_id": "publish-p5-current-architecture-vs-boundary-gate",
+  "decision": "approved",
+  "evidence_summary": "Retry attempt 2 removes orchestrator/rounds/round-195/implementation-notes.md from the base-branch diff, leaving only the authorized docs artifact plus the round-owned plan.md and selection.md. Baseline lineage and diff checks passed, the strict retry-scope allowlist passed, focused retained-child regression probes passed (4 examples, 0 failures; 1 example, 0 failures), and the artifact keeps one bounded current-architecture continuation classification plus one milestone-2 handoff inside the round-194 frozen lane, authoritative surfaces, and writable slice."
+}
