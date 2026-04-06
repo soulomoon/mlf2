@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap/rev-001",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2b-publish-post-implementation-p5-settlement",
+  "extracted_item_id": "publish-post-implementation-p5-settlement",
+  "decision": "approved",
+  "evidence_summary": "Docs-only round publishes the planned settlement surface for the retained-child guard-cluster P5 lane, lineage and roadmap metadata checks pass, the artifact honestly republishes merged round-196 test-only evidence for sameLaneAliasFrameClearBoundaryExpr while keeping nestedForallContrastExpr fail-closed, and the stale scope helper is a plan-script defect because the adjusted status-based scope check shows only the settlement artifact and required implementation-notes were newly added implementation-owned paths."
+}
