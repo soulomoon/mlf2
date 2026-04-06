@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3c-record-p5-dominant-boundary-pressure",
+  "extracted_item_id": "record-p5-dominant-boundary-pressure",
+  "decision": "approved",
+  "evidence_summary": "Docs-only round publishes the planned milestone-3 routing note only, treats accepted round-198 as the binding ledger, keeps P2 unopened because the accepted evidence still leaves P5 as the stronger blocker / pressure source, routes only to the later milestone-4 decision surface, and stays within the authorized docs-only scope apart from controller-owned orchestrator/state.json bookkeeping."
+}
