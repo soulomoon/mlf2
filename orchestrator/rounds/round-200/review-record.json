@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap/rev-001",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-publish-refreshed-readiness-decision",
+  "extracted_item_id": "publish-refreshed-readiness-decision",
+  "decision": "approved",
+  "evidence_summary": "Docs-only round publishes one milestone-4 refreshed decision artifact only, rereads the accepted round-199/round-198 P5-vs-P2 ledger plus the preserved round-192 negative-family settlements against the accepted round-193 vocabulary, selects exactly one evidence-backed refreshed token explicit boundary-revision candidate, defers any follow-on enablement or next-family consequence to direction-4b, and stays within the authorized docs-only scope apart from controller-owned orchestrator/state.json bookkeeping."
+}
