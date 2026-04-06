@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-freeze-p5-authority-and-success-bar",
+  "extracted_item_id": "post-item-7-p5-successor-gate-freeze",
+  "decision": "approved",
+  "evidence_summary": "Retry attempt 2 removes orchestrator/rounds/round-194/implementation-notes.md from the base-branch diff, leaving only the authorized milestone-1 docs artifact plus the round-owned plan.md and selection.md. git diff --check passed, the allowed-set diff gate passed, and the artifact still cites round-193, the March 28 P5 chain, and round-151 while freezing one exact follow-on lane, one authoritative-surface success bar, and one writable slice without pre-authorizing implementation or boundary revision."
+}
