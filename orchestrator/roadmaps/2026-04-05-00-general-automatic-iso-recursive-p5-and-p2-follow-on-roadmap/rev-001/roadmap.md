@@ -74,7 +74,7 @@ stronger repo-level answer on full automatic iso-recursive type inference by:
 
 ## Milestones
 
-### 1. [pending] Freeze and classify the post-item-7 `P5` successor gate and exact live blocker ledger
+### 1. [done] Freeze and classify the post-item-7 `P5` successor gate and exact live blocker ledger
 
 - Milestone id: `milestone-1`
 - Depends on: none
@@ -92,41 +92,41 @@ stronger repo-level answer on full automatic iso-recursive type inference by:
 - Coordination notes: keep the March 28 exact `P5` packet and round-151
   reclassification as predecessor truth only; do not reopen settled same-lane
   or exact `P2` packets while freezing the `P5` successor gate.
-- Progress notes: accepted `round-194`, merged as base commit `693444b`,
+- Progress notes: accepted `round-194`, merged as base commit `693444b`
+  (`Freeze post-item-7 P5 successor authority, success bar, and writable slice`),
   finalized `direction-1a-freeze-p5-authority-and-success-bar` through
   `docs/plans/2026-04-06-post-item-7-p5-successor-authority-success-bar-and-writable-slice-freeze.md`
   with authoritative review in
-  `orchestrator/rounds/round-194/review-record.json`. That docs-only freeze
-  keeps the March 28 exact packet and round-151 reclassification closed as
-  predecessor truth, freezes the retained-child guard-cluster lane as the
-  narrowest lawful post-item-7 `P5` follow-on, binds the
-  `runPipelineElab` / `runPipelineElabChecked` success bar plus matching
-  internal/public pipeline continuity, and freezes the bounded writable slice
-  without authorizing milestone-2 implementation or boundary revision.
+  `orchestrator/rounds/round-194/review-record.json`. Accepted `round-195`,
+  merged as base commit `182f63f`
+  (`Document post-item-7 P5 current-architecture gate and lawful handoff`),
+  finalized `direction-1b-publish-p5-current-architecture-vs-boundary-gate`
+  through
+  `docs/plans/2026-04-06-post-item-7-p5-current-architecture-vs-boundary-pressure-gate-and-immediate-handoff-decision.md`
+  with authoritative review in
+  `orchestrator/rounds/round-195/review-record.json`. Together those accepted
+  docs-only rounds keep the March 28 exact packet and round-151
+  reclassification closed as predecessor truth, freeze the retained-child
+  guard-cluster lane plus the bounded writable slice, classify the direct
+  post-item-7 `P5` read as `bounded current-architecture continuation`, and
+  bind one bounded `milestone-2` current-architecture campaign on that frozen
+  lane as the only lawful immediate handoff.
 
-Candidate directions:
+Accepted direction lineage:
+
+- Direction id: `direction-1a-freeze-p5-authority-and-success-bar`
+  Status: accepted in `round-194`, merged as `693444b`.
+  Outcome: froze the exact retained-child guard-cluster `P5` lane, the
+  authoritative-surface success bar on `runPipelineElab` /
+  `runPipelineElabChecked`, and the bounded writable slice without
+  authorizing implementation or boundary revision.
 
 - Direction id: `direction-1b-publish-p5-current-architecture-vs-boundary-gate`
-  Summary: record the docs-only current-architecture-versus-boundary-pressure
-  classification for the frozen retained-child guard-cluster `P5` lane and
-  bind the one next lawful move.
-  Why it matters now: accepted `round-194` already froze the authority chain,
-  exact lane, authoritative-surface success bar, and writable slice, but
-  milestone-1 is still incomplete until the roadmap records whether that
-  frozen lane still reads as bounded current-architecture continuation or as
-  later explicit boundary pressure.
-  Preconditions: accepted `round-194` and
-  `docs/plans/2026-04-06-post-item-7-p5-successor-authority-success-bar-and-writable-slice-freeze.md`
-  plus `orchestrator/rounds/round-194/review-record.json` are available as
-  the direct freeze authority.
-  Parallel hints: serial only; this gate closes milestone-1 and determines
-  whether milestone-2 remains lawful in `rev-001`.
-  Boundary notes: docs-only; do not pre-select implementation, reopen the
-  settled March 28 packet, or revise the architecture in the same extracted
-  item.
-  Extraction notes: expected extracted item shape is one docs-only gate
-  grounded in the accepted round-194 freeze that ends with one exact outcome
-  token and one lawful next move only.
+  Status: accepted in `round-195`, merged as `182f63f`.
+  Outcome: selected `bounded current-architecture continuation` for the
+  already frozen retained-child guard-cluster lane and bound one bounded
+  `milestone-2` campaign on that exact lane and writable slice as the only
+  lawful next move in `rev-001`.
 
 ### 2. [pending] Run one bounded post-item-7 `P5` authoritative-surface campaign
 
@@ -145,25 +145,43 @@ Candidate directions:
 - Coordination notes: keep the same-lane chain, the exact March 28 `P5`
   packet, the accepted `P2` packet, and the negative-family settlements closed
   as predecessor or aggregate truth only.
+- Progress notes: entry into `milestone-2` is now lawful because accepted
+  `round-195` fixed the milestone-1 outcome as
+  `bounded current-architecture continuation` and bound
+  `direction-2a-implement-the-selected-p5-lane` as the next unfinished move
+  on the frozen retained-child guard-cluster lane only.
 
 Candidate directions:
 
 - Direction id: `direction-2a-implement-the-selected-p5-lane`
-  Summary: execute the minimal code / test / doc slice, if any, needed to
-  determine whether the milestone-1-selected `P5` lane can stay inside the
-  current architecture while remaining honest on the authoritative surfaces.
-  Why it matters now: milestone-1 only freezes the lane; the family still
-  needs one bounded execution read before routing the remaining frontier.
-  Preconditions: milestone-1 has fixed the exact lane, success bar, and
-  writable slice.
+  Summary: execute one bounded current-architecture campaign on the frozen
+  retained-child guard-cluster `P5` lane only, centered on
+  `boundHasForallFrom`, `sameLaneLocalRetainedChildTarget`,
+  `keepTargetFinal`, `targetC`, and
+  `preserveRetainedChildAuthoritativeResult`, with reviewer-visible outcome on
+  `runPipelineElab` / `runPipelineElabChecked` plus the matching internal /
+  public pipeline facades.
+  Why it matters now: accepted `round-195` closed milestone-1 with the outcome
+  `bounded current-architecture continuation` and made this exact bounded
+  campaign the only lawful next move before any post-`P5` routing.
+  Preconditions: accepted `round-194` and `round-195` have fixed the exact
+  lane, success bar, classification outcome, and writable slice through the
+  two 2026-04-06 milestone-1 docs artifacts plus their review records.
   Parallel hints: serial only; authoritative-surface evidence and full-gate
   verification must stay coupled.
-  Boundary notes: do not broaden beyond the selected lane, do not reopen the
-  exact March 28 packet, and do not smuggle in cyclic, multi-SCC, fallback,
-  or second-interface behavior.
-  Extraction notes: extracted items may be docs-only or code-bearing depending
-  on the selected lane, but they must stay bounded to the milestone-1 writable
-  slice and cite exact authoritative evidence anchors.
+  Boundary notes: keep exactly the round-194 writable slice; do not open a
+  fresh `P2` lane, reopen the exact March 28 packet, relitigate round-151, or
+  smuggle in cyclic, multi-SCC, fallback, or second-interface behavior.
+  Extraction notes: expected extracted item shape is one bounded
+  implementation/verification round on the frozen lane only; any writable
+  files must stay within
+  `src/MLF/Elab/Run/ResultType/Fallback/Core.hs`,
+  `src/MLF/Elab/TermClosure.hs`,
+  `src/MLF/Elab/Run/Pipeline.hs`,
+  `src/MLF/Elab/Pipeline.hs`,
+  `src-public/MLF/Pipeline.hs`,
+  `test/Research/P5ClearBoundarySpec.hs`, and
+  `test/PipelineSpec.hs`, with exact authoritative evidence anchors cited.
 
 - Direction id: `direction-2b-publish-post-implementation-p5-settlement`
   Summary: republish the exact post-implementation settlement surface and
