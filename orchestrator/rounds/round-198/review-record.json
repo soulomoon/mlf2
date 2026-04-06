@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-refresh-the-p5-vs-p2-gap-ledger",
+  "extracted_item_id": "refresh-the-p5-vs-p2-gap-ledger",
+  "decision": "approved",
+  "evidence_summary": "Docs-only round refreshes the post-milestone-2 P5-vs-P2 ledger from accepted round-193, round-191, round-181, and round-197 evidence, keeps the refreshed P5 retained-child settlement distinct from the packet-specific P2 C1 folklore ledger, lawfully keeps P5 as the stronger blocker while routing only to direction-3c, and the only scope-helper failure is the stale plan allowlist omitting the required round-local implementation-notes.md."
+}
