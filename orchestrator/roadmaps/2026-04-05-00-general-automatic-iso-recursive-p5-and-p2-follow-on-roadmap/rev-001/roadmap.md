@@ -214,63 +214,68 @@ Accepted direction lineage:
   now explicit: `sameLaneAliasFrameClearBoundaryExpr` has bounded
   current-architecture support on `runPipelineElab` /
   `runPipelineElabChecked`, `nestedForallContrastExpr` remains fail-closed,
-  and the merged implementation payload stayed `test-only`.
-  `direction-3a-refresh-the-p5-vs-p2-gap-ledger` is therefore the next
-  unfinished move, because `rev-001` now needs one exact reread of whether
-  `P5` still outranks `P2` from that settled baseline.
+  and the merged implementation payload stayed `test-only`. Accepted
+  `round-198`, merged as base commit `375f0e6`
+  (`Document the milestone-3 P5-vs-P2 remaining-frontier routing ledger`),
+  then finalized `direction-3a-refresh-the-p5-vs-p2-gap-ledger` through
+  `docs/plans/2026-04-06-post-item-7-p5-vs-p2-remaining-frontier-ledger.md`
+  with authoritative review in
+  `orchestrator/rounds/round-198/review-record.json`. That accepted reread
+  kept refreshed `P5` evidence separate from preserved `P2`
+  packet-specific folklore, concluded
+  `P5 remains the stronger blocker / pressure source`, kept
+  `direction-3b-freeze-one-bounded-p2-follow-on-lane` gated because the
+  current ledger does not make `P2` next, and therefore makes
+  `direction-3c-record-p5-dominant-boundary-pressure` the next unfinished
+  move.
+
+Accepted direction lineage:
+
+- Direction id: `direction-3a-refresh-the-p5-vs-p2-gap-ledger`
+  Status: accepted in `round-198`, merged as `375f0e6`.
+  Outcome: published the canonical post-milestone-2 `P5` vs `P2`
+  remaining-frontier ledger, preserved `P2` as packet-specific `C1`
+  folklore, concluded `P5 remains the stronger blocker / pressure source`,
+  and routed the milestone forward only to
+  `direction-3c-record-p5-dominant-boundary-pressure`.
 
 Candidate directions:
 
-- Direction id: `direction-3a-refresh-the-p5-vs-p2-gap-ledger`
-  Summary: publish a docs-only reread of the remaining positive-family gap
-  after milestone-2, keeping `P5` and `P2` distinct and naming the current
-  strongest blocker honestly.
-  Why it matters now: accepted `round-197` settled the selected `P5` lane as
-  bounded current-architecture support without upgrading it into general
-  family closure. `rev-001` now needs one explicit reread of the remaining
-  `P5` vs `P2` gap from that exact baseline rather than carrying forward the
-  pre-settlement ranking by inertia.
-  Preconditions: accepted `round-197` / `direction-2b` is merged on the base
-  branch, including the settlement surface in
-  `docs/plans/2026-04-06-post-item-7-p5-post-implementation-settlement-surface-and-exact-repo-impact-read.md`
-  and the authoritative review in
-  `orchestrator/rounds/round-197/review-record.json`.
-  Parallel hints: serial only; the refreshed ledger determines what the next
-  lawful frontier actually is.
-  Boundary notes: docs-only; no implementation or roadmap-wide boundary
-  revision in this reread.
-  Extraction notes: expected extracted item shape is an aggregate reread that
-  ends with one exact remaining-frontier conclusion only.
-
-- Direction id: `direction-3b-freeze-one-bounded-p2-follow-on-lane`
-  Summary: if `P5` no longer dominates, freeze one exact non-local
-  propagation lane that can test whether `P2` can be upgraded beyond
-  packet-specific folklore.
-  Why it matters now: repo-level readiness remains blocked if `P2` cannot move
-  beyond one exact packet even after the refreshed `P5` read.
-  Preconditions: `direction-3a-refresh-the-p5-vs-p2-gap-ledger` or an
-  equivalent accepted reread identifies `P2` as the next strongest unresolved
-  front.
-  Parallel hints: serial after the refreshed gap ledger; no co-scheduling with
-  fresh `P5` work in `rev-001`.
-  Boundary notes: docs-only freeze first; do not reopen the exact accepted `C1`
-  packet or silently widen into broad non-local search.
-  Extraction notes: expected extracted item shape is a freeze artifact naming
-  one exact `P2` lane, success bar, and writable slice.
-
 - Direction id: `direction-3c-record-p5-dominant-boundary-pressure`
-  Summary: if `P5` remains the stronger blocker after milestone-2, record why
-  opening a fresh `P2` lane would be weaker than routing the family through a
-  later explicit architecture-decision branch.
-  Why it matters now: the roadmap needs an honest off-ramp when the refreshed
-  post-`P5` read still outranks `P2`.
-  Preconditions: `direction-3a-refresh-the-p5-vs-p2-gap-ledger` shows that
-  `P5` remains the dominant unresolved frontier or boundary-pressure source.
-  Parallel hints: serial after the refreshed gap ledger.
+  Summary: record why the refreshed milestone-3 ledger keeps `P5` above `P2`
+  and why opening a fresh `P2` lane would be weaker than routing the family
+  through a later explicit architecture-decision branch.
+  Why it matters now: accepted `round-198` refreshed the `P5` vs `P2`
+  remaining-frontier ledger and still ranked `P5` above `P2`, so `rev-001`
+  now needs the bounded pressure note that explains why the current revision
+  should keep `P2` unopened.
+  Preconditions: accepted `round-198` /
+  `direction-3a-refresh-the-p5-vs-p2-gap-ledger` is merged on the base
+  branch, including the remaining-frontier ledger in
+  `docs/plans/2026-04-06-post-item-7-p5-vs-p2-remaining-frontier-ledger.md`
+  and the authoritative review in
+  `orchestrator/rounds/round-198/review-record.json`.
+  Parallel hints: serial after the accepted refreshed gap ledger.
   Boundary notes: docs-only; do not promote this pressure note into an
   immediate boundary revision without the later decision milestone.
   Extraction notes: expected extracted item shape is a routing artifact that
   names why `P2` should stay unopened in the current revision.
+
+- Direction id: `direction-3b-freeze-one-bounded-p2-follow-on-lane`
+  Summary: if a future accepted reread no longer leaves `P5` dominant, freeze
+  one exact non-local propagation lane that can test whether `P2` can be
+  upgraded beyond packet-specific folklore.
+  Why it matters now: this remains the only lawful `P2` follow-on shape if a
+  later reread actually makes `P2` the next strongest unresolved front; it is
+  not the next move on the current ledger.
+  Preconditions: a future accepted reread beyond `round-198` identifies `P2`
+  as the next strongest unresolved front; accepted `round-198` does not.
+  Parallel hints: serial only after such a reread; no co-scheduling with fresh
+  `P5` work in `rev-001`.
+  Boundary notes: docs-only freeze first; do not reopen the exact accepted `C1`
+  packet or silently widen into broad non-local search.
+  Extraction notes: expected extracted item shape is a freeze artifact naming
+  one exact `P2` lane, success bar, and writable slice.
 
 ### 4. [pending] Reissue the repo-level readiness / architecture decision from the refreshed `P5` / `P2` ledger
 
