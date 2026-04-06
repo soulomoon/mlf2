@@ -2596,6 +2596,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           `shouldSatisfy` isInfixOf
             "case sameLaneLocalRetainedChildTarget of\n                            Just v -> v\n                            Nothing -> schemeBodyTarget targetPresolutionView rootC"
 
+      it "keeps the P5 guard cluster wired through boundHasForallFrom and authoritative preservation" $ do
+        fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
+        termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
+        pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+        fallbackSrc `shouldSatisfy` isInfixOf "boundHasForallFrom bnd"
+        termClosureSrc `shouldSatisfy` isInfixOf "preserveRetainedChildAliasBoundary env v sch rhs body"
+        pipelineSrc `shouldSatisfy` isInfixOf "case preserveRetainedChildAuthoritativeResult termClosed0 of"
+
       it "keeps retained-child fallback open for recursive types even when the same wrapper crosses a nested forall boundary" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =

@@ -70,6 +70,10 @@ spec =
             fallbackTy <- sameLaneClearBoundaryFallbackType
             containsMu fallbackTy `shouldBe` True
 
+        it "keeps the same-lane alias-frame packet recursive while the quantified boundary stays clear" $ do
+            fallbackTy <- sameLaneAliasFrameClearBoundaryFallbackType
+            containsMu fallbackTy `shouldBe` True
+
         it "correctly absorbs μ when polymorphic mediation crosses a nested forall boundary" $ do
             fallbackTy <- fallbackType nestedForallContrastExpr
             containsMu fallbackTy `shouldBe` False
@@ -78,6 +82,20 @@ spec =
             let pipelineRuns =
                     [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
                     , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
+                    ]
+            mapM_
+                (\(label, result) -> case result of
+                    Left err ->
+                        expectationFailure (label ++ ": " ++ renderPipelineError err)
+                    Right (_term, ty) ->
+                        containsMu ty `shouldBe` True
+                )
+                pipelineRuns
+
+        it "sameLaneAliasFrameClearBoundaryExpr alias-frame clear-boundary packet preserves recursive output on both authoritative entrypoints" $ do
+            let pipelineRuns =
+                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))
+                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))
                     ]
             mapM_
                 (\(label, result) -> case result of
@@ -121,6 +139,12 @@ sameLaneClearBoundaryExpr =
     ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
         (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
 
+sameLaneAliasFrameClearBoundaryExpr :: SurfaceExpr
+sameLaneAliasFrameClearBoundaryExpr =
+    ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+        (ELet "hold" (EVar "k")
+            (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "hold")) (EVar "u")))
+
 nestedForallContrastExpr :: SurfaceExpr
 nestedForallContrastExpr =
     ELet "id" (ELam "z" (EVar "z"))
@@ -142,6 +166,18 @@ sameLaneClearBoundaryFallbackType = do
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
 
+sameLaneAliasFrameClearBoundaryFallbackType :: IO ElabType
+sameLaneAliasFrameClearBoundaryFallbackType = do
+    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty sameLaneAliasFrameClearBoundaryExpr)
+    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+        innerCanon = extractFirstApp annCanon0
+        innerPre = extractFirstApp annPre0
+        (retainedRoot, retainedChild) = case innerCanon of
+            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
+        inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+    requireRight (computeResultTypeFallback inputs innerCanon innerPre)
+
 fallbackType :: SurfaceExpr -> IO ElabType
 fallbackType expr = do
     artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
@@ -152,6 +188,31 @@ extractInnerLetRhs :: AnnExpr -> AnnExpr
 extractInnerLetRhs ann0 = case ann0 of
     ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
     _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
+
+extractFirstApp :: AnnExpr -> AnnExpr
+extractFirstApp ann0 = case ann0 of
+    AApp {} -> ann0
+    AAnn inner _ _ -> extractFirstApp inner
+    ALam _ _ _ body _ -> extractFirstApp body
+    ALet _ _ _ _ _ rhs body _ ->
+        case extractFirstAppMaybe rhs of
+            Just hit -> hit
+            Nothing ->
+                case extractFirstAppMaybe body of
+                    Just hit -> hit
+                    Nothing -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
+    _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
+
+extractFirstAppMaybe :: AnnExpr -> Maybe AnnExpr
+extractFirstAppMaybe ann0 = case ann0 of
+    AApp {} -> Just ann0
+    AAnn inner _ _ -> extractFirstAppMaybe inner
+    ALam _ _ _ body _ -> extractFirstAppMaybe body
+    ALet _ _ _ _ _ rhs body _ ->
+        case extractFirstAppMaybe rhs of
+            Just hit -> Just hit
+            Nothing -> extractFirstAppMaybe body
+    _ -> Nothing
 
 wireSameLaneLocalRoot :: ResultTypeInputs -> NodeId -> NodeId -> ResultTypeInputs
 wireSameLaneLocalRoot inputs rootNid childNid =
