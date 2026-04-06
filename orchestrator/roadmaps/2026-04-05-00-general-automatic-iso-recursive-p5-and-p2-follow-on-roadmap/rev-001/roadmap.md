@@ -286,42 +286,53 @@ Accepted direction lineage:
   source`, routed the family forward only to this later readiness /
   architecture decision surface, and made
   `direction-4a-publish-refreshed-readiness-decision` the next concrete
-  unfinished move in `rev-001`.
+  unfinished move in `rev-001`. Accepted `round-200`, merged as base commit
+  `9b68ab8`
+  (`Publish the milestone-4 refreshed readiness decision artifact`), then
+  finalized `direction-4a-publish-refreshed-readiness-decision` through
+  `docs/plans/2026-04-07-post-item-7-refreshed-repo-level-readiness-and-architecture-decision-from-the-updated-p5-vs-p2-ledger-and-preserved-negative-family-settlements.md`
+  with authoritative review in
+  `orchestrator/rounds/round-200/review-record.json`. That accepted docs-only
+  refreshed aggregate decision reread the accepted updated `P5` / `P2` ledger
+  plus preserved negative-family settlements, selected the refreshed
+  end-state token `explicit boundary-revision candidate`, and kept any
+  concrete enablement / next-family consequence deferred to
+  `direction-4b-bind-final-enablement-or-next-family`. Milestone-4 therefore
+  remains in progress rather than done, and
+  `direction-4b-bind-final-enablement-or-next-family` is now the next
+  concrete unfinished move in `rev-001`.
+
+Accepted direction lineage:
+
+- Direction id: `direction-4a-publish-refreshed-readiness-decision`
+  Status: accepted in `round-200`, merged as `9b68ab8`.
+  Outcome: published the milestone-4 refreshed repo-level readiness /
+  architecture decision from the updated `P5` / `P2` ledger plus preserved
+  negative-family settlements, selected
+  `explicit boundary-revision candidate`, and kept the concrete downstream
+  consequence deferred to
+  `direction-4b-bind-final-enablement-or-next-family`.
 
 Candidate directions:
 
-- Direction id: `direction-4a-publish-refreshed-readiness-decision`
-  Summary: publish the refreshed aggregate readiness / architecture decision
-  from the updated `P5` / `P2` ledger and the preserved negative-family
-  settlements.
-  Why it matters now: accepted `round-199` completed the milestone-3 routing
-  reread by recording that `P5` still outranks `P2` and keeps `P2` unopened,
-  so the repo now needs the refreshed end-state read for the current ledger
-  rather than another frontier-routing note.
-  Preconditions: accepted `round-199` /
-  `direction-3c-record-p5-dominant-boundary-pressure` is merged on the base
-  branch, including the routing note in
-  `docs/plans/2026-04-07-post-item-7-p5-dominant-boundary-pressure-routing-note-keeping-p2-unopened-on-the-current-ledger.md`
-  and the authoritative review in
-  `orchestrator/rounds/round-199/review-record.json`.
-  Parallel hints: serial only; the refreshed decision consumes the entire
-  current ledger.
-  Boundary notes: docs-only; no implementation or roadmap amendment in the
-  same extracted item.
-  Extraction notes: expected extracted item shape is one aggregate decision
-  artifact that records exactly one end-state and one supporting evidence
-  ledger only.
-
 - Direction id: `direction-4b-bind-final-enablement-or-next-family`
-  Summary: bind the concrete consequence of the refreshed decision, whether
-  that is a final enablement / hardening handoff, another bounded continuation
-  family, or an explicit boundary-revision family.
-  Why it matters now: the roadmap must end with one executable next move
-  rather than a free-floating decision token.
-  Preconditions: `direction-4a-publish-refreshed-readiness-decision` or an
-  equivalent accepted aggregate decision exists.
+  Summary: bind the exact downstream consequence of the refreshed
+  `explicit boundary-revision candidate` decision, naming one exact next
+  family or enablement step without revisiting the selected token.
+  Why it matters now: accepted `round-200` fixed the refreshed end-state
+  token as `explicit boundary-revision candidate` but intentionally deferred
+  the concrete consequence, so milestone-4 cannot complete until that one
+  exact handoff is bound.
+  Preconditions: accepted `round-200` /
+  `direction-4a-publish-refreshed-readiness-decision` is merged on the base
+  branch, including the refreshed decision artifact in
+  `docs/plans/2026-04-07-post-item-7-refreshed-repo-level-readiness-and-architecture-decision-from-the-updated-p5-vs-p2-ledger-and-preserved-negative-family-settlements.md`
+  and the authoritative review in
+  `orchestrator/rounds/round-200/review-record.json`.
   Parallel hints: serial after the refreshed decision.
-  Boundary notes: keep the handoff precise; do not silently widen the scope of
-  the refreshed decision.
+  Boundary notes: keep the handoff precise; preserve the selected refreshed
+  end-state token `explicit boundary-revision candidate` exactly; do not
+  silently widen the scope of the refreshed decision.
   Extraction notes: expected extracted item shape is a bounded handoff artifact
-  that names one exact next family or enablement step only.
+  that names one exact next family or enablement step only while carrying
+  forward `explicit boundary-revision candidate` exactly.
