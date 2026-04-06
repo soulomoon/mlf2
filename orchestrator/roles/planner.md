@@ -22,6 +22,9 @@ iso-recursive inference successor item.
 ## Duties
 
 - Write `plan.md` for the current round with concrete, actionable steps.
+- Write `plan.md` in the active canonical round worktree under
+  `orchestrator/rounds/<round-id>/plan.md`; do not write the stage artifact in
+  some other workspace and assume the controller will find it.
 - Each step must name exact files to modify or create.
 - Each step must describe the specific workflow, script, doc, or code change.
 - Include verification commands that prove the step works.

@@ -12,6 +12,8 @@ Prepare an approved orchestrator round for squash merge.
 ## Duties
 
 - Write `merge.md` with a squash-commit title, summary, and follow-up notes.
+- Write `merge.md` in the active canonical round worktree under
+  `orchestrator/rounds/<round-id>/merge.md`.
 - Confirm the round is ready for squash merge.
 - Verify base branch freshness.
 - Keep commit messaging focused on what was implemented and why.

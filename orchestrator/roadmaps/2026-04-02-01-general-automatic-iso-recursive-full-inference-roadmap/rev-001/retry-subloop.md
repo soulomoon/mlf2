@@ -98,5 +98,11 @@ After review:
 After 3 consecutive rejected attempts on the same round:
 
 - controller records the failure summary in `resume_error`
-- controller must not continue automatically until a human or an explicit
-  recovery recommendation reopens the round
+- controller must automatically enter the same-round recovery ladder before
+  asking a human to reopen anything
+- same-mechanism retry exhaustion is escalation, not terminal stop: re-observe
+  the recorded canonical round worktree, apply lawful controller-owned
+  recovery if already-produced outputs exist, and then re-dispatch through a
+  different lawful recovery path when available
+- ask a human to reopen the round only after no lawful same-round recovery
+  action remains
