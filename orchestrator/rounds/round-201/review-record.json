@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-05-00-general-automatic-iso-recursive-p5-and-p2-follow-on-roadmap/rev-001",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4b-bind-final-enablement-or-next-family",
+  "extracted_item_id": "bind-final-enablement-or-next-family",
+  "decision": "approved",
+  "evidence_summary": "Docs-only round publishes the one planned milestone-4 final handoff artifact only, carries forward explicit boundary-revision candidate exactly from the accepted round-200 to round-151 lineage, binds exactly one planning-only explicit boundary-revision family for broader positive P5 polymorphism-nested-forall support beyond the one settled retained-child clear-boundary lane, keeps P2 unopened and preserved negative-family rows closed, and does not authorize a separate enablement step, concrete revision work, or any second handoff."
+}
