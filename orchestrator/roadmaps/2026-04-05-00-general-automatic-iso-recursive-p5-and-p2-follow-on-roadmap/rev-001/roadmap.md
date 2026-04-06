@@ -258,7 +258,7 @@ Accepted direction lineage:
   remains unopened in `rev-001`, and the only lawful downstream route is the
   later `milestone-4` readiness / architecture decision surface.
 
-### 4. [in-progress] Reissue the repo-level readiness / architecture decision from the refreshed `P5` / `P2` ledger
+### 4. [done] Reissue the repo-level readiness / architecture decision from the refreshed `P5` / `P2` ledger
 
 - Milestone id: `milestone-4`
 - Depends on: `milestone-3`
@@ -297,10 +297,23 @@ Accepted direction lineage:
   plus preserved negative-family settlements, selected the refreshed
   end-state token `explicit boundary-revision candidate`, and kept any
   concrete enablement / next-family consequence deferred to
-  `direction-4b-bind-final-enablement-or-next-family`. Milestone-4 therefore
-  remains in progress rather than done, and
-  `direction-4b-bind-final-enablement-or-next-family` is now the next
-  concrete unfinished move in `rev-001`.
+  `direction-4b-bind-final-enablement-or-next-family`. Accepted `round-201`,
+  merged as base commit `da7569f`, then finalized
+  `direction-4b-bind-final-enablement-or-next-family` through
+  `docs/plans/2026-04-07-post-item-7-explicit-boundary-revision-candidate-final-handoff-to-one-planning-only-p5-polymorphism-nested-forall-boundary-revision-family.md`
+  with authoritative review in
+  `orchestrator/rounds/round-201/review-record.json`. That accepted docs-only
+  final handoff carried forward the refreshed end-state token
+  `explicit boundary-revision candidate` exactly, bound exactly one downstream
+  consequence
+  (`open one planning-only explicit boundary-revision family for broader positive P5 polymorphism-nested-forall support beyond the one settled retained-child clear-boundary lane`),
+  kept `P2` unopened on the current ledger, preserved the representative
+  negative-family rows and the one settled retained-child clear-boundary `P5`
+  lane as closed predecessor truth only, and therefore completed
+  `milestone-4`. This closes `rev-001` honestly: all milestones are done, no
+  candidate directions or other unfinished work remain active in this roadmap
+  family, and any continuation must begin as a fresh planning-only explicit
+  boundary-revision family rather than another direction inside `rev-001`.
 
 Accepted direction lineage:
 
@@ -313,26 +326,12 @@ Accepted direction lineage:
   consequence deferred to
   `direction-4b-bind-final-enablement-or-next-family`.
 
-Candidate directions:
-
 - Direction id: `direction-4b-bind-final-enablement-or-next-family`
-  Summary: bind the exact downstream consequence of the refreshed
-  `explicit boundary-revision candidate` decision, naming one exact next
-  family or enablement step without revisiting the selected token.
-  Why it matters now: accepted `round-200` fixed the refreshed end-state
-  token as `explicit boundary-revision candidate` but intentionally deferred
-  the concrete consequence, so milestone-4 cannot complete until that one
-  exact handoff is bound.
-  Preconditions: accepted `round-200` /
-  `direction-4a-publish-refreshed-readiness-decision` is merged on the base
-  branch, including the refreshed decision artifact in
-  `docs/plans/2026-04-07-post-item-7-refreshed-repo-level-readiness-and-architecture-decision-from-the-updated-p5-vs-p2-ledger-and-preserved-negative-family-settlements.md`
-  and the authoritative review in
-  `orchestrator/rounds/round-200/review-record.json`.
-  Parallel hints: serial after the refreshed decision.
-  Boundary notes: keep the handoff precise; preserve the selected refreshed
-  end-state token `explicit boundary-revision candidate` exactly; do not
-  silently widen the scope of the refreshed decision.
-  Extraction notes: expected extracted item shape is a bounded handoff artifact
-  that names one exact next family or enablement step only while carrying
-  forward `explicit boundary-revision candidate` exactly.
+  Status: accepted in `round-201`, merged as `da7569f`.
+  Outcome: published the milestone-4 final handoff that carried forward
+  `explicit boundary-revision candidate` exactly and bound exactly one lawful
+  downstream consequence: open one planning-only explicit boundary-revision
+  family for broader positive `P5 polymorphism-nested-forall` support beyond
+  the one settled retained-child clear-boundary lane, while keeping `P2`
+  unopened and predecessor evidence closed. This completed `milestone-4` and
+  left no active unfinished directions in `rev-001`.
