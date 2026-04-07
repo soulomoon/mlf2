@@ -1,0 +1,15 @@
+{
+  "roadmap_id": "2026-04-07-00-p5-polymorphism-nested-forall-explicit-boundary-revision-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-07-00-p5-polymorphism-nested-forall-explicit-boundary-revision-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-freeze-inherited-boundary-and-decision-surface",
+  "extracted_item_id": "freeze-inherited-boundary-and-decision-surface",
+  "decision": "approved",
+  "evidence_summary": "Base branch, merge-base, and HEAD all resolve to b69758ef24658acfd4ce4ae433147ac83743c5d5, so the observed round diff is the uncommitted working-tree payload. That payload stays inside the docs-only milestone-1 scope: one new freeze artifact plus round packet files only, with no code, test, Cabal, roadmap, or controller-state widening beyond the controller-owned state modification already called out by the plan. The artifact passes the required section/token/forbidden-token checks, preserves the accepted round-200/round-201 lineage and closed predecessor truths, freezes the inherited-boundary table clause by clause, names the exact live broader positive P5 subject and exact lawful milestone-2/milestone-3 outcomes, and remains planning-only and non-enacting.",
+  "implemented_stage_result": "one canonical docs-only milestone-1 freeze artifact plus round packet files only",
+  "attempt_verdict": "accepted",
+  "stage_action": "finalize",
+  "retry_reason": null,
+  "fix_hypothesis": null
+}
