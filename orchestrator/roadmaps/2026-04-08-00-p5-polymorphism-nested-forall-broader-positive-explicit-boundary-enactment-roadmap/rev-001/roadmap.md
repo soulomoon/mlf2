@@ -83,7 +83,7 @@ behavior and evidence by:
 
 ## Milestones
 
-### 1. [pending] Freeze the enactment contract, authoritative frontier, writable slice, and representative corpus
+### 1. [done] Freeze the enactment contract, authoritative frontier, writable slice, and representative corpus
 
 - Milestone id: `milestone-1`
 - Depends on: none
@@ -99,34 +99,41 @@ behavior and evidence by:
   `runPipelineElab` and `runPipelineElabChecked`, the exact preserved closed
   families, and the exact writable production/test/docs surfaces for later
   enactment rounds.
+- Completion notes: accepted `round-206`, merged as base commit `12fd9dc`
+  (`Freeze P5 broader-positive enactment contract, corpus, and writable
+  slice`), finalized
+  `direction-1a-freeze-broader-positive-enactment-contract` through
+  `docs/plans/2026-04-08-p5-polymorphism-nested-forall-broader-positive-enactment-family-contract-authoritative-frontier-representative-corpus-and-writable-slice-freeze.md`
+  with authoritative review in
+  `orchestrator/rounds/round-206/review-record.json`. That accepted
+  docs/control-plane-only freeze consumes accepted `round-205` as the binding
+  family-entry authority, keeps accepted `round-204` and `round-203` as the
+  controlling broader-positive ledger beneath it, freezes the exact broader-
+  positive frontier beyond the one settled retained-child lane, freezes the
+  expected shift away from treating polymorphic-mediation `mu` absorption as
+  the controlling broader-positive read, freezes the representative corpus and
+  exact writable slice, and preserves `P2`, `N1 ambiguity-reject`,
+  `N2 unsoundness-guard`, and `N6 termination-pressure` as closed predecessor
+  truth or guardrails. `milestone-1` is therefore complete, and the next
+  lawful move is `milestone-2` /
+  `direction-2a-implement-core-polymorphic-mediation-recursive-structure-preservation`
+  as the first code-bearing round inside the frozen slice.
 - Parallel lane: `lane-main`
 - Coordination notes: consume accepted `round-203`, `round-204`, and
   `round-205` directly; preserve the retained-child lane as predecessor truth
   only; keep `P2` and the representative negative-family rows closed; and do
   not start production edits before the contract freeze is accepted.
 
-Candidate directions:
+Accepted direction lineage:
 
 - Direction id: `direction-1a-freeze-broader-positive-enactment-contract`
-  Summary: publish the canonical milestone-1 enactment contract that names the
-  broader frontier, exact behavior shift, writable slice, authoritative
-  entrypoints, representative corpus, and preserved guardrails for the direct
-  code-bearing family.
-  Why it matters now: accepted `round-205` selected one later enactment family
-  only, but it intentionally did not freeze the exact code-bearing slice or
-  exact success corpus. This milestone must bind those before implementation
-  starts.
-  Preconditions: none.
-  Parallel hints: serial extraction only.
-  Boundary notes: milestone-1 is docs/control-plane-only. It may inventory
-  likely production/test seams, but it must not change runtime behavior yet.
-  Extraction notes: the first round should freeze the likely authoritative
-  seams around `src/MLF/Elab/TermClosure.hs`,
-  `src/MLF/Elab/Run/Pipeline.hs`,
-  `src/MLF/Elab/Pipeline.hs`,
-  `src-public/MLF/Pipeline.hs`,
-  `test/Research/P5ClearBoundarySpec.hs`, and `test/PipelineSpec.hs` without
-  pre-committing the final implementation diff mechanically.
+  Status: accepted in `round-206`, merged as `12fd9dc`.
+  Outcome: published the canonical milestone-1 enactment-contract freeze,
+  preserved predecessor history unchanged, froze the exact broader-positive
+  frontier, expected behavior shift, authoritative entrypoints,
+  representative corpus, and writable slice, and routed the family forward
+  only to `milestone-2` /
+  `direction-2a-implement-core-polymorphic-mediation-recursive-structure-preservation`.
 
 ### 2. [pending] Implement the broader-positive recursive-structure-preservation mechanism
 
@@ -142,8 +149,9 @@ Candidate directions:
   absorption-driven reason, focused tests capture the new behavior, and the
   retained-child lane plus preserved negative guardrails remain honest.
 - Parallel lane: `lane-main`
-- Coordination notes: stay inside the milestone-1 writable slice, keep the
-  family within the accepted explicit-only / iso-recursive /
+- Coordination notes: consume accepted `round-206` and its milestone-1
+  contract freeze directly; stay inside the milestone-1 writable slice; keep
+  the family within the accepted explicit-only / iso-recursive /
   non-equi-recursive / non-cyclic-graph / no-fallback boundary, and do not
   overclaim full broader-positive closure before the broader representative
   frontier has passed on both authoritative entrypoints.
@@ -155,17 +163,24 @@ Candidate directions:
   machinery so broader-positive quantified-crossing cases preserve recursive
   structure instead of being controlled by polymorphic-mediation `mu`
   absorption.
-  Why it matters now: the accepted revised ledger already selected enactment
-  rather than bounded continuation or explicit closure. The family now needs
-  the core semantic change in production code.
+  Why it matters now: accepted `round-206` now freezes the exact frontier,
+  representative corpus, authoritative entrypoints, and writable slice. The
+  next lawful move is the first code-bearing round that changes only the core
+  recursive-structure machinery needed to stop the old absorption-driven read.
   Preconditions: `milestone-1`.
   Parallel hints: serial extraction only.
   Boundary notes: no fallback rescue, no second interface, no equi-recursive
   or cyclic widening, and no reopening of `P2` or the representative negative
   families.
-  Extraction notes: expect focused rounds on the internal recursive-structure
-  seams first; each round must keep scope bounded enough for honest review and
-  must add or update focused tests with the behavior change.
+  Extraction notes: start serially with the internal mechanism seams in
+  `src/MLF/Elab/Run/ResultType/Fallback.hs`,
+  `src/MLF/Elab/Run/ResultType/Fallback/Core.hs`, and
+  `src/MLF/Elab/TermClosure.hs`, plus the smallest focused updates in
+  `test/PipelineSpec.hs` and `test/Research/P5ClearBoundarySpec.hs` needed to
+  prove the behavior shift. Defer `src/MLF/Elab/Run/Pipeline.hs`,
+  `src/MLF/Elab/Pipeline.hs`, and `src-public/MLF/Pipeline.hs` threading to
+  `direction-2b` unless keeping them untouched would make the selected slice
+  dishonest or non-reviewable.
 
 - Direction id: `direction-2b-thread-the-selected-semantics-through-authoritative-pipeline-seams`
   Summary: carry the milestone-2 mechanism through the authoritative pipeline
