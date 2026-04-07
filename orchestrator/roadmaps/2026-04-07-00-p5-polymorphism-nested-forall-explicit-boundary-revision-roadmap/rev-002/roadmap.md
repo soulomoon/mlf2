@@ -156,21 +156,20 @@ Accepted direction lineage:
   read, and handed the family forward only to the broader positive `P5`
   ledger milestone under the revised freeze.
 
-### 2. [pending] Build the broader positive `P5` planning ledger beyond the one settled retained-child lane under the revised freeze
+### 2. [done] Build the broader positive `P5` planning ledger beyond the one settled retained-child lane under the revised freeze
 
 - Milestone id: `milestone-2`
 - Depends on: `milestone-1`
 - Intent: use the accepted `rev-002` milestone-1 refreeze to identify the
   exact broader positive `P5 polymorphism-nested-forall` frontier beyond the
   one settled retained-child clear-boundary lane, distinguish preserved
-  evidence from live pressure, and compare whether that broader frontier still
-  admits an honest bounded current-architecture continuation or instead
-  sustains one exact explicit boundary-revision candidate.
+  evidence from live pressure, and freeze the exact planning surface that the
+  final downstream handoff must consume without reopening excluded neighbor
+  families.
 - Completion signal: an accepted docs-only planning ledger identifies one
   exact broader positive `P5` frontier, classifies what remains predecessor
-  truth versus live pressure under the revised freeze, and records one honest
-  planning-level read on current-boundary continuation versus explicit
-  revision candidacy.
+  truth versus live pressure under the revised freeze, and fixes the exact
+  surviving decision surface that the final downstream handoff must bind.
 - Parallel lane: `lane-main`
 - Coordination notes: treat accepted `round-203` and its milestone-1
   refreeze artifact as controlling. Only the exact live inherited-boundary
@@ -179,46 +178,33 @@ Accepted direction lineage:
   representative tests, do not promote `nestedForallContrastExpr` into whole-
   family closure by itself, and do not reopen `P2` or the representative
   negative-family rows.
+- Completion notes: accepted `round-204`, merged as base commit `9ee680c`
+  (`Publish the milestone-2 broader-positive P5 ledger under the revised freeze`),
+  finalized
+  `direction-2a-build-broader-positive-p5-ledger-under-revised-freeze`
+  through
+  `docs/plans/2026-04-07-p5-polymorphism-nested-forall-explicit-boundary-revision-family-broader-positive-p5-ledger-under-the-revised-freeze.md`
+  with authoritative review in
+  `orchestrator/rounds/round-204/review-record.json`. That accepted broader
+  ledger fixes the exact live frontier to broader positive nested-forall /
+  quantified-crossing support beyond the one settled retained-child lane,
+  preserves accepted `round-203` as the controlling milestone-1 refreeze,
+  keeps `P2`, the March 28 exact packet, and the representative negative-
+  family rows closed as predecessor truth or excluded material, and preserves
+  `explicit boundary-revision candidate` as family-entry pressure only rather
+  than a bound downstream consequence. `milestone-2` is therefore complete,
+  and `rev-002` now moves directly to `milestone-3` for the one remaining
+  downstream bind without opening a separate `direction-2b` extraction.
 
-Candidate directions:
+Accepted direction lineage:
 
 - Direction id: `direction-2a-build-broader-positive-p5-ledger-under-revised-freeze`
-  Summary: identify the exact broader positive `P5` frontier beyond the one
-  settled retained-child clear-boundary lane under the revised milestone-1
-  freeze, and classify each preserved input as predecessor truth, excluded
-  material, or still-live broader support pressure.
-  Why it matters now: the family still needs an exact live frontier instead of
-  an abstract "broader support" label before any current-boundary-versus-
-  revision comparison can be honest, but that ledger must now respect the
-  reopened nested-forall `mu`-preservation question.
-  Preconditions: `milestone-1`.
-  Parallel hints: serial only.
-  Boundary notes: docs-only inventory and classification; do not revise code,
-  tests, or the inherited boundary itself.
-  Extraction notes: keep the focus on broader positive nested-forall /
-  quantified-crossing support beyond the settled retained-child lane; explain
-  specifically how the surviving pressure bears on the live inherited-boundary
-  clauses or semantic questions frozen in `milestone-1`; and state explicitly
-  why preserved `P2`, negative-family, iso-recursive, non-equi-recursive,
-  no-fallback, no-second-interface, and `non-cyclic-graph = unknown`
-  predecessor context do not become live debt again here.
-
-- Direction id: `direction-2b-compare-current-boundary-vs-explicit-revision`
-  Summary: use the milestone-2 planning ledger to decide whether one exact
-  bounded current-architecture continuation still survives honestly or whether
-  the broader planning record instead supports one exact explicit
-  boundary-revision candidate.
-  Why it matters now: the family cannot bind a downstream consequence until it
-  compares the broader frontier against the revised decision surface from
-  `milestone-1`.
-  Preconditions: `milestone-1`; a stable broader positive `P5` ledger from
-  `direction-2a` or an equivalent accepted artifact.
-  Parallel hints: serial only; do not extract until the broader frontier is
-  frozen.
-  Boundary notes: remain planning-only and decision-surface-only; do not enact
-  a revision or authorize implementation.
-  Extraction notes: the outcome must name one surviving planning-level read
-  only rather than leaving a menu of equal options open.
+  Status: accepted in `round-204`, merged as `9ee680c`.
+  Outcome: published the canonical milestone-2 broader-ledger artifact, froze
+  the exact broader positive `P5` frontier under the accepted `round-203`
+  refreeze, classified preserved evidence versus still-live pressure
+  honestly, and routed the family forward only to
+  `milestone-3` / `direction-3a-bind-one-downstream-consequence`.
 
 ### 3. [pending] Bind one exact downstream consequence from the revised planning ledger
 
@@ -235,20 +221,26 @@ Candidate directions:
   implementation family, one later bounded current-architecture continuation
   family, or an explicit no-further-action close if the accepted planning
   record truly collapses the pressure. It may not bind more than one next
-  move, and it may not enact that move inside `rev-002`.
+  move, and it may not enact that move inside `rev-002`. Accepted
+  `round-204` now fixes the broader frontier and preserved/live-pressure split
+  for this family, so this milestone must consume that frozen ledger directly
+  instead of reopening milestone-2 classification work.
 
 Candidate directions:
 
 - Direction id: `direction-3a-bind-one-downstream-consequence`
-  Summary: publish the canonical planning-family final handoff that names one
-  exact downstream consequence only and keeps all non-selected routes closed.
-  Why it matters now: without one exact handoff, this planning-only family
-  would end in ambiguity about whether the next move is enactment, bounded
-  continuation, or closure.
+  Summary: publish the canonical planning-family final handoff that consumes
+  the accepted `round-203` / `round-204` planning record, names one exact
+  downstream consequence only, and keeps all non-selected routes closed.
+  Why it matters now: `round-204` has already frozen the broader frontier
+  under the revised milestone-1 surface, so the family now needs one exact
+  bind on whether that surviving pressure routes to later enactment, bounded
+  continuation, or explicit closure instead of another milestone-2 reread.
   Preconditions: `milestone-2`.
   Parallel hints: serial finalization only.
   Boundary notes: handoff-only; do not revise the inherited boundary or enact
   any downstream code, tests, or contract changes in this revision.
   Extraction notes: the final artifact must explain why every non-selected
-  route stays closed, including any attempt to reopen `P2` or to treat the one
-  settled retained-child lane as broad family closure.
+  route stays closed, including any attempt to reopen `P2`, to treat the one
+  settled retained-child lane as broad family closure, or to resurrect a
+  separate `direction-2b` comparison packet after the accepted broader ledger.
