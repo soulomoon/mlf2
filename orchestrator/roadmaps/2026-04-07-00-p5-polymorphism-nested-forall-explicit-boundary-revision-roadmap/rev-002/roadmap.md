@@ -206,7 +206,7 @@ Accepted direction lineage:
   honestly, and routed the family forward only to
   `milestone-3` / `direction-3a-bind-one-downstream-consequence`.
 
-### 3. [pending] Bind one exact downstream consequence from the revised planning ledger
+### 3. [done] Bind one exact downstream consequence from the revised planning ledger
 
 - Milestone id: `milestone-3`
 - Depends on: `milestone-2`
@@ -225,22 +225,48 @@ Accepted direction lineage:
   `round-204` now fixes the broader frontier and preserved/live-pressure split
   for this family, so this milestone must consume that frozen ledger directly
   instead of reopening milestone-2 classification work.
+- Completion notes: accepted `round-205`, merged as base commit `e3dca9f`
+  (`Publish the milestone-3 final handoff binding one exact downstream consequence from the revised planning ledger`),
+  finalized `direction-3a-bind-one-downstream-consequence` through
+  `docs/plans/2026-04-08-p5-polymorphism-nested-forall-explicit-boundary-revision-family-final-handoff-binding-one-exact-downstream-consequence-from-the-revised-planning-ledger.md`
+  with authoritative review in
+  `orchestrator/rounds/round-205/review-record.json`. That accepted docs-only
+  final handoff consumed accepted `round-204` as the binding immediate
+  predecessor and accepted `round-203` as the controlling revised freeze,
+  evaluated exactly the three lawful milestone-3 downstream-consequence
+  routes, and bound exactly one downstream consequence:
+  `open one later enactment / implementation family for the still-live explicit boundary-revision pressure on broader positive P5 polymorphism-nested-forall support beyond the one settled retained-child clear-boundary lane`.
+  It kept the non-selected routes explicitly closed, including
+  `one later bounded current-architecture continuation family`,
+  `one explicit no-further-action close`,
+  `P2`,
+  `N1 ambiguity-reject`,
+  `N2 unsoundness-guard`,
+  `N6 termination-pressure`,
+  the March 28 exact packet reruns,
+  the one settled retained-child lane as broad family closure, and any
+  separate `direction-2b` comparison packet. This completed `milestone-3`
+  and closes `rev-002` honestly: all milestones are done, the family ends
+  with exactly one bound downstream consequence, and no candidate directions
+  or other unfinished work remain active inside this roadmap family.
 
-Candidate directions:
+Accepted direction lineage:
 
 - Direction id: `direction-3a-bind-one-downstream-consequence`
-  Summary: publish the canonical planning-family final handoff that consumes
-  the accepted `round-203` / `round-204` planning record, names one exact
-  downstream consequence only, and keeps all non-selected routes closed.
-  Why it matters now: `round-204` has already frozen the broader frontier
-  under the revised milestone-1 surface, so the family now needs one exact
-  bind on whether that surviving pressure routes to later enactment, bounded
-  continuation, or explicit closure instead of another milestone-2 reread.
-  Preconditions: `milestone-2`.
-  Parallel hints: serial finalization only.
-  Boundary notes: handoff-only; do not revise the inherited boundary or enact
-  any downstream code, tests, or contract changes in this revision.
-  Extraction notes: the final artifact must explain why every non-selected
-  route stays closed, including any attempt to reopen `P2`, to treat the one
-  settled retained-child lane as broad family closure, or to resurrect a
-  separate `direction-2b` comparison packet after the accepted broader ledger.
+  Status: accepted in `round-205`, merged as `e3dca9f`.
+  Outcome: published the canonical milestone-3 final handoff that consumed
+  the accepted `round-203` / `round-204` revised planning ledger and bound
+  exactly one lawful downstream consequence: open one later enactment /
+  implementation family for the still-live explicit boundary-revision
+  pressure on broader positive `P5 polymorphism-nested-forall` support beyond
+  the one settled retained-child clear-boundary lane, while keeping
+  `one later bounded current-architecture continuation family`,
+  `one explicit no-further-action close`,
+  `P2`,
+  `N1 ambiguity-reject`,
+  `N2 unsoundness-guard`,
+  `N6 termination-pressure`,
+  the March 28 exact packet reruns,
+  the one settled retained-child lane as broad family closure, and
+  `direction-2b` closed. This completed `milestone-3` and left no active
+  unfinished directions in `rev-002`.
