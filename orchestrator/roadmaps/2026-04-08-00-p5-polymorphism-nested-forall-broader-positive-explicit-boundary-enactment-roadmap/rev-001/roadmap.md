@@ -155,6 +155,28 @@ Accepted direction lineage:
   non-equi-recursive / non-cyclic-graph / no-fallback boundary, and do not
   overclaim full broader-positive closure before the broader representative
   frontier has passed on both authoritative entrypoints.
+- Progress notes: accepted `round-207`, merged as base commit `fb85bd4`
+  (`Align same-wrapper nested-forall fallback target and scope`), completed
+  the first serial `direction-2a` extraction
+  `implement-same-wrapper-nested-forall-target-selection-and-term-closure-seams`
+  with authoritative review in
+  `orchestrator/rounds/round-207/review-record.json`. That accepted bounded
+  code-bearing slice stayed inside
+  `src/MLF/Elab/Run/ResultType/Fallback/Core.hs`,
+  `test/PipelineSpec.hs`, and
+  `test/Research/P5ClearBoundarySpec.hs`, aligned the selected same-wrapper
+  nested-`forall` fallback target with the matching generalization scope so
+  the internal mechanism now preserves recursive structure for that packet,
+  kept the settled retained-child lane and preserved negative/control
+  guardrails honest, passed focused checks plus `cabal build all && cabal test`,
+  and left `src/MLF/Elab/Run/ResultType/Fallback.hs`,
+  `src/MLF/Elab/TermClosure.hs`,
+  `src/MLF/Elab/Run/Pipeline.hs`,
+  `src/MLF/Elab/Pipeline.hs`, and
+  `src-public/MLF/Pipeline.hs` untouched. Milestone-2 remains pending because
+  the selected behavior is still internal-only and authoritative entrypoints
+  remain fail-closed in this round, so the next serial move is now
+  `direction-2b-thread-the-selected-semantics-through-authoritative-pipeline-seams`.
 
 Candidate directions:
 
@@ -186,17 +208,34 @@ Candidate directions:
   Summary: carry the milestone-2 mechanism through the authoritative pipeline
   and public/internal entrypoints so the selected behavior is visible where
   the family measures success.
-  Why it matters now: broader-positive support is not accepted until the
-  enacted behavior is visible on both `runPipelineElab` and
+  Why it matters now: accepted `round-207` completed the first serial
+  `direction-2a` internal mechanism slice and proved the selected same-wrapper
+  nested-`forall` packet can preserve recursive structure inside fallback
+  without widening into pipeline/public seams, but broader-positive support is
+  not accepted until that behavior is visible on both `runPipelineElab` and
   `runPipelineElabChecked`.
-  Preconditions: `milestone-1`; likely follows accepted progress from
-  `direction-2a`.
+  Preconditions: `milestone-1`; accepted progress from
+  `direction-2a` via `round-207`.
   Parallel hints: keep serial unless a later accepted revision proves an
   independent split is safe.
   Boundary notes: do not drift into closeout docs or broad corpus claims here;
   this direction is for production wiring and narrowly justified focused tests.
   Extraction notes: public/internal parity should be treated as part of the
   production slice, not as a separate interface or compatibility layer.
+
+Accepted extraction lineage:
+
+- Extraction id: `implement-same-wrapper-nested-forall-target-selection-and-term-closure-seams`
+  Direction: `direction-2a-implement-core-polymorphic-mediation-recursive-structure-preservation`
+  Status: accepted in `round-207`, merged as `fb85bd4`.
+  Outcome: repaired the first bounded same-wrapper nested-`forall` internal
+  mechanism slice by carrying the selected recursive target together with the
+  matching generalization scope inside fallback core, proving recursive
+  preservation on the selected internal packet and focused tests while keeping
+  `Fallback.hs`, `TermClosure.hs`, and the authoritative pipeline/public
+  seams untouched and still fail-closed. This extraction is complete; the next
+  unfinished serial item remains
+  `direction-2b-thread-the-selected-semantics-through-authoritative-pipeline-seams`.
 
 ### 3. [pending] Prove broader-positive frontier success on both authoritative entrypoints
 
