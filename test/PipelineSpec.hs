@@ -2582,25 +2582,46 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "sameLocalTypeLane child =\n                  case bindingScopeRefCanonical presolutionViewFinal child of"
+            "sameLocalTypeLane parentRef child =\n                  parentRef == scopeRootPost\n                    || case bindingScopeRefCanonical presolutionViewFinal child of"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "in if rootBindingIsLocalType\n                  then pickCandidate (\\_parentRef child -> sameLocalTypeLane child)\n                  else pickCandidate (\\parentRef _child -> parentRef == scopeRoot)"
+            "sameWrapperRetainedChildProof ="
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "sameLaneLocalRetainedChildTarget =\n            if rootBindingIsLocalType\n              then boundVarTarget\n              else Nothing"
+            "selectedSameWrapperNestedForallTarget childTarget bndRoot hasForall =\n                  bndRoot == boundVarTargetRoot\n                    && ( not hasForall\n                           || childTarget == boundVarTargetRoot\n                       )"
+        fallbackSrc
+          `shouldSatisfy` (not . isInfixOf "bndRoot == boundVarTargetRoot,\n                              not hasForall")
+        fallbackSrc
+          `shouldSatisfy` (not . isInfixOf "bndRoot == boundVarTargetRoot,\n                              not hasForall\n                            ]")
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "chosenTargetProof =\n                          case recursiveTargetProofFor childTarget of\n                            Just proof -> proof\n                            Nothing -> (childC, scopeRoot)"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "sameLaneLocalRetainedChildScopeRoot =\n            if rootBindingIsLocalType\n              then fmap (\\(_child, _childTarget, _chosenTarget, chosenScopeRoot) -> chosenScopeRoot) sameWrapperRetainedChildProof\n              else Nothing"
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "keepTargetFinal =\n            rootBindingIsLocalType\n              && ( rootLocalMultiInst\n                     || rootLocalInstArgMultiBase\n                     || rootLocalSchemeAliasBaseLike\n                     || maybe False (const True) sameLaneLocalRetainedChildTarget\n                 )"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "case sameLaneLocalRetainedChildTarget of\n                            Just v -> v\n                            Nothing -> schemeBodyTarget targetPresolutionView rootC"
+            "case sameLaneLocalRetainedChildTarget of\n                          Just v\n                            | v /= rootFinal -> v\n                          _ ->\n                            case lookupNodeIn nodesFinal rootFinal of\n                              Just TyVar {} -> rootFinal\n                              _ -> schemeBodyTarget targetPresolutionView rootC"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "useSameLaneLocalRetainedChildScopeRoot =\n            case baseTarget of\n              Just _ -> False\n              Nothing ->\n                keepTargetFinal"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "generalizeScopeRoot =\n            if useSameLaneLocalRetainedChildScopeRoot\n              then\n                case sameLaneLocalRetainedChildScopeRoot of\n                  Just alignedScopeRoot -> alignedScopeRoot\n                  Nothing -> scopeRoot\n              else scopeRoot"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "generalizeWithPlan planBuilder bindParentsGaFinal presolutionViewFinal generalizeScopeRoot targetC"
+        fallbackSrc
+          `shouldSatisfy` (not . isInfixOf "generalizeWithPlan planBuilder bindParentsGaFinal presolutionViewFinal scopeRoot targetC")
 
       it "keeps the P5 guard cluster wired through boundHasForallFrom and authoritative preservation" $ do
         fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
         termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
         pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-        fallbackSrc `shouldSatisfy` isInfixOf "boundHasForallFrom bnd"
+        fallbackSrc `shouldSatisfy` isInfixOf "hasForall = boundHasForallFrom (snd chosenTargetProof) bndC"
         termClosureSrc `shouldSatisfy` isInfixOf "preserveRetainedChildAliasBoundary env v sch rhs body"
         pipelineSrc `shouldSatisfy` isInfixOf "case preserveRetainedChildAuthoritativeResult termClosed0 of"
 
@@ -2615,10 +2636,47 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
                     (EApp (ELam "y" (EVar "y")) (EVar "k"))
                 )
+            extractSelectedBodyApp ann0 = case ann0 of
+              ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ body _) _ _) _ ->
+                case body of
+                  AAnn inner _ _ -> inner
+                  other -> other
+              _ ->
+                error
+                  ( "unexpected same-wrapper nested-forall wrapper shape: "
+                      ++ show ann0
+                  )
+            wireSameLaneLocalRoot inputs rootNid childNid =
+              let view0 = rtcPresolutionView inputs
+                  retainedTarget =
+                    case pvLookupVarBound view0 childNid of
+                      Just boundNid -> boundNid
+                      Nothing ->
+                        error
+                          ( "expected retained child bound for "
+                              ++ show childNid
+                          )
+                  rewrite =
+                    ariSetVarBound rootNid retainedTarget
+                      . ariSetVarBound childNid retainedTarget
+                      . ariSetTypeParent childNid (Just (typeRef rootNid))
+                      . ariSetTypeParent rootNid Nothing
+                  inputs' = rewriteResultTypeInputs rewrite inputs
+               in inputs' {rtcBaseConstraint = rewrite (pvConstraint view0)}
         artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
-        let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
-        fallbackTy <- requireRight (computeResultTypeFallback inputs annCanon annPre)
-        containsMu fallbackTy `shouldBe` False
+        let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+            bodyCanon = extractSelectedBodyApp annCanon0
+            bodyPre = extractSelectedBodyApp annPre0
+            (retainedRoot, retainedChild) = case bodyCanon of
+              AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+              other ->
+                error
+                  ( "expected same-wrapper nested-forall retained-child app shape, got "
+                      ++ show other
+                  )
+            inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+        fallbackTy <- requireRight (computeResultTypeFallback inputs bodyCanon bodyPre)
+        containsMu fallbackTy `shouldBe` True
 
       it "keeps local empty-candidate scheme-alias/base-like fallback on the local TypeRef lane" $ do
         fallbackTy <- localEmptyCandidateSchemeAliasBaseLikeFallback True

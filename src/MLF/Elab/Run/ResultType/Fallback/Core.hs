@@ -400,6 +400,10 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
             if rootBindingIsLocalType
               then presolutionViewFinal
               else presolutionView
+          retainedChildPresolutionView =
+            if rootBindingIsLocalType
+              then rtcPresolutionView ctx
+              else targetPresolutionView
           rootBound =
             case lookupNodeIn nodesFinal rootFinal of
               Just TyVar {tnBound = Just bnd} -> Just (canonicalFinal bnd)
@@ -496,14 +500,18 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
             canonicalSchemeRootOwners
               canonicalFinal
               (IntMap.fromList [(genNodeKey (gnId gen), gen) | gen <- genNodesFinal])
-          boundHasForallFrom start0 =
+          alignedScopeRootFor target =
+            case bindingScopeRefCanonical retainedChildPresolutionView target of
+              Right ref -> canonicalizeScopeRef retainedChildPresolutionView redirects ref
+              Left _ -> scopeRoot
+          boundHasForallFrom scopeRootAligned start0 =
             let go visited nid0 =
                   let nid = canonicalFinal nid0
                       key = getNodeId nid
                       isNestedSchemeRoot =
                         case IntMap.lookup key schemeRootOwnerFinal of
                           Just gid ->
-                            case scopeRoot of
+                            case scopeRootAligned of
                               GenRef gidScope -> gid /= gidScope
                               TypeRef _ -> True
                           Nothing -> False
@@ -533,7 +541,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                       ++ " owner="
                                       ++ show owner
                                       ++ " scope="
-                                      ++ show scopeRoot
+                                      ++ show scopeRootAligned
                                   )
                                   ()
                           else ()
@@ -559,7 +567,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                     bndNested =
                                       case IntMap.lookup bndKey schemeRootOwnerFinal of
                                         Just gid ->
-                                          case scopeRoot of
+                                          case scopeRootAligned of
                                             GenRef gidScope -> gid /= gidScope
                                             TypeRef _ -> True
                                         Nothing -> False
@@ -580,59 +588,109 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                  in go visited' d || go visited' c
                               _ -> False
              in go IntSet.empty start0
-          boundVarTarget =
-            let sameLocalTypeLane child =
-                  case bindingScopeRefCanonical presolutionViewFinal child of
-                    Right ref -> ref == scopeRootPost
-                    Left _ -> False
-                candidatesFor keepCandidate =
-                  [ ( canonicalFinal child,
-                      canonicalFinal bnd,
-                      canonicalFinal (schemeBodyTarget targetPresolutionView bnd),
-                      boundHasForallFrom bnd
-                    )
-                  | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (ChiQuery.chiCanonicalConstraint presolutionViewFinal)),
+          firstRecursiveTargetFrom start0 =
+            let go visited nid0 =
+                  let nid = canonicalFinal nid0
+                      key = getNodeId nid
+                   in if IntSet.member key visited
+                        then Nothing
+                        else case pvLookupNode retainedChildPresolutionView nid of
+                          Just TyMu {} -> Just nid
+                          Just TyVar {tnBound = Just bnd} ->
+                            go (IntSet.insert key visited) bnd
+                          Just TyForall {tnBody = b} ->
+                            go (IntSet.insert key visited) b
+                          Just TyExp {tnBody = b} ->
+                            go (IntSet.insert key visited) b
+                          Just TyArrow {tnDom = d, tnCod = c} ->
+                            let visited' = IntSet.insert key visited
+                             in case go visited' d of
+                                  Just recursiveTarget -> Just recursiveTarget
+                                  Nothing -> go visited' c
+                          _ -> Nothing
+             in go IntSet.empty start0
+          sameWrapperRetainedChildProof =
+            let sameLocalTypeLane parentRef child =
+                  parentRef == scopeRootPost
+                    || case bindingScopeRefCanonical presolutionViewFinal child of
+                      Right ref -> ref == scopeRootPost
+                      Left _ -> False
+                selectedSameWrapperNestedForallTarget childTarget bndRoot hasForall =
+                  bndRoot == boundVarTargetRoot
+                    && ( not hasForall
+                           || childTarget == boundVarTargetRoot
+                       )
+                recursiveTargetProofFor childTarget =
+                  let recursiveFromInstRoots =
+                        listToMaybe
+                          [ recursiveTarget
+                          | instRoot <- rootInstRoots,
+                            Just recursiveTarget <- [firstRecursiveTargetFrom instRoot]
+                          ]
+                      chosenRecursiveTarget =
+                        case firstRecursiveTargetFrom childTarget of
+                          Just recursiveTarget -> Just recursiveTarget
+                          Nothing -> recursiveFromInstRoots
+                   in case chosenRecursiveTarget of
+                        Just recursiveTarget ->
+                          Just (recursiveTarget, alignedScopeRootFor recursiveTarget)
+                        Nothing -> Nothing
+                candidates =
+                  [ let childC = canonicalFinal child
+                        childTarget = canonicalFinal (schemeBodyTarget retainedChildPresolutionView child)
+                        bndC = canonicalFinal bnd
+                        bndRoot = canonicalFinal (schemeBodyTarget retainedChildPresolutionView bnd)
+                        chosenTargetProof =
+                          case recursiveTargetProofFor childTarget of
+                            Just proof -> proof
+                            Nothing -> (childC, scopeRoot)
+                        hasForall = boundHasForallFrom (snd chosenTargetProof) bndC
+                     in (childC, childTarget, bndC, bndRoot, chosenTargetProof, hasForall)
+                  | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (pvCanonicalConstraint retainedChildPresolutionView)),
                     TypeRef child <- [nodeRefFromKey childKey],
-                    keepCandidate parentRef (canonicalFinal child),
-                    Just bnd <- [View.rtvLookupVarBound viewFinalBounded (canonicalFinal child)]
+                    sameLocalTypeLane parentRef (canonicalFinal child),
+                    Just bnd <- [pvLookupVarBound retainedChildPresolutionView (canonicalFinal child)]
                   ]
-                pickCandidate keepCandidate =
-                  let candidates = candidatesFor keepCandidate
-                      debugCandidates =
-                        if debugGaScopeEnabled traceCfg
-                          then
-                            debugGaScope
-                              traceCfg
-                              ( "runPipelineElab: boundVarTargetRoot="
-                                  ++ show boundVarTargetRoot
-                                  ++ " scopeRoot="
-                                  ++ show scopeRoot
-                                  ++ " scopeRootPost="
-                                  ++ show scopeRootPost
-                                  ++ " rootBindingIsLocalType="
-                                  ++ show rootBindingIsLocalType
-                                  ++ " candidates="
-                                  ++ show
-                                    [ (child, bnd, bndRoot, hasForall)
-                                    | (child, bnd, bndRoot, hasForall) <- candidates
-                                    ]
-                              )
-                              ()
-                          else ()
-                   in case debugCandidates of
-                        () ->
-                          listToMaybe
-                            [ child
-                            | (child, _bnd, bndRoot, hasForall) <- candidates,
-                              bndRoot == boundVarTargetRoot,
-                              not hasForall
-                            ]
+                debugCandidates =
+                  if debugGaScopeEnabled traceCfg
+                    then
+                      debugGaScope
+                        traceCfg
+                        ( "runPipelineElab: boundVarTargetRoot="
+                            ++ show boundVarTargetRoot
+                            ++ " scopeRoot="
+                            ++ show scopeRoot
+                            ++ " scopeRootPost="
+                            ++ show scopeRootPost
+                            ++ " rootBindingIsLocalType="
+                            ++ show rootBindingIsLocalType
+                            ++ " candidates="
+                            ++ show
+                              [ (child, childTarget, bnd, bndRoot, chosenTargetProof, hasForall)
+                              | (child, childTarget, bnd, bndRoot, chosenTargetProof, hasForall) <- candidates
+                              ]
+                        )
+                        ()
+                    else ()
              in if rootBindingIsLocalType
-                  then pickCandidate (\_parentRef child -> sameLocalTypeLane child)
-                  else pickCandidate (\parentRef _child -> parentRef == scopeRoot)
+                  then
+                    case debugCandidates of
+                      () ->
+                        listToMaybe
+                          [ (child, childTarget, chosenTarget, chosenScopeRoot)
+                          | (child, childTarget, _bnd, bndRoot, (chosenTarget, chosenScopeRoot), hasForall) <- candidates,
+                            selectedSameWrapperNestedForallTarget childTarget bndRoot hasForall
+                          ]
+                  else Nothing
+          boundVarTarget =
+            fmap (\(child, _childTarget, _chosenTarget, _chosenScopeRoot) -> child) sameWrapperRetainedChildProof
           sameLaneLocalRetainedChildTarget =
             if rootBindingIsLocalType
-              then boundVarTarget
+              then fmap (\(_child, _childTarget, chosenTarget, _chosenScopeRoot) -> chosenTarget) sameWrapperRetainedChildProof
+              else Nothing
+          sameLaneLocalRetainedChildScopeRoot =
+            if rootBindingIsLocalType
+              then fmap (\(_child, _childTarget, _chosenTarget, chosenScopeRoot) -> chosenScopeRoot) sameWrapperRetainedChildProof
               else Nothing
           keepTargetFinal =
             rootBindingIsLocalType
@@ -658,12 +716,14 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                       || rootLocalMultiInst
                       || rootLocalInstArgMultiBase
                       then rootFinal
-                      else case lookupNodeIn nodesFinal rootFinal of
-                        Just TyVar {} -> rootFinal
-                        _ ->
-                          case sameLaneLocalRetainedChildTarget of
-                            Just v -> v
-                            Nothing -> schemeBodyTarget targetPresolutionView rootC
+                      else
+                        case sameLaneLocalRetainedChildTarget of
+                          Just v
+                            | v /= rootFinal -> v
+                          _ ->
+                            case lookupNodeIn nodesFinal rootFinal of
+                              Just TyVar {} -> rootFinal
+                              _ -> schemeBodyTarget targetPresolutionView rootC
                   else
                     if rootBindingIsLocalType
                       then schemeBodyTarget targetPresolutionView rootC
@@ -671,6 +731,22 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                         if rootFinalInvolvesMu
                           then schemeBodyTarget presolutionViewFinal rootC
                           else rootFinal
+      let useSameLaneLocalRetainedChildScopeRoot =
+            case baseTarget of
+              Just _ -> False
+              Nothing ->
+                keepTargetFinal
+                  && not rootLocalSchemeAliasBaseLike
+                  && not rootLocalMultiInst
+                  && not rootLocalInstArgMultiBase
+                  && maybe False (/= rootFinal) sameLaneLocalRetainedChildTarget
+      let generalizeScopeRoot =
+            if useSameLaneLocalRetainedChildScopeRoot
+              then
+                case sameLaneLocalRetainedChildScopeRoot of
+                  Just alignedScopeRoot -> alignedScopeRoot
+                  Nothing -> scopeRoot
+              else scopeRoot
       let bindParentsGaFinal =
             case boundTarget of
               Just baseN ->
@@ -695,7 +771,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                  in bindParentsGa {gaBaseConstraint = baseConstraint'}
               Nothing -> bindParentsGa
       (sch, _subst) <-
-        generalizeWithPlan planBuilder bindParentsGaFinal presolutionViewFinal scopeRoot targetC
+        generalizeWithPlan planBuilder bindParentsGaFinal presolutionViewFinal generalizeScopeRoot targetC
       debugWhenM
         traceCfg
         ( "runPipelineElab: final scheme="
@@ -708,10 +784,16 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
             ++ show targetC
             ++ " boundVarTarget="
             ++ show boundVarTarget
+            ++ " sameWrapperRetainedChildProof="
+            ++ show sameWrapperRetainedChildProof
+            ++ " rootInstRoots="
+            ++ show rootInstRoots
             ++ " boundVarTargetRoot="
             ++ show boundVarTargetRoot
             ++ " scopeRoot="
             ++ show scopeRoot
+            ++ " generalizeScopeRoot="
+            ++ show generalizeScopeRoot
             ++ " rootBindingIsLocalType="
             ++ show rootBindingIsLocalType
             ++ " rootFinalInvolvesMu="
