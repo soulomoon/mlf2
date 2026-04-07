@@ -74,9 +74,9 @@ spec =
             fallbackTy <- sameLaneAliasFrameClearBoundaryFallbackType
             containsMu fallbackTy `shouldBe` True
 
-        it "correctly absorbs μ when polymorphic mediation crosses a nested forall boundary" $ do
+        it "preserves recursive fallback shape for the selected same-wrapper packet across a nested forall boundary" $ do
             fallbackTy <- fallbackType nestedForallContrastExpr
-            containsMu fallbackTy `shouldBe` False
+            containsMu fallbackTy `shouldBe` True
 
         it "keeps the clear-boundary control recursive on both current pipeline entrypoints" $ do
             let pipelineRuns =
@@ -106,7 +106,7 @@ spec =
                 )
                 pipelineRuns
 
-        it "reports PhiTranslatabilityError at pipeline entrypoints as a downstream consequence of correct non-recursive nested-forall outcome" $ do
+        it "reports PhiTranslatabilityError at pipeline entrypoints while the nested-forall preservation stays internal-only in this round" $ do
             let expectedSnippets =
                     [ "Phase 6 (elaboration): PhiTranslatabilityError"
                     , "reifyInst: missing authoritative instantiation translation"
@@ -181,8 +181,16 @@ sameLaneAliasFrameClearBoundaryFallbackType = do
 fallbackType :: SurfaceExpr -> IO ElabType
 fallbackType expr = do
     artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
-    let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
-    requireRight (computeResultTypeFallback inputs annCanon annPre)
+    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+        bodyCanon = extractSelectedBodyApp annCanon0
+        bodyPre = extractSelectedBodyApp annPre0
+        (retainedRoot, retainedChild) = case bodyCanon of
+            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            other ->
+                error
+                    ("expected same-wrapper nested-forall retained-child app shape, got " ++ show other)
+        inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+    requireRight (computeResultTypeFallback inputs bodyCanon bodyPre)
 
 extractInnerLetRhs :: AnnExpr -> AnnExpr
 extractInnerLetRhs ann0 = case ann0 of
@@ -213,6 +221,14 @@ extractFirstAppMaybe ann0 = case ann0 of
             Just hit -> Just hit
             Nothing -> extractFirstAppMaybe body
     _ -> Nothing
+
+extractSelectedBodyApp :: AnnExpr -> AnnExpr
+extractSelectedBodyApp ann0 = case ann0 of
+    ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ body _) _ _) _ ->
+        case body of
+            AAnn inner _ _ -> inner
+            other -> other
+    _ -> error ("unexpected same-wrapper nested-forall wrapper shape: " ++ show ann0)
 
 wireSameLaneLocalRoot :: ResultTypeInputs -> NodeId -> NodeId -> ResultTypeInputs
 wireSameLaneLocalRoot inputs rootNid childNid =
@@ -268,6 +284,7 @@ wireSameLaneLocalRoot inputs rootNid childNid =
                 }
     in inputs
         { rtcPresolutionView = view'
+        , rtcBaseConstraint = baseConstraint'
         , rtcBindParentsGa = ga'
         }
 
