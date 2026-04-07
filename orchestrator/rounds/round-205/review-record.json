@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-07-00-p5-polymorphism-nested-forall-explicit-boundary-revision-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-07-00-p5-polymorphism-nested-forall-explicit-boundary-revision-roadmap/rev-002",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-bind-one-downstream-consequence",
+  "extracted_item_id": "bind-one-downstream-consequence",
+  "decision": "approved",
+  "evidence_summary": "The docs-only round stays within the authorized milestone-3 handoff artifact plus round bookkeeping, cites the required round-203/204-ledger lineage, selects exactly one later enactment / implementation family, explains why bounded continuation, explicit close, P2, the representative negative-family rows, the March 28 packet, the retained-child lane as broad closure, and direction-2b remain closed, and does not enact any downstream change inside rev-002."
+}
