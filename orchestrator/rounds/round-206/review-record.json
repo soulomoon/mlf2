@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-freeze-broader-positive-enactment-contract",
+  "extracted_item_id": "freeze-broader-positive-enactment-contract",
+  "decision": "approved",
+  "evidence_summary": "The docs/control-plane-only round stays within the authorized milestone-1 artifact plus round bookkeeping, consumes the approved round-203/204/205 lineage honestly, freezes the exact broader-positive frontier, expected behavior shift, authoritative entrypoints, representative corpus, and writable slice, preserves the retained-child lane and the P2/N1/N2/N6 guardrails as predecessor truth or closed boundaries, and touches no code, test, Cabal, roadmap, or thesis-facing files."
+}
