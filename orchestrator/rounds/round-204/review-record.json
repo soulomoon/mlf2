@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-07-00-p5-polymorphism-nested-forall-explicit-boundary-revision-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-07-00-p5-polymorphism-nested-forall-explicit-boundary-revision-roadmap/rev-002",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-build-broader-positive-p5-ledger-under-revised-freeze",
+  "extracted_item_id": "build-broader-positive-p5-ledger-under-revised-freeze",
+  "decision": "approved",
+  "evidence_summary": "Docs-only round publishes the milestone-2 broader-positive P5 ledger under the accepted round-203 rev-002 freeze, keeps the retained-child lane bounded as predecessor evidence, preserves P2 and the representative negative-family rows as closed predecessor truth, and leaves direction-2b and milestone-3 closed."
+}
