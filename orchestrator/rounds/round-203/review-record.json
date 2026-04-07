@@ -1,0 +1,10 @@
+{
+  "roadmap_id": "2026-04-07-00-p5-polymorphism-nested-forall-explicit-boundary-revision-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-07-00-p5-polymorphism-nested-forall-explicit-boundary-revision-roadmap/rev-002",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-refreeze-inherited-boundary-after-reopening-polymorphic-mediation-semantics",
+  "extracted_item_id": "refreeze-inherited-boundary-after-reopening-polymorphic-mediation-semantics",
+  "decision": "approved",
+  "evidence_summary": "Docs-only milestone-1 refreeze preserves historical round-202 and round-151 artifacts, reclassifies the round-151 semantic read as narrowed live pressure, keeps P2 and the representative negative-family rows closed, and stays within the authorized planning-only scope."
+}
