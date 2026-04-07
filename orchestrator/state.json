@@ -1,9 +1,9 @@
 {
   "contract_version": 2,
   "base_branch": "codex/automatic-recursive-type-inference",
-  "roadmap_id": "2026-04-07-00-p5-polymorphism-nested-forall-explicit-boundary-revision-roadmap",
+  "roadmap_id": "2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap",
   "roadmap_revision": "rev-001",
-  "roadmap_dir": "orchestrator/roadmaps/2026-04-07-00-p5-polymorphism-nested-forall-explicit-boundary-revision-roadmap/rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap/rev-001",
   "stage": "select-task",
   "controller_stage": "dispatch-rounds",
   "max_parallel_rounds": 1,
@@ -15,7 +15,7 @@
   "worktree_path": null,
   "active_round_dir": null,
   "round_artifacts": {},
-  "last_completed_round": "round-201",
+  "last_completed_round": "round-205",
   "resume_error": null,
   "resume_errors": {},
   "retry": null
