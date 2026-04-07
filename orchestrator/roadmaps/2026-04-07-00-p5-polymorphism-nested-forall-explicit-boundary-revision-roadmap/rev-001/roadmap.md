@@ -89,7 +89,7 @@ settled retained-child clear-boundary lane by:
 
 ## Milestones
 
-### 1. [pending] Freeze the exact inherited boundary under pressure and the exact decision surface for this family
+### 1. [done] Freeze the exact inherited boundary under pressure and the exact decision surface for this family
 
 - Milestone id: `milestone-1`
 - Depends on: none
@@ -103,6 +103,30 @@ settled retained-child clear-boundary lane by:
   truths, the exact live broader positive `P5` subject, the exact lawful
   family outcomes, and the no-go claims that keep implementation and revision
   enactment blocked in `rev-001`.
+- Completion notes: accepted `round-202` finalized this milestone through
+  `docs/plans/2026-04-07-p5-polymorphism-nested-forall-explicit-boundary-revision-family-inherited-boundary-pressure-and-planning-only-decision-surface-freeze.md`
+  with authoritative review in
+  `orchestrator/rounds/round-202/review-record.json`. That docs-only freeze
+  artifact carried `explicit boundary-revision candidate` forward as
+  planning-only family-entry pressure, froze
+  `explicit recursive annotations remain the production baseline` as the only
+  inherited clause under live pressure, kept
+  `recursive meaning remains iso-recursive only`,
+  `non-equi-recursive = keep`,
+  `no-fallback = keep`, and
+  `no second interface is authorized` preserved closed, kept
+  `non-cyclic-graph = unknown` as preserved background rather than reopened
+  debt, preserved `sameLaneAliasFrameClearBoundaryExpr`,
+  `nestedForallContrastExpr`,
+  `P2` / exact `C1`,
+  `round-151` polymorphic-mediation absorption, and
+  `N1 ambiguity-reject` / `N2 unsoundness-guard` / `N6 termination-pressure`
+  as closed predecessor truth, fixed the live subject to
+  `broader positive P5 polymorphism-nested-forall support beyond the one settled retained-child clear-boundary lane`,
+  and froze the only lawful later outcomes to the two milestone-2 planning
+  reads plus the three milestone-3 downstream-consequence options. The
+  accepted result hands off only to `milestone-2` /
+  `direction-2a-build-broader-positive-p5-ledger`.
 - Parallel lane: `lane-main`
 - Coordination notes: keep `round-200` / `round-201` as binding predecessor
   authority, keep `round-197` as one settled retained-child clear-boundary
@@ -133,28 +157,38 @@ Candidate directions:
 
 - Milestone id: `milestone-2`
 - Depends on: `milestone-1`
-- Intent: use the milestone-1 freeze to identify the exact broader positive
-  `P5 polymorphism-nested-forall` frontier beyond the one settled retained-
-  child clear-boundary lane, distinguish preserved evidence from live pressure,
-  and compare whether the broader frontier still admits an honest bounded
-  current-architecture continuation or instead sustains one exact explicit
-  boundary-revision candidate.
+- Intent: use the accepted milestone-1 freeze to identify the exact broader
+  positive `P5 polymorphism-nested-forall` frontier beyond the one settled
+  retained-child clear-boundary lane, but only as pressure on the explicit
+  recursive-annotation production baseline; distinguish preserved evidence
+  from live pressure; and compare whether that broader frontier still admits
+  an honest bounded current-architecture continuation or instead sustains one
+  exact explicit boundary-revision candidate.
 - Completion signal: an accepted docs-only planning ledger identifies one
   exact broader positive `P5` frontier, classifies what remains predecessor
   truth versus live pressure, and records one honest planning-level read on
   current-boundary continuation versus explicit revision candidacy.
 - Parallel lane: `lane-main`
-- Coordination notes: keep the family planning-only; do not introduce new code
-  or new representative tests, do not promote `nestedForallContrastExpr` into
-  whole-family closure by itself, and do not reopen `P2` or the representative
+- Coordination notes: treat the accepted `round-202` freeze as controlling:
+  only `explicit recursive annotations remain the production baseline` is live
+  inherited-boundary pressure in this milestone;
+  `recursive meaning remains iso-recursive only`,
+  `non-equi-recursive = keep`,
+  `no-fallback = keep`, and
+  `no second interface is authorized` stay preserved closed; and
+  `non-cyclic-graph = unknown` stays preserved background rather than reopened
+  debt. Keep the family planning-only; do not introduce new code or new
+  representative tests, do not promote `nestedForallContrastExpr` into whole-
+  family closure by itself, and do not reopen `P2` or the representative
   negative-family rows.
 
 Candidate directions:
 
 - Direction id: `direction-2a-build-broader-positive-p5-ledger`
   Summary: identify the exact broader positive `P5` frontier beyond the one
-  settled retained-child clear-boundary lane and classify each preserved input
-  as predecessor truth, excluded material, or still-live broader support
+  settled retained-child clear-boundary lane that still pressures the explicit
+  recursive-annotation baseline, and classify each preserved input as
+  predecessor truth, excluded material, or still-live broader support
   pressure.
   Why it matters now: the family needs an exact live frontier instead of an
   abstract "broader support" label before any current-boundary-versus-
@@ -164,9 +198,12 @@ Candidate directions:
   Boundary notes: docs-only inventory and classification; do not revise code,
   tests, or the inherited boundary itself.
   Extraction notes: keep the focus on broader positive nested-forall /
-  quantified-crossing support beyond the settled retained-child lane and state
-  explicitly why preserved `P2`, negative-family, and absorbed-`mu`
-  predecessor evidence do not become live debt again here.
+  quantified-crossing support beyond the settled retained-child lane; explain
+  specifically why any surviving pressure bears on the explicit-recursive-
+  annotation baseline only; and state explicitly why preserved `P2`,
+  negative-family, absorbed-`mu`, iso-recursive, non-equi-recursive,
+  no-fallback, no-second-interface, and `non-cyclic-graph = unknown`
+  predecessor context do not become live debt again here.
 
 - Direction id: `direction-2b-compare-current-boundary-vs-explicit-revision`
   Summary: use the milestone-2 planning ledger to decide whether one exact
