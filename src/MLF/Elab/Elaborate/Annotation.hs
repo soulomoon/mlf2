@@ -407,11 +407,51 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
             Nothing -> inferFromNode (ewLeft schemeInfoWitness)
       where
         inferFromNode nodeId =
-            case reifyTargetType scopeContext namedSet schemeInfo nodeId of
-                Right targetTy ->
-                    let (binds, body) = Inst.splitForalls (schemeToType (siScheme schemeInfo))
-                    in fmap ((,) binds) (inferInstAppArgsFromScheme binds body targetTy)
-                Left _ -> Nothing
+            inferAgainstTarget =<<
+                ( either (const Nothing) Just (reifyTargetType scopeContext namedSet schemeInfo nodeId)
+                    <|> either (const Nothing) Just (reifyTargetNodeType scopeContext namedSet schemeInfo nodeId)
+                )
+        inferAgainstTarget targetTy =
+            let (binds, body) = Inst.splitForalls (schemeToType (siScheme schemeInfo))
+                schemeTy = schemeToType (siScheme schemeInfo)
+                targetHasVisibleForall = case targetTy of
+                    TForall {} -> True
+                    _ -> False
+                inferIdentityLikeTarget =
+                    case (binds, body) of
+                        ([(binderName, _)], TArrow (TVar dom) (TVar cod))
+                            | dom == binderName && cod == binderName ->
+                                let args = [TVar binderName]
+                                in case applyInstantiation schemeTy (instSeqApps args) of
+                                    Right tyApplied
+                                        | alphaEqType tyApplied targetTy ->
+                                            Just args
+                                    _ -> Nothing
+                        _ -> Nothing
+                normalizeArgs inferred =
+                    let rewrite prefix remainingBinds remainingArgs =
+                            case (remainingBinds, remainingArgs) of
+                                ((binderName, _) : restBinds, argTy : restArgs) ->
+                                    let normalizedArg =
+                                            case argTy of
+                                                TVar v
+                                                    | targetHasVisibleForall
+                                                    , isJust (parseNameId v) ->
+                                                        let candidateArgs = prefix ++ [TVar binderName] ++ restArgs
+                                                        in case applyInstantiation schemeTy (instSeqApps candidateArgs) of
+                                                            Right tyApplied
+                                                                | alphaEqType tyApplied targetTy ->
+                                                                    TVar binderName
+                                                            _ -> argTy
+                                                _ -> argTy
+                                     in normalizedArg : rewrite (prefix ++ [normalizedArg]) restBinds restArgs
+                                (_, []) -> []
+                                ([], restArgs) -> restArgs
+                    in rewrite [] binds inferred
+                inferredArgs =
+                    fmap normalizeArgs (inferInstAppArgsFromScheme binds body targetTy)
+                        <|> inferIdentityLikeTarget
+            in fmap ((,) binds) inferredArgs
 
     authoritativeTargetType namedSet edgeWitness schemeInfo =
         case reifyTargetNodeType scopeContext namedSet schemeInfo (ewRight edgeWitness) of

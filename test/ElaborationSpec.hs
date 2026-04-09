@@ -1790,6 +1790,101 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right _ -> pure ()
 
+    it "selected same-wrapper nested-forall exact edge authoritative instantiation translation" $ do
+      let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+          expr =
+            ELet
+              "id"
+              (ELam "z" (EVar "z"))
+              ( ELet
+                  "k"
+                  (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                  (EApp (ELam "y" (EVar "y")) (EVar "k"))
+              )
+          extractPacket ann0 = case ann0 of
+            ALet "id" _ idSchemeRoot _ _ _ (AAnn (ALet "k" _ _ _ _ rhs _ _) _ _) _ ->
+              case rhs of
+                AApp funAnn _ argEdgeId _ _ -> pure (idSchemeRoot, funAnn, argEdgeId)
+                other -> do
+                  expectationFailure ("Expected selected same-wrapper nested-forall rhs app, got: " ++ show other)
+                  fail "selectedSameWrapperNestedForallExactEdge"
+            other -> do
+              expectationFailure ("Expected selected same-wrapper nested-forall packet shape, got: " ++ show other)
+              fail "selectedSameWrapperNestedForallExactEdge"
+      artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+      let (inputs, annCanon, _annPre) = resultTypeInputsForArtifacts artifacts
+      (idSchemeRoot, _funAnn, argEdgeId) <- extractPacket annCanon
+      rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 48]
+      scopeRoot <-
+        requireRight
+          ( resolveCanonicalScope
+              (paConstraintNorm artifacts)
+              (rtcPresolutionView inputs)
+              (rtcRedirects inputs)
+              idSchemeRoot
+          )
+      let targetNode = schemeBodyTarget (rtcPresolutionView inputs) idSchemeRoot
+      (scheme, subst) <-
+        requireRight
+          ( generalizeWithPlan
+              (rtcPlanBuilder inputs)
+              (rtcBindParentsGa inputs)
+              (rtcPresolutionView inputs)
+              scopeRoot
+              targetNode
+          )
+      let witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
+          trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
+      phi <-
+        requireRight
+          ( Elab.phiFromEdgeWitnessWithTrace
+              defaultTraceConfig
+              (generalizeAtWithActive (paSolved artifacts))
+              (rtcPresolutionView inputs)
+              (Just (rtcBindParentsGa inputs))
+              (Just (Elab.SchemeInfo scheme subst))
+              trace
+              witness
+          )
+      phi `shouldBe` Elab.InstId
+      case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+        Left err -> expectationFailure (Elab.renderPipelineError err)
+        Right _ -> pure ()
+
+    it "selected same-wrapper nested-forall reaches the post-annotation authoritative handoff" $ do
+      let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+          expr =
+            ELet
+              "id"
+              (ELam "z" (EVar "z"))
+              ( ELet
+                  "k"
+                  (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                  (EApp (ELam "y" (EVar "y")) (EVar "k"))
+              )
+          containsMuTy ty0 = case ty0 of
+            Elab.TMu _ _ -> True
+            Elab.TArrow dom cod -> containsMuTy dom || containsMuTy cod
+            Elab.TCon _ args -> any containsMuTy args
+            Elab.TForall _ mb body -> maybe False containsMuBound mb || containsMuTy body
+            _ -> False
+          containsMuBound bound = case bound of
+            Elab.TArrow dom cod -> containsMuTy dom || containsMuTy cod
+            Elab.TBase _ -> False
+            Elab.TCon _ args -> any containsMuTy args
+            Elab.TForall _ mb body -> maybe False containsMuBound mb || containsMuTy body
+            Elab.TMu _ _ -> True
+            Elab.TBottom -> False
+          assertPipeline label runPipeline =
+            case runPipeline Set.empty (unsafeNormalizeExpr expr) of
+              Left err ->
+                expectationFailure (label ++ ": " ++ Elab.renderPipelineError err)
+              Right (term, ty) -> do
+                Elab.typeCheck term `shouldBe` Right ty
+                containsMuTy ty `shouldBe` True
+      assertPipeline "unchecked" Elab.runPipelineElab
+      assertPipeline "checked" Elab.runPipelineElabChecked
+
   describe "Paper ≺ ordering (leftmost-lowermost)" $ do
     it "generalizeAt orders binders by ≺ (not by NodeId)" $ do
       -- Construct a tiny solved graph where the leftmost variable in the type

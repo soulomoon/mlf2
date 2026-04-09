@@ -2618,12 +2618,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           `shouldSatisfy` (not . isInfixOf "generalizeWithPlan planBuilder bindParentsGaFinal presolutionViewFinal scopeRoot targetC")
 
       it "keeps the P5 guard cluster wired through boundHasForallFrom and authoritative preservation" $ do
+        annotationSrc <- readFile "src/MLF/Elab/Elaborate/Annotation.hs"
         fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
         termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
         pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+        annotationSrc `shouldSatisfy` isInfixOf "inferAuthoritativeInstArgs namedSet schemeInfoWitness schemeInfo ="
+        annotationSrc `shouldSatisfy` isInfixOf "authoritativeTargetType namedSet edgeWitness schemeInfo ="
+        annotationSrc `shouldSatisfy` isInfixOf "reifyTraceBinderInstArgs namedSet schemeInfo nodes0 ="
+        annotationSrc `shouldSatisfy` isInfixOf "expInstantiateArgsToInstNoFallback"
         fallbackSrc `shouldSatisfy` isInfixOf "hasForall = boundHasForallFrom (snd chosenTargetProof) bndC"
         termClosureSrc `shouldSatisfy` isInfixOf "preserveRetainedChildAliasBoundary env v sch rhs body"
+        pipelineSrc `shouldSatisfy` isInfixOf "termClosed0 ="
         pipelineSrc `shouldSatisfy` isInfixOf "case preserveRetainedChildAuthoritativeResult termClosed0 of"
+        pipelineSrc `shouldSatisfy` isInfixOf "tyChecked <- fromTypeCheckError (typeCheck termClosed)"
+        pipelineSrc `shouldSatisfy` isInfixOf "computeResultTypeFromAnn resultTypeInputs inner inner annNodeId eid"
 
       it "keeps retained-child fallback open for recursive types even when the same wrapper crosses a nested forall boundary" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -2677,6 +2685,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
         fallbackTy <- requireRight (computeResultTypeFallback inputs bodyCanon bodyPre)
         containsMu fallbackTy `shouldBe` True
+
+      it "same-wrapper nested-forall packet preserves recursive output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "k"
+                    (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                    (EApp (ELam "y" (EVar "y")) (EVar "k"))
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
 
       it "keeps local empty-candidate scheme-alias/base-like fallback on the local TypeRef lane" $ do
         fallbackTy <- localEmptyCandidateSchemeAliasBaseLikeFallback True

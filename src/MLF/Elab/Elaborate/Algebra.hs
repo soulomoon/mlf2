@@ -167,21 +167,74 @@ elabAlg algebraContext layer =
             funInst <- reifyInstIfPolymorphic fAnn funEid f'
             argInst <- reifyInstIfPolymorphic aAnn argEid a'
             let funInstByFunType =
-                  case (funInst, TypeCheck.typeCheckWithEnv tcEnv f') of
-                    (InstApp _, Right TForall {}) -> funInst
-                    (InstApp _, Right _) -> InstId
+                  case funInst of
+                    inst0@(InstApp _) ->
+                      case TypeCheck.typeCheckWithEnv tcEnv f' of
+                        Right TForall {} -> inst0
+                        Right _ -> InstId
+                        Left _ -> inst0
+                    inst0@(InstInside (InstBot _)) ->
+                      case TypeCheck.typeCheckWithEnv tcEnv f' of
+                        Right TForall {} -> inst0
+                        Right _ -> InstId
+                        Left _ -> inst0
+                    inst0@(InstInside (InstApp _)) ->
+                      case TypeCheck.typeCheckWithEnv tcEnv f' of
+                        Right TForall {} -> inst0
+                        Right _ -> InstId
+                        Left _ -> inst0
+                    inst0@(InstSeq (InstInside (InstBot _)) InstElim) ->
+                      case TypeCheck.typeCheckWithEnv tcEnv f' of
+                        Right TForall {} -> inst0
+                        Right _ -> InstId
+                        Left _ -> inst0
+                    inst0@(InstSeq (InstInside (InstApp _)) InstElim) ->
+                      case TypeCheck.typeCheckWithEnv tcEnv f' of
+                        Right TForall {} -> inst0
+                        Right _ -> InstId
+                        Left _ -> inst0
                     _ -> funInst
                 funInst' =
-                  case (funInstByFunType, sourceAnnIsPolymorphic env aAnn) of
-                    (InstApp (TVar _), False) ->
-                      case reifyNodeTypePreferringBound scopeContext (annNode aAnn) of
-                        Right argTy -> InstApp argTy
-                        Left _ -> funInstByFunType
-                    (InstApp TForall {}, False) ->
-                      case reifyNodeTypePreferringBound scopeContext (annNode aAnn) of
-                        Right argTy -> InstApp argTy
-                        Left _ -> funInstByFunType
-                    _ -> funInstByFunType
+                  case
+                      either
+                        ( const
+                            ( either
+                                (const Nothing)
+                                Just
+                                (reifyNodeTypePreferringBound scopeContext (annNode aAnn))
+                            )
+                        )
+                        Just
+                        (TypeCheck.typeCheckWithEnv tcEnv a')
+                    of
+                    recoveredArg ->
+                      case funInstByFunType of
+                        inst0@(InstApp ty0) ->
+                          case ty0 of
+                            TVar {} -> maybe inst0 InstApp recoveredArg
+                            TForall {} -> maybe inst0 InstApp recoveredArg
+                            _ -> inst0
+                        inst0@(InstInside (InstBot ty0)) ->
+                          case ty0 of
+                            TVar {} -> maybe inst0 InstApp recoveredArg
+                            TForall {} -> maybe inst0 InstApp recoveredArg
+                            _ -> inst0
+                        inst0@(InstInside (InstApp ty0)) ->
+                          case ty0 of
+                            TVar {} -> maybe inst0 InstApp recoveredArg
+                            TForall {} -> maybe inst0 InstApp recoveredArg
+                            _ -> inst0
+                        inst0@(InstSeq (InstInside (InstBot ty0)) InstElim) ->
+                          case ty0 of
+                            TVar {} -> maybe inst0 InstApp recoveredArg
+                            TForall {} -> maybe inst0 InstApp recoveredArg
+                            _ -> inst0
+                        inst0@(InstSeq (InstInside (InstApp ty0)) InstElim) ->
+                          case ty0 of
+                            TVar {} -> maybe inst0 InstApp recoveredArg
+                            TForall {} -> maybe inst0 InstApp recoveredArg
+                            _ -> inst0
+                        _ -> funInstByFunType
                 normalizeFunInst inst0 =
                   case TypeCheck.typeCheckWithEnv tcEnv f' of
                     Right fTy -> go 0 inst0
@@ -190,7 +243,8 @@ elabAlg algebraContext layer =
                           | n >= (8 :: Int) = instN
                           | otherwise =
                               case applyInstantiation fTy instN of
-                                Right TForall {} -> go (n + 1) (InstSeq instN InstElim)
+                                Right (TForall _ (Just _) _) -> go (n + 1) (InstSeq instN InstElim)
+                                Right TForall {} -> instN
                                 Right _ -> instN
                                 Left _ -> instN
                     Left _ -> inst0
@@ -223,6 +277,46 @@ elabAlg algebraContext layer =
                                           normalizeFunInst (InstApp argTyPreferred)
                                     _ -> funInstNorm
                             Nothing -> funInstNorm
+                        (Left _, _, _, _) ->
+                          fromMaybe funInstNorm $
+                            case (sourceVarName fAnn, TypeCheck.typeCheckWithEnv tcEnv a') of
+                              (Just fName, Right argTy)
+                                | let containsMuType ty =
+                                        case ty of
+                                          TMu {} -> True
+                                          TArrow dom cod -> containsMuType dom || containsMuType cod
+                                          TCon _ args -> any containsMuType args
+                                          TForall _ mb body ->
+                                            maybe False containsMuBound mb || containsMuType body
+                                          _ -> False
+                                          where
+                                            containsMuBound bound = case bound of
+                                              TArrow dom cod -> containsMuType dom || containsMuType cod
+                                              TCon _ args -> any containsMuType args
+                                              TForall _ mb body -> maybe False containsMuBound mb || containsMuType body
+                                              TMu {} -> True
+                                              _ -> False
+                                      isIdentityLikeSchemeType ty =
+                                        case ty of
+                                          TForall name Nothing body -> isIdentityLikeBody name body
+                                          _ -> False
+                                        where
+                                          isIdentityLikeBody name body = case body of
+                                            TArrow (TVar dom) (TVar cod) -> dom == name && cod == name
+                                            _ -> False
+                                , containsMuType argTy ->
+                                    case Map.lookup fName env of
+                                      Just fSchemeInfo
+                                        | isIdentityLikeSchemeType (schemeToType (siScheme fSchemeInfo)) ->
+                                            let candidate = normalizeFunInst (InstApp argTy)
+                                                fAppCandidate = case candidate of
+                                                  InstId -> f'
+                                                  _ -> ETyInst f' candidate
+                                             in case TypeCheck.typeCheckWithEnv tcEnv (EApp fAppCandidate a') of
+                                                  Right _ -> Just candidate
+                                                  Left _ -> Nothing
+                                      _ -> Nothing
+                              _ -> Nothing
                         _ -> funInstNorm
                 fAppForArgInference = case funInstRecovered of
                   InstId -> f'
@@ -232,31 +326,91 @@ elabAlg algebraContext layer =
                         case (sourceVarName fAnn, sourceVarName aAnn) of
                           (Just fName, Just argName) -> fName /= argName
                           _ -> False
-                   in case (sourceVarName aAnn, f') of
-                        (Just vName, ELam _ paramTy _) -> do
-                          schemeInfo <- Map.lookup vName env
-                          let paramTy' =
-                                if shouldInlineParamTy
-                                  then inlineBoundVarsType presolutionView paramTy
-                                  else paramTy
-                          args <- inferInstAppArgs (siScheme schemeInfo) paramTy'
-                          pure (instSeqApps args)
-                        (Just vName, _) -> do
-                          schemeInfo <- Map.lookup vName env
-                          case TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference of
-                            Right (TArrow paramTy _) -> do
-                              let paramTy' =
-                                    if shouldInlineParamTy
-                                      then inlineBoundVarsType presolutionView paramTy
-                                      else paramTy
+                      shouldInferArgInst =
+                        case (sourceVarName fAnn, sourceVarName aAnn) of
+                          (Just fName, Just argName) -> fName /= argName
+                          _ -> True
+                   in if not shouldInferArgInst
+                        then Nothing
+                        else case (sourceVarName aAnn, f') of
+                          (Just vName, ELam _ paramTy _) -> do
+                            schemeInfo <- Map.lookup vName env
+                            let paramTy' =
+                                  if shouldInlineParamTy
+                                    then inlineBoundVarsType presolutionView paramTy
+                                    else paramTy
+                            do
                               args <- inferInstAppArgs (siScheme schemeInfo) paramTy'
-                              pure (instSeqApps args)
-                            _ -> Nothing
-                        _ -> Nothing
+                              pure (instSeqApps (map (inlineBoundVarsType presolutionView) args))
+                          (Just vName, _) -> do
+                            schemeInfo <- Map.lookup vName env
+                            case TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference of
+                              Right (TArrow paramTy _) -> do
+                                let paramTy' =
+                                      if shouldInlineParamTy
+                                        then inlineBoundVarsType presolutionView paramTy
+                                        else paramTy
+                                do
+                                  args <- inferInstAppArgs (siScheme schemeInfo) paramTy'
+                                  pure (instSeqApps (map (inlineBoundVarsType presolutionView) args))
+                              _ -> Nothing
+                          _ -> Nothing
                 argInst' =
-                  case (sourceAnnIsPolymorphic env aAnn, argInstFromFun) of
-                    (True, Just inst) -> inst
-                    _ -> argInst
+                  case (sourceVarName fAnn, sourceVarName aAnn, TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference, argInst) of
+                    (Just fName, Just argName, Right (TArrow paramTy _), InstApp argTy)
+                      | fName == argName
+                      , Just schemeInfo <- Map.lookup fName env
+                      , case siScheme schemeInfo of
+                          Forall [(_, Nothing)] _ -> True
+                          _ -> False
+                      , let instCandidate = InstApp argTy
+                      , Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate)
+                      , alphaEqType argTy' paramTy ->
+                          instCandidate
+                    (Just fName, Just argName, Right (TArrow paramTy _), InstInside (InstBot argTy))
+                      | fName == argName
+                      , Just schemeInfo <- Map.lookup fName env
+                      , case siScheme schemeInfo of
+                          Forall [(_, Nothing)] _ -> True
+                          _ -> False
+                      , let instCandidate = InstApp argTy
+                      , Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate)
+                      , alphaEqType argTy' paramTy ->
+                          instCandidate
+                    (Just fName, Just argName, Right (TArrow paramTy _), InstInside (InstApp argTy))
+                      | fName == argName
+                      , Just schemeInfo <- Map.lookup fName env
+                      , case siScheme schemeInfo of
+                          Forall [(_, Nothing)] _ -> True
+                          _ -> False
+                      , let instCandidate = InstApp argTy
+                      , Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate)
+                      , alphaEqType argTy' paramTy ->
+                          instCandidate
+                    (Just fName, Just argName, Right (TArrow paramTy _), InstSeq (InstInside (InstBot argTy)) InstElim)
+                      | fName == argName
+                      , Just schemeInfo <- Map.lookup fName env
+                      , case siScheme schemeInfo of
+                          Forall [(_, Nothing)] _ -> True
+                          _ -> False
+                      , let instCandidate = InstApp argTy
+                      , Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate)
+                      , alphaEqType argTy' paramTy ->
+                          instCandidate
+                    (Just fName, Just argName, Right (TArrow paramTy _), InstSeq (InstInside (InstApp argTy)) InstElim)
+                      | fName == argName
+                      , Just schemeInfo <- Map.lookup fName env
+                      , case siScheme schemeInfo of
+                          Forall [(_, Nothing)] _ -> True
+                          _ -> False
+                      , let instCandidate = InstApp argTy
+                      , Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate)
+                      , alphaEqType argTy' paramTy ->
+                          instCandidate
+                    _ ->
+                      case (sourceAnnIsPolymorphic env aAnn, argInstFromFun) of
+                        (True, Just inst) -> inst
+                        _ -> argInst
                 argInstFinal =
                   case argInst' of
                     InstId -> InstId
@@ -265,13 +419,88 @@ elabAlg algebraContext layer =
                         Right (TForall _ (Just _) _) -> InstElim
                         Right TForall {} -> argInst'
                         _ -> InstId
-                fApp = case funInstRecovered of
-                  InstId -> f'
-                  _ -> ETyInst f' funInstRecovered
                 aApp = case argInstFinal of
                   InstId -> a'
                   _ -> ETyInst a' argInstFinal
-            insertMuUseSiteCoercions tcEnv fApp aApp
+                fApp =
+                  let fApp0 = case funInstRecovered of
+                        InstId -> f'
+                        _ -> ETyInst f' funInstRecovered
+                      containsMuType ty =
+                        case ty of
+                          TMu {} -> True
+                          TArrow dom cod -> containsMuType dom || containsMuType cod
+                          TCon _ args -> any containsMuType args
+                          TForall _ mb body ->
+                            maybe False containsMuBound mb || containsMuType body
+                          _ -> False
+                        where
+                          containsMuBound bound = case bound of
+                            TArrow dom cod -> containsMuType dom || containsMuType cod
+                            TCon _ args -> any containsMuType args
+                            TForall _ mb body -> maybe False containsMuBound mb || containsMuType body
+                            TMu {} -> True
+                            _ -> False
+                      isInternalTyVar ty =
+                        case ty of
+                          TVar name -> isJust (parseNameId name)
+                          _ -> False
+                      isIdentityLambdaBody paramName body =
+                        case body of
+                          EVar bodyName -> bodyName == paramName
+                          _ -> False
+                   in case (TypeCheck.typeCheckWithEnv tcEnv (EApp fApp0 aApp), fApp0, sourceVarName aAnn, TypeCheck.typeCheckWithEnv tcEnv aApp) of
+                        (Left _, ELam paramName paramTy body, Just argName, Right argTy)
+                          | isInternalTyVar paramTy
+                              && isIdentityLambdaBody paramName body
+                              && containsMuType argTy
+                              && maybe False (containsMuType . schemeToType . siScheme) (Map.lookup argName env) ->
+                              ELam paramName argTy body
+                        _ -> fApp0
+            app <- insertMuUseSiteCoercions tcEnv fApp aApp
+            case
+                ( (\go ->
+                      sourceAnnIsPolymorphic env aAnn
+                        && ( case funInst of
+                               InstApp ty -> go ty
+                               InstInside (InstBot ty) -> go ty
+                               InstInside (InstApp ty) -> go ty
+                               InstSeq (InstInside (InstBot ty)) InstElim -> go ty
+                               InstSeq (InstInside (InstApp ty)) InstElim -> go ty
+                               _ -> False
+                            || case argInst of
+                                 InstApp ty -> go ty
+                                 InstInside (InstBot ty) -> go ty
+                                 InstInside (InstApp ty) -> go ty
+                                 InstSeq (InstInside (InstBot ty)) InstElim -> go ty
+                                 InstSeq (InstInside (InstApp ty)) InstElim -> go ty
+                                 _ -> False
+                           )
+                  )
+                    ( let go ty =
+                            case ty of
+                              TVar name -> isJust (parseNameId name)
+                              TArrow dom cod -> go dom && go cod
+                              TForall _ _ body -> go body
+                              _ -> False
+                       in go
+                    ),
+                  TypeCheck.typeCheckWithEnv tcEnv app
+                ) of
+                (True, Left tcErr) ->
+                  if take (length "TCArgumentMismatch") (show tcErr) == "TCArgumentMismatch"
+                        || take (length "TCExpectedArrow") (show tcErr) == "TCExpectedArrow"
+                        then
+                          Left
+                            (PhiTranslatabilityError
+                              [ "AAppF: unresolved non-self polymorphic alias instantiation",
+                                "function=" ++ show (sourceVarName fAnn),
+                                "argument=" ++ show (sourceVarName aAnn),
+                                "typeCheck=" ++ show tcErr
+                              ]
+                            )
+                        else Right app
+                _ -> Right app
        in mkOut f
     ALetF v _schemeGenId schemeRootId _ _rhsScopeGen (rhsAnn, rhsOut) (bodyAnn, bodyOut) trivialRoot ->
       let elaborateLet env = do
@@ -328,52 +557,66 @@ elabAlg algebraContext layer =
                    that uses the μ-type as both domain and codomain (identity-like), or
                    more precisely, domain = μ-type and codomain = μ-type when the body
                    simply returns the parameter. -}
-                rhsLambdaMuAnnotationTy =
-                  case rhsAnn of
-                    ALam lamParam _ _ lamBody _ ->
-                      case desugaredAnnLambdaInfo lamParam lamBody of
-                        Just (annNodeId, _) ->
-                          case reifyNodeTypePreferringBound scopeContext annNodeId of
-                            Right annTy@TMu {} -> Just annTy
-                            _ -> Nothing
-                        Nothing -> Nothing
-                    _ -> Nothing
                 scheme =
                   case (annContainsVar v rhsAnn, blockedAliasMuType (schemeToType schemeBase)) of
-                    (True, Just muTy) -> schemeFromType muTy
-                    _ -> case rhsLambdaMuAnnotationTy of
-                      Just muTy ->
-                        {- Note [Selective codomain override for μ-annotated lambdas]
-                           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                           The domain is always overridden to the μ-type since
-                           rhsLambdaMuAnnotationTy detects that the lambda parameter has
-                           an explicit μ-annotation (e.g. λx:μα.α→Int. x).
+                        (True, Just muTy) -> schemeFromType muTy
+                        _ -> case
+                          let isIdentityLikeSchemeType ty =
+                                case ty of
+                                  TForall name Nothing body -> isIdentityLikeBody name body
+                                  _ -> False
+                                where
+                                  isIdentityLikeBody name body = case body of
+                                    TArrow (TVar dom) (TVar cod) -> dom == name && cod == name
+                                    _ -> False
+                              muAnnotationTy annExpr =
+                                case annExpr of
+                                  ALam lamParam _ _ lamBody _ ->
+                                    case desugaredAnnLambdaInfo lamParam lamBody of
+                                      Just (annNodeId, _) ->
+                                        case reifyNodeTypePreferringBound scopeContext annNodeId of
+                                          Right annTy@TMu {} -> Just annTy
+                                          _ -> Nothing
+                                      Nothing -> Nothing
+                                  AAnn inner _ _ -> muAnnotationTy inner
+                                  _ -> Nothing
+                           in case rhsAnn of
+                                AApp funAnn argAnn _ _ _
+                                  | maybe False (isIdentityLikeSchemeType . schemeToType . siScheme) (sourceVarName funAnn >>= (`Map.lookup` env)) ->
+                                      muAnnotationTy argAnn
+                                _ -> muAnnotationTy rhsAnn of
+                          Just muTy ->
+                            {- Note [Selective codomain override for μ-annotated lambdas]
+                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                               The domain is always overridden to the μ-type since
+                               the surrounding μ-annotation detection confirms that the lambda parameter has
+                               an explicit μ-annotation (e.g. λx:μα.α→Int. x).
 
-                           For the codomain: when the scheme is fully polymorphic
-                           (e.g. ∀a.∀b. a→b with both vars quantified), generalization
-                           captured the correct parametricity and downstream elaboration
-                           handles the μ-type through normal instantiation — so we leave
-                           schemeBase intact. When the codomain is a constraint-internal
-                           variable (e.g. TVar "t10" that wasn't quantified), generalization
-                           lost track of its relationship to the μ-annotated parameter,
-                           and we override it to the μ-type. -}
-                        let schemeBody = case schemeToType schemeBase of
-                              TForall _ _ inner -> go inner
-                              other -> other
-                              where
-                                go (TForall _ _ inner) = go inner
-                                go t = t
-                            quantVars = Set.fromList [n | (n, _) <- fst (Inst.splitForalls (schemeToType schemeBase))]
-                            isUnquantifiedTVar (TVar v') = not (Set.member v' quantVars)
-                            isUnquantifiedTVar _ = False
-                         in case schemeBody of
-                              TArrow _dom cod
-                                | isUnquantifiedTVar cod ->
-                                    -- Codomain is an unquantified internal variable:
-                                    -- override both domain and codomain to μ.
-                                    schemeFromType (TArrow muTy muTy)
-                              _ -> schemeBase
-                      Nothing -> schemeBase
+                               For the codomain: when the scheme is fully polymorphic
+                               (e.g. ∀a.∀b. a→b with both vars quantified), generalization
+                               captured the correct parametricity and downstream elaboration
+                               handles the μ-type through normal instantiation — so we leave
+                               schemeBase intact. When the codomain is a constraint-internal
+                               variable (e.g. TVar "t10" that wasn't quantified), generalization
+                               lost track of its relationship to the μ-annotated parameter,
+                               and we override it to the μ-type. -}
+                            let schemeBody = case schemeToType schemeBase of
+                                  TForall _ _ inner -> go inner
+                                  other -> other
+                                  where
+                                    go (TForall _ _ inner) = go inner
+                                    go t = t
+                                quantVars = Set.fromList [n | (n, _) <- fst (Inst.splitForalls (schemeToType schemeBase))]
+                                isUnquantifiedTVar (TVar v') = not (Set.member v' quantVars)
+                                isUnquantifiedTVar _ = False
+                             in case schemeBody of
+                                  TArrow _dom cod
+                                    | isUnquantifiedTVar cod ->
+                                        -- Codomain is an unquantified internal variable:
+                                        -- override both domain and codomain to μ.
+                                        schemeFromType (TArrow muTy muTy)
+                                  _ -> schemeBase
+                          Nothing -> schemeBase
                 subst0 = normalizeSubstForScheme scheme (deriveLambdaBinderSubst scheme0Norm subst0Norm)
                 subst =
                   let (binds, _) = Inst.splitForalls (schemeToType scheme)
@@ -382,11 +625,47 @@ elabAlg algebraContext layer =
                 env' = Map.insert v schemeInfo env
                 tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) env') Map.empty
             rhs' <- elabTerm rhsOut env'
-            let rhsAbs0 = closeTermWithSchemeSubstIfNeeded subst scheme rhs'
+            let rhsAbs0 =
+                  let schemeTy = schemeToType scheme
+                   in case (rhs', TypeCheck.typeCheckWithEnv tcEnv rhs') of
+                        (EVar _, _) ->
+                          closeTermWithSchemeSubstIfNeeded subst scheme rhs'
+                        (_, Right rhsTy)
+                          | alphaEqType rhsTy schemeTy -> rhs'
+                        _ -> closeTermWithSchemeSubstIfNeeded subst scheme rhs'
                 rhsAbs =
-                  case scheme of
-                    Forall binds _ | not (null binds) -> rhsAbs0
-                    _ -> stripUnusedTopTyAbs rhsAbs0
+                  let schemeTy = schemeToType scheme
+                   in case TypeCheck.typeCheckWithEnv tcEnv rhsAbs0 of
+                        rhsAbs0Ty ->
+                          case scheme of
+                            Forall binds _
+                              | not (null binds)
+                              , Right rhsTy <- rhsAbs0Ty
+                              , alphaEqType rhsTy schemeTy ->
+                                  rhsAbs0
+                              | not (null binds) ->
+                                  case
+                                      case (rhsAbs0, rhsAbs0Ty) of
+                                        (ETyAbs _ _ body, Right (TForall _ _ bodyTy))
+                                          | alphaEqType bodyTy schemeTy ->
+                                              body
+                                        _ -> stripUnusedTopTyAbs rhsAbs0
+                                    of
+                                    rhsAbsCandidate ->
+                                      case TypeCheck.typeCheckWithEnv tcEnv rhsAbsCandidate of
+                                        Right rhsTy
+                                          | alphaEqType rhsTy schemeTy ->
+                                              rhsAbsCandidate
+                                        _ ->
+                                          case rhsAbs0Ty of
+                                            Left _ -> rhsAbsCandidate
+                                            _ -> rhsAbs0
+                            _ ->
+                              case (rhsAbs0, rhsAbs0Ty) of
+                                (ETyAbs _ _ body, Right (TForall _ _ bodyTy))
+                                  | alphaEqType bodyTy schemeTy ->
+                                      body
+                                _ -> stripUnusedTopTyAbs rhsAbs0
                 rhsAbsTyChecked = TypeCheck.typeCheckWithEnv tcEnv rhsAbs
             case debugGeneralize
               ( "elaborate let("
@@ -406,10 +685,23 @@ elabAlg algebraContext layer =
                   case bodyAnn of
                     AAnn _ target _ | canonical target == canonical trivialRoot -> elabStripped bodyOut
                     _ -> elabTerm bodyOut
-            body' <- bodyElab env'
-            let schemeTy = schemeToType scheme
-                rhsFinal =
-                  case schemeTy of
+            body' <-
+              bodyElab
+                ( Map.insert
+                    v
+                    ( case (rhs', TypeCheck.typeCheckWithEnv tcEnv rhs') of
+                        (EVar _, Right rhsTy)
+                          | not (alphaEqType rhsTy (schemeToType scheme)) ->
+                              SchemeInfo
+                                { siScheme = schemeFromType rhsTy
+                                , siSubst = subst
+                                }
+                        _ -> schemeInfo
+                    )
+                    env
+                )
+            let rhsFinal =
+                  case schemeToType scheme of
                     muTy@TMu {} -> ERoll muTy rhsAbs
                     _ -> rhsAbs
             pure (scheme, rhsFinal, body')
