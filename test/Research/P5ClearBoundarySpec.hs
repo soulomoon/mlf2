@@ -65,19 +65,19 @@ import SpecUtil
 spec :: Spec
 spec =
     describe "P5 clear-boundary retained-child probes" $ do
-        it "keeps the same-lane retained-child packet recursive while the quantified boundary stays clear" $ do
+        it "sameLaneClearBoundaryExpr stays recursive as the first milestone-3 representative broader-positive clear-boundary anchor while the quantified boundary stays clear" $ do
             fallbackTy <- sameLaneClearBoundaryFallbackType
             containsMu fallbackTy `shouldBe` True
 
-        it "keeps the same-lane alias-frame packet recursive while the quantified boundary stays clear" $ do
+        it "sameLaneAliasFrameClearBoundaryExpr stays recursive as preserved predecessor alias-frame truth while the quantified boundary stays clear" $ do
             fallbackTy <- sameLaneAliasFrameClearBoundaryFallbackType
             containsMu fallbackTy `shouldBe` True
 
-        it "preserves recursive fallback shape for the selected same-wrapper packet across a nested forall boundary" $ do
+        it "nestedForallContrastExpr stays recursive as preserved merged-baseline same-wrapper nested-forall success across a nested forall boundary" $ do
             fallbackTy <- fallbackType nestedForallContrastExpr
             containsMu fallbackTy `shouldBe` True
 
-        it "keeps the clear-boundary control recursive on both current pipeline entrypoints" $ do
+        it "sameLaneClearBoundaryExpr is the first explicit milestone-3 representative broader-positive clear-boundary packet on both authoritative entrypoints" $ do
             let pipelineRuns =
                     [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
                     , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
@@ -105,7 +105,7 @@ spec =
                 )
                 pipelineRuns
 
-        it "keeps the selected same-wrapper nested-forall packet recursive on both authoritative entrypoints" $ do
+        it "selected same-wrapper nested-forall preserved merged-baseline packet stays recursive on both authoritative entrypoints" $ do
             let pipelineRuns =
                     [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))
                     , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))

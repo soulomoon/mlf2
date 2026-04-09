@@ -1736,22 +1736,22 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     it "converts ExpForall to InstIntro" $ do
       Elab.pretty Elab.InstIntro `shouldBe` "O"
 
-    it "same-lane retained-child exact edge 3 authoritative instantiation" $ do
+    it "sameLaneClearBoundaryExpr exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
-          expr =
+          sameLaneClearBoundaryExpr =
             ELet
               "k"
               (ELamAnn "x" recursiveAnn (EVar "x"))
               (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
-          extractEdge3 ann0 = case ann0 of
+          extractSameLaneClearBoundaryEdge ann0 = case ann0 of
             ALet "k" _ schemeRootId _ _ _ (AAnn (ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _) _ _) _ ->
               pure (schemeRootId, argEdgeId)
             other -> do
-              expectationFailure ("Expected exact same-lane retained-child packet shape, got: " ++ show other)
-              fail "sameLaneRetainedChildExactEdge3"
-      artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+              expectationFailure ("Expected sameLaneClearBoundaryExpr packet shape, got: " ++ show other)
+              fail "sameLaneClearBoundaryExprExactEdge"
+      artifacts <- requireRight (runPipelineArtifactsDefault Set.empty sameLaneClearBoundaryExpr)
       let (inputs, annCanon, _annPre) = resultTypeInputsForArtifacts artifacts
-      (schemeRootId, argEdgeId) <- extractEdge3 annCanon
+      (schemeRootId, argEdgeId) <- extractSameLaneClearBoundaryEdge annCanon
       rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 31]
       scopeRoot <-
         requireRight
@@ -1786,7 +1786,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               witness
           )
       phi `shouldBe` Elab.InstApp (Elab.TVar "t32")
-      case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+      case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right _ -> pure ()
 
