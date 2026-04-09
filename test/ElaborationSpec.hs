@@ -1790,6 +1790,83 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right _ -> pure ()
 
+    it "sameLaneDoubleAliasFrameClearBoundaryExpr exact edge authoritative instantiation translation" $ do
+      let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+          sameLaneDoubleAliasFrameClearBoundaryExpr =
+            ELet
+              "k"
+              (ELamAnn "x" recursiveAnn (EVar "x"))
+              ( ELet
+                  "hold"
+                  (EVar "k")
+                  ( ELet
+                      "keep"
+                      (EVar "hold")
+                      (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "keep")) (EVar "u"))
+                  )
+              )
+          extractSameLaneDoubleAliasEdge ann0 = case ann0 of
+            ALet "k" _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
+              case holdBody of
+                ALet "hold" _ _ _ _ _ (AAnn keepBody _ _) _ ->
+                  case keepBody of
+                    ALet "keep" _ _ _ _ _ (AAnn uBody _ _) _ ->
+                      case uBody of
+                        ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
+                          pure (schemeRootId, argEdgeId)
+                        other -> do
+                          expectationFailure ("Expected sameLaneDoubleAliasFrameClearBoundaryExpr inner packet shape, got: " ++ show other)
+                          fail "sameLaneDoubleAliasFrameClearBoundaryExprExactEdge"
+                    other -> do
+                      expectationFailure ("Expected sameLaneDoubleAliasFrameClearBoundaryExpr keep packet shape, got: " ++ show other)
+                      fail "sameLaneDoubleAliasFrameClearBoundaryExprExactEdge"
+                other -> do
+                  expectationFailure ("Expected sameLaneDoubleAliasFrameClearBoundaryExpr hold packet shape, got: " ++ show other)
+                  fail "sameLaneDoubleAliasFrameClearBoundaryExprExactEdge"
+            other -> do
+              expectationFailure ("Expected sameLaneDoubleAliasFrameClearBoundaryExpr packet shape, got: " ++ show other)
+              fail "sameLaneDoubleAliasFrameClearBoundaryExprExactEdge"
+      artifacts <- requireRight (runPipelineArtifactsDefault Set.empty sameLaneDoubleAliasFrameClearBoundaryExpr)
+      let (inputs, annCanon, _annPre) = resultTypeInputsForArtifacts artifacts
+      (schemeRootId, argEdgeId) <- extractSameLaneDoubleAliasEdge annCanon
+      rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 37]
+      scopeRoot <-
+        requireRight
+          ( resolveCanonicalScope
+              (paConstraintNorm artifacts)
+              (rtcPresolutionView inputs)
+              (rtcRedirects inputs)
+              schemeRootId
+          )
+      let targetNode = schemeBodyTarget (rtcPresolutionView inputs) schemeRootId
+      (scheme, subst) <-
+        requireRight
+          ( generalizeWithPlan
+              (rtcPlanBuilder inputs)
+              (rtcBindParentsGa inputs)
+              (rtcPresolutionView inputs)
+              scopeRoot
+              targetNode
+          )
+      let schemeInfo = Elab.SchemeInfo scheme subst
+          witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
+          trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
+      phi <-
+        requireRight
+          ( Elab.phiFromEdgeWitnessWithTrace
+              defaultTraceConfig
+              (generalizeAtWithActive (paSolved artifacts))
+              (rtcPresolutionView inputs)
+              (Just (rtcBindParentsGa inputs))
+              (Just schemeInfo)
+              trace
+              witness
+          )
+      phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t38")) (Elab.InstApp (Elab.TVar "t44"))
+      case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDoubleAliasFrameClearBoundaryExpr) of
+        Left err -> expectationFailure (Elab.renderPipelineError err)
+        Right _ -> pure ()
+
     it "selected same-wrapper nested-forall exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
           expr =
