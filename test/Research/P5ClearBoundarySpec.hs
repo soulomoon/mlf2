@@ -1,7 +1,6 @@
 module Research.P5ClearBoundarySpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
-import Data.List (isInfixOf)
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -106,31 +105,17 @@ spec =
                 )
                 pipelineRuns
 
-        it "reports PhiTranslatabilityError at pipeline entrypoints while the nested-forall preservation stays internal-only in this round" $ do
-            let expectedSnippets =
-                    [ "Phase 6 (elaboration): PhiTranslatabilityError"
-                    , "reifyInst: missing authoritative instantiation translation"
-                    , "expansion args="
-                    ]
-                pipelineRuns =
+        it "keeps the selected same-wrapper nested-forall packet recursive on both authoritative entrypoints" $ do
+            let pipelineRuns =
                     [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))
                     , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))
                     ]
             mapM_
                 (\(label, result) -> case result of
-                    Left err -> do
-                        let rendered = renderPipelineError err
-                        mapM_
-                            (\snippet ->
-                                rendered `shouldSatisfy` isInfixOf snippet
-                            )
-                            expectedSnippets
+                    Left err ->
+                        expectationFailure (label ++ ": " ++ renderPipelineError err)
                     Right (_term, ty) ->
-                        expectationFailure
-                            ( label
-                                ++ ": expected authoritative translation failure, got "
-                                ++ show ty
-                            )
+                        containsMu ty `shouldBe` True
                 )
                 pipelineRuns
 
