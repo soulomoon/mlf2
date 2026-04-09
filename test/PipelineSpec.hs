@@ -2086,32 +2086,32 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         fallbackTy <- requireRight (computeResultTypeFallback inputs innerCanon innerPre)
         containsMu fallbackTy `shouldBe` True
 
-      it "same-lane retained-child exact packet clears Phase 6 elaboration" $ do
+      it "sameLaneClearBoundaryExpr clears Phase 6 elaboration on both authoritative entrypoints" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
-            expr =
+            sameLaneClearBoundaryExpr =
               ELet
                 "k"
                 (ELamAnn "x" recursiveAnn (EVar "x"))
                 (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
               ]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
             Right _ -> pure ()
 
-      it "same-lane retained-child exact packet authoritative public output stays forall identity" $ do
+      it "sameLaneClearBoundaryExpr authoritative public output stays recursive on both entrypoints without collapsing to forall identity" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
-            expr =
+            sameLaneClearBoundaryExpr =
               ELet
                 "k"
                 (ELamAnn "x" recursiveAnn (EVar "x"))
                 (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
             collapsedTy = TForall "a" Nothing (TVar "a")
-        (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
         when (uncheckedTy == collapsedTy) $
           expectationFailure
             ( "unchecked term collapsed: "
