@@ -2129,7 +2129,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         containsMu uncheckedTy `shouldBe` True
         containsMu checkedTy `shouldBe` True
 
-      it "sameLaneAliasFrameClearBoundaryExpr alias-frame clear-boundary packet preserves recursive output on both authoritative entrypoints" $ do
+      it "sameLaneAliasFrameClearBoundaryExpr preserves predecessor alias-frame truth on both authoritative entrypoints" $ do
         termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
         termClosureSrc `shouldSatisfy` isInfixOf "isClearBoundaryRetainedChildRhs :: String -> ElabTerm -> Bool"
         termClosureSrc `shouldSatisfy` isInfixOf "isClearBoundaryRetainedChildRhs source childRhs"
@@ -2155,7 +2155,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneDoubleAliasFrameClearBoundaryExpr double-alias clear-boundary packet preserves recursive output on both authoritative entrypoints" $ do
+      it "sameLaneDoubleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet on both authoritative entrypoints" $ do
         termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
         termClosureSrc `shouldSatisfy` isInfixOf "remainingAliasFrames > 0"
         termClosureSrc `shouldSatisfy` isInfixOf "&& isAliasFrameRhs childRhs"
