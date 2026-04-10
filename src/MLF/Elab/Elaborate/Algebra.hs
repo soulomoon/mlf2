@@ -596,11 +596,12 @@ elabAlg algebraContext layer =
                    visible as a binder-bound at the let scope.
 
                    We detect this case by inspecting the RHS annotation structure for
-                   a desugared annotated lambda whose annotation node reifies to TMu.
-                   When found, we override the scheme with a monomorphic function type
-                   that uses the μ-type as both domain and codomain (identity-like), or
-                   more precisely, domain = μ-type and codomain = μ-type when the body
-                   simply returns the parameter. -}
+                   a desugared annotated lambda whose annotation node reifies to a
+                   contractive TMu witness. When found, we override the scheme with a
+                   monomorphic function type that uses the witnessed μ-type as both
+                   domain and codomain (identity-like), or more precisely, domain =
+                   μ-type and codomain = μ-type when the body simply returns the
+                   parameter. -}
                 scheme =
                   case (annContainsVar v rhsAnn, blockedAliasMuType (schemeToType schemeBase)) of
                         (True, Just muTy) -> schemeFromType muTy
@@ -619,7 +620,8 @@ elabAlg algebraContext layer =
                                     case desugaredAnnLambdaInfo lamParam lamBody of
                                       Just (annNodeId, _) ->
                                         case reifyNodeTypePreferringBound scopeContext annNodeId of
-                                          Right annTy@TMu {} -> Just annTy
+                                          Right annTy@TMu {}
+                                            | hasContractiveRecursiveWitness annTy -> Just annTy
                                           _ -> Nothing
                                       Nothing -> Nothing
                                   AAnn inner _ _ -> muAnnotationTy inner
@@ -634,7 +636,7 @@ elabAlg algebraContext layer =
                                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
                                The domain is always overridden to the μ-type since
                                the surrounding μ-annotation detection confirms that the lambda parameter has
-                               an explicit μ-annotation (e.g. λx:μα.α→Int. x).
+                               an explicit contractive μ-annotation (e.g. λx:μα.α→Int. x).
 
                                For the codomain: when the scheme is fully polymorphic
                                (e.g. ∀a.∀b. a→b with both vars quantified), generalization

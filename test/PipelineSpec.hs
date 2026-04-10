@@ -1487,6 +1487,24 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   (label ++ " μ/∀ mediation without a recursive witness unexpectedly preserved " ++ show ty)
               typeCheck term `shouldBe` Right ty
 
+      it "keeps non-contractive μ annotations out of the mediated witness lane" $ do
+        let badRecursiveAnn = STMu "a" (STVar "a")
+            expr =
+              ELet
+                "id"
+                (ELam "x" (EVar "x"))
+                (ELet "g" (EApp (EVar "id") (ELamAnn "x" badRecursiveAnn (EVar "x"))) (EVar "g"))
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left _ -> pure ()
+            Right (_term, ty) ->
+              expectationFailure
+                (label ++ " unexpectedly accepted non-contractive mediated μ annotation with type " ++ show ty)
+
       it "characterizes higher-order recursion as recursive-at-constraint level with current Phase-6 fail-closed behavior" $ do
         let expr =
               ELet
