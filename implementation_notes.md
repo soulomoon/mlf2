@@ -43,6 +43,7 @@ no cycles exist, so all existing behavior is preserved identically.
 
 **Current behavior under polymorphic mediation:**
 - The mediated-preservation lane stays inside the existing boundary: recursive functions preserve visible `μ` through identity-like polymorphic mediators only when elaboration can already recover a contractive recursive-domain witness from the self reference. Cases without that witness (for example `let rec f = id f`) remain fail-closed instead of synthesizing a new recursive wrapper.
+- The supported positive surface is intentionally narrow: the witness-backed `μ/∀` mediation case and the already-supported same-wrapper authoritative packets remain recursive, but broader mediated families are still out of scope until a new witness-backed positive regression is named and verified.
 
 **Resolved gap (non-local proxy elaboration):**
 - Non-local proxy `PhiTranslatabilityError` at pipeline entrypoints has been resolved. The `reifyInst` TyMu 0-binder fallback (round 152) and `OpRaise` non-spine bind-parent guard for μ-type nodes (round 153) fixed the two `PhiTranslatabilityError` crash sites. The pipeline now reaches type checking for non-local proxy wrappers. Survey of all 13 `ElaborationSpec` `PhiTranslatabilityError` assertion sites (round 154) confirmed none match the non-local proxy pattern — all are legitimate untranslatable cases.
