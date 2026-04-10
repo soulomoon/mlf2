@@ -1867,6 +1867,92 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         Left err -> expectationFailure (Elab.renderPipelineError err)
         Right _ -> pure ()
 
+    it "sameLaneTripleAliasFrameClearBoundaryExpr exact edge authoritative instantiation translation" $ do
+      let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+          sameLaneTripleAliasFrameClearBoundaryExpr =
+            ELet
+              "k"
+              (ELamAnn "x" recursiveAnn (EVar "x"))
+              ( ELet
+                  "hold"
+                  (EVar "k")
+                  ( ELet
+                      "keep"
+                      (EVar "hold")
+                      ( ELet
+                          "more"
+                          (EVar "keep")
+                          (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "more")) (EVar "u"))
+                      )
+                  )
+              )
+          extractSameLaneTripleAliasEdge ann0 = case ann0 of
+            ALet "k" _ schemeRootId _ _ _ (AAnn holdBody _ _) _ ->
+              case holdBody of
+                ALet "hold" _ _ _ _ _ (AAnn keepBody _ _) _ ->
+                  case keepBody of
+                    ALet "keep" _ _ _ _ _ (AAnn moreBody _ _) _ ->
+                      case moreBody of
+                        ALet "more" _ _ _ _ _ (AAnn uBody _ _) _ ->
+                          case uBody of
+                            ALet "u" _ _ _ _ (AApp _ _ _ argEdgeId _) _ _ ->
+                              pure (schemeRootId, argEdgeId)
+                            other -> do
+                              expectationFailure ("Expected sameLaneTripleAliasFrameClearBoundaryExpr inner packet shape, got: " ++ show other)
+                              fail "sameLaneTripleAliasFrameClearBoundaryExprExactEdge"
+                        other -> do
+                          expectationFailure ("Expected sameLaneTripleAliasFrameClearBoundaryExpr more packet shape, got: " ++ show other)
+                          fail "sameLaneTripleAliasFrameClearBoundaryExprExactEdge"
+                    other -> do
+                      expectationFailure ("Expected sameLaneTripleAliasFrameClearBoundaryExpr keep packet shape, got: " ++ show other)
+                      fail "sameLaneTripleAliasFrameClearBoundaryExprExactEdge"
+                other -> do
+                  expectationFailure ("Expected sameLaneTripleAliasFrameClearBoundaryExpr hold packet shape, got: " ++ show other)
+                  fail "sameLaneTripleAliasFrameClearBoundaryExprExactEdge"
+            other -> do
+              expectationFailure ("Expected sameLaneTripleAliasFrameClearBoundaryExpr packet shape, got: " ++ show other)
+              fail "sameLaneTripleAliasFrameClearBoundaryExprExactEdge"
+      artifacts <- requireRight (runPipelineArtifactsDefault Set.empty sameLaneTripleAliasFrameClearBoundaryExpr)
+      let (inputs, annCanon, _annPre) = resultTypeInputsForArtifacts artifacts
+      (schemeRootId, argEdgeId) <- extractSameLaneTripleAliasEdge annCanon
+      scopeRoot <-
+        requireRight
+          ( resolveCanonicalScope
+              (paConstraintNorm artifacts)
+              (rtcPresolutionView inputs)
+              (rtcRedirects inputs)
+              schemeRootId
+          )
+      let targetNode = schemeBodyTarget (rtcPresolutionView inputs) schemeRootId
+      (scheme, subst) <-
+        requireRight
+          ( generalizeWithPlan
+              (rtcPlanBuilder inputs)
+              (rtcBindParentsGa inputs)
+              (rtcPresolutionView inputs)
+              scopeRoot
+              targetNode
+          )
+      let schemeInfo = Elab.SchemeInfo scheme subst
+          witness = rtcEdgeWitnesses inputs IntMap.! getEdgeId argEdgeId
+          trace = IntMap.lookup (getEdgeId argEdgeId) (rtcEdgeTraces inputs)
+      phi <-
+        requireRight
+          ( Elab.phiFromEdgeWitnessWithTrace
+              defaultTraceConfig
+              (generalizeAtWithActive (paSolved artifacts))
+              (rtcPresolutionView inputs)
+              (Just (rtcBindParentsGa inputs))
+              (Just schemeInfo)
+              trace
+              witness
+          )
+      rtcEdgeExpansions inputs IntMap.! getEdgeId argEdgeId `shouldBe` ExpInstantiate [NodeId 40]
+      phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t41")) (Elab.InstApp (Elab.TVar "t47"))
+      case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneTripleAliasFrameClearBoundaryExpr) of
+        Left err -> expectationFailure (Elab.renderPipelineError err)
+        Right _ -> pure ()
+
     it "selected same-wrapper nested-forall exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
           expr =

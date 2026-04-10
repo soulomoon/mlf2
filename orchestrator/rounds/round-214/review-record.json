@@ -1,0 +1,12 @@
+{
+  "roadmap_id": "2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap",
+  "roadmap_revision": "rev-017",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap/rev-017",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-expand-the-broader-positive-representative-corpus",
+  "extracted_item_id": "promote-same-lane-triple-alias-clear-boundary-packet-to-next-explicit-milestone-3-representative-corpus-anchor",
+  "stage_action": "finalize",
+  "merge_readiness": "satisfied",
+  "decision": "approved",
+  "evidence_summary": "Reviewed the canonical round worktree diff against base branch codex/automatic-recursive-type-inference on merged predecessor baseline 2091c39. The implementation-owned diff stays within test/ElaborationSpec.hs, test/PipelineSpec.hs, and test/Research/P5ClearBoundarySpec.hs, while controller-owned orchestrator pointer/state updates remain outside the writable slice. sameLaneTripleAliasFrameClearBoundaryExpr is now the next explicit milestone-3 representative anchor on the research, pipeline, and elaboration surfaces; sameLaneClearBoundaryExpr remains the first anchor; sameLaneDoubleAliasFrameClearBoundaryExpr remains the merged next anchor; sameLaneAliasFrameClearBoundaryExpr remains preserved predecessor truth; quadruple/deeper alias shells remain continuity-only; checked-authoritative parity, the retained-child exact packet, BUG-2026-02-06-002, BUG-2026-02-17-002, the correct semantic g g failure, the representative let-polymorphism and nested-let cluster, and the quantified fail-closed probes all stay green; ./scripts/thesis-conformance-gate.sh passed; and cabal build all && cabal test passed with 1347 examples, 0 failures."
+}

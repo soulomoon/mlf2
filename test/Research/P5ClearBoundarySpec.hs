@@ -77,6 +77,10 @@ spec =
             fallbackTy <- sameLaneDoubleAliasFrameClearBoundaryFallbackType
             containsMu fallbackTy `shouldBe` True
 
+        it "sameLaneTripleAliasFrameClearBoundaryExpr stays recursive as the next milestone-3 representative broader-positive clear-boundary packet after the merged double-alias anchor while the quantified boundary stays clear" $ do
+            fallbackTy <- sameLaneTripleAliasFrameClearBoundaryFallbackType
+            containsMu fallbackTy `shouldBe` True
+
         it "nestedForallContrastExpr stays recursive as preserved merged-baseline same-wrapper nested-forall success across a nested forall boundary" $ do
             fallbackTy <- fallbackType nestedForallContrastExpr
             containsMu fallbackTy `shouldBe` True
@@ -123,6 +127,20 @@ spec =
                 )
                 pipelineRuns
 
+        it "sameLaneTripleAliasFrameClearBoundaryExpr is the next milestone-3 representative broader-positive clear-boundary packet after the merged double-alias anchor on both authoritative entrypoints" $ do
+            let pipelineRuns =
+                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneTripleAliasFrameClearBoundaryExpr))
+                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneTripleAliasFrameClearBoundaryExpr))
+                    ]
+            mapM_
+                (\(label, result) -> case result of
+                    Left err ->
+                        expectationFailure (label ++ ": " ++ renderPipelineError err)
+                    Right (_term, ty) ->
+                        containsMu ty `shouldBe` True
+                )
+                pipelineRuns
+
         it "selected same-wrapper nested-forall preserved merged-baseline packet stays recursive on both authoritative entrypoints" $ do
             let pipelineRuns =
                     [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))
@@ -154,6 +172,14 @@ sameLaneDoubleAliasFrameClearBoundaryExpr =
         (ELet "hold" (EVar "k")
             (ELet "keep" (EVar "hold")
                 (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "keep")) (EVar "u"))))
+
+sameLaneTripleAliasFrameClearBoundaryExpr :: SurfaceExpr
+sameLaneTripleAliasFrameClearBoundaryExpr =
+    ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+        (ELet "hold" (EVar "k")
+            (ELet "keep" (EVar "hold")
+                (ELet "more" (EVar "keep")
+                    (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "more")) (EVar "u")))))
 
 nestedForallContrastExpr :: SurfaceExpr
 nestedForallContrastExpr =
@@ -191,6 +217,18 @@ sameLaneAliasFrameClearBoundaryFallbackType = do
 sameLaneDoubleAliasFrameClearBoundaryFallbackType :: IO ElabType
 sameLaneDoubleAliasFrameClearBoundaryFallbackType = do
     artifacts <- requireRight (runPipelineArtifactsDefault Set.empty sameLaneDoubleAliasFrameClearBoundaryExpr)
+    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+        innerCanon = extractFirstApp annCanon0
+        innerPre = extractFirstApp annPre0
+        (retainedRoot, retainedChild) = case innerCanon of
+            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
+        inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+    requireRight (computeResultTypeFallback inputs innerCanon innerPre)
+
+sameLaneTripleAliasFrameClearBoundaryFallbackType :: IO ElabType
+sameLaneTripleAliasFrameClearBoundaryFallbackType = do
+    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty sameLaneTripleAliasFrameClearBoundaryExpr)
     let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
