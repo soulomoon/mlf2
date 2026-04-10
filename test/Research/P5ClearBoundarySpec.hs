@@ -89,6 +89,10 @@ spec =
             fallbackTy <- sameLaneQuintupleAliasFrameClearBoundaryFallbackType
             containsMu fallbackTy `shouldBe` True
 
+        it "sameLaneSextupleAliasFrameClearBoundaryExpr stays recursive as the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quintuple-alias anchor while the quantified boundary stays clear" $ do
+            fallbackTy <- sameLaneSextupleAliasFrameClearBoundaryFallbackType
+            containsMu fallbackTy `shouldBe` True
+
         it "nestedForallContrastExpr stays recursive as preserved merged-baseline same-wrapper nested-forall success across a nested forall boundary" $ do
             fallbackTy <- fallbackType nestedForallContrastExpr
             containsMu fallbackTy `shouldBe` True
@@ -177,6 +181,20 @@ spec =
                 )
                 pipelineRuns
 
+        it "sameLaneSextupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quintuple-alias anchor on both authoritative entrypoints" $ do
+            let pipelineRuns =
+                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr))
+                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr))
+                    ]
+            mapM_
+                (\(label, result) -> case result of
+                    Left err ->
+                        expectationFailure (label ++ ": " ++ renderPipelineError err)
+                    Right (_term, ty) ->
+                        containsMu ty `shouldBe` True
+                )
+                pipelineRuns
+
         it "selected same-wrapper nested-forall preserved merged-baseline packet stays recursive on both authoritative entrypoints" $ do
             let pipelineRuns =
                     [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))
@@ -235,6 +253,17 @@ sameLaneQuintupleAliasFrameClearBoundaryExpr =
                     (ELet "deep" (EVar "more")
                         (ELet "tail" (EVar "deep")
                             (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "tail")) (EVar "u")))))))
+
+sameLaneSextupleAliasFrameClearBoundaryExpr :: SurfaceExpr
+sameLaneSextupleAliasFrameClearBoundaryExpr =
+    ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+        (ELet "hold" (EVar "k")
+            (ELet "keep" (EVar "hold")
+                (ELet "more" (EVar "keep")
+                    (ELet "deep" (EVar "more")
+                        (ELet "tail" (EVar "deep")
+                            (ELet "leaf" (EVar "tail")
+                                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "leaf")) (EVar "u"))))))))
 
 nestedForallContrastExpr :: SurfaceExpr
 nestedForallContrastExpr =
@@ -308,6 +337,18 @@ sameLaneQuadrupleAliasFrameClearBoundaryFallbackType = do
 sameLaneQuintupleAliasFrameClearBoundaryFallbackType :: IO ElabType
 sameLaneQuintupleAliasFrameClearBoundaryFallbackType = do
     artifacts <- requireRight (runPipelineArtifactsDefault Set.empty sameLaneQuintupleAliasFrameClearBoundaryExpr)
+    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+        innerCanon = extractFirstApp annCanon0
+        innerPre = extractFirstApp annPre0
+        (retainedRoot, retainedChild) = case innerCanon of
+            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
+        inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+    requireRight (computeResultTypeFallback inputs innerCanon innerPre)
+
+sameLaneSextupleAliasFrameClearBoundaryFallbackType :: IO ElabType
+sameLaneSextupleAliasFrameClearBoundaryFallbackType = do
+    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty sameLaneSextupleAliasFrameClearBoundaryExpr)
     let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
         innerCanon = extractFirstApp annCanon0
         innerPre = extractFirstApp annPre0
