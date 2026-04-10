@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Changed
+- Closed the P5 broader-positive enactment family on merged `ea8db76`: the
+  enactment contract froze in `round-206`, milestone-3 reached the merged
+  nonuple frontier in `round-220`, and the new canonical closeout records the
+  selected same-wrapper nested-`forall` packet plus
+  `sameLaneClearBoundaryExpr` through
+  `sameLaneNonupleAliasFrameClearBoundaryExpr` as the current
+  broader-positive frontier on both authoritative entrypoints while keeping
+  `sameLaneAliasFrameClearBoundaryExpr` as predecessor truth only,
+  `sameLaneDecupleAliasFrameClearBoundaryExpr` and deeper alias shells
+  closed, and the repo-facing notes synced without adding a new
+  thesis-deviation entry.
 - Updated the supported compiler lane from GHC 9.12.2 / `base-4.21` to GHC
   9.14.1 / `base-4.22` across Cabal metadata, the local `cabal.project` pin,
   the GitHub Actions matrix, README guidance, TODO tracking, and current

@@ -1,3 +1,22 @@
+## 2026-04-10 - P5 broader-positive enactment family closed on the merged nonuple frontier
+
+- The broader-positive enactment family now closes on merged `ea8db76`, where
+  accepted `round-220` already recorded
+  `./scripts/thesis-conformance-gate.sh` and
+  `cabal build all && cabal test` with `1365 examples, 0 failures`.
+- The enacted positive frontier is the selected same-wrapper nested-`forall`
+  packet plus the explicit clear-boundary anchors from
+  `sameLaneClearBoundaryExpr` through
+  `sameLaneNonupleAliasFrameClearBoundaryExpr` on both
+  `runPipelineElab` and `runPipelineElabChecked`.
+- `sameLaneAliasFrameClearBoundaryExpr` remains predecessor truth only, while
+  `sameLaneDecupleAliasFrameClearBoundaryExpr`, deeper alias shells, `P2`,
+  `N1 ambiguity-reject`, `N2 unsoundness-guard`, and
+  `N6 termination-pressure` stay closed.
+- This closeout republishes already accepted evidence only, so no new
+  thesis-deviation record is required and `docs/thesis-deviations.yaml`
+  remains unchanged.
+
 ## 2026-03-29 - Automatic iso-recursive type inference implemented and tested
 
 Automatic iso-recursive type inference is now implemented and tested end-to-end across all pipeline phases. An initial implementation in round-144 was followed by a gap-fix campaign (rounds 146-149) that addressed four specific robustness gaps: witness normalization for TyMu nodes, alias-bounds resolution for recursive types, ELet fixpoint reduction for recursive let-bindings, and result-type fallback opening for non-local recursive reconstruction.

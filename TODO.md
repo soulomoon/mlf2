@@ -4,6 +4,26 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 108 P5 broader-positive enactment closeout (completed 2026-04-10)
+
+- Completed:
+  - `round-206` froze the broader-positive enactment contract, the
+    authoritative-entrypoint success bar, the preserved guardrails, and the
+    milestone-4 ownership of the repo-facing notes.
+  - Accepted rounds `round-211` through `round-220`, now merged through
+    `ea8db76`, made the selected same-wrapper nested-`forall` packet plus
+    `sameLaneClearBoundaryExpr` through
+    `sameLaneNonupleAliasFrameClearBoundaryExpr` reviewer-visible on both
+    `runPipelineElab` and `runPipelineElabChecked`.
+  - Milestone-4 closeout keeps `sameLaneAliasFrameClearBoundaryExpr` as
+    predecessor truth only and keeps
+    `sameLaneDecupleAliasFrameClearBoundaryExpr`, deeper alias shells, `P2`,
+    `N1 ambiguity-reject`, `N2 unsoundness-guard`, and
+    `N6 termination-pressure` closed.
+  - No new thesis-deviation record is required; `docs/thesis-deviations.yaml`
+    remains unchanged because this closeout republishes already accepted
+    evidence only.
+
 ## Task 107 GHC 9.14 toolchain upgrade (completed 2026-04-01)
 
 - Completed:
