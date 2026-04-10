@@ -15,7 +15,7 @@ import Data.Functor.Foldable (para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe, isJust)
+import Data.Maybe (fromMaybe, isJust, isNothing)
 import qualified Data.Set as Set
 import MLF.Constraint.Presolution (PresolutionView)
 import MLF.Constraint.Types
@@ -58,7 +58,7 @@ import MLF.Elab.Types
   )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr (..), AnnExprF (..))
 import MLF.Frontend.Syntax (VarName)
-import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsType, parseNameId, substTypeCapture)
+import MLF.Reify.TypeOps (alphaEqType, firstNonContractiveRecursiveType, freeTypeVarsType, parseNameId, substTypeCapture)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 type Env = Map.Map VarName SchemeInfo
@@ -77,6 +77,26 @@ data AlgebraContext = AlgebraContext
     algNamedSetReify :: IntSet.IntSet
   }
 
+containsMuType :: ElabType -> Bool
+containsMuType ty =
+  case ty of
+    TMu {} -> True
+    TArrow dom cod -> containsMuType dom || containsMuType cod
+    TCon _ args -> any containsMuType args
+    TForall _ mb body -> maybe False containsMuBound mb || containsMuType body
+    _ -> False
+  where
+    containsMuBound bound = case bound of
+      TArrow dom cod -> containsMuType dom || containsMuType cod
+      TCon _ args -> any containsMuType args
+      TForall _ mb body -> maybe False containsMuBound mb || containsMuType body
+      TMu {} -> True
+      _ -> False
+
+hasContractiveRecursiveWitness :: ElabType -> Bool
+hasContractiveRecursiveWitness ty =
+  containsMuType ty && isNothing (firstNonContractiveRecursiveType ty)
+
 elabAlg :: AlgebraContext -> AnnExprF (AnnExpr, ElabOut) -> ElabOut
 elabAlg algebraContext layer =
   case layer of
@@ -87,6 +107,54 @@ elabAlg algebraContext layer =
       let f env = do
             let mAnnLambda = desugaredAnnLambdaInfo v bodyAnn
                 resolvedParam = algResolvedLambdaParamNode algebraContext lamNodeId
+                recursiveParamTyFromEnv annExpr =
+                  let isIdentityLikeSchemeType ty =
+                        case ty of
+                          TForall name Nothing body -> case body of
+                            TArrow (TVar dom) (TVar cod) -> dom == name && cod == name
+                            _ -> False
+                          _ -> False
+                      mediatedVarUse expr =
+                        case expr of
+                          AVar name _ -> name == v
+                          AAnn inner _ _ -> mediatedVarUse inner
+                          AApp fun arg _ _ _ ->
+                            case (fun, arg) of
+                              (AVar funName _, innerArg)
+                                | Just schemeInfo <- Map.lookup funName env
+                                , isIdentityLikeSchemeType (schemeToType (siScheme schemeInfo)) ->
+                                    mediatedVarUse innerArg
+                              _ -> False
+                          _ -> False
+                      firstRecursiveDomain expr =
+                        case expr of
+                          AApp (AVar recurName _) arg _ _ _
+                            | mediatedVarUse arg
+                            , Just schemeInfo <- Map.lookup recurName env ->
+                                case schemeToType (siScheme schemeInfo) of
+                                  muTy@(TMu muName muBody)
+                                    | hasContractiveRecursiveWitness muTy ->
+                                        case substTypeCapture muName muTy muBody of
+                                          TArrow dom _ -> Just dom
+                                          _ -> Nothing
+                                  _ -> Nothing
+                          ALam boundName _ _ inner _
+                            | boundName == v -> Nothing
+                            | otherwise -> firstRecursiveDomain inner
+                          AApp fun arg _ _ _ ->
+                            case firstRecursiveDomain fun of
+                              Just dom -> Just dom
+                              Nothing -> firstRecursiveDomain arg
+                          ALet boundName _ _ _ _ rhs body _
+                            | boundName == v ->
+                                firstRecursiveDomain rhs
+                            | otherwise ->
+                                case firstRecursiveDomain rhs of
+                                  Just dom -> Just dom
+                                  Nothing -> firstRecursiveDomain body
+                          AAnn inner _ _ -> firstRecursiveDomain inner
+                          _ -> Nothing
+                   in firstRecursiveDomain annExpr
             paramSource <-
               case mAnnLambda of
                 Just _ -> pure (fromMaybe paramNode resolvedParam)
@@ -102,7 +170,13 @@ elabAlg algebraContext layer =
                   case mAnnLambda of
                     Just (_, innerBodyAnn) -> para (elabAlg algebraContext) innerBodyAnn
                     Nothing -> bodyOut
-            paramTySurface <- reifyNodeTypePreferringBound scopeContext paramSource
+            paramTySurface0 <- reifyNodeTypePreferringBound scopeContext paramSource
+            let paramTySurface =
+                  case paramTySurface0 of
+                    TVar name
+                      | isJust (parseNameId name) ->
+                          fromMaybe paramTySurface0 (recursiveParamTyFromEnv bodyAnn)
+                    _ -> paramTySurface0
             (paramTy, paramSchemeInfo) <-
               case mAnnLambda of
                 Just (annNodeId, _) ->
@@ -281,22 +355,7 @@ elabAlg algebraContext layer =
                           fromMaybe funInstNorm $
                             case (sourceVarName fAnn, TypeCheck.typeCheckWithEnv tcEnv a') of
                               (Just fName, Right argTy)
-                                | let containsMuType ty =
-                                        case ty of
-                                          TMu {} -> True
-                                          TArrow dom cod -> containsMuType dom || containsMuType cod
-                                          TCon _ args -> any containsMuType args
-                                          TForall _ mb body ->
-                                            maybe False containsMuBound mb || containsMuType body
-                                          _ -> False
-                                          where
-                                            containsMuBound bound = case bound of
-                                              TArrow dom cod -> containsMuType dom || containsMuType cod
-                                              TCon _ args -> any containsMuType args
-                                              TForall _ mb body -> maybe False containsMuBound mb || containsMuType body
-                                              TMu {} -> True
-                                              _ -> False
-                                      isIdentityLikeSchemeType ty =
+                                | let isIdentityLikeSchemeType ty =
                                         case ty of
                                           TForall name Nothing body -> isIdentityLikeBody name body
                                           _ -> False
@@ -304,7 +363,7 @@ elabAlg algebraContext layer =
                                           isIdentityLikeBody name body = case body of
                                             TArrow (TVar dom) (TVar cod) -> dom == name && cod == name
                                             _ -> False
-                                , containsMuType argTy ->
+                                , hasContractiveRecursiveWitness argTy ->
                                     case Map.lookup fName env of
                                       Just fSchemeInfo
                                         | isIdentityLikeSchemeType (schemeToType (siScheme fSchemeInfo)) ->
@@ -426,21 +485,6 @@ elabAlg algebraContext layer =
                   let fApp0 = case funInstRecovered of
                         InstId -> f'
                         _ -> ETyInst f' funInstRecovered
-                      containsMuType ty =
-                        case ty of
-                          TMu {} -> True
-                          TArrow dom cod -> containsMuType dom || containsMuType cod
-                          TCon _ args -> any containsMuType args
-                          TForall _ mb body ->
-                            maybe False containsMuBound mb || containsMuType body
-                          _ -> False
-                        where
-                          containsMuBound bound = case bound of
-                            TArrow dom cod -> containsMuType dom || containsMuType cod
-                            TCon _ args -> any containsMuType args
-                            TForall _ mb body -> maybe False containsMuBound mb || containsMuType body
-                            TMu {} -> True
-                            _ -> False
                       isInternalTyVar ty =
                         case ty of
                           TVar name -> isJust (parseNameId name)
@@ -453,8 +497,8 @@ elabAlg algebraContext layer =
                         (Left _, ELam paramName paramTy body, Just argName, Right argTy)
                           | isInternalTyVar paramTy
                               && isIdentityLambdaBody paramName body
-                              && containsMuType argTy
-                              && maybe False (containsMuType . schemeToType . siScheme) (Map.lookup argName env) ->
+                              && hasContractiveRecursiveWitness argTy
+                              && maybe False (hasContractiveRecursiveWitness . schemeToType . siScheme) (Map.lookup argName env) ->
                               ELam paramName argTy body
                         _ -> fApp0
             app <- insertMuUseSiteCoercions tcEnv fApp aApp
@@ -627,11 +671,18 @@ elabAlg algebraContext layer =
             rhs' <- elabTerm rhsOut env'
             let rhsAbs0 =
                   let schemeTy = schemeToType scheme
+                      rhsMatchesScheme rhsTy =
+                        alphaEqType rhsTy schemeTy
+                          || case schemeTy of
+                            muTy@(TMu muName muBody) ->
+                              let expectedBodyTy = substTypeCapture muName muTy muBody
+                               in alphaEqType rhsTy expectedBodyTy
+                            _ -> False
                    in case (rhs', TypeCheck.typeCheckWithEnv tcEnv rhs') of
                         (EVar _, _) ->
                           closeTermWithSchemeSubstIfNeeded subst scheme rhs'
                         (_, Right rhsTy)
-                          | alphaEqType rhsTy schemeTy -> rhs'
+                          | rhsMatchesScheme rhsTy -> rhs'
                         _ -> closeTermWithSchemeSubstIfNeeded subst scheme rhs'
                 rhsAbs =
                   let schemeTy = schemeToType scheme
@@ -681,6 +732,15 @@ elabAlg algebraContext layer =
               )
               () of
               () -> pure ()
+            let rhsForRoll =
+                  case schemeToType scheme of
+                    muTy@(TMu muName muBody) ->
+                      let expectedBodyTy = substTypeCapture muName muTy muBody
+                       in case TypeCheck.typeCheckWithEnv tcEnv rhs' of
+                            Right rhsTy
+                              | alphaEqType rhsTy expectedBodyTy -> rhs'
+                            _ -> rhsAbs
+                    _ -> rhsAbs
             let bodyElab =
                   case bodyAnn of
                     AAnn _ target _ | canonical target == canonical trivialRoot -> elabStripped bodyOut
@@ -702,7 +762,7 @@ elabAlg algebraContext layer =
                 )
             let rhsFinal =
                   case schemeToType scheme of
-                    muTy@TMu {} -> ERoll muTy rhsAbs
+                    muTy@TMu {} -> ERoll muTy rhsForRoll
                     _ -> rhsAbs
             pure (scheme, rhsFinal, body')
           f env = do
