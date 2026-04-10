@@ -1,7 +1,7 @@
 # Verification Contract
 
 Roadmap family: `2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap`
-Revision: `rev-006`
+Revision: `rev-009`
 
 ## Baseline Checks
 
@@ -21,18 +21,20 @@ Every round must satisfy all baseline checks that match its touched scope.
    - Confirm prior roadmap families and revisions remain unchanged.
    - Confirm `round-208`, `round-209`, and `round-210` artifacts remain
      immutable predecessor evidence if the round cites them.
-   - For `rev-006` milestone-2 continuation, confirm the same `round-211`
-     branch/worktree remains the live baseline when cited and that its
-     current diff is preserved rather than discarded on a fresh round.
+   - For `rev-009` milestone-2 continuation, confirm the same `round-211`
+     branch/worktree remains the live baseline when cited and that its current
+     diff in `Annotation.hs`, `Legacy.hs`, `Algebra.hs`,
+     `test/ElaborationSpec.hs`, `test/PipelineSpec.hs`, and
+     `test/Research/P5ClearBoundarySpec.hs` is preserved rather than discarded
+     on a fresh round.
 2. **Diff hygiene**
    - Run `git diff --check` on the round diff.
 3. **Build and test gate for production/test changes**
    - If the round touches `src/`, `src-public/`, `app/`, `test/`, or
      `mlf2.cabal`, run `cabal build all && cabal test`.
 4. **Thesis conformance gate for thesis-facing changes**
-   - If the round touches `docs/thesis-*`, `docs/thesis-deviations.yaml`,
-     `scripts/thesis-*`, `papers/these-finale-english.txt`, or any other
-     thesis-conformance source, run `./scripts/thesis-conformance-gate.sh`.
+   - If the round touches thesis-facing sources, run
+     `./scripts/thesis-conformance-gate.sh`.
 5. **Broader-positive boundary discipline**
    - Confirm the round stays inside the selected milestone/direction scope and
      does not silently widen into cyclic search, multi-SCC behavior,
@@ -42,23 +44,16 @@ Every round must satisfy all baseline checks that match its touched scope.
    - Confirm `P2`, `N1 ambiguity-reject`, `N2 unsoundness-guard`, and
      `N6 termination-pressure` remain closed unless the active milestone
      explicitly and honestly reclassifies them.
-   - For milestone-2 rounds under `rev-006`, confirm the continuation stays
-     limited to the preserved `round-211` baseline plus the one newly
-     admitted same-file seam:
-     `src/MLF/Elab/Elaborate/Annotation.hs`,
-     `src/MLF/Elab/Legacy.hs`,
-     `src/MLF/Elab/Elaborate/Algebra.hs`,
-     `test/ElaborationSpec.hs`,
-     `test/PipelineSpec.hs`, and
-     `test/Research/P5ClearBoundarySpec.hs`.
+   - For milestone-2 rounds under `rev-009`, confirm the continuation stays
+     limited to the preserved `round-211` baseline plus the newly admitted
+     `src/MLF/Elab/TermClosure.hs` seam.
 6. **Authoritative-entrypoint discipline**
    - When a round claims broader-positive support, confirm the evidence is
-     visible on both `runPipelineElab` and `runPipelineElabChecked` rather
-     than only on internal helpers or one entrypoint.
+     visible on both `runPipelineElab` and `runPipelineElabChecked`.
 7. **Worker-plan integrity when fan-out is used**
    - If a round uses planner-authored worker fan-out, confirm
-     `worker-plan.json` exists, worker ownership boundaries were respected,
-     and approval is based on the integrated round result.
+     `worker-plan.json` exists, worker ownership boundaries were respected, and
+     approval is based on the integrated round result.
 
 ## Task-Specific Checks
 
@@ -68,19 +63,19 @@ direction.
 - **milestone-1**
   - Verify the artifact consumes accepted `round-203`, `round-204`, and
     `round-205` honestly and does not rewrite those predecessor artifacts.
-  - Verify the artifact names the exact broader positive frontier beyond the
-    one settled retained-child lane, the exact expected behavior shift away
-    from controlling polymorphic-mediation `mu` absorption, the exact
-    authoritative success surfaces, and the exact representative corpus.
+  - Verify the artifact names the exact broader positive frontier, the expected
+    behavior shift, the authoritative success surfaces, and the representative
+    corpus.
   - Verify the artifact freezes the writable slice concretely enough for later
     code-bearing rounds and keeps excluded families and guardrails closed.
   - Verify the round stays docs/control-plane-only.
 - **milestone-2**
   - Verify the diff stays inside the milestone-1 writable slice as superseded
-    by `rev-006`:
+    by `rev-009`:
     `src/MLF/Elab/Elaborate/Annotation.hs`,
     `src/MLF/Elab/Legacy.hs`,
     `src/MLF/Elab/Elaborate/Algebra.hs`,
+    `src/MLF/Elab/TermClosure.hs`,
     `test/ElaborationSpec.hs`,
     `test/PipelineSpec.hs`, and
     `test/Research/P5ClearBoundarySpec.hs`.
@@ -88,37 +83,48 @@ direction.
     authoritative translation and the downstream
     `PhiReorder: missing binder identity` progress from the current
     `round-211` baseline.
-  - Verify the admitted continuation matches the `rev-006` proof boundary:
-    the clean baseline still stops at the Phase 7 `AAppF`
-    `TCArgumentMismatch`, but the round's writable repair target is the later
-    authoritative `ALetF` let-scheme finalization / closure seam in
-    `Algebra.hs`, because the non-landing same-file `AAppF` experiment already
-    proved that specializing the selected packet only advances the blocker to
-    the let-scheme boundary.
-  - If the round carries changes in
-    `src/MLF/Elab/Elaborate/Annotation.hs` or
-    `src/MLF/Elab/Legacy.hs`, verify they are preserved round-211 baseline
-    work or only mechanical companions to the `Algebra.hs` repair, not a
-    reopened annotation-translation redesign.
-  - If the round touches
-    `src/MLF/Elab/Elaborate/Algebra.hs`, verify the repair stays inside the
-    selected authoritative `ALetF` let-scheme finalization / closure logic
-    around scheme selection,
-    `closeTermWithSchemeSubstIfNeeded`, and `rhsFinal`,
-    with same-file `AAppF` context only if needed. It must not broaden other
-    algebra cases or add fallback/compatibility helpers.
-  - Verify the authoritative packet is covered honestly on both entrypoints
-    in `test/PipelineSpec.hs` and `test/Research/P5ClearBoundarySpec.hs`,
-    and that `test/ElaborationSpec.hs` still proves the old Phase 6 seam and
-    the post-annotation baseline stay cleared.
+  - Verify the inherited `rev-008` Algebra continuation remains in place and
+    still keeps the selected packet green on both authoritative entrypoints,
+    keeps checked-authoritative representative parity green, and keeps the
+    classic let-polymorphism / explicit-`forall` positive cases green.
+  - Verify the admitted `rev-009` continuation matches the blocker proof:
+    the selected packet is already repaired, but the full gate still fails with
+    the remaining strict-target / thesis-target `TCExpectedArrow` cases and the
+    alias-side nested-let `TCLetTypeMismatch` cases. The writable repair target
+    must therefore be the `TermClosure.hs` closure / alias-boundary seam
+    around `closeTermWithSchemeSubstIfNeeded`, plus only any immediately
+    adjacent authoritative witness / instantiation shaping needed to clear that
+    remaining cluster.
+  - If the round touches `src/MLF/Elab/Elaborate/Annotation.hs` or
+    `src/MLF/Elab/Legacy.hs`, verify those edits are preserved round-211
+    baseline work or only mechanical companions to the `TermClosure.hs`
+    repair, not a reopened annotation redesign.
+  - If the round touches `src/MLF/Elab/Elaborate/Algebra.hs`, verify those
+    edits preserve the inherited selected-packet repair and only move with the
+    newly admitted `TermClosure.hs` repair where an adjacent authoritative
+    witness / instantiation handoff must stay aligned.
+  - If the round touches `src/MLF/Elab/TermClosure.hs`, verify the repair
+    stays centered on `closeTermWithSchemeSubstIfNeeded` and does not broaden
+    into unrelated closure heuristics, fallback behavior, or a second
+    interface.
+  - Verify the authoritative packet is still covered honestly on both
+    entrypoints in `test/PipelineSpec.hs` and
+    `test/Research/P5ClearBoundarySpec.hs`, and that
+    `test/ElaborationSpec.hs` still proves the old Phase 6 and post-annotation
+    seams remain cleared.
+  - Verify the remaining fail-fast cluster is explicitly rechecked:
+    - `BUG-2026-02-06-002`
+    - `dual annotated coercion consumers fail fast on unresolved non-root OpWeaken`
+    - `pipeline fails fast for nested-let when only expansion-derived instantiation remains`
+    - `full pipeline fails fast post-boundary-enforcement for: nested-let`
   - Verify
     `src/MLF/Elab/Run/Pipeline.hs`,
-    `src/MLF/Elab/TermClosure.hs`,
     `src/MLF/Elab/Pipeline.hs`,
     `src-public/MLF/Pipeline.hs`,
     `src/MLF/Elab/Run/ResultType/Fallback.hs`, and
     `src/MLF/Elab/Run/ResultType/Fallback/Core.hs`
-    remain untouched in this tightened continuation.
+    remain untouched unless a later accepted roadmap revision explicitly
+    authorizes more.
   - Verify `cabal build all && cabal test` passed.
   - Verify no fallback rescue, second interface, cyclic widening, or
     negative-family reclassification is smuggled in.
@@ -126,8 +132,7 @@ direction.
   - Verify the representative broader positive frontier named by milestone-1
     now passes honestly on both `runPipelineElab` and `runPipelineElabChecked`.
   - Verify the relevant research/pipeline regression surfaces were updated or
-    replayed honestly, especially `test/Research/P5ClearBoundarySpec.hs`,
-    `test/PipelineSpec.hs`, and any milestone-1-authorized companion specs.
+    replayed honestly.
   - Verify public/internal parity is real and does not depend on helper-only
     success or compatibility shims.
   - Verify preserved `P2` and representative negative-family rows remain
@@ -135,11 +140,7 @@ direction.
 - **milestone-4**
   - Verify the closeout artifact records the enacted behavior and evidence
     surface honestly.
-  - Verify the closeout states that polymorphic-mediation `mu` absorption is
-    no longer the controlling broader-positive read only to the extent that
-    milestone-3 actually earned that claim.
-  - Verify repo-facing notes, `implementation_notes.md`, `TODO.md`,
-    `CHANGELOG.md`, and any thesis-deviation records were updated when the
+  - Verify repo-facing notes and thesis-deviation records were updated when the
     accepted evidence requires them.
   - Verify `cabal build all && cabal test` passed for any code/test-bearing
     round and `./scripts/thesis-conformance-gate.sh` passed when thesis-facing
@@ -174,8 +175,8 @@ When the round finalizes, also write `review-record.json`:
 ```json
 {
   "roadmap_id": "2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap",
-  "roadmap_revision": "rev-006",
-  "roadmap_dir": "orchestrator/roadmaps/2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap/rev-006",
+  "roadmap_revision": "rev-009",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap/rev-009",
   "milestone_id": "<milestone-id>",
   "direction_id": "<direction-id>",
   "extracted_item_id": "<extracted-item-id>",

@@ -1,7 +1,13 @@
 # Progress
 
-- Session started for design review and implementation-plan drafting for the scaffold-orchestrator-loop dual-mode update.
-- Reviewed the design note, the live repo-local `orchestrator/state.json`, the active roadmap bundle, and the current scaffold-orchestrator-loop skill/reference files.
-- Identified one non-blocking implementation assumption: pointer stubs are maintained when present but are not promoted to required bootstrap assets by this design.
-- Identified one contract gap that the first plan draft needed to cover explicitly: the scaffold skill's state schema and bootstrap asset still omit the `retry` field used by the live controller contract.
-- Saved and refined the implementation plan under `docs/superpowers/plans/`.
+- Loaded the guider contract, `AGENTS.md`, active `orchestrator/state.json`,
+  active `rev-017` bundle, round-214 selection/plan/implementation/review
+  artifacts, TODO/implementation notes, and the guider-listed plan docs.
+- Confirmed base branch `HEAD = ed66291` and that the merged `round-214`
+  evidence promotes `sameLaneTripleAliasFrameClearBoundaryExpr` without
+  closing milestone-3.
+- Identified the next exact extraction as
+  `promote-same-lane-quadruple-alias-clear-boundary-packet-to-next-explicit-milestone-3-representative-corpus-anchor`.
+- Published `rev-018` of the active roadmap bundle and updated both the
+  parent workspace and canonical round-214 runtime state/pointer stubs to
+  the new revision.

@@ -1,7 +1,7 @@
 # Verification Contract
 
 Roadmap family: `2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap`
-Revision: `rev-006`
+Revision: `rev-007`
 
 ## Baseline Checks
 
@@ -21,7 +21,7 @@ Every round must satisfy all baseline checks that match its touched scope.
    - Confirm prior roadmap families and revisions remain unchanged.
    - Confirm `round-208`, `round-209`, and `round-210` artifacts remain
      immutable predecessor evidence if the round cites them.
-   - For `rev-006` milestone-2 continuation, confirm the same `round-211`
+   - For `rev-007` milestone-2 continuation, confirm the same `round-211`
      branch/worktree remains the live baseline when cited and that its
      current diff is preserved rather than discarded on a fresh round.
 2. **Diff hygiene**
@@ -42,7 +42,7 @@ Every round must satisfy all baseline checks that match its touched scope.
    - Confirm `P2`, `N1 ambiguity-reject`, `N2 unsoundness-guard`, and
      `N6 termination-pressure` remain closed unless the active milestone
      explicitly and honestly reclassifies them.
-   - For milestone-2 rounds under `rev-006`, confirm the continuation stays
+   - For milestone-2 rounds under `rev-007`, confirm the continuation stays
      limited to the preserved `round-211` baseline plus the one newly
      admitted same-file seam:
      `src/MLF/Elab/Elaborate/Annotation.hs`,
@@ -77,7 +77,7 @@ direction.
   - Verify the round stays docs/control-plane-only.
 - **milestone-2**
   - Verify the diff stays inside the milestone-1 writable slice as superseded
-    by `rev-006`:
+    by `rev-007`:
     `src/MLF/Elab/Elaborate/Annotation.hs`,
     `src/MLF/Elab/Legacy.hs`,
     `src/MLF/Elab/Elaborate/Algebra.hs`,
@@ -88,13 +88,16 @@ direction.
     authoritative translation and the downstream
     `PhiReorder: missing binder identity` progress from the current
     `round-211` baseline.
-  - Verify the admitted continuation matches the `rev-006` proof boundary:
-    the clean baseline still stops at the Phase 7 `AAppF`
-    `TCArgumentMismatch`, but the round's writable repair target is the later
-    authoritative `ALetF` let-scheme finalization / closure seam in
-    `Algebra.hs`, because the non-landing same-file `AAppF` experiment already
-    proved that specializing the selected packet only advances the blocker to
-    the let-scheme boundary.
+  - Verify the admitted continuation matches the `rev-007` proof boundary:
+    the clean baseline still stops at the Phase 7 authoritative-application
+    `TCArgumentMismatch`; the minimal same-file `AAppF` recovery reaches the
+    immediate `ALetF` `TCLetTypeMismatch`; the ALetF monomorphic-collapse
+    experiment only shifts the blocker to downstream body-side
+    `TCArgumentMismatch (TVar "t25") ...`; and the bound-relaxation /
+    closure experiment still fails at `TCLetTypeMismatch`. The round's
+    writable repair target must therefore be the exact post-let consumer seam
+    in `Algebra.hs`, not the narrower rev-006 scheme-selection / closure
+    slice and not a broader pipeline/public/fallback reopen.
   - If the round carries changes in
     `src/MLF/Elab/Elaborate/Annotation.hs` or
     `src/MLF/Elab/Legacy.hs`, verify they are preserved round-211 baseline
@@ -102,11 +105,11 @@ direction.
     reopened annotation-translation redesign.
   - If the round touches
     `src/MLF/Elab/Elaborate/Algebra.hs`, verify the repair stays inside the
-    selected authoritative `ALetF` let-scheme finalization / closure logic
-    around scheme selection,
-    `closeTermWithSchemeSubstIfNeeded`, and `rhsFinal`,
-    with same-file `AAppF` context only if needed. It must not broaden other
-    algebra cases or add fallback/compatibility helpers.
+    selected authoritative `ALetF` `bodyElab` / `env'` handoff plus the
+    immediate downstream body-side `AAppF` inference path, with `ALamF`
+    parameter recovery admitted only where that consumer still elaborates
+    against the old non-recursive lane. It must not broaden other algebra
+    cases or add fallback/compatibility helpers.
   - Verify the authoritative packet is covered honestly on both entrypoints
     in `test/PipelineSpec.hs` and `test/Research/P5ClearBoundarySpec.hs`,
     and that `test/ElaborationSpec.hs` still proves the old Phase 6 seam and
@@ -174,8 +177,8 @@ When the round finalizes, also write `review-record.json`:
 ```json
 {
   "roadmap_id": "2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap",
-  "roadmap_revision": "rev-006",
-  "roadmap_dir": "orchestrator/roadmaps/2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap/rev-006",
+  "roadmap_revision": "rev-007",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap/rev-007",
   "milestone_id": "<milestone-id>",
   "direction_id": "<direction-id>",
   "extracted_item_id": "<extracted-item-id>",

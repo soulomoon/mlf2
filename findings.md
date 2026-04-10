@@ -2,8 +2,19 @@
 
 ## Current Observations
 
-- The design is implementable as a docs-first skill-contract update. It does not require any change to `$run-orchestrator-loop`, and it explicitly keeps runtime rounds out of scope.
-- The current `scaffold-orchestrator-loop` materials are bootstrap-only: `SKILL.md` says to use the skill only when no top-level `orchestrator/` exists, `references/repo-contract.md` documents only initial scaffold creation, and `references/roadmap-generation.md` speaks only about an initial roadmap.
-- The existing scaffold assets already expose the state fields that `next-family` needs. `assets/orchestrator/state.json` and `assets/orchestrator/state-schema.md` do not appear to require changes if `next-family` rewrites the live repo-local state directly and bootstrap behavior stays as-is.
-- The current scaffold assets do not include top-level pointer-stub templates such as `orchestrator/roadmap.md`, `orchestrator/verification.md`, or `orchestrator/retry-subloop.md`. The cleanest reading of the design is to keep those files optional compatibility surfaces that must be refreshed when present in `next-family`, not new required bootstrap assets in this change.
-- There is one real contract drift to fix in the plan: the design and live repo-local state both treat `retry` as part of terminality and reset semantics, but the scaffold skill's documented state schema and bootstrap `assets/orchestrator/state.json` do not currently include that field.
+- `HEAD` is now merged baseline commit `ed66291`
+  (`Promote sameLaneTripleAliasFrameClearBoundaryExpr to the next milestone-3 anchor`).
+- `round-214` was accepted and merged on `codex/automatic-recursive-type-inference`
+  with no production edits; the merged implementation widened only the three
+  milestone-3 evidence surfaces and raised the full test count to
+  `1347 examples, 0 failures`.
+- Milestone-3 is still live: `test/PipelineSpec.hs` already carries
+  `sameLaneQuadrupleAliasFrameClearBoundaryExpr` and
+  `sameLaneQuintupleAliasFrameClearBoundaryExpr` guard/control rows, but the
+  research and elaboration surfaces only make the clear-boundary frontier
+  explicit through `sameLaneTripleAliasFrameClearBoundaryExpr`.
+- The smallest honest next extraction is therefore
+  `promote-same-lane-quadruple-alias-clear-boundary-packet-to-next-explicit-milestone-3-representative-corpus-anchor`.
+- The successor revision must keep quintuple/deeper alias shells as
+  continuity-only evidence and must not treat the merged first three anchors
+  plus predecessor truth as whole-frontier closure.
