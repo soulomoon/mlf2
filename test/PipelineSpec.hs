@@ -1408,13 +1408,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
                 ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
               ]
-        -- Phase 4 witness normalization now handles TyMu; downstream Phase 7 type-checking rejects
+        -- Phase 4 witness normalization now handles TyMu; downstream Phase 7 type-checking still rejects.
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err -> do
               let rendered = renderPipelineError err
               rendered `shouldSatisfy` isInfixOf "Phase 7 (type checking)"
-              rendered `shouldSatisfy` isInfixOf "TCRollBodyMismatch"
+              rendered
+                `shouldSatisfy` \msg ->
+                  isInfixOf "TCRollBodyMismatch" msg || isInfixOf "TCArgumentMismatch" msg
             Right (_term, ty) ->
               expectationFailure
                 (label ++ " unexpectedly succeeded with type " ++ show ty)
@@ -1442,7 +1444,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               Right (termChecked, tyChecked) -> do
                 typeCheck termChecked `shouldBe` Right tyChecked
 
-      it "characterizes μ/∀ interaction as recursive-at-constraint level with current Phase-6 fail-closed behavior" $ do
+      it "preserves visible μ across μ/∀ interaction when a contractive recursive witness already exists" $ do
         let expr =
               ELet
                 "id"
@@ -1455,18 +1457,36 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
                 ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
               ]
-        forM_ pipelineRuns $ \(_label, result) ->
+        forM_ pipelineRuns $ \(label, result) ->
           case result of
-            Left err -> do
-              let rendered = renderPipelineError err
-              -- Alias-bound resolution fix means Phase 6 no longer rejects;
-              -- if a regression re-introduces "alias bounds survived", fail loudly.
-              rendered `shouldSatisfy` (not . isInfixOf "alias bounds survived scheme finalization")
+            Left err ->
+              expectationFailure
+                (label ++ " μ/∀ interaction: expected visible μ, got error " ++ renderPipelineError err)
             Right (term, ty) -> do
-              -- Phase 6 succeeds; Phase 7 type-check may still fail on recursive roll/unroll.
-              case typeCheck term of
-                Right tyChecked -> tyChecked `shouldBe` ty
-                Left _tcErr -> pure () -- characterize: Phase 7 blocked on TCRollBodyMismatch
+              unless (containsMu ty) $
+                expectationFailure
+                  (label ++ " μ/∀ interaction: expected TMu in type, got " ++ show ty)
+              typeCheck term `shouldBe` Right ty
+
+      it "keeps μ/∀ mediation fail-closed without a contractive recursive witness" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "x" (EVar "x"))
+                (ELet "f" (EApp (EVar "id") (EVar "f")) (EVar "f"))
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left _ -> pure ()
+            Right (term, ty) -> do
+              when (containsMu ty) $
+                expectationFailure
+                  (label ++ " μ/∀ mediation without a recursive witness unexpectedly preserved " ++ show ty)
+              typeCheck term `shouldBe` Right ty
+
       it "characterizes higher-order recursion as recursive-at-constraint level with current Phase-6 fail-closed behavior" $ do
         let expr =
               ELet

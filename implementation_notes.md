@@ -41,8 +41,8 @@ constraint graphs (Section 9.3). The extension is documented in
 Non-recursive programs remain unaffected — the cycle detection is a no-op when
 no cycles exist, so all existing behavior is preserved identically.
 
-**Known correct behavior under polymorphic mediation:**
-- Nested-forall-mediated recursive types: μ is absorbed during constraint solving through polymorphic mediation (e.g., `let rec f = id f`). In these cases, the result-type fallback correctly reports no μ-type because constraint solving legitimately removed the recursive wrapper through polymorphic generalization. This is not a limitation — it is the expected outcome when a polymorphic mediator generalizes away the recursive structure.
+**Current behavior under polymorphic mediation:**
+- The mediated-preservation lane stays inside the existing boundary: recursive functions preserve visible `μ` through identity-like polymorphic mediators only when elaboration can already recover a contractive recursive-domain witness from the self reference. Cases without that witness (for example `let rec f = id f`) remain fail-closed instead of synthesizing a new recursive wrapper.
 
 **Resolved gap (non-local proxy elaboration):**
 - Non-local proxy `PhiTranslatabilityError` at pipeline entrypoints has been resolved. The `reifyInst` TyMu 0-binder fallback (round 152) and `OpRaise` non-spine bind-parent guard for μ-type nodes (round 153) fixed the two `PhiTranslatabilityError` crash sites. The pipeline now reaches type checking for non-local proxy wrappers. Survey of all 13 `ElaborationSpec` `PhiTranslatabilityError` assertion sites (round 154) confirmed none match the non-local proxy pattern — all are legitimate untranslatable cases.
