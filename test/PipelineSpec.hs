@@ -2379,7 +2379,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneOctupleAliasFrameClearBoundaryExpr octuple-alias clear-boundary packet preserves recursive output on both authoritative entrypoints" $ do
+      it "sameLaneOctupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged septuple-alias anchor on both authoritative entrypoints" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
