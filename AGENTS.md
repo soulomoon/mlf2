@@ -28,16 +28,6 @@
 - When adding a new spec module, wire it into both `mlf2.cabal` and `test/Main.hs`.
 - Keep the production surface narrow: if tests need low-level internal helpers, add a test-support seam rather than widening a production facade.
 - Commit messages should be imperative and descriptive. Update `CHANGELOG.md` only when the change records meaningful project progress rather than pure wording cleanup.
-
-## Task Workflow
-
-- prefer skill run-orchestrator-loop and scaffold-orchestrator-loop
-- prefer parrallel task execution workflow when possible, but do not add parallelism if it would make the implementation more complex without a clear performance benefit.
-- When a repo-local top-level `orchestrator/` exists, treat it as the live repo-wide control plane. Resolve the active roadmap bundle from `orchestrator/state.json` via `roadmap_id`, `roadmap_revision`, and `roadmap_dir`.
-- If the top-level orchestrator takes over an older task packet, keep predecessor packets/logs immutable unless a round explicitly updates a human-facing summary.
-- For repo-local orchestrator runtime, `stage: "done"` is non-terminal whenever the authoritative roadmap still contains `[pending]` or `[in-progress]` items; continue to the next selection transition instead of stopping.
-- For repo-local orchestrator runtime, persisted `blocked`, `resume_error`, and `resume_errors` state are recovery checkpoints, not terminal outcomes; resume the same round/stage from the recorded worktree and exhaust lawful recovery before asking a human to reopen anything.
-- For repo-local orchestrator runtime, treat the recorded canonical round worktree as the primary observation surface for round-owned stage artifacts (`selection.md`, `plan.md`, `implementation-notes.md`, `review.md`, `review-record.json`, `merge.md`) before declaring those artifacts missing.
 - When using `spawn_agent`, use the builtin subagent with `model: "gpt-5.4"` and `reasoning_effort: "xhigh"` unless the user explicitly requests something else.
 
 ## Guidance Ownership Map

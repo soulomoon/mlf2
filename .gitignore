@@ -70,3 +70,4 @@ tmp/
 *.pdf
 .worktrees/
 orchestrator/worktrees/
+.omx/
