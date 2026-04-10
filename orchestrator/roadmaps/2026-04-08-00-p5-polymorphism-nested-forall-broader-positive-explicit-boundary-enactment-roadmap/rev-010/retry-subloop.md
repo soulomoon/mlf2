@@ -1,7 +1,7 @@
 # Retry Subloop Contract
 
 Roadmap family: `2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap`
-Revision: `rev-006`
+Revision: `rev-010`
 
 ## Scope
 
@@ -12,23 +12,32 @@ Revision: `rev-006`
   a missing representative corpus,
   or an overbroad writable slice.
 - `milestone-2` retries for:
-  code outside the preserved `round-211` live baseline plus the one newly
-  admitted `rev-006` seam,
-  unchanged controlling let-scheme / closure behavior in the selected slice,
-  unsupported semantic widening,
-  missing focused tests,
-  failing build/test evidence,
-  an attempted same-round let-scheme / handoff repair that regresses the
-  selected packet back to the old Phase 6 `reifyInst` stop or the downstream
-  `PhiReorder: missing binder identity` detour,
-  an attempted same-round let-scheme / handoff repair that still leaves the
-  selected packet blocked at the baseline Phase 7 `TCArgumentMismatch`,
-  an attempted same-round let-scheme / handoff repair that reaches the later
-  authoritative `ALetF` boundary but still leaves the packet blocked at
-  `TCLetTypeMismatch`,
+  code outside the preserved live `round-211` baseline plus the newly admitted
+  `rev-010` seam,
+  loss of the current `round-211` gains on the selected packet,
+  checked-authoritative parity, or classic let-polymorphism /
+  explicit-`forall` positives,
+  unchanged controlling behavior in the newly admitted post-closure
+  authoritative classification / witness refinement seam,
+  missing focused evidence for the remaining A6 / nested-let fail-fast
+  cluster,
+  failing build/test evidence or failing thesis-conformance evidence,
+  an attempted repair that regresses the selected packet back to the old Phase
+  6 stop, the downstream `PhiReorder: missing binder identity` detour, the old
+  Phase 7 `TCArgumentMismatch`, or the immediate `ALetF`
+  `TCLetTypeMismatch` chain already cleared by the inherited Algebra repair,
+  an attempted repair that still leaves `BUG-2026-02-06-002` or the A6
+  dual-coercion pair at `TCExpectedArrow` after the admitted post-closure seam
+  has been exercised,
+  an attempted repair that still leaves the nested-let fail-fast / invariant
+  probes at alias-side `TCLetTypeMismatch` after the admitted seam has been
+  exercised,
+  an attempted repair that removes the alias-side mismatch only by turning the
+  nested-let fail-fast probe into false success `forall a. a -> a`,
   or any attempt that discards the preserved `round-211` diff, restarts on a
-  fresh round, or reopens pipeline/handoff/public/fallback seams instead of
-  clearing the exact selected `Algebra.hs` `ALetF` continuation.
+  fresh round, retries `TermClosure.hs` as if `rev-009` were still open, or
+  reopens pipeline/public/fallback surfaces instead of clearing the exact
+  selected post-closure authoritative classification / witness seam.
 - `milestone-3` retries for:
   broader-positive claims not backed by success on both `runPipelineElab` and
   `runPipelineElabChecked`,
@@ -39,8 +48,7 @@ Revision: `rev-006`
   closeout claims broader than the accepted code/test evidence,
   missing repo-facing notes,
   missing thesis-deviation accounting when required,
-  or a recorded controlling-behavior change that the enacted family did not
-  actually earn.
+  or a recorded controlling-behavior change the enacted family did not earn.
 
 Review may reject and return the same round to `plan`.
 Maximum 3 retry attempts per round before escalation.
@@ -88,42 +96,52 @@ After review:
 ## Boundary Rules
 
 - Do not widen from the accepted explicit-only / iso-recursive boundary into
-  cyclic search, multi-SCC search, equi-recursive reasoning, fallback
-  rescue, or a second interface unless a later accepted roadmap revision
-  authorizes it explicitly.
-- Do not widen the `rev-006` milestone-2 continuation beyond the preserved
+  cyclic search, multi-SCC search, equi-recursive reasoning, fallback rescue,
+  or a second interface unless a later accepted roadmap revision authorizes it
+  explicitly.
+- Do not widen the `rev-010` milestone-2 continuation beyond the preserved
   `round-211` baseline in
   `src/MLF/Elab/Elaborate/Annotation.hs`,
   `src/MLF/Elab/Legacy.hs`,
+  `src/MLF/Elab/Elaborate/Algebra.hs`,
   `test/ElaborationSpec.hs`,
   `test/PipelineSpec.hs`, and
   `test/Research/P5ClearBoundarySpec.hs`,
-  plus the one newly admitted same-file seam
-  `src/MLF/Elab/Elaborate/Algebra.hs`
-  unless a later accepted roadmap revision authorizes more.
+  plus the newly admitted post-closure authoritative classification / witness
+  seam.
 - Treat `round-208`, `round-209`, and `round-210` as immutable blocked
   predecessor evidence only. Continue milestone-2 on the same `round-211`
-  branch/worktree baseline; do not edit any blocked round worktree artifacts,
-  and do not discard the current `round-211` diff on a fresh round.
+  branch/worktree baseline; do not edit blocked round artifacts, and do not
+  discard the current `round-211` diff on a fresh round.
 - Do not reopen
-  `src/MLF/Elab/Run/Pipeline.hs`,
   `src/MLF/Elab/TermClosure.hs`,
+  `src/MLF/Elab/Run/Pipeline.hs`,
   `src/MLF/Elab/Pipeline.hs`,
   `src-public/MLF/Pipeline.hs`,
   `src/MLF/Elab/Run/ResultType/Fallback.hs`, or
   `src/MLF/Elab/Run/ResultType/Fallback/Core.hs`
-  as substitute continuation surfaces unless a later accepted roadmap
-  revision authorizes them explicitly.
-- Do not broaden `src/MLF/Elab/Elaborate/Algebra.hs` beyond the selected
-  authoritative `ALetF` let-scheme finalization / closure logic around
-  scheme selection,
-  `closeTermWithSchemeSubstIfNeeded`, and `rhsFinal`,
-  with same-file `AAppF` context only if needed to keep that repair honest.
-- Do not reopen `P2` or the representative negative-family rows as substitute
+  as substitute continuation surfaces unless a later accepted roadmap revision
+  authorizes them explicitly.
+- Do not relitigate the inherited selected-packet `Algebra.hs` repair as if
+  the packet were still unresolved. Preserve that repair and only adjust the
+  exact post-closure authoritative classification / handoff locals
+  `rhsAbs0`, `rhsAbs`, `rhsFinal`, and `bodyElab` / `env'`.
+- Do not broaden `src/MLF/Elab/Elaborate/Annotation.hs` beyond the
+  `reifyInst` authoritative refinement helpers
+  `authoritativeTargetType`,
+  `inferAuthoritativeInstArgs`,
+  `reifyTraceBinderInstArgs`,
+  `instNeedsAuthoritativeRefinement`, and
+  `instSeqApps`.
+- Do not broaden `src/MLF/Elab/Legacy.hs` beyond
+  `expInstantiateArgsToInstNoFallback` / `instAppsFromTypes`, and only as a
+  direct mechanical companion to the admitted `Annotation.hs` witness
+  refinement.
+- Do not reopen `P2` or representative negative-family rows as substitute
   positive support for the broader-positive frontier.
-- Do not treat one repaired packet or one boundary-crossing seam repair as
-  full broader-positive frontier completion unless the active milestone
-  explicitly owns only that narrower claim.
+- Do not treat one repaired packet or one repaired fail-fast cluster as full
+  broader-positive frontier completion unless the active milestone explicitly
+  owns only that narrower claim.
 - Do not regress the accepted retained-child clear-boundary lane while
   enacting the broader-positive frontier.
 - Do not rewrite already-used predecessor roadmap families or revisions.

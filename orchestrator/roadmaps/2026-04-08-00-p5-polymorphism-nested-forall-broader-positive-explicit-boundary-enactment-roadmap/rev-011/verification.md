@@ -1,7 +1,7 @@
 # Verification Contract
 
 Roadmap family: `2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap`
-Revision: `rev-006`
+Revision: `rev-011`
 
 ## Baseline Checks
 
@@ -21,18 +21,21 @@ Every round must satisfy all baseline checks that match its touched scope.
    - Confirm prior roadmap families and revisions remain unchanged.
    - Confirm `round-208`, `round-209`, and `round-210` artifacts remain
      immutable predecessor evidence if the round cites them.
-   - For `rev-006` milestone-2 continuation, confirm the same `round-211`
-     branch/worktree remains the live baseline when cited and that its
-     current diff is preserved rather than discarded on a fresh round.
+   - For `rev-011` milestone-2 continuation, confirm the same `round-211`
+     branch/worktree remains the live baseline when cited and that its current
+     diff in `Annotation.hs`, `Legacy.hs`, `Algebra.hs`,
+     `test/ElaborationSpec.hs`, `test/PipelineSpec.hs`, and
+     `test/Research/P5ClearBoundarySpec.hs` is preserved rather than discarded
+     on a fresh round.
 2. **Diff hygiene**
    - Run `git diff --check` on the round diff.
 3. **Build and test gate for production/test changes**
    - If the round touches `src/`, `src-public/`, `app/`, `test/`, or
      `mlf2.cabal`, run `cabal build all && cabal test`.
-4. **Thesis conformance gate for thesis-facing changes**
-   - If the round touches `docs/thesis-*`, `docs/thesis-deviations.yaml`,
-     `scripts/thesis-*`, `papers/these-finale-english.txt`, or any other
-     thesis-conformance source, run `./scripts/thesis-conformance-gate.sh`.
+4. **Thesis conformance gate**
+   - For `rev-011` milestone-2 continuation, run
+     `./scripts/thesis-conformance-gate.sh` because the preserved blocker proof
+     still includes the A6 `TCExpectedArrow` cluster.
 5. **Broader-positive boundary discipline**
    - Confirm the round stays inside the selected milestone/direction scope and
      does not silently widen into cyclic search, multi-SCC behavior,
@@ -42,23 +45,16 @@ Every round must satisfy all baseline checks that match its touched scope.
    - Confirm `P2`, `N1 ambiguity-reject`, `N2 unsoundness-guard`, and
      `N6 termination-pressure` remain closed unless the active milestone
      explicitly and honestly reclassifies them.
-   - For milestone-2 rounds under `rev-006`, confirm the continuation stays
-     limited to the preserved `round-211` baseline plus the one newly
-     admitted same-file seam:
-     `src/MLF/Elab/Elaborate/Annotation.hs`,
-     `src/MLF/Elab/Legacy.hs`,
-     `src/MLF/Elab/Elaborate/Algebra.hs`,
-     `test/ElaborationSpec.hs`,
-     `test/PipelineSpec.hs`, and
-     `test/Research/P5ClearBoundarySpec.hs`.
+   - For milestone-2 rounds under `rev-011`, confirm the continuation stays
+     limited to the preserved `round-211` baseline plus the newly admitted
+     downstream application-consumer / immediate authoritative-companion seam.
 6. **Authoritative-entrypoint discipline**
    - When a round claims broader-positive support, confirm the evidence is
-     visible on both `runPipelineElab` and `runPipelineElabChecked` rather
-     than only on internal helpers or one entrypoint.
+     visible on both `runPipelineElab` and `runPipelineElabChecked`.
 7. **Worker-plan integrity when fan-out is used**
    - If a round uses planner-authored worker fan-out, confirm
-     `worker-plan.json` exists, worker ownership boundaries were respected,
-     and approval is based on the integrated round result.
+     `worker-plan.json` exists, worker ownership boundaries were respected, and
+     approval is based on the integrated round result.
 
 ## Task-Specific Checks
 
@@ -68,16 +64,15 @@ direction.
 - **milestone-1**
   - Verify the artifact consumes accepted `round-203`, `round-204`, and
     `round-205` honestly and does not rewrite those predecessor artifacts.
-  - Verify the artifact names the exact broader positive frontier beyond the
-    one settled retained-child lane, the exact expected behavior shift away
-    from controlling polymorphic-mediation `mu` absorption, the exact
-    authoritative success surfaces, and the exact representative corpus.
+  - Verify the artifact names the exact broader positive frontier, the expected
+    behavior shift, the authoritative success surfaces, and the representative
+    corpus.
   - Verify the artifact freezes the writable slice concretely enough for later
     code-bearing rounds and keeps excluded families and guardrails closed.
   - Verify the round stays docs/control-plane-only.
 - **milestone-2**
   - Verify the diff stays inside the milestone-1 writable slice as superseded
-    by `rev-006`:
+    by `rev-011`:
     `src/MLF/Elab/Elaborate/Annotation.hs`,
     `src/MLF/Elab/Legacy.hs`,
     `src/MLF/Elab/Elaborate/Algebra.hs`,
@@ -85,49 +80,71 @@ direction.
     `test/PipelineSpec.hs`, and
     `test/Research/P5ClearBoundarySpec.hs`.
   - Verify the continuing round preserves the already-cleared Phase 6
-    authoritative translation and the downstream
-    `PhiReorder: missing binder identity` progress from the current
+    authoritative translation, the downstream
+    `PhiReorder: missing binder identity` progress, the selected packet on both
+    authoritative entrypoints, checked-authoritative parity, the classic
+    let-polymorphism / explicit-`forall` positives,
+    `BUG-2026-02-06-002`, and the retained-child exact packet from the current
     `round-211` baseline.
-  - Verify the admitted continuation matches the `rev-006` proof boundary:
-    the clean baseline still stops at the Phase 7 `AAppF`
-    `TCArgumentMismatch`, but the round's writable repair target is the later
-    authoritative `ALetF` let-scheme finalization / closure seam in
-    `Algebra.hs`, because the non-landing same-file `AAppF` experiment already
-    proved that specializing the selected packet only advances the blocker to
-    the let-scheme boundary.
-  - If the round carries changes in
-    `src/MLF/Elab/Elaborate/Annotation.hs` or
-    `src/MLF/Elab/Legacy.hs`, verify they are preserved round-211 baseline
-    work or only mechanical companions to the `Algebra.hs` repair, not a
-    reopened annotation-translation redesign.
-  - If the round touches
-    `src/MLF/Elab/Elaborate/Algebra.hs`, verify the repair stays inside the
-    selected authoritative `ALetF` let-scheme finalization / closure logic
-    around scheme selection,
-    `closeTermWithSchemeSubstIfNeeded`, and `rhsFinal`,
-    with same-file `AAppF` context only if needed. It must not broaden other
-    algebra cases or add fallback/compatibility helpers.
-  - Verify the authoritative packet is covered honestly on both entrypoints
-    in `test/PipelineSpec.hs` and `test/Research/P5ClearBoundarySpec.hs`,
-    and that `test/ElaborationSpec.hs` still proves the old Phase 6 seam and
-    the post-annotation baseline stay cleared.
+  - Verify the admitted `rev-011` continuation matches the blocker proof:
+    direct `TermClosure.hs` repair and the bounded post-closure `ALetF`
+    continuation are already exhausted; the writable repair target is now the
+    downstream `ALamF` / `AAppF` consumer recovery surface in `Algebra.hs`,
+    plus only the immediate authoritative witness refinement companion in
+    `Annotation.hs` / `Legacy.hs` when reviewer evidence proves it necessary.
+  - If the round touches `src/MLF/Elab/Elaborate/Algebra.hs`, verify those
+    edits stay limited to the exact downstream consumer locals and immediate
+    helper reads around
+    `collapseTrivialBoundAlias`,
+    `singleAppInstArg`,
+    `recoverSingleAppArg`,
+    `identityLikeMuArgInst`,
+    and the precise `ALamF` / `AAppF` branches that now stop at
+    `TCExpectedArrow`; they must not relitigate direct closure or the settled
+    `ALetF` post-closure handoff as if those seams were still open.
+  - If the round touches `src/MLF/Elab/Elaborate/Annotation.hs`, verify those
+    edits stay inside `reifyInst` authoritative refinement helpers
+    `authoritativeTargetType`,
+    `inferAuthoritativeInstArgs`,
+    `reifyTraceBinderInstArgs`,
+    `instNeedsAuthoritativeRefinement`, and
+    `instSeqApps`, and do not reopen unrelated annotation translation logic.
+  - If the round touches `src/MLF/Elab/Legacy.hs`, verify those edits stay
+    inside `expInstantiateArgsToInstNoFallback` / `instAppsFromTypes` as a
+    mechanical companion to the admitted `Annotation.hs` witness refinement,
+    not as a broader witness-translation redesign.
+  - Verify the authoritative packet is still covered honestly on both
+    entrypoints in `test/PipelineSpec.hs` and
+    `test/Research/P5ClearBoundarySpec.hs`, and that
+    `test/ElaborationSpec.hs` still proves the old Phase 6 and post-annotation
+    seams remain cleared.
+  - Verify the remaining fail-fast cluster is explicitly rechecked:
+    - `dual annotated coercion consumers fail fast on unresolved non-root OpWeaken`
+    - `pipeline fails fast for nested-let when only expansion-derived instantiation remains`
+    - `full pipeline fails fast post-boundary-enforcement for: nested-let`
+    - `BUG-2026-02-17-002`
+    - the non-local proxy wrapper `g g`
+  - Verify the nested-let probes do not become false success
+    `forall a. a -> a`.
   - Verify
-    `src/MLF/Elab/Run/Pipeline.hs`,
     `src/MLF/Elab/TermClosure.hs`,
+    `src/MLF/Elab/Run/Pipeline.hs`,
     `src/MLF/Elab/Pipeline.hs`,
     `src-public/MLF/Pipeline.hs`,
     `src/MLF/Elab/Run/ResultType/Fallback.hs`, and
     `src/MLF/Elab/Run/ResultType/Fallback/Core.hs`
-    remain untouched in this tightened continuation.
+    remain untouched unless a later accepted roadmap revision explicitly
+    authorizes more.
   - Verify `cabal build all && cabal test` passed.
-  - Verify no fallback rescue, second interface, cyclic widening, or
-    negative-family reclassification is smuggled in.
+  - Verify `./scripts/thesis-conformance-gate.sh` passed.
+  - Verify no fallback rescue, second interface, cyclic widening,
+    equi-recursive reinterpretation, or negative-family reclassification is
+    smuggled in.
 - **milestone-3**
   - Verify the representative broader positive frontier named by milestone-1
     now passes honestly on both `runPipelineElab` and `runPipelineElabChecked`.
   - Verify the relevant research/pipeline regression surfaces were updated or
-    replayed honestly, especially `test/Research/P5ClearBoundarySpec.hs`,
-    `test/PipelineSpec.hs`, and any milestone-1-authorized companion specs.
+    replayed honestly.
   - Verify public/internal parity is real and does not depend on helper-only
     success or compatibility shims.
   - Verify preserved `P2` and representative negative-family rows remain
@@ -135,15 +152,11 @@ direction.
 - **milestone-4**
   - Verify the closeout artifact records the enacted behavior and evidence
     surface honestly.
-  - Verify the closeout states that polymorphic-mediation `mu` absorption is
-    no longer the controlling broader-positive read only to the extent that
-    milestone-3 actually earned that claim.
-  - Verify repo-facing notes, `implementation_notes.md`, `TODO.md`,
-    `CHANGELOG.md`, and any thesis-deviation records were updated when the
+  - Verify repo-facing notes and thesis-deviation records were updated when the
     accepted evidence requires them.
   - Verify `cabal build all && cabal test` passed for any code/test-bearing
-    round and `./scripts/thesis-conformance-gate.sh` passed when thesis-facing
-    files changed.
+    round and `./scripts/thesis-conformance-gate.sh` passed when required by
+    the active milestone.
 
 ## Approval Criteria
 
@@ -174,8 +187,8 @@ When the round finalizes, also write `review-record.json`:
 ```json
 {
   "roadmap_id": "2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap",
-  "roadmap_revision": "rev-006",
-  "roadmap_dir": "orchestrator/roadmaps/2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap/rev-006",
+  "roadmap_revision": "rev-011",
+  "roadmap_dir": "orchestrator/roadmaps/2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap/rev-011",
   "milestone_id": "<milestone-id>",
   "direction_id": "<direction-id>",
   "extracted_item_id": "<extracted-item-id>",

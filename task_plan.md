@@ -1,16 +1,18 @@
 # Task Plan
 
 ## Summary
-Goal: Review `docs/superpowers/specs/2026-04-02-scaffold-orchestrator-loop-dual-mode-update-design.md` and write an implementation plan for updating `scaffold-orchestrator-loop` so it supports both bootstrap and terminal-control-plane next-family setup without starting runtime rounds.
+Goal: Publish the post-`round-214` successor roadmap revision for the active
+`P5` broader-positive explicit-boundary enactment family, keep milestone-3
+live honestly on merged baseline `ed66291`, and update the active and
+canonical round-214 runtime pointer surfaces to the new revision.
 
 ## Phases
-1. Review the design note, current scaffold skill docs, and the live repo-local orchestrator contract. - complete
-2. Identify the actual implementation write-surface, state/pointer assumptions, and verification approach. - complete
-3. Write the implementation plan under `docs/superpowers/plans/` and refresh persistent planning notes for this task. - complete
+1. Load the active guider contract, state, active revision bundle, round-214 accepted artifacts, and repo status. - completed
+2. Determine the honest post-merge baseline and next exact milestone-3 extraction. - completed
+3. Publish `rev-018` of the roadmap bundle with updated roadmap, retry, and verification contracts. - completed
+4. Update active runtime state plus parent and canonical round-214 pointer stubs to `rev-018`. - completed
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |------|---------|------------|
-| Shallow asset listing hid nested scaffold files | 1 | Re-ran `find` without the depth limit and inspected the full asset tree before drafting the plan |
-| Tried to read non-existent top-level pointer stub templates from the skill assets | 1 | Confirmed the current scaffold assets do not ship pointer stubs and treated them as optional compatibility files in the plan |
-| First plan draft missed the `retry` schema drift | 1 | Re-checked the scaffold asset and state-schema files, then expanded the saved plan to include state-contract alignment work |
+| None | 1 | Not applicable |

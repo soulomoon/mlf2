@@ -1,23 +1,26 @@
 # P5 Polymorphism-Nested-Forall Broader-Positive Explicit Boundary-Enactment Roadmap
 
 Roadmap family: `2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap`
-Revision: `rev-006`
+Revision: `rev-007`
 Base branch: `codex/automatic-recursive-type-inference`
 Created: 2026-04-08
 
 ## Goal
 
 Continue the same code-bearing enactment family after live `round-211`
-proved that `rev-005` still stopped one seam too early in a more local way:
-the preserved round-211 annotation-plus-handoff baseline still clears the old
-Phase 6 authoritative translation stop and the downstream
-`PhiReorder: missing binder identity` detour, but a non-landing
-`Algebra.hs`-only `AAppF` experiment showed that the selected same-wrapper
-nested-`forall` packet does not honestly finish inside `AAppF` alone. When
-the authoritative application is specialized far enough to type through that
-builder, the next blocker immediately appears later in the same file at the
-authoritative `ALetF` let-scheme finalization / closure boundary as
-`Phase 7 (type checking): TCLetTypeMismatch`.
+proved that `rev-006` still stopped one seam too early: the preserved
+round-211 annotation-plus-handoff baseline still clears the old Phase 6
+authoritative translation stop and the downstream
+`PhiReorder: missing binder identity` detour, but the authorized
+`Algebra.hs`-only repairs now show that the selected same-wrapper
+nested-`forall` packet does not honestly finish inside the rev-006
+`ALetF` scheme-selection / closure slice. The clean baseline still stops in
+Phase 7 at the authoritative application with `TCArgumentMismatch`; the
+minimal same-file `AAppF` recovery reaches the let boundary immediately as
+`TCLetTypeMismatch`; collapsing that let scheme monomorphically only shifts
+the blocker further downstream into the body consumer as
+`TCArgumentMismatch (TVar "t25") ...`; and the bound-relaxation / closure
+variant still fails at `TCLetTypeMismatch`.
 
 This revision keeps the family goal unchanged:
 
@@ -31,7 +34,7 @@ This revision keeps the family goal unchanged:
 - record the new controlling behavior honestly once the code and evidence
   actually earn it.
 
-What changes in `rev-006` is only the milestone-2 continuation contract:
+What changes in `rev-007` is only the milestone-2 continuation contract:
 live `round-211` remains the preserved same-branch / same-worktree baseline,
 including its current diff in
 `src/MLF/Elab/Elaborate/Annotation.hs`,
@@ -41,12 +44,13 @@ including its current diff in
 `test/Research/P5ClearBoundarySpec.hs`.
 The newly authorized addition is still exactly one production owner:
 `src/MLF/Elab/Elaborate/Algebra.hs`,
-but the writable seam is now broader than `AAppF` alone and narrower than a
-general algebra reopen. It is limited to the selected authoritative `ALetF`
-let-scheme finalization / closure logic around scheme selection,
-`closeTermWithSchemeSubstIfNeeded`, and `rhsFinal`, with the same-file
-`AAppF` context available only if the let-scheme handoff repair requires that
-local context to remain honest.
+but the writable seam is now broader than the rev-006
+scheme-selection / `closeTermWithSchemeSubstIfNeeded` / `rhsFinal` slice and
+still narrower than a general algebra reopen. It is limited to the exact
+post-let consumer seam: the authoritative `ALetF` `bodyElab` / `env'`
+handoff plus the immediate downstream body-side `AAppF` inference path, with
+`ALamF` parameter recovery admitted only where that consumer still
+elaborates against the old non-recursive lane.
 `src/MLF/Elab/Run/Pipeline.hs`,
 `src/MLF/Elab/TermClosure.hs`,
 `src/MLF/Elab/Pipeline.hs`,
@@ -86,11 +90,14 @@ remain read-only continuity anchors for this continuation.
   packet.
 - Preserve the `round-211` implementation-note proof honestly: the clean
   baseline still fails in Phase 7 `TCArgumentMismatch` at the authoritative
-  application builder, but an `AAppF`-only same-file experiment can move that
-  packet forward only to reveal the later authoritative
-  `ALetF` let-scheme finalization / closure mismatch. `rev-006` treats that
-  proof as the reason for widening the admitted seam inside `Algebra.hs`, not
-  as accepted implementation success.
+  application builder; the minimal same-file `AAppF` recovery reaches the
+  immediate authoritative `ALetF` `TCLetTypeMismatch`; the ALetF
+  monomorphic-collapse experiment only shifts the blocker into the
+  downstream body consumer as `TCArgumentMismatch (TVar "t25") ...`; and the
+  bound-relaxation / closure experiment still fails at
+  `TCLetTypeMismatch`. `rev-007` treats that proof as the reason for
+  widening the admitted seam only to the same-file post-let consumer path in
+  `Algebra.hs`, not as accepted implementation success.
 - Keep `P2` unopened on this family's live ledger unless a later accepted
   roadmap revision explicitly changes that scope.
 - Keep `N1 ambiguity-reject`, `N2 unsoundness-guard`, and
@@ -98,7 +105,7 @@ remain read-only continuity anchors for this continuation.
   this family explicitly reclassifies them.
 - No cyclic search, multi-SCC widening, equi-recursive reasoning, fallback
   rescue, or second interface is authorized.
-- `rev-006` does not authorize milestone-3 corpus widening, milestone-4
+- `rev-007` does not authorize milestone-3 corpus widening, milestone-4
   closeout work, or edits outside the preserved round-211 baseline plus the
   exact `src/MLF/Elab/Elaborate/Algebra.hs` continuation named below.
 - Backwards compatibility shims are not a goal. The goal is a clean, honest,
@@ -108,7 +115,7 @@ remain read-only continuity anchors for this continuation.
 
 - `milestone-1` remains complete before any code-bearing enactment round.
 - `milestone-2` may change production semantics only inside the writable slice
-  frozen by accepted `milestone-1`, as superseded narrowly by `rev-006`.
+  frozen by accepted `milestone-1`, as superseded narrowly by `rev-007`.
 - `milestone-3` may broaden representative success only after the core
   milestone-2 mechanism is accepted. Do not claim full broader-positive
   support before the representative frontier passes on both authoritative
@@ -202,6 +209,20 @@ remain read-only continuity anchors for this continuation.
   `closeTermWithSchemeSubstIfNeeded`, and `rhsFinal`, with same-file
   `AAppF` context allowed only if needed to keep the let-scheme repair
   honest.
+- `rev-007` supersession note: the live round-211 rev-006 probes exhausted
+  that selected `ALetF` let-scheme finalization / closure slice. The clean
+  baseline still stops at Phase 7 `TCArgumentMismatch`; the minimal same-file
+  `AAppF` recovery reaches immediate `TCLetTypeMismatch`; the ALetF
+  monomorphic-collapse experiment only shifts the blocker into the
+  downstream body consumer as `TCArgumentMismatch (TVar "t25") ...`; and the
+  bound-relaxation / closure experiment still fails at `TCLetTypeMismatch`.
+  The active contract therefore preserves the same live round-211 baseline
+  and keeps the one newly authored production owner in `Algebra.hs`, but
+  widens the admitted same-file seam only to the exact post-let consumer
+  path: `ALetF` `bodyElab` / `env'` handoff plus the immediate downstream
+  body-side `AAppF` inference path, with `ALamF` parameter recovery admitted
+  only where that consumer still elaborates against the old non-recursive
+  lane.
 - Parallel lane: `lane-main`
 - Coordination notes: consume accepted `round-203`, `round-204`, `round-205`,
   and `round-206` directly; preserve the retained-child lane as predecessor
@@ -234,7 +255,7 @@ Accepted direction lineage:
   `round-207` as the first bounded internal mechanism slice, consume blocked
   `round-208`, `round-209`, and `round-210` as predecessor evidence, and
   consume live `round-211` as the continuing same-round baseline. Stay inside
-  the exact `rev-006` continuation, keep the family within the accepted
+  the exact `rev-007` continuation, keep the family within the accepted
   explicit-only / iso-recursive / non-equi-recursive / non-cyclic-graph /
   no-fallback boundary, and do not overclaim full broader-positive closure
   before the broader representative frontier has passed on both authoritative
@@ -264,14 +285,16 @@ Accepted direction lineage:
   `reifyInst` stop is gone and the post-annotation path now clears the
   earlier `PhiReorder: missing binder identity` detour. The clean baseline
   still fails later in Phase 7 with `TCArgumentMismatch` at the authoritative
-  application term, and the non-landing same-file `AAppF` experiment proves
-  that the next remaining contradiction sits at the authoritative
-  `ALetF` let-scheme finalization / closure boundary. The next exact move is
+  application term. The minimal same-file `AAppF` recovery reaches immediate
+  `TCLetTypeMismatch` at the let boundary; the ALetF monomorphic-collapse
+  probe only shifts the blocker to downstream body-side
+  `TCArgumentMismatch (TVar "t25") ...`; and the bound-relaxation /
+  closure probe still returns `TCLetTypeMismatch`. The next exact move is
   therefore not a fresh round and not a reopen of pipeline/handoff/public/
   fallback seams; it is a same-round continuation under
   `direction-2b-thread-the-selected-semantics-through-authoritative-pipeline-seams`
   that preserves the current round-211 diff and admits only the selected
-  `Algebra.hs` let-scheme / handoff seam named below.
+  `Algebra.hs` post-let consumer seam named below.
 
 Candidate directions:
 
@@ -295,10 +318,10 @@ Candidate directions:
 
 - Direction id: `direction-2b-thread-the-selected-semantics-through-authoritative-pipeline-seams`
   Summary: carry the milestone-2 mechanism through the authoritative pipeline
-  and let-scheme handoff so the selected behavior is visible where the family
+  and post-let consumer so the selected behavior is visible where the family
   measures success, continuing the same round-211 packet from the preserved
-  annotation-plus-handoff baseline into the exact authoritative `ALetF`
-  let-scheme finalization / closure seam that still blocks honest completion.
+  annotation-plus-handoff baseline into the exact same-file post-let
+  consumer seam that still blocks honest completion.
   Why it matters now: accepted `round-207` completed the first serial
   `direction-2a` internal mechanism slice and proved the selected same-
   wrapper nested-`forall` packet can preserve recursive structure inside
@@ -310,15 +333,19 @@ Candidate directions:
   authoritative path closed or preserved the elaborated term and re-typed it;
   blocked `round-210` showed that handoff-only continuation was not
   independently reachable; and live `round-211` now clears those earlier
-  stops on the same branch/worktree. The remaining honest proof is that
-  `AAppF`-only repair does not settle the packet: it only exposes the later
-  authoritative `ALetF` let-scheme mismatch. The next move is therefore to
-  preserve the current diff and repair only that admitted same-file seam.
+  stops on the same branch/worktree. The remaining honest proof is that the
+  rev-006 `ALetF` scheme-selection / closure slice is exhausted:
+  `AAppF`-only repair exposes the immediate `TCLetTypeMismatch`, the
+  monomorphic let collapse only shifts the blocker to downstream body-side
+  `TCArgumentMismatch (TVar "t25") ...`, and the bound-relaxation path still
+  stops at `TCLetTypeMismatch`. The next move is therefore to preserve the
+  current diff and repair only that admitted same-file post-let consumer
+  seam.
   Preconditions: `milestone-1`; accepted progress from `direction-2a` via
   `round-207`; blocked predecessor evidence from `round-208`, `round-209`,
   and `round-210`; live round-211 baseline; and the round-211 implementation
-  proof that `AAppF`-only landing would still stop at the let-scheme
-  boundary.
+  proof that the rev-006 let-scheme / closure slice is exhausted and the
+  remaining honest blocker now sits in the immediate post-let consumer path.
   Parallel hints: keep serial unless a later accepted revision proves an
   independent split is safe.
   Boundary notes: do not drift into milestone-3 corpus work, milestone-4
@@ -332,10 +359,10 @@ Candidate directions:
   `test/Research/P5ClearBoundarySpec.hs`,
   plus one additional same-file seam in
   `src/MLF/Elab/Elaborate/Algebra.hs`
-  limited to the authoritative `ALetF` let-scheme finalization / closure
-  logic around scheme selection,
-  `closeTermWithSchemeSubstIfNeeded`, and `rhsFinal`, with `AAppF` context in
-  the same file only if needed to keep that let-scheme handoff repair honest.
+  limited to the authoritative `ALetF` `bodyElab` / `env'` handoff plus the
+  immediate downstream body-side `AAppF` inference path, with `ALamF`
+  parameter recovery admitted only where that consumer still elaborates
+  against the old non-recursive lane.
   Keep
   `src/MLF/Elab/Run/Pipeline.hs`,
   `src/MLF/Elab/TermClosure.hs`,
@@ -345,9 +372,9 @@ Candidate directions:
   `src/MLF/Elab/Run/ResultType/Fallback/Core.hs`
   as read-only continuity and predecessor anchors.
   Extraction notes: the exact same-round continuation task is
-  `continue-round-211-selected-same-wrapper-nested-forall-through-aletf-let-scheme-finalization-and-closure`.
+  `continue-round-211-selected-same-wrapper-nested-forall-through-post-let-body-consumer-seam`.
   Current task/title:
-  `Continue the selected same-wrapper nested-forall packet through the authoritative ALetF let-scheme finalization / closure seam while preserving the live round-211 annotation-plus-handoff baseline`.
+  `Continue the selected same-wrapper nested-forall packet through the authoritative post-let body consumer seam while preserving the live round-211 annotation-plus-handoff baseline`.
   Preserve the existing round-211 diff in
   `src/MLF/Elab/Elaborate/Annotation.hs`,
   `src/MLF/Elab/Legacy.hs`,
@@ -355,10 +382,11 @@ Candidate directions:
   `test/PipelineSpec.hs`, and
   `test/Research/P5ClearBoundarySpec.hs`.
   Add only `src/MLF/Elab/Elaborate/Algebra.hs` as newly authored production
-  logic, and touch the same focused tests only if the `ALetF` repair truly
-  needs companion expectation updates. Do not discard the current round-211
-  branch/worktree, do not reopen blocked round artifacts, and stop again if
-  another seam outside this tighter continuation is required.
+  logic, and touch the same focused tests only if the post-let consumer
+  repair truly needs companion expectation updates. Do not discard the
+  current round-211 branch/worktree, do not reopen blocked round artifacts,
+  and stop again if another seam outside this tighter continuation is
+  required.
 
 Accepted extraction lineage:
 
@@ -401,7 +429,7 @@ Blocked predecessor lineage:
 
 Live continuation lineage:
 
-- Continuation id: `round-211-live-authoritative-aletf-let-scheme-finalization-and-closure-blocker`
+- Continuation id: `round-211-live-post-let-body-consumer-seam-blocker`
   Direction: `direction-2b-thread-the-selected-semantics-through-authoritative-pipeline-seams`
   Status: live same-round continuation baseline; not accepted, not merged.
   Outcome: preserved the current round-211 diff in
@@ -413,14 +441,17 @@ Live continuation lineage:
   which clears the old Phase 6 authoritative translation stop and the
   downstream `PhiReorder: missing binder identity` detour for the selected
   packet. The clean baseline still fails with Phase 7
-  `TCArgumentMismatch`, and the non-landing same-file `AAppF` experiment
-  proved that honest specialization only advances the blocker to the later
-  authoritative `ALetF` let-scheme finalization / closure mismatch. The next
-  exact move is to continue on the same round-211 branch/worktree, preserve
-  that current diff, and add only the selected `Algebra.hs` `ALetF`
-  let-scheme finalization / closure logic around scheme selection,
-  `closeTermWithSchemeSubstIfNeeded`, and `rhsFinal`, with same-file `AAppF`
-  context only if needed.
+  `TCArgumentMismatch`; the minimal same-file `AAppF` recovery reaches
+  immediate `TCLetTypeMismatch`; the ALetF monomorphic-collapse experiment
+  only shifts the blocker to downstream body-side
+  `TCArgumentMismatch (TVar "t25") ...`; and the bound-relaxation / closure
+  experiment still fails at `TCLetTypeMismatch`. The next exact move is to
+  continue on the same round-211 branch/worktree, preserve that current
+  diff, and add only the selected `Algebra.hs` post-let consumer seam:
+  `ALetF` `bodyElab` / `env'` handoff plus the immediate downstream
+  body-side `AAppF` inference path, with `ALamF` parameter recovery admitted
+  only where that consumer still elaborates against the old non-recursive
+  lane.
 
 ### 3. [pending] Prove broader-positive frontier success on both authoritative entrypoints
 

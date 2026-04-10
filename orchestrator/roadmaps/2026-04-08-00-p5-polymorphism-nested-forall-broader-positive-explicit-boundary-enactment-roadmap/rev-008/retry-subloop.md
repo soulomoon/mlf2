@@ -1,7 +1,7 @@
 # Retry Subloop Contract
 
 Roadmap family: `2026-04-08-00-p5-polymorphism-nested-forall-broader-positive-explicit-boundary-enactment-roadmap`
-Revision: `rev-006`
+Revision: `rev-008`
 
 ## Scope
 
@@ -13,22 +13,28 @@ Revision: `rev-006`
   or an overbroad writable slice.
 - `milestone-2` retries for:
   code outside the preserved `round-211` live baseline plus the one newly
-  admitted `rev-006` seam,
-  unchanged controlling let-scheme / closure behavior in the selected slice,
+  admitted `rev-008` seam,
+  unchanged controlling combined `ALetF` scheme/closure plus post-let
+  consumer behavior in the selected slice,
   unsupported semantic widening,
   missing focused tests,
   failing build/test evidence,
-  an attempted same-round let-scheme / handoff repair that regresses the
+  an attempted same-round combined-seam repair that regresses the
   selected packet back to the old Phase 6 `reifyInst` stop or the downstream
   `PhiReorder: missing binder identity` detour,
-  an attempted same-round let-scheme / handoff repair that still leaves the
+  an attempted same-round combined-seam repair that still leaves the
   selected packet blocked at the baseline Phase 7 `TCArgumentMismatch`,
-  an attempted same-round let-scheme / handoff repair that reaches the later
-  authoritative `ALetF` boundary but still leaves the packet blocked at
-  `TCLetTypeMismatch`,
+  an attempted same-round combined-seam repair that still reaches the
+  immediate authoritative `ALetF` boundary but leaves the packet blocked at
+  `TCLetTypeMismatch` even after combining the earlier scheme/closure
+  contract with the already-admitted consumer path,
+  an attempted same-round combined-seam repair that clears the let mismatch
+  only to leave the packet blocked downstream at
+  `TCArgumentMismatch (TVar "t25") ...` because the body-side consumer still
+  elaborates against the old non-recursive lane,
   or any attempt that discards the preserved `round-211` diff, restarts on a
   fresh round, or reopens pipeline/handoff/public/fallback seams instead of
-  clearing the exact selected `Algebra.hs` `ALetF` continuation.
+  clearing the exact selected `Algebra.hs` combined continuation.
 - `milestone-3` retries for:
   broader-positive claims not backed by success on both `runPipelineElab` and
   `runPipelineElabChecked`,
@@ -91,7 +97,7 @@ After review:
   cyclic search, multi-SCC search, equi-recursive reasoning, fallback
   rescue, or a second interface unless a later accepted roadmap revision
   authorizes it explicitly.
-- Do not widen the `rev-006` milestone-2 continuation beyond the preserved
+- Do not widen the `rev-008` milestone-2 continuation beyond the preserved
   `round-211` baseline in
   `src/MLF/Elab/Elaborate/Annotation.hs`,
   `src/MLF/Elab/Legacy.hs`,
@@ -115,10 +121,21 @@ After review:
   as substitute continuation surfaces unless a later accepted roadmap
   revision authorizes them explicitly.
 - Do not broaden `src/MLF/Elab/Elaborate/Algebra.hs` beyond the selected
-  authoritative `ALetF` let-scheme finalization / closure logic around
-  scheme selection,
-  `closeTermWithSchemeSubstIfNeeded`, and `rhsFinal`,
-  with same-file `AAppF` context only if needed to keep that repair honest.
+  combined same-file seam: the earlier `ALetF` scheme/closure locals
+  `schemeBase`,
+  `rhsLambdaMuAnnotationTy`,
+  `scheme`,
+  `subst`,
+  `rhsAbs0`,
+  `rhsAbs`,
+  and
+  `rhsFinal`,
+  together with the already-admitted consumer path
+  `bodyElab`,
+  `env'`,
+  and the immediate downstream body-side `AAppF`, with `ALamF` parameter
+  recovery admitted only where that consumer still elaborates against the old
+  non-recursive lane.
 - Do not reopen `P2` or the representative negative-family rows as substitute
   positive support for the broader-positive frontier.
 - Do not treat one repaired packet or one boundary-crossing seam repair as
