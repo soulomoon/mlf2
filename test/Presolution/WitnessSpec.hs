@@ -1007,6 +1007,7 @@ spec = do
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId m, getNodeId parent, getNodeId n])
                             , etBinderReplayMap = mempty
+                            , etReplayDomainBinders = []
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractNone
                             }
@@ -1073,6 +1074,7 @@ spec = do
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId interiorNode])
                             , etBinderReplayMap = mempty
+                            , etReplayDomainBinders = []
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractNone
                             }
@@ -1138,6 +1140,7 @@ spec = do
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
                             , etBinderReplayMap = mempty
+                            , etReplayDomainBinders = []
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractNone
                             }
@@ -1195,6 +1198,7 @@ spec = do
                             , etBinderArgs = []
                             , etInterior = InteriorNodes (IntSet.fromList [getNodeId interiorNode, getNodeId outsideNode])
                             , etBinderReplayMap = mempty
+                            , etReplayDomainBinders = []
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractNone
                             }
@@ -1266,6 +1270,7 @@ spec = do
                                     [ (getNodeId sourceB1, binder)
                                     , (getNodeId sourceB2, binder)
                                     ]
+                            , etReplayDomainBinders = []
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractStrict
                             }
@@ -1333,6 +1338,7 @@ spec = do
                                     [ (getNodeId sourceB1, binder)
                                     , (getNodeId sourceB2, binder)
                                     ]
+                            , etReplayDomainBinders = []
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractStrict
                             }
@@ -1404,6 +1410,7 @@ spec = do
                                     [ (getNodeId sourceB1, binder)
                                     , (getNodeId sourceB2, binder)
                                     ]
+                            , etReplayDomainBinders = []
                             , etCopyMap = mempty
                             , etReplayContract = ReplayContractStrict
                             }
@@ -1623,6 +1630,7 @@ spec = do
                         , etBinderArgs = [(source, argNode)]
                         , etInterior = fromListInterior [root, source, replayTarget, argNode]
                         , etBinderReplayMap = IntMap.fromList [(getNodeId source, replayTarget)]
+                        , etReplayDomainBinders = []
                         , etCopyMap = mempty
                         , etReplayContract = ReplayContractStrict
                         }
@@ -1664,6 +1672,35 @@ spec = do
                         , etBinderArgs = [(source, argNode)]
                         , etInterior = fromListInterior [root, body, replayBinder, source, argNode]
                         , etBinderReplayMap = IntMap.fromList [(getNodeId source, replayBinder)]
+                        , etReplayDomainBinders = []
+                        , etCopyMap = mempty
+                        , etReplayContract = ReplayContractStrict
+                        }
+            validateReplayMapTraceContract id c c edgeKey tr `shouldBe` Right ()
+
+        it "accepts codomain targets inside an explicit producer replay domain" $ do
+            let edgeKey = 3
+                root = NodeId 400
+                source = NodeId 401
+                replayBinder = NodeId 402
+                argNode = NodeId 403
+                c = rootedConstraint emptyConstraint
+                    { cNodes =
+                        nodeMapFromList
+                            [ (getNodeId root, TyArrow root replayBinder replayBinder)
+                            , (getNodeId source, TyVar { tnId = source, tnBound = Nothing })
+                            , (getNodeId replayBinder, TyVar { tnId = replayBinder, tnBound = Nothing })
+                            , (getNodeId argNode, TyBase argNode (BaseTy "Int"))
+                            ]
+                    , cBindParents = IntMap.empty
+                    }
+                tr =
+                    EdgeTrace
+                        { etRoot = root
+                        , etBinderArgs = [(source, argNode)]
+                        , etInterior = fromListInterior [root, source, replayBinder, argNode]
+                        , etBinderReplayMap = IntMap.fromList [(getNodeId source, replayBinder)]
+                        , etReplayDomainBinders = [replayBinder]
                         , etCopyMap = mempty
                         , etReplayContract = ReplayContractStrict
                         }
@@ -1705,6 +1742,7 @@ spec = do
                                 [ (getNodeId sourceA, replayBinder)
                                 , (getNodeId sourceB, replayBinder)
                                 ]
+                        , etReplayDomainBinders = []
                         , etCopyMap = mempty
                         , etReplayContract = ReplayContractStrict
                         }
@@ -1749,6 +1787,7 @@ spec = do
                         , etBinderArgs = [(source, argNode)]
                         , etInterior = fromListInterior [root, body, replayBinder, replayAlias, source, argNode]
                         , etBinderReplayMap = IntMap.fromList [(getNodeId source, replayAlias)]
+                        , etReplayDomainBinders = []
                         , etCopyMap = mempty
                         , etReplayContract = ReplayContractStrict
                         }
@@ -2000,6 +2039,7 @@ spec = do
                                     ]
                                 )
                         , etBinderReplayMap = IntMap.empty
+                        , etReplayDomainBinders = []
                         , etCopyMap = mempty
                         , etReplayContract = ReplayContractStrict
                         }
@@ -2036,6 +2076,7 @@ spec = do
                                     ]
                             etReplayContract tr' `shouldBe` ReplayContractStrict
                             etBinderArgs tr' `shouldBe` [(sourceA, argA), (sourceB, argB)]
+                            etReplayDomainBinders tr' `shouldBe` [replayA, replayB]
                             etBinderReplayMap tr'
                                 `shouldBe` IntMap.fromList
                                     [ (getNodeId sourceA, replayA)
@@ -2094,6 +2135,7 @@ spec = do
                                     ]
                                 )
                         , etBinderReplayMap = IntMap.empty
+                        , etReplayDomainBinders = []
                         , etCopyMap = mempty
                         , etReplayContract = ReplayContractStrict
                         }
@@ -2156,6 +2198,7 @@ spec = do
                                     ]
                                 )
                         , etBinderReplayMap = IntMap.empty
+                        , etReplayDomainBinders = []
                         , etCopyMap = mempty
                         , etReplayContract = ReplayContractNone
                         }
@@ -2228,6 +2271,7 @@ spec = do
                                     ]
                                 )
                         , etBinderReplayMap = IntMap.empty
+                        , etReplayDomainBinders = []
                         , etCopyMap = mempty
                         , etReplayContract = ReplayContractNone
                         }
@@ -2281,6 +2325,7 @@ spec = do
                         , etBinderArgs = []
                         , etInterior = fromListInterior [root, raised]
                         , etBinderReplayMap = IntMap.empty
+                        , etReplayDomainBinders = []
                         , etCopyMap = mempty
                         , etReplayContract = ReplayContractNone
                         }
@@ -2344,6 +2389,7 @@ spec = do
                                     ]
                                 )
                         , etBinderReplayMap = IntMap.empty
+                        , etReplayDomainBinders = []
                         , etCopyMap = mempty
                         , etReplayContract = ReplayContractNone
                         }

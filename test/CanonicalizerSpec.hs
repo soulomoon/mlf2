@@ -104,6 +104,7 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
                     , etBinderArgs = [(NodeId 1, NodeId 3), (NodeId 2, NodeId 4)]
                     , etInterior = fromListInterior [NodeId 1, NodeId 2, NodeId 3]
                     , etBinderReplayMap = mempty
+                    , etReplayDomainBinders = []
                     , etCopyMap = CopyMapping (IntMap.fromList [(1, NodeId 2), (3, NodeId 4)])
                     , etReplayContract = ReplayContractNone
                     }

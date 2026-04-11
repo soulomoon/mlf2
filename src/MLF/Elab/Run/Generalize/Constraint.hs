@@ -69,7 +69,16 @@ instantiationCopyNodes presolutionView redirects edgeTraces =
                     [ getNodeId (adoptNode (NodeId nid))
                     | nid <- IntSet.toList interiorKeys
                     ]
+                replayRaw =
+                    [ getNodeId node
+                    | node <- etReplayDomainBinders tr
+                    ]
+                replayCanon =
+                    [ getNodeId (adoptNode node)
+                    | node <- etReplayDomainBinders tr
+                    ]
                 rootRaw = getNodeId (etRoot tr)
                 rootCanon = getNodeId (adoptNode (etRoot tr))
-            in IntSet.fromList (rootRaw : rootCanon : copyRaw ++ copyCanon ++ interiorRaw ++ interiorCanon)
+            in IntSet.fromList
+                (rootRaw : rootCanon : copyRaw ++ copyCanon ++ interiorRaw ++ interiorCanon ++ replayRaw ++ replayCanon)
     in IntSet.unions (map collectTrace (IntMap.elems edgeTraces))

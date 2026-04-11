@@ -91,6 +91,7 @@ canonicalizeTrace canon tr =
         , etInterior = etInterior tr
         , etReplayContract = etReplayContract tr
         , etBinderReplayMap = etBinderReplayMap tr
+        , etReplayDomainBinders = etReplayDomainBinders tr
         , etCopyMap = etCopyMap tr
         }
 

@@ -191,6 +191,9 @@ pendingWeakenOwnerToMaybe owner = case owner of
 -- Replay-map contract:
 --   * `etBinderReplayMap` maps source binder keys to replay-domain binder
 --     nodes selected during presolution normalization.
+--   * `etReplayDomainBinders`, when non-empty, records the producer-approved
+--     replay-domain TyVar binders that Phase 4 must validate against instead
+--     of re-deriving binder scope from `etRoot`.
 --   * The map is required, total over the source binder domain (`etBinderArgs`),
 --     and injective over replay-domain TyVar binders.
 --
@@ -207,6 +210,7 @@ data EdgeTrace = EdgeTrace
     , etInterior :: InteriorNodes -- ^ Nodes in I(r) (exact, from the binding tree).
     , etReplayContract :: ReplayContract -- ^ Producer-owned replay contract authority.
     , etBinderReplayMap :: IntMap NodeId -- ^ source binder key -> replay-domain binder node
+    , etReplayDomainBinders :: [NodeId] -- ^ Explicit replay-domain binders for strict replay lanes.
     , etCopyMap :: CopyMapping -- ^ Provenance: original node -> copied/replaced node
     }
     deriving (Eq, Show)

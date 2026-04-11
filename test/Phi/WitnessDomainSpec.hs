@@ -70,6 +70,7 @@ mkTrace binderArgs copyPairs =
         , etBinderArgs = [(NodeId b, NodeId a) | (b, a) <- binderArgs]
         , etInterior = InteriorNodes IntSet.empty
         , etBinderReplayMap = mempty
+        , etReplayDomainBinders = []
         , etCopyMap = CopyMapping (IntMap.fromList [(k, NodeId v) | (k, v) <- copyPairs])
         , etReplayContract = ReplayContractNone
         }

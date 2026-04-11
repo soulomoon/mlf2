@@ -84,6 +84,11 @@ buildTraceCopyMap c baseNamedKeysAll adoptNode tr =
                 [ (getNodeId (adoptNode copyN), NodeId baseKey)
                 | (baseKey, copyN) <- IntMap.toList copyMap0
                 ]
+        replayMetaOverrides =
+            IntMap.fromList
+                [ (getNodeId (adoptNode replayBinder), NodeId sourceKey)
+                | (sourceKey, replayBinder) <- IntMap.toList (etBinderReplayMap tr)
+                ]
         ensureRoot acc =
             let rootCopyKey = getNodeId (adoptNode rootBase)
             in IntMap.insertWith (\_ old -> old) rootCopyKey rootBase acc
@@ -100,5 +105,9 @@ buildTraceCopyMap c baseNamedKeysAll adoptNode tr =
                 else IntMap.insert copyKey rootBase acc
     in foldl'
             addInterior
-            (ensureRoot (IntMap.union binderMetaOverrides (IntMap.union binderCopyOverrides invMap)))
+            ( ensureRoot
+                ( IntMap.union replayMetaOverrides
+                    (IntMap.union binderMetaOverrides (IntMap.union binderCopyOverrides invMap))
+                )
+            )
             (toListInterior (etInterior tr))

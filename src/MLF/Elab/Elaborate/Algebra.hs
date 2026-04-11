@@ -168,7 +168,7 @@ elabAlg algebraContext layer =
                         _ -> pure resolvedNode
             let bodyElabOut =
                   case mAnnLambda of
-                    Just (_, innerBodyAnn) -> para (elabAlg algebraContext) innerBodyAnn
+                    Just (_, _, innerBodyAnn) -> para (elabAlg algebraContext) innerBodyAnn
                     Nothing -> bodyOut
             paramTySurface0 <- reifyNodeTypePreferringBound scopeContext paramSource
             let paramTySurface =
@@ -179,7 +179,7 @@ elabAlg algebraContext layer =
                     _ -> paramTySurface0
             (paramTy, paramSchemeInfo) <-
               case mAnnLambda of
-                Just (annNodeId, _) ->
+                Just (annNodeId, _, _) ->
                   case generalizeAtNode scopeContext annNodeId of
                     Right (paramScheme, _subst) ->
                       let paramTy0 = case paramScheme of
@@ -602,68 +602,87 @@ elabAlg algebraContext layer =
                    domain and codomain (identity-like), or more precisely, domain =
                    μ-type and codomain = μ-type when the body simply returns the
                    parameter. -}
-                scheme =
-                  case (annContainsVar v rhsAnn, blockedAliasMuType (schemeToType schemeBase)) of
-                        (True, Just muTy) -> schemeFromType muTy
-                        _ -> case
-                          let isIdentityLikeSchemeType ty =
-                                case ty of
-                                  TForall name Nothing body -> isIdentityLikeBody name body
-                                  _ -> False
-                                where
-                                  isIdentityLikeBody name body = case body of
-                                    TArrow (TVar dom) (TVar cod) -> dom == name && cod == name
-                                    _ -> False
-                              muAnnotationTy annExpr =
-                                case annExpr of
-                                  ALam lamParam _ _ lamBody _ ->
-                                    case desugaredAnnLambdaInfo lamParam lamBody of
-                                      Just (annNodeId, _) ->
-                                        case reifyNodeTypePreferringBound scopeContext annNodeId of
-                                          Right annTy@TMu {}
-                                            | hasContractiveRecursiveWitness annTy -> Just annTy
-                                          _ -> Nothing
-                                      Nothing -> Nothing
-                                  AAnn inner _ _ -> muAnnotationTy inner
+            scheme <-
+              case (annContainsVar v rhsAnn, blockedAliasMuType (schemeToType schemeBase)) of
+                (True, Just muTy) -> pure (schemeFromType muTy)
+                _ ->
+                  let isIdentityLikeSchemeType ty =
+                        case ty of
+                          TForall name Nothing body -> isIdentityLikeBody name body
+                          _ -> False
+                        where
+                          isIdentityLikeBody name body = case body of
+                            TArrow (TVar dom) (TVar cod) -> dom == name && cod == name
+                            _ -> False
+                      firstNonContractiveMuAnnotation annExpr =
+                        case annExpr of
+                          ALam lamParam _ _ lamBody _ ->
+                            case desugaredAnnLambdaInfo lamParam lamBody of
+                              Just (annNodeId, _, _) ->
+                                case reifyNodeTypePreferringBound scopeContext annNodeId of
+                                  Right annTy ->
+                                    firstNonContractiveRecursiveType annTy
                                   _ -> Nothing
-                           in case rhsAnn of
-                                AApp funAnn argAnn _ _ _
-                                  | maybe False (isIdentityLikeSchemeType . schemeToType . siScheme) (sourceVarName funAnn >>= (`Map.lookup` env)) ->
-                                      muAnnotationTy argAnn
-                                _ -> muAnnotationTy rhsAnn of
-                          Just muTy ->
-                            {- Note [Selective codomain override for μ-annotated lambdas]
-                               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                               The domain is always overridden to the μ-type since
-                               the surrounding μ-annotation detection confirms that the lambda parameter has
-                               an explicit contractive μ-annotation (e.g. λx:μα.α→Int. x).
+                              Nothing -> Nothing
+                          AAnn inner _ _ -> firstNonContractiveMuAnnotation inner
+                          _ -> Nothing
+                      muAnnotationTy annExpr =
+                        case annExpr of
+                          ALam lamParam _ _ lamBody _ ->
+                            case desugaredAnnLambdaInfo lamParam lamBody of
+                              Just (annNodeId, _, _) ->
+                                case reifyNodeTypePreferringBound scopeContext annNodeId of
+                                  Right annTy@TMu {}
+                                    | hasContractiveRecursiveWitness annTy -> Just annTy
+                                  _ -> Nothing
+                              Nothing -> Nothing
+                          AAnn inner _ _ -> muAnnotationTy inner
+                          _ -> Nothing
+                      mediatedMuSubject =
+                        case rhsAnn of
+                          AApp funAnn argAnn _ _ _
+                            | maybe False (isIdentityLikeSchemeType . schemeToType . siScheme) (sourceVarName funAnn >>= (`Map.lookup` env)) ->
+                                argAnn
+                          _ -> rhsAnn
+                  in case firstNonContractiveMuAnnotation mediatedMuSubject of
+                      Just badTy ->
+                        Left (InstantiationError ("non-contractive recursive annotation: " ++ show badTy))
+                      Nothing ->
+                        pure $
+                          case muAnnotationTy mediatedMuSubject of
+                            Just muTy ->
+                              {- Note [Selective codomain override for μ-annotated lambdas]
+                                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                                 The domain is always overridden to the μ-type since
+                                 the surrounding μ-annotation detection confirms that the lambda parameter has
+                                 an explicit contractive μ-annotation (e.g. λx:μα.α→Int. x).
 
-                               For the codomain: when the scheme is fully polymorphic
-                               (e.g. ∀a.∀b. a→b with both vars quantified), generalization
-                               captured the correct parametricity and downstream elaboration
-                               handles the μ-type through normal instantiation — so we leave
-                               schemeBase intact. When the codomain is a constraint-internal
-                               variable (e.g. TVar "t10" that wasn't quantified), generalization
-                               lost track of its relationship to the μ-annotated parameter,
-                               and we override it to the μ-type. -}
-                            let schemeBody = case schemeToType schemeBase of
-                                  TForall _ _ inner -> go inner
-                                  other -> other
-                                  where
-                                    go (TForall _ _ inner) = go inner
-                                    go t = t
-                                quantVars = Set.fromList [n | (n, _) <- fst (Inst.splitForalls (schemeToType schemeBase))]
-                                isUnquantifiedTVar (TVar v') = not (Set.member v' quantVars)
-                                isUnquantifiedTVar _ = False
-                             in case schemeBody of
+                                 For the codomain: when the scheme is fully polymorphic
+                                 (e.g. ∀a.∀b. a→b with both vars quantified), generalization
+                                 captured the correct parametricity and downstream elaboration
+                                 handles the μ-type through normal instantiation — so we leave
+                                 schemeBase intact. When the codomain is a constraint-internal
+                                 variable (e.g. TVar "t10" that wasn't quantified), generalization
+                                 lost track of its relationship to the μ-annotated parameter,
+                                 and we override it to the μ-type. -}
+                              let schemeBody = case schemeToType schemeBase of
+                                    TForall _ _ inner -> go inner
+                                    other -> other
+                                    where
+                                      go (TForall _ _ inner) = go inner
+                                      go t = t
+                                  quantVars = Set.fromList [n | (n, _) <- fst (Inst.splitForalls (schemeToType schemeBase))]
+                                  isUnquantifiedTVar (TVar v') = not (Set.member v' quantVars)
+                                  isUnquantifiedTVar _ = False
+                              in case schemeBody of
                                   TArrow _dom cod
                                     | isUnquantifiedTVar cod ->
                                         -- Codomain is an unquantified internal variable:
                                         -- override both domain and codomain to μ.
                                         schemeFromType (TArrow muTy muTy)
                                   _ -> schemeBase
-                          Nothing -> schemeBase
-                subst0 = normalizeSubstForScheme scheme (deriveLambdaBinderSubst scheme0Norm subst0Norm)
+                            Nothing -> schemeBase
+            let subst0 = normalizeSubstForScheme scheme (deriveLambdaBinderSubst scheme0Norm subst0Norm)
                 subst =
                   let (binds, _) = Inst.splitForalls (schemeToType scheme)
                    in if null binds then IntMap.empty else subst0
@@ -766,7 +785,14 @@ elabAlg algebraContext layer =
                   case schemeToType scheme of
                     muTy@TMu {} -> ERoll muTy rhsForRoll
                     _ -> rhsAbs
-            pure (scheme, rhsFinal, body')
+            let schemeFinal =
+                  case TypeCheck.typeCheckWithEnv tcEnv rhsFinal of
+                    Right rhsTy
+                      | v == "_"
+                      , not (alphaEqType rhsTy (schemeToType scheme)) ->
+                          schemeFromType rhsTy
+                    _ -> scheme
+            pure (schemeFinal, rhsFinal, body')
           f env = do
             (scheme, rhsFinal, body') <- elaborateLet env
             pure (ELet v scheme rhsFinal body')

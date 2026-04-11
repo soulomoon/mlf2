@@ -109,14 +109,14 @@ sourceAnnSchemeInfo env sourceAnn =
         AAnn inner _ _ -> sourceAnnSchemeInfo env inner
         _ -> Nothing
 
-desugaredAnnLambdaInfo :: VarName -> AnnExpr -> Maybe (NodeId, AnnExpr)
+desugaredAnnLambdaInfo :: VarName -> AnnExpr -> Maybe (NodeId, EdgeId, AnnExpr)
 desugaredAnnLambdaInfo param bodyAnn =
     case bodyAnn of
         ALet letName _ _ _ _ rhsAnn innerBodyAnn _
             | letName == param ->
                 case rhsAnn of
-                    AAnn rhsInner annNodeId _ | annRefersToVar param rhsInner ->
-                        Just (annNodeId, innerBodyAnn)
+                    AAnn rhsInner annNodeId eid | annRefersToVar param rhsInner ->
+                        Just (annNodeId, eid, innerBodyAnn)
                     _ -> Nothing
         _ -> Nothing
 
