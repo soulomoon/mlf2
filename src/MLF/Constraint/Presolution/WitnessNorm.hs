@@ -17,7 +17,7 @@ import Control.Monad.Except (throwError)
 import Control.Monad (forM, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (find)
+import Data.List (find, nub)
 import Data.Maybe (mapMaybe)
 
 import qualified MLF.Util.Order as Order
@@ -121,13 +121,30 @@ normalizeEdgeWitnessesM = do
                             (IntSet.empty, [])
                             binderArgs0
             sourceBindersInOrder = map fst sourceEntriesInOrder
+            sourceBinderKeySet =
+                IntSet.fromList
+                    [ getNodeId sourceBinder
+                    | sourceBinder <- sourceBindersInOrder
+                    ]
             traceInteriorKeys =
                 case traceInterior of
                     InteriorNodes s -> s
+            isSchemeRootSourceBinder nid =
+                case Binding.lookupBindParent c0 (typeRef nid) of
+                    Just (GenRef gid, _) ->
+                        case lookupGen gid (cGenNodes c0) of
+                            Just gen -> nid `elem` gnSchemes gen
+                            Nothing -> False
+                    _ -> False
+            isReplayDomainBinder nid =
+                let targetC = canonical nid
+                    restored = restoreNode targetC
+                in isExactTyVar targetC
+                    && (restored == targetC || IntSet.notMember (getNodeId restored) sourceBinderKeySet)
             replayBindersAtRoot =
                 [ canonical b
                 | b <- bindersOrdered
-                , isExactTyVar (canonical b)
+                , isReplayDomainBinder b
                 ]
               where
                 bindersOrdered =
@@ -165,6 +182,14 @@ normalizeEdgeWitnessesM = do
                     [ (getNodeId (canonical (rewriteNode sourceBinder)), replayBinder)
                     | (sourceBinder, replayBinder) <- initialReplayPairs
                     ]
+            sourceReplayBinders =
+                nub
+                    [ binderC
+                    | sourceBinder <- sourceBindersInOrder
+                    , let binderC = canonical (rewriteNode sourceBinder)
+                    , isExactTyVar binderC
+                    , isSchemeRootSourceBinder sourceBinder
+                    ]
         let interiorWithBinders =
                 if IntMap.size binderArgs > 1
                     then IntSet.union interiorNorm (IntSet.fromList (IntMap.keys binderArgs))
@@ -195,37 +220,10 @@ normalizeEdgeWitnessesM = do
             Left err ->
                 throwError (WitnessNormalizationError (EdgeId eid) err)
         let opsNorm = opsNormRaw
-        let replayBinders = replayBindersAtRoot
-            hasReplayCodomain =
-                not (null replayBinders)
-            semanticStrictWithReplayCodomain op =
-                case op of
-                    OpWeaken target -> canonical target /= canonical edgeRoot
-                    OpGraft _ target -> canonical target /= canonical edgeRoot
-                    OpMerge{} -> True
-                    OpRaiseMerge{} -> True
-                    OpRaise{} -> False
-            strictWithReplayCodomain =
-                hasReplayCodomain
-                    && ( not (null sourceEntriesInOrder)
-                            || any semanticStrictWithReplayCodomain opsNorm
-                       )
-            sourceKeySet =
+        let sourceKeySet =
                 IntSet.fromList
                     [ getNodeId sourceBinder
                     | sourceBinder <- sourceBindersInOrder
-                    ]
-            finalSourceKeySet =
-                if strictWithReplayCodomain
-                    then IntSet.fromList
-                        [ getNodeId (canonical (rewriteNode sourceBinder))
-                        | sourceBinder <- sourceBindersInOrder
-                        ]
-                    else IntSet.empty
-            finalReplayKeySet =
-                IntSet.fromList
-                    [ getNodeId replayBinder
-                    | replayBinder <- replayBinders
                     ]
             abstractBoundShape nid =
                 let go seen current =
@@ -255,6 +253,16 @@ normalizeEdgeWitnessesM = do
                         go IntSet.empty muBody
                     _ ->
                         False
+            sourceKeySetSeed =
+                IntSet.fromList
+                    [ getNodeId (canonical (rewriteNode sourceBinder))
+                    | sourceBinder <- sourceBindersInOrder
+                    ]
+            replayKeySetSeed =
+                IntSet.fromList
+                    [ getNodeId replayBinder
+                    | replayBinder <- replayBindersAtRoot
+                    ]
             keepFinalizedOp op =
                 case op of
                     OpWeaken target ->
@@ -262,8 +270,8 @@ normalizeEdgeWitnessesM = do
                             targetKey = getNodeId targetC
                             rootKey = getNodeId (canonical edgeRoot)
                         in targetKey == rootKey
-                            || IntSet.member targetKey finalSourceKeySet
-                            || IntSet.member targetKey finalReplayKeySet
+                            || IntSet.member targetKey sourceKeySetSeed
+                            || IntSet.member targetKey replayKeySetSeed
                             || abstractBoundShape target
                     _ ->
                         True
@@ -281,6 +289,70 @@ normalizeEdgeWitnessesM = do
                     []
                 | otherwise =
                     opsNormPruned
+            isInSourceInterior target =
+                IntSet.member (getNodeId (restoreNode target)) traceInteriorKeys
+            interiorContainsTyMu =
+                any
+                    (\nid ->
+                        case NodeAccess.lookupNode c0 (NodeId nid) of
+                            Just TyMu{} -> True
+                            _ -> False
+                    )
+                    (IntSet.toList interiorWithBinders)
+            replayBindersSeededFromInteriorGrafts =
+                nub
+                    [ targetC
+                    | OpGraft _ target <- opsNormFinalized
+                    , let targetC = canonical target
+                    , isExactTyVar targetC
+                    , abstractBoundShape target
+                    , isInSourceInterior target
+                    , restoreNode target /= edgeRoot
+                    , not (IntSet.member (getNodeId (restoreNode target)) sourceKeySet)
+                    ]
+            replayBinders
+                | null replayBindersAtRoot
+                    && length sourceReplayBinders == length sourceEntriesInOrder
+                    && any
+                        (\case
+                            OpGraft _ target -> abstractBoundShape target
+                            _ -> False
+                        )
+                        opsNormFinalized =
+                    sourceReplayBinders
+                | null replayBindersAtRoot
+                    && length replayBindersSeededFromInteriorGrafts == length sourceEntriesInOrder
+                    && not (null replayBindersSeededFromInteriorGrafts) =
+                    replayBindersSeededFromInteriorGrafts
+                | otherwise =
+                    replayBindersAtRoot
+            replayBindersWithBoundedGrafts =
+                if null replayBinders
+                    then []
+                    else
+                        nub
+                            ( replayBinders
+                                ++ [ targetC
+                                   | OpGraft _ target <- opsNormFinalized
+                                   , let targetC = canonical target
+                                   , isExactTyVar targetC
+                                   , abstractBoundShape target
+                                   ]
+                            )
+            hasReplayCodomain =
+                not (null replayBindersWithBoundedGrafts)
+            semanticStrictWithReplayCodomain op =
+                case op of
+                    OpWeaken target -> canonical target /= canonical edgeRoot
+                    OpGraft _ target -> canonical target /= canonical edgeRoot
+                    OpMerge{} -> True
+                    OpRaiseMerge{} -> True
+                    OpRaise{} -> False
+            strictWithReplayCodomain =
+                hasReplayCodomain
+                    && ( not (null sourceEntriesInOrder)
+                            || any semanticStrictWithReplayCodomain opsNorm
+                       )
             keepNoReplayProjectedOp op =
                 case op of
                     OpGraft{} ->
@@ -297,6 +369,8 @@ normalizeEdgeWitnessesM = do
                         | otherwise ->
                             Just op
                     OpWeaken target
+                        | not (abstractBoundShape target) ->
+                            Nothing
                         | IntSet.member (getNodeId (restoreNode target)) graftTargetKeys ->
                             Nothing
                         | graftTargetCount <= 1 ->
@@ -307,8 +381,6 @@ normalizeEdgeWitnessesM = do
                             Just op
             opsNoReplayProjected =
                 mapMaybe keepNoReplayProjectedOp opsNormFinalized
-            isInSourceInterior target =
-                IntSet.member (getNodeId (restoreNode target)) traceInteriorKeys
             disallowedNoReplayOp op =
                 case op of
                     OpGraft _ target ->
@@ -319,14 +391,6 @@ normalizeEdgeWitnessesM = do
                     OpMerge{} -> True
                     OpRaiseMerge{} -> True
                     _ -> False
-            interiorContainsTyMu =
-                any
-                    (\nid ->
-                        case NodeAccess.lookupNode c0 (NodeId nid) of
-                            Just TyMu{} -> True
-                            _ -> False
-                    )
-                    (IntSet.toList interiorWithBinders)
             residualNoReplayOp
                 | strictWithReplayCodomain =
                     Nothing
@@ -358,22 +422,33 @@ normalizeEdgeWitnessesM = do
                     filter (not . disallowedNoReplayOp) opsNoReplayProjected
             activeSourceEntries
                 | not strictWithReplayCodomain = []
-                | otherwise = sourceEntriesInOrder
+                | otherwise =
+                    reverse $
+                        snd $
+                            foldl'
+                                (\(seen, acc) entry@(sourceBinder, _arg) ->
+                                    let key = getNodeId (canonical (rewriteNode sourceBinder))
+                                    in if IntSet.member key seen
+                                        then (seen, acc)
+                                        else (IntSet.insert key seen, entry : acc)
+                                )
+                                (IntSet.empty, [])
+                                sourceEntriesInOrder
             nActive = length activeSourceEntries
             isTypeTreeBound target =
                 case Binding.lookupBindParent c0 (typeRef (canonical target)) of
                     Just (TypeRef _, _) -> True
                     Nothing -> False
                     Just _ -> False
-        when (strictReplayContract && length replayBinders < nActive) $
+        when (strictReplayContract && length replayBindersWithBoundedGrafts < nActive) $
             throwError $
                 WitnessNormalizationError (EdgeId eid) $
-                    Witness.ReplayMapIncomplete (map fst (drop (length replayBinders) activeSourceEntries))
+                    Witness.ReplayMapIncomplete (map fst (drop (length replayBindersWithBoundedGrafts) activeSourceEntries))
         let replayPairs =
                 if strictReplayContract
-                    then zip activeSourceEntries (take nActive replayBinders)
+                    then zip activeSourceEntries (take nActive replayBindersWithBoundedGrafts)
                     else []
-            replayMapSourceFinal =
+        let replayMapSourceFinal =
                 IntMap.fromList
                     [ (getNodeId sourceBinder, replayBinder)
                     | ((sourceBinder, _), replayBinder) <- replayPairs
@@ -399,6 +474,7 @@ normalizeEdgeWitnessesM = do
                     { Witness.binderArgs = activeBinderArgsMap
                     , Witness.binderReplayMap = replayMapValidation
                     , Witness.replayContract = replayContract
+                    , Witness.replayDomainBinders = replayBindersWithBoundedGrafts
                     }
         -- Validate normalized ops and replay-map contract against the finalized
         -- producer replay codomain.
@@ -431,6 +507,10 @@ normalizeEdgeWitnessesM = do
                 { etBinderArgs = activeBinderArgs
                 , etReplayContract = replayContract
                 , etBinderReplayMap = replayMapSourceFinal
+                , etReplayDomainBinders =
+                    if strictReplayContract
+                        then replayBindersWithBoundedGrafts
+                        else []
                 }) mbTrace
         pure (eid, w0 { ewForallIntros = ewForallIntros w0, ewWitness = InstanceWitness opsFinal }, trace')
     let witnessMap =

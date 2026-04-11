@@ -120,20 +120,23 @@ validateNormalizedWitness env ops = do
                 then Right ()
                 else Left (ReplayMapNonTyVarTarget (NodeId sourceKey) replayTargetRaw)
 
-    replayBindersForRoot =
-        let orderedUnder nid =
-                case Binding.orderedBinders canon (constraint env) (typeRef (canon nid)) of
-                    Left _ -> []
-                    Right binders -> map canon binders
-            direct = orderedUnder rootC
-        in case NodeAccess.lookupNode (constraint env) rootC of
-            Just TyVar{ tnBound = Just bnd } ->
-                let viaBound = orderedUnder bnd
-                in if null direct then viaBound else direct
-            Just TyMu{ tnBody = muBody } ->
-                let viaMu = orderedUnder muBody
-                in if null direct then viaMu else direct
-            _ -> direct
+    replayBindersForRoot
+        | not (null (replayDomainBinders env)) =
+            map canon (replayDomainBinders env)
+        | otherwise =
+            let orderedUnder nid =
+                    case Binding.orderedBinders canon (constraint env) (typeRef (canon nid)) of
+                        Left _ -> []
+                        Right binders -> map canon binders
+                direct = orderedUnder rootC
+            in case NodeAccess.lookupNode (constraint env) rootC of
+                Just TyVar{ tnBound = Just bnd } ->
+                    let viaBound = orderedUnder bnd
+                    in if null direct then viaBound else direct
+                Just TyMu{ tnBody = muBody } ->
+                    let viaMu = orderedUnder muBody
+                    in if null direct then viaMu else direct
+                _ -> direct
 
     replayBinderDomain =
         IntSet.fromList

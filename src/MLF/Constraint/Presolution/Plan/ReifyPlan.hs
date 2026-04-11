@@ -198,6 +198,9 @@ buildReifyPlan ReifyPlanInput {..} =
         case rpiBindParentsGa of
           Just _ ->
             case IntMap.lookup (getNodeId (rpiCanonical rpiTypeRoot)) rpiSolvedToBasePref of
+              Just _baseN
+                | rpiTargetIsBaseLike ->
+                    (rpiTypeRoot, substLocal)
               Just baseN
                 | rpiCanonical baseN /= rpiCanonical rpiTypeRoot ->
                     (baseN, substBaseByKeyLocal)

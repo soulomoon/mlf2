@@ -322,17 +322,23 @@ validateReplayMapTraceContract canonical _sourceConstraint finalConstraint eid t
         in dup
 
     replayBindersForTrace trace =
-        let rootC = canonical (etRoot trace)
-            orderedUnder nid =
-                case Binding.orderedBinders canonical finalConstraint (typeRef (canonical nid)) of
-                    Left _ -> []
-                    Right binders -> map canonical binders
-            direct = orderedUnder rootC
-        in case NodeAccess.lookupNode finalConstraint rootC of
-            Just TyVar{ tnBound = Just bnd } ->
-                let viaBound = orderedUnder bnd
-                in if null direct then viaBound else direct
-            _ -> direct
+        case etReplayDomainBinders trace of
+            binders@(_ : _) -> map canonical binders
+            [] ->
+                let rootC = canonical (etRoot trace)
+                    orderedUnder nid =
+                        case Binding.orderedBinders canonical finalConstraint (typeRef (canonical nid)) of
+                            Left _ -> []
+                            Right binders -> map canonical binders
+                    direct = orderedUnder rootC
+                in case NodeAccess.lookupNode finalConstraint rootC of
+                    Just TyVar{ tnBound = Just bnd } ->
+                        let viaBound = orderedUnder bnd
+                        in if null direct then viaBound else direct
+                    Just TyMu{ tnBody = muBody } ->
+                        let viaMu = orderedUnder muBody
+                        in if null direct then viaMu else direct
+                    _ -> direct
 
 -- | Rewrite constraint by removing TyExp nodes, applying expansion mapping and
 -- union-find canonicalization, collapsing duplicates (preferring structure over

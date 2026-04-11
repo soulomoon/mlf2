@@ -62,8 +62,9 @@ import MLF.Elab.TermClosure
   )
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
-import MLF.Frontend.ConstraintGen (AnnExpr (..), ConstraintError, ConstraintResult (..), generateConstraints)
+import MLF.Frontend.ConstraintGen (AnnExpr (..), ConstraintError (..), ConstraintResult (..), generateConstraints)
 import MLF.Frontend.Syntax (NormSurfaceExpr)
+import qualified MLF.Frontend.Syntax as Surface
 import MLF.Reify.TypeOps (freeTypeVarsType)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
@@ -78,6 +79,62 @@ data TraceCopyArtifacts = TraceCopyArtifacts
     tcaInstCopyNodes :: IntSet.IntSet,
     tcaInstCopyMapFull :: IntMap.IntMap NodeId
   }
+
+validateDirectRecursiveAnnotations :: NormSurfaceExpr -> Either ConstraintError ()
+validateDirectRecursiveAnnotations = goExpr
+  where
+    goExpr expr =
+      case expr of
+        Surface.EVar _ -> Right ()
+        Surface.ELit _ -> Right ()
+        Surface.ELam _ body -> goExpr body
+        Surface.EApp fun arg -> goExpr fun >> goExpr arg
+        Surface.ELet _ rhs body -> goExpr rhs >> goExpr body
+        Surface.ELamAnn _ annTy body -> validateAnn annTy >> goExpr body
+        Surface.EAnn inner annTy -> goExpr inner >> validateAnn annTy
+        Surface.ECoerceConst _ -> Right ()
+
+    validateAnn annTy =
+      case directNonContractiveMu annTy of
+        Just badTy -> Left (RecursiveAnnotationNotSupported badTy)
+        Nothing -> Right ()
+
+    directNonContractiveMu annTy =
+      case annTy of
+        Surface.STMu v body
+          | not (muBodyContractive v body) -> Just annTy
+        _ -> Nothing
+
+    muBodyContractive needle = bodyType False False
+      where
+        bodyType guarded shadowed ty =
+          case ty of
+            Surface.STVar v -> shadowed || v /= needle || guarded
+            Surface.STArrow dom cod -> bodyType True shadowed dom && bodyType True shadowed cod
+            Surface.STBase _ -> True
+            Surface.STCon _ args -> all (bodyType True shadowed) args
+            Surface.STForall v mb body ->
+              let shadowed' = shadowed || v == needle
+                  boundOk = maybe True (bodyBound guarded shadowed' . Surface.unNormBound) mb
+               in boundOk && bodyType guarded shadowed' body
+            Surface.STMu v body ->
+              let shadowed' = shadowed || v == needle
+               in bodyType guarded shadowed' body
+            Surface.STBottom -> True
+
+        bodyBound guarded shadowed bound =
+          case bound of
+            Surface.STArrow dom cod -> bodyType True shadowed dom && bodyType True shadowed cod
+            Surface.STBase _ -> True
+            Surface.STCon _ args -> all (bodyType True shadowed) args
+            Surface.STForall v mb body ->
+              let shadowed' = shadowed || v == needle
+                  boundOk = maybe True (bodyBound guarded shadowed' . Surface.unNormBound) mb
+               in boundOk && bodyType guarded shadowed' body
+            Surface.STMu v body ->
+              let shadowed' = shadowed || v == needle
+               in bodyType guarded shadowed' body
+            Surface.STBottom -> True
 
 runPipelineElab :: PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElab = runPipelineElabWithConfig defaultPipelineConfig
@@ -98,6 +155,7 @@ runPipelineElabWith ::
   NormSurfaceExpr ->
   Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWith traceCfg genConstraints expr = do
+  () <- fromConstraintError (validateDirectRecursiveAnnotations expr)
   ConstraintResult {crConstraint = c0, crAnnotated = ann} <- fromConstraintError (genConstraints expr)
   let c1 = normalize c0
   (c1Broken, acyc) <- fromCycleError (breakCyclesAndCheckAcyclicity c1)

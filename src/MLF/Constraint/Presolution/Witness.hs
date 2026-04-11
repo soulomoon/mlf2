@@ -148,6 +148,7 @@ buildEdgeTrace input gid expn (copyMap0, _interior0, _frontier0) = do
         etInterior = interiorNodes,
         etReplayContract = ReplayContractNone,
         etBinderReplayMap = mempty,
+        etReplayDomainBinders = [],
         etCopyMap = copyMap0
       }
 

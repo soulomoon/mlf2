@@ -216,6 +216,7 @@ edgeTraceFixtureFromWitness ew =
       etBinderArgs = [],
       etInterior = fromListInterior (ewRoot ew : concatMap opTargets ops),
       etBinderReplayMap = IntMap.empty,
+      etReplayDomainBinders = [],
       etCopyMap = mempty,
       etReplayContract = ReplayContractNone
     }
@@ -3501,6 +3502,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [root],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -3544,6 +3546,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [root, binderN],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = insertCopy binderN aliasN mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -3602,6 +3605,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                       [ (getNodeId binderA, binderA),
                         (getNodeId binderB, binderB)
                       ],
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractStrict
                 }
@@ -3662,6 +3666,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etInterior = fromListInterior [root, binderA, badTarget],
                   -- Missing source key binderA in replay-map domain: strict fail-fast.
                   etBinderReplayMap = IntMap.empty,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractStrict
                 }
@@ -3721,6 +3726,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   -- Domain is correct (binderA -> bogusTarget), but bogusTarget
                   -- is not in the replay binder domain (siSubst siReplay).
                   etBinderReplayMap = IntMap.fromList [(getNodeId binderA, bogusTarget)],
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractStrict
                 }
@@ -3785,6 +3791,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [(sourceKey, argNode)],
                   etInterior = fromListInterior [root, sourceKey, replayBinder, replayAlias, argNode],
                   etBinderReplayMap = IntMap.singleton (getNodeId sourceKey) replayAlias,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractStrict
                 }
@@ -3844,6 +3851,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [(sourceKey, argNode)],
                   etInterior = fromListInterior [root, sourceKey, sourceBinder, argNode],
                   etBinderReplayMap = IntMap.fromList [(getNodeId sourceKey, sourceBinder)],
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractStrict
                 }
@@ -3906,6 +3914,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   -- Invalid source-space identity target: source key is not in replay key-space.
                   -- Strict pass-through bridge must hard-fail instead of remapping at runtime.
                   etBinderReplayMap = IntMap.singleton (getNodeId sourceKey) sourceKey,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractStrict
                 }
@@ -3968,6 +3977,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [(sourceKey, argNode)],
                   etInterior = fromListInterior [root, binderA, argNode],
                   etBinderReplayMap = IntMap.singleton (getNodeId sourceKey) replayGhost,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractStrict
                 }
@@ -4027,6 +4037,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [(binderA, argNode)],
                   etInterior = fromListInterior [root, binderA, argNode],
                   etBinderReplayMap = IntMap.singleton (getNodeId binderA) binderA,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractStrict
                 }
@@ -4084,6 +4095,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [root, body, replayBinder, sourceKey],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = insertCopy sourceKey replayBinder mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -4154,6 +4166,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etInterior = fromListInterior [root, sourceKey, replayTarget, argNode],
                   -- Target comes from siSubst key-space, not parseable binder-name extraction.
                   etBinderReplayMap = IntMap.fromList [(getNodeId sourceKey, replayTarget)],
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractStrict
                 }
@@ -4371,6 +4384,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [root, body, binderA, aliasN],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -4492,6 +4506,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [root, binderA, binderB, argNode],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = insertCopy binderA binderB mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -4548,6 +4563,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [root, n, m],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -4592,6 +4608,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [root, n],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -4636,6 +4653,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [root, n, m],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -4685,6 +4703,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [root, n],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -5356,6 +5375,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = mempty,
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -5525,6 +5545,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [binderN, nonBinderN],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -5579,6 +5600,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [binderN, nonBinderN],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -5634,6 +5656,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [root, body, binderN, nonBinderN, argNode],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = insertCopy (NodeId 999) nonBinderN mempty,
                   etReplayContract = ReplayContractNone
                 }
@@ -5994,6 +6017,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   etBinderArgs = [],
                   etInterior = fromListInterior [root, aN, mN, nN],
                   etBinderReplayMap = mempty,
+                  etReplayDomainBinders = [],
                   etCopyMap = mempty,
                   etReplayContract = ReplayContractNone
                 }

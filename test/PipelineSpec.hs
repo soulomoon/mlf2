@@ -108,11 +108,12 @@ matchesRecursiveArrow actual expected = case (actual, expected) of
   (TArrow domA codA, TArrow domE codE) ->
     matchesRecursiveMu domA domE && matchesRecursiveMu codA codE
   _ -> False
-  where
-    matchesRecursiveMu tyA tyE = case (tyA, tyE) of
-      (TMu _ bodyA, TMu _ bodyE) -> stripMuNames bodyA == stripMuNames bodyE
-      _ -> False
 
+matchesRecursiveMu :: ElabType -> ElabType -> Bool
+matchesRecursiveMu actual expected = case (actual, expected) of
+  (TMu _ bodyA, TMu _ bodyE) -> stripMuNames bodyA == stripMuNames bodyE
+  _ -> False
+  where
     stripMuNames ty = case ty of
       TVar _ -> TVar "_"
       TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
@@ -144,6 +145,10 @@ expectedSameLaneAliasFrameClearBoundaryArrow :: ElabType
 expectedSameLaneAliasFrameClearBoundaryArrow =
   let recursiveTy = TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int")))
    in TArrow recursiveTy recursiveTy
+
+expectedUriR2C1RecursiveIntCarrier :: ElabType
+expectedUriR2C1RecursiveIntCarrier =
+  TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int")))
 
 containsMu :: ElabType -> Bool
 containsMu ty = case ty of
@@ -1504,6 +1509,83 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Right (_term, ty) ->
               expectationFailure
                 (label ++ " unexpectedly accepted non-contractive mediated μ annotation with type " ++ show ty)
+
+      it "URI-R2-C1 unannotated carrier: direct recursiveArrowInt admits a visible recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "f"
+                (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
+                (EVar "f")
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 direct carrier: expected recursive Int carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 direct carrier: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 uniqueness reject: witnessless mediation stays fail-closed without a contractive recursive witness" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "x" (EVar "x"))
+                (ELet "f" (EApp (EVar "id") (EVar "f")) (EVar "f"))
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(_label, result) ->
+          case result of
+            Left _ -> pure ()
+            Right (term, ty) -> do
+              containsMu ty `shouldBe` False
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 reconstruction: same-lane alias wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "f"
+                (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
+                (ELet "hold" (EVar "f") (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "hold")) (EVar "u")))
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 reconstruction: expected recursive Int carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 reconstruction: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
 
       it "characterizes higher-order recursion as recursive-at-constraint level with current Phase-6 fail-closed behavior" $ do
         let expr =
@@ -3054,6 +3136,37 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                             adoptNode mapped `shouldBe` expected
                 )
                 baseCopyPairs
+            vs -> expectationFailure ("validateSolvedGraph failed:\n" ++ unlines vs)
+
+    it "projects strict replay binders back onto their source binders for generalization" $ do
+      let expr =
+            ELet
+              "f"
+              (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
+              (EVar "f")
+      case runPipelineArtifactsDefault defaultPolySyms expr of
+        Left err -> expectationFailure err
+        Right PipelineArtifacts {paConstraintNorm = c1, paPresolution = pres, paSolved = solved} ->
+          case Solved.validateCanonicalGraphStrict solved of
+            [] -> do
+              let canon = canonicalizerFrom (\nid -> Solved.canonical solved (chaseRedirects (prRedirects pres) nid))
+                  adoptNode = canonicalizeNode canon
+                  baseNamedKeysAll = collectBaseNamedKeys c1
+                  tr = (prEdgeTraces pres) IntMap.! 0
+                  traceMap = buildTraceCopyMap c1 baseNamedKeysAll adoptNode tr
+              etReplayContract tr `shouldBe` ReplayContractStrict
+              etReplayDomainBinders tr `shouldSatisfy` (not . null)
+              case (etBinderArgs tr, IntMap.toList (etBinderReplayMap tr)) of
+                ([(sourceBinder, _arg)], [(_sourceKey, replayBinder)]) ->
+                  case IntMap.lookup (getNodeId (adoptNode replayBinder)) traceMap of
+                    Nothing ->
+                      expectationFailure
+                        ("Missing replay-binder provenance entry for " ++ show replayBinder)
+                    Just mapped ->
+                      adoptNode mapped `shouldBe` adoptNode sourceBinder
+                other ->
+                  expectationFailure
+                    ("Expected one strict replay binder pair, got " ++ show other)
             vs -> expectationFailure ("validateSolvedGraph failed:\n" ++ unlines vs)
 
     it "BUG-002-V4 keeps OpRaise targets inside etInterior after witness/trace canonicalization" $ do
