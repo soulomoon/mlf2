@@ -405,6 +405,7 @@ test-suite mlf2-test
                       PublicSurfaceSpec,
                       RepoGuardSpec,
                       Research.C1AuthoritativeSurfaceSpec,
+                      Research.P2RepresentativeSupportSpec,
                       Research.P5ClearBoundarySpec,
                       Research.SameLaneRetainedChildRepresentativeGapSpec,
                       Research.UriR2C1PrototypeP1Spec,

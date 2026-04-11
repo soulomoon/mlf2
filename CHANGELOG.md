@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Changed
+- Refreshed the representative-family readiness ledger so the repo can now
+  honestly claim general automatic iso-recursive inference inside its
+  inherited explicit-only production boundary: added a direct
+  `P2` representative-support harness covering both the exact `C1` non-local
+  `Int` packet and a second route-pure non-local `Bool` packet on
+  `runPipelineElab` / `runPipelineElabChecked`, published superseding
+  current-state positive-family and repo-level readiness artifacts under
+  `docs/plans/2026-04-11-*`, and synced `implementation_notes.md` / `TODO.md`
+  to the refreshed current ledger. Validated with
+  `./scripts/thesis-conformance-gate.sh` and
+  `cabal build all && cabal test` (`1371 examples, 0 failures`).
 - Closed the P5 broader-positive enactment family on merged `ea8db76`: the
   enactment contract froze in `round-206`, milestone-3 reached the merged
   nonuple frontier in `round-220`, and the new canonical closeout records the
