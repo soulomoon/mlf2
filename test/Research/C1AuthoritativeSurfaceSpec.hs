@@ -64,37 +64,59 @@ import SpecUtil
 spec :: Spec
 spec =
     describe "C1 authoritative-surface harness" $ do
-        it "keeps the admitted non-local packet visibly non-recursive on the fallback surface" $ do
-            fallbackTy <- c1FallbackType
+        it "keeps the admitted non-local Int packet visibly non-recursive on the fallback surface" $ do
+            fallbackTy <- c1FallbackTypeFor c1IntExpr (BaseTy "Int")
             fallbackTy `shouldBe` TBase (BaseTy "Int")
             containsMu fallbackTy `shouldBe` False
 
-        it "keeps the exact source packet recursive on both current pipeline entrypoints" $ do
+        it "keeps the exact Int source packet recursive on both current pipeline entrypoints" $ do
             let blocked = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
             (_uncheckedTerm, uncheckedTy) <-
-                requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1Expr))
+                requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1IntExpr))
             (_checkedTerm, checkedTy) <-
-                requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr c1Expr))
+                requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr c1IntExpr))
             uncheckedTy `shouldNotBe` blocked
             checkedTy `shouldNotBe` blocked
             containsMu uncheckedTy `shouldBe` True
             containsMu checkedTy `shouldBe` True
 
-c1Expr :: SurfaceExpr
-c1Expr = ELet "k" (ELamAnn "x" recursiveAnn (EVar "x")) (EVar "k")
+        it "keeps the admitted non-local Bool packet visibly non-recursive on the fallback surface" $ do
+            fallbackTy <- c1FallbackTypeFor c1BoolExpr (BaseTy "Bool")
+            fallbackTy `shouldBe` TBase (BaseTy "Bool")
+            containsMu fallbackTy `shouldBe` False
 
-recursiveAnn :: SrcType
-recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+        it "keeps the exact Bool source packet recursive on both current pipeline entrypoints" $ do
+            let blocked = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
+            (_uncheckedTerm, uncheckedTy) <-
+                requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1BoolExpr))
+            (_checkedTerm, checkedTy) <-
+                requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr c1BoolExpr))
+            uncheckedTy `shouldNotBe` blocked
+            checkedTy `shouldNotBe` blocked
+            containsMu uncheckedTy `shouldBe` True
+            containsMu checkedTy `shouldBe` True
 
-c1FallbackType :: IO ElabType
-c1FallbackType = do
-    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty c1Expr)
+c1IntExpr :: SurfaceExpr
+c1IntExpr = ELet "k" (ELamAnn "x" recursiveIntAnn (EVar "x")) (EVar "k")
+
+c1BoolExpr :: SurfaceExpr
+c1BoolExpr = ELet "k" (ELamAnn "x" recursiveBoolAnn (EVar "x")) (EVar "k")
+
+recursiveIntAnn :: SrcType
+recursiveIntAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+
+recursiveBoolAnn :: SrcType
+recursiveBoolAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+
+c1FallbackTypeFor :: SurfaceExpr -> BaseTy -> IO ElabType
+c1FallbackTypeFor expr expectedBase = do
+    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
     let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
         bodyCanon = extractVarBody annCanon0
         bodyPre = extractVarBody annPre0
         rootNid = rtcCanonical inputs0 (bodyRoot annCanon0)
         inputs =
-            rebindRootTo inputs0 rootNid (findIntBaseNode (rtcPresolutionView inputs0))
+            rebindRootTo inputs0 rootNid (findBaseNode expectedBase (rtcPresolutionView inputs0))
     requireRight (computeResultTypeFallback inputs bodyCanon bodyPre)
 
 extractVarBody :: AnnExpr -> AnnExpr
@@ -151,16 +173,17 @@ setVarBound nid newBound constraint =
                 ]
         }
 
-findIntBaseNode :: PresolutionView.PresolutionView -> NodeId
-findIntBaseNode view0 =
+findBaseNode :: BaseTy -> PresolutionView.PresolutionView -> NodeId
+findBaseNode expectedBase view0 =
     case
         [ tnId node
-        | (_nodeIdKey, node@TyBase{ tnBase = BaseTy "Int" }) <-
+        | (_nodeIdKey, node@TyBase{ tnBase = baseTy }) <-
             toListNode (cNodes (pvConstraint view0))
+        , baseTy == expectedBase
         ]
     of
         baseNid : _ -> baseNid
-        [] -> error "expected Int base node for C1 fallback case"
+        [] -> error ("expected base node for " ++ show expectedBase ++ " in C1 fallback case")
 
 resultTypeInputsForArtifacts :: PipelineArtifacts -> (ResultTypeInputs, AnnExpr, AnnExpr)
 resultTypeInputsForArtifacts

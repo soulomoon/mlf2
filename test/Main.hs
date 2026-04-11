@@ -37,6 +37,7 @@ import Reify.TypeOpsSpec qualified
 import Reify.TypeSpec qualified
 import RepoGuardSpec qualified
 import Research.C1AuthoritativeSurfaceSpec qualified
+import Research.P2RepresentativeSupportSpec qualified
 import Research.P5ClearBoundarySpec qualified
 import Research.SameLaneRetainedChildRepresentativeGapSpec qualified
 import Research.UriR2C1PrototypeP1Spec qualified
@@ -73,6 +74,7 @@ main = do
     PublicSurfaceSpec.spec
     RepoGuardSpec.spec
     Research.C1AuthoritativeSurfaceSpec.spec
+    Research.P2RepresentativeSupportSpec.spec
     Research.P5ClearBoundarySpec.spec
     Research.SameLaneRetainedChildRepresentativeGapSpec.spec
     Research.UriR2C1PrototypeP1Spec.spec

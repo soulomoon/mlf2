@@ -1,3 +1,32 @@
+## 2026-04-11 - Representative family matrix now supports the repo-level general automatic iso-recursive claim
+
+- The live current-state aggregate now promotes every positive row in the
+  current readiness contract (`P2` through `P6`) above folklore or blocker
+  status inside the inherited explicit-only boundary.
+- `P2 non-local-propagation` is no longer packet-specific folklore: the new
+  `test/Research/P2RepresentativeSupportSpec.hs` harness locks both the exact
+  `C1` non-local alias-bound / base-like `Int` packet and a second
+  route-pure non-local alias-bound / base-like `Bool` packet as recursive on
+  `runPipelineElab` and `runPipelineElabChecked`, giving the family direct
+  authoritative support across two admitted packets under the same non-local
+  route story.
+- `P5 polymorphism-nested-forall` remains closed on the merged nonuple
+  frontier, so the selected same-wrapper nested-`forall` packet plus the
+  clear-boundary chain through `sameLaneNonupleAliasFrameClearBoundaryExpr`
+  continue to provide bounded broader-positive support while
+  `sameLaneDecupleAliasFrameClearBoundaryExpr` and deeper alias shells remain
+  closed.
+- The superseding current-state records are:
+  - `docs/plans/2026-04-11-general-automatic-iso-recursive-full-inference-positive-family-aggregate-classification-current-state-refresh.md`
+  - `docs/plans/2026-04-11-general-automatic-iso-recursive-full-inference-repo-level-readiness-and-architecture-decision-current-state-refresh.md`
+- Under that refreshed ledger, the repo can now honestly claim general
+  automatic iso-recursive inference across its representative family matrix
+  within the inherited explicit-only / iso-recursive / non-equi-recursive /
+  no-fallback / no-second-interface production boundary.
+- Verification on current HEAD:
+  `./scripts/thesis-conformance-gate.sh` passed, and
+  `cabal build all && cabal test` passed with `1371 examples, 0 failures`.
+
 ## 2026-04-10 - P5 broader-positive enactment family closed on the merged nonuple frontier
 
 - The broader-positive enactment family now closes on merged `ea8db76`, where

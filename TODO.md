@@ -4,6 +4,27 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 109 representative-family readiness refresh (completed 2026-04-11)
+
+- Completed:
+  - Added `test/Research/P2RepresentativeSupportSpec.hs` and wired it into
+    `mlf2.cabal` / `test/Main.hs` so the repo now has a direct durable P2
+    harness instead of relying on cross-referencing unrelated specs.
+  - Locked two authoritative `P2` packets under that harness:
+    - the exact `C1` non-local alias-bound / base-like `Int` packet; and
+    - a second route-pure non-local alias-bound / base-like `Bool` packet.
+  - Published superseding current-state aggregate and readiness artifacts:
+    - `docs/plans/2026-04-11-general-automatic-iso-recursive-full-inference-positive-family-aggregate-classification-current-state-refresh.md`
+    - `docs/plans/2026-04-11-general-automatic-iso-recursive-full-inference-repo-level-readiness-and-architecture-decision-current-state-refresh.md`
+  - Synced `implementation_notes.md` and `CHANGELOG.md` so the repo-facing
+    claim now matches the current evidence rather than the stale April 5
+    subset ledger.
+- Verification:
+  - focused P2 representative-support harness: PASS
+  - focused broader-positive and fail-closed guard reruns: PASS
+  - `./scripts/thesis-conformance-gate.sh`: PASS
+  - `cabal build all && cabal test`: PASS (`1371 examples, 0 failures`)
+
 ## Task 108 P5 broader-positive enactment closeout (completed 2026-04-10)
 
 - Completed:
