@@ -891,57 +891,44 @@ elabAlg algebraContext layer =
                     _ -> annExpr
                 aliasSourceName = transparentMediatorSourceName rhsAnn
                 aliasSourceSchemeInfo = aliasSourceName >>= (`lookupSchemeInfo` env)
-                previewRecursiveCarrierTy selfName annExpr =
-                  case annExpr of
-                    ALam lamParam _ _ lamBody _
-                      | previewContainsRecursiveSelfAppToParam selfName lamParam lamBody ->
-                          do
-                            resultTy <- either (const Nothing) Just (reifyNodeTypePreferringBound scopeContext (annNode lamBody))
-                            let usedNames = freeTypeVarsType resultTy
-                            pure $
-                              if resultTy == TBottom && previewHasNestedRecursiveSelfAppToParam selfName lamParam lamBody
-                                then previewRecursiveFixedPointCarrier usedNames
-                                else previewRecursiveArrowCarrier usedNames resultTy
-                    AAnn inner _ _ -> previewRecursiveCarrierTy selfName inner
-                    _ -> Nothing
-                previewContainsRecursiveSelfAppToParam selfName paramName annExpr =
+                containsRecursiveSelfAppToParam selfName paramName annExpr =
                   case annExpr of
                     AVar _ _ -> False
                     ALit _ _ -> False
                     AApp (AVar recurName _) arg _ _ _
                       | recurName == selfName -> annContainsVar paramName arg
                     AApp fun arg _ _ _ ->
-                      previewContainsRecursiveSelfAppToParam selfName paramName fun
-                        || previewContainsRecursiveSelfAppToParam selfName paramName arg
+                      containsRecursiveSelfAppToParam selfName paramName fun
+                        || containsRecursiveSelfAppToParam selfName paramName arg
                     ALam boundName _ _ body _
                       | boundName == selfName || boundName == paramName -> False
-                      | otherwise -> previewContainsRecursiveSelfAppToParam selfName paramName body
+                      | otherwise -> containsRecursiveSelfAppToParam selfName paramName body
                     ALet boundName _ _ _ _ rhs body _
                       | boundName == selfName || boundName == paramName ->
-                          previewContainsRecursiveSelfAppToParam selfName paramName rhs
+                          containsRecursiveSelfAppToParam selfName paramName rhs
                       | otherwise ->
-                          previewContainsRecursiveSelfAppToParam selfName paramName rhs
-                            || previewContainsRecursiveSelfAppToParam selfName paramName body
-                    AAnn inner _ _ -> previewContainsRecursiveSelfAppToParam selfName paramName inner
-                previewHasNestedRecursiveSelfAppToParam selfName paramName annExpr =
+                          containsRecursiveSelfAppToParam selfName paramName rhs
+                            || containsRecursiveSelfAppToParam selfName paramName body
+                    AAnn inner _ _ -> containsRecursiveSelfAppToParam selfName paramName inner
+                hasNestedRecursiveSelfAppToParam selfName paramName annExpr =
                   case annExpr of
                     AVar _ _ -> False
                     ALit _ _ -> False
                     AApp fun arg _ _ _ ->
-                      previewContainsRecursiveSelfAppToParam selfName paramName arg
-                        || previewHasNestedRecursiveSelfAppToParam selfName paramName fun
-                        || previewHasNestedRecursiveSelfAppToParam selfName paramName arg
+                      containsRecursiveSelfAppToParam selfName paramName arg
+                        || hasNestedRecursiveSelfAppToParam selfName paramName fun
+                        || hasNestedRecursiveSelfAppToParam selfName paramName arg
                     ALam boundName _ _ body _
                       | boundName == selfName || boundName == paramName -> False
-                      | otherwise -> previewHasNestedRecursiveSelfAppToParam selfName paramName body
+                      | otherwise -> hasNestedRecursiveSelfAppToParam selfName paramName body
                     ALet boundName _ _ _ _ rhs body _
                       | boundName == selfName || boundName == paramName ->
-                          previewHasNestedRecursiveSelfAppToParam selfName paramName rhs
+                          hasNestedRecursiveSelfAppToParam selfName paramName rhs
                       | otherwise ->
-                          previewHasNestedRecursiveSelfAppToParam selfName paramName rhs
-                            || previewHasNestedRecursiveSelfAppToParam selfName paramName body
-                    AAnn inner _ _ -> previewHasNestedRecursiveSelfAppToParam selfName paramName inner
-                previewRecursiveArrowCarrier extraUsedNames codTy =
+                          hasNestedRecursiveSelfAppToParam selfName paramName rhs
+                            || hasNestedRecursiveSelfAppToParam selfName paramName body
+                    AAnn inner _ _ -> hasNestedRecursiveSelfAppToParam selfName paramName inner
+                recursiveArrowCarrier extraUsedNames codTy =
                   let usedNames = Set.union extraUsedNames (freeTypeVarsType codTy)
                       pickFreshMuName idx =
                         let candidate =
@@ -953,7 +940,7 @@ elabAlg algebraContext layer =
                               else candidate
                       muName = pickFreshMuName 0
                    in TMu muName (TArrow (TVar muName) codTy)
-                previewRecursiveFixedPointCarrier extraUsedNames =
+                recursiveFixedPointCarrier extraUsedNames =
                   let pickFreshMuName idx =
                         let candidate =
                               if idx == (0 :: Int)
@@ -964,6 +951,18 @@ elabAlg algebraContext layer =
                               else candidate
                       muName = pickFreshMuName 0
                    in TMu muName (TArrow (TVar muName) (TVar muName))
+                previewRecursiveCarrierTy selfName annExpr =
+                  case annExpr of
+                    ALam lamParam _ _ lamBody _
+                      | containsRecursiveSelfAppToParam selfName lamParam lamBody ->
+                          do
+                            resultTy <- either (const Nothing) Just (reifyNodeTypePreferringBound scopeContext (annNode lamBody))
+                            pure $
+                              if resultTy == TBottom && hasNestedRecursiveSelfAppToParam selfName lamParam lamBody
+                                then recursiveFixedPointCarrier Set.empty
+                                else recursiveArrowCarrier Set.empty resultTy
+                    AAnn inner _ _ -> previewRecursiveCarrierTy selfName inner
+                    _ -> Nothing
                 recoverGeneralizeAtNode err =
                   case err of
                     SchemeFreeVars _ _
@@ -1099,76 +1098,16 @@ elabAlg algebraContext layer =
                 inferredRecursiveCarrierTyFor selfName extraUsedNames annExpr =
                   case annExpr of
                     ALam lamParam _ _ lamBody _ ->
-                      if annContainsRecursiveSelfAppToParam selfName lamParam lamBody
+                      if containsRecursiveSelfAppToParam selfName lamParam lamBody
                         then do
                           resultTy <- either (const Nothing) Just (reifyNodeTypePreferringBound scopeContext (annNode lamBody))
                           pure $
-                            if resultTy == TBottom && annHasNestedRecursiveSelfAppToParam selfName lamParam lamBody
-                              then mkRecursiveFixedPointCarrier extraUsedNames
-                              else mkRecursiveArrowCarrier extraUsedNames resultTy
+                            if resultTy == TBottom && hasNestedRecursiveSelfAppToParam selfName lamParam lamBody
+                              then recursiveFixedPointCarrier extraUsedNames
+                              else recursiveArrowCarrier extraUsedNames resultTy
                         else Nothing
                     AAnn inner _ _ -> inferredRecursiveCarrierTyFor selfName extraUsedNames inner
                     _ -> Nothing
-                annContainsRecursiveSelfAppToParam selfName paramName annExpr =
-                  case annExpr of
-                    AVar _ _ -> False
-                    ALit _ _ -> False
-                    AApp (AVar recurName _) arg _ _ _
-                      | recurName == selfName -> annContainsVar paramName arg
-                    AApp fun arg _ _ _ ->
-                      annContainsRecursiveSelfAppToParam selfName paramName fun
-                        || annContainsRecursiveSelfAppToParam selfName paramName arg
-                    ALam boundName _ _ body _
-                      | boundName == selfName || boundName == paramName -> False
-                      | otherwise -> annContainsRecursiveSelfAppToParam selfName paramName body
-                    ALet boundName _ _ _ _ rhs body _
-                      | boundName == selfName || boundName == paramName ->
-                          annContainsRecursiveSelfAppToParam selfName paramName rhs
-                      | otherwise ->
-                          annContainsRecursiveSelfAppToParam selfName paramName rhs
-                            || annContainsRecursiveSelfAppToParam selfName paramName body
-                    AAnn inner _ _ -> annContainsRecursiveSelfAppToParam selfName paramName inner
-                annHasNestedRecursiveSelfAppToParam selfName paramName annExpr =
-                  case annExpr of
-                    AVar _ _ -> False
-                    ALit _ _ -> False
-                    AApp fun arg _ _ _ ->
-                      annContainsRecursiveSelfAppToParam selfName paramName arg
-                        || annHasNestedRecursiveSelfAppToParam selfName paramName fun
-                        || annHasNestedRecursiveSelfAppToParam selfName paramName arg
-                    ALam boundName _ _ body _
-                      | boundName == selfName || boundName == paramName -> False
-                      | otherwise -> annHasNestedRecursiveSelfAppToParam selfName paramName body
-                    ALet boundName _ _ _ _ rhs body _
-                      | boundName == selfName || boundName == paramName ->
-                          annHasNestedRecursiveSelfAppToParam selfName paramName rhs
-                      | otherwise ->
-                          annHasNestedRecursiveSelfAppToParam selfName paramName rhs
-                            || annHasNestedRecursiveSelfAppToParam selfName paramName body
-                    AAnn inner _ _ -> annHasNestedRecursiveSelfAppToParam selfName paramName inner
-                mkRecursiveArrowCarrier extraUsedNames codTy =
-                  let usedNames = Set.union extraUsedNames (freeTypeVarsType codTy)
-                      pickFreshMuName idx =
-                        let candidate =
-                              if idx == (0 :: Int)
-                                then "a"
-                                else "a" ++ show idx
-                         in if Set.member candidate usedNames
-                              then pickFreshMuName (idx + 1)
-                              else candidate
-                      muName = pickFreshMuName 0
-                   in TMu muName (TArrow (TVar muName) codTy)
-                mkRecursiveFixedPointCarrier extraUsedNames =
-                  let pickFreshMuName idx =
-                        let candidate =
-                              if idx == (0 :: Int)
-                                then "a"
-                                else "a" ++ show idx
-                         in if Set.member candidate extraUsedNames
-                              then pickFreshMuName (idx + 1)
-                              else candidate
-                      muName = pickFreshMuName 0
-                   in TMu muName (TArrow (TVar muName) (TVar muName))
                 shouldPreferInferredRecursiveCarrier carrierTy inferredTy =
                   (isBottomRecursiveCarrier carrierTy && isFixedPointRecursiveCarrier inferredTy)
                     || hasInternalRecursiveCodomain carrierTy && not (hasInternalRecursiveCodomain inferredTy)
