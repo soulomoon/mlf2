@@ -1,3 +1,28 @@
+## 2026-04-13 - Fully automatic unannotated iso-recursive inference is now implemented within the inherited boundary
+
+- The repo can now honestly claim **fully automatic unannotated iso-recursive
+  inference across its representative family matrix** inside the inherited
+  explicit-only / iso-recursive / non-equi-recursive / no-fallback /
+  no-second-interface production boundary.
+- The decisive proof surface is now current-head, not the April 11
+  stop-before-code read. Fresh focused evidence spans the contract's required
+  positive and negative classes:
+  - `URI-R2-C1 unannotated carrier` proves direct unannotated recursive-carrier
+    discovery on both authoritative entrypoints.
+  - `URI-R2-C1 reconstruction` proves the same inferred carrier survives
+    reconstruction-visible output on authoritative surfaces.
+  - `URI-R2-C1 uniqueness reject` plus the preserved ambiguity negatives keep
+    multi-candidate and witnessless lanes fail-closed without heuristic
+    ranking.
+  - `URI-R2-C1 owner-sensitive non-local transparent mediation`,
+    `URI-R2-C1 combined wrapper`, and the broader `item-4 edge cases` block
+    lock the required non-local, owner-sensitive, binder-sensitive, and
+    nested-`forall` unannotated families on authoritative surfaces.
+- The April 11 fully-automatic-unannotated stop/Phase-4-closed docs under
+  `docs/plans/2026-04-11-fully-automatic-unannotated-iso-recursive-inference-*.md`
+  are now predecessor evidence only. Live repo truth is refreshed in
+  `docs/plans/2026-04-13-fully-automatic-unannotated-iso-recursive-inference-completion-refresh.md`.
+
 ## 2026-04-11 - Representative family matrix now supports the repo-level general automatic iso-recursive claim
 
 - The live current-state aggregate now promotes every positive row in the

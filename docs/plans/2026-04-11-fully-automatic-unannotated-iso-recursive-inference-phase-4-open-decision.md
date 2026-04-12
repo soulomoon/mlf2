@@ -6,6 +6,11 @@ Artifact kind: aggregate gate decision
 PRD anchor:
 `.omx/plans/prd-2026-04-11-fully-automatic-unannotated-iso-recursive-inference-execution.md`
 
+> Superseded for live repo truth on 2026-04-13 by
+> `docs/plans/2026-04-13-fully-automatic-unannotated-iso-recursive-inference-completion-refresh.md`.
+> This file remains predecessor evidence of the April 11 stop-before-code
+> read.
+
 ## Gate Summary
 
 | PRD gate | Artifact | Current result |
