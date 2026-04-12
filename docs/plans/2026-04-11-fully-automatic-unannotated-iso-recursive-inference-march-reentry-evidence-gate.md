@@ -6,6 +6,11 @@ Artifact kind: docs-only re-entry memo / stronger stop ledger
 PRD anchor:
 `.omx/plans/prd-2026-04-11-fully-automatic-unannotated-iso-recursive-inference-execution.md`
 
+> Superseded for live repo truth on 2026-04-13 by
+> `docs/plans/2026-04-13-fully-automatic-unannotated-iso-recursive-inference-completion-refresh.md`.
+> This file remains predecessor evidence of the April 11 stop-before-code
+> read.
+
 ## Purpose
 
 Answer the PRD's March re-entry gate using the current repository record,

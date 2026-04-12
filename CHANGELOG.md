@@ -3,6 +3,28 @@
 ## Unreleased
 
 ### Changed
+- The repo can now honestly claim fully automatic unannotated iso-recursive
+  inference across its representative family matrix inside the inherited
+  explicit-only / iso-recursive / non-equi-recursive / no-fallback /
+  no-second-interface boundary. Added
+  `docs/plans/2026-04-13-fully-automatic-unannotated-iso-recursive-inference-completion-refresh.md`,
+  marked the April 11 stop/Phase-4-closed fully-automatic-unannotated plan
+  docs as predecessor evidence only, aligned `implementation_notes.md`, and
+  renamed the stale higher-order characterization in `PipelineSpec` so current
+  repo truth no longer says the stronger unannotated lane is still closed.
+  Validated with focused matcher reruns for `URI-R2-C1 unannotated carrier`
+  (`2 examples, 0 failures`), `URI-R2-C1 uniqueness reject`
+  (`1 example, 0 failures`), `URI-R2-C1 reconstruction`
+  (`4 examples, 0 failures`), the preserved unannotated contrast
+  (`1 example, 0 failures`),
+  `URI-R2-C1 owner-sensitive non-local transparent mediation`
+  (`24 examples, 0 failures`),
+  `URI-R2-C1 combined wrapper`
+  (`24 examples, 0 failures`),
+  `item-4 edge cases`
+  (`85 examples, 0 failures`), plus `git diff --check`,
+  `./scripts/thesis-conformance-gate.sh`, and
+  `cabal build all && cabal test`.
 - Extended the retained-child exact-output research harness across the next
   same-wrapper nested-`forall` mixed stacked transparent-mediator family
   without widening production logic. `SameLaneRetainedChildRepresentativeGapSpec`

@@ -3670,7 +3670,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "characterizes higher-order recursion as recursive-at-constraint level with current Phase-6 fail-closed behavior" $ do
+      it "characterizes higher-order recursion as preserving typechecked output without a distinct automaticMuConstraint witness" $ do
         let expr =
               ELet
                 "f"
