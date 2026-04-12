@@ -5084,10 +5084,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             "sameWrapperRetainedChildAmbiguous = candidateSelectionIsAmbiguous sameWrapperRetainedChildSelection"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "case candidateSelectionValue recursiveCandidateSelection of\n              Just (RecursiveCandidateBaseTarget admission) -> Just admission\n              _ -> Nothing"
+            "selectedRecursiveCandidate = candidateSelectionValue recursiveCandidateSelection"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "case candidateSelectionValue recursiveCandidateSelection of\n              Just (RecursiveCandidateRetainedChild retainedChildProof') -> Just retainedChildProof'\n              _ -> Nothing"
+            "case selectedRecursiveCandidate of\n              Just (RecursiveCandidateBaseTarget admission) -> Just admission\n              _ -> Nothing"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "case selectedRecursiveCandidate of\n              Just (RecursiveCandidateRetainedChild retainedChildProof') -> Just retainedChildProof'\n              _ -> Nothing"
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "recursiveCandidateAmbiguous = candidateSelectionIsAmbiguous recursiveCandidateSelection"
