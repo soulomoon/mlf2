@@ -43,6 +43,7 @@ import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
 import MLF.Elab.Run.TypeOps (inlineBoundVarsType)
 import MLF.Elab.TermClosure
     ( alignTermTypeVarsToScheme
+    , alignTopTyAbsToScheme
     , alignTermTypeVarsToTopTyAbs
     , closeTermWithSchemeSubstIfNeeded
     )
@@ -198,16 +199,25 @@ elaborateAnnotationTerm annotationContext namedSetReify env exprAnn annNodeId ei
                 then
                     if canReuseSourceScheme && sourceAnnIsPolymorphic env exprAnn
                         then pure expr'
-                    else case expectedSchemeInfo of
+                else case expectedSchemeInfo of
                         Just (schemeExpected, substExpected) ->
-                            case expr' of
-                                ETyAbs{} ->
-                                    pure
-                                        ( fromMaybe expr'
-                                            ( alignTermTypeVarsToScheme schemeExpected expr'
-                                                <|> alignTermTypeVarsToTopTyAbs expr'
-                                            )
+                            let alignedExpr =
+                                    fromMaybe expr'
+                                        ( alignTopTyAbsToScheme schemeExpected expr'
+                                            <|> alignTermTypeVarsToScheme schemeExpected expr'
+                                            <|> alignTermTypeVarsToTopTyAbs expr'
                                         )
+                                alignedExprMatchesExpected =
+                                    case typeCheck alignedExpr of
+                                        Right tyExpr ->
+                                            alphaEqType tyExpr (schemeToType schemeExpected)
+                                        Left _ -> False
+                            in case expr' of
+                                ETyAbs{}
+                                    | alignedExprMatchesExpected ->
+                                        pure alignedExpr
+                                    | otherwise ->
+                                        pure (closeTermWithSchemeSubstIfNeeded substExpected schemeExpected alignedExpr)
                                 _ -> pure (closeTermWithSchemeSubstIfNeeded substExpected schemeExpected expr')
                         Nothing -> pure (fromMaybe expr' (alignTermTypeVarsToTopTyAbs expr'))
                 else

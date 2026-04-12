@@ -3,6 +3,284 @@
 ## Unreleased
 
 ### Changed
+- Extended the retained-child exact-output research harness across the next
+  same-wrapper nested-`forall` mixed stacked transparent-mediator family
+  without widening production logic. `SameLaneRetainedChildRepresentativeGapSpec`
+  now locks both mixed direct/let-aliased orders and both decuple alias-shell
+  companions on both authoritative entrypoints, so the retained-child
+  exact-output surface now covers the mixed stacked lane in addition to the
+  already-locked direct stacked transparent and stacked let-aliased families.
+  Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "same-lane retained-child representative-gap probes"'`
+  (`44 examples, 0 failures`) and `cabal build all && cabal test`
+  (`1539 examples, 0 failures`).
+- Closed the retained-child exact-output asymmetry for the same-wrapper
+  nested-`forall` stacked let-aliased transparent-mediator lane without
+  widening elaboration heuristics. `MLF.Elab.Run.Pipeline` now pre-closes
+  retained-child authoritative candidates against the root scheme before the
+  existing preserved-child replay step, so already-recursive direct packets no
+  longer lose the first closure pass merely because their pre-preserve term is
+  type-closed. `SameLaneRetainedChildRepresentativeGapSpec` now also locks
+  both the direct stacked let-aliased packet and its decuple alias-shell
+  companion on both authoritative entrypoints. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "same-lane retained-child representative-gap probes"'`
+  (`36 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "same-wrapper nested-forall plus"'`
+  (`22 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1531 examples, 0 failures`).
+- Extended the retained-child exact-output research harness across the next
+  same-wrapper nested-`forall` stacked transparent-mediator family without
+  widening production logic. `SameLaneRetainedChildRepresentativeGapSpec` now
+  locks both the direct stacked transparent-mediator packet and its decuple
+  alias-shell companion on both authoritative entrypoints, so that broader
+  retained-child parity no longer depends on the type-only `PipelineSpec`
+  rows for those two already-admitted packets. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "same-lane retained-child representative-gap probes"'`
+  (`32 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "same-wrapper nested-forall plus"'`
+  (`22 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1527 examples, 0 failures`).
+- Preserved direct clear-boundary retained-child authoritative output instead
+  of repairing only the alias-frame variants. `MLF.Elab.TermClosure` now
+  recognizes the direct same-wrapper nested-`forall` transparent-mediator
+  packet as a retained-child clear-boundary repair site, so authoritative
+  replay keeps the full recursive binder shape when the RHS already has a
+  recursive witness. `SameLaneRetainedChildRepresentativeGapSpec` now locks
+  both the direct transparent-mediator packet and its decuple alias-shell
+  companion on both authoritative entrypoints. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "same-lane retained-child representative-gap probes"'`
+  (`28 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "same-wrapper nested-forall plus"'`
+  (`22 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "item-4 edge cases"'`
+  (`85 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1523 examples, 0 failures`).
+- Extended the retained-child exact-output research harness to cover the
+  same-wrapper nested-`forall` alias-frame family in addition to the direct
+  alias-frame chain. `SameLaneRetainedChildRepresentativeGapSpec` now locks
+  the single alias-frame and decuple alias-frame same-wrapper nested-`forall`
+  packets on both authoritative entrypoints, so exact retained-child public
+  output no longer relies on implicit parity for those two already-admitted
+  packets. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "same-lane retained-child representative-gap probes"'`
+  (`24 examples, 0 failures`).
+- Implemented the next plan-aligned shared recursive-candidate selection seam
+  instead of keeping duplicate local selectors. `MLF.Elab.Run.ResultType.Util`
+  now owns a reusable `CandidateSelection` helper with both plain `Eq` and
+  custom-equality selection, `MLF.Elab.Run.ResultType.Fallback.Core` now uses
+  that shared selector for base-target / retained-child cardinality handling,
+  and `MLF.Elab.Elaborate.Algebra` now uses the same helper for the
+  alpha-equivalent helper/direct structural recovery lane. The private
+  internal library now exposes `ResultType.Util` so the shared selection law
+  is testable directly, and the retained-child exact-output research harness
+  now locks `sameLaneDecupleAliasFrameClearBoundaryExpr` on both authoritative
+  entrypoints. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "Shared candidate selection"'`
+  (`3 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "same-lane retained-child representative-gap probes"'`
+  (`20 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "item-4 edge cases"'`
+  (`85 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1515 examples, 0 failures`).
+- Extended the bounded same-wrapper nested-`forall` transparent-mediator
+  frontier without widening production logic. `PipelineSpec` now locks the
+  previously probe-only plain stacked transparent `Bool` row, both plain mixed
+  stacked wrapper orders on `Int`/`Bool`, and the reverse mixed
+  let-aliased/direct stacked decuple-alias-chain rows. That closes the
+  remaining asymmetry in the current same-wrapper stacked transparent-eta
+  family, so the broader authoritative parity surface no longer depends on
+  REPL-only evidence for those packets. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "same-wrapper nested-forall plus"'`
+  (`22 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization"'`
+  (`74 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1496 examples, 0 failures`).
+- Turned the next owner-sensitive non-local unannotated `URI-R2-C1`
+  transparent-mediator family from REPL-only evidence into durable
+  `PipelineSpec` coverage. Current-head tests now lock the packets that return
+  `hold = wrap f` directly on both authoritative entrypoints for both `Int`
+  and `Bool`, across direct transparent wrappers, let-aliased transparent
+  wrappers, stacked transparent wrappers, stacked let-aliased transparent
+  wrappers, mixed direct/let-aliased stacked wrappers, and mixed
+  let-aliased/direct stacked wrappers. The same family is now also locked
+  through a decuple owner-local alias chain for all six wrapper shapes on both
+  carriers. No production-code change was needed in this slice; the current
+  `Algebra` and pipeline behavior already admitted these packets, so the change
+  records that broader non-local unannotated route as a reviewable regression
+  surface instead of leaving it implicit. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "URI-R2-C1 owner-sensitive non-local transparent mediation"'`
+  (`24 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "item-4 edge cases"'`
+  (`73 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1477 examples, 0 failures`).
+- Narrowed unannotated recursive let recovery around a shared structural
+  candidate selector in `MLF.Elab.Elaborate.Algebra` instead of branch-order
+  precedence. Let-generalization now combines returned-helper and direct
+  recursive-carrier candidates through
+  `StructuralRecursiveCandidateSelection`, de-duplicates alpha-equivalent
+  proofs, and fails closed when distinct structural candidates survive on the
+  same self-recursive RHS. The selector is explicitly gated to true
+  self-recursive lets (`annContainsVar v rhsAnn`), so non-recursive alias
+  wrapper bindings on the owner-sensitive `P2` route keep their earlier
+  scheme flow instead of being reclassified by accident. Added a focused
+  `PipelineSpec` ambiguity regression for the direct-self-app plus
+  returned-helper multi-cluster packet, which now stays fail-closed on both
+  authoritative entrypoints. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "URI-R2-C1 ambiguity reject"'`
+  (`1 example, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "P2 representative-support harness"'`
+  (`10 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "item-4 edge cases"'`
+  (`49 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1453 examples, 0 failures`).
+- Expanded the durable `P2` non-local representative-support harness beyond
+  the exact `C1` packet and the route-pure `Bool` variant. The repo now locks
+  owner-sensitive non-local wrapper packets on both authoritative
+  entrypoints for `Int` and `Bool`: direct identity-consumer propagation,
+  transparent eta mediators, let-aliased transparent eta mediators, stacked
+  transparent eta mediators, stacked let-aliased transparent eta mediators,
+  both mixed stacked transparent-mediator orders, and the next representative
+  combined-wrapper packets around the same non-local recursive source. Current
+  representative support now also locks the transparent, let-aliased
+  transparent, stacked let-aliased transparent, and mixed
+  direct/let-aliased stacked transparent-mediator combined-wrapper shapes on
+  both carriers and both authoritative entrypoints. This turns that broader
+  `P2` route from probe-only evidence into a wider reviewable regression
+  surface. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "P2 representative-support harness"'`
+  (`24 examples, 0 failures`) and `cabal build all && cabal test`
+  (`1502 examples, 0 failures`).
+- Extended the unannotated `URI-R2-C1` mediator frontier with durable
+  combined-wrapper coverage instead of another packet-local heuristic. The
+  existing recovery path already admits the next owner-sensitive packets where
+  an identity-consumer wrapper is followed by a transparent eta mediator, a
+  let-aliased transparent eta mediator, stacked transparent eta mediators,
+  stacked let-aliased transparent eta mediators, and both mixed stacked
+  wrapper orders. `PipelineSpec` now locks those direct `Int`/`Bool` packets
+  on both authoritative entrypoints, plus the decuple owner-local alias-chain
+  variants for the single-wrapper, same-order stacked, and mixed stacked
+  shapes, so the broader unannotated lane no longer relies on REPL-only
+  evidence for those combined packets. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "URI-R2-C1 combined wrapper"'`
+  (`24 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "item-4 edge cases"'`
+  (`85 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1489 examples, 0 failures`).
+- Closed the next authoritative parity gap in the broader same-wrapper
+  mediation frontier: stacked let-aliased transparent eta mediators now
+  recover the same structural wrapper scheme as their direct transparent
+  counterparts instead of keeping a malformed generalized binder order that
+  died in Phase 7 with `TCTypeAbsVarInScope`. The term-level transparent
+  mediator recovery now looks through alias-only `let mid = h` frames when it
+  collects eta parameters, checks the structural recovery candidate against
+  the pre-let environment instead of the malformed self-binding, and treats
+  forward binder references in the generalized scheme as a recovery trigger in
+  the same narrow lane. This makes the combined
+  `same-wrapper nested-forall + stacked let-aliased transparent eta mediator`
+  family stay recursive on both authoritative pipeline entrypoints for both
+  `Int` and `Bool` carriers, and also through a decuple owner-local alias
+  chain for both carriers. The sibling let-aliased direct-wrapper lane is now
+  also locked as non-poisoning for both carriers, so a second aliased
+  mediator in scope no longer forces `wrap2 k` back onto a stale polymorphic
+  shell, including through a decuple owner-local alias chain. The mixed
+  direct/let-aliased stacked lane is now also locked through a decuple
+  owner-local alias chain for both carriers. Added ten focused
+  `PipelineSpec` regressions for the direct, sibling-direct, mixed-stack, and
+  decuple-chain `Int`/`Bool` packets. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "transparent eta mediator"'`
+  (`18 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "sameLaneClearBoundaryExpr"'`
+  (`5 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization"'`
+  (`67 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1420 examples, 0 failures`).
+- Closed the next authoritative parity gap in the broader same-wrapper
+  mediation frontier: `MLF.Elab.Elaborate.Algebra` now treats transparent
+  eta-mediated applications with a recursive variable argument as alias-shaped
+  at the binding boundary, so `let hold = wrap k` inherits `k`'s recovered
+  recursive scheme/substitution instead of keeping the mediator app's stale
+  polymorphic shell. The app elaborator also skips replay-only instantiation
+  work when the transparent mediator will be bypassed to the already-typed
+  recursive argument. This makes the combined
+  `same-wrapper nested-forall + transparent eta mediator` family stay
+  recursive on both authoritative pipeline entrypoints for both `Int` and
+  `Bool` carriers instead of failing first in Phase 6 with
+  `PhiTranslatabilityError` and then in Phase 7 with `TCArgumentMismatch`.
+  The same family now also stays recursive through a decuple owner-local alias
+  chain for both the direct transparent eta mediator and the let-aliased
+  transparent eta mediator variant, across both `Int` and `Bool` carriers.
+  Added focused `PipelineSpec` regressions for both carrier variants plus the
+  four deeper decuple alias-chain packets.
+  Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "same-wrapper nested-forall plus transparent eta mediator"'`
+  (`6 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization"'`
+  (`55 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1408 examples, 0 failures`).
+- Closed the authoritative parity gap for the combined same-wrapper
+  nested-`forall` plus owner-local alias packet: `MLF.Elab.Elaborate.Algebra`
+  now recovers direct instantiation for single-binder identity-like
+  polymorphic wrappers when authoritative replay translation is missing but
+  the application argument already carries a contractive recursive witness.
+  This makes
+  `let id = \z.z in let k = id (\x:μα.α→Int. x) in let hold = k in let u = (\y -> y) hold in u`
+  stay recursive on both authoritative pipeline entrypoints instead of
+  failing in Phase 6 with `PhiTranslatabilityError`, while the fallback
+  surface was already recursive. Added new `PipelineSpec` and
+  `Research.P5ClearBoundarySpec` regressions for that combined packet, and
+  locked `sameLaneDecupleAliasFrameClearBoundaryExpr` as an admitted
+  broader-positive clear-boundary row on both fallback and authoritative
+  surfaces. The same combined nested-`forall` family is now also durably
+  covered through a decuple owner-local alias chain, not just a single
+  alias-frame packet. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "P5 clear-boundary retained-child probes"'`
+  (`28 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization"'`
+  (`49 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1402 examples, 0 failures`).
+- Refactored result-type fallback base-target selection around an explicit
+  admission model: `MLF.Elab.Run.ResultType.Fallback.Core` now classifies
+  unique root-base, unique inst-arg-base, and scheme-alias/base-like packets
+  through a named `BaseTargetAdmission` proof instead of inferring them from
+  separate local/non-local singleton booleans. This locks the newly admitted
+  unique non-local single-base and inst-arg-only singleton-base families into
+  the current truth while preserving the non-local multi-inst and inst-arg
+  multi-base contrasts as ambiguity rejects. The retained-child same-lane
+  fallback lane now also rejects sibling-candidate, intra-target, and mixed
+  retained-child/base-target ambiguity explicitly instead of resolving them by
+  traversal order or family priority, while keeping inst-root evidence as
+  fallback only when the child target has no direct recursive witness. Added
+  test-first `PipelineSpec` source-guard coverage for the classifier contract,
+  runtime retained-child ambiguity regressions, the new mixed-family
+  ambiguity regression, and synced the live unannotated-family planning
+  artifacts to the new classification. Validated
+  with `cabal test mlf2-test --test-show-details=direct --test-options='--match "ARI-C1 feasibility characterization"'`
+  (`46 examples, 0 failures`),
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "item-4 edge cases"'`
+  (`24 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1393 examples, 0 failures`).
+- Extended the automatic iso-recursive inference surface through mediated
+  unannotated same-wrapper nested-`forall` lanes: let-scheme elaboration now
+  reconstructs a contractive recursive carrier from the lambda body result
+  when an identity-like wrapper hides the recursive witness at the mediated
+  node, so `let id = \z.z in let f = id (\x -> let _ = f x in 0/true) in (\y
+  -> y) f` now succeeds on both authoritative pipeline entrypoints while the
+  witnessless `let f = id f in f` lane stays fail-closed. Added focused
+  `PipelineSpec` coverage for direct, alias-reconstruction, and nested-`forall`
+  `Bool` packets plus the new mediated `Int`/`Bool` positives.
+- Broadened unannotated recursive let inference for returned helper fixed
+  points: when let-generalization sees a nested self-application used as the
+  argument to an outer recursive call, elaboration now prefers the inferred
+  self-codomain carrier over the bottom-collapsed alias placeholder and
+  aligns rolled lambdas against the unfolded `μ` body. This admits
+  `let f = \x -> let g = \y -> f (g y) in g in f` as
+  `(μa. a -> a) -> (μa. a -> a)` on both authoritative pipeline entrypoints
+  instead of failing at Phase 7. The authoritative retained-child
+  preservation path now also re-closes preserved terms against the root
+  scheme, which keeps the alias-frame clear-boundary family stable after the
+  broader unannotated rewrites. Added a positive `PipelineSpec` regression
+  for the returned-helper fixed-point lane. Validated with
+  `cabal build all && cabal test` (`1392 examples, 0 failures`).
 - Refreshed the representative-family readiness ledger so the repo can now
   honestly claim general automatic iso-recursive inference inside its
   inherited explicit-only production boundary: added a direct

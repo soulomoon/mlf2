@@ -1,5 +1,8 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.ResultType.Util (
+    CandidateSelection(..),
+    selectUniqueCandidate,
+    selectUniqueCandidateBy,
     generalizeWithPlan,
     resultTypeRoots,
     containsBoundForall,
@@ -10,7 +13,6 @@ module MLF.Elab.Run.ResultType.Util (
 ) where
 
 import Data.Functor.Foldable (cata)
-
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
@@ -32,6 +34,31 @@ import MLF.Elab.Inst (applyInstantiation)
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr(..))
 
+data CandidateSelection a
+    = NoCandidateSelection
+    | UniqueCandidateSelection a
+    | AmbiguousCandidateSelection
+    deriving (Eq, Show)
+
+selectUniqueCandidate :: Eq a => [a] -> CandidateSelection a
+selectUniqueCandidate = selectUniqueCandidateBy (==)
+
+selectUniqueCandidateBy :: (a -> a -> Bool) -> [a] -> CandidateSelection a
+selectUniqueCandidateBy eqCandidate =
+    foldl' step NoCandidateSelection
+  where
+    step selection candidate =
+        case selection of
+            NoCandidateSelection ->
+                UniqueCandidateSelection candidate
+            UniqueCandidateSelection existing
+                | eqCandidate existing candidate ->
+                    UniqueCandidateSelection existing
+                | otherwise ->
+                    AmbiguousCandidateSelection
+            AmbiguousCandidateSelection ->
+                AmbiguousCandidateSelection
+
 -- | Generalize with plan helper
 generalizeWithPlan
     :: PresolutionPlanBuilder
@@ -41,14 +68,12 @@ generalizeWithPlan
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 generalizeWithPlan planBuilder bindParentsGa presolutionView scopeRoot targetNode =
-    let runWithGa mbGa =
-            generalizeAtWithBuilder
-                planBuilder
-                mbGa
-                presolutionView
-                scopeRoot
-                targetNode
-    in runWithGa (Just bindParentsGa)
+    generalizeAtWithBuilder
+        planBuilder
+        (Just bindParentsGa)
+        presolutionView
+        scopeRoot
+        targetNode
 
 resultTypeRoots
     :: (NodeId -> NodeId)

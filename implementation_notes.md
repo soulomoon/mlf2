@@ -10,12 +10,210 @@
   `runPipelineElab` and `runPipelineElabChecked`, giving the family direct
   authoritative support across two admitted packets under the same non-local
   route story.
-- `P5 polymorphism-nested-forall` remains closed on the merged nonuple
-  frontier, so the selected same-wrapper nested-`forall` packet plus the
-  clear-boundary chain through `sameLaneNonupleAliasFrameClearBoundaryExpr`
-  continue to provide bounded broader-positive support while
-  `sameLaneDecupleAliasFrameClearBoundaryExpr` and deeper alias shells remain
-  closed.
+- That `P2` harness now also includes owner-sensitive non-local wrapper
+  packets on the same route, not just the exact source packet. Durable current
+  coverage now includes identity-consumer propagation, transparent eta
+  mediation, let-aliased transparent eta mediation, and stacked transparent
+  eta mediation around the same non-local recursive source for both `Int` and
+  `Bool`. This keeps the route representative when ownership moves through
+  local wrapper binds instead of only when the packet is returned directly.
+- The result-type fallback now also makes its non-local singleton-base support
+  explicit instead of inferring it from separate local/non-local booleans:
+  `MLF.Elab.Run.ResultType.Fallback.Core` carries a named
+  `BaseTargetAdmission` classifier for unique root-base, unique inst-arg-base,
+  and scheme-alias/base-like packets, so the unique non-local single-base and
+  inst-arg-only singleton-base families are now admitted current-truth rows
+  rather than unresolved fail-closed folklore.
+- `P5 polymorphism-nested-forall` no longer stops at the historical nonuple
+  frontier in the live repo state. Durable current-head coverage now includes
+  `sameLaneDecupleAliasFrameClearBoundaryExpr`, and the combined
+  same-wrapper nested-`forall` plus owner-local alias packet
+  `let id = \z.z in let k = id (\x:μα.α→Int. x) in let hold = k in let u = (\y
+  -> y) hold in u` is now recursive on the fallback surface and on both
+  authoritative pipeline entrypoints. The same combined family is also now
+  durably covered through a decuple owner-local alias chain, and the next
+  composed transparent eta-mediated variant
+  `let id = \z.z in let wrap = \h.\z.h z in let k = id (\x:μα.α→Int/Bool. x) in let hold = wrap k in (\y -> y) hold`
+  is now recursive on both authoritative pipeline entrypoints for both `Int`
+  and `Bool` carriers. Both the direct transparent eta mediator and the
+  let-aliased transparent eta mediator variant now also stay recursive
+  through a decuple owner-local alias chain for both carrier families. The
+  next stacked let-aliased transparent mediator family
+  `let wrap1 = \h. let mid = h in \z. mid z in let wrap2 = \h. let mid = h in \z. mid z in let hold = wrap2 (wrap1 k) in ...`
+  is now also recursive on both authoritative entrypoints for both `Int` and
+  `Bool` carriers, and through a decuple owner-local alias chain for both
+  carriers. The sibling let-aliased direct-wrapper lane
+  `let wrap1 = \h. let mid = h in \z. mid z in let wrap2 = \h. let mid = h in \z. mid z in let hold = wrap2 k in ...`
+  is now also stable for both carriers instead of poisoning `wrap2 k` back to
+  a stale polymorphic shell, including through a decuple owner-local alias
+  chain. The mixed direct/let-aliased stacked lane is also now durably covered
+  through a decuple owner-local alias chain for both carriers. The term-level
+  transparent-mediator scheme recovery now walks through alias-only `let`
+  frames while collecting eta parameters, and it treats forward binder
+  references or alpha-inequivalent generalized schemes as narrow recovery
+  triggers so malformed binder order and stale wrapper shells no longer block
+  the stacked alias-shaped lane. The older nonuple closeout record is
+  historical predecessor evidence only. No broader upper frontier beyond the
+  newly covered decuple alias-chain plus stacked transparent-eta and
+  sibling-direct packets is claimed here yet.
+- The mediated unannotated same-wrapper nested-`forall` lane now also stays
+  recursive on both authoritative entrypoints: when let-generalization sees an
+  identity-like wrapper around a self-recursive unannotated lambda and direct
+  node reification no longer exposes the recursive carrier, elaboration now
+  reconstructs `μa. a -> τ` from the lambda body result type and the detected
+  `f x` self-application. This clears the previously failing
+  `let id = \z.z in let f = id (\x -> let _ = f x in 0/true) in (\y -> y) f`
+  pocket while preserving the fail-closed witnessless lane
+  `let f = id f in f`.
+- That unannotated mediated lane is now durably covered through the next
+  combined transparent-mediator shapes as well. The already-admitted recovery
+  path keeps
+  `let id = \z.z in let wrap = \h.\z.h z in let f = id (\x -> let _ = f x in 0/true) in let hold = wrap f in (\y -> y) hold`
+  recursive on both authoritative entrypoints, and the same remains true for
+  the let-aliased transparent eta form
+  `let wrap = \h. let k = h in \z. k z in ...`, plus stacked transparent
+  mediators `wrap2 (wrap1 f)`. Current durable coverage now includes those
+  direct `Int`/`Bool` packets and their decuple owner-local alias-chain
+  variants in `PipelineSpec`, while still making no broader claim beyond the
+  tested combined-wrapper family.
+- The owner-sensitive non-local analogue of that unannotated transparent-
+  mediator family is now also durably covered. Current `PipelineSpec`
+  coverage now locks the packets that return the mediator result directly
+  (`let hold = wrap f in hold`) for both `Int` and `Bool`, across direct
+  transparent wrappers, let-aliased transparent wrappers, stacked transparent
+  wrappers, and stacked let-aliased transparent wrappers, on both
+  authoritative entrypoints. The same family is now also durably covered
+  through a decuple owner-local alias chain for all four wrapper shapes on
+  both carriers. No new production edit was required for this slice; the
+  current implementation already admitted the route, and the repo now records
+  it as durable current truth rather than REPL-only evidence.
+- `MLF.Elab.Elaborate.Algebra` now also uses one shared structural recursive
+  candidate selector for the live unannotated recovery families instead of
+  helper-first branch order. Returned-helper and direct recursive-carrier
+  proofs are collected into `StructuralRecursiveCandidateSelection`,
+  alpha-equivalent candidates collapse to one proof, and distinct surviving
+  candidates now keep the lane fail-closed on genuinely self-recursive RHSs
+  instead of choosing the first structural story. That gate is explicitly
+  restricted to `annContainsVar v rhsAnn`, so non-recursive alias-wrapper
+  lets on the owner-sensitive `P2` route continue to preserve their original
+  scheme path. Durable current-head negative coverage now includes the direct
+  self-app plus returned-helper multi-cluster packet, which stays fail-closed
+  on both authoritative entrypoints.
+- The previously fail-closed returned-helper fixed-point lane is now also
+  admitted on both authoritative entrypoints: when an unannotated recursive
+  helper feeds its own self-application into an outer recursive call
+  (`let f = \x -> let g = \y -> f (g y) in g in f`), let-generalization now
+  prefers the inferred self-codomain carrier `μa. a -> a` over the
+  bottom-collapsed alias placeholder, and the rolled RHS lambda is aligned
+  against the unfolded `μ` body before the final `ERoll`. This clears the old
+  Phase 7 `TCArgumentMismatch` pocket while preserving the witnessless
+  fail-closed lane.
+- The retained-child authoritative preservation rewrite now re-closes its
+  adjusted term against the root scheme before final output. That preserves
+  the settled alias-frame clear-boundary chain after the broader unannotated
+  recursive rewrites, instead of dropping a leading unbounded `forall` on
+  `runPipelineElab`.
+- The authoritative replay gap for the combined nested-`forall` plus
+  owner-local alias packet is now closed in `MLF.Elab.Elaborate.Algebra`.
+  When `reifyInst` cannot recover an authoritative translation for a
+  single-binder identity-like polymorphic wrapper, elaboration now directly
+  instantiates that wrapper at the already-typed recursive argument carrier
+  when the argument has a contractive recursive witness. This removes the old
+  Phase 6 `PhiTranslatabilityError` without widening the fail-closed negative
+  lanes.
+- The same-lane retained-child fallback path is now cardinality-aware in the
+  three live ambiguity shapes that were still positional on April 12: multiple
+  sibling retained-child candidates, multiple recursive descendants inside one
+  retained-child target, and mixed retained-child/base-target competition now
+  keep the lane fail-closed instead of choosing a witness by traversal order
+  or family priority. Direct child evidence remains the primary proof source;
+  inst-root evidence still acts only as fallback when the child target has no
+  direct recursive witness.
+- The preserved non-local negatives are now better described as ambiguity
+  rejects than as unresolved positives: the multi-inst and inst-arg multi-base
+  contrast rows stay reject-side because the current admission model requires a
+  unique structural base-target proof, not because the route is still
+  unclassified.
+- The owner-sensitive non-local unannotated `URI-R2-C1`
+  transparent-mediation regression surface now also includes both mixed
+  direct/let-aliased stacked wrapper orders, with and without decuple
+  owner-local alias shells, on both carriers and both authoritative
+  entrypoints. No production-code widening was required for this slice.
+- The adjacent unannotated `URI-R2-C1` combined-wrapper surface now also
+  includes stacked plain transparent mediators, stacked plain let-aliased
+  mediators, and both mixed stacked orders on both authoritative entrypoints,
+  with the mixed stacked orders additionally locked through the decuple
+  owner-local alias chain. No production-code widening was required there
+  either.
+- The bounded same-wrapper nested-`forall` transparent-mediator surface now
+  also includes the plain stacked transparent `Bool` row, both plain mixed
+  stacked orders on both carriers, and the reverse mixed
+  let-aliased/direct stacked decuple-alias-chain rows. No production-code
+  widening was required for that slice either.
+- The `P2` representative-support harness now also includes owner-sensitive
+  non-local stacked let-aliased transparent mediators and both mixed stacked
+  transparent-mediator orders on both carriers. No production-code widening
+  was required for that slice either.
+- That same `P2` harness now also includes the next representative
+  combined-wrapper owner-sensitive non-local packets: transparent,
+  let-aliased transparent, stacked let-aliased transparent, and mixed
+  direct/let-aliased stacked transparent mediators on both carriers. No
+  production-code widening was required for that slice either.
+- `MLF.Elab.Run.ResultType.Util` now owns one shared `CandidateSelection`
+  helper for the current recursive-candidate seams. `Fallback.Core` uses it
+  for base-target / retained-child cardinality, and `Elaborate.Algebra` uses
+  the same helper for the alpha-equivalent helper/direct structural recovery
+  lane instead of carrying a second local selector. The private internal
+  library now exposes that util seam for direct tests, and the retained-child
+  exact-output research harness now locks the decuple alias-frame packet on
+  both authoritative entrypoints.
+- That retained-child exact-output research harness now also locks the
+  same-wrapper nested-`forall` alias-frame and decuple alias-frame packets on
+  both authoritative entrypoints, so those already-admitted retained-child
+  packets now have explicit exact-output coverage instead of inheriting
+  confidence only from broader parity harnesses.
+- `MLF.Elab.TermClosure` now preserves direct clear-boundary retained-child
+  packets, not just the alias-frame repair lane. When authoritative replay
+  reaches the direct same-wrapper nested-`forall` transparent-mediator packet,
+  retained-child preservation now returns the recursive RHS directly once the
+  surrounding clear-boundary body and recursive witness are confirmed. The
+  retained-child exact-output research harness now also locks both that direct
+  packet and its decuple alias-shell companion on both authoritative
+  entrypoints.
+- That retained-child exact-output research harness now also locks the direct
+  stacked transparent-mediator same-wrapper nested-`forall` packet and its
+  decuple alias-shell companion on both authoritative entrypoints, so the next
+  already-admitted stacked transparent family now has exact-output coverage
+  instead of relying only on broader type-parity rows.
+- `MLF.Elab.Run.Pipeline` now pre-closes retained-child authoritative
+  candidates against the root scheme before replaying the preserved child.
+  That keeps already-recursive direct packets from skipping the first closure
+  pass just because the pre-preserve term happens to be type-closed, which in
+  turn closes the direct stacked let-aliased same-wrapper nested-`forall`
+  exact-output asymmetry without widening `Elaborate.Algebra`.
+- That retained-child exact-output research harness now also locks the direct
+  stacked let-aliased transparent-mediator same-wrapper nested-`forall`
+  packet and its decuple alias-shell companion on both authoritative
+  entrypoints, so the stacked let-aliased family now has the same exact-output
+  coverage as the already-admitted direct stacked transparent family.
+- That retained-child exact-output research harness now also locks both mixed
+  direct/let-aliased stacked same-wrapper nested-`forall` packets and both
+  decuple alias-shell companions on both authoritative entrypoints, so the
+  mixed stacked transparent-mediator lane now has the same exact-output
+  coverage as the already-admitted direct stacked transparent and stacked
+  let-aliased families.
+- Fresh focused verification on current HEAD is green:
+  `Shared candidate selection` -> `3 examples, 0 failures`,
+  `same-lane retained-child representative-gap probes` -> `44 examples, 0 failures`,
+  `P2 representative-support harness` -> `24 examples, 0 failures`,
+  `URI-R2-C1 combined wrapper` -> `24 examples, 0 failures`,
+  `URI-R2-C1 owner-sensitive non-local transparent mediation` -> `24 examples, 0 failures`,
+  `URI-R2-C1 ambiguity reject` -> `1 example, 0 failures`,
+  `item-4 edge cases` -> `85 examples, 0 failures`,
+  `same-wrapper nested-forall plus` -> `22 examples, 0 failures`,
+  `sameLaneClearBoundaryExpr` -> `5 examples, 0 failures`,
+  `ARI-C1 feasibility characterization` -> `74 examples, 0 failures`,
+  `cabal build all && cabal test` -> `1539 examples, 0 failures`.
 - The superseding current-state records are:
   - `docs/plans/2026-04-11-general-automatic-iso-recursive-full-inference-positive-family-aggregate-classification-current-state-refresh.md`
   - `docs/plans/2026-04-11-general-automatic-iso-recursive-full-inference-repo-level-readiness-and-architecture-decision-current-state-refresh.md`
@@ -25,7 +223,7 @@
   no-fallback / no-second-interface production boundary.
 - Verification on current HEAD:
   `./scripts/thesis-conformance-gate.sh` passed, and
-  `cabal build all && cabal test` passed with `1371 examples, 0 failures`.
+  `cabal build all && cabal test` passed with `1420 examples, 0 failures`.
 
 ## 2026-04-10 - P5 broader-positive enactment family closed on the merged nonuple frontier
 

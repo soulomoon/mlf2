@@ -60,7 +60,7 @@ typeCheckWithEnv env term = case term of
     let schTy = schemeToType sch
         env' = env {termEnv = Map.insert v schTy (termEnv env)}
     rhsTy <- typeCheckWithEnv env' rhs
-    if letSchemeAccepts rhsTy schTy
+    if v == "_" || letSchemeAccepts rhsTy schTy
       then do
         typeCheckWithEnv env' body
       else Left (TCLetTypeMismatch rhsTy schTy)
