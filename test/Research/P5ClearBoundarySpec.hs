@@ -105,6 +105,18 @@ spec =
             fallbackTy <- sameLaneNonupleAliasFrameClearBoundaryFallbackType
             containsMu fallbackTy `shouldBe` True
 
+        it "sameLaneDecupleAliasFrameClearBoundaryExpr is the next broader-positive owner-sensitive clear-boundary packet beyond the merged nonuple frontier" $ do
+            fallbackTy <- sameLaneDecupleAliasFrameClearBoundaryFallbackType
+            containsMu fallbackTy `shouldBe` True
+
+        it "sameWrapperNestedForallAliasFrameClearBoundaryExpr keeps the combined nested-forall plus owner-local alias packet recursive on the fallback surface" $ do
+            fallbackTy <- sameWrapperNestedForallAliasFrameClearBoundaryFallbackType
+            containsMu fallbackTy `shouldBe` True
+
+        it "sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr keeps the combined nested-forall plus decuple owner-local alias packet recursive on the fallback surface" $ do
+            fallbackTy <- sameWrapperNestedForallDecupleAliasFrameClearBoundaryFallbackType
+            containsMu fallbackTy `shouldBe` True
+
         it "nestedForallContrastExpr stays recursive as preserved merged-baseline same-wrapper nested-forall success across a nested forall boundary" $ do
             fallbackTy <- fallbackType nestedForallContrastExpr
             containsMu fallbackTy `shouldBe` True
@@ -249,6 +261,48 @@ spec =
                 )
                 pipelineRuns
 
+        it "sameLaneDecupleAliasFrameClearBoundaryExpr is the next broader-positive owner-sensitive clear-boundary packet on both authoritative entrypoints" $ do
+            let pipelineRuns =
+                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDecupleAliasFrameClearBoundaryExpr))
+                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneDecupleAliasFrameClearBoundaryExpr))
+                    ]
+            mapM_
+                (\(label, result) -> case result of
+                    Left err ->
+                        expectationFailure (label ++ ": " ++ renderPipelineError err)
+                    Right (_term, ty) ->
+                        containsMu ty `shouldBe` True
+                )
+                pipelineRuns
+
+        it "sameWrapperNestedForallAliasFrameClearBoundaryExpr keeps the combined nested-forall plus owner-local alias packet recursive on both authoritative entrypoints" $ do
+            let pipelineRuns =
+                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallAliasFrameClearBoundaryExpr))
+                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameWrapperNestedForallAliasFrameClearBoundaryExpr))
+                    ]
+            mapM_
+                (\(label, result) -> case result of
+                    Left err ->
+                        expectationFailure (label ++ ": " ++ renderPipelineError err)
+                    Right (_term, ty) ->
+                        containsMu ty `shouldBe` True
+                )
+                pipelineRuns
+
+        it "sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr keeps the combined nested-forall plus decuple owner-local alias packet recursive on both authoritative entrypoints" $ do
+            let pipelineRuns =
+                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr))
+                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr))
+                    ]
+            mapM_
+                (\(label, result) -> case result of
+                    Left err ->
+                        expectationFailure (label ++ ": " ++ renderPipelineError err)
+                    Right (_term, ty) ->
+                        containsMu ty `shouldBe` True
+                )
+                pipelineRuns
+
         it "selected same-wrapper nested-forall preserved merged-baseline packet stays recursive on both authoritative entrypoints" $ do
             let pipelineRuns =
                     [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))
@@ -354,9 +408,47 @@ sameLaneNonupleAliasFrameClearBoundaryExpr =
                         (ELet "tail" (EVar "deep")
                             (ELet "leaf" (EVar "tail")
                                 (ELet "tip" (EVar "leaf")
+                                        (ELet "bud" (EVar "tip")
+                                            (ELet "seed" (EVar "bud")
+                                                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "seed")) (EVar "u")))))))))))
+
+sameLaneDecupleAliasFrameClearBoundaryExpr :: SurfaceExpr
+sameLaneDecupleAliasFrameClearBoundaryExpr =
+    ELet "k" (ELamAnn "x" recursiveAnn (EVar "x"))
+        (ELet "hold" (EVar "k")
+            (ELet "keep" (EVar "hold")
+                (ELet "more" (EVar "keep")
+                    (ELet "deep" (EVar "more")
+                        (ELet "tail" (EVar "deep")
+                            (ELet "leaf" (EVar "tail")
+                                (ELet "tip" (EVar "leaf")
                                     (ELet "bud" (EVar "tip")
                                         (ELet "seed" (EVar "bud")
-                                            (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "seed")) (EVar "u")))))))))))
+                                            (ELet "grain" (EVar "seed")
+                                                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "grain")) (EVar "u"))))))))))))
+
+sameWrapperNestedForallAliasFrameClearBoundaryExpr :: SurfaceExpr
+sameWrapperNestedForallAliasFrameClearBoundaryExpr =
+    sameWrapperNestedForallAliasChainExpr ["hold"]
+
+sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr :: SurfaceExpr
+sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr =
+    sameWrapperNestedForallAliasChainExpr
+        ["hold", "keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain"]
+
+sameWrapperNestedForallAliasChainExpr :: [String] -> SurfaceExpr
+sameWrapperNestedForallAliasChainExpr aliases =
+    ELet "id" (ELam "z" (EVar "z"))
+        (ELet "k" (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+            (sameWrapperAliasChain aliases "k"))
+
+sameWrapperAliasChain :: [String] -> String -> SurfaceExpr
+sameWrapperAliasChain aliases source =
+    case aliases of
+        [] ->
+            ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+        aliasName : rest ->
+            ELet aliasName (EVar source) (sameWrapperAliasChain rest aliasName)
 
 nestedForallContrastExpr :: SurfaceExpr
 nestedForallContrastExpr =
@@ -487,6 +579,46 @@ sameLaneNonupleAliasFrameClearBoundaryFallbackType = do
         inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
     requireRight (computeResultTypeFallback inputs innerCanon innerPre)
 
+sameLaneDecupleAliasFrameClearBoundaryFallbackType :: IO ElabType
+sameLaneDecupleAliasFrameClearBoundaryFallbackType = do
+    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty sameLaneDecupleAliasFrameClearBoundaryExpr)
+    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+        innerCanon = extractFirstApp annCanon0
+        innerPre = extractFirstApp annPre0
+        (retainedRoot, retainedChild) = case innerCanon of
+            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
+        inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+    requireRight (computeResultTypeFallback inputs innerCanon innerPre)
+
+sameWrapperNestedForallAliasFrameClearBoundaryFallbackType :: IO ElabType
+sameWrapperNestedForallAliasFrameClearBoundaryFallbackType = do
+    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty sameWrapperNestedForallAliasFrameClearBoundaryExpr)
+    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+        innerCanon = extractFirstApp (extractSelectedBody annCanon0)
+        innerPre = extractFirstApp (extractSelectedBody annPre0)
+        (retainedRoot, retainedChild) = case innerCanon of
+            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            other ->
+                error
+                    ("expected same-wrapper nested-forall alias-frame retained-child app shape, got " ++ show other)
+        inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+    requireRight (computeResultTypeFallback inputs innerCanon innerPre)
+
+sameWrapperNestedForallDecupleAliasFrameClearBoundaryFallbackType :: IO ElabType
+sameWrapperNestedForallDecupleAliasFrameClearBoundaryFallbackType = do
+    artifacts <- requireRight (runPipelineArtifactsDefault Set.empty sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr)
+    let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+        innerCanon = extractFirstApp (extractSelectedBody annCanon0)
+        innerPre = extractFirstApp (extractSelectedBody annPre0)
+        (retainedRoot, retainedChild) = case innerCanon of
+            AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+            other ->
+                error
+                    ("expected same-wrapper nested-forall decuple alias retained-child app shape, got " ++ show other)
+        inputs = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+    requireRight (computeResultTypeFallback inputs innerCanon innerPre)
+
 fallbackType :: SurfaceExpr -> IO ElabType
 fallbackType expr = do
     artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
@@ -531,13 +663,16 @@ extractFirstAppMaybe ann0 = case ann0 of
             Nothing -> extractFirstAppMaybe body
     _ -> Nothing
 
-extractSelectedBodyApp :: AnnExpr -> AnnExpr
-extractSelectedBodyApp ann0 = case ann0 of
-    ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ body _) _ _) _ ->
-        case body of
-            AAnn inner _ _ -> inner
-            other -> other
+extractSelectedBody :: AnnExpr -> AnnExpr
+extractSelectedBody ann0 = case ann0 of
+    ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ _ body _) _ _) _ -> body
     _ -> error ("unexpected same-wrapper nested-forall wrapper shape: " ++ show ann0)
+
+extractSelectedBodyApp :: AnnExpr -> AnnExpr
+extractSelectedBodyApp ann0 =
+    case extractSelectedBody ann0 of
+        AAnn inner _ _ -> inner
+        other -> other
 
 wireSameLaneLocalRoot :: ResultTypeInputs -> NodeId -> NodeId -> ResultTypeInputs
 wireSameLaneLocalRoot inputs rootNid childNid =

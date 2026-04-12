@@ -56,6 +56,11 @@ import MLF.Elab.Run.ResultType
     rtcEdgeTraces,
     rtcEdgeWitnesses,
   )
+import MLF.Elab.Run.ResultType.Util
+  ( CandidateSelection (..),
+    selectUniqueCandidate,
+    selectUniqueCandidateBy,
+  )
 import MLF.Elab.Run.Util
   ( canonicalizeExpansion,
     canonicalizeTrace,
@@ -109,6 +114,11 @@ matchesRecursiveArrow actual expected = case (actual, expected) of
     matchesRecursiveMu domA domE && matchesRecursiveMu codA codE
   _ -> False
 
+matchesRecursiveArrowCodomain :: ElabType -> ElabType -> Bool
+matchesRecursiveArrowCodomain actual expected = case actual of
+  TArrow _ cod -> matchesRecursiveMu cod expected
+  _ -> False
+
 matchesRecursiveMu :: ElabType -> ElabType -> Bool
 matchesRecursiveMu actual expected = case (actual, expected) of
   (TMu _ bodyA, TMu _ bodyE) -> stripMuNames bodyA == stripMuNames bodyE
@@ -149,6 +159,10 @@ expectedSameLaneAliasFrameClearBoundaryArrow =
 expectedUriR2C1RecursiveIntCarrier :: ElabType
 expectedUriR2C1RecursiveIntCarrier =
   TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int")))
+
+expectedUriR2C1RecursiveBoolCarrier :: ElabType
+expectedUriR2C1RecursiveBoolCarrier =
+  TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Bool")))
 
 containsMu :: ElabType -> Bool
 containsMu ty = case ty of
@@ -338,6 +352,21 @@ resultTypeInputsForArtifacts
 
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
+  describe "Shared candidate selection" $ do
+    it "deduplicates repeated equal candidates instead of treating repeats as ambiguity" $ do
+      selectUniqueCandidate [1 :: Int, 1, 1]
+        `shouldBe` UniqueCandidateSelection 1
+
+    it "keeps distinct candidates fail-closed as ambiguity" $ do
+      selectUniqueCandidate [1 :: Int, 2]
+        `shouldBe` AmbiguousCandidateSelection
+
+    it "supports custom equality so structurally equivalent candidates collapse to one choice" $ do
+      selectUniqueCandidateBy
+        (\(_, arityA) (_, arityB) -> arityA == arityB)
+        [("helper", 2 :: Int), ("direct", 2)]
+        `shouldBe` UniqueCandidateSelection ("helper", 2)
+
   describe "Elaboration helpers" $ do
     it "reifies type with flexible bound" $ do
       -- Note: With coercion-only annotations, let-bindings with annotated RHS
@@ -1400,7 +1429,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 typeCheck termChecked `shouldBe` Right tyChecked
 
     describe "Automatic μ-introduction (item-4 edge cases)" $ do
-      it "characterizes nested recursive lets as Phase-4-safe with current Phase-7 type-checking rejection" $ do
+      it "preserves returned nested recursive helper fixed points on both authoritative entrypoints" $ do
         let expr =
               ELet
                 "f"
@@ -1413,18 +1442,31 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
                 ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
               ]
-        -- Phase 4 witness normalization now handles TyMu; downstream Phase 7 type-checking still rejects.
         forM_ pipelineRuns $ \(label, result) ->
           case result of
-            Left err -> do
-              let rendered = renderPipelineError err
-              rendered `shouldSatisfy` isInfixOf "Phase 7 (type checking)"
-              rendered
-                `shouldSatisfy` \msg ->
-                  isInfixOf "TCRollBodyMismatch" msg || isInfixOf "TCArgumentMismatch" msg
-            Right (_term, ty) ->
+            Left err ->
               expectationFailure
-                (label ++ " unexpectedly succeeded with type " ++ show ty)
+                ( label
+                    ++ " nested recursive helper fixed point: expected recursive success, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              case strippedTy of
+                TArrow dom cod -> do
+                  unless (containsMu dom && matchesRecursiveMu dom cod) $
+                    expectationFailure
+                      ( label
+                          ++ " nested recursive helper fixed point: expected matching recursive domain/codomain after stripping leading foralls, got "
+                          ++ show ty
+                      )
+                _ ->
+                  expectationFailure
+                    ( label
+                        ++ " nested recursive helper fixed point: expected arrow type after stripping leading foralls, got "
+                        ++ show ty
+                    )
+              typeCheck term `shouldBe` Right ty
 
       it "characterizes polymorphic recursion with annotation without Phase-3 regression" $ do
         let ann = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
@@ -1540,6 +1582,36 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
+      it "URI-R2-C1 unannotated carrier: direct recursiveArrowBool admits a visible recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "f"
+                (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True))))
+                (EVar "f")
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 direct carrier: expected recursive Bool carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 direct carrier: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
       it "URI-R2-C1 uniqueness reject: witnessless mediation stays fail-closed without a contractive recursive witness" $ do
         let expr =
               ELet
@@ -1555,6 +1627,446 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Left _ -> pure ()
             Right (term, ty) -> do
               containsMu ty `shouldBe` False
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 non-local identity consumer: direct id application preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "f"
+                    (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
+                    (EApp (EVar "id") (EVar "f"))
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 non-local identity consumer: expected recursive Int carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 non-local identity consumer: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 non-local identity consumer: direct id application preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "f"
+                    (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True))))
+                    (EApp (EVar "id") (EVar "f"))
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 non-local identity consumer: expected recursive Bool carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 non-local identity consumer: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 owner-local identity consumer: let-aliased recursive Int carrier survives id application on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "f"
+                    (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
+                    (ELet "hold" (EVar "f") (EApp (EVar "id") (EVar "hold")))
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 owner-local identity consumer: expected recursive Int carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 owner-local identity consumer: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 owner-local identity consumer: let-aliased recursive Bool carrier survives id application on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "f"
+                    (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True))))
+                    (ELet "hold" (EVar "f") (EApp (EVar "id") (EVar "hold")))
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 owner-local identity consumer: expected recursive Bool carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 owner-local identity consumer: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 identity consumer wrapper: named wrap preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "u" (EApp (EVar "id") (EVar "u")))
+                    ( ELet
+                        "f"
+                        (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
+                        (EApp (EVar "wrap") (EVar "f"))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 identity consumer wrapper: expected recursive Int carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 identity consumer wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 identity consumer wrapper: named wrap preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "u" (EApp (EVar "id") (EVar "u")))
+                    ( ELet
+                        "f"
+                        (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True))))
+                        (EApp (EVar "wrap") (EVar "f"))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 identity consumer wrapper: expected recursive Bool carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 identity consumer wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 nested identity consumer wrapper: repeated id application preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "u" (EApp (EVar "id") (EApp (EVar "id") (EVar "u"))))
+                    ( ELet
+                        "f"
+                        (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
+                        (EApp (EVar "wrap") (EVar "f"))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 nested identity consumer wrapper: expected recursive Int carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 nested identity consumer wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 nested identity consumer wrapper: repeated id application preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "u" (EApp (EVar "id") (EApp (EVar "id") (EVar "u"))))
+                    ( ELet
+                        "f"
+                        (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True))))
+                        (EApp (EVar "wrap") (EVar "f"))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 nested identity consumer wrapper: expected recursive Bool carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 nested identity consumer wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 staged identity consumer wrapper: let-bound id result preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "u" (ELet "k" (EApp (EVar "id") (EVar "u")) (EVar "k")))
+                    ( ELet
+                        "f"
+                        (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
+                        (EApp (EVar "wrap") (EVar "f"))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 staged identity consumer wrapper: expected recursive Int carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 staged identity consumer wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 staged identity consumer wrapper: let-bound id result preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "u" (ELet "k" (EApp (EVar "id") (EVar "u")) (EVar "k")))
+                    ( ELet
+                        "f"
+                        (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True))))
+                        (EApp (EVar "wrap") (EVar "f"))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 staged identity consumer wrapper: expected recursive Bool carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 staged identity consumer wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 local helper identity consumer wrapper: let-bound helper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "u" (ELet "use" (ELam "v" (EApp (EVar "id") (EVar "v"))) (EApp (EVar "use") (EVar "u"))))
+                    ( ELet
+                        "f"
+                        (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
+                        (EApp (EVar "wrap") (EVar "f"))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 local helper identity consumer wrapper: expected recursive Int carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 local helper identity consumer wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 local helper identity consumer wrapper: let-bound helper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "u" (ELet "use" (ELam "v" (EApp (EVar "id") (EVar "v"))) (EApp (EVar "use") (EVar "u"))))
+                    ( ELet
+                        "f"
+                        (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True))))
+                        (EApp (EVar "wrap") (EVar "f"))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 local helper identity consumer wrapper: expected recursive Bool carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 local helper identity consumer wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
               typeCheck term `shouldBe` Right ty
 
       it "URI-R2-C1 reconstruction: same-lane alias wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
@@ -1583,6 +2095,1577 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                       ++ " URI-R2-C1 reconstruction: expected "
                       ++ show expectedUriR2C1RecursiveIntCarrier
                       ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 reconstruction: same-lane alias wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "f"
+                (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True))))
+                (ELet "hold" (EVar "f") (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "hold")) (EVar "u")))
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 reconstruction: expected recursive Bool carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 reconstruction: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 nested-forall carrier: same-wrapper identity preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "f"
+                    (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0)))))
+                    (EApp (ELam "y" (EVar "y")) (EVar "f"))
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 nested-forall carrier: expected recursive Int carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 nested-forall carrier: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 nested-forall carrier: same-wrapper identity preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "f"
+                    (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True)))))
+                    (EApp (ELam "y" (EVar "y")) (EVar "f"))
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 nested-forall carrier: expected recursive Bool carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 nested-forall carrier: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 eta-mediated carrier: transparent eta wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "wrap"
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                ( ELet
+                    "f"
+                    (EApp (EVar "wrap") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0)))))
+                    (EVar "f")
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 eta-mediated carrier: expected recursive Int carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 eta-mediated carrier: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 eta-mediated carrier: transparent eta wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "wrap"
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                ( ELet
+                    "f"
+                    (EApp (EVar "wrap") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True)))))
+                    (EVar "f")
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 eta-mediated carrier: expected recursive Bool carrier, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 eta-mediated carrier: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 eta-mediated carrier: let-aliased transparent eta wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "wrap"
+                (ELam "h" (ELet "k" (EVar "h") (ELam "z" (EApp (EVar "k") (EVar "z")))))
+                ( ELet
+                    "f"
+                    (EApp (EVar "wrap") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0)))))
+                    (EVar "f")
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 eta-mediated carrier: expected recursive Int carrier through let-aliased transparent eta wrapper, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 eta-mediated carrier: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 eta-mediated carrier: let-aliased transparent eta wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "wrap"
+                (ELam "h" (ELet "k" (EVar "h") (ELam "z" (EApp (EVar "k") (EVar "z")))))
+                ( ELet
+                    "f"
+                    (EApp (EVar "wrap") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True)))))
+                    (EVar "f")
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 eta-mediated carrier: expected recursive Bool carrier through let-aliased transparent eta wrapper, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 eta-mediated carrier: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      let uriR2C1OwnerSensitiveNonLocalTransparentIntRhs =
+            ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0)))
+          uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs =
+            ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True)))
+          transparentMediatorWrap =
+            ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z")))
+          aliasedTransparentMediatorWrap =
+            ELam "h" (ELet "k" (EVar "h") (ELam "z" (EApp (EVar "k") (EVar "z"))))
+          ownerSensitiveNonLocalAliasChain aliases source =
+            case aliases of
+              [] ->
+                ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+              aliasName : rest ->
+                ELet aliasName (EVar source) (ownerSensitiveNonLocalAliasChain rest aliasName)
+          ownerSensitiveNonLocalTransparentExpr wrap recursiveRhs =
+            ELet
+              "id"
+              (ELam "z" (EVar "z"))
+              ( ELet
+                  "wrap"
+                  wrap
+                  ( ELet
+                      "f"
+                      (EApp (EVar "id") recursiveRhs)
+                      (ELet "hold" (EApp (EVar "wrap") (EVar "f")) (EVar "hold"))
+                  )
+              )
+          ownerSensitiveNonLocalStackedTransparentExpr wrap1 wrap2 recursiveRhs =
+            ELet
+              "id"
+              (ELam "z" (EVar "z"))
+              ( ELet
+                  "wrap1"
+                  wrap1
+                  ( ELet
+                      "wrap2"
+                      wrap2
+                      ( ELet
+                          "f"
+                          (EApp (EVar "id") recursiveRhs)
+                          (ELet "hold" (EApp (EVar "wrap2") (EApp (EVar "wrap1") (EVar "f"))) (EVar "hold"))
+                      )
+                  )
+              )
+          ownerSensitiveNonLocalTransparentAliasChainExpr wrap recursiveRhs =
+            ELet
+              "id"
+              (ELam "z" (EVar "z"))
+              ( ELet
+                  "wrap"
+                  wrap
+                  ( ELet
+                      "f"
+                      (EApp (EVar "id") recursiveRhs)
+                      ( ELet
+                          "hold"
+                          (EApp (EVar "wrap") (EVar "f"))
+                          (ownerSensitiveNonLocalAliasChain ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"] "hold")
+                      )
+                  )
+              )
+          ownerSensitiveNonLocalStackedTransparentAliasChainExpr wrap1 wrap2 recursiveRhs =
+            ELet
+              "id"
+              (ELam "z" (EVar "z"))
+              ( ELet
+                  "wrap1"
+                  wrap1
+                  ( ELet
+                      "wrap2"
+                      wrap2
+                      ( ELet
+                          "f"
+                          (EApp (EVar "id") recursiveRhs)
+                          ( ELet
+                              "hold"
+                              (EApp (EVar "wrap2") (EApp (EVar "wrap1") (EVar "f")))
+                              (ownerSensitiveNonLocalAliasChain ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"] "hold")
+                          )
+                      )
+                  )
+              )
+          expectUriR2C1OwnerSensitiveNonLocalTransparentMediation label expectedCarrier expr = do
+            let pipelineRuns =
+                  [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                    ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+                  ]
+            forM_ pipelineRuns $ \(entryLabel, result) ->
+              case result of
+                Left err ->
+                  expectationFailure
+                    ( entryLabel
+                        ++ " "
+                        ++ label
+                        ++ ": expected recursive carrier, got error "
+                        ++ renderPipelineError err
+                    )
+                Right (term, ty) -> do
+                  let strippedTy = stripLeadingUnboundedForalls ty
+                  unless (matchesRecursiveMu strippedTy expectedCarrier) $
+                    expectationFailure
+                      ( entryLabel
+                          ++ " "
+                          ++ label
+                          ++ ": expected "
+                          ++ show expectedCarrier
+                          ++ " after stripping leading foralls, got "
+                          ++ show ty
+                      )
+                  typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: direct transparent wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          (ownerSensitiveNonLocalTransparentExpr transparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentIntRhs)
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: direct transparent wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          (ownerSensitiveNonLocalTransparentExpr transparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs)
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: let-aliased transparent wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          (ownerSensitiveNonLocalTransparentExpr aliasedTransparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentIntRhs)
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: let-aliased transparent wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          (ownerSensitiveNonLocalTransparentExpr aliasedTransparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs)
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked transparent wrappers preserve the recursive Int carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          ( ownerSensitiveNonLocalStackedTransparentExpr
+              transparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked transparent wrappers preserve the recursive Bool carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( ownerSensitiveNonLocalStackedTransparentExpr
+              transparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked let-aliased transparent wrappers preserve the recursive Int carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          ( ownerSensitiveNonLocalStackedTransparentExpr
+              aliasedTransparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked let-aliased transparent wrappers preserve the recursive Bool carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( ownerSensitiveNonLocalStackedTransparentExpr
+              aliasedTransparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: direct transparent wrapper stays recursive through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          (ownerSensitiveNonLocalTransparentAliasChainExpr transparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentIntRhs)
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: direct transparent wrapper stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          (ownerSensitiveNonLocalTransparentAliasChainExpr transparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs)
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: let-aliased transparent wrapper stays recursive through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          (ownerSensitiveNonLocalTransparentAliasChainExpr aliasedTransparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentIntRhs)
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: let-aliased transparent wrapper stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          (ownerSensitiveNonLocalTransparentAliasChainExpr aliasedTransparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs)
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked transparent wrappers stay recursive through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          ( ownerSensitiveNonLocalStackedTransparentAliasChainExpr
+              transparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked transparent wrappers stay recursively Bool-typed through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( ownerSensitiveNonLocalStackedTransparentAliasChainExpr
+              transparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked let-aliased transparent wrappers stay recursive through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          ( ownerSensitiveNonLocalStackedTransparentAliasChainExpr
+              aliasedTransparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked let-aliased transparent wrappers stay recursively Bool-typed through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( ownerSensitiveNonLocalStackedTransparentAliasChainExpr
+              aliasedTransparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed direct and let-aliased stacked wrappers preserve the recursive Int carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          ( ownerSensitiveNonLocalStackedTransparentExpr
+              transparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed direct and let-aliased stacked wrappers preserve the recursive Bool carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( ownerSensitiveNonLocalStackedTransparentExpr
+              transparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed let-aliased and direct stacked wrappers preserve the recursive Int carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          ( ownerSensitiveNonLocalStackedTransparentExpr
+              aliasedTransparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed let-aliased and direct stacked wrappers preserve the recursive Bool carrier on both authoritative entrypoints" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( ownerSensitiveNonLocalStackedTransparentExpr
+              aliasedTransparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed direct and let-aliased stacked wrappers stay recursive through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          ( ownerSensitiveNonLocalStackedTransparentAliasChainExpr
+              transparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed direct and let-aliased stacked wrappers stay recursively Bool-typed through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( ownerSensitiveNonLocalStackedTransparentAliasChainExpr
+              transparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed let-aliased and direct stacked wrappers stay recursive through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveIntCarrier
+          ( ownerSensitiveNonLocalStackedTransparentAliasChainExpr
+              aliasedTransparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed let-aliased and direct stacked wrappers stay recursively Bool-typed through a decuple owner-local alias chain" $ do
+        expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
+          "URI-R2-C1 owner-sensitive non-local transparent mediation"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( ownerSensitiveNonLocalStackedTransparentAliasChainExpr
+              aliasedTransparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      let combinedWrapperAliasChain aliases source =
+            case aliases of
+              [] ->
+                ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+              aliasName : rest ->
+                ELet aliasName (EVar source) (combinedWrapperAliasChain rest aliasName)
+          uriR2C1CombinedWrapperStackedExpr wrap1 wrap2 recursiveRhs =
+            ELet
+              "id"
+              (ELam "z" (EVar "z"))
+              ( ELet
+                  "wrap1"
+                  wrap1
+                  ( ELet
+                      "wrap2"
+                      wrap2
+                      ( ELet
+                          "f"
+                          (EApp (EVar "id") recursiveRhs)
+                          ( ELet
+                              "hold"
+                              (EApp (EVar "wrap2") (EApp (EVar "wrap1") (EVar "f")))
+                              (EApp (ELam "y" (EVar "y")) (EVar "hold"))
+                          )
+                      )
+                  )
+              )
+          uriR2C1CombinedWrapperStackedAliasChainExpr wrap1 wrap2 recursiveRhs =
+            ELet
+              "id"
+              (ELam "z" (EVar "z"))
+              ( ELet
+                  "wrap1"
+                  wrap1
+                  ( ELet
+                      "wrap2"
+                      wrap2
+                      ( ELet
+                          "f"
+                          (EApp (EVar "id") recursiveRhs)
+                          ( ELet
+                              "hold"
+                              (EApp (EVar "wrap2") (EApp (EVar "wrap1") (EVar "f")))
+                              (combinedWrapperAliasChain ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"] "hold")
+                          )
+                      )
+                  )
+              )
+          expectUriR2C1CombinedWrapper label expectedCarrier expr = do
+            let pipelineRuns =
+                  [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                    ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+                  ]
+            forM_ pipelineRuns $ \(entryLabel, result) ->
+              case result of
+                Left err ->
+                  expectationFailure
+                    ( entryLabel
+                        ++ " "
+                        ++ label
+                        ++ ": expected recursive carrier, got error "
+                        ++ renderPipelineError err
+                    )
+                Right (term, ty) -> do
+                  let strippedTy = stripLeadingUnboundedForalls ty
+                  unless (matchesRecursiveMu strippedTy expectedCarrier) $
+                    expectationFailure
+                      ( entryLabel
+                          ++ " "
+                          ++ label
+                          ++ ": expected "
+                          ++ show expectedCarrier
+                          ++ " after stripping leading foralls, got "
+                          ++ show ty
+                      )
+                  typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus transparent eta wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                    ( ELet
+                        "f"
+                        (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0)))))
+                        (ELet "hold" (EApp (EVar "wrap") (EVar "f")) (EApp (ELam "y" (EVar "y")) (EVar "hold")))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Int carrier through identity consumer plus transparent eta wrapper, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus transparent eta wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                    ( ELet
+                        "f"
+                        (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True)))))
+                        (ELet "hold" (EApp (EVar "wrap") (EVar "f")) (EApp (ELam "y" (EVar "y")) (EVar "hold")))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Bool carrier through identity consumer plus transparent eta wrapper, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus let-aliased transparent eta wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELet "k" (EVar "h") (ELam "z" (EApp (EVar "k") (EVar "z")))))
+                    ( ELet
+                        "f"
+                        (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0)))))
+                        (ELet "hold" (EApp (EVar "wrap") (EVar "f")) (EApp (ELam "y" (EVar "y")) (EVar "hold")))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Int carrier through identity consumer plus let-aliased transparent eta wrapper, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus let-aliased transparent eta wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELet "k" (EVar "h") (ELam "z" (EApp (EVar "k") (EVar "z")))))
+                    ( ELet
+                        "f"
+                        (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True)))))
+                        (ELet "hold" (EApp (EVar "wrap") (EVar "f")) (EApp (ELam "y" (EVar "y")) (EVar "hold")))
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Bool carrier through identity consumer plus let-aliased transparent eta wrapper, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus transparent eta wrapper stays recursive through a decuple owner-local alias chain" $ do
+        let aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                    ( ELet
+                        "f"
+                        (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0)))))
+                        ( ELet
+                            "hold"
+                            (EApp (EVar "wrap") (EVar "f"))
+                            ( aliasChain
+                                ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                "hold"
+                            )
+                        )
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Int carrier through transparent eta wrapper and decuple alias chain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus transparent eta wrapper stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        let aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                    ( ELet
+                        "f"
+                        (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True)))))
+                        ( ELet
+                            "hold"
+                            (EApp (EVar "wrap") (EVar "f"))
+                            ( aliasChain
+                                ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                "hold"
+                            )
+                        )
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Bool carrier through transparent eta wrapper and decuple alias chain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus let-aliased transparent eta wrapper stays recursive through a decuple owner-local alias chain" $ do
+        let aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELet "k" (EVar "h") (ELam "z" (EApp (EVar "k") (EVar "z")))))
+                    ( ELet
+                        "f"
+                        (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0)))))
+                        ( ELet
+                            "hold"
+                            (EApp (EVar "wrap") (EVar "f"))
+                            ( aliasChain
+                                ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                "hold"
+                            )
+                        )
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Int carrier through let-aliased transparent eta wrapper and decuple alias chain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus let-aliased transparent eta wrapper stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        let aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELet "k" (EVar "h") (ELam "z" (EApp (EVar "k") (EVar "z")))))
+                    ( ELet
+                        "f"
+                        (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True)))))
+                        ( ELet
+                            "hold"
+                            (EApp (EVar "wrap") (EVar "f"))
+                            ( aliasChain
+                                ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                "hold"
+                            )
+                        )
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Bool carrier through let-aliased transparent eta wrapper and decuple alias chain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked transparent eta mediators stays recursive through a decuple owner-local alias chain" $ do
+        let aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap1"
+                    (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                    ( ELet
+                        "wrap2"
+                        (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                        ( ELet
+                            "f"
+                            (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0)))))
+                            ( ELet
+                                "hold"
+                                (EApp (EVar "wrap2") (EApp (EVar "wrap1") (EVar "f")))
+                                ( aliasChain
+                                    ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                    "hold"
+                                )
+                            )
+                        )
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Int carrier through stacked transparent eta mediators and decuple alias chain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked transparent eta mediators stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        let aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap1"
+                    (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                    ( ELet
+                        "wrap2"
+                        (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                        ( ELet
+                            "f"
+                            (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True)))))
+                            ( ELet
+                                "hold"
+                                (EApp (EVar "wrap2") (EApp (EVar "wrap1") (EVar "f")))
+                                ( aliasChain
+                                    ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                    "hold"
+                                )
+                            )
+                        )
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Bool carrier through stacked transparent eta mediators and decuple alias chain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked let-aliased transparent eta mediators stays recursive through a decuple owner-local alias chain" $ do
+        let aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap1"
+                    aliasedWrap
+                    ( ELet
+                        "wrap2"
+                        aliasedWrap
+                        ( ELet
+                            "f"
+                            (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0)))))
+                            ( ELet
+                                "hold"
+                                (EApp (EVar "wrap2") (EApp (EVar "wrap1") (EVar "f")))
+                                ( aliasChain
+                                    ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                    "hold"
+                                )
+                            )
+                        )
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Int carrier through stacked let-aliased transparent eta mediators and decuple alias chain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked let-aliased transparent eta mediators stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        let aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap1"
+                    aliasedWrap
+                    ( ELet
+                        "wrap2"
+                        aliasedWrap
+                        ( ELet
+                            "f"
+                            (EApp (EVar "id") (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True)))))
+                            ( ELet
+                                "hold"
+                                (EApp (EVar "wrap2") (EApp (EVar "wrap1") (EVar "f")))
+                                ( aliasChain
+                                    ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                    "hold"
+                                )
+                            )
+                        )
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 combined wrapper: expected recursive Bool carrier through stacked let-aliased transparent eta mediators and decuple alias chain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 combined wrapper: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked transparent eta mediators preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveIntCarrier
+          ( uriR2C1CombinedWrapperStackedExpr
+              transparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked transparent eta mediators preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( uriR2C1CombinedWrapperStackedExpr
+              transparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked let-aliased transparent eta mediators preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveIntCarrier
+          ( uriR2C1CombinedWrapperStackedExpr
+              aliasedTransparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked let-aliased transparent eta mediators preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( uriR2C1CombinedWrapperStackedExpr
+              aliasedTransparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed direct and let-aliased stacked transparent eta mediators preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveIntCarrier
+          ( uriR2C1CombinedWrapperStackedExpr
+              transparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed direct and let-aliased stacked transparent eta mediators preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( uriR2C1CombinedWrapperStackedExpr
+              transparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed let-aliased and direct stacked transparent eta mediators preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveIntCarrier
+          ( uriR2C1CombinedWrapperStackedExpr
+              aliasedTransparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed let-aliased and direct stacked transparent eta mediators preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( uriR2C1CombinedWrapperStackedExpr
+              aliasedTransparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed direct and let-aliased stacked transparent eta mediators stays recursive through a decuple owner-local alias chain" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveIntCarrier
+          ( uriR2C1CombinedWrapperStackedAliasChainExpr
+              transparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed direct and let-aliased stacked transparent eta mediators stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( uriR2C1CombinedWrapperStackedAliasChainExpr
+              transparentMediatorWrap
+              aliasedTransparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed let-aliased and direct stacked transparent eta mediators stays recursive through a decuple owner-local alias chain" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveIntCarrier
+          ( uriR2C1CombinedWrapperStackedAliasChainExpr
+              aliasedTransparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
+          )
+
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed let-aliased and direct stacked transparent eta mediators stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        expectUriR2C1CombinedWrapper
+          "URI-R2-C1 combined wrapper"
+          expectedUriR2C1RecursiveBoolCarrier
+          ( uriR2C1CombinedWrapperStackedAliasChainExpr
+              aliasedTransparentMediatorWrap
+              transparentMediatorWrap
+              uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
+          )
+
+      it "URI-R2-C1 reconstruction: deeper same-lane alias chain preserves the recursive Int carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "f"
+                (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
+                ( ELet
+                    "hold"
+                    (EVar "f")
+                    ( ELet
+                        "keep"
+                        (EVar "hold")
+                        ( ELet
+                            "more"
+                            (EVar "keep")
+                            (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "more")) (EVar "u"))
+                        )
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 reconstruction: expected recursive Int carrier through deeper alias chain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 reconstruction: expected "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 reconstruction: deeper same-lane alias chain preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "f"
+                (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True))))
+                ( ELet
+                    "hold"
+                    (EVar "f")
+                    ( ELet
+                        "keep"
+                        (EVar "hold")
+                        ( ELet
+                            "more"
+                            (EVar "keep")
+                            (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "more")) (EVar "u"))
+                        )
+                    )
+                )
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 reconstruction: expected recursive Bool carrier through deeper alias chain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveMu strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 reconstruction: expected "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 nested recursive helper: preserves recursive Int codomain on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "f"
+                ( ELam
+                    "x"
+                    ( ELet
+                        "g"
+                        (ELam "y" (ELet "_" (EApp (EVar "f") (EApp (EVar "g") (EVar "y"))) (ELit (LInt 0))))
+                        (EVar "g")
+                    )
+                )
+                (EVar "f")
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 nested recursive helper: expected recursive Int codomain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveArrowCodomain strippedTy expectedUriR2C1RecursiveIntCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 nested recursive helper: expected codomain "
+                      ++ show expectedUriR2C1RecursiveIntCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 nested recursive helper: preserves recursive Bool codomain on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "f"
+                ( ELam
+                    "x"
+                    ( ELet
+                        "g"
+                        (ELam "y" (ELet "_" (EApp (EVar "f") (EApp (EVar "g") (EVar "y"))) (ELit (LBool True))))
+                        (EVar "g")
+                    )
+                )
+                (EVar "f")
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 nested recursive helper: expected recursive Bool codomain, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              let strippedTy = stripLeadingUnboundedForalls ty
+              unless (matchesRecursiveArrowCodomain strippedTy expectedUriR2C1RecursiveBoolCarrier) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 nested recursive helper: expected codomain "
+                      ++ show expectedUriR2C1RecursiveBoolCarrier
+                      ++ " after stripping leading foralls, got "
+                      ++ show ty
+                  )
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 ambiguity reject: direct self-app and returned-helper clusters stay fail-closed on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "f"
+                ( ELam
+                    "x"
+                    ( ELet
+                        "_"
+                        (EApp (EVar "f") (EVar "x"))
+                        ( ELet
+                            "g"
+                            (ELam "y" (EApp (EVar "f") (EApp (EVar "g") (EVar "y"))))
+                            (EVar "g")
+                        )
+                    )
+                )
+                (EVar "f")
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(_label, result) ->
+          case result of
+            Left _ -> pure ()
+            Right (term, ty) -> do
+              containsMu ty `shouldBe` False
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 higher-order recursion: preserves visible recursive structure on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "f"
+                (ELam "x" (ELam "y" (EApp (EApp (EVar "f") (EVar "x")) (EVar "y"))))
+                (EVar "f")
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 higher-order recursion: expected visible recursive structure, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              unless (containsMu ty) $
+                expectationFailure
+                  (label ++ " URI-R2-C1 higher-order recursion: expected TMu in type, got " ++ show ty)
+              typeCheck term `shouldBe` Right ty
+
+      it "URI-R2-C1 recursive data-like constructor shape: preserves visible recursive structure on both authoritative entrypoints" $ do
+        let expr =
+              ELet
+                "lst"
+                (ELam "x" (ELam "xs" (EApp (EApp (EVar "lst") (EVar "x")) (EVar "xs"))))
+                (EVar "lst")
+            pipelineRuns =
+              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
+                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+              ]
+        forM_ pipelineRuns $ \(label, result) ->
+          case result of
+            Left err ->
+              expectationFailure
+                ( label
+                    ++ " URI-R2-C1 recursive data-like constructor shape: expected visible recursive structure, got error "
+                    ++ renderPipelineError err
+                )
+            Right (term, ty) -> do
+              unless (containsMu ty) $
+                expectationFailure
+                  ( label
+                      ++ " URI-R2-C1 recursive data-like constructor shape: expected TMu in type, got "
                       ++ show ty
                   )
               typeCheck term `shouldBe` Right ty
@@ -2206,6 +4289,202 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         fallbackTy <- requireRight (computeResultTypeFallback inputs innerCanon innerPre)
         containsMu fallbackTy `shouldBe` True
 
+      it "keeps retained-child ambiguity fail-closed when multiple same-lane candidates survive" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr =
+              ELet
+                "k"
+                (ELamAnn "x" recursiveAnn (EVar "x"))
+                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+            extractInnerLetRhs ann0 = case ann0 of
+              ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+              _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
+            wireSameLaneLocalRoot inputs rootNid childNid =
+              let view0 = rtcPresolutionView inputs
+                  retainedTarget =
+                    case pvLookupVarBound view0 childNid of
+                      Just boundNid -> boundNid
+                      Nothing ->
+                        error
+                          ( "expected retained child bound for "
+                              ++ show childNid
+                          )
+                  rewrite =
+                    ariSetVarBound rootNid retainedTarget
+                      . ariSetVarBound childNid retainedTarget
+                      . ariSetTypeParent childNid (Just (typeRef rootNid))
+                      . ariSetTypeParent rootNid Nothing
+               in rewriteResultTypeInputs rewrite inputs
+            duplicateRetainedChildCandidate inputs rootNid childNid =
+              let view0 = rtcPresolutionView inputs
+                  retainedTarget =
+                    case pvLookupVarBound view0 childNid of
+                      Just boundNid -> boundNid
+                      Nothing ->
+                        error
+                          ( "expected retained child bound for "
+                              ++ show childNid
+                          )
+                  peerNid =
+                    case nextFreshNodeIds 1 (pvConstraint view0) of
+                      [freshNid] -> freshNid
+                      other ->
+                        error
+                          ( "expected one fresh node id for retained-child ambiguity case, got "
+                              ++ show other
+                          )
+                  rewrite =
+                    insertTyNodes [TyVar {tnId = peerNid, tnBound = Just retainedTarget}]
+                      . ariSetTypeParent peerNid (Just (typeRef rootNid))
+               in rewriteResultTypeInputs rewrite inputs
+        artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+        let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+            innerCanon = extractInnerLetRhs annCanon0
+            innerPre = extractInnerLetRhs annPre0
+            (retainedRoot, retainedChild) = case innerCanon of
+              AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+              _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
+            inputs1 = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+            inputs2 = duplicateRetainedChildCandidate inputs1 retainedRoot retainedChild
+        fallbackTy <- requireRight (computeResultTypeFallback inputs2 innerCanon innerPre)
+        containsMu fallbackTy `shouldBe` False
+
+      it "keeps retained-child ambiguity fail-closed when one target exposes multiple recursive descendants" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr =
+              ELet
+                "k"
+                (ELamAnn "x" recursiveAnn (EVar "x"))
+                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+            extractInnerLetRhs ann0 = case ann0 of
+              ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+              _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
+            wireSameLaneLocalRoot inputs rootNid childNid =
+              let view0 = rtcPresolutionView inputs
+                  retainedTarget =
+                    case pvLookupVarBound view0 childNid of
+                      Just boundNid -> boundNid
+                      Nothing ->
+                        error
+                          ( "expected retained child bound for "
+                              ++ show childNid
+                          )
+                  rewrite =
+                    ariSetVarBound rootNid retainedTarget
+                      . ariSetVarBound childNid retainedTarget
+                      . ariSetTypeParent childNid (Just (typeRef rootNid))
+                      . ariSetTypeParent rootNid Nothing
+               in rewriteResultTypeInputs rewrite inputs
+            injectAmbiguousRetainedChildTarget inputs rootNid childNid =
+              let view0 = rtcPresolutionView inputs
+                  retainedTarget =
+                    case pvLookupVarBound view0 childNid of
+                      Just boundNid -> boundNid
+                      Nothing ->
+                        error
+                          ( "expected retained child bound for "
+                              ++ show childNid
+                          )
+                  (ambiguousTargetNid, alternateMuNid) =
+                    case nextFreshNodeIds 2 (pvConstraint view0) of
+                      [freshTargetNid, freshMuNid] -> (freshTargetNid, freshMuNid)
+                      other ->
+                        error
+                          ( "expected two fresh node ids for retained-child intra-target ambiguity case, got "
+                              ++ show other
+                          )
+                  rewrite =
+                    ariSetVarBound rootNid ambiguousTargetNid
+                      . ariSetVarBound childNid ambiguousTargetNid
+                      . insertTyNodes
+                        [ TyArrow {tnId = ambiguousTargetNid, tnDom = retainedTarget, tnCod = alternateMuNid},
+                          TyMu {tnId = alternateMuNid, tnBody = retainedTarget}
+                        ]
+               in rewriteResultTypeInputs rewrite inputs
+        artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+        let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+            innerCanon = extractInnerLetRhs annCanon0
+            innerPre = extractInnerLetRhs annPre0
+            (retainedRoot, retainedChild) = case innerCanon of
+              AApp _ (AVar _ nid) _ _ rootNid -> (rootNid, nid)
+              _ -> error ("expected retained-child app shape, got " ++ show innerCanon)
+            inputs1 = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+            inputs2 = injectAmbiguousRetainedChildTarget inputs1 retainedRoot retainedChild
+        fallbackTy <- requireRight (computeResultTypeFallback inputs2 innerCanon innerPre)
+        containsMu fallbackTy `shouldBe` False
+
+      it "keeps mixed retained-child/base-target competition fail-closed on the local TypeRef lane" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr =
+              ELet
+                "k"
+                (ELamAnn "x" recursiveAnn (EVar "x"))
+                (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
+            extractInnerLetRhs ann0 = case ann0 of
+              ALet _ _ _ _ _ _ (AAnn (ALet _ _ _ _ _ rhs _ _) _ _) _ -> rhs
+              _ -> error ("unexpected retained-child wrapper shape: " ++ show ann0)
+            wireSameLaneLocalRoot inputs rootNid childNid =
+              let view0 = rtcPresolutionView inputs
+                  retainedTarget =
+                    case pvLookupVarBound view0 childNid of
+                      Just boundNid -> boundNid
+                      Nothing ->
+                        error
+                          ( "expected retained child bound for "
+                              ++ show childNid
+                          )
+                  rewrite =
+                    ariSetVarBound rootNid retainedTarget
+                      . ariSetVarBound childNid retainedTarget
+                      . ariSetTypeParent childNid (Just (typeRef rootNid))
+                      . ariSetTypeParent rootNid Nothing
+               in rewriteResultTypeInputs rewrite inputs
+            injectSingleBaseWitness inputs eid =
+              let view0 = rtcPresolutionView inputs
+                  edgeWitnesses0 = rtcEdgeWitnesses inputs
+                  edgeKey = getEdgeId eid
+                  seedWitness =
+                    case IntMap.lookup edgeKey edgeWitnesses0 of
+                      Just ew -> ew
+                      Nothing ->
+                        case IntMap.elems edgeWitnesses0 of
+                          ew0 : _ -> ew0 {ewEdgeId = eid}
+                          [] ->
+                            error "expected an edge witness for mixed retained-child/base-target case"
+                  ew' =
+                    seedWitness
+                      { ewEdgeId = eid,
+                        ewRight = findIntBaseNode view0
+                      }
+               in inputs
+                    { rtcEdgeArtifacts =
+                        (rtcEdgeArtifacts inputs)
+                          { eaEdgeWitnesses =
+                              IntMap.insert edgeKey ew' edgeWitnesses0
+                          }
+                    }
+        artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
+        let (inputs0, annCanon0, annPre0) = resultTypeInputsForArtifacts artifacts
+            innerCanon = extractInnerLetRhs annCanon0
+            innerPre = extractInnerLetRhs annPre0
+            (retainedRoot, retainedChild, argEid) = case innerCanon of
+              AApp _ (AVar _ nid) _funEid argEdgeId appNid -> (appNid, nid, argEdgeId)
+              other ->
+                error
+                  ( "expected retained-child app shape for mixed retained-child/base-target case, got "
+                      ++ show other
+                  )
+            inputs1 = wireSameLaneLocalRoot inputs0 retainedRoot retainedChild
+            inputs2 = injectSingleBaseWitness inputs1 argEid
+        fallbackTy <- requireRight (computeResultTypeFallback inputs2 innerCanon innerPre)
+        case fallbackTy of
+          TVar _ -> pure ()
+          other ->
+            expectationFailure
+              ( "expected mixed retained-child/base-target competition to stay on the local fail-closed target variable, got "
+                  ++ show other
+              )
+
       it "sameLaneClearBoundaryExpr clears Phase 6 elaboration on both authoritative entrypoints" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             sameLaneClearBoundaryExpr =
@@ -2603,6 +4882,64 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
+      it "sameLaneDecupleAliasFrameClearBoundaryExpr is the next broader-positive owner-sensitive clear-boundary packet on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr =
+              ELet
+                "k"
+                (ELamAnn "x" recursiveAnn (EVar "x"))
+                ( ELet
+                    "hold"
+                    (EVar "k")
+                    ( ELet
+                        "keep"
+                        (EVar "hold")
+                        ( ELet
+                            "more"
+                            (EVar "keep")
+                            ( ELet
+                                "deep"
+                                (EVar "more")
+                                ( ELet
+                                    "tail"
+                                    (EVar "deep")
+                                    ( ELet
+                                        "leaf"
+                                        (EVar "tail")
+                                        ( ELet
+                                            "tip"
+                                            (EVar "leaf")
+                                            ( ELet
+                                                "bud"
+                                                (EVar "tip")
+                                                ( ELet
+                                                    "seed"
+                                                    (EVar "bud")
+                                                    ( ELet
+                                                        "grain"
+                                                        (EVar "seed")
+                                                        (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "grain")) (EVar "u"))
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+        (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
+        typeCheck checkedTerm `shouldBe` Right checkedTy
+        uncheckedTy `shouldBe` checkedTy
+        countLeadingUnboundedForalls uncheckedTy `shouldBe` 2
+        matchesRecursiveArrow
+          (stripLeadingUnboundedForalls uncheckedTy)
+          expectedSameLaneAliasFrameClearBoundaryArrow
+          `shouldBe` True
+
       it "sameLaneTripleAliasFrameClearBoundaryExpr keeps alias-shell preservation within the bounded entry budget" $ do
         termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
         termClosureSrc `shouldSatisfy` isInfixOf "hasRetainedChildAliasBoundary v body 2 ="
@@ -2705,6 +5042,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             "sameLocalTypeLane parentRef child =\n                  parentRef == scopeRootPost\n                    || case bindingScopeRefCanonical presolutionViewFinal child of"
         fallbackSrc
           `shouldSatisfy` isInfixOf
+            "sameWrapperRetainedChildSelection ="
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
             "sameWrapperRetainedChildProof ="
         fallbackSrc
           `shouldSatisfy` isInfixOf
@@ -2715,19 +5055,28 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           `shouldSatisfy` (not . isInfixOf "bndRoot == boundVarTargetRoot,\n                              not hasForall\n                            ]")
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "chosenTargetProof =\n                          case recursiveTargetProofFor childTarget of\n                            Just proof -> proof\n                            Nothing -> (childC, scopeRoot)"
+            "chosenTargetProof =\n                          case recursiveTargetProofFor childTarget of\n                            NoCandidate -> UniqueCandidate (childC, scopeRoot)\n                            other -> other"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "sameLaneLocalRetainedChildScopeRoot =\n            if rootBindingIsLocalType\n              then fmap (\\(_child, _childTarget, _chosenTarget, chosenScopeRoot) -> chosenScopeRoot) sameWrapperRetainedChildProof\n              else Nothing"
+            "sameWrapperRetainedChildAmbiguous ="
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "keepTargetFinal =\n            rootBindingIsLocalType\n              && ( rootLocalMultiInst\n                     || rootLocalInstArgMultiBase\n                     || rootLocalSchemeAliasBaseLike\n                     || maybe False (const True) sameLaneLocalRetainedChildTarget\n                 )"
+            "recursiveCandidateSelection ="
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "case sameWrapperRetainedChildSelection of\n              UniqueCandidate retainedChildProof' -> Just retainedChildProof'\n              _ -> Nothing"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "sameLaneLocalRetainedChildScopeRoot =\n            if rootBindingIsLocalType\n              then fmap retainedChildProofChosenScopeRoot selectedRetainedChildProof\n              else Nothing"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "keepTargetFinal =\n            rootBindingIsLocalType\n              && ( rootLocalMultiInst\n                     || rootLocalInstArgMultiBase\n                     || rootLocalSchemeAliasBaseLike\n                     || recursiveCandidateAmbiguous\n                     || maybe False (const True) sameLaneLocalRetainedChildTarget\n                 )"
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "case sameLaneLocalRetainedChildTarget of\n                          Just v\n                            | v /= rootFinal -> v\n                          _ ->\n                            case lookupNodeIn nodesFinal rootFinal of\n                              Just TyVar {} -> rootFinal\n                              _ -> schemeBodyTarget targetPresolutionView rootC"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "useSameLaneLocalRetainedChildScopeRoot =\n            case baseTarget of\n              Just _ -> False\n              Nothing ->\n                keepTargetFinal"
+            "useSameLaneLocalRetainedChildScopeRoot =\n            case selectedBaseTargetAdmission of\n              Just _ -> False\n              Nothing ->\n                keepTargetFinal"
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "generalizeScopeRoot =\n            if useSameLaneLocalRetainedChildScopeRoot\n              then\n                case sameLaneLocalRetainedChildScopeRoot of\n                  Just alignedScopeRoot -> alignedScopeRoot\n                  Nothing -> scopeRoot\n              else scopeRoot"
@@ -2736,6 +5085,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             "generalizeWithPlan planBuilder bindParentsGaFinal presolutionViewFinal generalizeScopeRoot targetC"
         fallbackSrc
           `shouldSatisfy` (not . isInfixOf "generalizeWithPlan planBuilder bindParentsGaFinal presolutionViewFinal scopeRoot targetC")
+        fallbackSrc
+          `shouldSatisfy` (not . isInfixOf "listToMaybe\n                          [ (child, childTarget, chosenTarget, chosenScopeRoot)")
 
       it "keeps the P5 guard cluster wired through boundHasForallFrom and authoritative preservation" $ do
         annotationSrc <- readFile "src/MLF/Elab/Elaborate/Annotation.hs"
@@ -2746,12 +5097,16 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         annotationSrc `shouldSatisfy` isInfixOf "authoritativeTargetType namedSet edgeWitness schemeInfo ="
         annotationSrc `shouldSatisfy` isInfixOf "reifyTraceBinderInstArgs namedSet schemeInfo nodes0 ="
         annotationSrc `shouldSatisfy` isInfixOf "expInstantiateArgsToInstNoFallback"
-        fallbackSrc `shouldSatisfy` isInfixOf "hasForall = boundHasForallFrom (snd chosenTargetProof) bndC"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "hasForall =\n                          case chosenTargetProof of\n                            UniqueCandidate (_chosenTarget, chosenScopeRoot) ->\n                              Just (boundHasForallFrom chosenScopeRoot bndC)\n                            _ -> Nothing"
         termClosureSrc `shouldSatisfy` isInfixOf "preserveRetainedChildAliasBoundary env v sch rhs body"
         pipelineSrc `shouldSatisfy` isInfixOf "termClosed0 ="
         pipelineSrc `shouldSatisfy` isInfixOf "case preserveRetainedChildAuthoritativeResult termClosed0 of"
         pipelineSrc `shouldSatisfy` isInfixOf "tyChecked <- fromTypeCheckError (typeCheck termClosed)"
-        pipelineSrc `shouldSatisfy` isInfixOf "computeResultTypeFromAnn resultTypeInputs inner inner annNodeId eid"
+        pipelineSrc `shouldSatisfy` isInfixOf "authoritativeAnnCanon = authoritativeRootAnn term annCanon"
+        pipelineSrc `shouldSatisfy` isInfixOf "authoritativeAnnPre = authoritativeRootAnn term ann"
+        pipelineSrc `shouldSatisfy` isInfixOf "computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid"
 
       it "keeps retained-child fallback open for recursive types even when the same wrapper crosses a nested forall boundary" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -2820,6 +5175,607 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         ty <- expectAlignedPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
+      it "same-wrapper nested-forall plus owner-local alias frame preserves recursive output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "k"
+                    (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                    ( ELet
+                        "hold"
+                        (EVar "k")
+                        (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "hold")) (EVar "u"))
+                    )
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus decuple owner-local alias frames preserves recursive output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "k"
+                    (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                    ( aliasChain
+                        ["hold", "keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain"]
+                        "k"
+                    )
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus transparent eta mediator preserves recursive Int output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                    ( ELet
+                        "k"
+                        (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                        ( ELet
+                            "hold"
+                            (EApp (EVar "wrap") (EVar "k"))
+                            (EApp (ELam "y" (EVar "y")) (EVar "hold"))
+                        )
+                    )
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus transparent eta mediator preserves recursive Bool output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                    ( ELet
+                        "k"
+                        (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                        ( ELet
+                            "hold"
+                            (EApp (EVar "wrap") (EVar "k"))
+                            (EApp (ELam "y" (EVar "y")) (EVar "hold"))
+                        )
+                    )
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus transparent eta mediator stays recursive through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                    ( ELet
+                        "k"
+                        (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                        ( ELet
+                            "hold"
+                            (EApp (EVar "wrap") (EVar "k"))
+                            ( aliasChain
+                                ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                "hold"
+                            )
+                        )
+                    )
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus let-aliased transparent eta mediator stays recursive through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z")))))
+                    ( ELet
+                        "k"
+                        (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                        ( ELet
+                            "hold"
+                            (EApp (EVar "wrap") (EVar "k"))
+                            ( aliasChain
+                                ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                "hold"
+                            )
+                        )
+                    )
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus transparent eta mediator stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                    ( ELet
+                        "k"
+                        (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                        ( ELet
+                            "hold"
+                            (EApp (EVar "wrap") (EVar "k"))
+                            ( aliasChain
+                                ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                "hold"
+                            )
+                        )
+                    )
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      let sameWrapperNestedForallStackedTransparentExpr wrap1 wrap2 recursiveAnn =
+            ELet
+              "id"
+              (ELam "z" (EVar "z"))
+              ( ELet
+                  "wrap1"
+                  wrap1
+                  ( ELet
+                      "wrap2"
+                      wrap2
+                      ( ELet
+                          "k"
+                          (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                          ( ELet
+                              "hold"
+                              (EApp (EVar "wrap2") (EApp (EVar "wrap1") (EVar "k")))
+                              (EApp (ELam "y" (EVar "y")) (EVar "hold"))
+                          )
+                      )
+                  )
+              )
+          sameWrapperNestedForallAliasChain aliases source =
+            case aliases of
+              [] ->
+                ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+              aliasName : rest ->
+                ELet aliasName (EVar source) (sameWrapperNestedForallAliasChain rest aliasName)
+          sameWrapperNestedForallStackedTransparentAliasChainExpr wrap1 wrap2 recursiveAnn =
+            ELet
+              "id"
+              (ELam "z" (EVar "z"))
+              ( ELet
+                  "wrap1"
+                  wrap1
+                  ( ELet
+                      "wrap2"
+                      wrap2
+                      ( ELet
+                          "k"
+                          (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                          ( ELet
+                              "hold"
+                              (EApp (EVar "wrap2") (EApp (EVar "wrap1") (EVar "k")))
+                              ( sameWrapperNestedForallAliasChain
+                                  ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                  "hold"
+                              )
+                          )
+                      )
+                  )
+              )
+
+      it "same-wrapper nested-forall plus stacked transparent eta mediators preserves recursive Int output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            expr =
+              sameWrapperNestedForallStackedTransparentExpr
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus stacked transparent eta mediators preserves recursive Bool output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            expr =
+              sameWrapperNestedForallStackedTransparentExpr
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus stacked let-aliased transparent eta mediators preserves recursive Int output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr = sameWrapperNestedForallStackedTransparentExpr aliasedWrap aliasedWrap recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus stacked let-aliased transparent eta mediators preserves recursive Bool output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr = sameWrapperNestedForallStackedTransparentExpr aliasedWrap aliasedWrap recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus stacked let-aliased transparent eta mediators stays recursive through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr = sameWrapperNestedForallStackedTransparentAliasChainExpr aliasedWrap aliasedWrap recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus stacked let-aliased transparent eta mediators stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr = sameWrapperNestedForallStackedTransparentAliasChainExpr aliasedWrap aliasedWrap recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus mixed direct and let-aliased stacked transparent eta mediators preserves recursive Int output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr =
+              sameWrapperNestedForallStackedTransparentExpr
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                aliasedWrap
+                recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus mixed direct and let-aliased stacked transparent eta mediators preserves recursive Bool output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr =
+              sameWrapperNestedForallStackedTransparentExpr
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                aliasedWrap
+                recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus mixed let-aliased and direct stacked transparent eta mediators preserves recursive Int output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr =
+              sameWrapperNestedForallStackedTransparentExpr
+                aliasedWrap
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus mixed let-aliased and direct stacked transparent eta mediators preserves recursive Bool output on both authoritative entrypoints" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr =
+              sameWrapperNestedForallStackedTransparentExpr
+                aliasedWrap
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus mixed direct and let-aliased stacked transparent eta mediators stays recursive through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr =
+              sameWrapperNestedForallStackedTransparentAliasChainExpr
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                aliasedWrap
+                recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus mixed direct and let-aliased stacked transparent eta mediators stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr =
+              sameWrapperNestedForallStackedTransparentAliasChainExpr
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                aliasedWrap
+                recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus mixed let-aliased and direct stacked transparent eta mediators stays recursive through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr =
+              sameWrapperNestedForallStackedTransparentAliasChainExpr
+                aliasedWrap
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus mixed let-aliased and direct stacked transparent eta mediators stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr =
+              sameWrapperNestedForallStackedTransparentAliasChainExpr
+                aliasedWrap
+                (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                recursiveAnn
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "sibling transparent eta mediators do not poison direct recursive wrapper application" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            directExpr wrapperName =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap1"
+                    (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                    ( ELet
+                        "wrap2"
+                        (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
+                        ( ELet
+                            "k"
+                            (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                            ( ELet
+                                "hold"
+                                (EApp (EVar wrapperName) (EVar "k"))
+                                (EApp (ELam "y" (EVar "y")) (EVar "hold"))
+                            )
+                        )
+                    )
+                )
+        ty1 <- expectAlignedPipelineSuccessType (directExpr "wrap1")
+        containsMu ty1 `shouldBe` True
+        ty2 <- expectAlignedPipelineSuccessType (directExpr "wrap2")
+        containsMu ty2 `shouldBe` True
+
+      it "sibling let-aliased transparent eta mediators do not poison direct recursive wrapper application" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            directExpr wrapperName =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap1"
+                    aliasedWrap
+                    ( ELet
+                        "wrap2"
+                        aliasedWrap
+                        ( ELet
+                            "k"
+                            (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                            ( ELet
+                                "hold"
+                                (EApp (EVar wrapperName) (EVar "k"))
+                                (EApp (ELam "y" (EVar "y")) (EVar "hold"))
+                            )
+                        )
+                    )
+                )
+        ty1 <- expectAlignedPipelineSuccessType (directExpr "wrap1")
+        containsMu ty1 `shouldBe` True
+        ty2 <- expectAlignedPipelineSuccessType (directExpr "wrap2")
+        containsMu ty2 `shouldBe` True
+
+      it "sibling let-aliased transparent eta mediators do not poison direct recursive Bool wrapper application" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap1"
+                    aliasedWrap
+                    ( ELet
+                        "wrap2"
+                        aliasedWrap
+                        ( ELet
+                            "k"
+                            (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                            ( ELet
+                                "hold"
+                                (EApp (EVar "wrap2") (EVar "k"))
+                                (EApp (ELam "y" (EVar "y")) (EVar "hold"))
+                            )
+                        )
+                    )
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "sibling let-aliased transparent eta mediators do not poison direct recursive wrapper application through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap1"
+                    aliasedWrap
+                    ( ELet
+                        "wrap2"
+                        aliasedWrap
+                        ( ELet
+                            "k"
+                            (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                            ( ELet
+                                "hold"
+                                (EApp (EVar "wrap2") (EVar "k"))
+                                ( aliasChain
+                                    ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                    "hold"
+                                )
+                            )
+                        )
+                    )
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "sibling let-aliased transparent eta mediators do not poison direct recursive Bool wrapper application through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            aliasedWrap =
+              ELam
+                "h"
+                (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
+            aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap1"
+                    aliasedWrap
+                    ( ELet
+                        "wrap2"
+                        aliasedWrap
+                        ( ELet
+                            "k"
+                            (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                            ( ELet
+                                "hold"
+                                (EApp (EVar "wrap2") (EVar "k"))
+                                ( aliasChain
+                                    ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                    "hold"
+                                )
+                            )
+                        )
+                    )
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
+      it "same-wrapper nested-forall plus let-aliased transparent eta mediator stays recursively Bool-typed through a decuple owner-local alias chain" $ do
+        let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
+            aliasChain aliases source =
+              case aliases of
+                [] ->
+                  ELet "u" (EApp (ELam "y" (EVar "y")) (EVar source)) (EVar "u")
+                aliasName : rest ->
+                  ELet aliasName (EVar source) (aliasChain rest aliasName)
+            expr =
+              ELet
+                "id"
+                (ELam "z" (EVar "z"))
+                ( ELet
+                    "wrap"
+                    (ELam "h" (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z")))))
+                    ( ELet
+                        "k"
+                        (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
+                        ( ELet
+                            "hold"
+                            (EApp (EVar "wrap") (EVar "k"))
+                            ( aliasChain
+                                ["keep", "more", "deep", "tail", "leaf", "tip", "bud", "seed", "grain", "dust"]
+                                "hold"
+                            )
+                        )
+                    )
+                )
+        ty <- expectAlignedPipelineSuccessType expr
+        containsMu ty `shouldBe` True
+
       it "keeps local empty-candidate scheme-alias/base-like fallback on the local TypeRef lane" $ do
         fallbackTy <- localEmptyCandidateSchemeAliasBaseLikeFallback True
         fallbackTy `shouldBe` TBase (BaseTy "Int")
@@ -2838,15 +5794,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         fallbackTy <- localSingleBaseFallback True
         fallbackTy `shouldBe` TBase (BaseTy "Int")
 
-      it "keeps the same single-base wrapper fail-closed once it leaves the local TypeRef lane" $ do
+      it "keeps the same single-base wrapper on a unique non-local baseTarget lane" $ do
         fallbackTy <- localSingleBaseFallback False
-        case fallbackTy of
-          TForall _ Nothing (TVar _) -> pure ()
-          other ->
-            expectationFailure
-              ( "expected non-local single-base contrast to stay on the quantified fail-closed shell, got "
-                  ++ show other
-              )
+        fallbackTy `shouldBe` TBase (BaseTy "Int")
+        containsMu fallbackTy `shouldBe` False
 
       it "keeps the selected non-local scheme-alias/base-like packet on the baseTarget -> baseC lane" $ do
         fallbackTy <- schemeAliasBaseLikeFallback False
@@ -2914,15 +5865,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         fallbackTy <- localInstArgSingleBaseFallback True
         fallbackTy `shouldBe` TBase (BaseTy "Int")
 
-      it "keeps the same inst-arg-only singleton-base wrapper fail-closed once it leaves the local TypeRef lane" $ do
+      it "keeps the same inst-arg-only singleton-base wrapper on a unique non-local baseTarget lane" $ do
         fallbackTy <- localInstArgSingleBaseFallback False
-        case fallbackTy of
-          TForall _ Nothing (TVar _) -> pure ()
-          other ->
-            expectationFailure
-              ( "expected non-local inst-arg-only singleton-base contrast to stay on the quantified fail-closed shell, got "
-                  ++ show other
-              )
+        fallbackTy `shouldBe` TBase (BaseTy "Int")
+        containsMu fallbackTy `shouldBe` False
 
       it "does not infer recursive shape for the corresponding unannotated variant" $ do
         let expr = ELam "x" (EVar "x")
@@ -2952,43 +5898,59 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         fallbackTy <- requireRight (computeResultTypeFallback inputs annCanon annPre)
         containsMu fallbackTy `shouldBe` True
 
-      it "keeps the explicit non-local scheme-alias/base-like proof separate from the preserved local lanes" $ do
+      it "keeps explicit base-target admission proofs separate from the preserved ambiguity negatives" $ do
         fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "rootLocalEmptyCandidateSchemeAliasBaseLike =\n            rootBindingIsLocalType\n              && rootIsSchemeAlias\n              && rootBoundIsBaseLike\n              && IntSet.null rootBoundCandidates\n              && IntSet.null instArgBaseBounds\n              && not rootHasMultiInst\n              && not instArgRootMultiBase"
+            "data RootLocality\n  = LocalTypeRoot\n  | NonLocalTypeRoot"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "rootLocalSingleBase =\n            rootBindingIsLocalType\n              && IntSet.size rootBoundCandidates == 1\n              && not rootHasMultiInst\n              && not instArgRootMultiBase"
+            "data BaseTargetAdmissionReason\n  = AdmitByUniqueRootCandidate\n  | AdmitByUniqueInstArgCandidate\n  | AdmitBySchemeAliasBaseLike"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "rootLocalInstArgSingleBase =\n            rootBindingIsLocalType\n              && IntSet.null rootBaseBounds\n              && IntSet.size instArgBaseBounds == 1\n              && not rootHasMultiInst\n              && not instArgRootMultiBase"
+            "data BaseTargetAdmission = BaseTargetAdmission\n  { baseTargetAdmissionLocality :: RootLocality,\n    baseTargetAdmissionReason :: BaseTargetAdmissionReason,\n    baseTargetAdmissionNode :: NodeId\n  }"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "rootNonLocalSchemeAliasBaseLike =\n            not rootBindingIsLocalType\n              && rootIsSchemeAlias\n              && rootBoundIsBaseLike"
+            "rootLocality = if rootBindingIsLocalType then LocalTypeRoot else NonLocalTypeRoot"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "let targetC =\n            case baseTarget of\n              Just baseC\n                | rootLocalSingleBase -> baseC"
+            "admitBaseTarget reason baseC =\n            BaseTargetAdmission\n              { baseTargetAdmissionLocality = rootLocality,\n                baseTargetAdmissionReason = reason,\n                baseTargetAdmissionNode = baseC\n              }"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "Just baseC\n                | rootLocalEmptyCandidateSchemeAliasBaseLike -> baseC"
+            "classifyBaseTargetAdmission resolvedBaseC"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "Just baseC\n                | rootLocalInstArgSingleBase -> baseC"
+            "baseTargetAdmission ="
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "Just baseC\n                | rootLocalEmptyCandidateSchemeAliasBaseLike -> baseC\n              Just baseC\n                | rootNonLocalSchemeAliasBaseLike -> baseC"
+            "data RecursiveCandidateProof\n  = RecursiveCandidateBaseTarget BaseTargetAdmission\n  | RecursiveCandidateRetainedChild RetainedChildProof"
         fallbackSrc
-          `shouldSatisfy` ( not
-                              . isInfixOf
-                                "Just baseC\n                            | rootIsSchemeAlias\n                                && rootBoundIsBaseLike -> baseC"
-                          )
+          `shouldSatisfy` isInfixOf
+            "selectedBaseTargetAdmission ="
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "selectedRetainedChildProof ="
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "let targetC =\n            case selectedBaseTargetAdmission of\n              Just admission -> baseTargetAdmissionNode admission"
+        fallbackSrc
+          `shouldSatisfy` (not . isInfixOf "rootLocalSingleBase =")
+        fallbackSrc
+          `shouldSatisfy` (not . isInfixOf "rootLocalInstArgSingleBase =")
+        fallbackSrc
+          `shouldSatisfy` (not . isInfixOf "rootLocalEmptyCandidateSchemeAliasBaseLike =")
+        fallbackSrc
+          `shouldSatisfy` (not . isInfixOf "rootNonLocalSingleBase =")
+        fallbackSrc
+          `shouldSatisfy` (not . isInfixOf "rootNonLocalInstArgSingleBase =")
+        fallbackSrc
+          `shouldSatisfy` (not . isInfixOf "rootNonLocalSchemeAliasBaseLike =")
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "then schemeBodyTarget targetPresolutionView rootC\n                      else\n                        if rootFinalInvolvesMu\n                          then schemeBodyTarget presolutionViewFinal rootC\n                          else rootFinal"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "keepTargetFinal =\n            rootBindingIsLocalType\n              && ( rootLocalMultiInst\n                     || rootLocalInstArgMultiBase"
+            "keepTargetFinal =\n            rootBindingIsLocalType\n              && ( rootLocalMultiInst\n                     || rootLocalInstArgMultiBase\n                     || rootLocalSchemeAliasBaseLike\n                     || recursiveCandidateAmbiguous"
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "rootLocalMultiInst =\n            rootBindingIsLocalType\n              && rootHasMultiInst"
@@ -3006,7 +5968,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             "if rootLocalSchemeAliasBaseLike"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "if rootLocalSchemeAliasBaseLike\n                      || rootLocalMultiInst\n                      || rootLocalInstArgMultiBase\n                      then rootFinal"
+            "if rootLocalSchemeAliasBaseLike\n                      || rootLocalMultiInst\n                      || rootLocalInstArgMultiBase\n                      || recursiveCandidateAmbiguous\n                      then rootFinal"
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "then rootFinal"

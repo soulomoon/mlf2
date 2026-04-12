@@ -23,7 +23,7 @@ import MLF.Constraint.Presolution
 import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
 import MLF.Constraint.Presolution.View (PresolutionView, pvCanonical)
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Types (Constraint, NodeId, PolySyms, cNodes, lookupNodeIn)
+import MLF.Constraint.Types (Constraint, NodeId, PolySyms, cNodes, getEdgeId, lookupNodeIn)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot (..))
 import MLF.Elab.Elaborate (ElabConfig (..), ElabEnv (..), elaborateWithEnv)
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
@@ -209,11 +209,15 @@ runPipelineElabWith traceCfg genConstraints expr = do
   term <- fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
   case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
     () -> pure ()
+  let authoritativeAnnCanon = authoritativeRootAnn term annCanon
+      authoritativeAnnPre = authoritativeRootAnn term ann
+      (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
+        stripWitnesslessAuthoritativeAnn (eaEdgeWitnesses edgeArtifacts) authoritativeAnnCanon authoritativeAnnPre
   rootScope <-
     fromElabError $
       bindingToElab $
-        resolveCanonicalScope c1Broken presolutionViewForGen (prRedirects pres) (annNode ann)
-  let rootTarget = schemeBodyTarget presolutionViewForGen (annNode annCanon)
+        resolveCanonicalScope c1Broken presolutionViewForGen (prRedirects pres) (annNode authoritativeAnnPreFinal)
+  let rootTarget = schemeBodyTarget presolutionViewForGen (annNode authoritativeAnnCanonFinal)
   (rootScheme, rootSubst) <-
     fromElabError $
       generalizeAtWithView (Just bindParentsGa) rootScope rootTarget
@@ -231,39 +235,43 @@ runPipelineElabWith traceCfg genConstraints expr = do
           c1Broken
           (prRedirects pres)
           traceCfg
+      retainedChildAuthoritativeCandidate =
+        case preserveRetainedChildAuthoritativeResult termSubst of
+          Just _ -> True
+          Nothing -> False
       termClosed0 =
-        case typeCheck termSubst of
-          Right ty | null (freeTypeVarsType ty) -> termSubst
-          Right ty ->
-            case rootScheme of
-              Forall binds _
-                | null binds ->
-                    let freeBinds =
-                          [ (name, Nothing)
-                          | name <- Set.toList (freeTypeVarsType ty)
-                          ]
-                        freeScheme = Forall freeBinds ty
-                     in closeTermWithSchemeSubstIfNeeded IntMap.empty freeScheme termSubst
-              _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
-          Left _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
+        if retainedChildAuthoritativeCandidate
+          then closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
+          else case typeCheck termSubst of
+            Right ty | null (freeTypeVarsType ty) -> termSubst
+            Right ty ->
+              case rootScheme of
+                Forall binds _
+                  | null binds ->
+                      let freeBinds =
+                            [ (name, Nothing)
+                            | name <- Set.toList (freeTypeVarsType ty)
+                            ]
+                          freeScheme = Forall freeBinds ty
+                       in closeTermWithSchemeSubstIfNeeded IntMap.empty freeScheme termSubst
+                _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
+            Left _ -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
       termClosed =
-        let preservedTerm =
-              case preserveRetainedChildAuthoritativeResult termClosed0 of
-                Just termAdjusted -> termAdjusted
-                Nothing -> termClosed0
-         in preservedTerm
+        case preserveRetainedChildAuthoritativeResult termClosed0 of
+          Just termAdjusted -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme termAdjusted
+          Nothing -> termClosed0
   let checkedAuthoritative = do
         tyChecked <- fromTypeCheckError (typeCheck termClosed)
         pure (termClosed, tyChecked)
 
   -- Keep result-type reconstruction for diagnostics, but report the
   -- type-checker result as authoritative.
-  case annCanon of
-    AAnn inner annNodeId eid -> do
-      _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner inner annNodeId eid)
+  case (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) of
+    (AAnn inner annNodeId eid, AAnn innerPre _ _) -> do
+      _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid)
       checkedAuthoritative
     _ -> do
-      _ <- fromElabError (computeResultTypeFallback resultTypeInputs annCanon ann)
+      _ <- fromElabError (computeResultTypeFallback resultTypeInputs authoritativeAnnCanonFinal authoritativeAnnPreFinal)
       checkedAuthoritative
 
 prepareSnapshotViews :: PresolutionResult -> Either PipelineError SnapshotViews
@@ -311,3 +319,59 @@ prepareTraceCopyArtifacts baseConstraint presolutionView redirects canonNode edg
           tcaInstCopyNodes = instCopyNodes,
           tcaInstCopyMapFull = instCopyMapFull
         }
+
+authoritativeRootAnn :: ElabTerm -> AnnExpr -> AnnExpr
+authoritativeRootAnn term annExpr =
+  case (stripLeadingTyAbs term, annExpr) of
+    (term0, AAnn inner _ _)
+      | shouldStripAuthoritativeAnn term0 ->
+          authoritativeRootAnn term0 inner
+    (ELet termName _ _ bodyTerm, ALet annName _ _ _ _ _ bodyAnn _)
+      | termName == annName ->
+          authoritativeRootAnn bodyTerm bodyAnn
+    (EApp (ELam param _ (EVar bodyVar)) argTerm, AApp _ argAnn _ _ _)
+      | param == bodyVar ->
+          authoritativeRootAnn argTerm argAnn
+    (EVar termName, AApp _ argAnn _ _ _)
+      | annProducesVar termName argAnn ->
+          authoritativeRootAnn (EVar termName) argAnn
+    _ -> annExpr
+
+shouldStripAuthoritativeAnn :: ElabTerm -> Bool
+shouldStripAuthoritativeAnn term =
+  case term of
+    ELet {} -> True
+    EVar {} -> True
+    EApp (ELam param _ (EVar bodyVar)) _ -> param == bodyVar
+    _ -> False
+
+stripWitnesslessAuthoritativeAnn ::
+  IntMap.IntMap edgeWitness ->
+  AnnExpr ->
+  AnnExpr ->
+  (AnnExpr, AnnExpr)
+stripWitnesslessAuthoritativeAnn edgeWitnesses annCanon annPre =
+  case annCanon of
+    AAnn innerCanon _ eid
+      | IntMap.notMember (getEdgeId eid) edgeWitnesses ->
+          let innerPre =
+                case annPre of
+                  AAnn inner _ _ -> inner
+                  other -> other
+           in stripWitnesslessAuthoritativeAnn edgeWitnesses innerCanon innerPre
+    _ -> (annCanon, annPre)
+
+annProducesVar :: Surface.VarName -> AnnExpr -> Bool
+annProducesVar termName = go
+  where
+    go annExpr =
+      case annExpr of
+        AVar annName _ -> annName == termName
+        AAnn inner _ _ -> go inner
+        _ -> False
+
+stripLeadingTyAbs :: ElabTerm -> ElabTerm
+stripLeadingTyAbs term =
+  case term of
+    ETyAbs _ _ body -> stripLeadingTyAbs body
+    _ -> term

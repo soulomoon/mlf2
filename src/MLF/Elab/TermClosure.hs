@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.TermClosure (
     closeTermWithSchemeSubstIfNeeded,
+    alignTopTyAbsToScheme,
     alignTermTypeVarsToScheme,
     alignTermTypeVarsToTopTyAbs,
     preserveRetainedChildAuthoritativeResult,
@@ -47,6 +48,8 @@ preserveRetainedChildAuthoritativeResult = go emptyEnv
                         | hasRecursiveComponent rhsTy ->
                             Just rhs
                     _ -> descend env v sch rhs body
+            | Just bodyPreserved <- preserveRetainedChildDirectBoundary env v rhs body ->
+                Just bodyPreserved
             | Just bodyPreserved <- preserveRetainedChildAliasBoundary env v sch rhs body ->
                 Just bodyPreserved
             | otherwise -> descend env v sch rhs body
@@ -62,6 +65,15 @@ preserveRetainedChildAuthoritativeResult = go emptyEnv
     descend env v sch rhs body =
         let env' = env { termEnv = Map.insert v (schemeToType sch) (termEnv env) }
         in fmap (ELet v sch rhs) (go env' body)
+
+    preserveRetainedChildDirectBoundary env v rhs body
+        | isClearBoundaryRetainedChildRhs v body =
+            case typeCheckWithEnv env rhs of
+                Right rhsTy
+                    | hasRecursiveComponent rhsTy ->
+                        Just rhs
+                _ -> Nothing
+        | otherwise = Nothing
 
     preserveRetainedChildAliasBoundary env v sch rhs body
         | isAliasFrameRhs rhs
@@ -254,10 +266,40 @@ alignTermTypeVarsToScheme sch term =
                 _ -> Nothing
         Left _ -> Nothing
 
+alignTopTyAbsToScheme :: ElabScheme -> ElabTerm -> Maybe ElabTerm
+alignTopTyAbsToScheme sch term =
+    let Forall binds _ = sch
+        (topBinds, body) = splitTopTyAbs term
+    in if length topBinds /= length binds
+        then Nothing
+        else
+            let renames =
+                    [ (oldName, newName)
+                    | ((oldName, _), (newName, _)) <- zip topBinds binds
+                    , oldName /= newName
+                    ]
+                body' = renameTermTypeVars renames body
+                rebuilt =
+                    foldr
+                        (\(name, mbBound) acc -> ETyAbs name mbBound acc)
+                        body'
+                        binds
+            in case typeCheck rebuilt of
+                Right tyAligned
+                    | alphaEqType tyAligned (schemeToType sch) -> Just rebuilt
+                _ -> Nothing
+
 topTyAbsNames :: ElabTerm -> [String]
 topTyAbsNames term = case term of
     ETyAbs v _ body -> v : topTyAbsNames body
     _ -> []
+
+splitTopTyAbs :: ElabTerm -> ([(String, Maybe BoundType)], ElabTerm)
+splitTopTyAbs term = case term of
+    ETyAbs v mbBound body ->
+        let (binds, core) = splitTopTyAbs body
+        in ((v, mbBound) : binds, core)
+    _ -> ([], term)
 
 alignTermTypeVarsToTopTyAbs :: ElabTerm -> Maybe ElabTerm
 alignTermTypeVarsToTopTyAbs term =

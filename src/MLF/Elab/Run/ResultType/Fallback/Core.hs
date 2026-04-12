@@ -1,4 +1,5 @@
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE PatternSynonyms #-}
 
 module MLF.Elab.Run.ResultType.Fallback.Core
   ( computeResultTypeFallbackCore,
@@ -8,6 +9,7 @@ where
 import Data.Functor.Foldable (cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List (nub)
 import Data.Maybe (listToMaybe)
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
 import MLF.Constraint.Presolution.Base (CopyMapping (..), lookupCopy)
@@ -46,9 +48,11 @@ import MLF.Elab.Run.ResultType.Types
     rtcEdgeWitnesses,
   )
 import MLF.Elab.Run.ResultType.Util
-  ( collectEdges,
+  ( CandidateSelection (..),
+    collectEdges,
     generalizeWithPlan,
     resultTypeRoots,
+    selectUniqueCandidate,
     stripAnn,
   )
 import qualified MLF.Elab.Run.ResultType.View as View
@@ -60,6 +64,53 @@ import MLF.Elab.Run.Scope
   )
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
+
+data RootLocality
+  = LocalTypeRoot
+  | NonLocalTypeRoot
+  deriving (Eq, Show)
+
+data BaseTargetAdmissionReason
+  = AdmitByUniqueRootCandidate
+  | AdmitByUniqueInstArgCandidate
+  | AdmitBySchemeAliasBaseLike
+  deriving (Eq, Show)
+
+data BaseTargetAdmission = BaseTargetAdmission
+  { baseTargetAdmissionLocality :: RootLocality,
+    baseTargetAdmissionReason :: BaseTargetAdmissionReason,
+    baseTargetAdmissionNode :: NodeId
+  }
+  deriving (Eq, Show)
+
+type UniqueCandidate = CandidateSelection
+
+pattern NoCandidate :: UniqueCandidate a
+pattern NoCandidate = NoCandidateSelection
+
+pattern UniqueCandidate :: a -> UniqueCandidate a
+pattern UniqueCandidate candidate = UniqueCandidateSelection candidate
+
+pattern AmbiguousCandidate :: UniqueCandidate a
+pattern AmbiguousCandidate = AmbiguousCandidateSelection
+
+{-# COMPLETE NoCandidate, UniqueCandidate, AmbiguousCandidate #-}
+
+data RetainedChildProof = RetainedChildProof
+  { retainedChildProofChild :: NodeId,
+    retainedChildProofChildTarget :: NodeId,
+    retainedChildProofChosenTarget :: NodeId,
+    retainedChildProofChosenScopeRoot :: NodeRef
+  }
+  deriving (Eq, Show)
+
+data RecursiveCandidateProof
+  = RecursiveCandidateBaseTarget BaseTargetAdmission
+  | RecursiveCandidateRetainedChild RetainedChildProof
+  deriving (Eq, Show)
+
+uniqueCandidate :: Eq a => [a] -> UniqueCandidate a
+uniqueCandidate = selectUniqueCandidate
 
 -- | Core implementation of computeResultTypeFallback (non-annotated-lambda case).
 computeResultTypeFallbackCore ::
@@ -256,7 +307,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
             if IntSet.null rootBaseBounds
               then rootArgBaseBounds
               else rootBaseBounds
-      let baseTarget =
+      let baseTargetCandidate =
             case lookupNodeIn nodes rootC of
               Just TyVar {} ->
                 case resolveBaseBoundCanonical rootC of
@@ -288,18 +339,28 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                   _ -> Nothing
                           _ -> Nothing
                   _ ->
-                    case IntSet.toList rootBoundCandidates of
+                    case IntSet.toList instArgBaseBounds of
                       [baseKey]
-                        | not rootHasMultiInst
+                        | IntSet.null rootBaseBounds
+                            && not rootHasMultiInst
                             && not instArgRootMultiBase ->
                             case lookupNodeIn nodes (NodeId baseKey) of
                               Just TyBase {} -> Just (NodeId baseKey)
                               Just TyBottom {} -> Just (NodeId baseKey)
                               _ -> Nothing
-                      _ -> Nothing
+                      _ ->
+                        case IntSet.toList rootBoundCandidates of
+                          [baseKey]
+                            | not rootHasMultiInst
+                                && not instArgRootMultiBase ->
+                                case lookupNodeIn nodes (NodeId baseKey) of
+                                  Just TyBase {} -> Just (NodeId baseKey)
+                                  Just TyBottom {} -> Just (NodeId baseKey)
+                                  _ -> Nothing
+                          _ -> Nothing
               _ -> Nothing
       let boundTarget =
-            case (baseTarget, lookupNodeIn nodes rootC) of
+            case (baseTargetCandidate, lookupNodeIn nodes rootC) of
               (Nothing, Just TyVar {tnBound = Nothing}) ->
                 case IntSet.toList rootBoundCandidates of
                   [baseKey] -> Just (NodeId baseKey)
@@ -468,33 +529,44 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
           rootLocalInstArgMultiBase =
             rootBindingIsLocalType
               && instArgRootMultiBase
-          rootLocalInstArgSingleBase =
-            rootBindingIsLocalType
-              && IntSet.null rootBaseBounds
-              && IntSet.size instArgBaseBounds == 1
-              && not rootHasMultiInst
-              && not instArgRootMultiBase
-          rootLocalEmptyCandidateSchemeAliasBaseLike =
-            rootBindingIsLocalType
-              && rootIsSchemeAlias
-              && rootBoundIsBaseLike
-              && IntSet.null rootBoundCandidates
-              && IntSet.null instArgBaseBounds
-              && not rootHasMultiInst
-              && not instArgRootMultiBase
-          rootNonLocalSchemeAliasBaseLike =
-            not rootBindingIsLocalType
-              && rootIsSchemeAlias
-              && rootBoundIsBaseLike
           rootLocalSchemeAliasBaseLike =
             rootBindingIsLocalType
               && rootIsSchemeAlias
               && rootBoundIsBaseLike
-          rootLocalSingleBase =
-            rootBindingIsLocalType
-              && IntSet.size rootBoundCandidates == 1
-              && not rootHasMultiInst
+          rootLocality = if rootBindingIsLocalType then LocalTypeRoot else NonLocalTypeRoot
+          rootAllowsExplicitBaseTarget =
+            not rootHasMultiInst
               && not instArgRootMultiBase
+          admitBaseTarget reason baseC =
+            BaseTargetAdmission
+              { baseTargetAdmissionLocality = rootLocality,
+                baseTargetAdmissionReason = reason,
+                baseTargetAdmissionNode = baseC
+              }
+          classifyBaseTargetAdmission resolvedBaseC
+            | IntSet.size rootBoundCandidates == 1
+                && IntSet.member (getNodeId resolvedBaseC) rootBoundCandidates
+                && rootAllowsExplicitBaseTarget =
+                Just (admitBaseTarget AdmitByUniqueRootCandidate resolvedBaseC)
+            | IntSet.null rootBaseBounds
+                && IntSet.size instArgBaseBounds == 1
+                && IntSet.member (getNodeId resolvedBaseC) instArgBaseBounds
+                && rootAllowsExplicitBaseTarget =
+                Just (admitBaseTarget AdmitByUniqueInstArgCandidate resolvedBaseC)
+            | rootIsSchemeAlias
+                && rootBoundIsBaseLike
+                && rootAllowsExplicitBaseTarget
+                && ( not rootBindingIsLocalType
+                       || ( IntSet.null rootBoundCandidates
+                              && IntSet.null instArgBaseBounds
+                          )
+                   ) =
+                Just (admitBaseTarget AdmitBySchemeAliasBaseLike resolvedBaseC)
+            | otherwise = Nothing
+          baseTargetAdmission =
+            case baseTargetCandidate of
+              Just resolvedBaseC -> classifyBaseTargetAdmission resolvedBaseC
+              Nothing -> Nothing
           boundVarTargetRoot = canonicalFinal (schemeBodyTarget targetPresolutionView rootC)
           (schemeRootSetFinal, schemeRootOwnerFinal) =
             canonicalSchemeRootOwners
@@ -588,14 +660,14 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                  in go visited' d || go visited' c
                               _ -> False
              in go IntSet.empty start0
-          firstRecursiveTargetFrom start0 =
+          recursiveTargetsFrom start0 =
             let go visited nid0 =
                   let nid = canonicalFinal nid0
                       key = getNodeId nid
                    in if IntSet.member key visited
-                        then Nothing
+                        then []
                         else case pvLookupNode retainedChildPresolutionView nid of
-                          Just TyMu {} -> Just nid
+                          Just TyMu {} -> [nid]
                           Just TyVar {tnBound = Just bnd} ->
                             go (IntSet.insert key visited) bnd
                           Just TyForall {tnBody = b} ->
@@ -604,12 +676,10 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                             go (IntSet.insert key visited) b
                           Just TyArrow {tnDom = d, tnCod = c} ->
                             let visited' = IntSet.insert key visited
-                             in case go visited' d of
-                                  Just recursiveTarget -> Just recursiveTarget
-                                  Nothing -> go visited' c
-                          _ -> Nothing
-             in go IntSet.empty start0
-          sameWrapperRetainedChildProof =
+                             in go visited' d ++ go visited' c
+                          _ -> []
+             in nub (go IntSet.empty start0)
+          sameWrapperRetainedChildSelection =
             let sameLocalTypeLane parentRef child =
                   parentRef == scopeRootPost
                     || case bindingScopeRefCanonical presolutionViewFinal child of
@@ -621,20 +691,24 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                            || childTarget == boundVarTargetRoot
                        )
                 recursiveTargetProofFor childTarget =
-                  let recursiveFromInstRoots =
-                        listToMaybe
+                  let directRecursiveTargetSelection =
+                        uniqueCandidate (recursiveTargetsFrom childTarget)
+                      instRootRecursiveTargetSelection =
+                        uniqueCandidate
                           [ recursiveTarget
                           | instRoot <- rootInstRoots,
-                            Just recursiveTarget <- [firstRecursiveTargetFrom instRoot]
+                            recursiveTarget <- recursiveTargetsFrom instRoot
                           ]
-                      chosenRecursiveTarget =
-                        case firstRecursiveTargetFrom childTarget of
-                          Just recursiveTarget -> Just recursiveTarget
-                          Nothing -> recursiveFromInstRoots
-                   in case chosenRecursiveTarget of
-                        Just recursiveTarget ->
-                          Just (recursiveTarget, alignedScopeRootFor recursiveTarget)
-                        Nothing -> Nothing
+                      liftSelection selection =
+                        case selection of
+                          UniqueCandidate recursiveTarget ->
+                            UniqueCandidate (recursiveTarget, alignedScopeRootFor recursiveTarget)
+                          AmbiguousCandidate -> AmbiguousCandidate
+                          NoCandidate -> NoCandidate
+                   in case liftSelection directRecursiveTargetSelection of
+                        UniqueCandidate directProof -> UniqueCandidate directProof
+                        AmbiguousCandidate -> AmbiguousCandidate
+                        NoCandidate -> liftSelection instRootRecursiveTargetSelection
                 candidates =
                   [ let childC = canonicalFinal child
                         childTarget = canonicalFinal (schemeBodyTarget retainedChildPresolutionView child)
@@ -642,15 +716,40 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                         bndRoot = canonicalFinal (schemeBodyTarget retainedChildPresolutionView bnd)
                         chosenTargetProof =
                           case recursiveTargetProofFor childTarget of
-                            Just proof -> proof
-                            Nothing -> (childC, scopeRoot)
-                        hasForall = boundHasForallFrom (snd chosenTargetProof) bndC
+                            NoCandidate -> UniqueCandidate (childC, scopeRoot)
+                            other -> other
+                        hasForall =
+                          case chosenTargetProof of
+                            UniqueCandidate (_chosenTarget, chosenScopeRoot) ->
+                              Just (boundHasForallFrom chosenScopeRoot bndC)
+                            _ -> Nothing
                      in (childC, childTarget, bndC, bndRoot, chosenTargetProof, hasForall)
                   | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (pvCanonicalConstraint retainedChildPresolutionView)),
                     TypeRef child <- [nodeRefFromKey childKey],
                     sameLocalTypeLane parentRef (canonicalFinal child),
                     Just bnd <- [pvLookupVarBound retainedChildPresolutionView (canonicalFinal child)]
                   ]
+                matchingCandidates =
+                  [ RetainedChildProof
+                      { retainedChildProofChild = child,
+                        retainedChildProofChildTarget = childTarget,
+                        retainedChildProofChosenTarget = chosenTarget,
+                        retainedChildProofChosenScopeRoot = chosenScopeRoot
+                      }
+                  | (child, childTarget, _bnd, bndRoot, UniqueCandidate (chosenTarget, chosenScopeRoot), Just hasForall) <- candidates,
+                    selectedSameWrapperNestedForallTarget childTarget bndRoot hasForall
+                  ]
+                matchingCandidateSelection =
+                  uniqueCandidate matchingCandidates
+                hasAmbiguousMatchingCandidate =
+                  any
+                    ( \(_child, _childTarget, _bnd, bndRoot, chosenTargetProof, _hasForall) ->
+                        bndRoot == boundVarTargetRoot
+                          && case chosenTargetProof of
+                            AmbiguousCandidate -> True
+                            _ -> False
+                    )
+                    candidates
                 debugCandidates =
                   if debugGaScopeEnabled traceCfg
                     then
@@ -669,52 +768,77 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                               [ (child, childTarget, bnd, bndRoot, chosenTargetProof, hasForall)
                               | (child, childTarget, bnd, bndRoot, chosenTargetProof, hasForall) <- candidates
                               ]
+                            ++ " matchingCandidateSelection="
+                            ++ show matchingCandidateSelection
+                            ++ " hasAmbiguousMatchingCandidate="
+                            ++ show hasAmbiguousMatchingCandidate
                         )
                         ()
                     else ()
-             in if rootBindingIsLocalType
-                  then
-                    case debugCandidates of
-                      () ->
-                        listToMaybe
-                          [ (child, childTarget, chosenTarget, chosenScopeRoot)
-                          | (child, childTarget, _bnd, bndRoot, (chosenTarget, chosenScopeRoot), hasForall) <- candidates,
-                            selectedSameWrapperNestedForallTarget childTarget bndRoot hasForall
-                          ]
-                  else Nothing
+             in case debugCandidates of
+                  () ->
+                    if rootBindingIsLocalType
+                      then
+                        if hasAmbiguousMatchingCandidate
+                          then AmbiguousCandidate
+                          else matchingCandidateSelection
+                      else NoCandidate
+          sameWrapperRetainedChildProof =
+            case sameWrapperRetainedChildSelection of
+              UniqueCandidate retainedChildProof' -> Just retainedChildProof'
+              _ -> Nothing
+          sameWrapperRetainedChildAmbiguous =
+            case sameWrapperRetainedChildSelection of
+              AmbiguousCandidate -> True
+              _ -> False
+          recursiveCandidateSelection =
+            if sameWrapperRetainedChildAmbiguous
+              then AmbiguousCandidate
+              else
+                uniqueCandidate
+                  ( maybe [] (pure . RecursiveCandidateBaseTarget) baseTargetAdmission
+                      ++ maybe [] (pure . RecursiveCandidateRetainedChild) sameWrapperRetainedChildProof
+                  )
+          selectedBaseTargetAdmission =
+            case recursiveCandidateSelection of
+              UniqueCandidate (RecursiveCandidateBaseTarget admission) -> Just admission
+              _ -> Nothing
+          selectedRetainedChildProof =
+            case recursiveCandidateSelection of
+              UniqueCandidate (RecursiveCandidateRetainedChild retainedChildProof') -> Just retainedChildProof'
+              _ -> Nothing
+          recursiveCandidateAmbiguous =
+            case recursiveCandidateSelection of
+              AmbiguousCandidate -> True
+              _ -> False
           boundVarTarget =
-            fmap (\(child, _childTarget, _chosenTarget, _chosenScopeRoot) -> child) sameWrapperRetainedChildProof
+            fmap retainedChildProofChild selectedRetainedChildProof
           sameLaneLocalRetainedChildTarget =
             if rootBindingIsLocalType
-              then fmap (\(_child, _childTarget, chosenTarget, _chosenScopeRoot) -> chosenTarget) sameWrapperRetainedChildProof
+              then fmap retainedChildProofChosenTarget selectedRetainedChildProof
               else Nothing
           sameLaneLocalRetainedChildScopeRoot =
             if rootBindingIsLocalType
-              then fmap (\(_child, _childTarget, _chosenTarget, chosenScopeRoot) -> chosenScopeRoot) sameWrapperRetainedChildProof
+              then fmap retainedChildProofChosenScopeRoot selectedRetainedChildProof
               else Nothing
           keepTargetFinal =
             rootBindingIsLocalType
               && ( rootLocalMultiInst
                      || rootLocalInstArgMultiBase
                      || rootLocalSchemeAliasBaseLike
+                     || recursiveCandidateAmbiguous
                      || maybe False (const True) sameLaneLocalRetainedChildTarget
                  )
       let targetC =
-            case baseTarget of
-              Just baseC
-                | rootLocalSingleBase -> baseC
-              Just baseC
-                | rootLocalInstArgSingleBase -> baseC
-              Just baseC
-                | rootLocalEmptyCandidateSchemeAliasBaseLike -> baseC
-              Just baseC
-                | rootNonLocalSchemeAliasBaseLike -> baseC
+            case selectedBaseTargetAdmission of
+              Just admission -> baseTargetAdmissionNode admission
               _ ->
                 if keepTargetFinal
                   then
                     if rootLocalSchemeAliasBaseLike
                       || rootLocalMultiInst
                       || rootLocalInstArgMultiBase
+                      || recursiveCandidateAmbiguous
                       then rootFinal
                       else
                         case sameLaneLocalRetainedChildTarget of
@@ -732,7 +856,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                           then schemeBodyTarget presolutionViewFinal rootC
                           else rootFinal
       let useSameLaneLocalRetainedChildScopeRoot =
-            case baseTarget of
+            case selectedBaseTargetAdmission of
               Just _ -> False
               Nothing ->
                 keepTargetFinal
@@ -777,15 +901,19 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
         ( "runPipelineElab: final scheme="
             ++ pretty sch
             ++ " keepTargetBase="
-            ++ show (case baseTarget of Just _ -> True; Nothing -> False)
+            ++ show (case selectedBaseTargetAdmission of Just _ -> True; Nothing -> False)
             ++ " keepTargetFinal="
             ++ show keepTargetFinal
             ++ " targetC="
             ++ show targetC
+            ++ " recursiveCandidateSelection="
+            ++ show recursiveCandidateSelection
+            ++ " baseTargetAdmission="
+            ++ show baseTargetAdmission
             ++ " boundVarTarget="
             ++ show boundVarTarget
             ++ " sameWrapperRetainedChildProof="
-            ++ show sameWrapperRetainedChildProof
+            ++ show selectedRetainedChildProof
             ++ " rootInstRoots="
             ++ show rootInstRoots
             ++ " boundVarTargetRoot="
