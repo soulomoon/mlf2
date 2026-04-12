@@ -1,6 +1,8 @@
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.ResultType.Util (
     CandidateSelection(..),
+    candidateSelectionIsAmbiguous,
+    candidateSelectionValue,
     selectUniqueCandidate,
     selectUniqueCandidateBy,
     generalizeWithPlan,
@@ -39,6 +41,22 @@ data CandidateSelection a
     | UniqueCandidateSelection a
     | AmbiguousCandidateSelection
     deriving (Eq, Show)
+
+candidateSelectionValue :: CandidateSelection a -> Maybe a
+candidateSelectionValue selection =
+    case selection of
+        UniqueCandidateSelection value ->
+            Just value
+        _ ->
+            Nothing
+
+candidateSelectionIsAmbiguous :: CandidateSelection a -> Bool
+candidateSelectionIsAmbiguous selection =
+    case selection of
+        AmbiguousCandidateSelection ->
+            True
+        _ ->
+            False
 
 selectUniqueCandidate :: Eq a => [a] -> CandidateSelection a
 selectUniqueCandidate = selectUniqueCandidateBy (==)
