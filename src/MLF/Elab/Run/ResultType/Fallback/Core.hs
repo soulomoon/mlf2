@@ -795,12 +795,13 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                   ( maybe [] (pure . RecursiveCandidateBaseTarget) baseTargetAdmission
                       ++ maybe [] (pure . RecursiveCandidateRetainedChild) sameWrapperRetainedChildProof
                   )
+          selectedRecursiveCandidate = candidateSelectionValue recursiveCandidateSelection
           selectedBaseTargetAdmission =
-            case candidateSelectionValue recursiveCandidateSelection of
+            case selectedRecursiveCandidate of
               Just (RecursiveCandidateBaseTarget admission) -> Just admission
               _ -> Nothing
           selectedRetainedChildProof =
-            case candidateSelectionValue recursiveCandidateSelection of
+            case selectedRecursiveCandidate of
               Just (RecursiveCandidateRetainedChild retainedChildProof') -> Just retainedChildProof'
               _ -> Nothing
           recursiveCandidateAmbiguous = candidateSelectionIsAmbiguous recursiveCandidateSelection
