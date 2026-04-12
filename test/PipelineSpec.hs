@@ -58,6 +58,8 @@ import MLF.Elab.Run.ResultType
   )
 import MLF.Elab.Run.ResultType.Util
   ( CandidateSelection (..),
+    candidateSelectionIsAmbiguous,
+    candidateSelectionValue,
     selectUniqueCandidate,
     selectUniqueCandidateBy,
   )
@@ -366,6 +368,18 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         (\(_, arityA) (_, arityB) -> arityA == arityB)
         [("helper", 2 :: Int), ("direct", 2)]
         `shouldBe` UniqueCandidateSelection ("helper", 2)
+
+    it "extracts only unique selections" $ do
+      candidateSelectionValue (selectUniqueCandidate [1 :: Int, 1])
+        `shouldBe` Just 1
+      candidateSelectionValue (selectUniqueCandidate [1 :: Int, 2])
+        `shouldBe` Nothing
+
+    it "flags only ambiguous selections as ambiguous" $ do
+      candidateSelectionIsAmbiguous (selectUniqueCandidate [1 :: Int, 2])
+        `shouldBe` True
+      candidateSelectionIsAmbiguous (selectUniqueCandidate [1 :: Int, 1])
+        `shouldBe` False
 
   describe "Elaboration helpers" $ do
     it "reifies type with flexible bound" $ do
@@ -5064,7 +5078,21 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             "recursiveCandidateSelection ="
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "case sameWrapperRetainedChildSelection of\n              UniqueCandidate retainedChildProof' -> Just retainedChildProof'\n              _ -> Nothing"
+            "sameWrapperRetainedChildProof = candidateSelectionValue sameWrapperRetainedChildSelection"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "sameWrapperRetainedChildAmbiguous = candidateSelectionIsAmbiguous sameWrapperRetainedChildSelection"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "case candidateSelectionValue recursiveCandidateSelection of\n              Just (RecursiveCandidateBaseTarget admission) -> Just admission\n              _ -> Nothing"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "case candidateSelectionValue recursiveCandidateSelection of\n              Just (RecursiveCandidateRetainedChild retainedChildProof') -> Just retainedChildProof'\n              _ -> Nothing"
+        fallbackSrc
+          `shouldSatisfy` isInfixOf
+            "recursiveCandidateAmbiguous = candidateSelectionIsAmbiguous recursiveCandidateSelection"
+        fallbackSrc
+          `shouldSatisfy` (not . isInfixOf "case sameWrapperRetainedChildSelection of\n              UniqueCandidate retainedChildProof' -> Just retainedChildProof'\n              _ -> Nothing")
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "sameLaneLocalRetainedChildScopeRoot =\n            if rootBindingIsLocalType\n              then fmap retainedChildProofChosenScopeRoot selectedRetainedChildProof\n              else Nothing"

@@ -49,6 +49,8 @@ import MLF.Elab.Run.ResultType.Types
   )
 import MLF.Elab.Run.ResultType.Util
   ( CandidateSelection (..),
+    candidateSelectionIsAmbiguous,
+    candidateSelectionValue,
     collectEdges,
     generalizeWithPlan,
     resultTypeRoots,
@@ -783,14 +785,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                           then AmbiguousCandidate
                           else matchingCandidateSelection
                       else NoCandidate
-          sameWrapperRetainedChildProof =
-            case sameWrapperRetainedChildSelection of
-              UniqueCandidate retainedChildProof' -> Just retainedChildProof'
-              _ -> Nothing
-          sameWrapperRetainedChildAmbiguous =
-            case sameWrapperRetainedChildSelection of
-              AmbiguousCandidate -> True
-              _ -> False
+          sameWrapperRetainedChildProof = candidateSelectionValue sameWrapperRetainedChildSelection
+          sameWrapperRetainedChildAmbiguous = candidateSelectionIsAmbiguous sameWrapperRetainedChildSelection
           recursiveCandidateSelection =
             if sameWrapperRetainedChildAmbiguous
               then AmbiguousCandidate
@@ -800,17 +796,14 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                       ++ maybe [] (pure . RecursiveCandidateRetainedChild) sameWrapperRetainedChildProof
                   )
           selectedBaseTargetAdmission =
-            case recursiveCandidateSelection of
-              UniqueCandidate (RecursiveCandidateBaseTarget admission) -> Just admission
+            case candidateSelectionValue recursiveCandidateSelection of
+              Just (RecursiveCandidateBaseTarget admission) -> Just admission
               _ -> Nothing
           selectedRetainedChildProof =
-            case recursiveCandidateSelection of
-              UniqueCandidate (RecursiveCandidateRetainedChild retainedChildProof') -> Just retainedChildProof'
+            case candidateSelectionValue recursiveCandidateSelection of
+              Just (RecursiveCandidateRetainedChild retainedChildProof') -> Just retainedChildProof'
               _ -> Nothing
-          recursiveCandidateAmbiguous =
-            case recursiveCandidateSelection of
-              AmbiguousCandidate -> True
-              _ -> False
+          recursiveCandidateAmbiguous = candidateSelectionIsAmbiguous recursiveCandidateSelection
           boundVarTarget =
             fmap retainedChildProofChild selectedRetainedChildProof
           sameLaneLocalRetainedChildTarget =
