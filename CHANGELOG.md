@@ -3,6 +3,16 @@
 ## Unreleased
 
 ### Changed
+- Added a new public recursive-ADT program surface via `MLF.Program`. The repo
+  now parses, pretty-prints, checks, and evaluates module-oriented recursive
+  algebraic data type programs with `data` declarations, constructor-pattern
+  `case`, recursive GADT-style constructor result types, existential
+  constructors via `forall`, single-parameter typeclasses / instances, and the
+  initial `deriving Eq` lane. Added the Phase-0 syntax/corpus freeze
+  (`docs/plans/2026-04-13-recursive-adt-syntax-freeze.md`), executable corpus
+  fixtures under `test/programs/recursive-adt/`, and `ProgramSpec` regression
+  coverage for parse/pretty roundtrips, execution, diagnostics, and a
+  representative recursive-Nat baseline.
 - The repo can now honestly claim fully automatic unannotated iso-recursive
   inference across its representative family matrix inside the inherited
   explicit-only / iso-recursive / non-equi-recursive / no-fallback /

@@ -129,3 +129,40 @@ Term        ::= x
 - xMLF term/type syntax includes base types as uppercase 0-ary constructors (e.g. `Int`, `Bool`).
 - xMLF parser accepts legacy instantiation tokens (`1`, `⟨τ⟩`, `!a`) for transition, but pretty-printing is canonical.
 - `ElabTerm` carries let schemes (`ELet String ElabScheme ...`); pretty output keeps `let x : scheme = ... in ...` as a repository-specific extension for debugging fidelity.
+
+## Recursive ADT Program Surface (`MLF.Program`)
+
+The recursive-ADT program layer is a separate surface above eMLF/xMLF. The
+authoritative Phase-0 freeze lives in
+`docs/plans/2026-04-13-recursive-adt-syntax-freeze.md`; the implementation
+currently accepts the following core shapes:
+
+```ebnf
+Program      ::= Module+
+Module       ::= "module" UIdent ["export" "(" ExportItem ("," ExportItem)* ")"] "{" Import* Decl* "}"
+Import       ::= "import" UIdent ["exposing" "(" ExportItem ("," ExportItem)* ")"] ";"
+ExportItem   ::= lIdent | UIdent | UIdent "(..)"
+
+Decl         ::= DataDecl | ClassDecl | InstanceDecl | DefDecl
+DataDecl     ::= "data" UIdent lIdent* "=" CtorDecl ("|" CtorDecl)* ["deriving" UIdent ("," UIdent)*] ";"
+CtorDecl     ::= UIdent ":" SrcType
+ClassDecl    ::= "class" UIdent lIdent "{" MethodSig* "}"
+MethodSig    ::= lIdent ":" SrcType ";"
+InstanceDecl ::= "instance" UIdent SrcType "{" MethodDef* "}"
+MethodDef    ::= lIdent "=" Expr ";"
+DefDecl      ::= "def" lIdent ":" SrcType "=" Expr ";"
+
+Expr         ::= lIdent | UIdent | Literal
+               | "\" Param Expr
+               | Expr Expr
+               | "let" lIdent [":" SrcType] "=" Expr "in" Expr
+               | "case" Expr "of" "{" Alt (";" Alt)* "}"
+               | "(" Expr ":" SrcType ")"
+
+Param        ::= lIdent | "(" lIdent [":" SrcType] ")"
+Alt          ::= Pattern "->" Expr
+Pattern      ::= UIdent lIdent* | lIdent | "_"
+```
+
+Current checked/evaluated recursive-ADT corpus examples live under
+`test/programs/recursive-adt/`.

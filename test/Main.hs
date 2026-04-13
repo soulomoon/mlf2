@@ -25,6 +25,7 @@ import Phi.AlignmentSpec qualified
 import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
 import PipelineSpec qualified
+import ProgramSpec qualified
 import Presolution.UnificationClosureSpec qualified
 import PresolutionFacadeSpec qualified
 import PresolutionSpec qualified
@@ -70,6 +71,7 @@ main = do
         die "PresolutionSpec was not wired into the test harness."
     SolveSpec.spec
     ScopeSpec.spec
+    ProgramSpec.spec
     PipelineSpec.spec
     PublicSurfaceSpec.spec
     RepoGuardSpec.spec
