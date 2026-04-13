@@ -1,0 +1,21 @@
+module RecursiveList export (Nat(..), List(..), tailOrNil, isNil, main) {
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  data List =
+      Nil : List
+    | Cons : Nat -> List -> List;
+
+  def tailOrNil : List -> List = \(xs : List) case xs of {
+    Nil -> Nil;
+    Cons _ rest -> rest
+  };
+
+  def isNil : List -> Bool = \(xs : List) case xs of {
+    Nil -> true;
+    Cons _ _ -> false
+  };
+
+  def main : Bool = isNil (tailOrNil (Cons Zero Nil));
+}

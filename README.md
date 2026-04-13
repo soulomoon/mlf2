@@ -89,6 +89,12 @@ Frozen examples live under `test/programs/recursive-adt/`, and the Phase-0
 syntax/corpus freeze is documented in
 `docs/plans/2026-04-13-recursive-adt-syntax-freeze.md`.
 
+Run a program file directly from the executable:
+
+```bash
+cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp
+```
+
 ## Syntax and paper alignment
 
 - Canonical syntax spec: `docs/syntax.md`

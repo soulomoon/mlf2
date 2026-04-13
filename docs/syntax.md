@@ -166,3 +166,9 @@ Pattern      ::= UIdent lIdent* | lIdent | "_"
 
 Current checked/evaluated recursive-ADT corpus examples live under
 `test/programs/recursive-adt/`.
+
+You can run a program file with:
+
+```bash
+cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp
+```

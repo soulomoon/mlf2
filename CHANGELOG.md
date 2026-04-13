@@ -13,6 +13,16 @@
   fixtures under `test/programs/recursive-adt/`, and `ProgramSpec` regression
   coverage for parse/pretty roundtrips, execution, diagnostics, and a
   representative recursive-Nat baseline.
+- Wired the `mlf2` executable to run recursive-ADT program files directly via
+  `cabal run mlf2 -- run-program <file.mlfp>`, and expanded the sample corpus
+  with `recursive-list-tail.mlfp`, `recursive-tree-deriving.mlfp`, and
+  `abstract-module-use.mlfp`. `ProgramSpec` now roundtrips/runs all nine sample
+  programs and verifies the CLI helper path. Validated with
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
+  (`24 examples, 0 failures`),
+  `cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp`
+  (`true`), and `cabal build all && cabal test`
+  (`1565 examples, 0 failures`).
 - The repo can now honestly claim fully automatic unannotated iso-recursive
   inference across its representative family matrix inside the inherited
   explicit-only / iso-recursive / non-equi-recursive / no-fallback /
