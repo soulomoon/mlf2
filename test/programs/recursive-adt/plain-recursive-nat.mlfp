@@ -1,0 +1,17 @@
+module NatPlain export (Nat(..), isZero, peel, main) {
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  def isZero : Nat -> Bool = \(n : Nat) case n of {
+    Zero -> true;
+    Succ _ -> false
+  };
+
+  def peel : Nat -> Nat = \(n : Nat) case n of {
+    Zero -> Zero;
+    Succ inner -> inner
+  };
+
+  def main : Bool = isZero (peel (Succ Zero));
+}

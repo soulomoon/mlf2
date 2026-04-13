@@ -10,7 +10,7 @@ The pipeline takes eMLF terms, builds and solves graphic constraints, and elabor
 ## Repository layout
 
 - `src/` — internal implementation (`MLF.Frontend.*`, `MLF.Constraint.*`, `MLF.Elab.*`, etc.)
-- `src-public/` — public API modules (`MLF.API`, `MLF.Pipeline`, `MLF.XMLF`)
+- `src-public/` — public API modules (`MLF.API`, `MLF.Program`, `MLF.Pipeline`, `MLF.XMLF`)
 - `app/` — executable entrypoint (`mlf2`)
 - `test/` — Hspec test suite
 - `tasks/` — active/archive task execution logs
@@ -65,12 +65,29 @@ CI reuses the same repo commands; there is no CI-only verification logic.
 ## Public entry points
 
 - `MLF.API` — surface syntax, parsing, pretty-printing, and normalization helpers
+- `MLF.Program` — recursive-ADT program syntax, checking, pretty-printing, and evaluation
 - `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API
 - `MLF.XMLF` — xMLF syntax, parser, and pretty-printer
 
 Active multi-step work is tracked under `tasks/todo/`; root-level `task_plan.md`,
 `findings.md`, and `progress.md` are historical leftovers rather than the active
 workflow.
+
+## Recursive ADT program surface
+
+`MLF.Program` adds a program-oriented recursive-ADT layer with:
+
+- `module` / `import ... exposing (...)`
+- `data` declarations with explicit constructor signatures
+- `case` / constructor pattern matching
+- recursive GADT-style constructor result types
+- existential constructors via `forall`
+- single-parameter typeclasses / instances
+- `deriving Eq` for the initial recursive-ADT corpus
+
+Frozen examples live under `test/programs/recursive-adt/`, and the Phase-0
+syntax/corpus freeze is documented in
+`docs/plans/2026-04-13-recursive-adt-syntax-freeze.md`.
 
 ## Syntax and paper alignment
 

@@ -1,0 +1,26 @@
+module TypeclassIntegration export (Eq, Nat(..), eq, same, main) {
+  class Eq a {
+    eq : a -> a -> Bool;
+  }
+
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  instance Eq Nat {
+    eq = \(left : Nat) \(right : Nat) case left of {
+      Zero -> case right of {
+        Zero -> true;
+        Succ _ -> false
+      };
+      Succ leftRest -> case right of {
+        Zero -> false;
+        Succ rightRest -> eq leftRest rightRest
+      }
+    };
+  }
+
+  def same : Nat -> Nat -> Bool = \(left : Nat) \(right : Nat) eq left right;
+
+  def main : Bool = same (Succ (Succ Zero)) (Succ (Succ Zero));
+}

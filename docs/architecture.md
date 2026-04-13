@@ -8,12 +8,14 @@ Goal: keep the implementation paper-faithful to the thesis and document any devi
 Downstream code should import:
 
 - `MLF.API` — umbrella frontend module (surface syntax + eMLF parse/pretty + normalization helpers)
+- `MLF.Program` — recursive-ADT program surface (modules, data declarations, typeclasses, checking, evaluation)
 - `MLF.Pipeline` — canonical pipeline/runtime module (e.g. `inferConstraintGraph`, `runPipelineElab`, `typeCheck`, `step`, `normalize`)
 - `MLF.XMLF` — explicit xMLF syntax, parser, and pretty-printing helpers
 
 Public modules live under `src-public/` and the public Cabal library only exposes:
 
 - `src-public/MLF/API.hs`
+- `src-public/MLF/Program.hs`
 - `src-public/MLF/Pipeline.hs`
 - `src-public/MLF/XMLF.hs`
 
@@ -24,7 +26,7 @@ artifacts and are not part of the current task workflow.
 ## Repo layout
 
 - `src/` builds the private implementation library `mlf2-internal`.
-- `src-public/` contains the public entry modules `MLF.API`, `MLF.Pipeline`, and `MLF.XMLF`.
+- `src-public/` contains the public entry modules `MLF.API`, `MLF.Program`, `MLF.Pipeline`, and `MLF.XMLF`.
 - `src-research/` contains `MLF.Research.*` modules for the separate internal library `mlf2-research`; `mlf2-internal` must not depend on it.
 - `app/` contains the `mlf2` executable entrypoint.
 - `test/` contains the Hspec suite, the manual test runner, and frozen parity tooling/artifacts.
@@ -39,6 +41,7 @@ All implementation modules live under `src/` and are built as a private sublibra
 The code is organized by domain (not by phase) under `src/MLF/`:
 
 - `MLF.Frontend.*` — surface syntax, desugaring, constraint generation
+- `MLF.Frontend.Program.*` — recursive-ADT program syntax, checking, and evaluation
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
 - `MLF.Binding.*` — binding tree queries + executable χe ops + harmonization
 - `MLF.Witness.*` — ω execution helpers (base χe operations)

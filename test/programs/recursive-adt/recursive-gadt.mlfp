@@ -1,0 +1,16 @@
+module RecursiveGadt export (Nat(..), Expr(..), doneNow, main) {
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  data Expr a =
+      DoneNat : Nat -> Expr Nat
+    | Step : Expr a -> Expr a;
+
+  def doneNow : Expr a -> Bool = \(expr) case expr of {
+    DoneNat _ -> true;
+    Step next -> doneNow next
+  };
+
+  def main : Bool = doneNow (Step (DoneNat Zero));
+}

@@ -71,6 +71,11 @@ library mlf2-internal
                       MLF.Constraint.Canonicalizer,
                       MLF.Constraint.Finalize,
                       MLF.Frontend.Syntax,
+                      MLF.Frontend.Program.Syntax,
+                      MLF.Frontend.Program.Parse,
+                      MLF.Frontend.Program.Pretty,
+                      MLF.Frontend.Program.Check,
+                      MLF.Frontend.Program.Run,
                       MLF.Frontend.Parse,
                       MLF.Frontend.Pretty,
                       MLF.Frontend.Normalize,
@@ -291,6 +296,7 @@ library
 
     -- Modules exported by the public library.
     exposed-modules:  MLF.API,
+                      MLF.Program,
                       MLF.Pipeline,
                       MLF.XMLF
 
@@ -376,6 +382,7 @@ test-suite mlf2-test
                       Presolution.UnificationClosureSpec,
                       SolveSpec,
                       ScopeSpec,
+                      ProgramSpec,
                       PipelineSpec,
                       ThesisFixDirectionSpec,
                       TypeCheckSpec,

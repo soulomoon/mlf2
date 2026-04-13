@@ -1,0 +1,32 @@
+module Core export (Eq, Nat(..), Expr(..), SomeExpr(..), eq) {
+  class Eq a {
+    eq : a -> a -> Bool;
+  }
+
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat
+    deriving Eq;
+
+  data Expr a =
+      DoneNat : Nat -> Expr Nat
+    | Step : Expr a -> Expr a;
+
+  data SomeExpr =
+      SomeExpr : forall a. Expr a -> SomeExpr;
+}
+
+module User export (peelSome, main) {
+  import Core exposing (Nat(..), Expr(..), SomeExpr(..), eq);
+
+  def peel : Expr a -> Nat = \(expr) case expr of {
+    DoneNat n -> n;
+    Step next -> peel next
+  };
+
+  def peelSome : SomeExpr -> Nat = \(boxed) case boxed of {
+    SomeExpr expr -> peel expr
+  };
+
+  def main : Bool = eq (peelSome (SomeExpr (Step (DoneNat (Succ Zero))))) (Succ Zero);
+}

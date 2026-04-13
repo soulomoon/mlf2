@@ -1,0 +1,12 @@
+module DerivingEq export (Eq, Nat(..), eq, main) {
+  class Eq a {
+    eq : a -> a -> Bool;
+  }
+
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat
+    deriving Eq;
+
+  def main : Bool = eq (Succ Zero) (Succ Zero);
+}

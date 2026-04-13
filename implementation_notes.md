@@ -2608,3 +2608,10 @@ This repo’s design is primarily informed by:
 - Presolution edge witness/trace assembly is now single-sourced under `MLF.Constraint.Presolution.Witness`; the thin `EdgeProcessing.Witness` wrapper and its one-off `EdgeWitnessPlan` boundary were retired without changing witness ingredients, TyExp-body root selection, or Phase-2 op integration.
 - Witness/trace canonicalization is now single-sourced under `MLF.Constraint.Presolution.Rewrite`; elaboration/runtime reuses that owner contract directly, while the elaboration-local `canonicalizeExpansion` helper remains separate because its `ExpForall` behavior still differs.
 - Result-type annotated recursion is now single-sourced through the `ResultType` facade/`Ann` owner path; `ResultType.Fallback` no longer carries the local `computeResultTypeFromAnnLocal` workaround for nested `AAnn` cases.
+
+## 2026-04-13 — Recursive ADT program surface
+
+- Added `MLF.Program` as a public recursive-ADT program layer separate from the existing eMLF/xMLF pipeline surfaces.
+- Introduced `MLF.Frontend.Program.Syntax`, `Parse`, `Pretty`, `Check`, and `Run` for module-oriented programs with `data`, `case`, typeclasses, instances, and `deriving Eq` over the initial recursive-ADT corpus.
+- Added the Phase-0 syntax/corpus freeze at `docs/plans/2026-04-13-recursive-adt-syntax-freeze.md` and executable corpus programs under `test/programs/recursive-adt/` covering plain recursive ADTs, GADT-style constructor refinement, existentials, deriving, typeclass integration, module/export behavior, and an integrated cross-module example.
+- Wired the new surface into the public library (`src-public/MLF/Program.hs`) and regression coverage (`test/ProgramSpec.hs`).
