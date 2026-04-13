@@ -1,0 +1,25 @@
+module Core export (Nat, zero, succ, peel, isZero) {
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  def zero : Nat = Zero;
+
+  def succ : Nat -> Nat = \(n : Nat) Succ n;
+
+  def peel : Nat -> Nat = \(n : Nat) case n of {
+    Zero -> Zero;
+    Succ inner -> inner
+  };
+
+  def isZero : Nat -> Bool = \(n : Nat) case n of {
+    Zero -> true;
+    Succ _ -> false
+  };
+}
+
+module User export (main) {
+  import Core exposing (Nat, zero, succ, peel, isZero);
+
+  def main : Bool = isZero (peel (succ zero));
+}

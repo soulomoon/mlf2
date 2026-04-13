@@ -1,3 +1,23 @@
+## 2026-04-14 - Recursive-ADT programs now run through the main executable
+
+- `app/Main.hs` now recognizes `run-program <file.mlfp>` and evaluates the
+  file through `MLF.Program` instead of routing every invocation through the
+  older prototype-only entrypoint.
+- The runnable recursive-ADT corpus now includes three additional positive
+  examples:
+  - `test/programs/recursive-adt/recursive-list-tail.mlfp`
+  - `test/programs/recursive-adt/recursive-tree-deriving.mlfp`
+  - `test/programs/recursive-adt/abstract-module-use.mlfp`
+- `ProgramSpec` now roundtrips and runs all nine recursive-ADT samples and
+  covers the CLI helper path directly.
+- Fresh verification on current HEAD:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
+    -> `24 examples, 0 failures`
+  - `cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp`
+    -> `true`
+  - `cabal build all && cabal test`
+    -> `1565 examples, 0 failures`
+
 ## 2026-04-13 - Fully automatic unannotated iso-recursive inference is now implemented within the inherited boundary
 
 - The repo can now honestly claim **fully automatic unannotated iso-recursive

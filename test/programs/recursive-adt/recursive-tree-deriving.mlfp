@@ -1,0 +1,12 @@
+module RecursiveTreeDeriving export (Eq, Tree(..), eq, main) {
+  class Eq a {
+    eq : a -> a -> Bool;
+  }
+
+  data Tree =
+      Leaf : Tree
+    | Branch : Tree -> Tree -> Tree
+    deriving Eq;
+
+  def main : Bool = eq (Branch Leaf Leaf) (Branch Leaf Leaf);
+}
