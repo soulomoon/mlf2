@@ -1,0 +1,15 @@
+module Main export (Nat(..), main) {
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  def main : Bool =
+    let peel : Nat -> Nat = \(n : Nat) case n of {
+      Zero -> Zero;
+      Succ inner -> peel inner
+    } in
+    case peel (Succ Zero) of {
+      Zero -> true;
+      Succ _ -> false
+    };
+}

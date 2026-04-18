@@ -1,12 +1,17 @@
+-- |
+-- Module      : MLF.Program
+-- Description : Compatibility shim for the unified `.mlfp` surface
+--
+-- Prefer `MLF.API` for `.mlfp` parsing/pretty-printing and `MLF.Pipeline` for
+-- `.mlfp` elaboration/checking/runtime on the shared eMLF path. This module remains as a thin
+-- backwards-compatible re-export.
 module MLF.Program
-    ( module MLF.Frontend.Program.Syntax
+    ( module MLF.Frontend.Syntax.Program
     , ProgramParseError
     , ProgramError (..)
     , CheckedProgram (..)
     , CheckedModule (..)
-    , ResolvedBinding (..)
-    , ResolvedExpr (..)
-    , ResolvedAlt (..)
+    , CheckedBinding (..)
     , Value (..)
     , renderProgramParseError
     , parseRawProgram
@@ -16,20 +21,20 @@ module MLF.Program
     , prettyValue
     ) where
 
-import MLF.Frontend.Program.Check
-    ( CheckedModule (..)
-    , CheckedProgram (..)
-    , ProgramError (..)
-    , ResolvedAlt (..)
-    , ResolvedBinding (..)
-    , ResolvedExpr (..)
-    , checkProgram
-    )
-import MLF.Frontend.Program.Parse
+import MLF.API
     ( ProgramParseError
     , parseRawProgram
+    , prettyProgram
     , renderProgramParseError
     )
-import MLF.Frontend.Program.Pretty (prettyProgram)
-import MLF.Frontend.Program.Run (Value (..), prettyValue, runProgram)
-import MLF.Frontend.Program.Syntax
+import MLF.Frontend.Syntax.Program
+import MLF.Pipeline
+    ( CheckedBinding (..)
+    , CheckedModule (..)
+    , CheckedProgram (..)
+    , ProgramError (..)
+    , Value (..)
+    , checkProgram
+    , prettyValue
+    , runProgram
+    )

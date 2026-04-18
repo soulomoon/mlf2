@@ -48,7 +48,10 @@ spec = describe "Repository guardrails" $ do
         "typeCheck",
         "step",
         "\n    , normalize\n",
-        "isValue"
+        "isValue",
+        "checkProgram",
+        "runProgram",
+        "prettyValue"
       ]
       $ \marker -> do
         apiSrc `shouldSatisfy` (not . isInfixOf marker)
@@ -58,19 +61,68 @@ spec = describe "Repository guardrails" $ do
     readmeSrc <- readFile "README.md"
     architectureSrc <- readFile "docs/architecture.md"
     forM_
-      [ "- `MLF.API` — surface syntax, parsing, pretty-printing, and normalization helpers",
-        "- `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API",
+      [ "- `MLF.API` — surface syntax plus eMLF / `.mlfp` parsing, pretty-printing, and normalization helpers",
+        "- `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API, including `.mlfp` elaboration/checking on the shared eMLF/xMLF path",
+        "- `MLF.Program` — thin compatibility re-export for the same unified `.mlfp` surface",
         "- `MLF.XMLF` — xMLF syntax, parser, and pretty-printer"
       ]
       $ \marker ->
         readmeSrc `shouldSatisfy` isInfixOf marker
     forM_
-      [ "- `MLF.API` — umbrella frontend module (surface syntax + eMLF parse/pretty + normalization helpers)",
-        "- `MLF.Pipeline` — canonical pipeline/runtime module",
+      [ "- `MLF.API` — umbrella frontend module (surface syntax + eMLF / `.mlfp` parse/pretty + normalization helpers)",
+        "- `MLF.Pipeline` — canonical pipeline/runtime module (e.g. `inferConstraintGraph`, `runPipelineElab`, `typeCheck`, `step`, `normalize`, `.mlfp` elaboration/checking/runtime)",
+        "- `MLF.Program` — compatibility shim re-exporting the same unified `.mlfp` surface",
         "- `MLF.XMLF` — explicit xMLF syntax, parser, and pretty-printing helpers"
       ]
       $ \marker ->
         architectureSrc `shouldSatisfy` isInfixOf marker
+
+  it "`.mlfp` elaboration reuses the existing eMLF/typecheck boundary without private authority facades" $ do
+    authorityExists <- doesFileExist "src/MLF/Frontend/Program/Authority.hs"
+    typecheckProgramExists <- doesFileExist "src/MLF/Elab/TypeCheck/Program.hs"
+    checkSrc <- readFile "src/MLF/Frontend/Program/Check.hs"
+    elaborateSrc <- readFile "src/MLF/Frontend/Program/Elaborate.hs"
+    runSrc <- readFile "src/MLF/Frontend/Program/Run.hs"
+    pipelineSrc <- readFile "src-public/MLF/Pipeline.hs"
+    syntaxSrc <- readFile "src/MLF/Frontend/Syntax.hs"
+    authorityExists `shouldBe` False
+    typecheckProgramExists `shouldBe` False
+    forM_
+      [ "isPipelineLowerable",
+        "resolveLowerableChecked",
+        "inferLowerableExpr",
+        "inferExprTypeViaPipeline",
+        "expression is not lowerable to the authoritative pipeline",
+        "resolveLowerableChecked received a non-lowerable case expression",
+        "authoritative `.mlfp` typing needs an explicit parameter type for non-lowerable lambda",
+        "data ExprScope",
+        "inferMethodApp ::",
+        "checkAlt ::",
+        "Program.Authority",
+        "MLF.Elab.TypeCheck.Program",
+        "constructorTerm",
+        "import MLF.Elab.TypeCheck",
+        "Elab.ETyAbs",
+        "Elab.ELam",
+        "Elab.EApp",
+        "Elab.ERoll",
+        "Elab.EUnroll"
+      ]
+      $ \marker -> do
+        checkSrc `shouldSatisfy` (not . isInfixOf marker)
+        elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
+        runSrc `shouldSatisfy` (not . isInfixOf marker)
+        pipelineSrc `shouldSatisfy` (not . isInfixOf marker)
+    forM_
+      [ "EUnfold ::",
+        "EUnfoldSurfaceF",
+        "unfold marker for case scrutinees"
+      ]
+      $ \marker ->
+        syntaxSrc `shouldSatisfy` (not . isInfixOf marker)
+    checkSrc `shouldSatisfy` isInfixOf "import MLF.Frontend.Program.Elaborate"
+    elaborateSrc `shouldSatisfy` isInfixOf "runPipelineElabWithEnv"
+    runSrc `shouldSatisfy` isInfixOf "normalize"
 
   it "split facades stay thin and child-owned" $ do
     forM_ splitFacadeGuards $ \(path, maxLines, requiredMarkers) -> do

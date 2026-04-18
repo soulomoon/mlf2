@@ -1,5 +1,7 @@
 module ProgramSpec (spec) where
 
+import Data.List (isInfixOf)
+import MLF.API (SrcTy (..))
 import MLF.Program
 import MLF.Program.CLI (runProgramFile)
 import Test.Hspec
@@ -15,6 +17,15 @@ fixturePaths =
     , "test/programs/recursive-adt/typeclass-integration.mlfp"
     , "test/programs/recursive-adt/abstract-module-use.mlfp"
     , "test/programs/recursive-adt/module-integrated.mlfp"
+    ]
+
+unifiedFixtureExpectations :: [(FilePath, String)]
+unifiedFixtureExpectations =
+    [ ("test/programs/unified/authoritative-let-polymorphism.mlfp", "1")
+    , ("test/programs/unified/authoritative-cross-module-let-polymorphism.mlfp", "1")
+    , ("test/programs/unified/authoritative-case-analysis.mlfp", "1")
+    , ("test/programs/unified/authoritative-overloaded-method.mlfp", "true")
+    , ("test/programs/unified/authoritative-recursive-let.mlfp", "true")
     ]
 
 spec :: Spec
@@ -102,6 +113,67 @@ spec = do
             program <- requireParsed programText
             (prettyValue <$> runProgram program) `shouldBe` Right "true"
 
+        it "rejects non-exhaustive case analysis for semantic reasons" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Nat(..), main) {"
+                        , "  data Nat ="
+                        , "      Zero : Nat"
+                        , "    | Succ : Nat -> Nat;"
+                        , ""
+                        , "  def main : Nat = case Succ Zero of {"
+                        , "    Zero -> Zero"
+                        , "  };"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramNonExhaustiveCase ["Succ"])
+
+        it "rejects constructor arity mismatches as pattern errors" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Nat(..), main) {"
+                        , "  data Nat ="
+                        , "      Zero : Nat"
+                        , "    | Succ : Nat -> Nat;"
+                        , ""
+                        , "  def main : Nat = case Zero of {"
+                        , "    Zero extra -> extra;"
+                        , "    Succ inner -> inner"
+                        , "  };"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramPatternConstructorMismatch "Zero" (STBase "Nat"))
+
+        it "rejects missing instances instead of reviving route-specific diagnostics" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Eq, Nat(..), eq, main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  data Nat ="
+                        , "      Zero : Nat"
+                        , "    | Succ : Nat -> Nat;"
+                        , ""
+                        , "  def main : Bool = eq Zero Zero;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramNoMatchingInstance "Eq" (STBase "Nat"))
+
+        it "rejects ordinary type mismatches directly" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : Int = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramTypeMismatch (STBase "Bool") (STBase "Int"))
+
     describe "MLF.Program performance baseline" $ do
         it "evaluates a recursive Nat equality example at representative depth" $ do
             let depth = (24 :: Int)
@@ -123,6 +195,21 @@ spec = do
                         ]
             program <- requireParsed programText
             (prettyValue <$> runProgram program) `shouldBe` Right "true"
+
+    describe "MLF.Program eMLF-owned `.mlfp` integration" $ do
+        mapM_ runUnifiedFixture unifiedFixtureExpectations
+
+        it "fails for a real type mismatch instead of the old infer-lambda gate" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : Int = let id = \\x x in id true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` either
+                (\err -> not ("ProgramCannotInferLambda" `isInfixOf` show err))
+                (const False)
   where
     roundtripFixture path =
         it ("roundtrips " ++ path) $ do
@@ -133,6 +220,11 @@ spec = do
         it ("runs " ++ path) $ do
             program <- requireParsed =<< readFile path
             (prettyValue <$> runProgram program) `shouldBe` Right "true"
+
+    runUnifiedFixture (path, expectedValue) =
+        it ("runs " ++ path ++ " through the eMLF-owned `.mlfp` path") $ do
+            program <- requireParsed =<< readFile path
+            (prettyValue <$> runProgram program) `shouldBe` Right expectedValue
 
 requireParsed :: String -> IO Program
 requireParsed input =

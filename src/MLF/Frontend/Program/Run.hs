@@ -1,139 +1,95 @@
 module MLF.Frontend.Program.Run
-    ( Value (..)
-    , runProgram
-    , prettyValue
-    ) where
+  ( Value (..),
+    runProgram,
+    prettyValue,
+  )
+where
 
-import qualified Data.Map.Strict as Map
-import Data.Map.Strict (Map)
-import qualified MLF.Frontend.Program.Syntax as ProgramSyntax
-import MLF.Frontend.Program.Check
-    ( CheckedProgram (..)
-    , CheckedModule (..)
-    , ConstructorInfo (..)
-    , DataInfo (..)
-    , ProgramError (..)
-    , ResolvedAlt (..)
-    , ResolvedBinding (..)
-    , ResolvedExpr (..)
-    , checkProgram
-    )
+import MLF.Elab.Pipeline (ElabTerm (..), Pretty (..), Ty (..), freeTypeVarsType, normalize, schemeFromType, typeCheck)
+import MLF.Frontend.Program.Check (checkProgram)
+import MLF.Frontend.Program.Types
+  ( CheckedBinding (..),
+    CheckedModule (..),
+    CheckedProgram (..),
+    ProgramError (..),
+  )
 import MLF.Frontend.Syntax (Lit (..))
-import qualified MLF.Frontend.Syntax as Frontend
+import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 
 data Value
-    = VLit Lit
-    | VClosure RuntimeEnv String ResolvedExpr
-    | VConstructor ConstructorInfo [Value]
-    | VData ConstructorInfo [Value]
-    | VThunk RuntimeEnv ResolvedExpr
-
-instance Eq Value where
-    VLit a == VLit b = a == b
-    VData ctorA argsA == VData ctorB argsB = ctorRuntimeName ctorA == ctorRuntimeName ctorB && argsA == argsB
-    VConstructor ctorA argsA == VConstructor ctorB argsB = ctorRuntimeName ctorA == ctorRuntimeName ctorB && argsA == argsB
-    _ == _ = False
-
-instance Show Value where
-    show = prettyValue
-
-type RuntimeEnv = Map String Value
+  = VLit Lit
+  | VTerm ElabTerm
+  deriving (Eq, Show)
 
 runProgram :: ProgramSyntax.Program -> Either ProgramError Value
 runProgram program = do
-    checked <- checkProgram program
-    evalMain checked
+  checked <- checkProgram program
+  pure (toValue (normalizeProgramTerm (programMainTerm checked)))
 
-evalMain :: CheckedProgram -> Either ProgramError Value
-evalMain checked = force (runtimeEnv Map.! checkedProgramMain checked)
+programMainTerm :: CheckedProgram -> ElabTerm
+programMainTerm checked =
+  foldr bindAll (EVar (checkedProgramMain checked)) allBindings
   where
-    runtimeEnv = buildRuntimeEnv checked
+    allBindings =
+      [ binding
+        | checkedModule <- checkedProgramModules checked,
+          binding <- checkedModuleBindings checkedModule
+      ]
 
-buildRuntimeEnv :: CheckedProgram -> RuntimeEnv
-buildRuntimeEnv checked = env
-  where
-    constructors =
-        Map.fromList
-            [ ( ctorRuntimeName ctor
-              , if null (ctorArgs ctor)
-                    then VData ctor []
-                    else VConstructor ctor []
-              )
-            | checkedModule <- checkedProgramModules checked
-            , dataInfo <- Map.elems (checkedModuleData checkedModule)
-            , ctor <- dataConstructors dataInfo
-            ]
-    bindings =
-        Map.fromList
-            [ (resolvedBindingName binding, VThunk env (resolvedBindingExpr binding))
-            | checkedModule <- checkedProgramModules checked
-            , binding <- checkedModuleBindings checkedModule
-            ]
-    env = bindings `Map.union` constructors
+    bindAll binding body =
+      ELet
+        (checkedBindingName binding)
+        (schemeFromType (checkedBindingType binding))
+        (checkedBindingTerm binding)
+        body
 
-force :: Value -> Either ProgramError Value
-force value = case value of
-    VThunk env expr -> eval env expr
-    other -> Right other
+normalizeProgramTerm :: ElabTerm -> ElabTerm
+normalizeProgramTerm term =
+  let termNorm = normalize term
+      termSimplified = case termNorm of
+        ELet v _ rhs (EVar bodyV)
+          | v == bodyV -> rhs
+        _ -> termNorm
+      termUnderTyAbs =
+        case termSimplified of
+          ETyAbs v mbBound body ->
+            let body' = normalizeProgramTerm body
+                rebuilt = ETyAbs v mbBound body'
+             in case typeCheck rebuilt of
+                  Right (TForall _ _ bodyTy)
+                    | v `notElem` freeTypeVarsType bodyTy -> body'
+                  _ -> rebuilt
+          _ -> termSimplified
+      termStripped = stripUnusedTopTyAbs termUnderTyAbs
+   in if termStripped == term
+        then termStripped
+        else normalizeProgramTerm termStripped
 
-eval :: RuntimeEnv -> ResolvedExpr -> Either ProgramError Value
-eval env expr = case expr of
-    RVar name ->
-        case Map.lookup name env of
-            Just value -> force value
-            Nothing -> Left (ProgramUnknownValue name)
-    RLit lit -> Right (VLit lit)
-    RLam name body -> Right (VClosure env name body)
-    RApp fun arg -> do
-        funValue <- eval env fun >>= force
-        argValue <- eval env arg >>= force
-        applyValue funValue argValue
-    RLet name rhs body ->
-        let env' = Map.insert name (VThunk env' rhs) env
-        in eval env' body
-    RCase scrutinee alts -> do
-        scrutineeValue <- eval env scrutinee >>= force
-        matchAlts env scrutineeValue alts
+stripUnusedTopTyAbs :: ElabTerm -> ElabTerm
+stripUnusedTopTyAbs term = case term of
+  ETyAbs v mbBound body ->
+    let body' = stripUnusedTopTyAbs body
+        term' = ETyAbs v mbBound body'
+     in case typeCheck term' of
+          Right (TForall _ _ bodyTy)
+            | v `notElem` freeTypeVarsType bodyTy -> body'
+          _ -> term'
+  ELam v ty body -> ELam v ty (stripUnusedTopTyAbs body)
+  EApp f a -> EApp (stripUnusedTopTyAbs f) (stripUnusedTopTyAbs a)
+  ELet v sch rhs body -> ELet v sch (stripUnusedTopTyAbs rhs) (stripUnusedTopTyAbs body)
+  ETyInst e inst -> ETyInst (stripUnusedTopTyAbs e) inst
+  ERoll ty body -> ERoll ty (stripUnusedTopTyAbs body)
+  EUnroll body -> EUnroll (stripUnusedTopTyAbs body)
+  _ -> term
 
-applyValue :: Value -> Value -> Either ProgramError Value
-applyValue funValue argValue = case funValue of
-    VClosure env name body -> eval (Map.insert name argValue env) body
-    VConstructor ctor applied ->
-        let applied' = applied ++ [argValue]
-        in if length applied' < length (ctorArgs ctor)
-            then Right (VConstructor ctor applied')
-            else Right (VData ctor applied')
-    VData _ _ -> Left (ProgramExpectedFunction (Frontend.STBase "<data>"))
-    VLit _ -> Left (ProgramExpectedFunction (Frontend.STBase "<literal>"))
-    VThunk env expr -> eval env expr >>= \forced -> applyValue forced argValue
-
-matchAlts :: RuntimeEnv -> Value -> [ResolvedAlt] -> Either ProgramError Value
-matchAlts env value alts =
-    case alts of
-        [] -> Left (ProgramNonExhaustiveCase [])
-        alt : rest ->
-            case alt of
-                RAltCtor ctor binders body ->
-                    case value of
-                        VData actualCtor args
-                            | ctorRuntimeName actualCtor == ctorRuntimeName ctor && length binders == length args ->
-                                let env' = foldl bindValue env (zip binders args)
-                                in eval env' body
-                        _ -> matchAlts env value rest
-                RAltVar name body -> eval (Map.insert name value env) body
-                RAltWildcard body -> eval env body
-  where
-    bindValue acc (name, argValue) = Map.insert name argValue acc
+toValue :: ElabTerm -> Value
+toValue term = case term of
+  ELit lit -> VLit lit
+  other -> VTerm other
 
 prettyValue :: Value -> String
 prettyValue value = case value of
-    VLit (LInt i) -> show i
-    VLit (LBool b) -> if b then "true" else "false"
-    VLit (LString s) -> show s
-    VClosure {} -> "<closure>"
-    VConstructor ctor args -> "<constructor " ++ ctorName ctor ++ suffix args ++ ">"
-    VData ctor args -> ctorName ctor ++ suffix args
-    VThunk {} -> "<thunk>"
-  where
-    suffix [] = ""
-    suffix args = "(" ++ unwords (map prettyValue args) ++ ")"
+  VLit (LInt i) -> show i
+  VLit (LBool b) -> if b then "true" else "false"
+  VLit (LString s) -> show s
+  VTerm term -> pretty term

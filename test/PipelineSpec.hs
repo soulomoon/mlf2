@@ -103,6 +103,7 @@ expectStrictPipelineFailure label result =
                                   || "TCInstantiationError" `isInfixOf` msg
                                   || "TCLetTypeMismatch" `isInfixOf` msg
                                   || "TCArgumentMismatch" `isInfixOf` msg
+                                  || "TCExpectedArrow" `isInfixOf` msg
                                   || "ValidationFailed" `isInfixOf` msg
                                   || "missing direct structural authority" `isInfixOf` msg
                             )
@@ -317,12 +318,12 @@ resultTypeInputsForArtifacts
         edgeExpansions = IntMap.map (canonicalizeExpansion canon) (prEdgeExpansions pres)
         baseNodeKeys =
           [ getNodeId nid
-          | (nid, _) <- toListNode (cNodes c1)
+            | (nid, _) <- toListNode (cNodes c1)
           ]
         baseToSolved =
           IntMap.fromList
             [ (baseKey, canonical (NodeId baseKey))
-            | baseKey <- baseNodeKeys
+              | baseKey <- baseNodeKeys
             ]
         solvedToBase =
           foldl'
@@ -1268,9 +1269,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             offenders =
               sort
                 [ (rmPath modSrc, api)
-                | modSrc <- productionModules,
-                  api <- forbiddenApis,
-                  api `isInfixOf` rmSource modSrc
+                  | modSrc <- productionModules,
+                    api <- forbiddenApis,
+                    api `isInfixOf` rmSource modSrc
                 ]
         when (null productionModules) $
           expectationFailure "Runtime callgraph guard found no production run-path modules"
@@ -1279,7 +1280,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             ( "Forbidden runtime API usage in production run-path callgraph:\n"
                 ++ unlines
                   [ path ++ " uses " ++ api
-                  | (path, api) <- offenders
+                    | (path, api) <- offenders
                   ]
             )
 
@@ -3829,7 +3830,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   { cNodes =
                       fromListNode
                         [ (nodeIdKey, tweak node)
-                        | (nodeIdKey, node) <- toListNode (cNodes constraint)
+                          | (nodeIdKey, node) <- toListNode (cNodes constraint)
                         ]
                   }
           ariSetTypeParent child mbParent constraint =
@@ -3875,7 +3876,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   { cNodes =
                       fromListNode
                         [ (nodeIdKey, tweak node)
-                        | (nodeIdKey, node) <- toListNode (cNodes constraint)
+                          | (nodeIdKey, node) <- toListNode (cNodes constraint)
                         ]
                   }
           makeLocalTypeRoot inputs rootNid =
@@ -3891,8 +3892,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 matchingTrace =
                   listToMaybe
                     [ tr
-                    | eid <- eids,
-                      Just tr <- [traceFor eid]
+                      | eid <- eids,
+                        Just tr <- [traceFor eid]
                     ]
                 nextEdgeKey =
                   case IntMap.lookupMax edgeTraces0 of
@@ -3918,8 +3919,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 matchingTrace =
                   listToMaybe
                     [ (getEdgeId eid, tr)
-                    | eid <- eids,
-                      Just tr <- [IntMap.lookup (getEdgeId eid) edgeTraces0]
+                      | eid <- eids,
+                        Just tr <- [IntMap.lookup (getEdgeId eid) edgeTraces0]
                     ]
              in case matchingTrace of
                   Just (edgeKey, tr) ->
@@ -3938,8 +3939,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                       )
           findIntBaseNode view0 =
             case [ tnId node
-                 | (_nodeIdKey, node@TyBase {tnBase = BaseTy "Int"}) <-
-                     toListNode (cNodes (pvConstraint view0))
+                   | (_nodeIdKey, node@TyBase {tnBase = BaseTy "Int"}) <-
+                       toListNode (cNodes (pvConstraint view0))
                  ] of
               baseNid : _ -> baseNid
               [] -> error "expected Int base node for local fallback case"
@@ -3950,7 +3951,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     nodes0 ->
                       maximum
                         [ getNodeId nodeIdKey
-                        | (nodeIdKey, _node) <- nodes0
+                          | (nodeIdKey, _node) <- nodes0
                         ]
                         + 1
              in fmap NodeId [start .. start + count - 1]
@@ -4243,7 +4244,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     { cNodes =
                         fromListNode
                           [ (nodeIdKey, tweak node)
-                          | (nodeIdKey, node) <- toListNode (cNodes constraint)
+                            | (nodeIdKey, node) <- toListNode (cNodes constraint)
                           ]
                     }
             setTypeParent child mbParent constraint =
@@ -5134,7 +5135,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         termClosureSrc `shouldSatisfy` isInfixOf "preserveRetainedChildAliasBoundary env v sch rhs body"
         pipelineSrc `shouldSatisfy` isInfixOf "termClosed0 ="
         pipelineSrc `shouldSatisfy` isInfixOf "case preserveRetainedChildAuthoritativeResult termClosed0 of"
-        pipelineSrc `shouldSatisfy` isInfixOf "tyChecked <- fromTypeCheckError (typeCheck termClosed)"
+        pipelineSrc `shouldSatisfy` isInfixOf "termClosedFresh = freshenTypeAbsAgainstEnv initialTcEnv termClosed"
+        pipelineSrc `shouldSatisfy` isInfixOf "case typeCheckWithEnv initialTcEnv termClosedFresh of"
+        pipelineSrc `shouldSatisfy` isInfixOf "pure (termClosedFresh, tyChecked)"
         pipelineSrc `shouldSatisfy` isInfixOf "authoritativeAnnCanon = authoritativeRootAnn term annCanon"
         pipelineSrc `shouldSatisfy` isInfixOf "authoritativeAnnPre = authoritativeRootAnn term ann"
         pipelineSrc `shouldSatisfy` isInfixOf "computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid"
@@ -6112,9 +6115,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   instCopyMapFull = foldl' IntMap.union IntMap.empty traceMaps
                   baseCopyPairs =
                     [ (baseKey, copyN)
-                    | tr <- IntMap.elems (prEdgeTraces pres),
-                      (baseKey, copyN) <- IntMap.toList (getCopyMapping (etCopyMap tr)),
-                      IntSet.member baseKey baseNamedKeysAll
+                      | tr <- IntMap.elems (prEdgeTraces pres),
+                        (baseKey, copyN) <- IntMap.toList (getCopyMapping (etCopyMap tr)),
+                        IntSet.member baseKey baseNamedKeysAll
                     ]
               baseNamedKeysAll `shouldSatisfy` (not . IntSet.null)
               baseCopyPairs `shouldSatisfy` (not . null)
@@ -6184,7 +6187,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               edgeTraces = IntMap.map (canonicalizeTrace canon) (prEdgeTraces pres)
               raisesForEdge (eid, ew) =
                 [ (eid, n)
-                | OpRaise n <- getInstanceOps (ewWitness ew)
+                  | OpRaise n <- getInstanceOps (ewWitness ew)
                 ]
               raiseTargets = concatMap raisesForEdge (IntMap.toList edgeWitnesses)
           forM_ raiseTargets $ \(eid, n) ->
@@ -6195,7 +6198,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 let interiorKeys =
                       IntSet.fromList
                         [ getNodeId nid
-                        | nid <- toListInterior (etInterior tr)
+                          | nid <- toListInterior (etInterior tr)
                         ]
                 IntSet.member (getNodeId n) interiorKeys `shouldBe` True
 
@@ -6270,8 +6273,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             varNodes = collectVarNodes "id" ann
             redirected =
               [ nid
-              | nid <- varNodes,
-                chaseRedirects redirects nid /= nid
+                | nid <- varNodes,
+                  chaseRedirects redirects nid /= nid
               ]
         varNodes `shouldSatisfy` (not . null)
         redirected `shouldSatisfy` (not . null)
@@ -6310,14 +6313,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         let redirects = prRedirects pres
             redirectedSchemeRoots =
               [ nid
-              | nid <- annLetSchemeRoots ann,
-                chaseRedirects redirects nid /= nid
+                | nid <- annLetSchemeRoots ann,
+                  chaseRedirects redirects nid /= nid
               ]
             annRedirected = applyRedirectsToAnn redirects ann
             staleRedirectNodes =
               [ nid
-              | nid <- annNodeOccurrences annRedirected,
-                chaseRedirects redirects nid /= nid
+                | nid <- annNodeOccurrences annRedirected,
+                  chaseRedirects redirects nid /= nid
               ]
         redirectedSchemeRoots `shouldSatisfy` (not . null)
         staleRedirectNodes `shouldBe` []
@@ -6328,8 +6331,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             annCanonical = canonicalizeAnn canonicalize annRedirected
             staleCanonicalNodes =
               [ nid
-              | nid <- annNodeOccurrences annCanonical,
-                canonicalize nid /= nid
+                | nid <- annNodeOccurrences annCanonical,
+                  canonicalize nid /= nid
               ]
         when hasCanonicalizationWork $
           annNodeOccurrences annCanonical `shouldSatisfy` (not . null)
@@ -6515,19 +6518,16 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELit (LInt 2))
             )
         normExpr = unsafeNormalizeExpr expr
-    let expectCoercionMismatch label result =
+        expectedTy = TBase (BaseTy "Int")
+    let expectInt label result =
           case result of
             Left err ->
-              renderPipelineError err
-                `shouldSatisfy` ( \msg ->
-                                    "TCLetTypeMismatch" `isInfixOf` msg
-                                      || "TCInstantiationError" `isInfixOf` msg
-                                )
-            Right (_, ty) ->
-              expectationFailure
-                ("Expected let-type mismatch for " ++ label ++ ", but pipeline succeeded with " ++ show ty)
-    expectCoercionMismatch "unchecked pipeline" (runPipelineElab Set.empty normExpr)
-    expectCoercionMismatch "checked pipeline" (runPipelineElabChecked Set.empty normExpr)
+              expectationFailure (label ++ " failed:\n" ++ renderPipelineError err)
+            Right (term, ty) -> do
+              ty `shouldBe` expectedTy
+              typeCheck term `shouldBe` Right expectedTy
+    expectInt "unchecked pipeline" (runPipelineElab Set.empty normExpr)
+    expectInt "checked pipeline" (runPipelineElabChecked Set.empty normExpr)
 
   describe "BUG-2026-02-06-002 sentinel matrix" $ do
     let makeFactory = ELam "x" (ELam "y" (EVar "x"))
@@ -7012,7 +7012,7 @@ liveNodeKeySet :: Constraint -> IntSet.IntSet
 liveNodeKeySet constraint =
   IntSet.fromList
     [ nodeIdToKey nid
-    | (nid, _) <- toListNode (cNodes constraint)
+      | (nid, _) <- toListNode (cNodes constraint)
     ]
 
 nodeIdToKey :: NodeId -> Int
@@ -7062,7 +7062,7 @@ reachableRunPathModules modules roots =
   let moduleNames = map rmName modules
       edges =
         [ (rmName m, filter (`elem` moduleNames) (rmImports m))
-        | m <- modules
+          | m <- modules
         ]
       reachableNames = go [] roots edges
    in [m | m <- modules, rmName m `elem` reachableNames]
@@ -7078,11 +7078,11 @@ parseRunPathImports :: String -> [String]
 parseRunPathImports src =
   nub
     [ moduleName
-    | line <- lines src,
-      let trimmed = dropWhile isSpace line,
-      "import " `isPrefixOf` trimmed,
-      moduleName <- maybe [] pure (parseImportedModule trimmed),
-      "MLF.Elab.Run." `isPrefixOf` moduleName
+      | line <- lines src,
+        let trimmed = dropWhile isSpace line,
+        "import " `isPrefixOf` trimmed,
+        moduleName <- maybe [] pure (parseImportedModule trimmed),
+        "MLF.Elab.Run." `isPrefixOf` moduleName
     ]
 
 parseImportedModule :: String -> Maybe String
@@ -7107,6 +7107,7 @@ annNodeOccurrences expr = case expr of
   ALet _ _ schemeRoot _ _ rhs body nid ->
     schemeRoot : nid : annNodeOccurrences rhs ++ annNodeOccurrences body
   AAnn inner nid _ -> nid : annNodeOccurrences inner
+  AUnfold inner nid _ -> nid : annNodeOccurrences inner
 
 annLetSchemeRoots :: AnnExpr -> [NodeId]
 annLetSchemeRoots expr = case expr of
@@ -7117,6 +7118,7 @@ annLetSchemeRoots expr = case expr of
   ALet _ _ schemeRoot _ _ rhs body _ ->
     schemeRoot : annLetSchemeRoots rhs ++ annLetSchemeRoots body
   AAnn inner _ _ -> annLetSchemeRoots inner
+  AUnfold inner _ _ -> annLetSchemeRoots inner
 
 annRootNode :: AnnExpr -> NodeId
 annRootNode expr = case expr of
@@ -7126,6 +7128,7 @@ annRootNode expr = case expr of
   AApp _ _ _ _ nid -> nid
   ALet _ _ _ _ _ _ _ nid -> nid
   AAnn _ nid _ -> nid
+  AUnfold _ nid _ -> nid
 
 validateStrict :: Solved -> Expectation
 validateStrict s =

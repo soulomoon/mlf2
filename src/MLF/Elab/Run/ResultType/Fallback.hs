@@ -6,11 +6,13 @@ module MLF.Elab.Run.ResultType.Fallback
   )
 where
 
+import qualified Data.Set as Set
 import MLF.Elab.Run.ResultType.Fallback.Core (computeResultTypeFallbackCore)
 import MLF.Elab.Run.ResultType.Types
   ( ResultTypeInputs (..),
   )
 import MLF.Elab.Run.ResultType.Util (generalizeWithPlan)
+import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeForBound)
 import qualified MLF.Elab.Run.ResultType.View as View
 import MLF.Elab.Run.Scope
   ( resolveCanonicalScope,
@@ -18,6 +20,7 @@ import MLF.Elab.Run.Scope
   )
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
+import MLF.Reify.TypeOps (freeTypeVarsType, freshNameLike)
 
 type ResultTypeRecursor =
   ResultTypeInputs ->
@@ -108,8 +111,18 @@ computeResultTypeFallbackWithView recurse ctx view annCanon ann = do
               then do
                 -- For thesis-exact semantics, wrap the result in a bounded quantifier.
                 -- The result type is: ∀a ⩾ bodyTy. paramTy -> a
-                let resultVar = "a"
-                boundTy <- case elabToBound bodyTy of
+                let resultVar =
+                      freshNameLike
+                        "a"
+                        ( Set.unions
+                            [ freeTypeVarsType paramTy,
+                              freeTypeVarsType bodyTy,
+                              forallBinderNames paramTy,
+                              forallBinderNames bodyTy
+                            ]
+                        )
+                let bodyBoundTy = inlineBoundVarsTypeForBound presolutionViewForGen bodyTy
+                boundTy <- case elabToBound bodyBoundTy of
                   Left err -> Left (ValidationFailed ["elabToBound failed: " ++ err])
                   Right b -> Right b
                 let boundedResultTy =
@@ -118,8 +131,7 @@ computeResultTypeFallbackWithView recurse ctx view annCanon ann = do
                         (Just boundTy)
                         (TArrow paramTy (TVar resultVar))
                 pure boundedResultTy
-              else
-                -- For simple annotations, just return the arrow type.
+              else -- For simple annotations, just return the arrow type.
                 pure (TArrow paramTy bodyTy)
     _ -> computeResultTypeFallbackCore ctx view annCanon ann
 
@@ -134,5 +146,16 @@ computeBodyResultType ::
 computeBodyResultType recurse ctx view bodyAnn =
   case bodyAnn of
     AAnn inner _ _ -> recurse ctx view inner inner
+    AUnfold inner _ _ -> recurse ctx view inner inner
     _ ->
       computeResultTypeFallbackCore ctx view bodyAnn bodyAnn
+
+forallBinderNames :: ElabType -> Set.Set String
+forallBinderNames ty =
+  case ty of
+    TForall name mb body ->
+      Set.insert name (maybe Set.empty (forallBinderNames . tyToElab) mb `Set.union` forallBinderNames body)
+    TArrow dom cod -> forallBinderNames dom `Set.union` forallBinderNames cod
+    TCon _ args -> foldMap forallBinderNames args
+    TMu name body -> Set.insert name (forallBinderNames body)
+    _ -> Set.empty

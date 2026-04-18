@@ -6,7 +6,7 @@ module MLF.Program.CLI
 import Control.Exception (IOException, try)
 import Data.Bifunctor (first)
 
-import MLF.Frontend.Program.Parse
+import MLF.Frontend.Parse.Program
     ( parseRawProgram
     , renderProgramParseError
     )
@@ -21,7 +21,7 @@ programCliUsage =
         [ "Usage:"
         , "  mlf2 run-program <file.mlfp>"
         , ""
-        , "Runs a recursive-ADT program file through the MLF.Program surface and"
+        , "Runs a .mlfp program file through the unified MLF frontend/pipeline path and"
         , "prints the resulting value."
         ]
 

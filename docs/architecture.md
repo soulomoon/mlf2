@@ -7,9 +7,9 @@ Goal: keep the implementation paper-faithful to the thesis and document any devi
 
 Downstream code should import:
 
-- `MLF.API` — umbrella frontend module (surface syntax + eMLF parse/pretty + normalization helpers)
-- `MLF.Program` — recursive-ADT program surface (modules, data declarations, typeclasses, checking, evaluation)
-- `MLF.Pipeline` — canonical pipeline/runtime module (e.g. `inferConstraintGraph`, `runPipelineElab`, `typeCheck`, `step`, `normalize`)
+- `MLF.API` — umbrella frontend module (surface syntax + eMLF / `.mlfp` parse/pretty + normalization helpers)
+- `MLF.Pipeline` — canonical pipeline/runtime module (e.g. `inferConstraintGraph`, `runPipelineElab`, `typeCheck`, `step`, `normalize`, `.mlfp` elaboration/checking/runtime)
+- `MLF.Program` — compatibility shim re-exporting the same unified `.mlfp` surface
 - `MLF.XMLF` — explicit xMLF syntax, parser, and pretty-printing helpers
 
 Public modules live under `src-public/` and the public Cabal library only exposes:
@@ -26,7 +26,7 @@ artifacts and are not part of the current task workflow.
 ## Repo layout
 
 - `src/` builds the private implementation library `mlf2-internal`.
-- `src-public/` contains the public entry modules `MLF.API`, `MLF.Program`, `MLF.Pipeline`, and `MLF.XMLF`.
+- `src-public/` contains the public entry modules `MLF.API`, `MLF.Program` (compatibility shim), `MLF.Pipeline`, and `MLF.XMLF`.
 - `src-research/` contains `MLF.Research.*` modules for the separate internal library `mlf2-research`; `mlf2-internal` must not depend on it.
 - `app/` contains the `mlf2` executable entrypoint.
 - `test/` contains the Hspec suite, the manual test runner, and frozen parity tooling/artifacts.
@@ -41,11 +41,15 @@ All implementation modules live under `src/` and are built as a private sublibra
 The code is organized by domain (not by phase) under `src/MLF/`:
 
 - `MLF.Frontend.*` — surface syntax, desugaring, constraint generation
-- `MLF.Frontend.Program.*` — recursive-ADT program syntax, checking, and evaluation
+- `MLF.Frontend.Syntax.Program` / `MLF.Frontend.Parse.Program` / `MLF.Frontend.Pretty.Program` — canonical `.mlfp` syntax ownership under the main frontend boundary
+- `MLF.Frontend.Program.Check` — module/import/class/data environment assembly for `.mlfp`
+- `MLF.Frontend.Program.Elaborate` — lowers `.mlfp` expressions into surface eMLF where possible and direct `ElabTerm`s only when the eMLF surface cannot express the needed construct
+- `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates checked `.mlfp` bindings through the existing xMLF runtime
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
 - `MLF.Binding.*` — binding tree queries + executable χe ops + harmonization
 - `MLF.Witness.*` — ω execution helpers (base χe operations)
 - `MLF.Elab.*` — elaboration to xMLF (Φ/Σ translation, reify/generalize, plus xMLF typechecking/reduction)
+- `MLF.Elab.TypeCheck` — the single typing judgment owner for elaborated `.mlfp` / xMLF terms
 - `MLF.XMLF.*` — explicit xMLF syntax and related helpers
 - `MLF.Reify.*` — graph-to-type reification and related type operations
 - `MLF.Types.*` — elaborated/runtime term and type representations

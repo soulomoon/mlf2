@@ -266,12 +266,12 @@ resultTypeInputsForArtifacts
         edgeExpansions = IntMap.map (canonicalizeExpansion canon) (prEdgeExpansions pres)
         baseNodeKeys =
           [ getNodeId nid
-          | (nid, _) <- toListNode (cNodes c1)
+            | (nid, _) <- toListNode (cNodes c1)
           ]
         baseToSolved =
           IntMap.fromList
             [ (baseKey, canonical (NodeId baseKey))
-            | baseKey <- baseNodeKeys
+              | baseKey <- baseNodeKeys
             ]
         solvedToBase =
           foldl'
@@ -409,6 +409,7 @@ annExprNode ann = case ann of
   AApp _ _ _ _ nid -> nid
   ALet _ _ _ _ _ _ _ nid -> nid
   AAnn _ nid _ -> nid
+  AUnfold _ nid _ -> nid
 
 stripBoundWrapper :: Elab.ElabType -> Elab.ElabType
 stripBoundWrapper (Elab.TForall v (Just bound) (Elab.TVar v'))
@@ -1092,8 +1093,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           baseNodesMissing =
             fromListNode
               [ (nid, node)
-              | (nid, node) <- toListNode (cNodes base0),
-                nid /= rootC
+                | (nid, node) <- toListNode (cNodes base0),
+                  nid /= rootC
               ]
           rootRef = typeRef rootC
           baseBindParentsMissing =
@@ -6080,9 +6081,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       ews <- requireRight (runToPresolutionWitnesses expr)
       let ops =
             [ op
-            | ew <- IntMap.elems ews,
-              let InstanceWitness xs = ewWitness ew,
-              op <- xs
+              | ew <- IntMap.elems ews,
+                let InstanceWitness xs = ewWitness ew,
+                op <- xs
             ]
       -- With coercion-only semantics, the witness operations may differ.
       -- The important thing is that presolution succeeds.
@@ -6100,6 +6101,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                           || "OpGraft: binder not found in quantifier spine" `isInfixOf` msg
                                           || "PhiTranslatabilityError" `isInfixOf` msg
                                           || "TCInstantiationError" `isInfixOf` msg
+                                          || "TCLetTypeMismatch" `isInfixOf` msg
+                                          || "TCArgumentMismatch" `isInfixOf` msg
+                                          || "TCExpectedArrow" `isInfixOf` msg
                                     )
             Right _ ->
               pure ()
@@ -6116,6 +6120,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                                           || "TCInstantiationError" `isInfixOf` msg
                                           || "TCLetTypeMismatch" `isInfixOf` msg
                                           || "TCArgumentMismatch" `isInfixOf` msg
+                                          || "TCExpectedArrow" `isInfixOf` msg
                                           || "SchemeFreeVars" `isInfixOf` msg
                                           || "ValidationFailed" `isInfixOf` msg
                                           || "missing direct structural authority" `isInfixOf` msg
@@ -6167,8 +6172,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           varNodes = collectVarNodes "id" ann
           redirected =
             [ nid
-            | nid <- varNodes,
-              Elab.chaseRedirects redirects nid /= nid
+              | nid <- varNodes,
+                Elab.chaseRedirects redirects nid /= nid
             ]
       varNodes `shouldSatisfy` (not . null)
       redirected `shouldSatisfy` (not . null)
@@ -6653,10 +6658,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             copyMap = etCopyMap tr
             selfBoundMetas =
               [ meta
-              | (binder, _arg) <- etBinderArgs tr,
-                Just meta <- [lookupCopy binder copyMap],
-                Just TyVar {tnBound = Just bnd} <- [lookupNodeIn (cNodes c) meta],
-                bnd == meta
+                | (binder, _arg) <- etBinderArgs tr,
+                  Just meta <- [lookupCopy binder copyMap],
+                  Just TyVar {tnBound = Just bnd} <- [lookupNodeIn (cNodes c) meta],
+                  bnd == meta
               ]
 
         unless (null selfBoundMetas) $

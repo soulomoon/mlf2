@@ -130,10 +130,12 @@ Term        ::= x
 - xMLF parser accepts legacy instantiation tokens (`1`, `⟨τ⟩`, `!a`) for transition, but pretty-printing is canonical.
 - `ElabTerm` carries let schemes (`ELet String ElabScheme ...`); pretty output keeps `let x : scheme = ... in ...` as a repository-specific extension for debugging fidelity.
 
-## Recursive ADT Program Surface (`MLF.Program`)
+## Unified `.mlfp` Program Surface
 
-The recursive-ADT program layer is a separate surface above eMLF/xMLF. The
-authoritative Phase-0 freeze lives in
+`.mlfp` is now a unified frontend/pipeline entrypoint rather than a separate
+language lane. `MLF.API` owns `.mlfp` parse/pretty, `MLF.Pipeline` elaborates
+`.mlfp` through the shared eMLF/xMLF path, and `MLF.Program` survives only as
+a compatibility shim. The Phase-0 freeze lives in
 `docs/plans/2026-04-13-recursive-adt-syntax-freeze.md`; the implementation
 currently accepts the following core shapes:
 

@@ -7,9 +7,10 @@ import qualified Data.Set as Set
 import Test.Hspec
 
 import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..))
-import MLF.Constraint.Types.Graph (typeRef)
+import MLF.Constraint.Types.Graph (BaseTy(..), typeRef)
 import MLF.Elab.Pipeline (runPipelineElab, runPipelineElabChecked)
 import MLF.Frontend.Syntax (Expr(..), SrcTy(..), Lit(..))
+import MLF.Types.Elab (Ty(..))
 import qualified MLF.Binding.Tree as Binding
 import SpecUtil (unsafeNormalizeExpr, runPipelineArtifactsDefault, PipelineArtifacts(..), mkForalls)
 
@@ -118,17 +119,12 @@ spec = describe "Phi alignment" $ do
                             (EApp (EAnn (EVar "c") ann) (ELit (LInt 1)))
                             (ELit (LInt 2)))
                 normExpr = unsafeNormalizeExpr expr
-            let expectCoercionMismatch label result =
+                expectedTy = TBase (BaseTy "Int")
+            let expectInt label result =
                     case result of
                         Left err ->
-                            let rendered = show err
-                            in rendered `shouldSatisfy`
-                                (\msg ->
-                                    "TCLetTypeMismatch" `isInfixOf` msg
-                                        || "TCInstantiationError" `isInfixOf` msg
-                                )
+                            expectationFailure (label ++ " failed: " ++ show err)
                         Right (_, ty) ->
-                            expectationFailure
-                                ("Expected let-type mismatch for " ++ label ++ ", but pipeline succeeded with " ++ show ty)
-            expectCoercionMismatch "unchecked pipeline" (runPipelineElab Set.empty normExpr)
-            expectCoercionMismatch "checked pipeline" (runPipelineElabChecked Set.empty normExpr)
+                            ty `shouldBe` expectedTy
+            expectInt "unchecked pipeline" (runPipelineElab Set.empty normExpr)
+            expectInt "checked pipeline" (runPipelineElabChecked Set.empty normExpr)

@@ -1,12 +1,13 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
-module MLF.Frontend.Desugar (
-    desugarSurface
-) where
+
+module MLF.Frontend.Desugar
+  ( desugarSurface,
+  )
+where
 
 import Data.Functor.Foldable (cata)
-
-import MLF.Frontend.Syntax (Expr (..), NormCoreExpr, NormSurfaceExpr, SurfaceExprF(..))
+import MLF.Frontend.Syntax (Expr (..), NormCoreExpr, NormSurfaceExpr, SurfaceExprF (..))
 
 {- Note [κσ coercions and desugaring]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -44,11 +45,11 @@ desugarSurface :: NormSurfaceExpr -> NormCoreExpr
 desugarSurface = cata alg
   where
     alg = \case
-        EVarSurfaceF v -> EVar v
-        ELitSurfaceF l -> ELit l
-        ELamSurfaceF v body -> ELam v body
-        EAppSurfaceF fun arg -> EApp fun arg
-        ELetSurfaceF v rhs body -> ELet v rhs body
-        ELamAnnSurfaceF v ty body ->
-            ELam v (ELet v (EApp (ECoerceConst ty) (EVar v)) body)
-        EAnnSurfaceF expr0 ty -> EApp (ECoerceConst ty) expr0
+      EVarSurfaceF v -> EVar v
+      ELitSurfaceF l -> ELit l
+      ELamSurfaceF v body -> ELam v body
+      EAppSurfaceF fun arg -> EApp fun arg
+      ELetSurfaceF v rhs body -> ELet v rhs body
+      ELamAnnSurfaceF v ty body ->
+        ELam v (ELet v (EApp (ECoerceConst ty) (EVar v)) body)
+      EAnnSurfaceF expr0 ty -> EApp (ECoerceConst ty) expr0

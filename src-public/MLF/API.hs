@@ -5,8 +5,8 @@
 -- Description : Stable umbrella API for downstream eMLF/xMLF users
 --
 -- `MLF.API` is the frontend-oriented umbrella API for downstream callers that
--- want surface syntax, parsing/pretty-printing, normalization helpers, and
--- constraint graph introspection.
+-- want surface syntax, eMLF / `.mlfp` parsing and pretty-printing,
+-- normalization helpers, and constraint graph introspection.
 --
 -- Choose `MLF.Pipeline` for constraint generation, elaboration, execution,
 -- typechecking, and runtime-facing xMLF helpers. Choose `MLF.XMLF` when you only
@@ -18,12 +18,15 @@ module MLF.API
     -- * Parse error types
     EmlfParseError,
     NormParseError (..),
+    ProgramParseError,
     renderEmlfParseError,
     renderNormParseError,
+    renderProgramParseError,
 
     -- * Raw parser entrypoints
     parseRawEmlfExpr,
     parseRawEmlfType,
+    parseRawProgram,
 
     -- * Normalized parser entrypoints
     parseNormEmlfExpr,
@@ -37,6 +40,8 @@ module MLF.API
     -- * Pretty-printing
     prettyEmlfExpr,
     prettyEmlfType,
+    Program,
+    prettyProgram,
 
     -- * Constraint graph introspection
     Constraint (..),
@@ -86,11 +91,18 @@ import MLF.Frontend.Parse
     renderEmlfParseError,
     renderNormParseError,
   )
+import MLF.Frontend.Parse.Program
+  ( ProgramParseError,
+    parseRawProgram,
+    renderProgramParseError,
+  )
 import MLF.Frontend.Pretty
   ( prettyEmlfExpr,
     prettyEmlfType,
   )
+import MLF.Frontend.Pretty.Program (prettyProgram)
 import MLF.Frontend.Syntax
+import MLF.Frontend.Syntax.Program (Program)
 
 -- | Number of type nodes in a constraint graph.
 constraintNodeCount :: Constraint -> Int

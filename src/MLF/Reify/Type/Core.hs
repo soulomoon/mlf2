@@ -1,10 +1,11 @@
 {-# LANGUAGE GADTs #-}
 
 module MLF.Reify.Type.Core
-    ( ReifyRoot (..)
-    , reifyWith
-    , reifyWithAs
-    ) where
+  ( ReifyRoot (..),
+    reifyWith,
+    reifyWithAs,
+  )
+where
 
 {- Note [Core reification algorithm — reifyWith]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -37,7 +38,6 @@ import Control.Monad (foldM, unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
-
 import MLF.Binding.Tree (lookupBindParent)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Solved (Solved)
@@ -85,35 +85,35 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
     schemeRootSetRaw =
       IntSet.fromList
         [ getNodeId root
-        | gen <- canonicalGenNodesList,
-          root <- gnSchemes gen
+          | gen <- canonicalGenNodesList,
+            root <- gnSchemes gen
         ]
     schemeRootSet =
       IntSet.union schemeRootSetRaw $
         IntSet.fromList
           [ getNodeId (canonical root)
-          | gen <- canonicalGenNodesList,
-            root <- gnSchemes gen
+            | gen <- canonicalGenNodesList,
+              root <- gnSchemes gen
           ]
     schemeGenByRootRaw =
       IntMap.fromListWith
         const
         [ (getNodeId root, gnId gen)
-        | gen <- canonicalGenNodesList,
-          root <- gnSchemes gen
+          | gen <- canonicalGenNodesList,
+            root <- gnSchemes gen
         ]
     schemeGenByRoot =
       IntMap.union schemeGenByRootRaw $
         IntMap.fromListWith
           const
           [ (getNodeId (canonical root), gnId gen)
-          | gen <- canonicalGenNodesList,
-            root <- gnSchemes gen
+            | gen <- canonicalGenNodesList,
+              root <- gnSchemes gen
           ]
     schemeGenSet =
       IntSet.fromList
         [ getGenNodeId gid
-        | gid <- IntMap.elems schemeGenByRoot
+          | gid <- IntMap.elems schemeGenByRoot
         ]
 
     lookupNode k = maybe (Left (MissingNode k)) Right (lookupNodeIn nodes k)
@@ -393,7 +393,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                           let binderKeys =
                                 IntSet.fromList
                                   [ getNodeId (canonical b)
-                                  | b <- binders
+                                    | b <- binders
                                   ]
                               namedExtra' = IntSet.union namedExtra binderKeys
                           (cache', core) <- case node of
@@ -599,9 +599,9 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
               Nothing -> False
           bindersReachable0 =
             [ canonical b
-            | b <- bindersBase,
-              isBinderNode b,
-              IntSet.member (getNodeId (canonical b)) reachable
+              | b <- bindersBase,
+                isBinderNode b,
+                IntSet.member (getNodeId (canonical b)) reachable
             ]
           bindersReachable =
             case mode of
@@ -610,22 +610,24 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                  in if keepNamedForScheme
                       then base
                       else filter (not . isNamedLocal namedExtra . canonical) base
-              ModeTypeNoFallback ->
-                filter (not . isNamedLocal namedExtra . canonical) bindersReachable0
+              ModeTypeNoFallback
+                | isForall node -> bindersReachable0
+                | otherwise ->
+                    filter (not . isNamedLocal namedExtra . canonical) bindersReachable0
               _ -> bindersReachable0
           binderKeys = map (getNodeId . canonical) bindersReachable
           binderSet = IntSet.fromList binderKeys
           orderKeys = Order.orderKeysFromRoot solved orderRoot
           missing =
             [ NodeId k
-            | k <- binderKeys,
-              not (IntMap.member k orderKeys)
+              | k <- binderKeys,
+                not (IntMap.member k orderKeys)
             ]
           depsFor k =
             [ d
-            | d <- IntSet.toList (freeVars solved (NodeId k) IntSet.empty),
-              IntSet.member d binderSet,
-              d /= k
+              | d <- IntSet.toList (freeVars solved (NodeId k) IntSet.empty),
+                IntSet.member d binderSet,
+                d /= k
             ]
           cmpReady a b =
             case Order.compareNodesByOrderKey orderKeys (NodeId a) (NodeId b) of
@@ -662,10 +664,10 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
                     BindRigid -> includeRigid && isBindableNode child
               pure
                 [ canonical child
-                | (childKey, (parent, flag)) <- IntMap.toList bindParents,
-                  parent == parentRef,
-                  Just child <- [childNode childKey],
-                  isBindable flag child
+                  | (childKey, (parent, flag)) <- IntMap.toList bindParents,
+                    parent == parentRef,
+                    Just child <- [childNode childKey],
+                    isBindable flag child
                 ]
 
     isForall :: TyNode -> Bool
@@ -689,7 +691,6 @@ reifyWithAs ::
   Either ElabError a
 reifyWithAs contextLabel solved nameForVar isNamed rootMode convert nid =
   convert =<< reifyWith contextLabel solved nameForVar isNamed rootMode nid
-
 
 freeVars :: Solved -> NodeId -> IntSet.IntSet -> IntSet.IntSet
 freeVars solved nid visited

@@ -1,3 +1,31 @@
+## 2026-04-14 - `.mlfp` now reuses the existing MLF typecheck/runtime path
+
+- `.mlfp` syntax ownership moved under the main frontend boundary via
+  `MLF.Frontend.Syntax.Program`, `MLF.Frontend.Parse.Program`, and
+  `MLF.Frontend.Pretty.Program`; the older `MLF.Frontend.Program.Syntax`,
+  `Parse`, and `Pretty` modules are now thin forwarding seams.
+- `.mlfp` expression elaboration now lives in `MLF.Frontend.Program.Elaborate`.
+  `Program.Check` assembles module/import/class/data environments, then lowers
+  expressions into ordinary surface eMLF where possible and direct `ElabTerm`s
+  only when the old surface language cannot express the construct cleanly.
+- `MLF.Elab.TypeCheck` owns the typing judgment for checked `.mlfp` terms, and
+  `Program.Run` evaluates those checked bindings through the existing xMLF
+  runtime instead of a separate `.mlfp` authority/runtime layer.
+- Public truth now matches the code: `MLF.API` owns `.mlfp` parse/pretty,
+  `MLF.Pipeline` owns `.mlfp` checking/runtime, and `MLF.Program` is a
+  compatibility re-export instead of a separate surface.
+- Added focused unified-path fixtures:
+  - `test/programs/unified/authoritative-let-polymorphism.mlfp`
+  - `test/programs/unified/authoritative-cross-module-let-polymorphism.mlfp`
+  - `test/programs/unified/authoritative-case-analysis.mlfp`
+  - `test/programs/unified/authoritative-overloaded-method.mlfp`
+  - `test/programs/unified/authoritative-recursive-let.mlfp`
+- Fresh focused verification on current HEAD:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
+    -> `27 examples, 0 failures`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "Public surface contracts"'`
+    -> `24 examples, 0 failures`
+
 ## 2026-04-14 - Recursive-ADT programs now run through the main executable
 
 - `app/Main.hs` now recognizes `run-program <file.mlfp>` and evaluates the
@@ -2629,9 +2657,17 @@ This repo’s design is primarily informed by:
 - Witness/trace canonicalization is now single-sourced under `MLF.Constraint.Presolution.Rewrite`; elaboration/runtime reuses that owner contract directly, while the elaboration-local `canonicalizeExpansion` helper remains separate because its `ExpForall` behavior still differs.
 - Result-type annotated recursion is now single-sourced through the `ResultType` facade/`Ann` owner path; `ResultType.Fallback` no longer carries the local `computeResultTypeFromAnnLocal` workaround for nested `AAnn` cases.
 
-## 2026-04-13 — Recursive ADT program surface
+## 2026-04-13 — Initial recursive ADT program surface
 
-- Added `MLF.Program` as a public recursive-ADT program layer separate from the existing eMLF/xMLF pipeline surfaces.
-- Introduced `MLF.Frontend.Program.Syntax`, `Parse`, `Pretty`, `Check`, and `Run` for module-oriented programs with `data`, `case`, typeclasses, instances, and `deriving Eq` over the initial recursive-ADT corpus.
+- Added the first public recursive-ADT program layer, which was later absorbed into the unified `MLF.API` / `MLF.Pipeline` ownership path on 2026-04-14.
+- Introduced the initial program modules (`MLF.Frontend.Program.Syntax`, `Parse`, `Pretty`, `Check`, and `Run`) for module-oriented programs with `data`, `case`, typeclasses, instances, and `deriving Eq` over the initial recursive-ADT corpus.
 - Added the Phase-0 syntax/corpus freeze at `docs/plans/2026-04-13-recursive-adt-syntax-freeze.md` and executable corpus programs under `test/programs/recursive-adt/` covering plain recursive ADTs, GADT-style constructor refinement, existentials, deriving, typeclass integration, module/export behavior, and an integrated cross-module example.
-- Wired the new surface into the public library (`src-public/MLF/Program.hs`) and regression coverage (`test/ProgramSpec.hs`).
+- Wired the initial surface into the public library and regression coverage.
+
+## 2026-04-19 — `.mlfp` ProgramSpec regression repair
+
+- Repaired the recursive-ADT and unified `.mlfp` ProgramSpec regressions while preserving the shared old eMLF/typecheck route. No new `.mlfp` syntax, direct Program-to-elaborated-term fallback, permissive `EUnroll`, or broad `TypeCheck` weakening was introduced.
+- The Phase 7 binder-hygiene fix is producer-side: `freshenTypeAbsAgainstEnv` now reserves type variables already present in lambda parameter types, let schemes, and nested type-abstraction bounds before descending, matching the environment shape enforced by `TypeCheck`.
+- Recursive-ADT repair stayed local to the producer/conversion seams: raw variable bounds are normalized before bound conversion, recursive existential constructor handlers keep ownership of their Church result binder, and constructor result naming remains canonical only where it is not capture-prone.
+- Final closure cleanup prunes vacuous leading type abstractions from non-recursive xMLF output; the `church-true` and `choose` goldens now record the non-vacuous `forall a. forall b. a -> b -> a` shape.
+- Evidence: fail-fast `mlf2-test` passed with 1582 examples, 0 failures; `MLF.Program execution corpus` passed with 9 examples, 0 failures; `MLF.Program` passed with 34 examples, 0 failures; direct `.mlfp` probes returned `true` for `authoritative-overloaded-method.mlfp` and `1` for `authoritative-case-analysis.mlfp`; final serial gates passed with `cabal test`, `cabal build all`, and `cabal test` again.

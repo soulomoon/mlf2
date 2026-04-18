@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 
 module MLF.Elab.Run.Pipeline
@@ -5,11 +6,14 @@ module MLF.Elab.Run.Pipeline
     runPipelineElabChecked,
     runPipelineElabWithConfig,
     runPipelineElabCheckedWithConfig,
+    runPipelineElabWithEnv,
+    runPipelineElabWithConfigAndEnv,
   )
 where
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Acyclicity (breakCyclesAndCheckAcyclicity)
 import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode)
@@ -23,9 +27,10 @@ import MLF.Constraint.Presolution
 import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
 import MLF.Constraint.Presolution.View (PresolutionView, pvCanonical)
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Types (Constraint, NodeId, PolySyms, cNodes, getEdgeId, lookupNodeIn)
+import MLF.Constraint.Types (BaseTy (..), Constraint, NodeId (..), PolySyms, cNodes, getEdgeId, getNodeId, lookupNodeIn)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot (..))
 import MLF.Elab.Elaborate (ElabConfig (..), ElabEnv (..), elaborateWithEnv)
+import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
   ( PipelineError (..),
@@ -60,12 +65,13 @@ import MLF.Elab.TermClosure
     preserveRetainedChildAuthoritativeResult,
     substInTerm,
   )
-import MLF.Elab.TypeCheck (typeCheck)
+import MLF.Elab.TypeCheck (typeCheckWithEnv)
+import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Elab.Types
-import MLF.Frontend.ConstraintGen (AnnExpr (..), ConstraintError (..), ConstraintResult (..), generateConstraints)
-import MLF.Frontend.Syntax (NormSurfaceExpr)
+import MLF.Frontend.ConstraintGen (AnnExpr (..), ConstraintError (..), ConstraintResult (..), ExternalEnv, generateConstraints, generateConstraintsWithEnv)
+import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound)
 import qualified MLF.Frontend.Syntax as Surface
-import MLF.Reify.TypeOps (freeTypeVarsType)
+import MLF.Reify.TypeOps (freeTypeVarsType, freshNameLike, substTypeCapture)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data SnapshotViews = SnapshotViews
@@ -144,19 +150,29 @@ runPipelineElabChecked = runPipelineElabCheckedWithConfig defaultPipelineConfig
 
 runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWithConfig config polySyms =
-  runPipelineElabWith (pcTraceConfig config) (generateConstraints polySyms)
+  runPipelineElabWith (pcTraceConfig config) Map.empty (generateConstraints polySyms)
 
 runPipelineElabCheckedWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabCheckedWithConfig = runPipelineElabWithConfig
 
+-- | Run the pipeline with an external environment of type assumptions
+-- for free variables, avoiding the ELamAnn wrapping approach.
+runPipelineElabWithEnv :: PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElabWithEnv = runPipelineElabWithConfigAndEnv defaultPipelineConfig
+
+runPipelineElabWithConfigAndEnv :: PipelineConfig -> PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
+runPipelineElabWithConfigAndEnv config polySyms extEnv =
+  runPipelineElabWith (pcTraceConfig config) extEnv (generateConstraintsWithEnv polySyms extEnv)
+
 runPipelineElabWith ::
   TraceConfig ->
+  ExternalEnv ->
   (NormSurfaceExpr -> Either ConstraintError ConstraintResult) ->
   NormSurfaceExpr ->
   Either PipelineError (ElabTerm, ElabType)
-runPipelineElabWith traceCfg genConstraints expr = do
+runPipelineElabWith traceCfg extEnv genConstraints expr = do
   () <- fromConstraintError (validateDirectRecursiveAnnotations expr)
-  ConstraintResult {crConstraint = c0, crAnnotated = ann} <- fromConstraintError (genConstraints expr)
+  ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} <- fromConstraintError (genConstraints expr)
   let c1 = normalize c0
   (c1Broken, acyc) <- fromCycleError (breakCyclesAndCheckAcyclicity c1)
   pres <- fromPresolutionError (computePresolution traceCfg acyc c1Broken)
@@ -180,6 +196,20 @@ runPipelineElabWith traceCfg genConstraints expr = do
           planBuilder
           mbGa
           presolutionViewForGen
+  -- Build authoritative SchemeInfo map and TypeCheck.Env from external
+  -- source types.  We derive schemes directly from the caller-supplied
+  -- NormSrcType values (which preserve lowerType naming) instead of
+  -- re-generalizing through the constraint graph, which would produce
+  -- graph-internal variable names that conflict with constructor types.
+  let initialSchemeInfos =
+        Map.map
+          (\srcTy -> SchemeInfo {siScheme = schemeFromType (srcTypeToElabType srcTy), siSubst = IntMap.empty})
+          extEnv
+  let initialTcEnv =
+        TypeCheck.Env
+          { TypeCheck.termEnv = Map.map (schemeToType . siScheme) initialSchemeInfos,
+            TypeCheck.typeEnv = Map.empty
+          }
   let annCanon = redirectAndCanonicalizeAnn (canonicalizeNode canonNode) (prRedirects pres) ann
   let edgeArtifacts =
         EdgeArtifacts
@@ -204,7 +234,14 @@ runPipelineElabWith traceCfg genConstraints expr = do
           { eePresolutionView = presolutionViewForGen,
             eeGaParents = bindParentsGa,
             eeEdgeArtifacts = edgeArtifacts,
-            eeScopeOverrides = scopeOverrides
+            eeScopeOverrides = scopeOverrides,
+            eeAnnSourceTypes =
+              IntMap.fromList
+                [ (getNodeId (canonicalizeNode canonNode nid), ty)
+                  | (k, ty) <- IntMap.toList annSourceTypes,
+                    let nid = NodeId k
+                ],
+            eeInitialTermEnv = initialSchemeInfos
           }
   term <- fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
   case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
@@ -242,7 +279,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
       termClosed0 =
         if retainedChildAuthoritativeCandidate
           then closeTermWithSchemeSubstIfNeeded rootSubst rootScheme term
-          else case typeCheck termSubst of
+          else case typeCheckWithEnv initialTcEnv termSubst of
             Right ty | null (freeTypeVarsType ty) -> termSubst
             Right ty ->
               case rootScheme of
@@ -250,7 +287,7 @@ runPipelineElabWith traceCfg genConstraints expr = do
                   | null binds ->
                       let freeBinds =
                             [ (name, Nothing)
-                            | name <- Set.toList (freeTypeVarsType ty)
+                              | name <- Set.toList (freeTypeVarsType ty)
                             ]
                           freeScheme = Forall freeBinds ty
                        in closeTermWithSchemeSubstIfNeeded IntMap.empty freeScheme termSubst
@@ -260,9 +297,13 @@ runPipelineElabWith traceCfg genConstraints expr = do
         case preserveRetainedChildAuthoritativeResult termClosed0 of
           Just termAdjusted -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme termAdjusted
           Nothing -> termClosed0
-  let checkedAuthoritative = do
-        tyChecked <- fromTypeCheckError (typeCheck termClosed)
-        pure (termClosed, tyChecked)
+  let termClosedFresh = freshenTypeAbsAgainstEnv initialTcEnv termClosed
+      checkedAuthoritative = do
+        tyChecked <-
+          case typeCheckWithEnv initialTcEnv termClosedFresh of
+            Right ty -> pure ty
+            Left err -> fromTypeCheckError (Left err)
+        pure (termClosedFresh, tyChecked)
 
   -- Keep result-type reconstruction for diagnostics, but report the
   -- type-checker result as authoritative.
@@ -270,9 +311,132 @@ runPipelineElabWith traceCfg genConstraints expr = do
     (AAnn inner annNodeId eid, AAnn innerPre _ _) -> do
       _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid)
       checkedAuthoritative
+    (AUnfold inner annNodeId eid, _) -> do
+      let innerPre = case authoritativeAnnPreFinal of
+            AUnfold ip _ _ -> ip
+            AAnn ip _ _ -> ip
+            other -> other
+      _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid)
+      checkedAuthoritative
     _ -> do
       _ <- fromElabError (computeResultTypeFallback resultTypeInputs authoritativeAnnCanonFinal authoritativeAnnPreFinal)
       checkedAuthoritative
+
+freshenTypeAbsAgainstEnv :: TypeCheck.Env -> ElabTerm -> ElabTerm
+freshenTypeAbsAgainstEnv env term0 = pruneVacuousLeadingTyAbsAgainstEnv env (go reserved term0)
+  where
+    reserved =
+      Set.unions
+        ( map freeTypeVarsType (Map.elems (TypeCheck.termEnv env))
+            ++ [Set.fromList (Map.keys (TypeCheck.typeEnv env))]
+        )
+
+    go used term = case term of
+      ETyAbs name mb body ->
+        let usedForBinder = Set.union used (maybe Set.empty freeTypeVarsType mb)
+            (name', bodyForName) =
+              if Set.member name usedForBinder
+                then
+                  let fresh = freshNameLike name usedForBinder
+                      bodyRenamed = renameTypeVarInTerm name fresh body
+                   in (fresh, bodyRenamed)
+                else (name, body)
+            usedBody = Set.insert name' usedForBinder
+            body' = go usedBody bodyForName
+         in ETyAbs name' mb body'
+      ELam v ty body ->
+        ELam v ty (go (Set.union used (freeTypeVarsType ty)) body)
+      EApp f a -> EApp (go used f) (go used a)
+      ELet v sch rhs body ->
+        let used' = Set.union used (freeTypeVarsType (schemeToType sch))
+         in ELet v sch (go used' rhs) (go used' body)
+      ETyInst t inst -> ETyInst (go used t) inst
+      ERoll ty body -> ERoll ty (go used body)
+      EUnroll body -> EUnroll (go used body)
+      _ -> term
+
+pruneVacuousLeadingTyAbsAgainstEnv :: TypeCheck.Env -> ElabTerm -> ElabTerm
+pruneVacuousLeadingTyAbsAgainstEnv env term = case term of
+  ETyAbs name mb body ->
+    let env' =
+          env
+            { TypeCheck.typeEnv =
+                Map.insert name (maybe TBottom tyToElab mb) (TypeCheck.typeEnv env)
+            }
+        body' = pruneVacuousLeadingTyAbsAgainstEnv env' body
+     in case typeCheckWithEnv env' body' of
+          Right bodyTy
+            | name `Set.notMember` freeTypeVarsType bodyTy,
+              not (containsRecursiveType bodyTy) ->
+                case mb of
+                  Nothing -> pruneVacuousLeadingTyAbsAgainstEnv env body'
+                  Just _ ->
+                    case Set.toList (freeTypeVarsType bodyTy `Set.difference` freeTypeVarsTypeCheckEnv env) of
+                      [freeName] ->
+                        let bodyRenamed = renameTypeVarInTerm freeName name body'
+                         in case typeCheckWithEnv env' bodyRenamed of
+                              Right renamedTy
+                                | name `Set.member` freeTypeVarsType renamedTy ->
+                                    ETyAbs name mb bodyRenamed
+                              _ -> pruneVacuousLeadingTyAbsAgainstEnv env body'
+                      _ -> pruneVacuousLeadingTyAbsAgainstEnv env body'
+          _ -> ETyAbs name mb body'
+  _ -> term
+
+freeTypeVarsTypeCheckEnv :: TypeCheck.Env -> Set.Set String
+freeTypeVarsTypeCheckEnv env =
+  Set.unions
+    ( map freeTypeVarsType (Map.elems (TypeCheck.termEnv env))
+        ++ map freeTypeVarsType (Map.elems (TypeCheck.typeEnv env))
+        ++ [Set.fromList (Map.keys (TypeCheck.typeEnv env))]
+    )
+
+containsRecursiveType :: ElabType -> Bool
+containsRecursiveType ty = case ty of
+  TMu _ _ -> True
+  TArrow dom cod -> containsRecursiveType dom || containsRecursiveType cod
+  TCon _ args -> any containsRecursiveType args
+  TForall _ mb body -> maybe False containsRecursiveBound mb || containsRecursiveType body
+  _ -> False
+  where
+    containsRecursiveBound bound = case bound of
+      TArrow dom cod -> containsRecursiveType dom || containsRecursiveType cod
+      TCon _ args -> any containsRecursiveType args
+      TForall _ mb body -> maybe False containsRecursiveBound mb || containsRecursiveType body
+      TMu _ _ -> True
+      _ -> False
+
+renameTypeVarInTerm :: String -> String -> ElabTerm -> ElabTerm
+renameTypeVarInTerm old new term =
+  let ty' = TVar new
+      renameTy = substTypeCapture old ty'
+      renameBound = mapBoundType renameTy
+      renameScheme sch = schemeFromType (renameTy (schemeToType sch))
+      renameName v
+        | v == old = new
+        | otherwise = v
+      renameInst inst = case inst of
+        InstId -> InstId
+        InstApp ty -> InstApp (renameTy ty)
+        InstIntro -> InstIntro
+        InstElim -> InstElim
+        InstInside inner -> InstInside (renameInst inner)
+        InstSeq a b -> InstSeq (renameInst a) (renameInst b)
+        InstUnder v inner -> InstUnder (renameName v) (renameInst inner)
+        InstBot ty -> InstBot (renameTy ty)
+        InstAbstr v -> InstAbstr (renameName v)
+   in case term of
+        EVar _ -> term
+        ELit _ -> term
+        ELam v ty body -> ELam v (renameTy ty) (renameTypeVarInTerm old new body)
+        EApp f a -> EApp (renameTypeVarInTerm old new f) (renameTypeVarInTerm old new a)
+        ELet v sch rhs body -> ELet v (renameScheme sch) (renameTypeVarInTerm old new rhs) (renameTypeVarInTerm old new body)
+        ETyAbs v mb body
+          | v == old -> ETyAbs v (fmap renameBound mb) body
+          | otherwise -> ETyAbs v (fmap renameBound mb) (renameTypeVarInTerm old new body)
+        ETyInst t inst -> ETyInst (renameTypeVarInTerm old new t) (renameInst inst)
+        ERoll ty body -> ERoll (renameTy ty) (renameTypeVarInTerm old new body)
+        EUnroll body -> EUnroll (renameTypeVarInTerm old new body)
 
 prepareSnapshotViews :: PresolutionResult -> Either PipelineError SnapshotViews
 prepareSnapshotViews pres = do
@@ -326,6 +490,9 @@ authoritativeRootAnn term annExpr =
     (term0, AAnn inner _ _)
       | shouldStripAuthoritativeAnn term0 ->
           authoritativeRootAnn term0 inner
+    (term0, AUnfold inner _ _)
+      | shouldStripAuthoritativeAnn term0 ->
+          authoritativeRootAnn term0 inner
     (ELet termName _ _ bodyTerm, ALet annName _ _ _ _ _ bodyAnn _)
       | termName == annName ->
           authoritativeRootAnn bodyTerm bodyAnn
@@ -357,6 +524,15 @@ stripWitnesslessAuthoritativeAnn edgeWitnesses annCanon annPre =
           let innerPre =
                 case annPre of
                   AAnn inner _ _ -> inner
+                  AUnfold inner _ _ -> inner
+                  other -> other
+           in stripWitnesslessAuthoritativeAnn edgeWitnesses innerCanon innerPre
+    AUnfold innerCanon _ eid
+      | IntMap.notMember (getEdgeId eid) edgeWitnesses ->
+          let innerPre =
+                case annPre of
+                  AAnn inner _ _ -> inner
+                  AUnfold inner _ _ -> inner
                   other -> other
            in stripWitnesslessAuthoritativeAnn edgeWitnesses innerCanon innerPre
     _ -> (annCanon, annPre)
@@ -368,6 +544,7 @@ annProducesVar termName = go
       case annExpr of
         AVar annName _ -> annName == termName
         AAnn inner _ _ -> go inner
+        AUnfold inner _ _ -> go inner
         _ -> False
 
 stripLeadingTyAbs :: ElabTerm -> ElabTerm
@@ -375,3 +552,35 @@ stripLeadingTyAbs term =
   case term of
     ETyAbs _ _ body -> stripLeadingTyAbs body
     _ -> term
+
+{- Note [srcTypeToElabType in Pipeline]
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   Local copy of the NormSrcType → ElabType conversion used to build
+   authoritative SchemeInfo for external environment bindings.  The
+   canonical copy lives in MLF.Elab.Elaborate.Algebra (internal) and
+   MLF.Frontend.Program.Elaborate (also internal, not exported).
+   We keep this local to avoid widening production facades. -}
+
+srcTypeToElabType :: NormSrcType -> ElabType
+srcTypeToElabType ty = case ty of
+  Surface.STVar name -> TVar name
+  Surface.STArrow dom cod -> TArrow (srcTypeToElabType dom) (srcTypeToElabType cod)
+  Surface.STBase name -> TBase (BaseTy name)
+  Surface.STCon name args -> TCon (BaseTy name) (fmap srcTypeToElabType args)
+  Surface.STForall name mb body ->
+    TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body)
+  Surface.STMu name body -> TMu name (srcTypeToElabType body)
+  Surface.STBottom -> TBottom
+  where
+    srcBoundToElabBound :: Surface.SrcBound 'Surface.NormN -> Maybe BoundType
+    srcBoundToElabBound (Surface.SrcBound boundTy) = structBoundToElabBound boundTy
+
+    structBoundToElabBound :: StructBound -> Maybe BoundType
+    structBoundToElabBound bTy = case bTy of
+      Surface.STArrow dom cod -> Just (TArrow (srcTypeToElabType dom) (srcTypeToElabType cod))
+      Surface.STBase name -> Just (TBase (BaseTy name))
+      Surface.STCon name args -> Just (TCon (BaseTy name) (fmap srcTypeToElabType args))
+      Surface.STForall name mb body ->
+        Just (TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body))
+      Surface.STMu name body -> Just (TMu name (srcTypeToElabType body))
+      Surface.STBottom -> Nothing

@@ -7,19 +7,23 @@ module MLF.Elab.Elaborate.Algebra
     ElabOut (..),
     AlgebraContext (..),
     elabAlg,
+    mkEnvBinding,
     resolvedLambdaParamNode,
   )
 where
 
+import Control.Applicative ((<|>))
 import Data.Functor.Foldable (para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
+import Data.List (find)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import qualified Data.Set as Set
 import MLF.Constraint.Presolution (PresolutionView)
 import MLF.Constraint.Types
-  ( NodeId,
+  ( BaseTy (..),
+    NodeId,
     TyNode (..),
     getNodeId,
   )
@@ -36,11 +40,13 @@ import MLF.Elab.Elaborate.Scope
   ( generalizeAtNode,
     normalizeSchemeSubstPair,
     normalizeSubstForScheme,
+    reifyNodeTypeDirect,
     reifyNodeTypePreferringBound,
     scopeRootForNode,
   )
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import qualified MLF.Elab.Inst as Inst
+import MLF.Elab.Reduce (normalize)
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
 import MLF.Elab.Run.ResultType.Util
   ( CandidateSelection (..),
@@ -50,7 +56,8 @@ import MLF.Elab.Run.TypeOps (inlineBoundVarsType, simplifyAnnotationType)
 import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded)
 import qualified MLF.Elab.TypeCheck as TypeCheck (Env (..), typeCheckWithEnv)
 import MLF.Elab.Types
-  ( ElabError (..),
+  ( BoundType,
+    ElabError (..),
     ElabTerm (..),
     ElabType,
     Instantiation (..),
@@ -62,14 +69,15 @@ import MLF.Elab.Types
     pattern Forall,
   )
 import MLF.Frontend.ConstraintGen.Types (AnnExpr (..), AnnExprF (..))
-import MLF.Frontend.Syntax (VarName)
-import MLF.Reify.TypeOps (alphaEqType, firstNonContractiveRecursiveType, freeTypeVarsType, freshNameLike, parseNameId, substTypeCapture)
+import MLF.Frontend.Syntax (NormSrcType, SrcBound (..), SrcNorm (..), SrcTy (..), StructBound, VarName)
+import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, firstNonContractiveRecursiveType, freeTypeVarsType, freshNameLike, parseNameId, substTypeCapture)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data EnvBinding = EnvBinding
   { ebSchemeInfo :: SchemeInfo,
     ebTransparentMediator :: Bool,
-    ebAliasTarget :: Maybe VarName
+    ebAliasTarget :: Maybe VarName,
+    ebExplicitRecursiveParam :: Bool
   }
 
 data IdentityWrapperAlias
@@ -106,7 +114,11 @@ data AlgebraContext = AlgebraContext
     algCanonical :: NodeId -> NodeId,
     algResolvedLambdaParamNode :: NodeId -> Maybe NodeId,
     algAnnotationContext :: AnnotationContext,
-    algNamedSetReify :: IntSet.IntSet
+    algNamedSetReify :: IntSet.IntSet,
+    -- | Original source annotation types from constraint generation, keyed by
+    -- canonicalized AAnn codomain NodeId.  Used in ALamF to recover annotation
+    -- types that presolution strips (e.g. TForall inside a μ body).
+    algAnnSourceTypes :: IntMap.IntMap NormSrcType
   }
 
 containsMuType :: ElabType -> Bool
@@ -159,7 +171,8 @@ mkEnvBinding schemeInfo transparentMediator =
   EnvBinding
     { ebSchemeInfo = schemeInfo,
       ebTransparentMediator = transparentMediator,
-      ebAliasTarget = Nothing
+      ebAliasTarget = Nothing,
+      ebExplicitRecursiveParam = False
     }
 
 envSchemeInfos :: Env -> Map.Map VarName SchemeInfo
@@ -184,7 +197,7 @@ freeTypeVarsEnvSchemes :: Env -> Set.Set String
 freeTypeVarsEnvSchemes env =
   Set.unions
     [ freeTypeVarsType (schemeToType (siScheme schemeInfo))
-    | schemeInfo <- Map.elems (envSchemeInfos env)
+      | schemeInfo <- Map.elems (envSchemeInfos env)
     ]
 
 applyTypeVarRenames :: [(String, String)] -> ElabType -> ElabType
@@ -197,6 +210,30 @@ applyTypeVarRenames renames ty0 =
     )
     ty0
     renames
+
+freeTypeVarsInOccurrenceOrder :: ElabType -> [String]
+freeTypeVarsInOccurrenceOrder ty0 = reverse (snd (goType Set.empty Set.empty [] ty0))
+  where
+    addName bound seen acc name
+      | name `Set.member` bound = (seen, acc)
+      | name `Set.member` seen = (seen, acc)
+      | otherwise = (Set.insert name seen, name : acc)
+
+    goType bound seen acc ty =
+      case ty of
+        TVar name -> addName bound seen acc name
+        TArrow dom cod ->
+          let (seen', acc') = goType bound seen acc dom
+           in goType bound seen' acc' cod
+        TCon _ args ->
+          foldl' (\(seen', acc') arg -> goType bound seen' acc' arg) (seen, acc) args
+        TForall name mb body ->
+          let (seen', acc') =
+                maybe (seen, acc) (\boundTy -> goType bound seen acc (tyToElab boundTy)) mb
+           in goType (Set.insert name bound) seen' acc' body
+        TMu name body -> goType (Set.insert name bound) seen acc body
+        TBase _ -> (seen, acc)
+        TBottom -> (seen, acc)
 
 freshenSchemeInfoAgainstEnv :: Env -> SchemeInfo -> SchemeInfo
 freshenSchemeInfoAgainstEnv env schemeInfo =
@@ -279,6 +316,7 @@ stripAnnExpr :: AnnExpr -> AnnExpr
 stripAnnExpr annExpr =
   case annExpr of
     AAnn inner _ _ -> stripAnnExpr inner
+    AUnfold inner _ _ -> stripAnnExpr inner
     _ -> annExpr
 
 stripLeadingTyAbs :: ElabTerm -> ElabTerm
@@ -374,6 +412,7 @@ elabAlg algebraContext layer =
                         case expr of
                           AVar name _ -> name == v
                           AAnn inner _ _ -> mediatedVarUse inner
+                          AUnfold inner _ _ -> mediatedVarUse inner
                           AApp fun arg _ _ _ ->
                             case (fun, arg) of
                               (AVar funName _, innerArg)
@@ -384,8 +423,8 @@ elabAlg algebraContext layer =
                       firstRecursiveDomain expr =
                         case expr of
                           AApp (AVar recurName _) arg _ _ _
-                            | mediatedVarUse arg
-                            , Just schemeInfo <- lookupSchemeInfo recurName env ->
+                            | mediatedVarUse arg,
+                              Just schemeInfo <- lookupSchemeInfo recurName env ->
                                 case schemeToType (siScheme schemeInfo) of
                                   muTy@(TMu muName muBody)
                                     | hasContractiveRecursiveWitness muTy ->
@@ -408,6 +447,7 @@ elabAlg algebraContext layer =
                                   Just dom -> Just dom
                                   Nothing -> firstRecursiveDomain body
                           AAnn inner _ _ -> firstRecursiveDomain inner
+                          AUnfold inner _ _ -> firstRecursiveDomain inner
                           _ -> Nothing
                    in firstRecursiveDomain annExpr
                 transparentParamTyFromBody annExpr =
@@ -447,29 +487,64 @@ elabAlg algebraContext layer =
             (paramTy, paramSchemeInfo) <-
               case mAnnLambda of
                 Just (annNodeId, _, _) ->
-                  case generalizeAtNode scopeContext annNodeId of
-                    Right (paramScheme, _subst) ->
-                      let paramTy0 = case paramScheme of
-                            Forall [(name, Just bnd)] bodyTy
-                              | bodyTy == TVar name -> tyToElab bnd
-                            _ -> schemeToType paramScheme
-                          -- If generalizeAtNode returned a bare TVar (over-generalized),
-                          -- fall back to reifyNodeTypePreferringBound which resolves
-                          -- through the constraint graph's bound/canonical chain.
-                          paramTyResolved = case paramTy0 of
-                            TVar {} ->
-                              case reifyNodeTypePreferringBound scopeContext annNodeId of
-                                Right ty@TMu {} -> ty
-                                _ -> paramTy0
-                            _ -> paramTy0
+                  -- First, check if we have the original source annotation type
+                  -- preserved from constraint generation.  This is the exact type
+                  -- the user wrote (after lowering), which presolution may have
+                  -- corrupted (e.g. stripping TForall inside a μ body).
+                  case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
+                    Just srcTy ->
+                      let preservedTy = srcTypeToElabType srcTy
                        in pure
-                            ( paramTyResolved,
+                            ( preservedTy,
                               SchemeInfo
-                                { siScheme = schemeFromType paramTyResolved,
+                                { siScheme = schemeFromType preservedTy,
                                   siSubst = IntMap.empty
                                 }
                             )
-                    Left err -> Left err
+                    Nothing ->
+                      case generalizeAtNode scopeContext annNodeId of
+                        Right (paramScheme, _subst) ->
+                          let paramTy0 = case paramScheme of
+                                Forall [(name, Just bnd)] bodyTy
+                                  | bodyTy == TVar name -> tyToElab bnd
+                                _ -> schemeToType paramScheme
+                              -- If generalizeAtNode returned a bare TVar (over-generalized)
+                              -- or a base type that disagrees with the constraint graph's
+                              -- solved μ type, fall back to reifyNodeTypePreferringBound.
+                              -- This handles the case where ELamAnn's desugared
+                              -- annotation-let picks up the body's result type (e.g. Bool)
+                              -- instead of the actual annotation type (e.g. μ Nat).
+                              paramTyResolved = case paramTy0 of
+                                TVar {} ->
+                                  case reifyNodeTypePreferringBound scopeContext annNodeId of
+                                    Right ty@TMu {} -> ty
+                                    _ -> paramTy0
+                                TBase {} ->
+                                  case reifyNodeTypePreferringBound scopeContext annNodeId of
+                                    Right ty@TMu {} -> ty
+                                    _ -> paramTy0
+                                _
+                                  | TMu {} <- paramTySurface,
+                                    Just unfoldedSurface <- unfoldMuOnce paramTySurface,
+                                    (alphaEqType unfoldedSurface paramTy0 || churchAwareEqType unfoldedSurface paramTy0) ->
+                                      paramTySurface
+                                _ -> paramTy0
+                           in pure
+                                ( paramTyResolved,
+                                  SchemeInfo
+                                    { siScheme = schemeFromType paramTyResolved,
+                                      siSubst = IntMap.empty
+                                    }
+                                )
+                        Left (SchemeFreeVars _ _) ->
+                          pure
+                            ( paramTySurface,
+                              SchemeInfo
+                                { siScheme = schemeFromType paramTySurface,
+                                  siSubst = IntMap.empty
+                                }
+                            )
+                        Left err -> Left err
                 Nothing ->
                   pure
                     ( paramTySurface,
@@ -479,15 +554,41 @@ elabAlg algebraContext layer =
                         }
                     )
             let env' = Map.insert v (mkEnvBinding paramSchemeInfo False) env
-            body' <- elabTerm bodyElabOut env'
+                env'' =
+                  Map.adjust
+                    ( \binding ->
+                        binding
+                          { ebExplicitRecursiveParam =
+                              isJust mAnnLambda && hasContractiveRecursiveWitness paramTy
+                          }
+                    )
+                    v
+                    env'
+            bodyRaw <- elabTerm bodyElabOut env''
+            let bodyTcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) (envSchemeInfos env'')) Map.empty
+                body' = stripUnusedTopTyAbsWithEnv bodyTcEnv bodyRaw
             pure (ELam v paramTy body')
        in mkOut f
-    AAppF (fAnn, fOut) (aAnn, aOut) funEid argEid _ ->
+    AAppF (fAnn, fOut) (aAnn, aOut) funEid argEid appNodeId ->
       let f env = do
             f' <- elabTerm fOut env
             a' <- elabTerm aOut env
             let schemeEnv = envSchemeInfos env
                 tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) schemeEnv) Map.empty
+                appTargetTy =
+                  let directTy = either (const Nothing) Just (reifyNodeTypeDirect scopeContext appNodeId)
+                      boundTy = either (const Nothing) Just (reifyNodeTypePreferringBound scopeContext appNodeId)
+                   in case directTy of
+                        Just TVar {} -> boundTy <|> directTy
+                        Just TBottom -> boundTy <|> directTy
+                        Just directTy'
+                          | Just boundMu@TMu {} <- boundTy,
+                            Just unfoldedBound <- unfoldMuOnce boundMu,
+                            let directNorm = stripVacuousForallsDeep directTy',
+                            let unfoldedNorm = stripVacuousForallsDeep unfoldedBound,
+                            (alphaEqType unfoldedNorm directNorm || churchAwareEqType unfoldedNorm directNorm) ->
+                              boundTy
+                        _ -> directTy
                 annHasMuScheme ann =
                   case sourceVarName ann >>= (`lookupSchemeInfo` env) of
                     Just schemeInfo ->
@@ -495,6 +596,38 @@ elabAlg algebraContext layer =
                         TMu {} -> True
                         _ -> False
                     Nothing -> False
+                argIsExplicitRecursiveParam ann =
+                  case sourceVarName ann >>= (`Map.lookup` env) of
+                    Just binding -> ebExplicitRecursiveParam binding
+                    Nothing -> False
+                sourceAnnotatedType ann =
+                  case ann of
+                    AVar name _ -> schemeToType . siScheme <$> lookupSchemeInfo name env
+                    AAnn inner annNodeId _ ->
+                      case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
+                        Just srcTy -> Just (srcTypeToElabType srcTy)
+                        Nothing -> sourceAnnotatedType inner
+                    AUnfold inner _ _ -> sourceAnnotatedType inner
+                    _ -> Nothing
+                argSourceSchemeTy =
+                  sourceAnnotatedType aAnn
+                sourceMuMatchesActualType sourceTy actualTy =
+                  alphaEqType sourceTy actualTy
+                    || churchAwareEqType sourceTy actualTy
+                    || case sourceTy of
+                      TMu {} ->
+                        case unfoldMuOnce sourceTy of
+                          Just unfoldedTy ->
+                            let unfoldedTy' = stripVacuousForallsDeep unfoldedTy
+                                actualTy' = stripVacuousForallsDeep actualTy
+                             in alphaEqType unfoldedTy' actualTy' || churchAwareEqType unfoldedTy' actualTy'
+                          Nothing -> False
+                      _ -> False
+                preferSourceMuArgTy actualTy =
+                  case argSourceSchemeTy of
+                    Just sourceTy@TMu {}
+                      | sourceMuMatchesActualType sourceTy actualTy -> sourceTy
+                    _ -> actualTy
                 recoverIdentityLikeRecursiveFunInst ann =
                   case (sourceVarName ann, TypeCheck.typeCheckWithEnv tcEnv a') of
                     (Just fName, Right argTy)
@@ -509,14 +642,19 @@ elabAlg algebraContext layer =
                                         Left _ -> Nothing
                             _ -> Nothing
                     _ -> Nothing
-                reifyInstWithRecovery ann eid _term =
-                  case reifyInst annotationContext namedSetReify schemeEnv ann eid of
-                    Right inst -> Right inst
-                    Left err@(PhiTranslatabilityError _)
-                      | Just inst <- recoverIdentityLikeRecursiveFunInst ann -> Right inst
-                      | annHasMuScheme ann -> Right InstId
-                      | otherwise -> Left err
-                    Left err -> Left err
+                reifyInstWithRecovery ann eid term
+                  | Nothing <- sourceVarName ann,
+                    Right ty <- TypeCheck.typeCheckWithEnv tcEnv term,
+                    not (case ty of TForall {} -> True; _ -> False) =
+                      Right InstId
+                  | otherwise =
+                      case reifyInst annotationContext namedSetReify schemeEnv ann eid of
+                        Right inst -> Right inst
+                        Left err@(PhiTranslatabilityError _)
+                          | Just inst <- recoverIdentityLikeRecursiveFunInst ann -> Right inst
+                          | annHasMuScheme ann -> Right InstId
+                          | otherwise -> Left err
+                        Left err -> Left err
                 reifyInstIfPolymorphic ann eid term
                   | sourceAnnIsPolymorphic schemeEnv ann =
                       reifyInstWithRecovery ann eid term
@@ -539,8 +677,8 @@ elabAlg algebraContext layer =
                            in case aStripped of
                                 ELam {} -> Just a'
                                 _ -> recursiveWitnessArgTerm
-                      | Just schemeInfo <- lookupSchemeInfo fName env
-                      , isSingleBinderIdentityScheme schemeInfo ->
+                      | Just schemeInfo <- lookupSchemeInfo fName env,
+                        isSingleBinderIdentityScheme schemeInfo ->
                           recursiveWitnessArgTerm
                     _ -> Nothing
             funInst <-
@@ -551,60 +689,56 @@ elabAlg algebraContext layer =
               case transparentOrIdentityBypassTerm of
                 Just _ -> Right InstId
                 Nothing -> reifyInstIfPolymorphic aAnn argEid a'
-            let funInstByFunType =
+            let fHeadTy = appHeadType tcEnv f'
+                fHead = appHeadTerm tcEnv f'
+                fIsMuHead =
+                  case TypeCheck.typeCheckWithEnv tcEnv f' of
+                    Right TMu {} -> True
+                    _ -> False
+                recoveredArgTy =
+                  either
+                    ( const
+                        ( either
+                            (const Nothing)
+                            (Just . preferSourceMuArgTy)
+                            (reifyNodeTypePreferringBound scopeContext (annNode aAnn))
+                        )
+                    )
+                    (Just . preferSourceMuArgTy)
+                    (TypeCheck.typeCheckWithEnv tcEnv a')
+                funInstByFunType =
                   case funInst of
                     inst0@(InstApp _) ->
-                      case TypeCheck.typeCheckWithEnv tcEnv f' of
-                        Right TForall {} -> inst0
-                        Right _ -> InstId
-                        Left _ -> inst0
+                      case fHeadTy of
+                        Just TForall {} -> inst0
+                        Just _ -> InstId
+                        Nothing -> inst0
                     inst0@(InstInside (InstBot _)) ->
-                      case TypeCheck.typeCheckWithEnv tcEnv f' of
-                        Right TForall {} -> inst0
-                        Right _ -> InstId
-                        Left _ -> inst0
+                      case fHeadTy of
+                        Just TForall {} -> inst0
+                        Just _ -> InstId
+                        Nothing -> inst0
                     inst0@(InstInside (InstApp _)) ->
-                      case TypeCheck.typeCheckWithEnv tcEnv f' of
-                        Right TForall {} -> inst0
-                        Right _ -> InstId
-                        Left _ -> inst0
+                      case fHeadTy of
+                        Just TForall {} -> inst0
+                        Just _ -> InstId
+                        Nothing -> inst0
                     inst0@(InstSeq (InstInside (InstBot _)) InstElim) ->
-                      case TypeCheck.typeCheckWithEnv tcEnv f' of
-                        Right TForall {} -> inst0
-                        Right _ -> InstId
-                        Left _ -> inst0
+                      case fHeadTy of
+                        Just TForall {} -> inst0
+                        Just _ -> InstId
+                        Nothing -> inst0
                     inst0@(InstSeq (InstInside (InstApp _)) InstElim) ->
-                      case TypeCheck.typeCheckWithEnv tcEnv f' of
-                        Right TForall {} -> inst0
-                        Right _ -> InstId
-                        Left _ -> inst0
+                      case fHeadTy of
+                        Just TForall {} -> inst0
+                        Just _ -> InstId
+                        Nothing -> inst0
                     _ -> funInst
                 funInst' =
-                  case
-                      either
-                        ( const
-                            ( either
-                                (const Nothing)
-                                Just
-                                (reifyNodeTypePreferringBound scopeContext (annNode aAnn))
-                            )
-                        )
-                        Just
-                        (TypeCheck.typeCheckWithEnv tcEnv a')
-                    of
+                  case recoveredArgTy of
                     recoveredArg ->
                       case funInstByFunType of
                         inst0@(InstApp ty0) ->
-                          case ty0 of
-                            TVar {} -> maybe inst0 InstApp recoveredArg
-                            TForall {} -> maybe inst0 InstApp recoveredArg
-                            _ -> inst0
-                        inst0@(InstInside (InstBot ty0)) ->
-                          case ty0 of
-                            TVar {} -> maybe inst0 InstApp recoveredArg
-                            TForall {} -> maybe inst0 InstApp recoveredArg
-                            _ -> inst0
-                        inst0@(InstInside (InstApp ty0)) ->
                           case ty0 of
                             TVar {} -> maybe inst0 InstApp recoveredArg
                             TForall {} -> maybe inst0 InstApp recoveredArg
@@ -621,23 +755,60 @@ elabAlg algebraContext layer =
                             _ -> inst0
                         _ -> funInstByFunType
                 normalizeFunInst inst0 =
-                  case TypeCheck.typeCheckWithEnv tcEnv f' of
-                    Right fTy -> go 0 inst0
+                  case fHeadTy of
+                    Just fTy -> go 0 inst0
                       where
+                        isAppLikeInst instX =
+                          case instX of
+                            InstApp {} -> True
+                            InstSeq (InstInside (InstBot _)) InstElim -> True
+                            InstSeq (InstInside (InstApp _)) InstElim -> True
+                            _ -> False
+                        canonicalizeAppLikeInst instX =
+                          case instX of
+                            InstApp ty -> InstApp ty
+                            InstSeq (InstInside (InstBot ty)) InstElim -> InstApp ty
+                            InstSeq (InstInside (InstApp ty)) InstElim -> InstApp ty
+                            _ -> instX
                         go n instN
                           | n >= (8 :: Int) = instN
                           | otherwise =
                               case applyInstantiation fTy instN of
-                                Right (TForall _ (Just _) _) -> go (n + 1) (InstSeq instN InstElim)
-                                Right TForall {} -> instN
+                                Right (TForall _ (Just _) _) ->
+                                  if isAppLikeInst instN
+                                    then canonicalizeAppLikeInst instN
+                                    else go (n + 1) (InstSeq instN InstElim)
+                                Right (TForall _ Nothing _) ->
+                                  case (instN, recoveredArgTy) of
+                                    (InstId, Just argTy) -> InstApp argTy
+                                    _ -> instN
                                 Right _ -> instN
                                 Left _ -> instN
-                    Left _ -> inst0
-                funInstNorm = normalizeFunInst funInst'
+                    Nothing -> inst0
+                targetResultInstCandidates =
+                  case (fIsMuHead, fHeadTy) of
+                    (True, Just TForall {}) ->
+                      [ InstApp (finalCodomain argTy)
+                      | Just argTy <- [recoveredArgTy]
+                      ]
+                        ++ [ InstApp (finalCodomain targetTy)
+                           | Just targetTy <- [appTargetTy]
+                           ]
+                    _ -> []
+                validatesTargetResultInst instCandidate =
+                  let fCandidate = ETyInst fHead instCandidate
+                   in case TypeCheck.typeCheckWithEnv tcEnv (EApp fCandidate a') of
+                        Right _ -> True
+                        Left _ -> False
+                funInstNorm0 = normalizeFunInst funInst'
+                funInstNorm =
+                  fromMaybe
+                    funInstNorm0
+                    (find validatesTargetResultInst targetResultInstCandidates)
                 funInstRecovered =
                   let fApp0 = case funInstNorm of
-                        InstId -> f'
-                        _ -> ETyInst f' funInstNorm
+                        InstId -> fHead
+                        _ -> ETyInst fHead funInstNorm
                    in case ( TypeCheck.typeCheckWithEnv tcEnv (EApp fApp0 a'),
                              sourceVarName fAnn,
                              sourceVarName aAnn,
@@ -672,17 +843,53 @@ elabAlg algebraContext layer =
                                         | isTransparentMediatorVar fName env ->
                                             let candidate = normalizeFunInst (InstApp argTy)
                                                 fAppCandidate = case candidate of
-                                                  InstId -> f'
-                                                  _ -> ETyInst f' candidate
+                                                  InstId -> fHead
+                                                  _ -> ETyInst fHead candidate
                                              in case TypeCheck.typeCheckWithEnv tcEnv (EApp fAppCandidate a') of
                                                   Right _ -> Just candidate
                                                   Left _ -> Nothing
                                       _ -> Nothing
                               _ -> Nothing
                         _ -> funInstNorm
-                fAppForArgInference = case funInstRecovered of
-                  InstId -> f'
-                  _ -> ETyInst f' funInstRecovered
+                funInstValidated =
+                  case funInstRecovered of
+                    InstId -> InstId
+                    instCandidate ->
+                      let isAppLikeInst inst0 =
+                            case inst0 of
+                              InstApp {} -> True
+                              InstSeq (InstInside (InstBot _)) InstElim -> True
+                              InstSeq (InstInside (InstApp _)) InstElim -> True
+                              _ -> False
+                          fCandidate = ETyInst fHead instCandidate
+                          keepCandidate =
+                            case (isAppLikeInst instCandidate, fHeadTy, sourceVarName fAnn) of
+                              (True, Just TForall {}, _) ->
+                                case TypeCheck.typeCheckWithEnv tcEnv fCandidate of
+                                  Right _ -> True
+                                  Left _ -> False
+                              (True, Nothing, Nothing) -> False
+                              (True, _, _) -> False
+                              _ ->
+                                case TypeCheck.typeCheckWithEnv tcEnv fCandidate of
+                                  Right _ -> True
+                                  Left _ -> False
+                       in if keepCandidate
+                            then instCandidate
+                            else case recoveredArgTy of
+                              Just argTy ->
+                                let recoveredCandidate = normalizeFunInst (InstApp argTy)
+                                 in case recoveredCandidate of
+                                      InstId -> InstId
+                                      _ ->
+                                        let fRecovered = ETyInst fHead recoveredCandidate
+                                         in case TypeCheck.typeCheckWithEnv tcEnv fRecovered of
+                                              Right _ -> recoveredCandidate
+                                              Left _ -> InstId
+                              Nothing -> InstId
+                fAppForArgInference = case funInstValidated of
+                  InstId -> fHead
+                  _ -> ETyInst fHead funInstValidated
                 argInstFromFun =
                   let shouldInlineParamTy =
                         case (sourceVarName fAnn, sourceVarName aAnn) of
@@ -718,54 +925,54 @@ elabAlg algebraContext layer =
                 argInst' =
                   case (sourceVarName fAnn, sourceVarName aAnn, TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference, argInst) of
                     (Just fName, Just argName, Right (TArrow paramTy _), InstApp argTy)
-                      | fName == argName
-                      , Just schemeInfo <- lookupSchemeInfo fName env
-                      , case siScheme schemeInfo of
+                      | fName == argName,
+                        Just schemeInfo <- lookupSchemeInfo fName env,
+                        case siScheme schemeInfo of
                           Forall [(_, Nothing)] _ -> True
-                          _ -> False
-                      , let instCandidate = InstApp argTy
-                      , Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate)
-                      , alphaEqType argTy' paramTy ->
+                          _ -> False,
+                        let instCandidate = InstApp argTy,
+                        Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate),
+                        alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstInside (InstBot argTy))
-                      | fName == argName
-                      , Just schemeInfo <- lookupSchemeInfo fName env
-                      , case siScheme schemeInfo of
+                      | fName == argName,
+                        Just schemeInfo <- lookupSchemeInfo fName env,
+                        case siScheme schemeInfo of
                           Forall [(_, Nothing)] _ -> True
-                          _ -> False
-                      , let instCandidate = InstApp argTy
-                      , Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate)
-                      , alphaEqType argTy' paramTy ->
+                          _ -> False,
+                        let instCandidate = InstApp argTy,
+                        Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate),
+                        alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstInside (InstApp argTy))
-                      | fName == argName
-                      , Just schemeInfo <- lookupSchemeInfo fName env
-                      , case siScheme schemeInfo of
+                      | fName == argName,
+                        Just schemeInfo <- lookupSchemeInfo fName env,
+                        case siScheme schemeInfo of
                           Forall [(_, Nothing)] _ -> True
-                          _ -> False
-                      , let instCandidate = InstApp argTy
-                      , Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate)
-                      , alphaEqType argTy' paramTy ->
+                          _ -> False,
+                        let instCandidate = InstApp argTy,
+                        Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate),
+                        alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstSeq (InstInside (InstBot argTy)) InstElim)
-                      | fName == argName
-                      , Just schemeInfo <- lookupSchemeInfo fName env
-                      , case siScheme schemeInfo of
+                      | fName == argName,
+                        Just schemeInfo <- lookupSchemeInfo fName env,
+                        case siScheme schemeInfo of
                           Forall [(_, Nothing)] _ -> True
-                          _ -> False
-                      , let instCandidate = InstApp argTy
-                      , Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate)
-                      , alphaEqType argTy' paramTy ->
+                          _ -> False,
+                        let instCandidate = InstApp argTy,
+                        Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate),
+                        alphaEqType argTy' paramTy ->
                           instCandidate
                     (Just fName, Just argName, Right (TArrow paramTy _), InstSeq (InstInside (InstApp argTy)) InstElim)
-                      | fName == argName
-                      , Just schemeInfo <- lookupSchemeInfo fName env
-                      , case siScheme schemeInfo of
+                      | fName == argName,
+                        Just schemeInfo <- lookupSchemeInfo fName env,
+                        case siScheme schemeInfo of
                           Forall [(_, Nothing)] _ -> True
-                          _ -> False
-                      , let instCandidate = InstApp argTy
-                      , Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate)
-                      , alphaEqType argTy' paramTy ->
+                          _ -> False,
+                        let instCandidate = InstApp argTy,
+                        Right argTy' <- TypeCheck.typeCheckWithEnv tcEnv (ETyInst a' instCandidate),
+                        alphaEqType argTy' paramTy ->
                           instCandidate
                     _ ->
                       case (sourceAnnIsPolymorphic schemeEnv aAnn, argInstFromFun) of
@@ -775,13 +982,30 @@ elabAlg algebraContext layer =
                   case transparentOrIdentityBypassTerm of
                     Just _ -> InstId
                     Nothing ->
-                      case argInst' of
-                        InstId -> InstId
-                        _ ->
-                          case TypeCheck.typeCheckWithEnv tcEnv a' of
-                            Right (TForall _ (Just _) _) -> InstElim
-                            Right TForall {} -> argInst'
-                            _ -> InstId
+                      let isAppLikeInst inst0 =
+                            case inst0 of
+                              InstApp {} -> True
+                              InstSeq (InstInside (InstBot _)) InstElim -> True
+                              InstSeq (InstInside (InstApp _)) InstElim -> True
+                              _ -> False
+                          canonicalizeAppLikeInst inst0 =
+                            case inst0 of
+                              InstApp ty -> InstApp ty
+                              InstSeq (InstInside (InstBot ty)) InstElim -> InstApp ty
+                              InstSeq (InstInside (InstApp ty)) InstElim -> InstApp ty
+                              _ -> inst0
+                       in case argInst' of
+                            InstId -> InstId
+                            _
+                              | isAppLikeInst argInst' ->
+                                  case TypeCheck.typeCheckWithEnv tcEnv a' of
+                                    Right TForall {} -> canonicalizeAppLikeInst argInst'
+                                    _ -> InstId
+                              | otherwise ->
+                                  case TypeCheck.typeCheckWithEnv tcEnv a' of
+                                    Right (TForall _ (Just _) _) -> InstElim
+                                    Right TForall {} -> argInst'
+                                    _ -> InstId
                 aApp =
                   case transparentOrIdentityBypassTerm of
                     Just bypassTerm -> bypassTerm
@@ -790,9 +1014,9 @@ elabAlg algebraContext layer =
                         InstId -> a'
                         _ -> ETyInst a' argInstFinal
                 fApp =
-                  let fApp0 = case funInstRecovered of
-                        InstId -> f'
-                        _ -> ETyInst f' funInstRecovered
+                  let fApp0 = case funInstValidated of
+                        InstId -> fHead
+                        _ -> ETyInst fHead funInstValidated
                       containsInternalTyVar ty =
                         case ty of
                           TVar name -> isJust (parseNameId name)
@@ -823,53 +1047,60 @@ elabAlg algebraContext layer =
                               ELam paramName argTy body
                         _ -> fApp0
                 bypassApp = transparentOrIdentityBypassTerm
-            app <-
+            app0 <-
               case bypassApp of
                 Just bypassTerm -> Right bypassTerm
-                Nothing -> insertMuUseSiteCoercions tcEnv fApp aApp
-            case
-                ( (\go ->
-                      sourceAnnIsPolymorphic schemeEnv aAnn
-                        && ( case funInst of
-                               InstApp ty -> go ty
-                               InstInside (InstBot ty) -> go ty
-                               InstInside (InstApp ty) -> go ty
-                               InstSeq (InstInside (InstBot ty)) InstElim -> go ty
-                               InstSeq (InstInside (InstApp ty)) InstElim -> go ty
-                               _ -> False
-                            || case argInst of
-                                 InstApp ty -> go ty
-                                 InstInside (InstBot ty) -> go ty
-                                 InstInside (InstApp ty) -> go ty
-                                 InstSeq (InstInside (InstBot ty)) InstElim -> go ty
-                                 InstSeq (InstInside (InstApp ty)) InstElim -> go ty
-                                 _ -> False
-                           )
-                  )
-                    ( let go ty =
-                            case ty of
-                              TVar name -> isJust (parseNameId name)
-                              TArrow dom cod -> go dom && go cod
-                              TForall _ _ body -> go body
-                              _ -> False
-                       in go
-                    ),
-                  TypeCheck.typeCheckWithEnv tcEnv app
-                ) of
-                (True, Left tcErr) ->
-                  if take (length "TCArgumentMismatch") (show tcErr) == "TCArgumentMismatch"
-                        || take (length "TCExpectedArrow") (show tcErr) == "TCExpectedArrow"
-                        then
-                          Left
-                            (PhiTranslatabilityError
-                              [ "AAppF: unresolved non-self polymorphic alias instantiation",
-                                "function=" ++ show (sourceVarName fAnn),
-                                "argument=" ++ show (sourceVarName aAnn),
-                                "typeCheck=" ++ show tcErr
-                              ]
+                Nothing ->
+                  insertMuUseSiteCoercions
+                    tcEnv
+                    (argIsExplicitRecursiveParam aAnn)
+                    (isJust (sourceVarName aAnn))
+                    argSourceSchemeTy
+                    fApp
+                    aApp
+            let app = rollResultToExpectedMu tcEnv appTargetTy app0
+            case ( ( \go ->
+                       sourceAnnIsPolymorphic schemeEnv aAnn
+                         && ( case funInst of
+                                InstApp ty -> go ty
+                                InstInside (InstBot ty) -> go ty
+                                InstInside (InstApp ty) -> go ty
+                                InstSeq (InstInside (InstBot ty)) InstElim -> go ty
+                                InstSeq (InstInside (InstApp ty)) InstElim -> go ty
+                                _ -> False
+                                || case argInst of
+                                  InstApp ty -> go ty
+                                  InstInside (InstBot ty) -> go ty
+                                  InstInside (InstApp ty) -> go ty
+                                  InstSeq (InstInside (InstBot ty)) InstElim -> go ty
+                                  InstSeq (InstInside (InstApp ty)) InstElim -> go ty
+                                  _ -> False
                             )
-                        else Right app
-                _ -> Right app
+                   )
+                     ( let go ty =
+                             case ty of
+                               TVar name -> isJust (parseNameId name)
+                               TArrow dom cod -> go dom && go cod
+                               TForall _ _ body -> go body
+                               _ -> False
+                        in go
+                     ),
+                   TypeCheck.typeCheckWithEnv tcEnv app
+                 ) of
+              (True, Left tcErr) ->
+                if take (length "TCArgumentMismatch") (show tcErr) == "TCArgumentMismatch"
+                  || take (length "TCExpectedArrow") (show tcErr) == "TCExpectedArrow"
+                  then
+                    Left
+                      ( PhiTranslatabilityError
+                          [ "AAppF: unresolved non-self polymorphic alias instantiation",
+                            "function=" ++ show (sourceVarName fAnn),
+                            "argument=" ++ show (sourceVarName aAnn),
+                            "typeCheck=" ++ show tcErr
+                          ]
+                      )
+                  else Right app
+              _ -> Right app
        in mkOut f
     ALetF v _schemeGenId schemeRootId _ _rhsScopeGen (rhsAnn, rhsOut) (bodyAnn, bodyOut) trivialRoot ->
       let elaborateLet env = do
@@ -891,6 +1122,59 @@ elabAlg algebraContext layer =
                     _ -> annExpr
                 aliasSourceName = transparentMediatorSourceName rhsAnn
                 aliasSourceSchemeInfo = aliasSourceName >>= (`lookupSchemeInfo` env)
+                letResultSourceScheme =
+                  case IntMap.lookup (getNodeId (canonical trivialRoot)) (algAnnSourceTypes algebraContext) of
+                    Just srcTy ->
+                      let fallback = (schemeFromType (srcTypeToElabType srcTy), IntMap.empty)
+                       in case reifyNodeTypePreferringBound scopeContext (canonical trivialRoot) of
+                            Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
+                            _ -> Just fallback
+                    Nothing -> Nothing
+                schemeRootSourceScheme =
+                  case IntMap.lookup (getNodeId schemeRootId) (algAnnSourceTypes algebraContext) of
+                    Just srcTy ->
+                      let fallback = (schemeFromType (srcTypeToElabType srcTy), IntMap.empty)
+                       in case reifyNodeTypePreferringBound scopeContext schemeRootId of
+                            Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
+                            _ -> Just fallback
+                    Nothing -> Nothing
+                rhsOuterSourceScheme =
+                  case rhsAnn of
+                    AAnn _ annNodeId _ ->
+                      case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
+                        Just srcTy ->
+                          let fallback = (schemeFromType (srcTypeToElabType srcTy), IntMap.empty)
+                           in case reifyNodeTypePreferringBound scopeContext annNodeId of
+                                Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
+                                _ -> Just fallback
+                        Nothing -> Nothing
+                    AUnfold inner _ _ ->
+                      case inner of
+                        AAnn _ annNodeId _ ->
+                          case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
+                            Just srcTy ->
+                              let fallback = (schemeFromType (srcTypeToElabType srcTy), IntMap.empty)
+                               in case reifyNodeTypePreferringBound scopeContext annNodeId of
+                                    Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
+                                    _ -> Just fallback
+                            Nothing -> Nothing
+                        _ -> Nothing
+                    _ -> Nothing
+                explicitSourceAnnotatedScheme annExpr =
+                  case annExpr of
+                    AAnn inner annNodeId _ ->
+                      case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
+                        Just srcTy ->
+                          let fallback = (schemeFromType (srcTypeToElabType srcTy), IntMap.empty)
+                           in case reifyNodeTypePreferringBound scopeContext annNodeId of
+                                Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
+                                _ -> Just fallback
+                        Nothing -> explicitSourceAnnotatedScheme inner
+                    ALam _ _ _ body _ -> explicitSourceAnnotatedScheme body
+                    AApp fun arg _ _ _ -> explicitSourceAnnotatedScheme fun <|> explicitSourceAnnotatedScheme arg
+                    ALet _ _ _ _ _ rhs body _ -> explicitSourceAnnotatedScheme rhs <|> explicitSourceAnnotatedScheme body
+                    AUnfold inner _ _ -> explicitSourceAnnotatedScheme inner
+                    _ -> Nothing
                 containsRecursiveSelfAppToParam selfName paramName annExpr =
                   case annExpr of
                     AVar _ _ -> False
@@ -910,6 +1194,7 @@ elabAlg algebraContext layer =
                           containsRecursiveSelfAppToParam selfName paramName rhs
                             || containsRecursiveSelfAppToParam selfName paramName body
                     AAnn inner _ _ -> containsRecursiveSelfAppToParam selfName paramName inner
+                    AUnfold inner _ _ -> containsRecursiveSelfAppToParam selfName paramName inner
                 hasNestedRecursiveSelfAppToParam selfName paramName annExpr =
                   case annExpr of
                     AVar _ _ -> False
@@ -928,6 +1213,7 @@ elabAlg algebraContext layer =
                           hasNestedRecursiveSelfAppToParam selfName paramName rhs
                             || hasNestedRecursiveSelfAppToParam selfName paramName body
                     AAnn inner _ _ -> hasNestedRecursiveSelfAppToParam selfName paramName inner
+                    AUnfold inner _ _ -> hasNestedRecursiveSelfAppToParam selfName paramName inner
                 recursiveArrowCarrier extraUsedNames codTy =
                   let usedNames = Set.union extraUsedNames (freeTypeVarsType codTy)
                       pickFreshMuName idx =
@@ -962,14 +1248,23 @@ elabAlg algebraContext layer =
                                 then recursiveFixedPointCarrier Set.empty
                                 else recursiveArrowCarrier Set.empty resultTy
                     AAnn inner _ _ -> previewRecursiveCarrierTy selfName inner
+                    AUnfold inner _ _ -> previewRecursiveCarrierTy selfName inner
                     _ -> Nothing
                 recoverGeneralizeAtNode err =
                   case err of
                     SchemeFreeVars _ _
+                      | Just schemePair <- rhsOuterSourceScheme ->
+                          Right schemePair
+                      | Just schemePair <- letResultSourceScheme ->
+                          Right schemePair
+                      | Just schemePair <- schemeRootSourceScheme ->
+                          Right schemePair
+                      | Just schemePair <- explicitSourceAnnotatedScheme rhsAnn ->
+                          Right schemePair
                       | Just aliasInfo <- aliasSourceSchemeInfo ->
                           Right (siScheme aliasInfo, siSubst aliasInfo)
-                      | Just carrierTy <- previewRecursiveCarrierTy v (peelTransparentMediatorSubject rhsAnn)
-                      , hasContractiveRecursiveWitness carrierTy ->
+                      | Just carrierTy <- previewRecursiveCarrierTy v (peelTransparentMediatorSubject rhsAnn),
+                        hasContractiveRecursiveWitness carrierTy ->
                           Right (schemeFromType carrierTy, IntMap.empty)
                     _ -> Left err
             _ <-
@@ -984,13 +1279,17 @@ elabAlg algebraContext layer =
                   )
                   ()
             (scheme0Raw, subst0Raw) <-
-              case generalizeAtNode scopeContext schemeRootId of
-                Right schemePair -> Right schemePair
-                Left err -> recoverGeneralizeAtNode err
+              case rhsOuterSourceScheme <|> explicitSourceAnnotatedScheme rhsAnn <|> letResultSourceScheme <|> schemeRootSourceScheme of
+                Just schemePair -> Right schemePair
+                Nothing ->
+                  case generalizeAtNode scopeContext schemeRootId of
+                    Right schemePair -> Right schemePair
+                    Left err -> recoverGeneralizeAtNode err
             let lambdaParamNodes annExpr =
                   case annExpr of
                     ALam _ paramNode _ body _ -> paramNode : lambdaParamNodes body
                     AAnn inner _ _ -> lambdaParamNodes inner
+                    AUnfold inner _ _ -> lambdaParamNodes inner
                     _ -> []
                 deriveLambdaBinderSubst scheme0 subst0' =
                   let (binds, _) = Inst.splitForalls (schemeToType scheme0)
@@ -1017,202 +1316,207 @@ elabAlg algebraContext layer =
                   if schemeTypeHasExplicitBound scheme0Ty
                     then scheme0Norm
                     else schemeFromType (simplifyAnnotationType scheme0Ty)
-                {- Note [Mu-type annotation override for let schemes]
-                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                   When a let-bound RHS is a lambda with a μ-type annotation on its
-                   parameter (e.g. let g = (λx:μα.α→Int. x) in …), the generalization
-                   may produce an overly-generic scheme (∀a.∀b. a→b) because the
-                   constraint graph's μ-node lives under the lambda scope and is not
-                   visible as a binder-bound at the let scope.
+            {- Note [Mu-type annotation override for let schemes]
+               ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+               When a let-bound RHS is a lambda with a μ-type annotation on its
+               parameter (e.g. let g = (λx:μα.α→Int. x) in …), the generalization
+               may produce an overly-generic scheme (∀a.∀b. a→b) because the
+               constraint graph's μ-node lives under the lambda scope and is not
+               visible as a binder-bound at the let scope.
 
-                   We detect this case by inspecting the RHS annotation structure for
-                   a desugared annotated lambda whose annotation node reifies to a
-                   contractive TMu witness. When found, we override the scheme with a
-                   monomorphic function type that uses the witnessed μ-type as both
-                   domain and codomain (identity-like), or more precisely, domain =
-                   μ-type and codomain = μ-type when the body simply returns the
-                   parameter. -}
+               We detect this case by inspecting the RHS annotation structure for
+               a desugared annotated lambda whose annotation node reifies to a
+               contractive TMu witness. When found, we override the scheme with a
+               monomorphic function type that uses the witnessed μ-type as both
+               domain and codomain (identity-like), or more precisely, domain =
+               μ-type and codomain = μ-type when the body simply returns the
+               parameter. -}
             scheme <-
-              let
-                firstNonContractiveMuAnnotation annExpr =
-                  case annExpr of
-                    ALam lamParam _ _ lamBody _ ->
-                      case desugaredAnnLambdaInfo lamParam lamBody of
-                        Just (annNodeId, _, _) ->
-                          case reifyNodeTypePreferringBound scopeContext annNodeId of
-                            Right annTy ->
-                              firstNonContractiveRecursiveType annTy
-                            _ -> Nothing
-                        Nothing -> Nothing
-                    AAnn inner _ _ -> firstNonContractiveMuAnnotation inner
-                    _ -> Nothing
-                muAnnotationTy annExpr =
-                  case annExpr of
-                    ALam lamParam _ _ lamBody _ ->
-                      case desugaredAnnLambdaInfo lamParam lamBody of
-                        Just (annNodeId, _, _) ->
-                          case reifyNodeTypePreferringBound scopeContext annNodeId of
-                            Right annTy@TMu {}
-                              | hasContractiveRecursiveWitness annTy -> Just annTy
-                            _ -> Nothing
-                        Nothing -> Nothing
-                    AAnn inner _ _ -> muAnnotationTy inner
-                    _ -> Nothing
-                muAnnotatedIdentityBody annExpr =
-                  case annExpr of
-                    ALam lamParam _ _ lamBody _ ->
-                      case desugaredAnnLambdaInfo lamParam lamBody of
-                        Just (_, _, innerBodyAnn) -> sourceVarName innerBodyAnn == Just lamParam
-                        Nothing -> False
-                    AAnn inner _ _ -> muAnnotatedIdentityBody inner
-                    _ -> False
-                overrideMuAnnotatedCodomain muTy =
-                  let
-                    stripForalls ty =
-                      case ty of
-                        TForall _ _ inner -> stripForalls inner
-                        other -> other
-                    schemeBody = stripForalls (schemeToType schemeBase)
-                    quantVars = Set.fromList [n | (n, _) <- fst (Inst.splitForalls (schemeToType schemeBase))]
-                    isUnquantifiedTVar (TVar v') = not (Set.member v' quantVars)
-                    isUnquantifiedTVar _ = False
-                   in
-                    case schemeBody of
-                      TArrow _dom cod
-                        | isUnquantifiedTVar cod ->
-                            -- Codomain is an unquantified internal variable:
-                            -- override both domain and codomain to μ.
-                            schemeFromType (TArrow muTy muTy)
-                      _ -> schemeBase
-                recursiveCarrierTyFor selfName extraUsedNames annExpr =
-                  let inferredCarrier = inferredRecursiveCarrierTyFor selfName extraUsedNames annExpr
-                   in case (reifyNodeTypePreferringBound scopeContext (annNode annExpr), inferredCarrier) of
-                        (Right carrierTy, Just inferredTy)
-                          | hasContractiveRecursiveWitness carrierTy
-                          , shouldPreferInferredRecursiveCarrier carrierTy inferredTy ->
-                              Just inferredTy
-                        (Right carrierTy, _)
-                          | hasContractiveRecursiveWitness carrierTy -> Just carrierTy
-                        (_, Just inferredTy) -> Just inferredTy
-                        _ -> Nothing
-                inferredRecursiveCarrierTyFor selfName extraUsedNames annExpr =
-                  case annExpr of
-                    ALam lamParam _ _ lamBody _ ->
-                      if containsRecursiveSelfAppToParam selfName lamParam lamBody
-                        then do
-                          resultTy <- either (const Nothing) Just (reifyNodeTypePreferringBound scopeContext (annNode lamBody))
-                          pure $
-                            if resultTy == TBottom && hasNestedRecursiveSelfAppToParam selfName lamParam lamBody
-                              then recursiveFixedPointCarrier extraUsedNames
-                              else recursiveArrowCarrier extraUsedNames resultTy
-                        else Nothing
-                    AAnn inner _ _ -> inferredRecursiveCarrierTyFor selfName extraUsedNames inner
-                    _ -> Nothing
-                shouldPreferInferredRecursiveCarrier carrierTy inferredTy =
-                  (isBottomRecursiveCarrier carrierTy && isFixedPointRecursiveCarrier inferredTy)
-                    || hasInternalRecursiveCodomain carrierTy && not (hasInternalRecursiveCodomain inferredTy)
-                isBottomRecursiveCarrier carrierTy =
-                  case carrierTy of
-                    TMu _ (TArrow _ TBottom) -> True
-                    _ -> False
-                isFixedPointRecursiveCarrier carrierTy =
-                  case carrierTy of
-                    TMu muName (TArrow (TVar domName) (TVar codName)) ->
-                      muName == domName && muName == codName
-                    _ -> False
-                hasInternalRecursiveCodomain carrierTy =
-                  case carrierTy of
-                    TMu muName (TArrow (TVar domName) codTy) ->
-                      muName == domName && internalOnlyType codTy
-                    _ -> False
-                internalOnlyType ty =
-                  case ty of
-                    TVar name -> isJust (parseNameId name)
-                    TArrow dom cod -> internalOnlyType dom && internalOnlyType cod
-                    TCon _ args -> not (null args) && all internalOnlyType args
-                    TForall _ mb body ->
-                      maybe True internalOnlyBound mb && internalOnlyType body
-                    TMu _ body -> internalOnlyType body
-                    _ -> False
-                internalOnlyBound bound =
-                  case bound of
-                    TArrow dom cod -> internalOnlyType dom && internalOnlyType cod
-                    TCon _ args -> not (null args) && all internalOnlyType args
-                    TForall _ mb body ->
-                      maybe True internalOnlyBound mb && internalOnlyType body
-                    TMu _ body -> internalOnlyType body
-                    _ -> False
-                returnedRecursiveHelperArrowTy annExpr =
-                  case annExpr of
-                    ALam _ _ _ lamBody _ -> do
-                      (outerDomTy, helperTy) <- returnedRecursiveHelperSignature lamBody
-                      pure (TArrow outerDomTy helperTy)
-                    AAnn inner _ _ -> returnedRecursiveHelperArrowTy inner
-                    _ -> Nothing
-                returnedRecursiveHelperSignature lamBody =
-                  case lamBody of
-                    ALet helperName _ _ _ _ helperRhs@(ALam helperParam _ _ _ _) helperBody _
-                      | sourceVarName helperBody == Just helperName -> do
-                          helperTy <- recursiveCarrierTyFor helperName Set.empty helperRhs
-                          outerDomTy <- recursiveCallArgumentTyFor v (Just (helperName, helperParam, helperTy)) helperRhs
-                          pure (outerDomTy, helperTy)
-                    ALet helperName _ _ _ _ helperRhs helperBody _
-                      | sourceVarName helperBody == Just helperName -> do
-                          helperTy <- recursiveCarrierTyFor helperName Set.empty helperRhs
-                          outerDomTy <- recursiveCallArgumentTyFor v Nothing helperRhs
-                          pure (outerDomTy, helperTy)
-                    AAnn inner _ _ -> returnedRecursiveHelperSignature inner
-                    _ -> Nothing
-                recursiveCallArgumentTyFor selfName mbHelper annExpr =
-                  case annExpr of
-                    AApp (AVar recurName _) arg _ _ _
-                      | recurName == selfName ->
-                          case helperRecursiveSelfAppResultTy mbHelper arg of
-                            Just argTy -> Just argTy
-                            Nothing -> either (const Nothing) Just (reifyNodeTypePreferringBound scopeContext (annNode arg))
-                    AApp fun arg _ _ _ ->
-                      case recursiveCallArgumentTyFor selfName mbHelper fun of
-                        Just argTy -> Just argTy
-                        Nothing -> recursiveCallArgumentTyFor selfName mbHelper arg
-                    ALam boundName _ _ body _
-                      | boundName == selfName -> Nothing
-                      | otherwise -> recursiveCallArgumentTyFor selfName mbHelper body
-                    ALet boundName _ _ _ _ rhs body _
-                      | boundName == selfName ->
-                          recursiveCallArgumentTyFor selfName mbHelper rhs
-                      | otherwise ->
-                          case recursiveCallArgumentTyFor selfName mbHelper rhs of
-                            Just argTy -> Just argTy
-                            Nothing -> recursiveCallArgumentTyFor selfName mbHelper body
-                    AAnn inner _ _ -> recursiveCallArgumentTyFor selfName mbHelper inner
-                    _ -> Nothing
-                helperRecursiveSelfAppResultTy mbHelper argExpr =
-                  case mbHelper of
-                    Just (helperName, helperParam, helperTy)
-                      | isRecursiveSelfAppToParam helperName helperParam argExpr ->
-                          recursiveSelfAppResultTy helperTy
-                    _ -> Nothing
-                isRecursiveSelfAppToParam helperName helperParam annExpr =
-                  case annExpr of
-                    AApp (AVar recurName _) arg _ _ _
-                      | recurName == helperName -> annContainsVar helperParam arg
-                    AAnn inner _ _ -> isRecursiveSelfAppToParam helperName helperParam inner
-                    _ -> False
-                recursiveSelfAppResultTy helperTy =
-                  case helperTy of
-                    TForall _ _ bodyTy -> recursiveSelfAppResultTy bodyTy
-                    TArrow _ codTy -> Just codTy
-                    muTy@TMu {} ->
-                      case unfoldMuOnce muTy of
-                        Just (TArrow _ codTy) -> Just codTy
-                        _ -> Nothing
-                    _ -> Nothing
-                mediatedMuSubject = peelTransparentMediatorSubject rhsAnn
-                recursiveCarrierPreview = recursiveCarrierTyFor v Set.empty mediatedMuSubject
-                structuralRecursiveCandidateSelection =
-                  selectStructuralRecursiveCandidate $
-                    maybe [] (pure . StructuralRecursiveCandidateFromHelper) (returnedRecursiveHelperArrowTy mediatedMuSubject)
-                      ++ maybe [] (pure . StructuralRecursiveCandidateFromDirectCarrier) recursiveCarrierPreview
+              let firstNonContractiveMuAnnotation annExpr =
+                    case annExpr of
+                      ALam lamParam _ _ lamBody _ ->
+                        case desugaredAnnLambdaInfo lamParam lamBody of
+                          Just (annNodeId, _, _) ->
+                            case reifyNodeTypePreferringBound scopeContext annNodeId of
+                              Right annTy ->
+                                firstNonContractiveRecursiveType annTy
+                              _ -> Nothing
+                          Nothing -> Nothing
+                      AAnn inner _ _ -> firstNonContractiveMuAnnotation inner
+                      AUnfold inner _ _ -> firstNonContractiveMuAnnotation inner
+                      _ -> Nothing
+                  muAnnotationTy annExpr =
+                    case annExpr of
+                      ALam lamParam _ _ lamBody _ ->
+                        case desugaredAnnLambdaInfo lamParam lamBody of
+                          Just (annNodeId, _, _) ->
+                            case reifyNodeTypePreferringBound scopeContext annNodeId of
+                              Right annTy@TMu {}
+                                | hasContractiveRecursiveWitness annTy -> Just annTy
+                              _ -> Nothing
+                          Nothing -> Nothing
+                      AAnn inner _ _ -> muAnnotationTy inner
+                      AUnfold inner _ _ -> muAnnotationTy inner
+                      _ -> Nothing
+                  muAnnotatedIdentityBody annExpr =
+                    case annExpr of
+                      ALam lamParam _ _ lamBody _ ->
+                        case desugaredAnnLambdaInfo lamParam lamBody of
+                          Just (_, _, innerBodyAnn) -> sourceVarName innerBodyAnn == Just lamParam
+                          Nothing -> False
+                      AAnn inner _ _ -> muAnnotatedIdentityBody inner
+                      AUnfold inner _ _ -> muAnnotatedIdentityBody inner
+                      _ -> False
+                  overrideMuAnnotatedCodomain muTy =
+                    let stripForalls ty =
+                          case ty of
+                            TForall _ _ inner -> stripForalls inner
+                            other -> other
+                        schemeBody = stripForalls (schemeToType schemeBase)
+                        quantVars = Set.fromList [n | (n, _) <- fst (Inst.splitForalls (schemeToType schemeBase))]
+                        isUnquantifiedTVar (TVar v') = not (Set.member v' quantVars)
+                        isUnquantifiedTVar _ = False
+                     in case schemeBody of
+                          TArrow _dom cod
+                            | isUnquantifiedTVar cod ->
+                                -- Codomain is an unquantified internal variable:
+                                -- override both domain and codomain to μ.
+                                schemeFromType (TArrow muTy muTy)
+                          _ -> schemeBase
+                  recursiveCarrierTyFor selfName extraUsedNames annExpr =
+                    let inferredCarrier = inferredRecursiveCarrierTyFor selfName extraUsedNames annExpr
+                     in case (reifyNodeTypePreferringBound scopeContext (annNode annExpr), inferredCarrier) of
+                          (Right carrierTy, Just inferredTy)
+                            | hasContractiveRecursiveWitness carrierTy,
+                              shouldPreferInferredRecursiveCarrier carrierTy inferredTy ->
+                                Just inferredTy
+                          (Right carrierTy, _)
+                            | hasContractiveRecursiveWitness carrierTy -> Just carrierTy
+                          (_, Just inferredTy) -> Just inferredTy
+                          _ -> Nothing
+                  inferredRecursiveCarrierTyFor selfName extraUsedNames annExpr =
+                    case annExpr of
+                      ALam lamParam _ _ lamBody _ ->
+                        if containsRecursiveSelfAppToParam selfName lamParam lamBody
+                          then do
+                            resultTy <- either (const Nothing) Just (reifyNodeTypePreferringBound scopeContext (annNode lamBody))
+                            pure $
+                              if resultTy == TBottom && hasNestedRecursiveSelfAppToParam selfName lamParam lamBody
+                                then recursiveFixedPointCarrier extraUsedNames
+                                else recursiveArrowCarrier extraUsedNames resultTy
+                          else Nothing
+                      AAnn inner _ _ -> inferredRecursiveCarrierTyFor selfName extraUsedNames inner
+                      AUnfold inner _ _ -> inferredRecursiveCarrierTyFor selfName extraUsedNames inner
+                      _ -> Nothing
+                  shouldPreferInferredRecursiveCarrier carrierTy inferredTy =
+                    (isBottomRecursiveCarrier carrierTy && isFixedPointRecursiveCarrier inferredTy)
+                      || hasInternalRecursiveCodomain carrierTy && not (hasInternalRecursiveCodomain inferredTy)
+                  isBottomRecursiveCarrier carrierTy =
+                    case carrierTy of
+                      TMu _ (TArrow _ TBottom) -> True
+                      _ -> False
+                  isFixedPointRecursiveCarrier carrierTy =
+                    case carrierTy of
+                      TMu muName (TArrow (TVar domName) (TVar codName)) ->
+                        muName == domName && muName == codName
+                      _ -> False
+                  hasInternalRecursiveCodomain carrierTy =
+                    case carrierTy of
+                      TMu muName (TArrow (TVar domName) codTy) ->
+                        muName == domName && internalOnlyType codTy
+                      _ -> False
+                  internalOnlyType ty =
+                    case ty of
+                      TVar name -> isJust (parseNameId name)
+                      TArrow dom cod -> internalOnlyType dom && internalOnlyType cod
+                      TCon _ args -> not (null args) && all internalOnlyType args
+                      TForall _ mb body ->
+                        maybe True internalOnlyBound mb && internalOnlyType body
+                      TMu _ body -> internalOnlyType body
+                      _ -> False
+                  internalOnlyBound bound =
+                    case bound of
+                      TArrow dom cod -> internalOnlyType dom && internalOnlyType cod
+                      TCon _ args -> not (null args) && all internalOnlyType args
+                      TForall _ mb body ->
+                        maybe True internalOnlyBound mb && internalOnlyType body
+                      TMu _ body -> internalOnlyType body
+                      _ -> False
+                  returnedRecursiveHelperArrowTy annExpr =
+                    case annExpr of
+                      ALam _ _ _ lamBody _ -> do
+                        (outerDomTy, helperTy) <- returnedRecursiveHelperSignature lamBody
+                        pure (TArrow outerDomTy helperTy)
+                      AAnn inner _ _ -> returnedRecursiveHelperArrowTy inner
+                      AUnfold inner _ _ -> returnedRecursiveHelperArrowTy inner
+                      _ -> Nothing
+                  returnedRecursiveHelperSignature lamBody =
+                    case lamBody of
+                      ALet helperName _ _ _ _ helperRhs@(ALam helperParam _ _ _ _) helperBody _
+                        | sourceVarName helperBody == Just helperName -> do
+                            helperTy <- recursiveCarrierTyFor helperName Set.empty helperRhs
+                            outerDomTy <- recursiveCallArgumentTyFor v (Just (helperName, helperParam, helperTy)) helperRhs
+                            pure (outerDomTy, helperTy)
+                      ALet helperName _ _ _ _ helperRhs helperBody _
+                        | sourceVarName helperBody == Just helperName -> do
+                            helperTy <- recursiveCarrierTyFor helperName Set.empty helperRhs
+                            outerDomTy <- recursiveCallArgumentTyFor v Nothing helperRhs
+                            pure (outerDomTy, helperTy)
+                      AAnn inner _ _ -> returnedRecursiveHelperSignature inner
+                      AUnfold inner _ _ -> returnedRecursiveHelperSignature inner
+                      _ -> Nothing
+                  recursiveCallArgumentTyFor selfName mbHelper annExpr =
+                    case annExpr of
+                      AApp (AVar recurName _) arg _ _ _
+                        | recurName == selfName ->
+                            case helperRecursiveSelfAppResultTy mbHelper arg of
+                              Just argTy -> Just argTy
+                              Nothing -> either (const Nothing) Just (reifyNodeTypePreferringBound scopeContext (annNode arg))
+                      AApp fun arg _ _ _ ->
+                        case recursiveCallArgumentTyFor selfName mbHelper fun of
+                          Just argTy -> Just argTy
+                          Nothing -> recursiveCallArgumentTyFor selfName mbHelper arg
+                      ALam boundName _ _ body _
+                        | boundName == selfName -> Nothing
+                        | otherwise -> recursiveCallArgumentTyFor selfName mbHelper body
+                      ALet boundName _ _ _ _ rhs body _
+                        | boundName == selfName ->
+                            recursiveCallArgumentTyFor selfName mbHelper rhs
+                        | otherwise ->
+                            case recursiveCallArgumentTyFor selfName mbHelper rhs of
+                              Just argTy -> Just argTy
+                              Nothing -> recursiveCallArgumentTyFor selfName mbHelper body
+                      AAnn inner _ _ -> recursiveCallArgumentTyFor selfName mbHelper inner
+                      AUnfold inner _ _ -> recursiveCallArgumentTyFor selfName mbHelper inner
+                      _ -> Nothing
+                  helperRecursiveSelfAppResultTy mbHelper argExpr =
+                    case mbHelper of
+                      Just (helperName, helperParam, helperTy)
+                        | isRecursiveSelfAppToParam helperName helperParam argExpr ->
+                            recursiveSelfAppResultTy helperTy
+                      _ -> Nothing
+                  isRecursiveSelfAppToParam helperName helperParam annExpr =
+                    case annExpr of
+                      AApp (AVar recurName _) arg _ _ _
+                        | recurName == helperName -> annContainsVar helperParam arg
+                      AAnn inner _ _ -> isRecursiveSelfAppToParam helperName helperParam inner
+                      AUnfold inner _ _ -> isRecursiveSelfAppToParam helperName helperParam inner
+                      _ -> False
+                  recursiveSelfAppResultTy helperTy =
+                    case helperTy of
+                      TForall _ _ bodyTy -> recursiveSelfAppResultTy bodyTy
+                      TArrow _ codTy -> Just codTy
+                      muTy@TMu {} ->
+                        case unfoldMuOnce muTy of
+                          Just (TArrow _ codTy) -> Just codTy
+                          _ -> Nothing
+                      _ -> Nothing
+                  mediatedMuSubject = peelTransparentMediatorSubject rhsAnn
+                  recursiveCarrierPreview = recursiveCarrierTyFor v Set.empty mediatedMuSubject
+                  structuralRecursiveCandidateSelection =
+                    selectStructuralRecursiveCandidate $
+                      maybe [] (pure . StructuralRecursiveCandidateFromHelper) (returnedRecursiveHelperArrowTy mediatedMuSubject)
+                        ++ maybe [] (pure . StructuralRecursiveCandidateFromDirectCarrier) recursiveCarrierPreview
                in case aliasSourceSchemeInfo of
                     Just aliasInfo ->
                       pure (siScheme aliasInfo)
@@ -1259,8 +1563,8 @@ elabAlg algebraContext layer =
                                   Nothing ->
                                     case recursiveCarrierTyFor v Set.empty mediatedMuSubject of
                                       Just carrierTy
-                                        | annContainsVar v rhsAnn
-                                        , not (hasContractiveRecursiveWitness (schemeToType schemeBase)) ->
+                                        | annContainsVar v rhsAnn,
+                                          not (hasContractiveRecursiveWitness (schemeToType schemeBase)) ->
                                             schemeFromType carrierTy
                                       Nothing
                                         | not (hasContractiveRecursiveWitness (schemeToType schemeBase)) ->
@@ -1291,7 +1595,20 @@ elabAlg algebraContext layer =
                         }
                     Nothing -> mkEnvBinding bindingSchemeInfo transparentMediator
                 tcEnvBase = TypeCheck.Env (Map.map (schemeToType . siScheme) (envSchemeInfos env)) Map.empty
-                env' = Map.insert v (envBindingFor schemeInfo) env
+                authoritativeSourceSchemeInfo =
+                  case rhsOuterSourceScheme <|> explicitSourceAnnotatedScheme rhsAnn <|> letResultSourceScheme <|> schemeRootSourceScheme of
+                    Just (schemeSrc, substSrc) ->
+                      Just
+                        ( freshenSchemeInfoAgainstEnv
+                            env
+                            SchemeInfo
+                              { siScheme = schemeSrc,
+                                siSubst = substSrc
+                              }
+                        )
+                    Nothing -> Nothing
+                envSchemeInfoForRhs = fromMaybe schemeInfo authoritativeSourceSchemeInfo
+                env' = Map.insert v (envBindingFor envSchemeInfoForRhs) env
                 tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) (envSchemeInfos env')) Map.empty
             rhs' <- elabTerm rhsOut env'
             let closeFreeVarsToScheme ty =
@@ -1299,8 +1616,8 @@ elabAlg algebraContext layer =
                       boundNames = Set.fromList (map fst binds)
                       extraBinds =
                         [ (name, Nothing)
-                        | name <- Set.toList (freeTypeVarsType body)
-                        , Set.notMember name boundNames
+                          | name <- freeTypeVarsInOccurrenceOrder body,
+                            Set.notMember name boundNames
                         ]
                    in Forall (binds ++ extraBinds) body
                 splitArrowN n ty
@@ -1400,51 +1717,50 @@ elabAlg algebraContext layer =
                     && (containsInternalTypeVar schemeTy || schemeHasForwardBoundReference schemeTy)
                 rhsTransparentMediatorOverride =
                   if transparentMediator
-                    then
-                      case rhsTransparentMediatorTerm of
-                        ELam _ rootParamTy body ->
-                          let (etaParams, _core) = collectLeadingLambdaParams body
-                              etaParamTys = map snd etaParams
-                           in case splitArrowN (length etaParams) rootParamTy of
-                                Just (_expectedEtaParamTys, resultTy)
-                                  | not (null etaParams)
-                                  , let (structuralRootParamTy, structuralMediatorTerm) =
-                                          rebuildTransparentMediatorTerm v etaParams resultTy
-                                  , let rhsScheme =
-                                          closeFreeVarsToScheme
-                                            (TArrow structuralRootParamTy (foldr TArrow resultTy etaParamTys))
-                                  , let candidateSubst =
-                                          case Inst.splitForalls (schemeToType rhsScheme) of
-                                            ([], _) -> IntMap.empty
-                                            _ -> normalizeSubstForScheme rhsScheme subst
-                                  , let rhsClosed =
-                                          closeTermWithSchemeSubstIfNeeded
-                                            candidateSubst
-                                            rhsScheme
-                                            structuralMediatorTerm
-                                  , let candidateSchemeAdmitsRhs =
-                                          case TypeCheck.typeCheckWithEnv tcEnvBase rhsClosed of
-                                            Right rhsTy -> alphaEqType rhsTy (schemeToType rhsScheme)
-                                            Left _ -> False
-                                  , candidateSchemeAdmitsRhs
-                                      || containsInternalTypeVar (schemeToType scheme)
-                                      || schemeHasForwardBoundReference (schemeToType scheme)
-                                      || not (alphaEqType (schemeToType scheme) (schemeToType rhsScheme)) ->
-                                      Just
-                                        ( structuralMediatorTerm,
-                                          SchemeInfo
-                                            { siScheme = rhsScheme,
-                                              siSubst = candidateSubst
-                                            }
-                                        )
-                                _ -> Nothing
-                        _ -> Nothing
+                    then case rhsTransparentMediatorTerm of
+                      ELam _ rootParamTy body ->
+                        let (etaParams, _core) = collectLeadingLambdaParams body
+                            etaParamTys = map snd etaParams
+                         in case splitArrowN (length etaParams) rootParamTy of
+                              Just (_expectedEtaParamTys, resultTy)
+                                | not (null etaParams),
+                                  let (structuralRootParamTy, structuralMediatorTerm) =
+                                        rebuildTransparentMediatorTerm v etaParams resultTy,
+                                  let rhsScheme =
+                                        closeFreeVarsToScheme
+                                          (TArrow structuralRootParamTy (foldr TArrow resultTy etaParamTys)),
+                                  let candidateSubst =
+                                        case Inst.splitForalls (schemeToType rhsScheme) of
+                                          ([], _) -> IntMap.empty
+                                          _ -> normalizeSubstForScheme rhsScheme subst,
+                                  let rhsClosed =
+                                        closeTermWithSchemeSubstIfNeeded
+                                          candidateSubst
+                                          rhsScheme
+                                          structuralMediatorTerm,
+                                  let candidateSchemeAdmitsRhs =
+                                        case TypeCheck.typeCheckWithEnv tcEnvBase rhsClosed of
+                                          Right rhsTy -> alphaEqType rhsTy (schemeToType rhsScheme)
+                                          Left _ -> False,
+                                  candidateSchemeAdmitsRhs
+                                    || containsInternalTypeVar (schemeToType scheme)
+                                    || schemeHasForwardBoundReference (schemeToType scheme)
+                                    || not (alphaEqType (schemeToType scheme) (schemeToType rhsScheme)) ->
+                                    Just
+                                      ( structuralMediatorTerm,
+                                        SchemeInfo
+                                          { siScheme = rhsScheme,
+                                            siSubst = candidateSubst
+                                          }
+                                      )
+                              _ -> Nothing
+                      _ -> Nothing
                     else Nothing
                 rhsIdentityWrapperOverride =
                   case (stripAnnExpr rhsAnn, rhsTransparentMediatorTerm) of
                     (ALam rootParam _ _ body _, ELam rootName rootParamTy _)
-                      | rootParam == rootName
-                      , identityWrapperBody rootParam Map.empty body ->
+                      | rootParam == rootName,
+                        identityWrapperBody rootParam Map.empty body ->
                           let rhsTerm = ELam rootName rootParamTy (EVar rootName)
                               rhsScheme = closeFreeVarsToScheme (TArrow rootParamTy rootParamTy)
                               candidateSubst =
@@ -1501,9 +1817,20 @@ elabAlg algebraContext layer =
                   case effectiveRhsOverride of
                     Just (overrideTerm, _) -> overrideTerm
                     Nothing -> rhs'
+                authoritativeEnvSchemeInfo =
+                  fromMaybe
+                    (freshenSchemeInfoAgainstEnv env schemeInfo)
+                    authoritativeSourceSchemeInfo
                 effectiveScheme = siScheme effectiveSchemeInfo
                 effectiveSubst = siSubst effectiveSchemeInfo
-                envForBody = Map.insert v (envBindingFor effectiveSchemeInfo) env
+                envSchemeInfoForBody =
+                  if isJust rhsOuterSourceScheme
+                    || isJust (explicitSourceAnnotatedScheme rhsAnn)
+                    || isJust letResultSourceScheme
+                    || isJust schemeRootSourceScheme
+                    then authoritativeEnvSchemeInfo
+                    else effectiveSchemeInfo
+                envForBody = Map.insert v (envBindingFor envSchemeInfoForBody) env
                 tcEnvForBody = TypeCheck.Env (Map.map (schemeToType . siScheme) (envSchemeInfos envForBody)) Map.empty
             let rhsAbs0 =
                   let schemeTy = schemeToType effectiveScheme
@@ -1527,18 +1854,16 @@ elabAlg algebraContext layer =
                           rhsAbs0Ty ->
                             case effectiveScheme of
                               Forall binds _
-                                | not (null binds)
-                                , Right rhsTy <- rhsAbs0Ty
-                                , alphaEqType rhsTy schemeTy ->
+                                | not (null binds),
+                                  Right rhsTy <- rhsAbs0Ty,
+                                  alphaEqType rhsTy schemeTy ->
                                     rhsAbs0
                                 | not (null binds) ->
-                                    case
-                                        case (rhsAbs0, rhsAbs0Ty) of
-                                          (ETyAbs _ _ body, Right (TForall _ _ bodyTy))
-                                            | alphaEqType bodyTy schemeTy ->
-                                                body
-                                          _ -> stripUnusedTopTyAbsWithEnv tcEnv rhsAbs0
-                                      of
+                                    case case (rhsAbs0, rhsAbs0Ty) of
+                                      (ETyAbs _ _ body, Right (TForall _ _ bodyTy))
+                                        | alphaEqType bodyTy schemeTy ->
+                                            body
+                                      _ -> stripUnusedTopTyAbsWithEnv tcEnv rhsAbs0 of
                                       rhsAbsCandidate ->
                                         case TypeCheck.typeCheckWithEnv tcEnv rhsAbsCandidate of
                                           Right rhsTy
@@ -1573,7 +1898,7 @@ elabAlg algebraContext layer =
                             _ -> rhsAbsBase
                 rhsAbsTyChecked = TypeCheck.typeCheckWithEnv tcEnv rhsAbs
             case debugGeneralize
-                ( "elaborate let("
+              ( "elaborate let("
                   ++ v
                   ++ "): scheme="
                   ++ show effectiveScheme
@@ -1607,6 +1932,7 @@ elabAlg algebraContext layer =
             let bodyElab =
                   case bodyAnn of
                     AAnn _ target _ | canonical target == canonical trivialRoot -> elabStripped bodyOut
+                    AUnfold _ target _ | canonical target == canonical trivialRoot -> elabStripped bodyOut
                     _ -> elabTerm bodyOut
             body' <-
               bodyElab
@@ -1620,8 +1946,8 @@ elabAlg algebraContext layer =
                                 (EVar _, Right rhsTy)
                                   | not (alphaEqType rhsTy (schemeToType effectiveScheme)) ->
                                       SchemeInfo
-                                        { siScheme = schemeFromType rhsTy
-                                        , siSubst = effectiveSubst
+                                        { siScheme = schemeFromType rhsTy,
+                                          siSubst = effectiveSubst
                                         }
                                 _ -> effectiveSchemeInfo
                             )
@@ -1648,23 +1974,40 @@ elabAlg algebraContext layer =
                     Right rhsTy
                       | v == "_" ->
                           schemeFromType rhsTy
+                      | sourceVarName bodyAnn == Just v,
+                        lambdaAnn rhsAnn,
+                        isNothing rhsOuterSourceScheme,
+                        isNothing (explicitSourceAnnotatedScheme rhsAnn),
+                        isNothing letResultSourceScheme,
+                        isNothing schemeRootSourceScheme,
+                        not (alphaEqType rhsTy (schemeToType effectiveScheme)) ->
+                          schemeFromType rhsTy
                     _ ->
                       case rhsAliasOverride of
                         Just (_, aliasInfo) -> siScheme aliasInfo
                         Nothing -> effectiveScheme
             pure (schemeFinal, rhsFinal, body')
-          f env = do
-            (scheme, rhsFinal, body') <- elaborateLet env
-            if isJust (sourceVarName rhsAnn) && not (containsFreeVar v body')
-              then pure body'
-              else pure (ELet v scheme rhsFinal body')
-          fStripped env = do
-            (scheme, rhsFinal, body') <- elaborateLet env
-            if isJust (sourceVarName rhsAnn) && not (containsFreeVar v body')
-              then pure body'
-              else if containsFreeVar v rhsFinal
-              then pure (ELet v scheme rhsFinal body')
-              else pure body'
+          unusedIdentityWrapperBinding =
+            not (annContainsVar v bodyAnn) && identityWrapperAnn rhsAnn
+          f env =
+            if unusedIdentityWrapperBinding
+              then elabTerm bodyOut env
+              else do
+                (scheme, rhsFinal, body') <- elaborateLet env
+                if isJust (sourceVarName rhsAnn) && not (containsFreeVar v body')
+                  then pure body'
+                  else pure (ELet v scheme rhsFinal body')
+          fStripped env =
+            if unusedIdentityWrapperBinding
+              then elabTerm bodyOut env
+              else do
+                (scheme, rhsFinal, body') <- elaborateLet env
+                if isJust (sourceVarName rhsAnn) && not (containsFreeVar v body')
+                  then pure body'
+                  else
+                    if containsFreeVar v rhsFinal
+                      then pure (ELet v scheme rhsFinal body')
+                      else pure body'
        in ElabOut
             { elabTerm = f,
               elabStripped = fStripped
@@ -1675,6 +2018,15 @@ elabAlg algebraContext layer =
             expr' <- elabTerm exprOut env
             elaborateAnnotationTerm annotationContext namedSetReify (envSchemeInfos env) exprAnn annNodeId eid expr',
           elabStripped = \env -> elabTerm exprOut env
+        }
+    AUnfoldF (_exprAnn, exprOut) _unfoldNodeId _eid ->
+      ElabOut
+        { elabTerm = \env -> do
+            expr' <- elabTerm exprOut env
+            pure (EUnroll expr'),
+          elabStripped = \env -> do
+            expr' <- elabTerm exprOut env
+            pure (EUnroll expr')
         }
   where
     annotationContext = algAnnotationContext algebraContext
@@ -1691,22 +2043,135 @@ elabAlg algebraContext layer =
       case annExpr of
         AVar v _ -> Just v
         AAnn inner _ _ -> sourceVarName inner
+        AUnfold inner _ _ -> sourceVarName inner
         _ -> Nothing
 
-    insertMuUseSiteCoercions :: TypeCheck.Env -> ElabTerm -> ElabTerm -> Either ElabError ElabTerm
-    insertMuUseSiteCoercions tcEnv fTerm aTerm = do
-      let fUnrolled =
+    lambdaAnn annExpr =
+      case stripAnnExpr annExpr of
+        ALam {} -> True
+        _ -> False
+
+    identityWrapperAnn annExpr =
+      case annExpr of
+        ALam param _ _ body _ -> sourceVarName body == Just param
+        AAnn inner _ _ -> identityWrapperAnn inner
+        AUnfold inner _ _ -> identityWrapperAnn inner
+        _ -> False
+
+    {- Note [μ-headed application support]
+       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+       Church-encoded ADTs produce types of the form
+         TMu name (TForall ... (TForall ... (TArrow ... ...)))
+       When such a term is used in function position, we need to unroll the μ
+       to expose the leading TForall/TArrow for instantiation and application.
+
+       appHeadTerm:  wraps the term in EUnroll when its type is a TMu whose
+                     unfolding eventually reaches TForall or TArrow.
+       appHeadType:  returns the type of appHeadTerm — i.e. the unfolded μ body.
+
+       These helpers allow the existing InstApp/InstElim machinery in AAppF to
+       work transparently on Church-encoded eliminators without duplicating
+       instantiation logic inside insertMuUseSiteCoercions. -}
+    appHeadTerm :: TypeCheck.Env -> ElabTerm -> ElabTerm
+    appHeadTerm tcEnv term =
+      case TypeCheck.typeCheckWithEnv tcEnv term of
+        Right TMu {} -> EUnroll term
+        _ -> term
+
+    appHeadType :: TypeCheck.Env -> ElabTerm -> Maybe ElabType
+    appHeadType tcEnv term =
+      case TypeCheck.typeCheckWithEnv tcEnv (appHeadTerm tcEnv term) of
+        Right ty -> Just ty
+        Left _ -> Nothing
+
+    finalCodomain :: ElabType -> ElabType
+    finalCodomain = go . peelLeadingForalls
+      where
+        peelLeadingForalls ty =
+          case ty of
+            TForall _ _ body -> peelLeadingForalls body
+            _ -> ty
+        go ty =
+          case ty of
+            TArrow _ cod -> go cod
+            _ -> ty
+
+    insertMuUseSiteCoercions :: TypeCheck.Env -> Bool -> Bool -> Maybe ElabType -> ElabTerm -> ElabTerm -> Either ElabError ElabTerm
+    insertMuUseSiteCoercions tcEnv preserveRecursiveArg sourceArgIsVar mbArgSourceTy fTerm aTerm = do
+      let (fUnrolled, unfoldedFromMu) =
             case TypeCheck.typeCheckWithEnv tcEnv fTerm of
               Right muTy@TMu {} ->
                 case unfoldMuOnce muTy of
-                  Just TArrow {} -> EUnroll fTerm
-                  _ -> fTerm
-              _ -> fTerm
+                  Just TArrow {} -> (EUnroll fTerm, True)
+                  Just TForall {} -> (EUnroll fTerm, True)
+                  _ -> (fTerm, False)
+              _ -> (fTerm, False)
+      {- Note [Instantiate leading ∀ after μ-unfold]
+         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+         Church-encoded ADTs unfold to ∀result. arrow → ... → result.
+         After EUnroll the type is TForall, not TArrow, so we must
+         instantiate the leading quantifier before applying arguments.
+         We infer the instantiation type from the argument's type. -}
+      let peelLeadingUnboundedForalls inst0 =
+            let go n instN
+                  | n >= (8 :: Int) = instN
+                  | otherwise =
+                      case TypeCheck.typeCheckWithEnv tcEnv (ETyInst fUnrolled instN) of
+                        Right (TForall _ Nothing _) -> instN
+                        _ -> instN
+             in go 0 inst0
+          validatedForVarArg instN =
+            let candidate =
+                  case instN of
+                    InstId -> fUnrolled
+                    _ -> ETyInst fUnrolled instN
+             in if sourceArgIsVar
+                  then case TypeCheck.typeCheckWithEnv tcEnv candidate of
+                    Right TArrow {} -> candidate
+                    _ -> fUnrolled
+                  else candidate
+          fInstantiated =
+            case (unfoldedFromMu, TypeCheck.typeCheckWithEnv tcEnv fUnrolled) of
+              (True, Right (TForall _v Nothing _arrowBody)) ->
+                case TypeCheck.typeCheckWithEnv tcEnv aTerm of
+                  Right argTy ->
+                    let sourceMuMatchesActual sourceTy =
+                          alphaEqType sourceTy argTy
+                            || churchAwareEqType sourceTy argTy
+                            || case sourceTy of
+                              TMu {} ->
+                                case unfoldMuOnce sourceTy of
+                                  Just unfoldedTy ->
+                                    let unfoldedTy' = stripVacuousForallsDeep unfoldedTy
+                                        argTy' = stripVacuousForallsDeep argTy
+                                     in alphaEqType unfoldedTy' argTy' || churchAwareEqType unfoldedTy' argTy'
+                                  Nothing -> False
+                              _ -> False
+                        instArgTy =
+                          case (sourceArgIsVar, mbArgSourceTy) of
+                            (True, Just sourceTy) -> sourceTy
+                            (_, Just sourceTy@TMu {})
+                              | sourceMuMatchesActual sourceTy -> sourceTy
+                            _ -> argTy
+                        inst0 = InstApp instArgTy
+                     in case peelLeadingUnboundedForalls inst0 of
+                          instN -> validatedForVarArg instN
+                  Left _ -> fUnrolled
+              (_, Right _) ->
+                case peelLeadingUnboundedForalls InstId of
+                  instN -> validatedForVarArg instN
+              _ -> fUnrolled
       aCoerced <-
-        case TypeCheck.typeCheckWithEnv tcEnv fUnrolled of
-          Right (TArrow paramTy _resTy) -> coerceArgForParam tcEnv paramTy aTerm
+        case TypeCheck.typeCheckWithEnv tcEnv fInstantiated of
+          Right (TArrow paramTy _resTy)
+            | preserveRecursiveArg,
+              TMu {} <- paramTy,
+              Right argTy <- TypeCheck.typeCheckWithEnv tcEnv aTerm,
+              (alphaEqType argTy paramTy || churchAwareEqType argTy paramTy) ->
+                Right aTerm
+            | otherwise -> coerceArgForParam tcEnv sourceArgIsVar mbArgSourceTy paramTy aTerm
           _ -> Right aTerm
-      pure (EApp fUnrolled aCoerced)
+      pure (EApp fInstantiated aCoerced)
 
     unfoldMuOnce :: ElabType -> Maybe ElabType
     unfoldMuOnce muTy =
@@ -1714,26 +2179,174 @@ elabAlg algebraContext layer =
         TMu name body -> Just (substTypeCapture name muTy body)
         _ -> Nothing
 
-    coerceArgForParam :: TypeCheck.Env -> ElabType -> ElabTerm -> Either ElabError ElabTerm
-    coerceArgForParam tcEnv paramTy argTerm =
+    peelLeadingUnboundedForallsType :: ElabType -> ElabType
+    peelLeadingUnboundedForallsType ty =
+      case ty of
+        TForall _ Nothing body -> peelLeadingUnboundedForallsType body
+        _ -> ty
+
+    coerceArgForParam :: TypeCheck.Env -> Bool -> Maybe ElabType -> ElabType -> ElabTerm -> Either ElabError ElabTerm
+    coerceArgForParam tcEnv sourceArgIsVar mbArgSourceTy paramTy argTerm =
       case TypeCheck.typeCheckWithEnv tcEnv argTerm of
         Left _ -> Right argTerm
         Right argTy ->
           case paramTy of
+            TVar _
+              | Just muTy@TMu {} <- mbArgSourceTy ->
+                  case unfoldMuOnce muTy of
+                    Just unfoldedTy
+                      | alphaEqType unfoldedTy argTy || churchAwareEqType unfoldedTy argTy -> Right (ERoll muTy argTerm)
+                      | otherwise ->
+                          let argAligned = alignLeadingLambdasToType unfoldedTy argTerm
+                              argStripped = stripUnusedTyAbsAlongType tcEnv unfoldedTy argAligned
+                              argRebuilt = rebuildRecursiveArgAlongType tcEnv unfoldedTy argTerm
+                           in case TypeCheck.typeCheckWithEnv tcEnv argStripped of
+                                Right argTy'
+                                  | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (ERoll muTy argStripped)
+                                _ ->
+                                  case TypeCheck.typeCheckWithEnv tcEnv argRebuilt of
+                                    Right argTy'
+                                      | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (ERoll muTy argRebuilt)
+                                    _ -> Right argTerm
+                    _ -> Right argTerm
             muTy@TMu {} ->
-              case unfoldMuOnce muTy of
-                Just unfoldedTy
-                  | alphaEqType unfoldedTy argTy -> Right (ERoll muTy argTerm)
-                _ | shouldRollMuVar muTy argTy -> Right (ERoll muTy argTerm)
-                _ -> Right argTerm
+              let sourceMatchesMu =
+                    maybe
+                      False
+                      (\sourceTy -> alphaEqType sourceTy muTy || churchAwareEqType sourceTy muTy)
+                      mbArgSourceTy
+                      && sourceArgIsVar
+                  actualMatchesMu = alphaEqType argTy muTy || churchAwareEqType argTy muTy
+                  fallbackMuVar = Right argTerm
+                  coerceMuFromUnfolded muTy0 argTy0 =
+                    case unfoldMuOnce muTy0 of
+                      Just unfoldedTy
+                        | alphaEqType unfoldedTy argTy0 || churchAwareEqType unfoldedTy argTy0 -> Right (ERoll muTy0 argTerm)
+                        | otherwise ->
+                            let argAligned = alignLeadingLambdasToType unfoldedTy argTerm
+                                argStripped = stripUnusedTyAbsAlongType tcEnv unfoldedTy argAligned
+                                argRebuilt = rebuildRecursiveArgAlongType tcEnv unfoldedTy argTerm
+                             in case TypeCheck.typeCheckWithEnv tcEnv argStripped of
+                                  Right argTy'
+                                    | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (ERoll muTy0 argStripped)
+                                  _ ->
+                                    case TypeCheck.typeCheckWithEnv tcEnv argRebuilt of
+                                      Right argTy'
+                                        | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (ERoll muTy0 argRebuilt)
+                                      _ -> fallbackMuVar
+                      _ | shouldRollMuVar muTy0 argTy0 -> Right (ERoll muTy0 argTerm)
+                      _ -> fallbackMuVar
+               in if sourceMatchesMu && actualMatchesMu
+                    then Right argTerm
+                    else
+                      if sourceMatchesMu
+                        then case argTy of
+                          TMu {} -> Right (ERoll muTy (EUnroll argTerm))
+                          _
+                            | Just unfoldedTy <- unfoldMuOnce muTy,
+                              let unfoldedTyPeeled = peelLeadingUnboundedForallsType unfoldedTy,
+                              alphaEqType unfoldedTyPeeled argTy || churchAwareEqType unfoldedTyPeeled argTy ->
+                                let argRebuilt = rebuildRecursiveArgAlongType tcEnv unfoldedTy argTerm
+                                 in case TypeCheck.typeCheckWithEnv tcEnv argRebuilt of
+                                      Right argTy'
+                                        | alphaEqType unfoldedTy argTy' || churchAwareEqType unfoldedTy argTy' -> Right (ERoll muTy argRebuilt)
+                                      _ -> coerceMuFromUnfolded muTy argTy
+                          _ -> coerceMuFromUnfolded muTy argTy
+                        else case argTy of
+                          argMu@TMu {}
+                            | alphaEqType argMu muTy || churchAwareEqType argMu muTy ->
+                                Right argTerm
+                            | otherwise ->
+                                case (unfoldMuOnce muTy, unfoldMuOnce argMu) of
+                                  (Just expectedBodyTy, Just argBodyTy)
+                                    | alphaEqType expectedBodyTy argBodyTy || churchAwareEqType expectedBodyTy argBodyTy ->
+                                        Right (ERoll muTy (EUnroll argTerm))
+                                    | otherwise ->
+                                        let argUnrolled = EUnroll argTerm
+                                            argAligned = alignLeadingLambdasToType expectedBodyTy argUnrolled
+                                            argStripped = stripUnusedTyAbsAlongType tcEnv expectedBodyTy argAligned
+                                            argRebuilt = rebuildRecursiveArgAlongType tcEnv expectedBodyTy argUnrolled
+                                         in case TypeCheck.typeCheckWithEnv tcEnv argStripped of
+                                              Right argTy'
+                                                | alphaEqType expectedBodyTy argTy' || churchAwareEqType expectedBodyTy argTy' ->
+                                                    Right (ERoll muTy argStripped)
+                                              _ ->
+                                                case TypeCheck.typeCheckWithEnv tcEnv argRebuilt of
+                                                  Right argTy'
+                                                    | alphaEqType expectedBodyTy argTy' || churchAwareEqType expectedBodyTy argTy' ->
+                                                        Right (ERoll muTy argRebuilt)
+                                                  _ -> coerceMuFromUnfolded muTy argTy
+                                  _ -> coerceMuFromUnfolded muTy argTy
+                          _ -> coerceMuFromUnfolded muTy argTy
             _ ->
               case argTy of
                 muTy@TMu {} ->
                   case unfoldMuOnce muTy of
                     Just unfoldedTy
-                      | alphaEqType paramTy unfoldedTy -> Right (EUnroll argTerm)
+                      | alphaEqType paramTy unfoldedTy || churchAwareEqType paramTy unfoldedTy -> Right (EUnroll argTerm)
                     _ -> Right argTerm
                 _ -> Right argTerm
+
+    rollResultToExpectedMu :: TypeCheck.Env -> Maybe ElabType -> ElabTerm -> ElabTerm
+    rollResultToExpectedMu tcEnv mbTargetTy term =
+      case mbTargetTy of
+        Just muTy@TMu {} ->
+          case TypeCheck.typeCheckWithEnv tcEnv term of
+            Right termTy
+              | alphaEqType termTy muTy -> term
+              | otherwise,
+                actualMu@(TMu actualName actualBody) <- termTy,
+                churchAwareEqType termTy muTy ->
+                  case unfoldMuOnce muTy of
+                    Just expectedBodyTy ->
+                      let actualBodyTy = stripVacuousForallsDeep (substTypeCapture actualName actualMu actualBody)
+                       in if alphaEqType actualBodyTy expectedBodyTy || churchAwareEqType actualBodyTy expectedBodyTy
+                            then ERoll muTy (EUnroll term)
+                            else term
+                    _ -> term
+              | otherwise ->
+                  case unfoldMuOnce muTy of
+                    Just unfoldedTy
+                      | alphaEqType termTy unfoldedTy || churchAwareEqType termTy unfoldedTy ->
+                          ERoll muTy term
+                      | otherwise ->
+                          let termAligned = alignLeadingLambdasToType unfoldedTy term
+                              termStripped = stripUnusedTyAbsAlongType tcEnv unfoldedTy termAligned
+                              termRebuilt = rebuildRecursiveArgAlongType tcEnv unfoldedTy term
+                           in case TypeCheck.typeCheckWithEnv tcEnv termStripped of
+                                Right termTy'
+                                  | alphaEqType termTy' unfoldedTy || churchAwareEqType termTy' unfoldedTy ->
+                                      ERoll muTy termStripped
+                                _ ->
+                                  case TypeCheck.typeCheckWithEnv tcEnv termRebuilt of
+                                    Right termTy'
+                                      | alphaEqType termTy' unfoldedTy || churchAwareEqType termTy' unfoldedTy ->
+                                          ERoll muTy termRebuilt
+                                    _ -> term
+                    _ -> term
+            Left _ -> term
+        _ -> term
+
+    stripVacuousForallsDeep :: ElabType -> ElabType
+    stripVacuousForallsDeep ty = case ty of
+      TForall name Nothing body
+        | not (Set.member name (freeTypeVarsType body)) ->
+            stripVacuousForallsDeep body
+      TForall name mb body ->
+        TForall name (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
+      TArrow dom cod -> TArrow (stripVacuousForallsDeep dom) (stripVacuousForallsDeep cod)
+      TCon con args -> TCon con (fmap stripVacuousForallsDeep args)
+      TMu name body -> TMu name (stripVacuousForallsDeep body)
+      _ -> ty
+
+    stripVacuousForallsDeepBound :: BoundType -> BoundType
+    stripVacuousForallsDeepBound bound = case bound of
+      TArrow dom cod -> TArrow (stripVacuousForallsDeep dom) (stripVacuousForallsDeep cod)
+      TBase _ -> bound
+      TCon con args -> TCon con (fmap stripVacuousForallsDeep args)
+      TForall name mb body -> TForall name (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
+      TMu name body -> TMu name (stripVacuousForallsDeep body)
+      TBottom -> TBottom
 
     containsFreeVar :: VarName -> ElabTerm -> Bool
     containsFreeVar v term =
@@ -1755,8 +2368,9 @@ elabAlg algebraContext layer =
     alignLeadingLambdasToType :: ElabType -> ElabTerm -> ElabTerm
     alignLeadingLambdasToType ty term =
       case (ty, term) of
-        (TForall _ _ bodyTy, ETyAbs v mb body) ->
-          ETyAbs v mb (alignLeadingLambdasToType bodyTy body)
+        (TForall targetName _ bodyTy, ETyAbs v mb body) ->
+          let bodyTy' = substTypeCapture targetName (TVar v) bodyTy
+           in ETyAbs v mb (alignLeadingLambdasToType bodyTy' body)
         (TArrow dom cod, ELam v _ body) ->
           ELam v dom (alignLeadingLambdasToType cod body)
         _ -> term
@@ -1773,6 +2387,119 @@ elabAlg algebraContext layer =
                 _ -> term'
         _ -> term
 
+    stripUnusedTyAbsAlongType :: TypeCheck.Env -> ElabType -> ElabTerm -> ElabTerm
+    stripUnusedTyAbsAlongType tcEnv targetTy term =
+      let term' = stripUnusedTopTyAbsWithEnv tcEnv term
+       in case (targetTy, term') of
+            (TForall targetName _ targetBody, ETyAbs termName mbBound body)
+              | targetName == termName ->
+                  ETyAbs termName mbBound (stripUnusedTyAbsAlongType tcEnv targetBody body)
+            (TArrow dom cod, ELam name _ body) ->
+              ELam name dom (stripUnusedTyAbsAlongType tcEnv cod body)
+            _ -> term'
+
+    hoistFloatingTyAbsThroughLambdas :: ElabTerm -> ElabTerm
+    hoistFloatingTyAbsThroughLambdas term =
+      case term of
+        ELam name ty body ->
+          let body' = hoistFloatingTyAbsThroughLambdas body
+           in case body' of
+                ETyAbs tyName mbBound inner
+                  | tyName `Set.notMember` freeTypeVarsType ty ->
+                      ETyAbs tyName mbBound (hoistFloatingTyAbsThroughLambdas (ELam name ty inner))
+                _ -> ELam name ty body'
+        EApp fun arg -> EApp (hoistFloatingTyAbsThroughLambdas fun) (hoistFloatingTyAbsThroughLambdas arg)
+        ELet name sch rhs body ->
+          ELet name sch (hoistFloatingTyAbsThroughLambdas rhs) (hoistFloatingTyAbsThroughLambdas body)
+        ETyAbs name mbBound body -> ETyAbs name mbBound (hoistFloatingTyAbsThroughLambdas body)
+        ETyInst body inst -> ETyInst (hoistFloatingTyAbsThroughLambdas body) inst
+        ERoll ty body -> ERoll ty (hoistFloatingTyAbsThroughLambdas body)
+        EUnroll body -> EUnroll (hoistFloatingTyAbsThroughLambdas body)
+        _ -> term
+
+    addMissingLeadingTyAbsAlongType :: TypeCheck.Env -> ElabType -> ElabTerm -> ElabTerm
+    addMissingLeadingTyAbsAlongType tcEnv targetTy term =
+      let initialReserved =
+            Set.unions
+              ( Set.union (typeAbsNamesInTerm term) (typeVarNamesInTerm term)
+                  : map freeTypeVarsType (Map.elems (TypeCheck.termEnv tcEnv))
+                  ++ [Set.fromList (Map.keys (TypeCheck.typeEnv tcEnv)), forallBinderNames targetTy]
+              )
+       in go initialReserved targetTy term
+      where
+        go reserved targetTy' term' =
+          case targetTy' of
+            TForall targetName mbBound targetBody ->
+              case stripUnusedTopTyAbsWithEnv tcEnv term' of
+                ETyAbs termName termBound body
+                  | targetName == termName ->
+                      ETyAbs termName termBound (go (Set.insert termName reserved) targetBody body)
+                term'' ->
+                  let (targetName', targetBody') =
+                        if Set.member targetName reserved
+                          then
+                            let fresh = freshNameLike targetName reserved
+                             in (fresh, substTypeCapture targetName (TVar fresh) targetBody)
+                          else (targetName, targetBody)
+                      reserved' = Set.insert targetName' reserved
+                      body' = go reserved' targetBody' term''
+                   in ETyAbs targetName' mbBound body'
+            TArrow dom cod ->
+              case term' of
+                ELam name _ body -> ELam name dom (go reserved cod body)
+                _ -> term'
+            _ -> term'
+
+        forallBinderNames ty =
+          case ty of
+            TForall name _ body -> Set.insert name (forallBinderNames body)
+            _ -> Set.empty
+
+    typeAbsNamesInTerm :: ElabTerm -> Set.Set String
+    typeAbsNamesInTerm term =
+      case term of
+        ETyAbs name _ body -> Set.insert name (typeAbsNamesInTerm body)
+        ELam _ _ body -> typeAbsNamesInTerm body
+        EApp f a -> Set.union (typeAbsNamesInTerm f) (typeAbsNamesInTerm a)
+        ELet _ _ rhs body -> Set.union (typeAbsNamesInTerm rhs) (typeAbsNamesInTerm body)
+        ETyInst body _ -> typeAbsNamesInTerm body
+        ERoll _ body -> typeAbsNamesInTerm body
+        EUnroll body -> typeAbsNamesInTerm body
+        _ -> Set.empty
+
+    typeVarNamesInTerm :: ElabTerm -> Set.Set String
+    typeVarNamesInTerm term =
+      case term of
+        ETyAbs name mb body ->
+          Set.insert name (maybe Set.empty freeTypeVarsType mb `Set.union` typeVarNamesInTerm body)
+        ELam _ ty body -> Set.union (freeTypeVarsType ty) (typeVarNamesInTerm body)
+        EApp f a -> Set.union (typeVarNamesInTerm f) (typeVarNamesInTerm a)
+        ELet _ sch rhs body -> Set.unions [freeTypeVarsType (schemeToType sch), typeVarNamesInTerm rhs, typeVarNamesInTerm body]
+        ETyInst body inst -> Set.union (typeVarNamesInTerm body) (goInst inst)
+        ERoll ty body -> Set.union (freeTypeVarsType ty) (typeVarNamesInTerm body)
+        EUnroll body -> typeVarNamesInTerm body
+        _ -> Set.empty
+      where
+        goInst inst =
+          case inst of
+            InstId -> Set.empty
+            InstApp ty -> freeTypeVarsType ty
+            InstIntro -> Set.empty
+            InstElim -> Set.empty
+            InstInside inner -> goInst inner
+            InstSeq a b -> Set.union (goInst a) (goInst b)
+            InstUnder _ inner -> goInst inner
+            InstBot ty -> freeTypeVarsType ty
+            InstAbstr _ -> Set.empty
+
+    rebuildRecursiveArgAlongType :: TypeCheck.Env -> ElabType -> ElabTerm -> ElabTerm
+    rebuildRecursiveArgAlongType tcEnv targetTy term =
+      let normalized = normalize term
+          hoisted = hoistFloatingTyAbsThroughLambdas normalized
+          stripped = stripUnusedTopTyAbsWithEnv tcEnv hoisted
+          withTyAbs = addMissingLeadingTyAbsAlongType tcEnv targetTy stripped
+       in alignLeadingLambdasToType targetTy withTyAbs
+
     annContainsVar :: VarName -> AnnExpr -> Bool
     annContainsVar v annExpr =
       case annExpr of
@@ -1786,6 +2513,7 @@ elabAlg algebraContext layer =
           | x == v -> annContainsVar v rhs
           | otherwise -> annContainsVar v rhs || annContainsVar v body
         AAnn inner _ _ -> annContainsVar v inner
+        AUnfold inner _ _ -> annContainsVar v inner
 
     blockedAliasMuType :: ElabType -> Maybe ElabType
     blockedAliasMuType ty =
@@ -1814,6 +2542,41 @@ resolvedLambdaParamNode canonical chiLookupNode lamNodeId =
             _ -> Nothing
         _ -> Nothing
 
+{- Note [srcTypeToElabType in Algebra]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Local copy of the NormSrcType → ElabType conversion.  The canonical copy lives
+in MLF.Frontend.Program.Elaborate but is not exported (production surface is
+kept narrow).  We need this conversion in ALamF to recover the original source
+annotation type that presolution may have stripped (e.g. TForall inside a μ
+body).  Keeping it local avoids widening a production facade for a single
+internal consumer.
+-}
+
+-- | Convert a normalized source type to its elaboration-level equivalent.
+srcTypeToElabType :: NormSrcType -> ElabType
+srcTypeToElabType ty = case ty of
+  STVar name -> TVar name
+  STArrow dom cod -> TArrow (srcTypeToElabType dom) (srcTypeToElabType cod)
+  STBase name -> TBase (BaseTy name)
+  STCon name args -> TCon (BaseTy name) (fmap srcTypeToElabType args)
+  STForall name mb body ->
+    TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body)
+  STMu name body -> TMu name (srcTypeToElabType body)
+  STBottom -> TBottom
+  where
+    srcBoundToElabBound :: SrcBound 'NormN -> Maybe BoundType
+    srcBoundToElabBound (SrcBound boundTy) = structBoundToElabBound boundTy
+
+    structBoundToElabBound :: StructBound -> Maybe BoundType
+    structBoundToElabBound bTy = case bTy of
+      STArrow dom cod -> Just (TArrow (srcTypeToElabType dom) (srcTypeToElabType cod))
+      STBase name -> Just (TBase (BaseTy name))
+      STCon name args -> Just (TCon (BaseTy name) (fmap srcTypeToElabType args))
+      STForall name mb body ->
+        Just (TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body))
+      STMu name body -> Just (TMu name (srcTypeToElabType body))
+      STBottom -> Nothing
+
 annNode :: AnnExpr -> NodeId
 annNode ann =
   case ann of
@@ -1823,3 +2586,4 @@ annNode ann =
     AApp _ _ _ _ nid -> nid
     ALet _ _ _ _ _ _ _ nid -> nid
     AAnn _ nid _ -> nid
+    AUnfold _ nid _ -> nid

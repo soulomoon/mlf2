@@ -64,18 +64,24 @@ CI reuses the same repo commands; there is no CI-only verification logic.
 
 ## Public entry points
 
-- `MLF.API` — surface syntax, parsing, pretty-printing, and normalization helpers
-- `MLF.Program` — recursive-ADT program syntax, checking, pretty-printing, and evaluation
-- `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API
+- `MLF.API` — surface syntax plus eMLF / `.mlfp` parsing, pretty-printing, and normalization helpers
+- `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API, including `.mlfp` elaboration/checking on the shared eMLF/xMLF path
+- `MLF.Program` — thin compatibility re-export for the same unified `.mlfp` surface
 - `MLF.XMLF` — xMLF syntax, parser, and pretty-printer
 
 Active multi-step work is tracked under `tasks/todo/`; root-level `task_plan.md`,
 `findings.md`, and `progress.md` are historical leftovers rather than the active
 workflow.
 
-## Recursive ADT program surface
+## Unified `.mlfp` program surface
 
-`MLF.Program` adds a program-oriented recursive-ADT layer with:
+`.mlfp` programs now share the main frontend/pipeline ownership boundary:
+
+- `MLF.API` parses and pretty-prints `.mlfp` programs
+- `MLF.Pipeline` elaborates `.mlfp` programs onto the existing eMLF/xMLF path and checks them with the existing MLF typechecker
+- `MLF.Program` remains available only as a thin compatibility re-export
+
+The unified `.mlfp` surface includes:
 
 - `module` / `import ... exposing (...)`
 - `data` declarations with explicit constructor signatures
@@ -84,6 +90,12 @@ workflow.
 - existential constructors via `forall`
 - single-parameter typeclasses / instances
 - `deriving Eq` for the initial recursive-ADT corpus
+
+Internally, `.mlfp` now reuses the old MLF ownership boundary:
+
+- `MLF.Frontend.Program.Check` assembles module/import/class/data environments
+- `MLF.Frontend.Program.Elaborate` lowers `.mlfp` expressions to surface eMLF where possible and only emits direct `ElabTerm`s for constructs the old surface cannot encode cleanly
+- `MLF.Elab.TypeCheck` remains the typing-judgment owner for checked `.mlfp` terms
 
 Frozen examples live under `test/programs/recursive-adt/`, and the Phase-0
 syntax/corpus freeze is documented in

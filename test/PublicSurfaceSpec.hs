@@ -34,6 +34,16 @@ spec = describe "Public surface contracts" $ do
       parseNormEmlfExpr "λ(x) x"
         `shouldBe` Right (ELam "x" (EVar "x"))
 
+    it "roundtrips .mlfp programs through the unified frontend API" $ do
+      let src =
+            unlines
+              [ "module Main export (main) {",
+                "  def main : Int = let id = \\x x in id 1;",
+                "}"
+              ]
+      expectRight (parseRawProgram src) $ \program ->
+        parseRawProgram (prettyProgram program) `shouldBe` Right program
+
   describe "MLF.Pipeline" $ do
     it "elaborates normalized programs through the focused pipeline surface" $ do
       expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
@@ -61,6 +71,36 @@ spec = describe "Public surface contracts" $ do
         expectRight (Pipeline.runPipelineElabChecked Set.empty expr) $ \(term, ty) -> do
           Pipeline.typeCheck term `shouldBe` Right ty
           Pipeline.isValue term `shouldBe` True
+
+    it "runs unified .mlfp programs through the shared eMLF/typecheck surface" $ do
+      src <- readFile "test/programs/unified/authoritative-let-polymorphism.mlfp"
+      expectRight (parseRawProgram src) $ \program ->
+        expectRight (Pipeline.runProgram program) $ \value ->
+          Pipeline.prettyValue value `shouldBe` "1"
+
+    it "checks cross-module .mlfp programs through the shared eMLF/typecheck surface" $ do
+      src <- readFile "test/programs/unified/authoritative-cross-module-let-polymorphism.mlfp"
+      expectRight (parseRawProgram src) $ \program ->
+        expectRight (Pipeline.runProgram program) $ \value ->
+          Pipeline.prettyValue value `shouldBe` "1"
+
+    it "runs case-bearing .mlfp programs through the shared eMLF/typecheck surface" $ do
+      src <- readFile "test/programs/unified/authoritative-case-analysis.mlfp"
+      expectRight (parseRawProgram src) $ \program ->
+        expectRight (Pipeline.runProgram program) $ \value ->
+          Pipeline.prettyValue value `shouldBe` "1"
+
+    it "runs overloaded-method .mlfp programs through the shared eMLF/typecheck surface" $ do
+      src <- readFile "test/programs/unified/authoritative-overloaded-method.mlfp"
+      expectRight (parseRawProgram src) $ \program ->
+        expectRight (Pipeline.runProgram program) $ \value ->
+          Pipeline.prettyValue value `shouldBe` "true"
+
+    it "runs recursive-let .mlfp programs through the shared eMLF/typecheck surface" $ do
+      src <- readFile "test/programs/unified/authoritative-recursive-let.mlfp"
+      expectRight (parseRawProgram src) $ \program ->
+        expectRight (Pipeline.runProgram program) $ \value ->
+          Pipeline.prettyValue value `shouldBe` "true"
 
   describe "MLF.Pipeline (error formatting)" $ do
     it "formatPipelineError produces structured Text output" $ do
