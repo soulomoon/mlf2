@@ -1,5 +1,5 @@
-module SpecUtil (
-    emptyConstraint,
+module SpecUtil
+  ( emptyConstraint,
     nodeMapFromList,
     nodeMapSingleton,
     nodeMapElems,
@@ -13,7 +13,7 @@ module SpecUtil (
     defaultTraceConfig,
     unsafeNormalizeExpr,
     firstShowE,
-    PipelineArtifacts(..),
+    PipelineArtifacts (..),
     runConstraintDefault,
     runToPresolutionDefault,
     runToPresolutionWithAnnDefault,
@@ -25,61 +25,62 @@ module SpecUtil (
     lookupNodeMaybe,
     lookupNode,
     lookupNodeIO,
-    mkForalls
-) where
+    mkForalls,
+  )
+where
 
-import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
-import qualified Data.Set as Set
+import Data.IntMap.Strict qualified as IntMap
+import Data.IntSet qualified as IntSet
+import Data.Set qualified as Set
 import GHC.Stack (HasCallStack)
-import Test.Hspec (Expectation, expectationFailure)
-
-import qualified MLF.Binding.Tree as Binding
-import qualified MLF.Constraint.Types.Graph as Graph
-import MLF.Constraint.Types.Graph
-    ( BindFlag(..)
-    , BindParents
-    , Constraint(..)
-    , GenNode(..)
-    , GenNodeId(..)
-    , GenNodeMap
-    , NodeId(..)
-    , NodeMap(..)
-    , PolySyms
-    , TyNode(..)
-    , fromListGen
-    , fromListNode
-    , genRef
-    , getNodeId
-    , insertGen
-    , nodeRefKey
-    , structuralChildren
-    , toListNode
-    , typeRef
-    )
+import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Acyclicity (checkAcyclicity)
 import MLF.Constraint.Normalize (normalize)
-import MLF.Constraint.Presolution (PresolutionResult(..), computePresolution)
-import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
-import qualified MLF.Constraint.Solved as Solved
-import MLF.Frontend.ConstraintGen (AnnExpr(..), ConstraintResult(..), generateConstraints)
-import MLF.Frontend.Normalize (normalizeExpr)
-import MLF.Frontend.Syntax (NormSurfaceExpr, SrcTy(..), SrcType, SurfaceExpr, VarName, mkSrcBound)
+import MLF.Constraint.Presolution (PresolutionResult (..), computePresolution)
+import MLF.Constraint.Solved qualified as Solved
+import MLF.Constraint.Types.Graph
+  ( BindFlag (..),
+    BindParents,
+    Constraint (..),
+    GenNode (..),
+    GenNodeId (..),
+    GenNodeMap,
+    NodeId (..),
+    NodeMap (..),
+    PolySyms,
+    TyNode (..),
+    fromListGen,
+    fromListNode,
+    genRef,
+    getNodeId,
+    insertGen,
+    nodeRefKey,
+    structuralChildren,
+    toListNode,
+    typeRef,
+  )
+import MLF.Constraint.Types.Graph qualified as Graph
+import MLF.Constraint.Types.Presolution (PresolutionSnapshot (..))
 import MLF.Elab.Pipeline (defaultTraceConfig)
-import qualified SolvedFacadeTestUtil as SolvedTest
+import MLF.Frontend.ConstraintGen (AnnExpr (..), ConstraintResult (..), generateConstraints)
+import MLF.Frontend.Normalize (normalizeExpr)
+import MLF.Frontend.Syntax (NormSurfaceExpr, SrcTy (..), SrcType, SurfaceExpr, VarName, mkSrcBound)
+import SolvedFacadeTestUtil qualified as SolvedTest
+import Test.Hspec (Expectation, expectationFailure)
 
 emptyConstraint :: Constraint
-emptyConstraint = Constraint
-    { cNodes = fromListNode []
-    , cInstEdges = []
-    , cUnifyEdges = []
-    , cBindParents = IntMap.empty
-    , cPolySyms = Set.empty
-    , cEliminatedVars = IntSet.empty
-    , cWeakenedVars = IntSet.empty
-    , cAnnEdges = IntSet.empty
-    , cLetEdges = IntSet.empty
-    , cGenNodes = fromListGen []
+emptyConstraint =
+  Constraint
+    { cNodes = fromListNode [],
+      cInstEdges = [],
+      cUnifyEdges = [],
+      cBindParents = IntMap.empty,
+      cPolySyms = Set.empty,
+      cEliminatedVars = IntSet.empty,
+      cWeakenedVars = IntSet.empty,
+      cAnnEdges = IntSet.empty,
+      cLetEdges = IntSet.empty,
+      cGenNodes = fromListGen []
     }
 
 nodeMapFromList :: [(Int, TyNode)] -> NodeMap TyNode
@@ -99,175 +100,176 @@ nodeMapSize = length . toListNode
 
 nodeMapMember :: NodeId -> NodeMap a -> Bool
 nodeMapMember nid nodes =
-    case Graph.lookupNode nid nodes of
-        Just _ -> True
-        Nothing -> False
+  case Graph.lookupNode nid nodes of
+    Just _ -> True
+    Nothing -> False
 
 genNodeMap :: [NodeId] -> GenNodeMap GenNode
 genNodeMap ids =
-    fromListGen
-        [ (gid, GenNode gid [nid])
-        | nid <- ids
-        , let gid = GenNodeId (getNodeId nid)
-        ]
+  fromListGen
+    [ (gid, GenNode gid [nid])
+      | nid <- ids,
+        let gid = GenNodeId (getNodeId nid)
+    ]
 
 mkForalls :: [(String, Maybe SrcType)] -> SrcType -> SrcType
 mkForalls binds body =
-    foldr
-        (\(name, mbBound) acc -> STForall name (fmap mkSrcBound mbBound) acc)
-        body
-        binds
+  foldr
+    (\(name, mbBound) acc -> STForall name (fmap mkSrcBound mbBound) acc)
+    body
+    binds
 
 -- | Attach a root gen node and bind term-DAG roots under it (test helper).
 rootedConstraint :: Constraint -> Constraint
 rootedConstraint c0 =
-    let rootId = GenNodeId 0
-        roots =
-            map NodeId $
-                IntSet.toList (Binding.computeTermDagRoots c0)
-        genNode = GenNode rootId roots
-        genNodes' = insertGen rootId genNode (cGenNodes c0)
-        bindParents' =
-            foldr
-                (\nid bp ->
-                    let key = nodeRefKey (typeRef nid)
-                    in if IntMap.member key bp
-                        then bp
-                        else IntMap.insert key (genRef rootId, BindFlex) bp
-                )
-                (cBindParents c0)
-                roots
-    in c0 { cGenNodes = genNodes', cBindParents = bindParents' }
+  let rootId = GenNodeId 0
+      roots =
+        map NodeId $
+          IntSet.toList (Binding.computeTermDagRoots c0)
+      genNode = GenNode rootId roots
+      genNodes' = insertGen rootId genNode (cGenNodes c0)
+      bindParents' =
+        foldr
+          ( \nid bp ->
+              let key = nodeRefKey (typeRef nid)
+               in if IntMap.member key bp
+                    then bp
+                    else IntMap.insert key (genRef rootId, BindFlex) bp
+          )
+          (cBindParents c0)
+          roots
+   in c0 {cGenNodes = genNodes', cBindParents = bindParents'}
 
 bindParentsFromPairs :: [(NodeId, NodeId, BindFlag)] -> BindParents
 bindParentsFromPairs pairs =
-    IntMap.fromList
-        [ (nodeRefKey (typeRef child), (typeRef parent, flag))
-        | (child, parent, flag) <- pairs
-        ]
+  IntMap.fromList
+    [ (nodeRefKey (typeRef child), (typeRef parent, flag))
+      | (child, parent, flag) <- pairs
+    ]
 
-expectRight :: Show e => Either e a -> (a -> Expectation) -> Expectation
+expectRight :: (Show e) => Either e a -> (a -> Expectation) -> Expectation
 expectRight value k =
-    case value of
-        Left err -> expectationFailure $ "Expected success, but got: " ++ show err
-        Right result -> k result
+  case value of
+    Left err -> expectationFailure $ "Expected success, but got: " ++ show err
+    Right result -> k result
 
-requireRight :: Show e => Either e a -> IO a
+requireRight :: (Show e) => Either e a -> IO a
 requireRight = either (\e -> expectationFailure (show e) >> fail "requireRight") pure
 
 unsafeNormalizeExpr :: SurfaceExpr -> NormSurfaceExpr
 unsafeNormalizeExpr expr =
-    case normalizeExpr expr of
-        Left err -> error ("normalizeExpr failed in test: " ++ show err)
-        Right out -> out
+  case normalizeExpr expr of
+    Left err -> error ("normalizeExpr failed in test: " ++ show err)
+    Right out -> out
 
-firstShowE :: Show e => Either e a -> Either String a
+firstShowE :: (Show e) => Either e a -> Either String a
 firstShowE = either (Left . show) Right
 
 data PipelineArtifacts = PipelineArtifacts
-    { paConstraintNorm :: Constraint
-    , paPresolution :: PresolutionResult
-    , paSolved :: Solved.Solved
-    , paAnnotated :: AnnExpr
-    , paRoot :: NodeId
-    }
+  { paConstraintNorm :: Constraint,
+    paPresolution :: PresolutionResult,
+    paSolved :: Solved.Solved,
+    paAnnotated :: AnnExpr,
+    paRoot :: NodeId
+  }
 
 runConstraintDefault :: PolySyms -> SurfaceExpr -> Either String ConstraintResult
 runConstraintDefault poly expr =
-    firstShowE (generateConstraints poly (unsafeNormalizeExpr expr))
+  firstShowE (generateConstraints poly (unsafeNormalizeExpr expr))
 
-runToPresolutionDetailedDefault
-    :: PolySyms
-    -> SurfaceExpr
-    -> Either String (ConstraintResult, Constraint, PresolutionResult)
+runToPresolutionDetailedDefault ::
+  PolySyms ->
+  SurfaceExpr ->
+  Either String (ConstraintResult, Constraint, PresolutionResult)
 runToPresolutionDetailedDefault poly expr = do
-    result@ConstraintResult{ crConstraint = c0 } <- runConstraintDefault poly expr
-    let c1 = normalize c0
-    acyc <- firstShowE (checkAcyclicity c1)
-    pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
-    pure (result, c1, pres)
+  result@ConstraintResult {crConstraint = c0} <- runConstraintDefault poly expr
+  let c1 = normalize c0
+  acyc <- firstShowE (checkAcyclicity c1)
+  pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+  pure (result, c1, pres)
 
 runToPresolutionDefault :: PolySyms -> SurfaceExpr -> Either String PresolutionResult
 runToPresolutionDefault poly expr = do
-    (_, _, pres) <- runToPresolutionDetailedDefault poly expr
-    pure pres
+  (_, _, pres) <- runToPresolutionDetailedDefault poly expr
+  pure pres
 
-runToPresolutionWithAnnDefault
-    :: PolySyms
-    -> SurfaceExpr
-    -> Either String (PresolutionResult, AnnExpr)
+runToPresolutionWithAnnDefault ::
+  PolySyms ->
+  SurfaceExpr ->
+  Either String (PresolutionResult, AnnExpr)
 runToPresolutionWithAnnDefault poly expr = do
-    (ConstraintResult{ crAnnotated = ann }, _, pres) <-
-        runToPresolutionDetailedDefault poly expr
-    pure (pres, ann)
+  (ConstraintResult {crAnnotated = ann}, _, pres) <-
+    runToPresolutionDetailedDefault poly expr
+  pure (pres, ann)
 
-runPipelineArtifactsDefault
-    :: PolySyms
-    -> SurfaceExpr
-    -> Either String PipelineArtifacts
+runPipelineArtifactsDefault ::
+  PolySyms ->
+  SurfaceExpr ->
+  Either String PipelineArtifacts
 runPipelineArtifactsDefault poly expr = do
-    (ConstraintResult{ crAnnotated = ann, crRoot = root }, c1, pres) <-
-        runToPresolutionDetailedDefault poly expr
-    solved <- firstShowE (SolvedTest.solvedFromSnapshot (snapshotUnionFind pres) (snapshotConstraint pres))
-    pure
-        PipelineArtifacts
-            { paConstraintNorm = c1
-            , paPresolution = pres
-            , paSolved = solved
-            , paAnnotated = ann
-            , paRoot = root
-            }
+  (ConstraintResult {crAnnotated = ann, crRoot = root}, c1, pres) <-
+    runToPresolutionDetailedDefault poly expr
+  solved <- firstShowE (SolvedTest.solvedFromSnapshot (snapshotUnionFind pres) (snapshotConstraint pres))
+  pure
+    PipelineArtifacts
+      { paConstraintNorm = c1,
+        paPresolution = pres,
+        paSolved = solved,
+        paAnnotated = ann,
+        paRoot = root
+      }
 
 runToSolvedDefault :: PolySyms -> SurfaceExpr -> Either String Solved.Solved
 runToSolvedDefault poly expr = do
-    pres <- runToPresolutionDefault poly expr
-    firstShowE (SolvedTest.solvedFromSnapshot (snapshotUnionFind pres) (snapshotConstraint pres))
+  pres <- runToPresolutionDefault poly expr
+  firstShowE (SolvedTest.solvedFromSnapshot (snapshotUnionFind pres) (snapshotConstraint pres))
 
 inferBindParents :: NodeMap TyNode -> BindParents
 inferBindParents nodes =
-    -- Follow term structure edges (child → structural parent).
-    foldl' addEdges IntMap.empty (nodeMapElems nodes)
+  -- Follow term structure edges (child → structural parent).
+  foldl' addEdges IntMap.empty (nodeMapElems nodes)
   where
     addEdges bp parentNode =
-        let parent = tnId parentNode
-            boundKids =
-                case parentNode of
-                    TyVar{ tnBound = Just bnd } -> [bnd]
-                    _ -> []
-            kids = structuralChildren parentNode ++ boundKids
+      let parent = tnId parentNode
+          boundKids =
+            case parentNode of
+              TyVar {tnBound = Just bnd} -> [bnd]
+              _ -> []
+          kids = structuralChildren parentNode ++ boundKids
 
-            addOne m child
-                | child == parent = m
-                | otherwise =
-                    IntMap.insertWith
-                        (\_ old -> old)
-                        (nodeRefKey (typeRef child))
-                        (typeRef parent, BindFlex)
-                        m
-        in foldl' addOne bp kids
+          addOne m child
+            | child == parent = m
+            | otherwise =
+                IntMap.insertWith
+                  (\_ old -> old)
+                  (nodeRefKey (typeRef child))
+                  (typeRef parent, BindFlex)
+                  m
+       in foldl' addOne bp kids
 
 lookupNodeMaybe :: NodeMap TyNode -> NodeId -> Maybe TyNode
 lookupNodeMaybe nodes nid = Graph.lookupNode nid nodes
 
-lookupNode :: HasCallStack => NodeMap TyNode -> NodeId -> IO TyNode
+lookupNode :: (HasCallStack) => NodeMap TyNode -> NodeId -> IO TyNode
 lookupNode = lookupNodeIO
 
-lookupNodeIO :: HasCallStack => NodeMap TyNode -> NodeId -> IO TyNode
+lookupNodeIO :: (HasCallStack) => NodeMap TyNode -> NodeId -> IO TyNode
 lookupNodeIO table nid =
-    case lookupNodeMaybe table nid of
-        Just node -> pure node
-        Nothing -> do
-            expectationFailure $ "Missing node: " ++ show nid
-            pure (error "unreachable: missing TyNode")
+  case lookupNodeMaybe table nid of
+    Just node -> pure node
+    Nothing -> do
+      expectationFailure $ "Missing node: " ++ show nid
+      pure (error "unreachable: missing TyNode")
 
 collectVarNodes :: VarName -> AnnExpr -> [NodeId]
 collectVarNodes name = go
   where
     go ann = case ann of
-        AVar v nid | v == name -> [nid]
-        AVar _ _ -> []
-        ALit _ _ -> []
-        ALam _ _ _ body _ -> go body
-        AApp fun arg _ _ _ -> go fun ++ go arg
-        ALet _ _ _ _ _ rhs body _ -> go rhs ++ go body
-        AAnn expr _ _ -> go expr
+      AVar v nid | v == name -> [nid]
+      AVar _ _ -> []
+      ALit _ _ -> []
+      ALam _ _ _ body _ -> go body
+      AApp fun arg _ _ _ -> go fun ++ go arg
+      ALet _ _ _ _ _ rhs body _ -> go rhs ++ go body
+      AAnn expr _ _ -> go expr
+      AUnfold expr _ _ -> go expr

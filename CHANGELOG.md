@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Changed
+- Repaired the `.mlfp` ProgramSpec regression cluster while keeping `.mlfp`
+  on the shared old eMLF/typecheck route: no new surface forms, no direct
+  `.mlfp -> ElabTerm` fallback, no permissive `EUnroll`, and no broad
+  `TypeCheck` weakening. The recursive-ADT corpus, CLI/helper diagnostics,
+  module-ordering case, and unified `.mlfp` integration checks are green.
+  Validation: `MLF.Program execution corpus` (`9 examples, 0 failures`),
+  `MLF.Program` (`34 examples, 0 failures`), fail-fast `mlf2-test`
+  (`1582 examples, 0 failures`), direct public probes returning `true` for
+  `authoritative-overloaded-method.mlfp` and `1` for
+  `authoritative-case-analysis.mlfp`, plus final serial `cabal test`,
+  `cabal build all`, and `cabal test` again.
 - Added a new public recursive-ADT program surface via `MLF.Program`. The repo
   now parses, pretty-prints, checks, and evaluates module-oriented recursive
   algebraic data type programs with `data` declarations, constructor-pattern

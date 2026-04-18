@@ -3,8 +3,9 @@
 Module      : MLF.Pipeline
 Description : Focused normalized-pipeline API for downstream callers
 
-`MLF.Pipeline` exposes the normalized eMLF pipeline surface without the wider
-raw-syntax, parser, or pretty-printing conveniences re-exported by `MLF.API`.
+`MLF.Pipeline` exposes the normalized eMLF pipeline surface plus `.mlfp`
+checking/runtime on the shared eMLF/xMLF path, without the wider raw-syntax,
+parser, or pretty-printing conveniences re-exported by `MLF.API`.
 
 Prefer this module for consumers that already operate on normalized surface
 terms and want the smallest supported entrypoint for inference/elaboration.
@@ -55,6 +56,15 @@ module MLF.Pipeline
     , step
     , normalize
     , isValue
+    -- * Unified `.mlfp` program checking/runtime
+    , ProgramError(..)
+    , CheckedProgram(..)
+    , CheckedModule(..)
+    , CheckedBinding(..)
+    , Value(..)
+    , checkProgram
+    , runProgram
+    , prettyValue
     ) where
 
 import Data.Text (Text)
@@ -63,6 +73,16 @@ import MLF.Constraint.Acyclicity (CycleError(..))
 import MLF.Frontend.Syntax (NormSurfaceExpr, NormSrcType, StructBound)
 import MLF.Frontend.Normalize (NormalizationError(..), normalizeExpr, normalizeType)
 import MLF.Frontend.ConstraintGen (ConstraintError(..), ConstraintResult(..), generateConstraints)
+import MLF.Frontend.Program.Types
+    ( CheckedBinding(..)
+    , CheckedModule(..)
+    , CheckedProgram(..)
+    , ProgramError(..)
+    )
+import MLF.Frontend.Program.Check
+    ( checkProgram
+    )
+import MLF.Frontend.Program.Run (Value(..), prettyValue, runProgram)
 import MLF.Constraint.Types.Graph (BaseTy(..), PolySyms)
 -- Keep legacy elaboration conversion helpers quarantined in MLF.Elab.Legacy.
 import MLF.Elab.Pipeline

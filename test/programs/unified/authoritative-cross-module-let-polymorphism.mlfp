@@ -1,0 +1,8 @@
+module Core export (applyId) {
+  def applyId : Int = let id = \x x in id 1;
+}
+
+module User export (main) {
+  import Core exposing (applyId);
+  def main : Int = applyId;
+}

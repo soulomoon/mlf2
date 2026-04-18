@@ -7,22 +7,27 @@
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
-module MLF.Frontend.Syntax (
-    VarName,
+
+module MLF.Frontend.Syntax
+  ( VarName,
     Lit (..),
     ExprStage (..),
     Expr (..),
     SurfaceExprF (..),
+
     -- * Raw expression aliases (backward-compatible)
     SurfaceExpr,
     CoreExpr,
+
     -- * Normalized expression aliases
     NormSurfaceExpr,
     NormCoreExpr,
+
     -- * Raw source types (parser output)
     SrcTy (..),
     SrcType,
     SrcTypeF (..),
+
     -- * Staged frontend types
     SrcNorm (..),
     SrcTopVar (..),
@@ -34,6 +39,7 @@ module MLF.Frontend.Syntax (
     NormSrcType,
     StructBound,
     RawSrcType,
+
     -- * Backward-compatible normalized patterns
     pattern NSTVar,
     pattern NSTArrow,
@@ -48,10 +54,12 @@ module MLF.Frontend.Syntax (
     pattern SBForall,
     pattern SBMu,
     pattern SBBottom,
+
     -- * Metadata
     AnnotatedExpr (..),
-    BindingSite (..)
-) where
+    BindingSite (..),
+  )
+where
 
 import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..))
 import Data.List.NonEmpty (NonEmpty)
@@ -59,7 +67,7 @@ import Data.List.NonEmpty (NonEmpty)
 {- Note [Surface syntax and paper alignment]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 This module defines the *surface language* accepted by the pipeline and the
-*core language* consumed by constraint generation:
+\*core language* consumed by constraint generation:
 
   - `Expr 'Surface` is the surface eMLF term language (partially annotated
     λ-calculus).
@@ -110,10 +118,10 @@ type VarName = String
 --
 -- These map to base types in constraint generation (e.g. `Int`, `Bool`, `String`).
 data Lit
-    = LInt Integer
-    | LBool Bool
-    | LString String
-    deriving (Eq, Show)
+  = LInt Integer
+  | LBool Bool
+  | LString String
+  deriving (Eq, Show)
 
 {- Note [Staged frontend types]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -139,40 +147,43 @@ bound root cannot be a bare variable.
 
 -- | Normalization stage for source types.
 data SrcNorm = RawN | NormN
-    deriving (Eq, Show)
+  deriving (Eq, Show)
 
 -- | Whether a source type root may be a variable.
 data SrcTopVar = TopVarAllowed | TopVarDisallowed
-    deriving (Eq, Show)
+  deriving (Eq, Show)
 
 type family BoundTopVar (n :: SrcNorm) :: SrcTopVar where
-    BoundTopVar 'RawN = 'TopVarAllowed
-    BoundTopVar 'NormN = 'TopVarDisallowed
+  BoundTopVar 'RawN = 'TopVarAllowed
+  BoundTopVar 'NormN = 'TopVarDisallowed
 
 -- | Wrapper for forall bounds, indexed by stage.
 newtype SrcBound (n :: SrcNorm) = SrcBound
-    { unSrcBound :: SrcTy n (BoundTopVar n)
-    }
-    deriving (Eq, Show)
+  { unSrcBound :: SrcTy n (BoundTopVar n)
+  }
+  deriving (Eq, Show)
 
 mkSrcBound :: SrcTy n (BoundTopVar n) -> SrcBound n
 mkSrcBound = SrcBound
 
 -- | Source-level type syntax for annotations, indexed by stage and root policy.
 data SrcTy (n :: SrcNorm) (v :: SrcTopVar) where
-    STVar :: String -> SrcTy n 'TopVarAllowed
-    STArrow :: SrcTy n 'TopVarAllowed -> SrcTy n 'TopVarAllowed -> SrcTy n v
-    STBase :: String -> SrcTy n v
-    STCon :: String -> NonEmpty (SrcTy n 'TopVarAllowed) -> SrcTy n v
-    STForall :: String -> Maybe (SrcBound n) -> SrcTy n 'TopVarAllowed -> SrcTy n v
-    STMu :: String -> SrcTy n 'TopVarAllowed -> SrcTy n v
-    STBottom :: SrcTy n v
+  STVar :: String -> SrcTy n 'TopVarAllowed
+  STArrow :: SrcTy n 'TopVarAllowed -> SrcTy n 'TopVarAllowed -> SrcTy n v
+  STBase :: String -> SrcTy n v
+  STCon :: String -> NonEmpty (SrcTy n 'TopVarAllowed) -> SrcTy n v
+  STForall :: String -> Maybe (SrcBound n) -> SrcTy n 'TopVarAllowed -> SrcTy n v
+  STMu :: String -> SrcTy n 'TopVarAllowed -> SrcTy n v
+  STBottom :: SrcTy n v
 
 deriving instance Eq (SrcTy n v)
+
 deriving instance Show (SrcTy n v)
 
 type SrcType = SrcTy 'RawN 'TopVarAllowed
+
 type NormSrcType = SrcTy 'NormN 'TopVarAllowed
+
 type StructBound = SrcTy 'NormN 'TopVarDisallowed
 
 -- | Backward-compatible alias: 'RawSrcType' = 'SrcType'.
@@ -228,39 +239,40 @@ pattern SBBottom :: StructBound
 pattern SBBottom = STBottom
 
 {-# COMPLETE NSTVar, NSTArrow, NSTBase, NSTCon, NSTForall, NSTMu, NSTBottom #-}
+
 {-# COMPLETE SBArrow, SBBase, SBCon, SBForall, SBMu, SBBottom #-}
 
 data SrcTypeF a
-    = STVarF String
-    | STArrowF a a
-    | STBaseF String
-    | STConF String (NonEmpty a)
-    | STForallF String (Maybe a) a
-    | STMuF String a
-    | STBottomF
-    deriving (Eq, Show, Functor, Foldable, Traversable)
+  = STVarF String
+  | STArrowF a a
+  | STBaseF String
+  | STConF String (NonEmpty a)
+  | STForallF String (Maybe a) a
+  | STMuF String a
+  | STBottomF
+  deriving (Eq, Show, Functor, Foldable, Traversable)
 
 type instance Base (SrcTy 'RawN 'TopVarAllowed) = SrcTypeF
 
 instance Recursive (SrcTy 'RawN 'TopVarAllowed) where
-    project ty = case ty of
-        STVar v -> STVarF v
-        STArrow a b -> STArrowF a b
-        STBase b -> STBaseF b
-        STCon c args -> STConF c args
-        STForall v mb body -> STForallF v (fmap unSrcBound mb) body
-        STMu v body -> STMuF v body
-        STBottom -> STBottomF
+  project ty = case ty of
+    STVar v -> STVarF v
+    STArrow a b -> STArrowF a b
+    STBase b -> STBaseF b
+    STCon c args -> STConF c args
+    STForall v mb body -> STForallF v (fmap unSrcBound mb) body
+    STMu v body -> STMuF v body
+    STBottom -> STBottomF
 
 instance Corecursive (SrcTy 'RawN 'TopVarAllowed) where
-    embed ty = case ty of
-        STVarF v -> STVar v
-        STArrowF a b -> STArrow a b
-        STBaseF b -> STBase b
-        STConF c args -> STCon c args
-        STForallF v mb body -> STForall v (fmap mkSrcBound mb) body
-        STMuF v body -> STMu v body
-        STBottomF -> STBottom
+  embed ty = case ty of
+    STVarF v -> STVar v
+    STArrowF a b -> STArrow a b
+    STBaseF b -> STBase b
+    STConF c args -> STCon c args
+    STForallF v mb body -> STForall v (fmap mkSrcBound mb) body
+    STMuF v body -> STMu v body
+    STBottomF -> STBottom
 
 data ExprStage = Surface | Core
 
@@ -283,60 +295,74 @@ data ExprStage = Surface | Core
 -- The resulting let-binding has a coercion term as its RHS, which is treated
 -- as an ordinary let-binding (not a special "declared scheme" form).
 data Expr (s :: ExprStage) ty where
-    EVar :: VarName -> Expr s ty
-    ELit :: Lit -> Expr s ty
-    ELam :: VarName -> Expr s ty -> Expr s ty                         -- ^ λx. e (inferred parameter type)
-    EApp :: Expr s ty -> Expr s ty -> Expr s ty
-    ELet :: VarName -> Expr s ty -> Expr s ty -> Expr s ty            -- ^ let x = e₁ in e₂ (inferred scheme)
+  EVar :: VarName -> Expr s ty
+  ELit :: Lit -> Expr s ty
+  ELam ::
+    VarName ->
+    Expr s ty ->
+    -- | λx. e (inferred parameter type)
+    Expr s ty
+  EApp :: Expr s ty -> Expr s ty -> Expr s ty
+  ELet ::
+    VarName ->
+    Expr s ty ->
+    Expr s ty ->
+    -- | let x = e₁ in e₂ (inferred scheme)
+    Expr s ty
+  -- Surface-only.
+  ELamAnn :: VarName -> ty -> Expr 'Surface ty -> Expr 'Surface ty
+  EAnn :: Expr 'Surface ty -> ty -> Expr 'Surface ty
+  -- Core-only.
+  ECoerceConst ::
+    ty ->
+    -- | cτ (coercion constant)
+    Expr 'Core ty
 
-    -- Surface-only.
-    ELamAnn :: VarName -> ty -> Expr 'Surface ty -> Expr 'Surface ty
-    EAnn :: Expr 'Surface ty -> ty -> Expr 'Surface ty
+deriving instance (Eq ty) => Eq (Expr s ty)
 
-    -- Core-only.
-    ECoerceConst :: ty -> Expr 'Core ty                               -- ^ cτ (coercion constant)
-
-deriving instance Eq ty => Eq (Expr s ty)
-deriving instance Show ty => Show (Expr s ty)
+deriving instance (Show ty) => Show (Expr s ty)
 
 data SurfaceExprF ty a
-    = EVarSurfaceF VarName
-    | ELitSurfaceF Lit
-    | ELamSurfaceF VarName a
-    | EAppSurfaceF a a
-    | ELetSurfaceF VarName a a
-    | ELamAnnSurfaceF VarName ty a
-    | EAnnSurfaceF a ty
-    deriving (Functor, Foldable, Traversable)
+  = EVarSurfaceF VarName
+  | ELitSurfaceF Lit
+  | ELamSurfaceF VarName a
+  | EAppSurfaceF a a
+  | ELetSurfaceF VarName a a
+  | ELamAnnSurfaceF VarName ty a
+  | EAnnSurfaceF a ty
+  deriving (Functor, Foldable, Traversable)
 
 type instance Base (Expr 'Surface ty) = SurfaceExprF ty
 
 instance Recursive (Expr 'Surface ty) where
-    project expr = case expr of
-        EVar v -> EVarSurfaceF v
-        ELit l -> ELitSurfaceF l
-        ELam v body -> ELamSurfaceF v body
-        EApp fun arg -> EAppSurfaceF fun arg
-        ELet v rhs body -> ELetSurfaceF v rhs body
-        ELamAnn v ty body -> ELamAnnSurfaceF v ty body
-        EAnn expr0 ty -> EAnnSurfaceF expr0 ty
+  project expr = case expr of
+    EVar v -> EVarSurfaceF v
+    ELit l -> ELitSurfaceF l
+    ELam v body -> ELamSurfaceF v body
+    EApp fun arg -> EAppSurfaceF fun arg
+    ELet v rhs body -> ELetSurfaceF v rhs body
+    ELamAnn v ty body -> ELamAnnSurfaceF v ty body
+    EAnn expr0 ty -> EAnnSurfaceF expr0 ty
 
 instance Corecursive (Expr 'Surface ty) where
-    embed expr = case expr of
-        EVarSurfaceF v -> EVar v
-        ELitSurfaceF l -> ELit l
-        ELamSurfaceF v body -> ELam v body
-        EAppSurfaceF fun arg -> EApp fun arg
-        ELetSurfaceF v rhs body -> ELet v rhs body
-        ELamAnnSurfaceF v ty body -> ELamAnn v ty body
-        EAnnSurfaceF expr0 ty -> EAnn expr0 ty
+  embed expr = case expr of
+    EVarSurfaceF v -> EVar v
+    ELitSurfaceF l -> ELit l
+    ELamSurfaceF v body -> ELam v body
+    EAppSurfaceF fun arg -> EApp fun arg
+    ELetSurfaceF v rhs body -> ELet v rhs body
+    ELamAnnSurfaceF v ty body -> ELamAnn v ty body
+    EAnnSurfaceF expr0 ty -> EAnn expr0 ty
 
 -- | Raw surface expression (backward-compatible alias).
 type SurfaceExpr = Expr 'Surface SrcType
+
 -- | Raw core expression (backward-compatible alias).
 type CoreExpr = Expr 'Core SrcType
+
 -- | Normalized surface expression (alias bounds inlined).
 type NormSurfaceExpr = Expr 'Surface NormSrcType
+
 -- | Normalized core expression (alias bounds inlined).
 type NormCoreExpr = Expr 'Core NormSrcType
 
@@ -346,10 +372,10 @@ type NormCoreExpr = Expr 'Core NormSrcType
 -- occurrence is a lambda parameter vs a let-binding"). The main constraint
 -- generator uses its own annotation structure (`MLF.Frontend.ConstraintGen.AnnExpr`).
 data AnnotatedExpr = AnnotatedExpr
-    { annExpr :: SurfaceExpr
-    , annBinding :: Maybe BindingSite
-    }
-    deriving (Eq, Show)
+  { annExpr :: SurfaceExpr,
+    annBinding :: Maybe BindingSite
+  }
+  deriving (Eq, Show)
 
 -- | Distinguish between lambda parameters and let-bound values.
 --
@@ -357,6 +383,6 @@ data AnnotatedExpr = AnnotatedExpr
 --   - lambda-bound variables are not generalized (monomorphic),
 --   - let-bound variables may be generalized and later instantiated.
 data BindingSite
-    = LamParam VarName
-    | LetBinding VarName
-    deriving (Eq, Show)
+  = LamParam VarName
+  | LetBinding VarName
+  deriving (Eq, Show)

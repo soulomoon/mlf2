@@ -1,25 +1,30 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
-module MLF.Frontend.ConstraintGen (
-    ConstraintError (..),
+
+module MLF.Frontend.ConstraintGen
+  ( ConstraintError (..),
     ConstraintResult (..),
     AnnExpr (..),
+    ExternalEnv,
     generateConstraints,
-    generateConstraintsCore
-) where
+    generateConstraintsCore,
+    generateConstraintsWithEnv,
+    generateConstraintsCoreWithEnv,
+  )
+where
 
 import Data.Functor.Foldable (cata)
 import qualified Data.IntSet as IntSet
-
-import MLF.Frontend.Syntax
-    ( NormCoreExpr
-    , NormSurfaceExpr
-    )
-import MLF.Frontend.Desugar (desugarSurface)
+import qualified Data.Map.Strict as Map
 import MLF.Constraint.Types.Graph (NodeId, PolySyms, cAnnEdges, getEdgeId)
-import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.ConstraintGen.State
-import MLF.Frontend.ConstraintGen.Translate (buildRootExpr)
+import MLF.Frontend.ConstraintGen.Translate (buildRootExprWithEnv)
+import MLF.Frontend.ConstraintGen.Types
+import MLF.Frontend.Desugar (desugarSurface)
+import MLF.Frontend.Syntax
+  ( NormCoreExpr,
+    NormSurfaceExpr,
+  )
 
 {- Note [Phase 1: Constraint Generation]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -100,7 +105,13 @@ Paper references:
 
 generateConstraints :: PolySyms -> NormSurfaceExpr -> Either ConstraintError ConstraintResult
 generateConstraints polySyms expr =
-    generateConstraintsCore polySyms (desugarSurface expr)
+  generateConstraintsCore polySyms (desugarSurface expr)
+
+-- | Like 'generateConstraints' but with an external environment of
+-- pre-existing type assumptions for free variables.
+generateConstraintsWithEnv :: PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either ConstraintError ConstraintResult
+generateConstraintsWithEnv polySyms extEnv expr =
+  generateConstraintsCoreWithEnv polySyms extEnv (desugarSurface expr)
 
 -- | Generate constraints from a normalized core expression.
 --
@@ -108,23 +119,31 @@ generateConstraints polySyms expr =
 -- core-only forms (for example bare coercion constants) that are not
 -- constructible through the surface parser/normalizer pipeline.
 generateConstraintsCore :: PolySyms -> NormCoreExpr -> Either ConstraintError ConstraintResult
-generateConstraintsCore polySyms expr = do
-    let initialState = mkInitialStateWithPolySyms polySyms
-    ((_rootGen, rootNode, annRoot), finalState) <-
-        runConstraintM (buildRootExpr expr) initialState
-    let annEdges = collectAnnEdges annRoot
-        constraint = (buildConstraint finalState) { cAnnEdges = annEdges }
-    pure ConstraintResult
-        { crConstraint = constraint
-        , crRoot = rootNode
-        , crAnnotated = annRoot
-        }
+generateConstraintsCore polySyms =
+  generateConstraintsCoreWithEnv polySyms Map.empty
+
+-- | Like 'generateConstraintsCore' but with an external environment.
+generateConstraintsCoreWithEnv :: PolySyms -> ExternalEnv -> NormCoreExpr -> Either ConstraintError ConstraintResult
+generateConstraintsCoreWithEnv polySyms extEnv expr = do
+  let initialState = mkInitialStateWithPolySyms polySyms
+  ((_rootGen, initialEnv, rootNode, annRoot), finalState) <-
+    runConstraintM (buildRootExprWithEnv extEnv expr) initialState
+  let annEdges = collectAnnEdges annRoot
+      constraint = (buildConstraint finalState) {cAnnEdges = annEdges}
+  pure
+    ConstraintResult
+      { crConstraint = constraint,
+        crRoot = rootNode,
+        crAnnotated = annRoot,
+        crAnnSourceTypes = bsAnnSourceTypes finalState,
+        crInitialEnv = initialEnv
+      }
 
 data AnnEdges = AnnEdges
-    { aeAll :: IntSet.IntSet
-    , aeNoAnn :: IntSet.IntSet
-    , aeAnnTarget :: Maybe NodeId
-    }
+  { aeAll :: IntSet.IntSet,
+    aeNoAnn :: IntSet.IntSet,
+    aeAnnTarget :: Maybe NodeId
+  }
 
 collectAnnEdges :: AnnExpr -> IntSet.IntSet
 collectAnnEdges ann = aeAll (cata alg ann)
@@ -132,19 +151,22 @@ collectAnnEdges ann = aeAll (cata alg ann)
     emptyEdges = AnnEdges IntSet.empty IntSet.empty Nothing
 
     alg expr = case expr of
-        AVarF _ _ -> emptyEdges
-        ALitF _ _ -> emptyEdges
-        ALamF _ _ _ body _ -> body
-        AAppF fun arg _ _ _ ->
-            let allEdges = IntSet.union (aeAll fun) (aeAll arg)
-            in AnnEdges allEdges allEdges Nothing
-        ALetF _ _ _ _ _ rhs body trivialRoot ->
-            let bodyEdges =
-                    if aeAnnTarget body == Just trivialRoot
-                        then aeNoAnn body
-                        else aeAll body
-                allEdges = IntSet.union (aeAll rhs) bodyEdges
-            in AnnEdges allEdges allEdges Nothing
-        AAnnF inner target eid ->
-            let allEdges = IntSet.insert (getEdgeId eid) (aeAll inner)
-            in AnnEdges allEdges (aeAll inner) (Just target)
+      AVarF _ _ -> emptyEdges
+      ALitF _ _ -> emptyEdges
+      ALamF _ _ _ body _ -> body
+      AAppF fun arg _ _ _ ->
+        let allEdges = IntSet.union (aeAll fun) (aeAll arg)
+         in AnnEdges allEdges allEdges Nothing
+      ALetF _ _ _ _ _ rhs body trivialRoot ->
+        let bodyEdges =
+              if aeAnnTarget body == Just trivialRoot
+                then aeNoAnn body
+                else aeAll body
+            allEdges = IntSet.union (aeAll rhs) bodyEdges
+         in AnnEdges allEdges allEdges Nothing
+      AAnnF inner target eid ->
+        let allEdges = IntSet.insert (getEdgeId eid) (aeAll inner)
+         in AnnEdges allEdges (aeAll inner) (Just target)
+      AUnfoldF inner target eid ->
+        let allEdges = IntSet.insert (getEdgeId eid) (aeAll inner)
+         in AnnEdges allEdges (aeAll inner) (Just target)

@@ -93,6 +93,10 @@ evalInstantiationWith spec inst = eval inst
       InstSeqF (left, i1) (right, i2) ->
         \(k, env', t) ->
           case (left, right) of
+            (InstInside (InstBot tyArg), InstElim) ->
+              instAppFn tyArg (k, env', t)
+            (InstInside (InstApp tyArg), InstElim) ->
+              instAppFn tyArg (k, env', t)
             (InstInside (InstAbstr v), InstElim) ->
               case t of
                 TForall name _mbBound body ->

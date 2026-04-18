@@ -1,3 +1,5 @@
+{-# LANGUAGE GADTs #-}
+
 module MLF.Elab.TypeCheck
   ( Env (..),
     emptyEnv,
@@ -15,6 +17,7 @@ import MLF.Elab.Types
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Reify.TypeOps
   ( alphaEqType,
+    churchAwareEqType,
     firstNonContractiveRecursiveType,
     freeTypeVarsType,
     matchType,
@@ -51,9 +54,40 @@ typeCheckWithEnv env term = case term of
     aTy <- typeCheckWithEnv env a
     case fTy of
       TArrow argTy resTy ->
-        if argTy == TBottom || alphaEqType argTy aTy
-          then Right resTy
-          else Left (TCArgumentMismatch argTy aTy)
+        let argTy' = stripVacuousForallsDeep (inlineTypeEnvBounds env argTy)
+            aTy' = stripVacuousForallsDeep (inlineTypeEnvBounds env aTy)
+            peelLeadingUnboundedForalls ty = case ty of
+              TForall _ Nothing body -> peelLeadingUnboundedForalls body
+              _ -> ty
+            muCompatible =
+              case (argTy', aTy') of
+                (expectedMu@(TMu expectedName expectedBody), actualMu@(TMu actualName actualBody)) ->
+                  let expectedBody' = stripVacuousForallsDeep (substTypeCapture expectedName expectedMu expectedBody)
+                      actualBody' = stripVacuousForallsDeep (substTypeCapture actualName actualMu actualBody)
+                      expectedBodyPeeled = peelLeadingUnboundedForalls expectedBody'
+                      actualBodyPeeled = peelLeadingUnboundedForalls actualBody'
+                   in alphaEqType expectedBody' actualBody'
+                        || churchAwareEqType expectedBody' actualBody'
+                        || alphaEqType expectedBodyPeeled actualBodyPeeled
+                        || churchAwareEqType expectedBodyPeeled actualBodyPeeled
+                (expectedMu@(TMu expectedName expectedBody), actualTy) ->
+                  let expectedBody' = stripVacuousForallsDeep (substTypeCapture expectedName expectedMu expectedBody)
+                      expectedBodyPeeled = peelLeadingUnboundedForalls expectedBody'
+                      instantiatedExpected =
+                        case (expectedBody', actualTy) of
+                          (TForall resultName Nothing resultBody, TArrow resultTy _) ->
+                            let resultTy' = stripVacuousForallsDeep resultTy
+                             in Just (stripVacuousForallsDeep (substTypeCapture resultName resultTy' resultBody))
+                          _ -> Nothing
+                   in alphaEqType expectedBody' actualTy
+                        || churchAwareEqType expectedBody' actualTy
+                        || alphaEqType expectedBodyPeeled actualTy
+                        || churchAwareEqType expectedBodyPeeled actualTy
+                        || maybe False (\ty -> alphaEqType ty actualTy || churchAwareEqType ty actualTy) instantiatedExpected
+                _ -> False
+         in if argTy' == TBottom || alphaEqType argTy' aTy' || churchAwareEqType argTy' aTy' || muCompatible
+              then Right resTy
+              else Left (TCArgumentMismatch argTy' aTy')
       _ -> Left (TCExpectedArrow fTy)
   ELet v sch rhs body -> do
     ensureContractiveType (schemeToType sch)
@@ -87,9 +121,14 @@ typeCheckWithEnv env term = case term of
         bodyTy <- typeCheckWithEnv env body
         let expectedBodyTy = substTypeCapture name recursiveTy unfoldedBody
             expectedBodyTyAlias = collapseRecursiveAlias name recursiveTy expectedBodyTy
-        if alphaEqType expectedBodyTy bodyTy
-          || alphaEqType expectedBodyTyAlias bodyTy
-          || alphaEqType (TVar name) bodyTy
+            expectedBodyTy' = stripVacuousForallsDeep expectedBodyTy
+            expectedBodyTyAlias' = stripVacuousForallsDeep expectedBodyTyAlias
+            bodyTy' = stripVacuousForallsDeep bodyTy
+        if alphaEqType expectedBodyTy' bodyTy'
+          || alphaEqType expectedBodyTyAlias' bodyTy'
+          || churchAwareEqType expectedBodyTy' bodyTy'
+          || churchAwareEqType expectedBodyTyAlias' bodyTy'
+          || alphaEqType (TVar name) bodyTy'
           then Right recursiveTy
           else Left (TCRollBodyMismatch expectedBodyTy bodyTy)
       _ -> Left (TCExpectedRecursive recursiveTy)
@@ -118,7 +157,21 @@ ensureContractiveInstantiation inst = case inst of
 
 checkInstantiation :: Env -> ElabType -> Instantiation -> Either TypeCheckError ElabType
 checkInstantiation env ty inst =
-  (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst (0, env, ty)
+  let canonicalizeAppLikeInst inst0 = case inst0 of
+        InstApp ty' -> InstApp ty'
+        InstSeq (InstInside (InstBot ty')) InstElim -> InstApp ty'
+        InstSeq (InstInside (InstApp ty')) InstElim -> InstApp ty'
+        _ -> inst0
+      inst' = canonicalizeAppLikeInst inst
+      staleAppLikeInst inst0 = case inst0 of
+        InstApp {} -> True
+        InstSeq (InstInside (InstBot _)) InstElim -> True
+        InstSeq (InstInside (InstApp _)) InstElim -> True
+        _ -> False
+   in case ty of
+        TForall {} -> (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst' (0, env, ty)
+        _ | staleAppLikeInst inst' -> Right ty
+        _ -> (\(_, _, ty') -> ty') <$> evalInstantiationWith spec inst' (0, env, ty)
   where
     spec :: InstEvalSpec Env TypeCheckError
     spec =
@@ -160,9 +213,47 @@ freeTypeVarsEnv env =
     (Set.unions (map freeTypeVarsType (Map.elems (termEnv env))))
     (Set.unions (map freeTypeVarsType (Map.elems (typeEnv env))))
 
+inlineTypeEnvBounds :: Env -> ElabType -> ElabType
+inlineTypeEnvBounds env = go Set.empty
+  where
+    go seen ty = case ty of
+      TVar v
+        | v `Set.member` seen -> TVar v
+        | otherwise ->
+            case Map.lookup v (typeEnv env) of
+              Just bound
+                | bound /= TBottom -> go (Set.insert v seen) bound
+              _ -> TVar v
+      TArrow dom cod -> TArrow (go seen dom) (go seen cod)
+      TCon con args -> TCon con (fmap (go seen) args)
+      TBase _ -> ty
+      TBottom -> ty
+      TForall v mb body ->
+        let seen' = Set.insert v seen
+         in TForall v (fmap (goBound seen') mb) (go seen' body)
+      TMu v body ->
+        let seen' = Set.insert v seen
+         in TMu v (go seen' body)
+
+    goBound seen bound = case bound of
+      TArrow dom cod -> TArrow (go seen dom) (go seen cod)
+      TCon con args -> TCon con (fmap (go seen) args)
+      TBase _ -> bound
+      TBottom -> bound
+      TForall v mb body ->
+        let seen' = Set.insert v seen
+         in TForall v (fmap (goBound seen') mb) (go seen' body)
+      TMu v body ->
+        let seen' = Set.insert v seen
+         in TMu v (go seen' body)
+
 letSchemeAccepts :: ElabType -> ElabType -> Bool
 letSchemeAccepts rhsTy schTy =
-  alphaEqType rhsTy schTy || rhsIsInstanceOfScheme rhsTy schTy
+  let rhsTy' = stripVacuousForallsDeep rhsTy
+      schTy' = stripVacuousForallsDeep schTy
+   in alphaEqType rhsTy' schTy'
+        || churchAwareEqType rhsTy' schTy'
+        || rhsIsInstanceOfScheme rhsTy' schTy'
 
 rhsIsInstanceOfScheme :: ElabType -> ElabType -> Bool
 rhsIsInstanceOfScheme rhsTy schTy =
@@ -178,6 +269,27 @@ rhsIsInstanceOfScheme rhsTy schTy =
         && case matchType (Set.fromList schBinderNames) schBody rhsBody of
           Right _ -> True
           Left _ -> False
+
+stripVacuousForallsDeep :: ElabType -> ElabType
+stripVacuousForallsDeep ty = case ty of
+  TForall name mb body
+    | name `Set.notMember` freeTypeVarsType body ->
+        stripVacuousForallsDeep body
+    | otherwise ->
+        TForall name (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
+  TArrow dom cod -> TArrow (stripVacuousForallsDeep dom) (stripVacuousForallsDeep cod)
+  TCon con args -> TCon con (fmap stripVacuousForallsDeep args)
+  TMu name body -> TMu name (stripVacuousForallsDeep body)
+  _ -> ty
+
+stripVacuousForallsDeepBound :: BoundType -> BoundType
+stripVacuousForallsDeepBound bound = case bound of
+  TArrow dom cod -> TArrow (stripVacuousForallsDeep dom) (stripVacuousForallsDeep cod)
+  TCon con args -> TCon con (fmap stripVacuousForallsDeep args)
+  TForall name mb body ->
+    TForall name (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
+  TMu name body -> TMu name (stripVacuousForallsDeep body)
+  _ -> bound
 
 rebuildForalls :: [(String, Maybe BoundType)] -> ElabType -> ElabType
 rebuildForalls binds body = foldr (\(v, bnd) t -> TForall v bnd t) body binds

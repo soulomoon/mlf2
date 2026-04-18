@@ -111,7 +111,7 @@ data RecursiveCandidateProof
   | RecursiveCandidateRetainedChild RetainedChildProof
   deriving (Eq, Show)
 
-uniqueCandidate :: Eq a => [a] -> UniqueCandidate a
+uniqueCandidate :: (Eq a) => [a] -> UniqueCandidate a
 uniqueCandidate = selectUniqueCandidate
 
 -- | Core implementation of computeResultTypeFallback (non-annotated-lambda case).
@@ -141,7 +141,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
         IntMap.fromListWith
           (+)
           [ (getNodeId (etRoot tr), 1 :: Int)
-          | tr <- IntMap.elems edgeTraces
+            | tr <- IntMap.elems edgeTraces
           ]
   let (rootForTypeAnn, rootForTypePreAnn) =
         resultTypeRoots
@@ -160,6 +160,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
       -- This case should be handled by the facade, not called directly.
       -- If we reach here, it means the facade didn't properly dispatch.
       Left (ValidationFailed ["computeResultTypeFallback called with AAnn - use facade instead"])
+    AUnfold _ _ _ ->
+      Left (ValidationFailed ["computeResultTypeFallback called with AUnfold - use facade instead"])
     _ -> do
       let rootC = canonical rootForType
           nodes = cNodes (pvConstraint presolutionView)
@@ -181,8 +183,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
              in go IntSet.empty start
           rootInstRoots =
             [ etRoot tr
-            | EdgeId eid <- collectEdges rootForTypeAnn,
-              Just tr <- [IntMap.lookup eid edgeTraces]
+              | EdgeId eid <- collectEdges rootForTypeAnn,
+                Just tr <- [IntMap.lookup eid edgeTraces]
             ]
           rootHasMultiInst =
             any
@@ -202,8 +204,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
               TBase base ->
                 listToMaybe
                   [ tnId node
-                  | node@TyBase { tnBase = nodeBase } <- nodeList,
-                    nodeBase == base
+                    | node@TyBase {tnBase = nodeBase} <- nodeList,
+                      nodeBase == base
                   ]
               _ -> Nothing
           instAppBasesFromWitness funEid =
@@ -213,8 +215,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                   Right inst ->
                     IntSet.fromList
                       [ getNodeId nid
-                      | ty <- collectInstApps inst,
-                        Just nid <- [baseNodeForTy ty]
+                        | ty <- collectInstApps inst,
+                          Just nid <- [baseNodeForTy ty]
                       ]
                   Left _ -> IntSet.empty
               Nothing -> IntSet.empty
@@ -231,8 +233,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
           edgeBaseBounds =
             IntSet.fromList
               [ getNodeId baseC
-              | ew <- IntMap.elems edgeWitnesses,
-                Just baseC <- [argBounds (ewRight ew)]
+                | ew <- IntMap.elems edgeWitnesses,
+                  Just baseC <- [argBounds (ewRight ew)]
               ]
           rootArgBaseBounds =
             let argEdgeBases eid =
@@ -241,10 +243,10 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     Just tr ->
                       IntSet.fromList
                         [ getNodeId baseC
-                        | (binder, arg) <- etBinderArgs tr,
-                          let argNode =
-                                instArgNode tr binder arg,
-                          Just baseC <- [argBounds argNode]
+                          | (binder, arg) <- etBinderArgs tr,
+                            let argNode =
+                                  instArgNode tr binder arg,
+                            Just baseC <- [argBounds argNode]
                         ]
              in case stripAnn rootForTypeAnn of
                   AApp _ arg funEid argEid _ ->
@@ -264,27 +266,27 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                   IntMap.fromListWith
                     IntSet.union
                     [ (getNodeId (canonical binderRoot), IntSet.singleton (getNodeId baseC))
-                    | tr <- IntMap.elems edgeTraces,
-                      let copyMapInv =
-                            IntMap.fromListWith
-                              min
-                              [ (getNodeId copyN, getNodeId origN)
-                              | (origKey, copyN) <- IntMap.toList (getCopyMapping (etCopyMap tr)),
-                                let origN = NodeId origKey
-                              ],
-                      (binder, arg) <- etBinderArgs tr,
-                      let binderRoot =
-                            case IntMap.lookup (getNodeId binder) copyMapInv of
-                              Just origKey -> NodeId origKey
-                              Nothing -> binder,
-                      let argNode = instArgNode tr binder arg,
-                      Just baseC <- [argBounds argNode]
+                      | tr <- IntMap.elems edgeTraces,
+                        let copyMapInv =
+                              IntMap.fromListWith
+                                min
+                                [ (getNodeId copyN, getNodeId origN)
+                                  | (origKey, copyN) <- IntMap.toList (getCopyMapping (etCopyMap tr)),
+                                    let origN = NodeId origKey
+                                ],
+                        (binder, arg) <- etBinderArgs tr,
+                        let binderRoot =
+                              case IntMap.lookup (getNodeId binder) copyMapInv of
+                                Just origKey -> NodeId origKey
+                                Nothing -> binder,
+                        let argNode = instArgNode tr binder arg,
+                        Just baseC <- [argBounds argNode]
                     ]
              in IntSet.union
                   ( IntSet.unions
                       [ bounds
-                      | bounds <- IntMap.elems binderBounds,
-                        IntSet.size bounds > 1
+                        | bounds <- IntMap.elems binderBounds,
+                          IntSet.size bounds > 1
                       ]
                   )
                   edgeBaseBounds
@@ -293,10 +295,10 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                   IntMap.fromListWith
                     IntSet.union
                     [ (getNodeId (canonical (etRoot tr)), IntSet.singleton (getNodeId baseC))
-                    | tr <- IntMap.elems edgeTraces,
-                      (binder, arg) <- etBinderArgs tr,
-                      let argNode = instArgNode tr binder arg,
-                      Just baseC <- [argBounds argNode]
+                      | tr <- IntMap.elems edgeTraces,
+                        (binder, arg) <- etBinderArgs tr,
+                        let argNode = instArgNode tr binder arg,
+                        Just baseC <- [argBounds argNode]
                     ]
                 multiBase =
                   any (\s -> IntSet.size s > 1) (IntMap.elems rootBounds')
@@ -373,21 +375,21 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
         ( let showBase tr =
                 let bases =
                       [ resolveBaseBoundCanonical argNode
-                      | (binder, arg) <- etBinderArgs tr,
-                        let argNode =
-                              case lookupCopy binder (etCopyMap tr) of
-                                Just copyN -> copyN
-                                Nothing -> arg
+                        | (binder, arg) <- etBinderArgs tr,
+                          let argNode =
+                                case lookupCopy binder (etCopyMap tr) of
+                                  Just copyN -> copyN
+                                  Nothing -> arg
                       ]
                  in (etRoot tr, bases)
               perEdge = map showBase (IntMap.elems edgeTraces)
               edgeRightBases =
                 [ (EdgeId eid, ewRight ew, resolveBaseBoundCanonical (ewRight ew))
-                | (eid, ew) <- IntMap.toList edgeWitnesses
+                  | (eid, ew) <- IntMap.toList edgeWitnesses
                 ]
               edgeExpansionsList =
                 [ (EdgeId eid, expn)
-                | (eid, expn) <- IntMap.toList edgeExpansions
+                  | (eid, expn) <- IntMap.toList edgeExpansions
                 ]
            in "runPipelineElab: instArgBaseBounds="
                 ++ show instArgBaseBounds
@@ -412,7 +414,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                 ++ " baseNames="
                 ++ show
                   [ nodeBase
-                  | TyBase { tnBase = nodeBase } <- map snd (toListNode nodes)
+                    | TyBase {tnBase = nodeBase} <- map snd (toListNode nodes)
                   ]
                 ++ " perEdgeBases="
                 ++ show perEdge
@@ -698,8 +700,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                       instRootRecursiveTargetSelection =
                         uniqueCandidate
                           [ recursiveTarget
-                          | instRoot <- rootInstRoots,
-                            recursiveTarget <- recursiveTargetsFrom instRoot
+                            | instRoot <- rootInstRoots,
+                              recursiveTarget <- recursiveTargetsFrom instRoot
                           ]
                       liftSelection selection =
                         case selection of
@@ -726,10 +728,10 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                               Just (boundHasForallFrom chosenScopeRoot bndC)
                             _ -> Nothing
                      in (childC, childTarget, bndC, bndRoot, chosenTargetProof, hasForall)
-                  | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (pvCanonicalConstraint retainedChildPresolutionView)),
-                    TypeRef child <- [nodeRefFromKey childKey],
-                    sameLocalTypeLane parentRef (canonicalFinal child),
-                    Just bnd <- [pvLookupVarBound retainedChildPresolutionView (canonicalFinal child)]
+                    | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (pvCanonicalConstraint retainedChildPresolutionView)),
+                      TypeRef child <- [nodeRefFromKey childKey],
+                      sameLocalTypeLane parentRef (canonicalFinal child),
+                      Just bnd <- [pvLookupVarBound retainedChildPresolutionView (canonicalFinal child)]
                   ]
                 matchingCandidates =
                   [ RetainedChildProof
@@ -738,8 +740,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                         retainedChildProofChosenTarget = chosenTarget,
                         retainedChildProofChosenScopeRoot = chosenScopeRoot
                       }
-                  | (child, childTarget, _bnd, bndRoot, UniqueCandidate (chosenTarget, chosenScopeRoot), Just hasForall) <- candidates,
-                    selectedSameWrapperNestedForallTarget childTarget bndRoot hasForall
+                    | (child, childTarget, _bnd, bndRoot, UniqueCandidate (chosenTarget, chosenScopeRoot), Just hasForall) <- candidates,
+                      selectedSameWrapperNestedForallTarget childTarget bndRoot hasForall
                   ]
                 matchingCandidateSelection =
                   uniqueCandidate matchingCandidates
@@ -768,7 +770,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                             ++ " candidates="
                             ++ show
                               [ (child, childTarget, bnd, bndRoot, chosenTargetProof, hasForall)
-                              | (child, childTarget, bnd, bndRoot, chosenTargetProof, hasForall) <- candidates
+                                | (child, childTarget, bnd, bndRoot, chosenTargetProof, hasForall) <- candidates
                               ]
                             ++ " matchingCandidateSelection="
                             ++ show matchingCandidateSelection
@@ -883,7 +885,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     nodes' =
                       fromListNode
                         [ (nid, if nid == baseRoot then adjustNode node else node)
-                        | (nid, node) <- toListNode nodes0
+                          | (nid, node) <- toListNode nodes0
                         ]
                     baseConstraint' = baseConstraint {cNodes = nodes'}
                  in bindParentsGa {gaBaseConstraint = baseConstraint'}

@@ -51,7 +51,7 @@ import Control.Applicative ((<|>))
 import Control.Monad (foldM, unless, when)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import Data.List (elemIndex, findIndex)
+import Data.List (elemIndex, findIndex, sortBy)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, listToMaybe, mapMaybe)
 import qualified Data.Set as Set
@@ -86,8 +86,7 @@ import qualified MLF.Util.OrderKey as OrderKey
 import MLF.Util.Trace (traceGeneralize)
 import Text.Read (readMaybe)
 
-newtype ApplyFun i
-  = ApplyFun {runApplyFun :: Set.Set String -> Ty i}
+newtype ApplyFun i = ApplyFun {runApplyFun :: Set.Set String -> Ty i}
 
 phiWithSchemeOmega ::
   OmegaContext ->
@@ -235,8 +234,8 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     schemeRootGenMap =
       IntMap.fromList
         [ (getNodeId (canonicalNode root), gnId gen)
-        | gen <- NodeAccess.allGenNodes constraint,
-          root <- gnSchemes gen
+          | gen <- NodeAccess.allGenNodes constraint,
+            root <- gnSchemes gen
         ]
 
     genChildrenMap =
@@ -245,17 +244,17 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         [ ( getGenNodeId gid,
             [canonicalNode child]
           )
-        | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents,
-          GenRef gid <- [parentRef],
-          TypeRef child <- [nodeRefFromKey childKey]
+          | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents,
+            GenRef gid <- [parentRef],
+            TypeRef child <- [nodeRefFromKey childKey]
         ]
 
     bindKids rootC nid =
       let localChildren =
             [ canonicalNode child
-            | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents,
-              TypeRef child <- [nodeRefFromKey childKey],
-              parentRefCanon parentRef == TypeRef (canonicalNode nid)
+              | (childKey, (parentRef, _flag)) <- IntMap.toList bindParents,
+                TypeRef child <- [nodeRefFromKey childKey],
+                parentRefCanon parentRef == TypeRef (canonicalNode nid)
             ]
           genChildren =
             case IntMap.lookup (getNodeId (canonicalNode nid)) schemeRootGenMap of
@@ -270,7 +269,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
        in IntMap.elems $
             IntMap.fromList
               [ (getNodeId child, child)
-              | child <- localChildren ++ genChildren ++ siblingGenChildren
+                | child <- localChildren ++ genChildren ++ siblingGenChildren
               ]
 
     parentRefCanon (TypeRef parentN) = TypeRef (canonicalNode parentN)
@@ -345,9 +344,9 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                       (Left err, Left _) -> Left err
               entries =
                 [ (name, ty)
-                | (binder, arg) <- etBinderArgs tr,
-                  Just name <- [nameFor binder],
-                  Right ty <- [reifyArg arg]
+                  | (binder, arg) <- etBinderArgs tr,
+                    Just name <- [nameFor binder],
+                    Right ty <- [reifyArg arg]
                 ]
            in Map.fromList entries
         _ -> Map.empty
@@ -628,8 +627,8 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         else do
           let missingIdPositions =
                 [ i
-                | (i, Nothing) <- zip [(0 :: Int) ..] ids,
-                  i < schemeArity
+                  | (i, Nothing) <- zip [(0 :: Int) ..] ids,
+                    i < schemeArity
                 ]
                 where
                   schemeArity = case siScheme si of
@@ -638,9 +637,9 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
               orderKeysActive = orderKeysForBinders sourceBinders
               missingKeyBinders =
                 [ nid
-                | Just nid <- ids,
-                  isSchemeBinder nid,
-                  not (IntMap.member (getNodeId (canonicalNode nid)) orderKeysActive)
+                  | Just nid <- ids,
+                    isSchemeBinder nid,
+                    not (IntMap.member (getNodeId (canonicalNode nid)) orderKeysActive)
                 ]
           unless (null missingIdPositions) $
             Left $
@@ -667,9 +666,9 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
               Nothing -> []
               Just bnd ->
                 [ j
-                | v <- freeTypeVarsList bnd,
-                  v /= names !! i,
-                  Just j <- [nameIndex v]
+                  | v <- freeTypeVarsList bnd,
+                    v /= names !! i,
+                    Just j <- [nameIndex v]
                 ]
 
           cmpIdx :: Int -> Int -> Ordering
@@ -690,11 +689,15 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
           indices = [0 .. n - 1]
 
       idxs <-
-        topoSortBy
+        case topoSortBy
           "PhiReorder: cycle in bound dependencies"
           cmpIdx
           depsFor
-          indices
+          indices of
+          Right ordered -> Right ordered
+          Left (InstantiationError "PhiReorder: cycle in bound dependencies") ->
+            Right (sortBy cmpIdx indices)
+          Left err -> Left err
       pure [ids !! i | i <- idxs]
 
     reorderTo :: VSpine -> ElabType -> [Maybe NodeId] -> [Maybe NodeId] -> Either ElabError (Instantiation, ElabType, [Maybe NodeId])
@@ -767,15 +770,13 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                         argTy <- reifyTypeArg namedSet' Nothing (canonicalNode arg)
                         let boundTy = maybe TBottom tyToElab mbBound
                         if alphaEqType argTy boundTy
-                          then
-                            -- Bounded-match: bound already equals graft arg, so
-                            -- OpGraft is a no-op. The adjacent OpWeaken will emit
-                            -- InstElim which substitutes the existing bound (thesis Def. 14.2.1).
+                          then -- Bounded-match: bound already equals graft arg, so
+                          -- OpGraft is a no-op. The adjacent OpWeaken will emit
+                          -- InstElim which substitutes the existing bound (thesis Def. 14.2.1).
                             go binderKeys namedSet' vs accum rest lookupBinder
                           else
                             if argTy == TBottom
-                              then
-                                -- Bottom arg on bounded binder: no-op (OpWeaken will emit InstElim)
+                              then -- Bottom arg on bounded binder: no-op (OpWeaken will emit InstElim)
                                 go binderKeys namedSet' vs accum rest lookupBinder
                               else
                                 Left $
@@ -892,8 +893,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
         nReplay <- resolveTraceBinderTarget' True "OpMerge(n)" n
         mReplay <- resolveTraceBinderTarget' True "OpMerge(m)" m
         if isRigidNode nReplay
-          then
-            go binderKeys namedSet' vs accum rest lookupBinder
+          then go binderKeys namedSet' vs accum rest lookupBinder
           else
             if isRigidNode mReplay
               then
@@ -1035,12 +1035,12 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                   "nSource=" ++ show nSource ++ ", nAdopt=" ++ show nAdopt ++ ", nOrig=" ++ show nOrig ++ ", nC=" ++ show nC,
                   "interiorSet=" ++ show (IntSet.toList interiorSet)
                 ]
-          else
-            -- Paper Fig. 10: Raise(n) introduces a fresh quantifier one level higher,
-            -- bounds it by Txi(n), then aliases/eliminates the old binder.
-            --
-            -- For spine binders: use the existing logic
-            -- For non-spine nodes: use binding edges + prec ordering to compute context
+          else -- Paper Fig. 10: Raise(n) introduces a fresh quantifier one level higher,
+          -- bounds it by Txi(n), then aliases/eliminates the old binder.
+          --
+          -- For spine binders: use the existing logic
+          -- For non-spine nodes: use binding edges + prec ordering to compute context
+
             let mbIndex = lookupBinderIndex' binderKeys (vSpineIds vs) nC
              in case debugPhi ("OpRaise: binderIndex=" ++ show mbIndex) mbIndex of
                   Just i -> do
@@ -1238,13 +1238,13 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
       let nameToId =
             Map.fromList
               [ (nm, NodeId k)
-              | (k, nm) <- IntMap.toList (siSubst si')
+                | (k, nm) <- IntMap.toList (siSubst si')
               ]
           (qs, _) = splitForalls ty
        in [ case Map.lookup nm nameToId of
               Just nid -> Just nid
               Nothing -> parseBinderId nm
-          | (nm, _) <- qs
+            | (nm, _) <- qs
           ]
 
     parseBinderId :: String -> Maybe NodeId

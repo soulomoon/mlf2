@@ -1,19 +1,20 @@
 {-# LANGUAGE PatternSynonyms #-}
-module MLF.Elab.Pipeline (
-    ElabType,
-    Ty(..),
+
+module MLF.Elab.Pipeline
+  ( ElabType,
+    Ty (..),
     BoundType,
     ElabScheme,
     pattern Forall,
-    ElabTerm(..),
-    Instantiation(..),
-    ElabError(..),
-    TypeCheckError(..),
-    PipelineConfig(..),
+    ElabTerm (..),
+    Instantiation (..),
+    ElabError (..),
+    TypeCheckError (..),
+    PipelineConfig (..),
     defaultPipelineConfig,
-    TraceConfig(..),
+    TraceConfig (..),
     defaultTraceConfig,
-    PipelineError(..),
+    PipelineError (..),
     renderPipelineError,
     liftPipelineError,
     fromConstraintError,
@@ -22,8 +23,8 @@ module MLF.Elab.Pipeline (
     fromSolveError,
     fromElabError,
     fromTypeCheckError,
-    Pretty(..),
-    PrettyDisplay(..),
+    Pretty (..),
+    PrettyDisplay (..),
     reifyType,
     reifyTypeWithNames,
     reifyTypeWithNamedSet,
@@ -34,62 +35,73 @@ module MLF.Elab.Pipeline (
     schemeFromType,
     freeTypeVarsType,
     sigmaReorder,
+
     -- * Witness translation (production path)
     phiFromEdgeWitnessWithTrace,
     runPipelineElab,
     runPipelineElabChecked,
     runPipelineElabWithConfig,
     runPipelineElabCheckedWithConfig,
+    runPipelineElabWithEnv,
+    runPipelineElabWithConfigAndEnv,
+    ExternalEnv,
     applyRedirectsToAnn,
     canonicalizeAnn,
+
     -- * Exported for testing/debugging
     chaseRedirects,
-    SchemeInfo(..),
-    Env(..),
+    SchemeInfo (..),
+    Env (..),
     namedNodes,
+
     -- * Context representation for non-spine Raise (paper Fig. 10)
-    ContextStep(..),
+    ContextStep (..),
     contextToNodeBound,
     selectMinPrecInsertionIndex,
+
     -- * Phase 7 helpers
     typeCheck,
     typeCheckWithEnv,
     checkInstantiation,
     isValue,
     step,
-    normalize
-) where
+    normalize,
+  )
+where
 
-import MLF.Elab.Types
-import MLF.Elab.PipelineConfig (PipelineConfig(..), defaultPipelineConfig)
-import MLF.Elab.PipelineError
-    ( PipelineError(..)
-    , renderPipelineError
-    , liftPipelineError
-    , fromConstraintError
-    , fromCycleError
-    , fromPresolutionError
-    , fromSolveError
-    , fromElabError
-    , fromTypeCheckError
-    )
-import MLF.Util.Trace (TraceConfig(..), defaultTraceConfig)
-import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
-import MLF.Elab.TypeCheck (Env(..), checkInstantiation, typeCheck, typeCheckWithEnv)
-import MLF.Elab.Reduce (isValue, normalize, step)
 import MLF.Elab.Phi (contextToNodeBound, phiFromEdgeWitnessWithTrace)
+import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
+import MLF.Elab.PipelineError
+  ( PipelineError (..),
+    fromConstraintError,
+    fromCycleError,
+    fromElabError,
+    fromPresolutionError,
+    fromSolveError,
+    fromTypeCheckError,
+    liftPipelineError,
+    renderPipelineError,
+  )
+import MLF.Elab.Reduce (isValue, normalize, step)
+import MLF.Elab.Run
+  ( applyRedirectsToAnn,
+    canonicalizeAnn,
+    chaseRedirects,
+    runPipelineElab,
+    runPipelineElabChecked,
+    runPipelineElabCheckedWithConfig,
+    runPipelineElabWithConfig,
+    runPipelineElabWithConfigAndEnv,
+    runPipelineElabWithEnv,
+  )
+import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
+import MLF.Elab.Sigma (sigmaReorder)
+import MLF.Elab.TypeCheck (Env (..), checkInstantiation, typeCheck, typeCheckWithEnv)
+import MLF.Elab.Types
+import MLF.Frontend.ConstraintGen (ExternalEnv)
 import MLF.Reify.Core (namedNodes, reifyBoundWithNames, reifyType, reifyTypeWithNamedSet, reifyTypeWithNames)
 import MLF.Reify.TypeOps (freeTypeVarsType)
-import MLF.Elab.Run
-    ( applyRedirectsToAnn
-    , canonicalizeAnn
-    , chaseRedirects
-    , runPipelineElab
-    , runPipelineElabChecked
-    , runPipelineElabWithConfig
-    , runPipelineElabCheckedWithConfig
-    )
-import MLF.Elab.Sigma (sigmaReorder)
+import MLF.Util.Trace (TraceConfig (..), defaultTraceConfig)
 
 -- `runPipelineElab` / redirect helpers live in `MLF.Elab.Run`.

@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>mlf4 / mlf2 Detailed Module Import Graph</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'JetBrains Mono', monospace; background: #020617; min-height: 100vh; padding: 2rem; color: white; }
+    .container { max-width: 1660px; margin: 0 auto; }
+    .header { margin-bottom: 2rem; }
+    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .pulse-dot { width: 12px; height: 12px; background: #22d3ee; border-radius: 50%; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.45;} }
+    h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.025em; }
+    .subtitle { color: #94a3b8; font-size: 0.9rem; margin-left: 1.75rem; line-height: 1.5; max-width: 1260px; }
+    .diagram-container, .table-card { background: rgba(15, 23, 42, 0.5); border-radius: 1rem; border: 1px solid #1e293b; padding: 1.25rem; overflow-x: auto; }
+    svg { width: 100%; display: block; }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem; margin-top: 1.5rem; }
+    .card { background: rgba(15, 23, 42, 0.5); border-radius: 0.75rem; border: 1px solid #1e293b; padding: 1.1rem; }
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .cyan { background:#22d3ee; } .emerald { background:#34d399; } .violet { background:#a78bfa; }
+    .card h3 { font-size: 0.9rem; font-weight: 600; }
+    .card ul { list-style: none; color: #94a3b8; font-size: 0.78rem; line-height: 1.6; }
+    .card li { margin-bottom: 0.35rem; }
+    .tables { display: grid; grid-template-columns: 1fr 1.35fr; gap: 1rem; margin-top: 1.5rem; align-items: start; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.75rem; color: #cbd5e1; }
+    th, td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid #1e293b; vertical-align: top; }
+    th { color: white; font-size: 0.74rem; }
+    code { color: #93c5fd; }
+    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="header-row"><div class="pulse-dot"></div><h1>mlf4 / mlf2 Detailed Module Import Graph</h1></div>
+      <p class="subtitle">这是更细的 <code>module-to-module</code> 版本：不再只画 domain，而是直接把模块节点展开成一个聚焦子图。为了可读性，我没有硬塞进 repo 全部 190+ 个 Haskell 模块；这张图聚焦公开入口、它们的近邻、以及高连接度核心模块，能更真实地看出具体 import 链条。</p>
+    </div>
+    <div class="diagram-container"><svg viewBox="0 0 1570 980">
+<defs>
+  <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+    <polygon points="0 0, 8 3, 0 6" fill="#64748b" />
+  </marker>
+  <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+    <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+  </pattern>
+</defs>
+<rect width="100%" height="100%" fill="url(#grid)" />
+<rect x="20" y="20" width="1530" height="850" rx="16" fill="rgba(251, 191, 36, 0.04)" stroke="#fbbf24" stroke-width="1.2" stroke-dasharray="8,4"/>
+<text x="38" y="44" fill="#fbbf24" font-size="11" font-weight="600">Module-to-module import graph (focused subset around public entrypoints + major hubs)</text>
+<rect x="30" y="60" width="200" height="760" rx="12" fill="rgba(15,23,42,0.18)" stroke="#334155" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="42" y="78" fill="#fbbf24" font-size="10" font-weight="600">Runners / research</text>
+<rect x="250" y="60" width="220" height="760" rx="12" fill="rgba(15,23,42,0.18)" stroke="#334155" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="262" y="78" fill="#22d3ee" font-size="10" font-weight="600">Public facade</text>
+<rect x="490" y="60" width="240" height="760" rx="12" fill="rgba(15,23,42,0.18)" stroke="#334155" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="502" y="78" fill="#22d3ee" font-size="10" font-weight="600">Frontend / parse</text>
+<rect x="750" y="60" width="265" height="760" rx="12" fill="rgba(15,23,42,0.18)" stroke="#334155" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="762" y="78" fill="#34d399" font-size="10" font-weight="600">Constraint / presolution</text>
+<rect x="1035" y="60" width="245" height="760" rx="12" fill="rgba(15,23,42,0.18)" stroke="#334155" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="1047" y="78" fill="#a78bfa" font-size="10" font-weight="600">Elaboration</text>
+<rect x="1305" y="60" width="245" height="760" rx="12" fill="rgba(15,23,42,0.18)" stroke="#334155" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="1317" y="78" fill="#94a3b8" font-size="10" font-weight="600">Reify / util / support</text>
+<path d="M 460 142.0 C 488 142.0, 472 256.0, 500 256.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 142.0 C 488 142.0, 472 560.0, 500 560.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 142.0 C 488 142.0, 472 408.0, 500 408.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 142.0 C 488 142.0, 472 750.0, 500 750.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 142.0 C 488 142.0, 472 598.0, 500 598.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 142.0 C 488 142.0, 472 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 142.0 C 488 142.0, 472 218.0, 500 218.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1005 142.0 C 1031 142.0, 786 332.0, 760 332.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1005 142.0 C 1031 142.0, 786 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1005 142.0 C 1031 142.0, 786 218.0, 760 218.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1005 370.0 C 1031 370.0, 786 332.0, 760 332.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1005 370.0 C 1031 370.0, 786 408.0, 760 408.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1005 256.0 C 1031 256.0, 786 180.0, 760 180.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1005 256.0 C 1031 256.0, 786 294.0, 760 294.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1005 180.0 C 1031 180.0, 786 142.0, 760 142.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1005 180.0 C 1031 180.0, 786 294.0, 760 294.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1005 180.0 C 1031 180.0, 786 332.0, 760 332.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1005 180.0 C 1031 180.0, 786 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1005 180.0 C 1031 180.0, 786 218.0, 760 218.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1005 180.0 C 1104.2 180.0, 1215.8 142.0, 1315 142.0" fill="none" stroke="#34d399" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1005 294.0 C 1031 294.0, 786 408.0, 760 408.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1005 104.0 C 1031 104.0, 786 408.0, 760 408.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 446.0 C 1298 446.0, 1287 180.0, 1315 180.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 446.0 C 1433.2 446.0, 596.8 256.0, 760 256.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 446.0 C 1433.2 446.0, 596.8 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 446.0 C 1296 446.0, 1071 256.0, 1045 256.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 446.0 C 1296 446.0, 1071 484.0, 1045 484.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 446.0 C 1296 446.0, 1071 598.0, 1045 598.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 446.0 C 1296 446.0, 1071 522.0, 1045 522.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 446.0 C 1296 446.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 446.0 C 1516.4 446.0, 253.6 180.0, 500 180.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 446.0 C 1516.4 446.0, 253.6 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 446.0 C 1298 446.0, 1287 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 256.0 C 1433.2 256.0, 596.8 256.0, 760 256.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 256.0 C 1433.2 256.0, 596.8 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 256.0 C 1296 256.0, 1071 484.0, 1045 484.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 256.0 C 1296 256.0, 1071 636.0, 1045 636.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 256.0 C 1296 256.0, 1071 522.0, 1045 522.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 256.0 C 1296 256.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 256.0 C 1516.4 256.0, 253.6 180.0, 500 180.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 256.0 C 1516.4 256.0, 253.6 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 256.0 C 1298 256.0, 1287 218.0, 1315 218.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 256.0 C 1298 256.0, 1287 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 142.0 C 1433.2 142.0, 596.8 294.0, 760 294.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 142.0 C 1433.2 142.0, 596.8 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 142.0 C 1433.2 142.0, 596.8 218.0, 760 218.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 142.0 C 1296 142.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 142.0 C 1298 142.0, 1287 218.0, 1315 218.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 142.0 C 1298 142.0, 1287 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 142.0 C 1298 142.0, 1287 256.0, 1315 256.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 484.0 C 1298 484.0, 1287 180.0, 1315 180.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 484.0 C 1296 484.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 484.0 C 1298 484.0, 1287 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 294.0 C 1433.2 294.0, 596.8 142.0, 760 142.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 294.0 C 1433.2 294.0, 596.8 256.0, 760 256.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 294.0 C 1433.2 294.0, 596.8 180.0, 760 180.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 294.0 C 1433.2 294.0, 596.8 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 294.0 C 1296 294.0, 1071 484.0, 1045 484.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 294.0 C 1296 294.0, 1071 712.0, 1045 712.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 294.0 C 1296 294.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 294.0 C 1298 294.0, 1287 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 294.0 C 1298 294.0, 1287 256.0, 1315 256.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1296 332.0, 1071 484.0, 1045 484.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1296 332.0, 1071 636.0, 1045 636.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1296 332.0, 1071 750.0, 1045 750.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1296 332.0, 1071 560.0, 1045 560.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1296 332.0, 1071 598.0, 1045 598.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1296 332.0, 1071 674.0, 1045 674.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1296 332.0, 1071 218.0, 1045 218.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1296 332.0, 1071 712.0, 1045 712.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1296 332.0, 1071 522.0, 1045 522.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1296 332.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1516.4 332.0, 253.6 142.0, 500 142.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1298 332.0, 1287 218.0, 1315 218.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 332.0 C 1298 332.0, 1287 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 560.0 C 1433.2 560.0, 596.8 370.0, 760 370.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 560.0 C 1433.2 560.0, 596.8 256.0, 760 256.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 560.0 C 1296 560.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 560.0 C 1516.4 560.0, 253.6 142.0, 500 142.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 598.0 C 1298 598.0, 1287 180.0, 1315 180.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 598.0 C 1296 598.0, 1071 484.0, 1045 484.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 598.0 C 1296 598.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 598.0 C 1298 598.0, 1287 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 674.0 C 1296 674.0, 1071 180.0, 1045 180.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 218.0 C 1433.2 218.0, 596.8 256.0, 760 256.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 218.0 C 1433.2 218.0, 596.8 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 218.0 C 1296 218.0, 1071 142.0, 1045 142.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 218.0 C 1296 218.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 218.0 C 1516.4 218.0, 253.6 142.0, 500 142.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 218.0 C 1298 218.0, 1287 142.0, 1315 142.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1433.2 180.0, 596.8 370.0, 760 370.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1433.2 180.0, 596.8 256.0, 760 256.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1433.2 180.0, 596.8 180.0, 760 180.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1433.2 180.0, 596.8 294.0, 760 294.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1433.2 180.0, 596.8 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1433.2 180.0, 596.8 408.0, 760 408.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1296 180.0, 1071 484.0, 1045 484.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1296 180.0, 1071 750.0, 1045 750.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1296 180.0, 1071 560.0, 1045 560.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1296 180.0, 1071 218.0, 1045 218.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1296 180.0, 1071 522.0, 1045 522.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1296 180.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1516.4 180.0, 253.6 142.0, 500 142.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1516.4 180.0, 253.6 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 180.0 C 1298 180.0, 1287 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 370.0 C 1433.2 370.0, 596.8 218.0, 760 218.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 370.0 C 1296 370.0, 1071 142.0, 1045 142.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 370.0 C 1296 370.0, 1071 484.0, 1045 484.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 370.0 C 1296 370.0, 1071 636.0, 1045 636.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 370.0 C 1296 370.0, 1071 218.0, 1045 218.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 370.0 C 1296 370.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 370.0 C 1516.4 370.0, 253.6 142.0, 500 142.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 370.0 C 1298 370.0, 1287 218.0, 1315 218.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 370.0 C 1298 370.0, 1287 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 408.0 C 1298 408.0, 1287 180.0, 1315 180.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 408.0 C 1433.2 408.0, 596.8 256.0, 760 256.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 408.0 C 1433.2 408.0, 596.8 180.0, 760 180.0" fill="none" stroke="#a78bfa" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1270 408.0 C 1296 408.0, 1071 142.0, 1045 142.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 408.0 C 1296 408.0, 1071 636.0, 1045 636.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 408.0 C 1296 408.0, 1071 218.0, 1045 218.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 408.0 C 1296 408.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 408.0 C 1516.4 408.0, 253.6 142.0, 500 142.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 712.0 C 1296 712.0, 1071 484.0, 1045 484.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 712.0 C 1296 712.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 522.0 C 1296 522.0, 1071 484.0, 1045 484.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1270 522.0 C 1296 522.0, 1071 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 522.0 C 1516.4 522.0, 253.6 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 522.0 C 1298 522.0, 1287 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 104.0 C 1298 104.0, 1287 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 104.0 C 1298 104.0, 1287 142.0, 1315 142.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 104.0 C 1298 104.0, 1287 370.0, 1315 370.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1270 104.0 C 1298 104.0, 1287 294.0, 1315 294.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 142.0 C 910.4 142.0, 1124.6 180.0, 1315 180.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 142.0 C 746 142.0, 526 332.0, 500 332.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 142.0 C 746 142.0, 526 370.0, 500 370.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 142.0 C 746 142.0, 526 180.0, 500 180.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 142.0 C 746 142.0, 526 712.0, 500 712.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 142.0 C 746 142.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 332.0 C 748 332.0, 732 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 332.0 C 746 332.0, 526 180.0, 500 180.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 332.0 C 746 332.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 370.0 C 748 370.0, 732 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 370.0 C 746 370.0, 526 332.0, 500 332.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 370.0 C 746 370.0, 526 180.0, 500 180.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 370.0 C 746 370.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 180.0 C 910.4 180.0, 1124.6 180.0, 1315 180.0" fill="none" stroke="#22d3ee" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 720 180.0 C 748 180.0, 732 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 180.0 C 746 180.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 712.0 C 910.4 712.0, 1124.6 180.0, 1315 180.0" fill="none" stroke="#22d3ee" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 720 712.0 C 746 712.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 256.0 C 746 256.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 256.0 C 910.4 256.0, 1124.6 256.0, 1315 256.0" fill="none" stroke="#22d3ee" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 720 560.0 C 746 560.0, 526 256.0, 500 256.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 560.0 C 746 560.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 560.0 C 746 560.0, 526 636.0, 500 636.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 560.0 C 746 560.0, 526 674.0, 500 674.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 408.0 C 746 408.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 408.0 C 746 408.0, 526 218.0, 500 218.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 408.0 C 746 408.0, 526 636.0, 500 636.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 408.0 C 746 408.0, 526 674.0, 500 674.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 750.0 C 746 750.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 598.0 C 746 598.0, 526 750.0, 500 750.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 598.0 C 746 598.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 598.0 C 746 598.0, 526 218.0, 500 218.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 522.0 C 746 522.0, 526 294.0, 500 294.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 522.0 C 746 522.0, 526 484.0, 500 484.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 522.0 C 746 522.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 522.0 C 746 522.0, 526 218.0, 500 218.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 294.0 C 824.0 294.0, 941.0 332.0, 1045 332.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 294.0 C 824.0 294.0, 941.0 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 294.0 C 746 294.0, 526 256.0, 500 256.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 294.0 C 746 294.0, 526 484.0, 500 484.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 294.0 C 746 294.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 294.0 C 746 294.0, 526 218.0, 500 218.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 294.0 C 910.4 294.0, 1124.6 104.0, 1315 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 446.0 C 824.0 446.0, 941.0 332.0, 1045 332.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 446.0 C 746 446.0, 526 522.0, 500 522.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 446.0 C 746 446.0, 526 484.0, 500 484.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 446.0 C 746 446.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 446.0 C 746 446.0, 526 218.0, 500 218.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 484.0 C 824.0 484.0, 941.0 104.0, 1045 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 484.0 C 746 484.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 484.0 C 746 484.0, 526 218.0, 500 218.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 720 104.0 C 910.4 104.0, 1124.6 180.0, 1315 180.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 218.0 C 746 218.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 636.0 C 746 636.0, 526 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 720 674.0 C 746 674.0, 526 636.0, 500 636.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 460 104.0 C 556.0 104.0, 664.0 370.0, 760 370.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 104.0 C 647.2 104.0, 857.8 332.0, 1045 332.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 104.0 C 488 104.0, 472 142.0, 500 142.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 104.0 C 488 104.0, 472 256.0, 500 256.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 104.0 C 488 104.0, 472 522.0, 500 522.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 104.0 C 488 104.0, 472 446.0, 500 446.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 104.0 C 488 104.0, 472 484.0, 500 484.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 104.0 C 488 104.0, 472 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 180.0 C 486 180.0, 286 142.0, 260 142.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 180.0 C 488 180.0, 472 218.0, 500 218.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 180.0 C 486 180.0, 286 104.0, 260 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 220 180.0 C 309.6 180.0, 410.4 408.0, 500 408.0" fill="none" stroke="#fbbf24" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 220 180.0 C 309.6 180.0, 410.4 446.0, 500 446.0" fill="none" stroke="#fbbf24" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1540 218.0 C 1789.6 218.0, 510.4 294.0, 760 294.0" fill="none" stroke="#94a3b8" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1540 218.0 C 1789.6 218.0, 510.4 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1540 218.0 C 1566 218.0, 1341 142.0, 1315 142.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1540 104.0 C 1789.6 104.0, 510.4 104.0, 760 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1540 104.0 C 1789.6 104.0, 510.4 218.0, 760 218.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1540 104.0 C 1566 104.0, 1341 142.0, 1315 142.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1540 104.0 C 1566 104.0, 1341 256.0, 1315 256.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 220 104.0 C 484.0 104.0, 781.0 332.0, 1045 332.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 220 104.0 C 309.6 104.0, 410.4 256.0, 500 256.0" fill="none" stroke="#fbbf24" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 220 104.0 C 309.6 104.0, 410.4 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 220 104.0 C 246 104.0, 66 142.0, 40 142.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1540 142.0 C 1872.8 142.0, 167.2 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 218.0 C 733.6 218.0, 1041.4 332.0, 1315 332.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 218.0 C 733.6 218.0, 1041.4 370.0, 1315 370.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 460 218.0 C 733.6 218.0, 1041.4 294.0, 1315 294.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1540 332.0 C 1872.8 332.0, 167.2 636.0, 500 636.0" fill="none" stroke="#94a3b8" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1540 332.0 C 1872.8 332.0, 167.2 674.0, 500 674.0" fill="none" stroke="#94a3b8" stroke-width="1.1" opacity="0.22" marker-end="url(#arrowhead)"/>
+<path d="M 1540 332.0 C 1566 332.0, 1341 294.0, 1315 294.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1540 370.0 C 1872.8 370.0, 167.2 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 1540 370.0 C 1566 370.0, 1341 294.0, 1315 294.0" fill="none" stroke="#64748b" stroke-width="1.0" opacity="0.16" marker-end="url(#arrowhead)"/>
+<path d="M 1540 294.0 C 1872.8 294.0, 167.2 104.0, 500 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 220 218.0 C 246 218.0, 66 180.0, 40 180.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 220 218.0 C 246 218.0, 66 104.0, 40 104.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<path d="M 220 218.0 C 246 218.0, 66 142.0, 40 142.0" fill="none" stroke="#cbd5e1" stroke-width="1.6" opacity="0.34" marker-end="url(#arrowhead)"/>
+<rect x="40" y="90" width="180" height="28" rx="6" fill="#0f172a"/>
+<rect x="40" y="90" width="180" height="28" rx="6" fill="rgba(120, 53, 15, 0.30)" stroke="#fbbf24" stroke-width="1.2"/>
+<title>MLF.Research.URI.R2.C1.Prototype.Entrypoint | in 1 / out 12 | src-research/MLF/Research/URI/R2/C1/Prototype/Entrypoint.hs</title>
+<text x="48" y="102" fill="white" font-size="9.2" font-weight="600">Prototype.Entrypoint</text>
+<text x="48" y="112" fill="#94a3b8" font-size="7.2">in 1 · out 12</text>
+<rect x="40" y="128" width="180" height="28" rx="6" fill="#0f172a"/>
+<rect x="40" y="128" width="180" height="28" rx="6" fill="rgba(120, 53, 15, 0.30)" stroke="#fbbf24" stroke-width="1.2"/>
+<title>MLF.Research.URI.R2.C1.Prototype.Types | in 10 / out 0 | src-research/MLF/Research/URI/R2/C1/Prototype/Types.hs</title>
+<text x="48" y="140" fill="white" font-size="9.2" font-weight="600">Prototype.Types</text>
+<text x="48" y="150" fill="#94a3b8" font-size="7.2">in 10 · out 0</text>
+<rect x="40" y="166" width="180" height="28" rx="6" fill="#0f172a"/>
+<rect x="40" y="166" width="180" height="28" rx="6" fill="rgba(120, 53, 15, 0.30)" stroke="#fbbf24" stroke-width="1.2"/>
+<title>MLF.Program.CLI | in 1 / out 2 | src/MLF/Program/CLI.hs</title>
+<text x="48" y="178" fill="white" font-size="9.2" font-weight="600">Program.CLI</text>
+<text x="48" y="188" fill="#94a3b8" font-size="7.2">in 1 · out 2</text>
+<rect x="40" y="204" width="180" height="28" rx="6" fill="#0f172a"/>
+<rect x="40" y="204" width="180" height="28" rx="6" fill="rgba(120, 53, 15, 0.30)" stroke="#fbbf24" stroke-width="1.8"/>
+<title>Main | in 0 / out 3 | app/Main.hs</title>
+<text x="48" y="216" fill="white" font-size="9.2" font-weight="600">Main</text>
+<text x="48" y="226" fill="#94a3b8" font-size="7.2">in 0 · out 3</text>
+<rect x="260" y="90" width="200" height="28" rx="6" fill="#0f172a"/>
+<rect x="260" y="90" width="200" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.8"/>
+<title>MLF.Pipeline | in 1 / out 8 | src-public/MLF/Pipeline.hs</title>
+<text x="268" y="102" fill="white" font-size="9.2" font-weight="600">MLF.Pipeline</text>
+<text x="268" y="112" fill="#94a3b8" font-size="7.2">in 1 · out 8</text>
+<rect x="260" y="128" width="200" height="28" rx="6" fill="#0f172a"/>
+<rect x="260" y="128" width="200" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.8"/>
+<title>MLF.API | in 1 / out 7 | src-public/MLF/API.hs</title>
+<text x="268" y="140" fill="white" font-size="9.2" font-weight="600">MLF.API</text>
+<text x="268" y="150" fill="#94a3b8" font-size="7.2">in 1 · out 7</text>
+<rect x="260" y="166" width="200" height="28" rx="6" fill="#0f172a"/>
+<rect x="260" y="166" width="200" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.8"/>
+<title>MLF.Program | in 0 / out 3 | src-public/MLF/Program.hs</title>
+<text x="268" y="178" fill="white" font-size="9.2" font-weight="600">MLF.Program</text>
+<text x="268" y="188" fill="#94a3b8" font-size="7.2">in 0 · out 3</text>
+<rect x="260" y="204" width="200" height="28" rx="6" fill="#0f172a"/>
+<rect x="260" y="204" width="200" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.8"/>
+<title>MLF.XMLF | in 0 / out 3 | src-public/MLF/XMLF.hs</title>
+<text x="268" y="216" fill="white" font-size="9.2" font-weight="600">MLF.XMLF</text>
+<text x="268" y="226" fill="#94a3b8" font-size="7.2">in 0 · out 3</text>
+<rect x="500" y="90" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="90" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.8"/>
+<title>MLF.Frontend.Syntax | in 29 / out 1 | src/MLF/Frontend/Syntax.hs</title>
+<text x="508" y="102" fill="white" font-size="9.2" font-weight="600">Frontend.Syntax</text>
+<text x="508" y="112" fill="#94a3b8" font-size="7.2">in 29 · out 1</text>
+<rect x="500" y="128" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="128" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.8"/>
+<title>MLF.Frontend.ConstraintGen | in 13 / out 6 | src/MLF/Frontend/ConstraintGen.hs</title>
+<text x="508" y="140" fill="white" font-size="9.2" font-weight="600">Frontend.ConstraintGen</text>
+<text x="508" y="150" fill="#94a3b8" font-size="7.2">in 13 · out 6</text>
+<rect x="500" y="166" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="166" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.ConstraintGen.Types | in 10 / out 3 | src/MLF/Frontend/ConstraintGen/Types.hs</title>
+<text x="508" y="178" fill="white" font-size="9.2" font-weight="600">ConstraintGen.Types</text>
+<text x="508" y="188" fill="#94a3b8" font-size="7.2">in 10 · out 3</text>
+<rect x="500" y="204" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="204" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.Syntax.Program | in 9 / out 1 | src/MLF/Frontend/Syntax/Program.hs</title>
+<text x="508" y="216" fill="white" font-size="9.2" font-weight="600">Syntax.Program</text>
+<text x="508" y="226" fill="#94a3b8" font-size="7.2">in 9 · out 1</text>
+<rect x="500" y="242" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="242" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.Normalize | in 6 / out 2 | src/MLF/Frontend/Normalize.hs</title>
+<text x="508" y="254" fill="white" font-size="9.2" font-weight="600">Frontend.Normalize</text>
+<text x="508" y="264" fill="#94a3b8" font-size="7.2">in 6 · out 2</text>
+<rect x="500" y="280" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="280" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.Program.Elaborate | in 1 / out 7 | src/MLF/Frontend/Program/Elaborate.hs</title>
+<text x="508" y="292" fill="white" font-size="9.2" font-weight="600">Program.Elaborate</text>
+<text x="508" y="302" fill="#94a3b8" font-size="7.2">in 1 · out 7</text>
+<rect x="500" y="318" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="318" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.ConstraintGen.State | in 4 / out 3 | src/MLF/Frontend/ConstraintGen/State.hs</title>
+<text x="508" y="330" fill="white" font-size="9.2" font-weight="600">ConstraintGen.State</text>
+<text x="508" y="340" fill="#94a3b8" font-size="7.2">in 4 · out 3</text>
+<rect x="500" y="356" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="356" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.ConstraintGen.Translate | in 1 / out 6 | src/MLF/Frontend/ConstraintGen/Translate.hs</title>
+<text x="508" y="368" fill="white" font-size="9.2" font-weight="600">ConstraintGen.Translate</text>
+<text x="508" y="378" fill="#94a3b8" font-size="7.2">in 1 · out 6</text>
+<rect x="500" y="394" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="394" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.Parse.Program | in 3 / out 4 | src/MLF/Frontend/Parse/Program.hs</title>
+<text x="508" y="406" fill="white" font-size="9.2" font-weight="600">Parse.Program</text>
+<text x="508" y="416" fill="#94a3b8" font-size="7.2">in 3 · out 4</text>
+<rect x="500" y="432" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="432" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.Program.Run | in 2 / out 5 | src/MLF/Frontend/Program/Run.hs</title>
+<text x="508" y="444" fill="white" font-size="9.2" font-weight="600">Program.Run</text>
+<text x="508" y="454" fill="#94a3b8" font-size="7.2">in 2 · out 5</text>
+<rect x="500" y="470" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="470" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.Program.Types | in 4 / out 3 | src/MLF/Frontend/Program/Types.hs</title>
+<text x="508" y="482" fill="white" font-size="9.2" font-weight="600">Program.Types</text>
+<text x="508" y="492" fill="#94a3b8" font-size="7.2">in 4 · out 3</text>
+<rect x="500" y="508" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="508" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.Program.Check | in 2 / out 4 | src/MLF/Frontend/Program/Check.hs</title>
+<text x="508" y="520" fill="white" font-size="9.2" font-weight="600">Program.Check</text>
+<text x="508" y="530" fill="#94a3b8" font-size="7.2">in 2 · out 4</text>
+<rect x="500" y="546" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="546" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.Parse | in 1 / out 4 | src/MLF/Frontend/Parse.hs</title>
+<text x="508" y="558" fill="white" font-size="9.2" font-weight="600">Frontend.Parse</text>
+<text x="508" y="568" fill="#94a3b8" font-size="7.2">in 1 · out 4</text>
+<rect x="500" y="584" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="584" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.Pretty.Program | in 2 / out 3 | src/MLF/Frontend/Pretty/Program.hs</title>
+<text x="508" y="596" fill="white" font-size="9.2" font-weight="600">Pretty.Program</text>
+<text x="508" y="606" fill="#94a3b8" font-size="7.2">in 2 · out 3</text>
+<rect x="500" y="622" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="622" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Parse.Common | in 4 / out 1 | src/MLF/Parse/Common.hs</title>
+<text x="508" y="634" fill="white" font-size="9.2" font-weight="600">Parse.Common</text>
+<text x="508" y="644" fill="#94a3b8" font-size="7.2">in 4 · out 1</text>
+<rect x="500" y="660" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="660" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Parse.Type | in 3 / out 1 | src/MLF/Parse/Type.hs</title>
+<text x="508" y="672" fill="white" font-size="9.2" font-weight="600">Parse.Type</text>
+<text x="508" y="682" fill="#94a3b8" font-size="7.2">in 3 · out 1</text>
+<rect x="500" y="698" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="698" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.Desugar | in 1 / out 2 | src/MLF/Frontend/Desugar.hs</title>
+<text x="508" y="710" fill="white" font-size="9.2" font-weight="600">Frontend.Desugar</text>
+<text x="508" y="720" fill="#94a3b8" font-size="7.2">in 1 · out 2</text>
+<rect x="500" y="736" width="220" height="28" rx="6" fill="#0f172a"/>
+<rect x="500" y="736" width="220" height="28" rx="6" fill="rgba(8, 51, 68, 0.40)" stroke="#22d3ee" stroke-width="1.2"/>
+<title>MLF.Frontend.Pretty | in 2 / out 1 | src/MLF/Frontend/Pretty.hs</title>
+<text x="508" y="748" fill="white" font-size="9.2" font-weight="600">Frontend.Pretty</text>
+<text x="508" y="758" fill="#94a3b8" font-size="7.2">in 2 · out 1</text>
+<rect x="760" y="90" width="245" height="28" rx="6" fill="#0f172a"/>
+<rect x="760" y="90" width="245" height="28" rx="6" fill="rgba(6, 78, 59, 0.40)" stroke="#34d399" stroke-width="1.8"/>
+<title>MLF.Constraint.Types | in 87 / out 2 | src/MLF/Constraint/Types.hs</title>
+<text x="768" y="102" fill="white" font-size="9.2" font-weight="600">Constraint.Types</text>
+<text x="768" y="112" fill="#94a3b8" font-size="7.2">in 87 · out 2</text>
+<rect x="760" y="128" width="245" height="28" rx="6" fill="#0f172a"/>
+<rect x="760" y="128" width="245" height="28" rx="6" fill="rgba(6, 78, 59, 0.40)" stroke="#34d399" stroke-width="1.2"/>
+<title>MLF.Binding.Tree | in 36 / out 11 | src/MLF/Binding/Tree.hs</title>
+<text x="768" y="140" fill="white" font-size="9.2" font-weight="600">Binding.Tree</text>
+<text x="768" y="150" fill="#94a3b8" font-size="7.2">in 36 · out 11</text>
+<rect x="760" y="166" width="245" height="28" rx="6" fill="#0f172a"/>
+<rect x="760" y="166" width="245" height="28" rx="6" fill="rgba(6, 78, 59, 0.40)" stroke="#34d399" stroke-width="1.2"/>
+<title>MLF.Constraint.Presolution.Base | in 30 / out 15 | src/MLF/Constraint/Presolution/Base.hs</title>
+<text x="768" y="178" fill="white" font-size="9.2" font-weight="600">Presolution.Base</text>
+<text x="768" y="188" fill="#94a3b8" font-size="7.2">in 30 · out 15</text>
+<rect x="760" y="204" width="245" height="28" rx="6" fill="#0f172a"/>
+<rect x="760" y="204" width="245" height="28" rx="6" fill="rgba(6, 78, 59, 0.40)" stroke="#34d399" stroke-width="1.2"/>
+<title>MLF.Constraint.VarStore | in 27 / out 0 | src/MLF/Constraint/VarStore.hs</title>
+<text x="768" y="216" fill="white" font-size="9.2" font-weight="600">Constraint.VarStore</text>
+<text x="768" y="226" fill="#94a3b8" font-size="7.2">in 27 · out 0</text>
+<rect x="760" y="242" width="245" height="28" rx="6" fill="#0f172a"/>
+<rect x="760" y="242" width="245" height="28" rx="6" fill="rgba(6, 78, 59, 0.40)" stroke="#34d399" stroke-width="1.8"/>
+<title>MLF.Constraint.Presolution | in 22 / out 2 | src/MLF/Constraint/Presolution.hs</title>
+<text x="768" y="254" fill="white" font-size="9.2" font-weight="600">Constraint.Presolution</text>
+<text x="768" y="264" fill="#94a3b8" font-size="7.2">in 22 · out 2</text>
+<rect x="760" y="280" width="245" height="28" rx="6" fill="#0f172a"/>
+<rect x="760" y="280" width="245" height="28" rx="6" fill="rgba(6, 78, 59, 0.40)" stroke="#34d399" stroke-width="1.2"/>
+<title>MLF.Constraint.Presolution.View | in 17 / out 4 | src/MLF/Constraint/Presolution/View.hs</title>
+<text x="768" y="292" fill="white" font-size="9.2" font-weight="600">Presolution.View</text>
+<text x="768" y="302" fill="#94a3b8" font-size="7.2">in 17 · out 4</text>
+<rect x="760" y="318" width="245" height="28" rx="6" fill="#0f172a"/>
+<rect x="760" y="318" width="245" height="28" rx="6" fill="rgba(6, 78, 59, 0.40)" stroke="#34d399" stroke-width="1.2"/>
+<title>MLF.Constraint.Traversal | in 15 / out 0 | src/MLF/Constraint/Traversal.hs</title>
+<text x="768" y="330" fill="white" font-size="9.2" font-weight="600">Constraint.Traversal</text>
+<text x="768" y="340" fill="#94a3b8" font-size="7.2">in 15 · out 0</text>
+<rect x="760" y="356" width="245" height="28" rx="6" fill="#0f172a"/>
+<rect x="760" y="356" width="245" height="28" rx="6" fill="rgba(6, 78, 59, 0.40)" stroke="#34d399" stroke-width="1.2"/>
+<title>MLF.Constraint.Acyclicity | in 4 / out 2 | src/MLF/Constraint/Acyclicity.hs</title>
+<text x="768" y="368" fill="white" font-size="9.2" font-weight="600">Constraint.Acyclicity</text>
+<text x="768" y="378" fill="#94a3b8" font-size="7.2">in 4 · out 2</text>
+<rect x="760" y="394" width="245" height="28" rx="6" fill="#0f172a"/>
+<rect x="760" y="394" width="245" height="28" rx="6" fill="rgba(6, 78, 59, 0.40)" stroke="#34d399" stroke-width="1.2"/>
+<title>MLF.Constraint.Types.Presolution | in 5 / out 1 | src/MLF/Constraint/Types/Presolution.hs</title>
+<text x="768" y="406" fill="white" font-size="9.2" font-weight="600">Types.Presolution</text>
+<text x="768" y="416" fill="#94a3b8" font-size="7.2">in 5 · out 1</text>
+<rect x="1045" y="90" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="90" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.8"/>
+<title>MLF.Elab.Types | in 32 / out 6 | src/MLF/Elab/Types.hs</title>
+<text x="1053" y="102" fill="white" font-size="9.2" font-weight="600">Elab.Types</text>
+<text x="1053" y="112" fill="#94a3b8" font-size="7.2">in 32 · out 6</text>
+<rect x="1045" y="128" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="128" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Generalize | in 12 / out 16 | src/MLF/Elab/Generalize.hs</title>
+<text x="1053" y="140" fill="white" font-size="9.2" font-weight="600">Elab.Generalize</text>
+<text x="1053" y="150" fill="#94a3b8" font-size="7.2">in 12 · out 16</text>
+<rect x="1045" y="166" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="166" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.8"/>
+<title>MLF.Elab.Run.Pipeline | in 1 / out 26 | src/MLF/Elab/Run/Pipeline.hs</title>
+<text x="1053" y="178" fill="white" font-size="9.2" font-weight="600">Run.Pipeline</text>
+<text x="1053" y="188" fill="#94a3b8" font-size="7.2">in 1 · out 26</text>
+<rect x="1045" y="204" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="204" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Run.Generalize | in 6 / out 15 | src/MLF/Elab/Run/Generalize.hs</title>
+<text x="1053" y="216" fill="white" font-size="9.2" font-weight="600">Run.Generalize</text>
+<text x="1053" y="226" fill="#94a3b8" font-size="7.2">in 6 · out 15</text>
+<rect x="1045" y="242" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="242" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Elaborate.Annotation | in 2 / out 17 | src/MLF/Elab/Elaborate/Annotation.hs</title>
+<text x="1053" y="254" fill="white" font-size="9.2" font-weight="600">Elaborate.Annotation</text>
+<text x="1053" y="264" fill="#94a3b8" font-size="7.2">in 2 · out 17</text>
+<rect x="1045" y="280" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="280" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Phi.Omega.Interpret.Internal | in 1 / out 17 | src/MLF/Elab/Phi/Omega/Interpret/Internal.hs</title>
+<text x="1053" y="292" fill="white" font-size="9.2" font-weight="600">Interpret.Internal</text>
+<text x="1053" y="302" fill="#94a3b8" font-size="7.2">in 1 · out 17</text>
+<rect x="1045" y="318" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="318" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.8"/>
+<title>MLF.Elab.Pipeline | in 5 / out 13 | src/MLF/Elab/Pipeline.hs</title>
+<text x="1053" y="330" fill="white" font-size="9.2" font-weight="600">Elab.Pipeline</text>
+<text x="1053" y="340" fill="#94a3b8" font-size="7.2">in 5 · out 13</text>
+<rect x="1045" y="356" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="356" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Run.ResultType.Ann | in 1 / out 17 | src/MLF/Elab/Run/ResultType/Ann.hs</title>
+<text x="1053" y="368" fill="white" font-size="9.2" font-weight="600">ResultType.Ann</text>
+<text x="1053" y="378" fill="#94a3b8" font-size="7.2">in 1 · out 17</text>
+<rect x="1045" y="394" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="394" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Run.ResultType.Fallback.Core | in 1 / out 17 | src/MLF/Elab/Run/ResultType/Fallback/Core.hs</title>
+<text x="1053" y="406" fill="white" font-size="9.2" font-weight="600">Fallback.Core</text>
+<text x="1053" y="416" fill="#94a3b8" font-size="7.2">in 1 · out 17</text>
+<rect x="1045" y="432" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="432" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Elaborate.Algebra | in 1 / out 16 | src/MLF/Elab/Elaborate/Algebra.hs</title>
+<text x="1053" y="444" fill="white" font-size="9.2" font-weight="600">Elaborate.Algebra</text>
+<text x="1053" y="454" fill="#94a3b8" font-size="7.2">in 1 · out 16</text>
+<rect x="1045" y="470" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="470" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Inst | in 12 / out 3 | src/MLF/Elab/Inst.hs</title>
+<text x="1053" y="482" fill="white" font-size="9.2" font-weight="600">Elab.Inst</text>
+<text x="1053" y="492" fill="#94a3b8" font-size="7.2">in 12 · out 3</text>
+<rect x="1045" y="508" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="508" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.TypeCheck | in 5 / out 4 | src/MLF/Elab/TypeCheck.hs</title>
+<text x="1053" y="520" fill="white" font-size="9.2" font-weight="600">Elab.TypeCheck</text>
+<text x="1053" y="530" fill="#94a3b8" font-size="7.2">in 5 · out 4</text>
+<rect x="1045" y="546" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="546" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.PipelineError | in 2 / out 5 | src/MLF/Elab/PipelineError.hs</title>
+<text x="1053" y="558" fill="white" font-size="9.2" font-weight="600">Elab.PipelineError</text>
+<text x="1053" y="568" fill="#94a3b8" font-size="7.2">in 2 · out 5</text>
+<rect x="1045" y="584" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="584" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Reduce | in 2 / out 5 | src/MLF/Elab/Reduce.hs</title>
+<text x="1053" y="596" fill="white" font-size="9.2" font-weight="600">Elab.Reduce</text>
+<text x="1053" y="606" fill="#94a3b8" font-size="7.2">in 2 · out 5</text>
+<rect x="1045" y="622" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="622" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Phi | in 4 / out 2 | src/MLF/Elab/Phi.hs</title>
+<text x="1053" y="634" fill="white" font-size="9.2" font-weight="600">Elab.Phi</text>
+<text x="1053" y="644" fill="#94a3b8" font-size="7.2">in 4 · out 2</text>
+<rect x="1045" y="660" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="660" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Run | in 1 / out 3 | src/MLF/Elab/Run.hs</title>
+<text x="1053" y="672" fill="white" font-size="9.2" font-weight="600">Elab.Run</text>
+<text x="1053" y="682" fill="#94a3b8" font-size="7.2">in 1 · out 3</text>
+<rect x="1045" y="698" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="698" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.Sigma | in 2 / out 2 | src/MLF/Elab/Sigma.hs</title>
+<text x="1053" y="710" fill="white" font-size="9.2" font-weight="600">Elab.Sigma</text>
+<text x="1053" y="720" fill="#94a3b8" font-size="7.2">in 2 · out 2</text>
+<rect x="1045" y="736" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1045" y="736" width="225" height="28" rx="6" fill="rgba(76, 29, 149, 0.40)" stroke="#a78bfa" stroke-width="1.2"/>
+<title>MLF.Elab.PipelineConfig | in 2 / out 0 | src/MLF/Elab/PipelineConfig.hs</title>
+<text x="1053" y="748" fill="white" font-size="9.2" font-weight="600">Elab.PipelineConfig</text>
+<text x="1053" y="758" fill="#94a3b8" font-size="7.2">in 2 · out 0</text>
+<rect x="1315" y="90" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1315" y="90" width="225" height="28" rx="6" fill="rgba(30, 41, 59, 0.50)" stroke="#94a3b8" stroke-width="1.8"/>
+<title>MLF.Reify.TypeOps | in 24 / out 6 | src/MLF/Reify/TypeOps.hs</title>
+<text x="1323" y="102" fill="white" font-size="9.2" font-weight="600">Reify.TypeOps</text>
+<text x="1323" y="112" fill="#94a3b8" font-size="7.2">in 24 · out 6</text>
+<rect x="1315" y="128" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1315" y="128" width="225" height="28" rx="6" fill="rgba(30, 41, 59, 0.50)" stroke="#94a3b8" stroke-width="1.2"/>
+<title>MLF.Util.ElabError | in 24 / out 1 | src/MLF/Util/ElabError.hs</title>
+<text x="1323" y="140" fill="white" font-size="9.2" font-weight="600">Util.ElabError</text>
+<text x="1323" y="150" fill="#94a3b8" font-size="7.2">in 24 · out 1</text>
+<rect x="1315" y="166" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1315" y="166" width="225" height="28" rx="6" fill="rgba(30, 41, 59, 0.50)" stroke="#94a3b8" stroke-width="1.2"/>
+<title>Data.Functor.Foldable | in 24 / out 0 | src/Data/Functor/Foldable.hs</title>
+<text x="1323" y="178" fill="white" font-size="9.2" font-weight="600">Data.Functor.Foldable</text>
+<text x="1323" y="188" fill="#94a3b8" font-size="7.2">in 24 · out 0</text>
+<rect x="1315" y="204" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1315" y="204" width="225" height="28" rx="6" fill="rgba(30, 41, 59, 0.50)" stroke="#94a3b8" stroke-width="1.2"/>
+<title>MLF.Reify.Core | in 11 / out 8 | src/MLF/Reify/Core.hs</title>
+<text x="1323" y="216" fill="white" font-size="9.2" font-weight="600">Reify.Core</text>
+<text x="1323" y="226" fill="#94a3b8" font-size="7.2">in 11 · out 8</text>
+<rect x="1315" y="242" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1315" y="242" width="225" height="28" rx="6" fill="rgba(30, 41, 59, 0.50)" stroke="#94a3b8" stroke-width="1.2"/>
+<title>MLF.Util.Names | in 8 / out 0 | src/MLF/Util/Names.hs</title>
+<text x="1323" y="254" fill="white" font-size="9.2" font-weight="600">Util.Names</text>
+<text x="1323" y="264" fill="#94a3b8" font-size="7.2">in 8 · out 0</text>
+<rect x="1315" y="280" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1315" y="280" width="225" height="28" rx="6" fill="rgba(30, 41, 59, 0.50)" stroke="#94a3b8" stroke-width="1.2"/>
+<title>MLF.XMLF.Syntax | in 4 / out 1 | src/MLF/XMLF/Syntax.hs</title>
+<text x="1323" y="292" fill="white" font-size="9.2" font-weight="600">XMLF.Syntax</text>
+<text x="1323" y="302" fill="#94a3b8" font-size="7.2">in 4 · out 1</text>
+<rect x="1315" y="318" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1315" y="318" width="225" height="28" rx="6" fill="rgba(30, 41, 59, 0.50)" stroke="#94a3b8" stroke-width="1.2"/>
+<title>MLF.XMLF.Parse | in 1 / out 3 | src/MLF/XMLF/Parse.hs</title>
+<text x="1323" y="330" fill="white" font-size="9.2" font-weight="600">XMLF.Parse</text>
+<text x="1323" y="340" fill="#94a3b8" font-size="7.2">in 1 · out 3</text>
+<rect x="1315" y="356" width="225" height="28" rx="6" fill="#0f172a"/>
+<rect x="1315" y="356" width="225" height="28" rx="6" fill="rgba(30, 41, 59, 0.50)" stroke="#94a3b8" stroke-width="1.2"/>
+<title>MLF.XMLF.Pretty | in 2 / out 2 | src/MLF/XMLF/Pretty.hs</title>
+<text x="1323" y="368" fill="white" font-size="9.2" font-weight="600">XMLF.Pretty</text>
+<text x="1323" y="378" fill="#94a3b8" font-size="7.2">in 2 · out 2</text>
+<text x="1080" y="870" fill="white" font-size="10" font-weight="600">Legend</text>
+<rect x="1080" y="876" width="16" height="10" rx="2" fill="#22d3ee" opacity="0.45" stroke="#22d3ee" stroke-width="1"/>
+<text x="1102" y="884" fill="#94a3b8" font-size="8">public / frontend</text>
+<rect x="1080" y="892" width="16" height="10" rx="2" fill="#34d399" opacity="0.45" stroke="#34d399" stroke-width="1"/>
+<text x="1102" y="900" fill="#94a3b8" font-size="8">constraint / presolution</text>
+<rect x="1080" y="908" width="16" height="10" rx="2" fill="#a78bfa" opacity="0.45" stroke="#a78bfa" stroke-width="1"/>
+<text x="1102" y="916" fill="#94a3b8" font-size="8">elab / semantic</text>
+<rect x="1080" y="924" width="16" height="10" rx="2" fill="#94a3b8" opacity="0.45" stroke="#94a3b8" stroke-width="1"/>
+<text x="1102" y="932" fill="#94a3b8" font-size="8">support / utility</text>
+<rect x="1080" y="940" width="16" height="10" rx="2" fill="#fbbf24" opacity="0.45" stroke="#fbbf24" stroke-width="1"/>
+<text x="1102" y="948" fill="#94a3b8" font-size="8">runner / wrapper</text>
+<text x="40" y="890" fill="#94a3b8" font-size="8">Showing 61 modules and 224 import edges. Selection includes public entry modules, 1–2 hop neighbors, and top degree hubs so the graph stays readable.</text>
+</svg></div>
+    <div class="cards"><div class="card"><div class="card-header"><div class="card-dot cyan"></div><h3>How this subset was picked</h3></div><ul><li>• Starts from `MLF.API`, `MLF.Pipeline`, `MLF.Program`, `MLF.XMLF`, and `Main`.</li><li>• Adds direct imports, direct consumers, plus one extra hop from the public modules.</li><li>• Also adds top-degree implementation hubs so important internals stay visible.</li><li>• Result: 61 modules / 224 edges — much finer than the domain diagram, but still viewable.</li></ul></div><div class="card"><div class="card-header"><div class="card-dot emerald"></div><h3>What pops out</h3></div><ul><li>• `MLF.Frontend.Syntax` has very high fan-in in this slice.</li><li>• `MLF.Elab.Pipeline` and `MLF.Elab.Run.Pipeline` are strong orchestration hubs.</li><li>• `MLF.Constraint.Types` / `MLF.Constraint.Presolution` remain central semantic anchors.</li><li>• `MLF.Reify.TypeOps` is a key support dependency for many elaboration modules.</li></ul></div><div class="card"><div class="card-header"><div class="card-dot violet"></div><h3>Reading tip</h3></div><ul><li>• Left → right roughly follows façade → frontend → constraints → elaboration → support.</li><li>• Arrow density is real import density, not conceptual arrows I invented.</li><li>• Each node shows `in/out` degree within this focused subgraph only.</li><li>• Use the tables below when the visual graph gets too dense.</li></ul></div></div>
+    <div class="tables">
+      <div class="table-card">
+        <h3 style="margin-bottom:0.75rem;">Top hubs in this focused graph</h3>
+        <table>
+          <thead><tr><th>Module</th><th>In</th><th>Out</th><th>File</th></tr></thead>
+          <tbody><tr><td>MLF.Constraint.Types</td><td>87</td><td>2</td><td>src/MLF/Constraint/Types.hs</td></tr><tr><td>MLF.Binding.Tree</td><td>36</td><td>11</td><td>src/MLF/Binding/Tree.hs</td></tr><tr><td>MLF.Constraint.Presolution.Base</td><td>30</td><td>15</td><td>src/MLF/Constraint/Presolution/Base.hs</td></tr><tr><td>MLF.Elab.Types</td><td>32</td><td>6</td><td>src/MLF/Elab/Types.hs</td></tr><tr><td>MLF.Frontend.Syntax</td><td>29</td><td>1</td><td>src/MLF/Frontend/Syntax.hs</td></tr><tr><td>MLF.Reify.TypeOps</td><td>24</td><td>6</td><td>src/MLF/Reify/TypeOps.hs</td></tr><tr><td>MLF.Elab.Generalize</td><td>12</td><td>16</td><td>src/MLF/Elab/Generalize.hs</td></tr><tr><td>MLF.Constraint.VarStore</td><td>27</td><td>0</td><td>src/MLF/Constraint/VarStore.hs</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>1</td><td>26</td><td>src/MLF/Elab/Run/Pipeline.hs</td></tr><tr><td>MLF.Util.ElabError</td><td>24</td><td>1</td><td>src/MLF/Util/ElabError.hs</td></tr><tr><td>Data.Functor.Foldable</td><td>24</td><td>0</td><td>src/Data/Functor/Foldable.hs</td></tr><tr><td>MLF.Constraint.Presolution</td><td>22</td><td>2</td><td>src/MLF/Constraint/Presolution.hs</td></tr></tbody>
+        </table>
+      </div>
+      <div class="table-card">
+        <h3 style="margin-bottom:0.75rem;">Selected concrete import edges</h3>
+        <table>
+          <thead><tr><th>Importer</th><th>Imported module</th></tr></thead>
+          <tbody><tr><td>MLF.API</td><td>MLF.Frontend.Normalize</td></tr><tr><td>MLF.API</td><td>MLF.Frontend.Parse</td></tr><tr><td>MLF.API</td><td>MLF.Frontend.Parse.Program</td></tr><tr><td>MLF.API</td><td>MLF.Frontend.Pretty</td></tr><tr><td>MLF.API</td><td>MLF.Frontend.Pretty.Program</td></tr><tr><td>MLF.API</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.API</td><td>MLF.Frontend.Syntax.Program</td></tr><tr><td>MLF.Binding.Tree</td><td>MLF.Constraint.Types</td></tr><tr><td>MLF.Constraint.Presolution</td><td>MLF.Constraint.Presolution.Base</td></tr><tr><td>MLF.Constraint.Presolution</td><td>MLF.Constraint.Presolution.View</td></tr><tr><td>MLF.Constraint.Presolution.Base</td><td>MLF.Constraint.Types</td></tr><tr><td>MLF.Constraint.Types</td><td>MLF.Constraint.Types.Presolution</td></tr><tr><td>MLF.Elab.Elaborate.Algebra</td><td>MLF.Constraint.Presolution</td></tr><tr><td>MLF.Elab.Elaborate.Algebra</td><td>MLF.Constraint.Types</td></tr><tr><td>MLF.Elab.Elaborate.Algebra</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.Elaborate.Algebra</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Elab.Elaborate.Algebra</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Elab.Elaborate.Annotation</td><td>MLF.Constraint.Presolution</td></tr><tr><td>MLF.Elab.Elaborate.Annotation</td><td>MLF.Constraint.Types</td></tr><tr><td>MLF.Elab.Elaborate.Annotation</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.Elaborate.Annotation</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Elab.Elaborate.Annotation</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Elab.Generalize</td><td>MLF.Constraint.Types</td></tr><tr><td>MLF.Elab.Generalize</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.Generalize</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Elab.Inst</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.Inst</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Elab.Phi.Omega.Interpret.Internal</td><td>MLF.Constraint.Presolution</td></tr><tr><td>MLF.Elab.Phi.Omega.Interpret.Internal</td><td>MLF.Constraint.Types</td></tr><tr><td>MLF.Elab.Phi.Omega.Interpret.Internal</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.Phi.Omega.Interpret.Internal</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Elab.Inst</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Elab.Phi</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Elab.PipelineConfig</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Elab.PipelineError</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Elab.Reduce</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Elab.Run</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Elab.Run.Generalize</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Elab.Sigma</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Elab.TypeCheck</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Frontend.ConstraintGen</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Reify.Core</td></tr><tr><td>MLF.Elab.Pipeline</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Elab.PipelineError</td><td>MLF.Constraint.Presolution</td></tr><tr><td>MLF.Elab.PipelineError</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.PipelineError</td><td>MLF.Frontend.ConstraintGen</td></tr><tr><td>MLF.Elab.Reduce</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.Reduce</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Elab.Run</td><td>MLF.Elab.Run.Pipeline</td></tr><tr><td>MLF.Elab.Run.Generalize</td><td>MLF.Constraint.Presolution</td></tr><tr><td>MLF.Elab.Run.Generalize</td><td>MLF.Constraint.Types</td></tr><tr><td>MLF.Elab.Run.Generalize</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.Run.Generalize</td><td>MLF.Frontend.ConstraintGen</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Constraint.Acyclicity</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Constraint.Presolution</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Constraint.Presolution.Base</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Constraint.Presolution.View</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Constraint.Types</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Constraint.Types.Presolution</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Elab.Inst</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Elab.PipelineConfig</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Elab.PipelineError</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Elab.Run.Generalize</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Elab.TypeCheck</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Frontend.ConstraintGen</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Elab.Run.Pipeline</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Elab.Run.ResultType.Ann</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.Run.ResultType.Ann</td><td>MLF.Frontend.ConstraintGen</td></tr><tr><td>MLF.Elab.Run.ResultType.Ann</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Elab.Run.ResultType.Fallback.Core</td><td>MLF.Constraint.Presolution</td></tr><tr><td>MLF.Elab.Run.ResultType.Fallback.Core</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.Run.ResultType.Fallback.Core</td><td>MLF.Frontend.ConstraintGen</td></tr><tr><td>MLF.Elab.Sigma</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.TypeCheck</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Elab.TypeCheck</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Elab.TypeCheck</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Elab.Types</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Elab.Types</td><td>MLF.Util.ElabError</td></tr><tr><td>MLF.Elab.Types</td><td>MLF.XMLF.Pretty</td></tr><tr><td>MLF.Elab.Types</td><td>MLF.XMLF.Syntax</td></tr><tr><td>MLF.Frontend.ConstraintGen</td><td>Data.Functor.Foldable</td></tr><tr><td>MLF.Frontend.ConstraintGen</td><td>MLF.Frontend.ConstraintGen.State</td></tr><tr><td>MLF.Frontend.ConstraintGen</td><td>MLF.Frontend.ConstraintGen.Translate</td></tr><tr><td>MLF.Frontend.ConstraintGen</td><td>MLF.Frontend.ConstraintGen.Types</td></tr><tr><td>MLF.Frontend.ConstraintGen</td><td>MLF.Frontend.Desugar</td></tr><tr><td>MLF.Frontend.ConstraintGen</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.ConstraintGen.State</td><td>MLF.Constraint.Types</td></tr><tr><td>MLF.Frontend.ConstraintGen.State</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.ConstraintGen.Translate</td><td>MLF.Constraint.Types</td></tr><tr><td>MLF.Frontend.ConstraintGen.Translate</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.ConstraintGen.Types</td><td>MLF.Constraint.Types</td></tr><tr><td>MLF.Frontend.ConstraintGen.Types</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.Desugar</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.Normalize</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.Parse</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.Parse.Program</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.Pretty</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.Pretty.Program</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.Program.Check</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.Program.Elaborate</td><td>MLF.Elab.Pipeline</td></tr><tr><td>MLF.Frontend.Program.Elaborate</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Frontend.Program.Elaborate</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.Program.Elaborate</td><td>MLF.Reify.TypeOps</td></tr><tr><td>MLF.Frontend.Program.Run</td><td>MLF.Elab.Pipeline</td></tr><tr><td>MLF.Frontend.Program.Run</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.Program.Types</td><td>MLF.Elab.Types</td></tr><tr><td>MLF.Frontend.Program.Types</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Frontend.Syntax</td><td>Data.Functor.Foldable</td></tr><tr><td>MLF.Frontend.Syntax.Program</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Parse.Common</td><td>MLF.Frontend.Syntax</td></tr><tr><td>MLF.Pipeline</td><td>MLF.Constraint.Acyclicity</td></tr><tr><td>MLF.Pipeline</td><td>MLF.Elab.Pipeline</td></tr><tr><td>MLF.Pipeline</td><td>MLF.Frontend.ConstraintGen</td></tr><tr><td>MLF.Pipeline</td><td>MLF.Frontend.Normalize</td></tr><tr><td>MLF.Pipeline</td><td>MLF.Frontend.Program.Check</td></tr><tr><td>MLF.Pipeline</td><td>MLF.Frontend.Program.Run</td></tr><tr><td>MLF.Pipeline</td><td>MLF.Frontend.Program.Types</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="footer">detailed-module-import-graph.html · generated from actual repository imports</div>
+  </div>
+</body>
+</html>

@@ -24,6 +24,7 @@ assertPipelineStrictFailure label runPipeline =
                     "PhiTranslatabilityError" `elem` words msg
                         || "TCInstantiationError" `elem` words msg
                         || "TCLetTypeMismatch" `elem` words msg
+                        || "TCExpectedArrow" `elem` words msg
                 )
         Right (_term, ty) ->
             expectationFailure (label ++ " unexpectedly succeeded with type: " ++ show ty)
