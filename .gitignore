@@ -1,7 +1,7 @@
 # Haskell / Stack / Cabal build artifacts
 .stack-work/
 dist/
-dist-newstyle/
+dist-newstyle*/
 .cabal-sandbox/
 cabal.sandbox.config
 cabal.project.local
