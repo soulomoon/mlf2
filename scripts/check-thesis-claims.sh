@@ -223,9 +223,10 @@ claims.each do |c|
       errors['code-path-file-missing'] << "#{id}: file not found: #{full_path}"
       next
     end
-    # Code path fragments are navigational labels. The claims gate should not
-    # treat a function-name substring as proof; executable obligations and
-    # property tests carry the semantic evidence.
+    contents = File.read(full_path)
+    unless contents.include?(fragment)
+      errors['code-path-fragment-missing'] << "#{id}: navigation fragment #{fragment.inspect} not found in #{full_path}"
+    end
   end
 end
 
@@ -243,7 +244,7 @@ end
 
 puts "[thesis-claims] Schema: #{claims.size} claims, #{deviations.size} deviations"
 puts "[thesis-claims] Cross-links: all obligation/deviation references valid"
-puts "[thesis-claims] Code paths: all files and anchor fragments valid"
+puts "[thesis-claims] Code paths: all files and navigation fragments valid"
 puts "[thesis-claims] Deviations: no open, no orphans"
 RUBY
 

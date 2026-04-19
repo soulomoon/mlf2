@@ -7,20 +7,33 @@ import Control.Monad (forM_)
 import Data.Either (isRight)
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
+import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Map.Strict qualified as Map
 import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import MLF.Binding.GraphOps qualified as GraphOps
 import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Acyclicity (AcyclicityResult (..), checkAcyclicity)
 import MLF.Constraint.Inert qualified as Inert
-import MLF.Constraint.Presolution (PresolutionResult (..))
+import MLF.Constraint.Presolution (PresolutionError (..), PresolutionResult (..))
+import MLF.Constraint.Presolution.TestSupport (validateTranslatablePresolution)
+import MLF.Constraint.Presolution.Witness
+  ( OmegaNormalizeEnv (..),
+    OmegaNormalizeError (..),
+    coalesceRaiseMergeWithEnv,
+    normalizeInstanceOpsFull,
+    reorderWeakenWithEnv,
+    validateNormalizedWitness,
+  )
 import MLF.Constraint.Solve (SolveResult (..), frWith, solveUnify)
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness (EdgeWitness (..), InstanceOp (..), ReplayContract (..))
 import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Frontend.ConstraintGen (ConstraintResult (..))
 import MLF.Frontend.Syntax qualified as Surf
+import Presolution.Util (mkNormalizeConstraint, mkNormalizeEnv, orderedPairByPrec)
 import SpecUtil
   ( PipelineArtifacts (..),
     bindParentsFromPairs,
@@ -30,6 +43,7 @@ import SpecUtil
     runConstraintDefault,
     runPipelineArtifactsDefault,
     runToPresolutionDefault,
+    rootedConstraint,
     unsafeNormalizeExpr,
   )
 import Test.Hspec
@@ -43,183 +57,123 @@ spec = describe "Thesis obligation property evidence" $
         withMaxSuccess 100 $
           forAll (chooseInt (3, 16)) $ \size ->
             counterexample (obligationId obligation ++ " failed at size " ++ show size) $
-              propertyFor (obligationFamily obligation) size
+              obligationProperty obligation size
 
 data Obligation = Obligation
   { obligationId :: String,
-    obligationFamily :: ObligationFamily
+    obligationProperty :: Int -> Property
   }
-
-data ObligationFamily
-  = BindingFlexChildren
-  | BindingInterior
-  | BindingOrder
-  | GraphWeaken
-  | GraphRaiseStep
-  | GraphRaiseTo
-  | InertNodes
-  | InertLocked
-  | InertWeaken
-  | UnifyDecompose
-  | SolveVar
-  | SolveArrow
-  | RebindHarmonize
-  | GeneralizedUnify
-  | ReifyPipeline
-  | ConstraintGeneration
-  | Presolution
-  | WitnessNormalization
-  | Acyclicity
-  | TypeChecking
-  | Reduction
-  | InstApplication
-  | TranslatablePresolution
-  | SigmaReorder
-  | ContextSelection
-  | Elaboration
-  | PhiTranslation
 
 obligations :: [Obligation]
 obligations =
-  [ Obligation "O14-WF-EMPTY" TypeChecking,
-    Obligation "O14-WF-TVAR" TypeChecking,
-    Obligation "O14-WF-VAR" TypeChecking,
-    Obligation "O14-INST-REFLEX" InstApplication,
-    Obligation "O14-INST-TRANS" InstApplication,
-    Obligation "O14-INST-BOT" InstApplication,
-    Obligation "O14-INST-HYP" InstApplication,
-    Obligation "O14-INST-INNER" InstApplication,
-    Obligation "O14-INST-OUTER" InstApplication,
-    Obligation "O14-INST-QUANT-ELIM" InstApplication,
-    Obligation "O14-INST-QUANT-INTRO" InstApplication,
-    Obligation "O14-T-VAR" TypeChecking,
-    Obligation "O14-T-ABS" TypeChecking,
-    Obligation "O14-T-APP" TypeChecking,
-    Obligation "O14-T-TABS" TypeChecking,
-    Obligation "O14-T-TAPP" TypeChecking,
-    Obligation "O14-T-LET" TypeChecking,
-    Obligation "O14-RED-BETA" Reduction,
-    Obligation "O14-RED-BETALET" Reduction,
-    Obligation "O14-RED-REFLEX" Reduction,
-    Obligation "O14-RED-TRANS" Reduction,
-    Obligation "O14-RED-QUANT-INTRO" Reduction,
-    Obligation "O14-RED-QUANT-ELIM" Reduction,
-    Obligation "O14-RED-INNER" Reduction,
-    Obligation "O14-RED-OUTER" Reduction,
-    Obligation "O14-RED-CONTEXT" Reduction,
-    Obligation "O14-APPLY-N" InstApplication,
-    Obligation "O14-APPLY-O" InstApplication,
-    Obligation "O14-APPLY-SEQ" InstApplication,
-    Obligation "O14-APPLY-INNER" InstApplication,
-    Obligation "O14-APPLY-OUTER" InstApplication,
-    Obligation "O14-APPLY-HYP" InstApplication,
-    Obligation "O14-APPLY-BOT" InstApplication,
-    Obligation "O14-APPLY-ID" InstApplication,
-    Obligation "O15-TRANS-NO-INERT-LOCKED" TranslatablePresolution,
-    Obligation "O15-TRANS-SCHEME-ROOT-RIGID" TranslatablePresolution,
-    Obligation "O15-TRANS-ARROW-RIGID" TranslatablePresolution,
-    Obligation "O15-TRANS-NON-INTERIOR-RIGID" TranslatablePresolution,
-    Obligation "O15-REORDER-REQUIRED" SigmaReorder,
-    Obligation "O15-REORDER-IDENTITY" SigmaReorder,
-    Obligation "O15-CONTEXT-FIND" ContextSelection,
-    Obligation "O15-CONTEXT-REJECT" ContextSelection,
-    Obligation "O15-EDGE-TRANSLATION" PhiTranslation,
-    Obligation "O15-ELAB-LAMBDA-VAR" Elaboration,
-    Obligation "O15-ELAB-LET-VAR" Elaboration,
-    Obligation "O15-ELAB-ABS" Elaboration,
-    Obligation "O15-ELAB-APP" Elaboration,
-    Obligation "O15-ELAB-LET" Elaboration,
-    Obligation "O15-ENV-LAMBDA" Elaboration,
-    Obligation "O15-ENV-LET" Elaboration,
-    Obligation "O15-ENV-WF" Elaboration,
-    Obligation "O15-TR-SEQ-EMPTY" PhiTranslation,
-    Obligation "O15-TR-SEQ-CONS" PhiTranslation,
-    Obligation "O15-TR-RIGID-RAISE" PhiTranslation,
-    Obligation "O15-TR-RIGID-MERGE" PhiTranslation,
-    Obligation "O15-TR-RIGID-RAISEMERGE" PhiTranslation,
-    Obligation "O15-TR-ROOT-GRAFT" PhiTranslation,
-    Obligation "O15-TR-ROOT-RAISEMERGE" PhiTranslation,
-    Obligation "O15-TR-ROOT-WEAKEN" PhiTranslation,
-    Obligation "O15-TR-NODE-GRAFT" PhiTranslation,
-    Obligation "O15-TR-NODE-MERGE" PhiTranslation,
-    Obligation "O15-TR-NODE-RAISEMERGE" PhiTranslation,
-    Obligation "O15-TR-NODE-WEAKEN" PhiTranslation,
-    Obligation "O15-TR-NODE-RAISE" PhiTranslation,
-    Obligation "O04-BIND-FLEX-CHILDREN" BindingFlexChildren,
-    Obligation "O04-BIND-INTERIOR" BindingInterior,
-    Obligation "O04-BIND-ORDER" BindingOrder,
-    Obligation "O04-OP-WEAKEN" GraphWeaken,
-    Obligation "O04-OP-RAISE-STEP" GraphRaiseStep,
-    Obligation "O04-OP-RAISE-TO" GraphRaiseTo,
-    Obligation "O05-INERT-NODES" InertNodes,
-    Obligation "O05-INERT-LOCKED" InertLocked,
-    Obligation "O05-WEAKEN-INERT" InertWeaken,
-    Obligation "O07-UNIF-CORE" UnifyDecompose,
-    Obligation "O07-UNIF-PRESOL" SolveVar,
-    Obligation "O07-REBIND" RebindHarmonize,
-    Obligation "O07-GENUNIF" GeneralizedUnify,
-    Obligation "O08-REIFY-TYPE" ReifyPipeline,
-    Obligation "O08-REIFY-NAMES" ReifyPipeline,
-    Obligation "O08-BIND-MONO" ReifyPipeline,
-    Obligation "O08-SYN-TO-GRAPH" ReifyPipeline,
-    Obligation "O08-REIFY-INLINE" ReifyPipeline,
-    Obligation "O08-INLINE-PRED" ReifyPipeline,
-    Obligation "O09-CGEN-ROOT" ConstraintGeneration,
-    Obligation "O09-CGEN-EXPR" ConstraintGeneration,
-    Obligation "O10-EXP-DECIDE" Presolution,
-    Obligation "O10-EXP-APPLY" Presolution,
-    Obligation "O10-PROP-SOLVE" Presolution,
-    Obligation "O10-PROP-WITNESS" Presolution,
-    Obligation "O10-COPY-SCHEME" Presolution,
-    Obligation "O11-UNIFY-STRUCT" UnifyDecompose,
-    Obligation "O11-WITNESS-NORM" WitnessNormalization,
-    Obligation "O11-WITNESS-COALESCE" WitnessNormalization,
-    Obligation "O11-WITNESS-REORDER" WitnessNormalization,
-    Obligation "O12-SOLVE-UNIFY" SolveVar,
-    Obligation "O12-ACYCLIC-CHECK" Acyclicity,
-    Obligation "O12-ACYCLIC-TOPO" Acyclicity,
-    Obligation "O12-COPY-INST" Presolution,
-    Obligation "O12-NORM-GRAFT" UnifyDecompose,
-    Obligation "O12-NORM-MERGE" UnifyDecompose,
-    Obligation "O12-NORM-DROP" UnifyDecompose,
-    Obligation "O12-NORM-FIXPOINT" UnifyDecompose,
-    Obligation "O12-SOLVE-VAR-BASE" SolveVar,
-    Obligation "O12-SOLVE-VAR-VAR" SolveVar,
-    Obligation "O12-SOLVE-HARMONIZE" GeneralizedUnify,
-    Obligation "O12-SOLVE-ARROW" SolveArrow,
-    Obligation "O12-SOLVE-VALIDATE" SolveVar
+  [ Obligation "O14-WF-EMPTY" propWfEmpty,
+    Obligation "O14-WF-TVAR" propWfTVar,
+    Obligation "O14-WF-VAR" propWfVar,
+    Obligation "O14-INST-REFLEX" propInstReflex,
+    Obligation "O14-INST-TRANS" propInstTrans,
+    Obligation "O14-INST-BOT" propInstBot,
+    Obligation "O14-INST-HYP" propInstHyp,
+    Obligation "O14-INST-INNER" propInstInner,
+    Obligation "O14-INST-OUTER" propInstOuter,
+    Obligation "O14-INST-QUANT-ELIM" propInstQuantElim,
+    Obligation "O14-INST-QUANT-INTRO" propInstQuantIntro,
+    Obligation "O14-T-VAR" propTypingVar,
+    Obligation "O14-T-ABS" propTypingAbs,
+    Obligation "O14-T-APP" propTypingApp,
+    Obligation "O14-T-TABS" propTypingTAbs,
+    Obligation "O14-T-TAPP" propTypingTApp,
+    Obligation "O14-T-LET" propTypingLet,
+    Obligation "O14-RED-BETA" propRedBeta,
+    Obligation "O14-RED-BETALET" propRedBetaLet,
+    Obligation "O14-RED-REFLEX" propRedReflex,
+    Obligation "O14-RED-TRANS" propRedTrans,
+    Obligation "O14-RED-QUANT-INTRO" propRedQuantIntro,
+    Obligation "O14-RED-QUANT-ELIM" propRedQuantElim,
+    Obligation "O14-RED-INNER" propRedInner,
+    Obligation "O14-RED-OUTER" propRedOuter,
+    Obligation "O14-RED-CONTEXT" propRedContext,
+    Obligation "O14-APPLY-N" propApplyN,
+    Obligation "O14-APPLY-O" propApplyO,
+    Obligation "O14-APPLY-SEQ" propApplySeq,
+    Obligation "O14-APPLY-INNER" propApplyInner,
+    Obligation "O14-APPLY-OUTER" propApplyOuter,
+    Obligation "O14-APPLY-HYP" propApplyHyp,
+    Obligation "O14-APPLY-BOT" propApplyBot,
+    Obligation "O14-APPLY-ID" propApplyId,
+    Obligation "O15-TRANS-NO-INERT-LOCKED" propTransNoInertLocked,
+    Obligation "O15-TRANS-SCHEME-ROOT-RIGID" propTransSchemeRootRigid,
+    Obligation "O15-TRANS-ARROW-RIGID" propTransArrowRigid,
+    Obligation "O15-TRANS-NON-INTERIOR-RIGID" propTransNonInteriorRigid,
+    Obligation "O15-REORDER-REQUIRED" propSigmaReorderRequired,
+    Obligation "O15-REORDER-IDENTITY" propSigmaReorderIdentity,
+    Obligation "O15-CONTEXT-FIND" propContextFind,
+    Obligation "O15-CONTEXT-REJECT" propContextReject,
+    Obligation "O15-EDGE-TRANSLATION" propEdgeTranslation,
+    Obligation "O15-ELAB-LAMBDA-VAR" propElabLambdaVar,
+    Obligation "O15-ELAB-LET-VAR" propElabLetVar,
+    Obligation "O15-ELAB-ABS" propElabAbs,
+    Obligation "O15-ELAB-APP" propElabApp,
+    Obligation "O15-ELAB-LET" propElabLet,
+    Obligation "O15-ENV-LAMBDA" propEnvLambda,
+    Obligation "O15-ENV-LET" propEnvLet,
+    Obligation "O15-ENV-WF" propEnvWf,
+    Obligation "O15-TR-SEQ-EMPTY" propTrSeqEmpty,
+    Obligation "O15-TR-SEQ-CONS" propTrSeqCons,
+    Obligation "O15-TR-RIGID-RAISE" propTrRigidRaise,
+    Obligation "O15-TR-RIGID-MERGE" propTrRigidMerge,
+    Obligation "O15-TR-RIGID-RAISEMERGE" propTrRigidRaiseMerge,
+    Obligation "O15-TR-ROOT-GRAFT" propTrRootGraft,
+    Obligation "O15-TR-ROOT-RAISEMERGE" propTrRootRaiseMerge,
+    Obligation "O15-TR-ROOT-WEAKEN" propTrRootWeaken,
+    Obligation "O15-TR-NODE-GRAFT" propTrNodeGraft,
+    Obligation "O15-TR-NODE-MERGE" propTrNodeMerge,
+    Obligation "O15-TR-NODE-RAISEMERGE" propTrNodeRaiseMerge,
+    Obligation "O15-TR-NODE-WEAKEN" propTrNodeWeaken,
+    Obligation "O15-TR-NODE-RAISE" propTrNodeRaise,
+    Obligation "O04-BIND-FLEX-CHILDREN" propBindingFlexChildren,
+    Obligation "O04-BIND-INTERIOR" propBindingInterior,
+    Obligation "O04-BIND-ORDER" propBindingOrder,
+    Obligation "O04-OP-WEAKEN" propGraphWeaken,
+    Obligation "O04-OP-RAISE-STEP" propGraphRaiseStep,
+    Obligation "O04-OP-RAISE-TO" propGraphRaiseTo,
+    Obligation "O05-INERT-NODES" propInertNodes,
+    Obligation "O05-INERT-LOCKED" propInertLocked,
+    Obligation "O05-WEAKEN-INERT" propInertWeaken,
+    Obligation "O07-UNIF-CORE" propUnifyDecompose,
+    Obligation "O07-UNIF-PRESOL" propSolveVar,
+    Obligation "O07-REBIND" propRebindHarmonize,
+    Obligation "O07-GENUNIF" propGeneralizedUnify,
+    Obligation "O08-REIFY-TYPE" propReifyType,
+    Obligation "O08-REIFY-NAMES" propReifyNames,
+    Obligation "O08-BIND-MONO" propBindMono,
+    Obligation "O08-SYN-TO-GRAPH" propSynToGraph,
+    Obligation "O08-REIFY-INLINE" propReifyInline,
+    Obligation "O08-INLINE-PRED" propInlinePred,
+    Obligation "O09-CGEN-ROOT" propCgenRoot,
+    Obligation "O09-CGEN-EXPR" propCgenExpr,
+    Obligation "O10-EXP-DECIDE" propExpDecide,
+    Obligation "O10-EXP-APPLY" propExpApply,
+    Obligation "O10-PROP-SOLVE" propPropSolve,
+    Obligation "O10-PROP-WITNESS" propPropWitness,
+    Obligation "O10-COPY-SCHEME" propCopyScheme,
+    Obligation "O11-UNIFY-STRUCT" propUnifyDecompose,
+    Obligation "O11-WITNESS-NORM" propWitnessNorm,
+    Obligation "O11-WITNESS-COALESCE" propWitnessCoalesce,
+    Obligation "O11-WITNESS-REORDER" propWitnessReorder,
+    Obligation "O12-SOLVE-UNIFY" propSolveVar,
+    Obligation "O12-ACYCLIC-CHECK" propAcyclicCheck,
+    Obligation "O12-ACYCLIC-TOPO" propAcyclicTopo,
+    Obligation "O12-COPY-INST" propCopyInst,
+    Obligation "O12-NORM-GRAFT" propNormGraft,
+    Obligation "O12-NORM-MERGE" propNormMerge,
+    Obligation "O12-NORM-DROP" propNormDrop,
+    Obligation "O12-NORM-FIXPOINT" propNormFixpoint,
+    Obligation "O12-SOLVE-VAR-BASE" propSolveVarBase,
+    Obligation "O12-SOLVE-VAR-VAR" propSolveVarVar,
+    Obligation "O12-SOLVE-HARMONIZE" propSolveHarmonize,
+    Obligation "O12-SOLVE-ARROW" propSolveArrow,
+    Obligation "O12-SOLVE-VALIDATE" propSolveValidate
   ]
-
-propertyFor :: ObligationFamily -> Int -> Property
-propertyFor family size =
-  case family of
-    BindingFlexChildren -> propBindingFlexChildren size
-    BindingInterior -> propBindingInterior size
-    BindingOrder -> propBindingOrder size
-    GraphWeaken -> propGraphWeaken size
-    GraphRaiseStep -> propGraphRaiseStep size
-    GraphRaiseTo -> propGraphRaiseTo size
-    InertNodes -> propInertNodes size
-    InertLocked -> propInertLocked size
-    InertWeaken -> propInertWeaken size
-    UnifyDecompose -> propUnifyDecompose size
-    SolveVar -> propSolveVar size
-    SolveArrow -> propSolveArrow size
-    RebindHarmonize -> propRebindHarmonize size
-    GeneralizedUnify -> propGeneralizedUnify size
-    ReifyPipeline -> propPipelineReifies size
-    ConstraintGeneration -> propConstraintGeneration size
-    Presolution -> propPresolution size
-    WitnessNormalization -> propWitnessNormalization size
-    Acyclicity -> propAcyclicity size
-    TypeChecking -> propTypeChecking size
-    Reduction -> propReduction size
-    InstApplication -> propInstApplication size
-    TranslatablePresolution -> propTranslatablePresolution size
-    SigmaReorder -> propSigmaReorder size
-    ContextSelection -> propContextSelection size
-    Elaboration -> propElaboration size
-    PhiTranslation -> propPhiTranslation size
 
 propBindingFlexChildren :: Int -> Property
 propBindingFlexChildren _size =
@@ -398,133 +352,662 @@ propGeneralizedUnify _size =
             ]
         Left err -> counterexample (show err) False
 
-propPipelineReifies :: Int -> Property
-propPipelineReifies size =
-  let expr = surfaceExpr size
-   in case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-        Right (term, ty) ->
-          conjoin
-            [ counterexample (Elab.prettyDisplay ty) (not (null (Elab.prettyDisplay ty))),
-              Elab.typeCheck term === Right ty
-            ]
-        Left err -> counterexample (Elab.renderPipelineError err) False
+propWfEmpty :: Int -> Property
+propWfEmpty _size =
+  Elab.typeCheck (Elab.ELit (Surf.LInt 0)) === Right intTy
 
-propConstraintGeneration :: Int -> Property
-propConstraintGeneration size =
-  let expr = surfaceExpr size
-   in case runConstraintDefault Set.empty expr of
-        Right ConstraintResult {crConstraint = c, crRoot = root} ->
-          conjoin
-            [ Binding.checkBindingTree c === Right (),
-              counterexample (show root) (isJust (lookupNodeIn (cNodes c) root))
-            ]
-        Left err -> counterexample err False
+propWfTVar :: Int -> Property
+propWfTVar _size =
+  Elab.typeCheck polyId === Right polyIdTy
 
-propPresolution :: Int -> Property
-propPresolution size =
-  let expr = surfaceExpr size
-   in case runToPresolutionDefault Set.empty expr of
-        Right PresolutionResult {prConstraint = c} ->
-          conjoin
-            [ Binding.checkBindingTree c === Right (),
-              cInstEdges c === []
-            ]
-        Left err -> counterexample err False
+propWfVar :: Int -> Property
+propWfVar _size =
+  Elab.typeCheck idLam === Right (Elab.TArrow intTy intTy)
 
-propWitnessNormalization :: Int -> Property
-propWitnessNormalization size =
-  let expr = surfaceExpr size
-   in case runToPresolutionDefault Set.empty expr of
-        Right PresolutionResult {prConstraint = c, prEdgeWitnesses = witnesses} ->
-          conjoin
-            [ Binding.checkBindingTree c === Right (),
-              counterexample (show (IntMap.size witnesses)) (IntMap.size witnesses >= 0)
-            ]
-        Left err -> counterexample err False
+propInstReflex :: Int -> Property
+propInstReflex _size =
+  applyShouldBe intTy Elab.InstId intTy
 
-propAcyclicity :: Int -> Property
-propAcyclicity size =
+propInstTrans :: Int -> Property
+propInstTrans _size =
+  applyShouldBe intTy (Elab.InstSeq Elab.InstIntro Elab.InstElim) intTy
+
+propInstBot :: Int -> Property
+propInstBot _size =
+  applyShouldBe Elab.TBottom (Elab.InstBot intTy) intTy
+
+propInstHyp :: Int -> Property
+propInstHyp _size =
+  applyShouldBe Elab.TBottom (Elab.InstAbstr "a") (Elab.TVar "a")
+
+propInstInner :: Int -> Property
+propInstInner _size =
+  applyShouldBe forallA (Elab.InstInside (Elab.InstBot intTy)) (Elab.TForall "a" (Just (boundFromType intTy)) (Elab.TVar "a"))
+
+propInstOuter :: Int -> Property
+propInstOuter _size =
+  applyShouldBe (Elab.TForall "a" Nothing (Elab.TVar "z")) (Elab.InstUnder "x" (Elab.InstAbstr "x")) (Elab.TForall "a" Nothing (Elab.TVar "a"))
+
+propInstQuantElim :: Int -> Property
+propInstQuantElim _size =
+  applyShouldBe forallA Elab.InstElim Elab.TBottom
+
+propInstQuantIntro :: Int -> Property
+propInstQuantIntro _size =
+  case Elab.applyInstantiation intTy Elab.InstIntro of
+    Right (Elab.TForall _ Nothing body) -> body === intTy
+    other -> counterexample (show other) False
+
+propTypingVar :: Int -> Property
+propTypingVar _size =
+  let env = Elab.Env {Elab.termEnv = Map.fromList [("x", intTy)], Elab.typeEnv = Map.empty}
+   in Elab.typeCheckWithEnv env (Elab.EVar "x") === Right intTy
+
+propTypingAbs :: Int -> Property
+propTypingAbs _size =
+  Elab.typeCheck idLam === Right (Elab.TArrow intTy intTy)
+
+propTypingApp :: Int -> Property
+propTypingApp _size =
+  Elab.typeCheck (Elab.EApp idLam (Elab.ELit (Surf.LInt 1))) === Right intTy
+
+propTypingTAbs :: Int -> Property
+propTypingTAbs _size =
+  Elab.typeCheck polyId === Right polyIdTy
+
+propTypingTApp :: Int -> Property
+propTypingTApp _size =
+  Elab.typeCheck (Elab.ETyInst polyId (Elab.InstApp intTy)) === Right (Elab.TArrow intTy intTy)
+
+propTypingLet :: Int -> Property
+propTypingLet _size =
+  Elab.typeCheck (Elab.ELet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (Elab.EVar "x")) === Right intTy
+
+propRedBeta :: Int -> Property
+propRedBeta _size =
+  Elab.step (Elab.EApp idLam (Elab.ELit (Surf.LInt 1))) === Just (Elab.ELit (Surf.LInt 1))
+
+propRedBetaLet :: Int -> Property
+propRedBetaLet _size =
+  Elab.step (Elab.ELet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (Elab.EVar "x")) === Just (Elab.ELit (Surf.LInt 1))
+
+propRedReflex :: Int -> Property
+propRedReflex _size =
+  Elab.step (Elab.ETyInst (Elab.ELit (Surf.LInt 1)) Elab.InstId) === Just (Elab.ELit (Surf.LInt 1))
+
+propRedTrans :: Int -> Property
+propRedTrans _size =
+  let term = Elab.ETyInst (Elab.ELit (Surf.LInt 1)) (Elab.InstSeq Elab.InstIntro Elab.InstElim)
+   in Elab.step term === Just (Elab.ETyInst (Elab.ETyInst (Elab.ELit (Surf.LInt 1)) Elab.InstIntro) Elab.InstElim)
+
+propRedQuantIntro :: Int -> Property
+propRedQuantIntro _size =
+  Elab.step (Elab.ETyInst (Elab.ELit (Surf.LInt 1)) Elab.InstIntro) === Just (Elab.ETyAbs "u0" Nothing (Elab.ELit (Surf.LInt 1)))
+
+propRedQuantElim :: Int -> Property
+propRedQuantElim _size =
+  Elab.step (Elab.ETyInst polyId Elab.InstElim) === Just (Elab.ELam "x" Elab.TBottom (Elab.EVar "x"))
+
+propRedInner :: Int -> Property
+propRedInner _size =
+  let term = Elab.ETyInst (Elab.ETyAbs "a" Nothing (Elab.EVar "x")) (Elab.InstInside (Elab.InstBot intTy))
+   in Elab.step term === Just (Elab.ETyAbs "a" (Just (boundFromType intTy)) (Elab.EVar "x"))
+
+propRedOuter :: Int -> Property
+propRedOuter _size =
+  let body = Elab.ELam "x" (Elab.TVar "a") (Elab.EVar "x")
+      term = Elab.ETyInst (Elab.ETyAbs "a" Nothing body) (Elab.InstUnder "b" (Elab.InstApp intTy))
+   in Elab.step term === Just (Elab.ETyAbs "a" Nothing (Elab.ETyInst body (Elab.InstApp intTy)))
+
+propRedContext :: Int -> Property
+propRedContext _size =
+  let arg = Elab.EApp (Elab.ELam "y" intTy (Elab.EVar "y")) (Elab.ELit (Surf.LInt 1))
+   in Elab.step (Elab.EApp idLam arg) === Just (Elab.EApp idLam (Elab.ELit (Surf.LInt 1)))
+
+propApplyN :: Int -> Property
+propApplyN _size =
+  applyShouldBe forallA Elab.InstElim Elab.TBottom
+
+propApplyO :: Int -> Property
+propApplyO _size =
+  case Elab.applyInstantiation intTy Elab.InstIntro of
+    Right (Elab.TForall _ Nothing body) -> body === intTy
+    other -> counterexample (show other) False
+
+propApplySeq :: Int -> Property
+propApplySeq _size =
+  applyShouldBe forallA (Elab.InstApp intTy) intTy
+
+propApplyInner :: Int -> Property
+propApplyInner _size =
+  propInstInner 0
+
+propApplyOuter :: Int -> Property
+propApplyOuter _size =
+  propInstOuter 0
+
+propApplyHyp :: Int -> Property
+propApplyHyp _size =
+  applyShouldBe Elab.TBottom (Elab.InstAbstr "a") (Elab.TVar "a")
+
+propApplyBot :: Int -> Property
+propApplyBot _size =
+  applyShouldBe Elab.TBottom (Elab.InstBot intTy) intTy
+
+propApplyId :: Int -> Property
+propApplyId _size =
+  applyShouldBe (Elab.TArrow intTy boolTy) Elab.InstId (Elab.TArrow intTy boolTy)
+
+propTransNoInertLocked :: Int -> Property
+propTransNoInertLocked size =
+  let c = inertConstraint size
+   in case validateTranslatablePresolution c of
+        Left (NonTranslatablePresolution issues) -> counterexample (show issues) ("InertLockedNodes" `isInfixOf` show issues)
+        other -> counterexample (show other) False
+
+propTransSchemeRootRigid :: Int -> Property
+propTransSchemeRootRigid _size =
+  case validateTranslatablePresolution flexibleSchemeRootConstraint of
+    Left (NonTranslatablePresolution issues) -> counterexample (show issues) ("SchemeRootNotRigid" `isInfixOf` show issues)
+    other -> counterexample (show other) False
+
+propTransArrowRigid :: Int -> Property
+propTransArrowRigid _size =
+  case validateTranslatablePresolution flexibleArrowConstraint of
+    Left (NonTranslatablePresolution issues) -> counterexample (show issues) ("ArrowNodeNotRigid" `isInfixOf` show issues)
+    other -> counterexample (show other) False
+
+propTransNonInteriorRigid :: Int -> Property
+propTransNonInteriorRigid _size =
+  case validateTranslatablePresolution flexibleNonInteriorConstraint of
+    Left (NonTranslatablePresolution issues) -> counterexample (show issues) ("NonInteriorNodeNotRigid" `isInfixOf` show issues)
+    other -> counterexample (show other) False
+
+propSigmaReorderRequired :: Int -> Property
+propSigmaReorderRequired _size =
+  let body = Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")
+      src = Elab.TForall "a" Nothing (Elab.TForall "b" Nothing body)
+      tgt = Elab.TForall "b" Nothing (Elab.TForall "a" Nothing body)
+   in case Elab.sigmaReorder src tgt of
+        Right inst ->
+          conjoin
+            [ counterexample (show inst) (inst /= Elab.InstId),
+              counterexample (show inst) (isRight (Elab.applyInstantiation src inst))
+            ]
+        Left err -> counterexample (show err) False
+
+propSigmaReorderIdentity :: Int -> Property
+propSigmaReorderIdentity _size =
+  let src = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") intTy)
+   in Elab.sigmaReorder src src === Right Elab.InstId
+
+propContextFind :: Int -> Property
+propContextFind size =
+  let c = chainConstraint size
+   in case Binding.bindingPathToRoot c (typeRef (NodeId (size - 1))) of
+        Right path -> counterexample (show path) (last path == genRef (GenNodeId 0) && length path >= 2)
+        Left err -> counterexample (show err) False
+
+propContextReject :: Int -> Property
+propContextReject _size =
+  lookupNodeIn (cNodes binderConstraint) (NodeId 99) === Nothing
+
+propEdgeTranslation :: Int -> Property
+propEdgeTranslation _size =
+  case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr letIdAppExpr) of
+    Right (term, ty) ->
+      conjoin
+        [ ty === intTy,
+          Elab.typeCheck term === Right intTy
+        ]
+    Left err -> counterexample (Elab.renderPipelineError err) False
+
+propElabLambdaVar :: Int -> Property
+propElabLambdaVar _size =
+  elaboratesTo (Surf.ELam "x" (Surf.EVar "x")) polyIdTy
+
+propElabLetVar :: Int -> Property
+propElabLetVar _size =
+  elaboratesTo (Surf.ELet "x" (Surf.ELit (Surf.LInt 1)) (Surf.EVar "x")) intTy
+
+propElabAbs :: Int -> Property
+propElabAbs _size =
+  case Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr (Surf.ELam "x" (Surf.EVar "x"))) of
+    Right (Elab.ETyAbs {}, ty) -> ty === polyIdTy
+    other -> counterexample (show other) False
+
+propElabApp :: Int -> Property
+propElabApp _size =
+  elaboratesTo (Surf.EApp (Surf.ELam "x" (Surf.EVar "x")) (Surf.ELit (Surf.LInt 1))) intTy
+
+propElabLet :: Int -> Property
+propElabLet _size =
+  elaboratesTo letIdAppExpr intTy
+
+propEnvLambda :: Int -> Property
+propEnvLambda _size =
+  Elab.typeCheck idLam === Right (Elab.TArrow intTy intTy)
+
+propEnvLet :: Int -> Property
+propEnvLet _size =
+  Elab.typeCheck (Elab.ELet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (Elab.EVar "x")) === Right intTy
+
+propEnvWf :: Int -> Property
+propEnvWf _size =
+  conjoin [propEnvLambda 0, propEnvLet 0]
+
+propTrSeqEmpty :: Int -> Property
+propTrSeqEmpty _size =
+  propSigmaReorderIdentity 0
+
+propTrSeqCons :: Int -> Property
+propTrSeqCons _size =
+  propSigmaReorderRequired 0
+
+propTrRigidRaise :: Int -> Property
+propTrRigidRaise _size =
+  let env = mkNormalizeEnv mkNormalizeConstraint (NodeId 0) IntSet.empty
+   in normalizeInstanceOpsFull env [OpRaise (NodeId 2)] === Right []
+
+propTrRigidMerge :: Int -> Property
+propTrRigidMerge _size =
+  let env = mkNormalizeEnv mkNormalizeConstraint (NodeId 0) IntSet.empty
+   in normalizeInstanceOpsFull env [OpMerge (NodeId 2) (NodeId 3)] === Right []
+
+propTrRigidRaiseMerge :: Int -> Property
+propTrRigidRaiseMerge _size =
+  let env = mkNormalizeEnv mkNormalizeConstraint (NodeId 0) IntSet.empty
+   in normalizeInstanceOpsFull env [OpRaiseMerge (NodeId 2) (NodeId 3)] === Right []
+
+propTrRootGraft :: Int -> Property
+propTrRootGraft _size =
+  let root = NodeId 0
+      arg = NodeId 1
+      c =
+        rootedConstraint
+          emptyConstraint
+            { cNodes = nodeMapFromList [(0, TyArrow root arg arg), (1, TyVar {tnId = arg, tnBound = Nothing})],
+              cBindParents = bindParentsFromPairs [(arg, root, BindFlex)]
+            }
+      env = mkNormalizeEnv c root (IntSet.fromList [getNodeId root, getNodeId arg])
+   in validateNormalizedWitness env [OpGraft arg root] === Right ()
+
+propTrRootRaiseMerge :: Int -> Property
+propTrRootRaiseMerge _size =
+  let c = mkNormalizeConstraint
+      root = NodeId 0
+      n = NodeId 2
+      m = NodeId 3
+      env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+   in coalesceRaiseMergeWithEnv env [OpRaise n, OpMerge n m] === Right [OpRaiseMerge n m]
+
+propTrRootWeaken :: Int -> Property
+propTrRootWeaken _size =
+  let c = mkNormalizeConstraint
+      root = NodeId 0
+      n = NodeId 2
+      env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+   in normalizeInstanceOpsFull env [OpWeaken n] === Right [OpWeaken n]
+
+propTrNodeGraft :: Int -> Property
+propTrNodeGraft _size =
+  let c = mkNormalizeConstraint
+      root = NodeId 0
+      binder = NodeId 2
+      arg = NodeId 3
+      env =
+        (mkNormalizeEnv c root (IntSet.fromList [getNodeId binder]))
+          { binderArgs = IntMap.fromList [(getNodeId binder, arg)],
+            binderReplayMap = IntMap.fromList [(getNodeId binder, binder)],
+            replayContract = ReplayContractStrict
+          }
+   in normalizeInstanceOpsFull env [OpGraft arg binder, OpWeaken binder] === Right [OpGraft arg binder, OpWeaken binder]
+
+propTrNodeMerge :: Int -> Property
+propTrNodeMerge _size =
+  let c = mkNormalizeConstraint
+      root = NodeId 0
+      (mLess, nGreater) = orderedPairByPrec c root
+      env = mkNormalizeEnv c root (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
+   in normalizeInstanceOpsFull env [OpMerge mLess nGreater] === Left (MergeDirectionInvalid mLess nGreater)
+
+propTrNodeRaiseMerge :: Int -> Property
+propTrNodeRaiseMerge _size =
+  propTrRootRaiseMerge 0
+
+propTrNodeWeaken :: Int -> Property
+propTrNodeWeaken _size =
+  let root = NodeId 0
+      parent = NodeId 1
+      child = NodeId 2
+      sibling = NodeId 3
+      nodes =
+        nodeMapFromList
+          [ (0, TyForall root parent),
+            (1, TyForall parent child),
+            (2, TyVar {tnId = child, tnBound = Nothing}),
+            (3, TyVar {tnId = sibling, tnBound = Nothing})
+          ]
+      c =
+        rootedConstraint
+          emptyConstraint
+            { cNodes = nodes,
+              cBindParents =
+                bindParentsFromPairs
+                  [ (parent, root, BindFlex),
+                    (child, parent, BindFlex),
+                    (sibling, root, BindFlex)
+                  ]
+            }
+      env = mkNormalizeEnv c root (IntSet.fromList [getNodeId parent, getNodeId child, getNodeId sibling])
+   in reorderWeakenWithEnv env [OpWeaken parent, OpGraft child child] === Right [OpGraft child child, OpWeaken parent]
+
+propTrNodeRaise :: Int -> Property
+propTrNodeRaise _size =
+  let c = mkNormalizeConstraint
+      root = NodeId 0
+      n = NodeId 2
+      env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+   in validateNormalizedWitness env [OpRaise n] === Right ()
+
+propReifyType :: Int -> Property
+propReifyType _size =
+  elaboratesTo (Surf.ELit (Surf.LInt 1)) intTy
+
+propReifyNames :: Int -> Property
+propReifyNames _size =
+  case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr (Surf.ELam "x" (Surf.EVar "x"))) of
+    Right (_term, Elab.TForall _ Nothing (Elab.TArrow dom cod)) -> counterexample (show (dom, cod)) (dom == cod)
+    other -> counterexample (show other) False
+
+propBindMono :: Int -> Property
+propBindMono _size =
+  case runPipelineArtifactsDefault Set.empty (Surf.EAnn (Surf.ELit (Surf.LInt 1)) (Surf.STBase "Int")) of
+    Right PipelineArtifacts {paPresolution = PresolutionResult {prConstraint = c}} ->
+      Binding.checkBindingTree c === Right ()
+    Left err -> counterexample err False
+
+propSynToGraph :: Int -> Property
+propSynToGraph _size =
+  case runConstraintDefault Set.empty (Surf.EAnn (Surf.ELit (Surf.LInt 1)) (Surf.STBase "Int")) of
+    Right ConstraintResult {crConstraint = c, crRoot = root} ->
+      conjoin [counterexample (show root) (isJust (lookupNodeIn (cNodes c) root)), Binding.checkBindingTree c === Right ()]
+    Left err -> counterexample err False
+
+propReifyInline :: Int -> Property
+propReifyInline _size =
+  elaboratesTo (Surf.EAnn (Surf.ELit (Surf.LInt 1)) (Surf.STBase "Int")) intTy
+
+propInlinePred :: Int -> Property
+propInlinePred size =
+  propInertNodes size
+
+propCgenRoot :: Int -> Property
+propCgenRoot _size =
+  case runConstraintDefault Set.empty (Surf.ELit (Surf.LInt 1)) of
+    Right ConstraintResult {crConstraint = c, crRoot = root} ->
+      case lookupNodeIn (cNodes c) root of
+        Just TyVar {tnBound = Just bound} ->
+          conjoin
+            [ lookupNodeIn (cNodes c) bound === Just (TyBase bound (BaseTy "Int")),
+              Binding.checkBindingTree c === Right ()
+            ]
+        other -> counterexample (show other) False
+    Left err -> counterexample err False
+
+propCgenExpr :: Int -> Property
+propCgenExpr _size =
+  case runConstraintDefault Set.empty (Surf.EApp (Surf.ELam "x" (Surf.EVar "x")) (Surf.ELit (Surf.LInt 1))) of
+    Right ConstraintResult {crConstraint = c} ->
+      conjoin [counterexample (show (cInstEdges c)) (not (null (cInstEdges c))), Binding.checkBindingTree c === Right ()]
+    Left err -> counterexample err False
+
+propExpDecide :: Int -> Property
+propExpDecide _size =
+  propPresolutionClearsEdges letIdAppExpr
+
+propExpApply :: Int -> Property
+propExpApply _size =
+  propEdgeWitnessOps letIdAppExpr (not . null)
+
+propPropSolve :: Int -> Property
+propPropSolve _size =
+  propPresolutionClearsEdges letIdAppExpr
+
+propPropWitness :: Int -> Property
+propPropWitness _size =
+  case runToPresolutionDefault Set.empty letIdAppExpr of
+    Right PresolutionResult {prConstraint = c, prEdgeWitnesses = witnesses} ->
+      let entries = IntMap.toList witnesses
+       in conjoin
+            [ counterexample (show entries) (not (null entries)),
+              counterexample (show entries) $
+                all
+                  ( \(edgeKey, edgeWitness) ->
+                      getEdgeId (ewEdgeId edgeWitness) == edgeKey
+                        && isJust (lookupNodeIn (cNodes c) (ewRoot edgeWitness))
+                  )
+                  entries
+            ]
+    Left err -> counterexample err False
+
+propCopyScheme :: Int -> Property
+propCopyScheme _size =
+  case runToPresolutionDefault Set.empty letIdAppExpr of
+    Right PresolutionResult {prEdgeTraces = traces} -> counterexample (show (IntMap.size traces)) (not (IntMap.null traces))
+    Left err -> counterexample err False
+
+propWitnessNorm :: Int -> Property
+propWitnessNorm _size =
+  let c = mkNormalizeConstraint
+      root = NodeId 0
+      n = NodeId 2
+      m = NodeId 3
+      env = mkNormalizeEnv c root (IntSet.fromList [getNodeId n])
+   in normalizeInstanceOpsFull env [OpRaise n, OpMerge n m] === Right [OpRaiseMerge n m]
+
+propWitnessCoalesce :: Int -> Property
+propWitnessCoalesce _size =
+  propTrRootRaiseMerge 0
+
+propWitnessReorder :: Int -> Property
+propWitnessReorder _size =
+  propTrNodeWeaken 0
+
+propAcyclicCheck :: Int -> Property
+propAcyclicCheck size =
+  let c = acyclicConstraint size
+   in case checkAcyclicity c of
+        Right result -> counterexample (show result) (not (null (arSortedEdges result)))
+        Left err -> counterexample (show err) False
+
+propAcyclicTopo :: Int -> Property
+propAcyclicTopo size =
+  let c = acyclicConstraint size
+   in case checkAcyclicity c of
+        Right result -> arSortedEdges result === [InstEdge (EdgeId size) (NodeId 0) (NodeId 2)]
+        Left err -> counterexample (show err) False
+
+propCopyInst :: Int -> Property
+propCopyInst _size =
+  propCopyScheme 0
+
+propNormGraft :: Int -> Property
+propNormGraft _size =
+  propUnifyDecompose 0
+
+propNormMerge :: Int -> Property
+propNormMerge _size =
+  propSolveVarVar 0
+
+propNormDrop :: Int -> Property
+propNormDrop _size =
+  let c = varTripleConstraint {cUnifyEdges = [UnifyEdge (NodeId 1) (NodeId 1)]}
+   in case solveUnify defaultTraceConfig c of
+        Right SolveResult {srConstraint = solved} -> cUnifyEdges solved === []
+        Left err -> counterexample (show err) False
+
+propNormFixpoint :: Int -> Property
+propNormFixpoint _size =
+  propSolveValidate 0
+
+propSolveVarBase :: Int -> Property
+propSolveVarBase _size =
   let c =
         rootedConstraintLocal
           emptyConstraint
-            { cNodes =
-                nodeMapFromList
-                  [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}),
-                    (1, TyVar {tnId = NodeId 1, tnBound = Nothing}),
-                    (2, TyBase (NodeId 2) (BaseTy "Int"))
-                  ],
-              cInstEdges = [InstEdge (EdgeId size) (NodeId 0) (NodeId 2)]
+            { cNodes = nodeMapFromList [(0, TyCon (NodeId 0) (BaseTy "Box") (NodeId 1 :| [])), (1, TyVar (NodeId 1) Nothing), (2, TyBase (NodeId 2) (BaseTy "Int"))],
+              cBindParents = bindParentsFromPairs [(NodeId 1, NodeId 0, BindFlex), (NodeId 2, NodeId 0, BindFlex)],
+              cUnifyEdges = [UnifyEdge (NodeId 1) (NodeId 2)]
             }
-   in case checkAcyclicity c of
-        Right result ->
-          counterexample (show result) (not (null (arSortedEdges result)))
+   in case solveUnify defaultTraceConfig c of
+        Right SolveResult {srConstraint = solved, srUnionFind = uf} ->
+          conjoin [cUnifyEdges solved === [], frWith uf (NodeId 1) === frWith uf (NodeId 2)]
         Left err -> counterexample (show err) False
 
-propTypeChecking :: Int -> Property
-propTypeChecking size =
-  let (term, expected) = elabTerm size
-   in Elab.typeCheck term === Right expected
+propSolveVarVar :: Int -> Property
+propSolveVarVar _size =
+  propSolveVar 0
 
-propReduction :: Int -> Property
-propReduction size =
-  let term = reducibleTerm size
-   in case Elab.step term of
-        Just stepped ->
-          counterexample (show stepped) (Elab.isValue stepped || isJust (Elab.step stepped) || Elab.typeCheck stepped == Elab.typeCheck (Elab.normalize stepped))
-        Nothing -> counterexample (show term) (Elab.isValue term)
+propSolveHarmonize :: Int -> Property
+propSolveHarmonize _size =
+  propGeneralizedUnify 0
 
-propInstApplication :: Int -> Property
-propInstApplication size =
-  let poly = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
-      inst = instantiation size
-   in case Elab.applyInstantiation poly inst of
-        Right ty -> counterexample (show ty) (not (null (show ty)))
-        Left err -> counterexample (show err) False
+propSolveValidate :: Int -> Property
+propSolveValidate _size =
+  case solveUnify defaultTraceConfig varTripleConstraint of
+    Right SolveResult {srConstraint = solved} -> Binding.checkBindingTree solved === Right ()
+    Left err -> counterexample (show err) False
 
-propTranslatablePresolution :: Int -> Property
-propTranslatablePresolution size =
-  let expr = surfaceExpr size
-   in case runPipelineArtifactsDefault Set.empty expr of
-        Right _ -> property True
-        Left err -> counterexample err False
+applyShouldBe :: Elab.ElabType -> Elab.Instantiation -> Elab.ElabType -> Property
+applyShouldBe ty inst expected =
+  case Elab.applyInstantiation ty inst of
+    Right actual -> actual === expected
+    Left err -> counterexample (show err) False
 
-propSigmaReorder :: Int -> Property
-propSigmaReorder size =
-  let body = Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")
-      src = Elab.TForall "a" Nothing (Elab.TForall "b" Nothing body)
-      tgt =
-        if even size
-          then src
-          else Elab.TForall "b" Nothing (Elab.TForall "a" Nothing body)
-   in case Elab.sigmaReorder src tgt of
-        Right inst -> counterexample (show inst) (isRight (Elab.applyInstantiation src inst))
-        Left err -> counterexample (show err) False
+elaboratesTo :: Surf.SurfaceExpr -> Elab.ElabType -> Property
+elaboratesTo expr expected =
+  case Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+    Right (term, ty) ->
+      conjoin
+        [ ty === expected,
+          Elab.typeCheck term === Right expected
+        ]
+    Left err -> counterexample (Elab.renderPipelineError err) False
 
-propContextSelection :: Int -> Property
-propContextSelection size =
-  let c = chainConstraint size
-   in case Binding.bindingPathToRoot c (typeRef (NodeId (size - 1))) of
-        Right path ->
-          conjoin
-            [ counterexample (show path) (not (null path)),
-              counterexample (show path) (last path == genRef (GenNodeId 0))
-            ]
-        Left err -> counterexample (show err) False
+propPresolutionClearsEdges :: Surf.SurfaceExpr -> Property
+propPresolutionClearsEdges expr =
+  case runToPresolutionDefault Set.empty expr of
+    Right PresolutionResult {prConstraint = c} ->
+      conjoin
+        [ Binding.checkBindingTree c === Right (),
+          cInstEdges c === []
+        ]
+    Left err -> counterexample err False
 
-propElaboration :: Int -> Property
-propElaboration size =
-  let expr = surfaceExpr size
-   in case Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-        Right (term, ty) -> Elab.typeCheck term === Right ty
-        Left err -> counterexample (Elab.renderPipelineError err) False
+propEdgeWitnessOps :: Surf.SurfaceExpr -> ([EdgeWitness] -> Bool) -> Property
+propEdgeWitnessOps expr predicate =
+  case runToPresolutionDefault Set.empty expr of
+    Right PresolutionResult {prEdgeWitnesses = witnesses} ->
+      let values = IntMap.elems witnesses
+       in counterexample (show values) (predicate values)
+    Left err -> counterexample err False
 
-propPhiTranslation :: Int -> Property
-propPhiTranslation size =
-  let expr = surfaceExpr size
-   in case runPipelineArtifactsDefault Set.empty expr of
-        Right artifacts ->
-          counterexample (show (paRootId artifacts)) (paRootId artifacts >= 0)
-        Left err -> counterexample err False
+acyclicConstraint :: Int -> Constraint
+acyclicConstraint size =
+  rootedConstraintLocal
+    emptyConstraint
+      { cNodes =
+          nodeMapFromList
+            [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}),
+              (1, TyVar {tnId = NodeId 1, tnBound = Nothing}),
+              (2, TyBase (NodeId 2) (BaseTy "Int"))
+            ],
+        cInstEdges = [InstEdge (EdgeId size) (NodeId 0) (NodeId 2)]
+      }
+
+flexibleSchemeRootConstraint :: Constraint
+flexibleSchemeRootConstraint =
+  let rootGen = GenNodeId 0
+      schemeRoot = NodeId 0
+   in rootedConstraint
+        emptyConstraint
+          { cNodes = nodeMapFromList [(0, TyVar {tnId = schemeRoot, tnBound = Nothing})],
+            cBindParents = IntMap.fromList [(nodeRefKey (typeRef schemeRoot), (genRef rootGen, BindFlex))],
+            cGenNodes = fromListGen [(rootGen, GenNode rootGen [schemeRoot])]
+          }
+
+flexibleArrowConstraint :: Constraint
+flexibleArrowConstraint =
+  let rootGen = GenNodeId 0
+      dom = NodeId 0
+      cod = NodeId 1
+      arr = NodeId 2
+   in rootedConstraint
+        emptyConstraint
+          { cNodes =
+              nodeMapFromList
+                [ (0, TyVar {tnId = dom, tnBound = Nothing}),
+                  (1, TyVar {tnId = cod, tnBound = Nothing}),
+                  (2, TyArrow arr dom cod)
+                ],
+            cBindParents =
+              IntMap.fromList
+                [ (nodeRefKey (typeRef arr), (genRef rootGen, BindFlex)),
+                  (nodeRefKey (typeRef dom), (typeRef arr, BindFlex)),
+                  (nodeRefKey (typeRef cod), (typeRef arr, BindFlex))
+                ],
+            cGenNodes = fromListGen [(rootGen, GenNode rootGen [arr])]
+          }
+
+flexibleNonInteriorConstraint :: Constraint
+flexibleNonInteriorConstraint =
+  let rootGen = GenNodeId 0
+      schemeRoot = NodeId 0
+      dom = NodeId 1
+      cod = NodeId 2
+      arrow = NodeId 3
+      outside = NodeId 4
+   in emptyConstraint
+        { cNodes =
+            nodeMapFromList
+              [ (getNodeId schemeRoot, TyVar {tnId = schemeRoot, tnBound = Just arrow}),
+                (getNodeId dom, TyVar {tnId = dom, tnBound = Nothing}),
+                (getNodeId cod, TyVar {tnId = cod, tnBound = Nothing}),
+                (getNodeId arrow, TyArrow arrow dom cod),
+                (getNodeId outside, TyVar {tnId = outside, tnBound = Nothing})
+              ],
+          cBindParents =
+            IntMap.fromList
+              [ (nodeRefKey (typeRef schemeRoot), (genRef rootGen, BindRigid)),
+                (nodeRefKey (typeRef arrow), (typeRef schemeRoot, BindRigid)),
+                (nodeRefKey (typeRef dom), (typeRef arrow, BindFlex)),
+                (nodeRefKey (typeRef cod), (typeRef arrow, BindFlex)),
+                (nodeRefKey (typeRef outside), (genRef rootGen, BindFlex))
+              ],
+          cGenNodes = fromListGen [(rootGen, GenNode rootGen [schemeRoot])]
+        }
+
+forallA :: Elab.ElabType
+forallA = Elab.TForall "a" Nothing (Elab.TVar "a")
+
+polyIdTy :: Elab.ElabType
+polyIdTy = Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+
+letIdAppExpr :: Surf.SurfaceExpr
+letIdAppExpr =
+  Surf.ELet "id" (Surf.ELam "x" (Surf.EVar "x")) (Surf.EApp (Surf.EVar "id") (Surf.ELit (Surf.LInt 1)))
+
+boundFromType :: Elab.ElabType -> Elab.BoundType
+boundFromType ty =
+  case ty of
+    Elab.TVar v -> error ("boundFromType: unexpected variable bound " ++ show v)
+    Elab.TArrow a b -> Elab.TArrow a b
+    Elab.TCon c args -> Elab.TCon c args
+    Elab.TBase b -> Elab.TBase b
+    Elab.TBottom -> Elab.TBottom
+    Elab.TForall v mb body -> Elab.TForall v mb body
+    Elab.TMu v body -> Elab.TMu v body
 
 chainConstraint :: Int -> Constraint
 chainConstraint rawSize =
@@ -614,43 +1097,6 @@ inertConstraint size =
             ]
       }
 
-surfaceExpr :: Int -> Surf.SurfaceExpr
-surfaceExpr size =
-  case size `mod` 5 of
-    0 -> Surf.ELit (Surf.LInt (fromIntegral size))
-    1 -> Surf.ELam "x" (Surf.EVar "x")
-    2 -> Surf.EApp (Surf.ELam "x" (Surf.EVar "x")) (Surf.ELit (Surf.LInt (fromIntegral size)))
-    3 -> Surf.ELet "id" (Surf.ELam "x" (Surf.EVar "x")) (Surf.EVar "id")
-    _ -> Surf.EAnn (Surf.ELit (Surf.LInt (fromIntegral size))) (Surf.STBase "Int")
-
-elabTerm :: Int -> (Elab.ElabTerm, Elab.ElabType)
-elabTerm size =
-  case size `mod` 6 of
-    0 -> (Elab.ELit (Surf.LInt (fromIntegral size)), intTy)
-    1 -> (Elab.ELit (Surf.LBool (even size)), boolTy)
-    2 -> (idLam, Elab.TArrow intTy intTy)
-    3 -> (Elab.EApp idLam (Elab.ELit (Surf.LInt (fromIntegral size))), intTy)
-    4 -> (Elab.ELet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (Elab.EVar "x"), intTy)
-    _ -> (Elab.ETyInst polyId (Elab.InstApp intTy), Elab.TArrow intTy intTy)
-
-reducibleTerm :: Int -> Elab.ElabTerm
-reducibleTerm size =
-  case size `mod` 5 of
-    0 -> Elab.EApp idLam (Elab.ELit (Surf.LInt 1))
-    1 -> Elab.ELet "x" (Elab.schemeFromType intTy) (Elab.ELit (Surf.LInt 1)) (Elab.EVar "x")
-    2 -> Elab.ETyInst (Elab.ELit (Surf.LInt 1)) Elab.InstIntro
-    3 -> Elab.ETyInst polyId Elab.InstElim
-    _ -> Elab.ETyInst polyId (Elab.InstApp intTy)
-
-instantiation :: Int -> Elab.Instantiation
-instantiation size =
-  case size `mod` 5 of
-    0 -> Elab.InstId
-    1 -> Elab.InstElim
-    2 -> Elab.InstApp intTy
-    3 -> Elab.InstSeq (Elab.InstInside (Elab.InstBot intTy)) Elab.InstElim
-    _ -> Elab.InstUnder "x" Elab.InstId
-
 intTy :: Elab.ElabType
 intTy = Elab.TBase (BaseTy "Int")
 
@@ -662,6 +1108,3 @@ idLam = Elab.ELam "x" intTy (Elab.EVar "x")
 
 polyId :: Elab.ElabTerm
 polyId = Elab.ETyAbs "a" Nothing (Elab.ELam "x" (Elab.TVar "a") (Elab.EVar "x"))
-
-paRootId :: PipelineArtifacts -> Int
-paRootId = getNodeId . paRoot
