@@ -231,11 +231,7 @@ emlfBoundaryMatrix =
                 ]
         )
         (ExpectCheckFailureContaining "ProgramDuplicateInstance \"Eq\" (STBase \"Bool\")")
-    ]
-
-emlfPendingSuccessMatrix :: [ProgramMatrixCase]
-emlfPendingSuccessMatrix =
-    [ ProgramMatrixCase
+    , ProgramMatrixCase
         "case scrutinee inferred through lambda/application should run"
         ( InlineProgram $
             unlines
@@ -577,9 +573,6 @@ spec = do
     describe "MLF.Program eMLF boundary matrix" $ do
         mapM_ runProgramMatrixCase emlfBoundaryMatrix
 
-    describe "MLF.Program eMLF pending success matrix" $ do
-        mapM_ runPendingProgramMatrixCase emlfPendingSuccessMatrix
-
     describe "MLF.Program eMLF-owned `.mlfp` integration" $ do
         mapM_ runUnifiedFixture unifiedFixtureExpectations
 
@@ -622,17 +615,6 @@ spec = do
                     checkProgram program `shouldSatisfy` either
                         (isInfixOf expectedFragment . show)
                         (const False)
-
-    runPendingProgramMatrixCase matrixCase =
-        it (matrixCaseName matrixCase) $ do
-            _program <- loadProgramMatrixSource (matrixCaseSource matrixCase)
-            pendingWith ("should eventually satisfy " ++ renderProgramMatrixExpectation (matrixCaseExpectation matrixCase))
-
-    renderProgramMatrixExpectation expectation =
-        case expectation of
-            ExpectRunValue expectedValue -> "runtime value " ++ show expectedValue
-            ExpectCheckSuccess -> "check success"
-            ExpectCheckFailureContaining expectedFragment -> "check failure containing " ++ show expectedFragment
 
     loadProgramMatrixSource source =
         case source of

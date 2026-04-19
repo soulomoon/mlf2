@@ -28,6 +28,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
+    lowerConstructorBinding,
     lowerExprBinding,
     mkElaborateScope,
   )
@@ -200,6 +201,15 @@ checkModule priorModules mod0 = do
   instanceSkeletons <- buildInstanceSkeletons scope0 mod0 derivedInstances
   let scope1 = scope0 {scopeInstances = scopeInstances scope0 ++ instanceSkeletons}
   let elaborateScope = mkElaborateScope (scopeValues scope1) (scopeTypes scope1) (scopeInstances scope1)
+  constructorBindings <-
+    mapM
+      (liftEither . (finalizeBinding elaborateScope . lowerConstructorBinding elaborateScope))
+      [ ctor
+        | dataInfo <- Map.elems localData,
+          ctor <- dataConstructors dataInfo,
+          null (ctorForalls ctor),
+          ctorResult ctor == dataHeadTypeForInfo dataInfo
+      ]
   instanceBindings <- concat <$> mapM (checkInstance elaborateScope scope1) (derivedInstances ++ explicitInstances mod0)
   defBindings <- mapM (checkDef elaborateScope scope1) (moduleDefDecls mod0)
   exports <- buildExports mod0 localData localClasses localValues
@@ -215,7 +225,7 @@ checkModule priorModules mod0 = do
   pure
     CheckedModule
       { checkedModuleName = P.moduleName mod0,
-        checkedModuleBindings = instanceBindings ++ map markExportedMain defBindings,
+        checkedModuleBindings = constructorBindings ++ instanceBindings ++ map markExportedMain defBindings,
         checkedModuleData = localData,
         checkedModuleClasses = localClasses,
         checkedModuleInstances = instanceSkeletons,
@@ -434,6 +444,12 @@ addConstructorValues moduleName0 dataInfos =
           ctor <- dataConstructors dataInfo
       ]
 
+dataHeadTypeForInfo :: DataInfo -> SrcType
+dataHeadTypeForInfo dataInfo =
+  case dataParams dataInfo of
+    [] -> STBase (dataName dataInfo)
+    param : params -> STCon (dataName dataInfo) (STVar param :| map STVar params)
+
 synthesizeDerivedInstances :: Scope -> P.Module -> TcM [P.InstanceDecl]
 synthesizeDerivedInstances scope mod0 = concat <$> mapM deriveForData (moduleDataDecls mod0)
   where
@@ -557,17 +573,10 @@ checkInstance elaborateScope scope instDecl = do
   forM (P.instanceDeclMethods instDecl) $ \methodDef -> do
     case instanceMethods instanceInfo Map.! P.methodDefName methodDef of
       valueInfo@OrdinaryValue {} -> do
-        let methodExpr =
-              if mentionsFreeProgramValue (P.methodDefName methodDef) (P.methodDefExpr methodDef)
-                then
-                  P.ELet
-                    (P.methodDefName methodDef)
-                    (Just (valueType valueInfo))
-                    (P.methodDefExpr methodDef)
-                    (P.EVar (P.methodDefName methodDef))
-                else P.methodDefExpr methodDef
+        let methodRuntimeName = valueRuntimeName valueInfo
+            methodSourceType = valueType valueInfo
         liftEither
-          ( lowerExprBinding elaborateScope (valueRuntimeName valueInfo) (valueType valueInfo) False methodExpr
+          ( lowerExprBinding elaborateScope methodRuntimeName methodSourceType False (P.methodDefExpr methodDef)
               >>= finalizeBinding elaborateScope
           )
       _ -> throwError (ProgramUnexpectedInstanceMethod (P.instanceDeclClass instDecl) (P.methodDefName methodDef))
@@ -576,31 +585,6 @@ checkInstance elaborateScope scope instDecl = do
       find
         (\info -> instanceClassName info == className0 && instanceHeadType info == headTy)
         (scopeInstances scope0)
-
-mentionsFreeProgramValue :: String -> P.Expr -> Bool
-mentionsFreeProgramValue name = elem name . collectFreeValues Set.empty
-  where
-    collectFreeValues bound expr =
-      case expr of
-        P.EVar v
-          | v `Set.member` bound -> []
-          | otherwise -> [v]
-        P.ELit _ -> []
-        P.ELam param body -> collectFreeValues (Set.insert (P.paramName param) bound) body
-        P.EApp fun arg -> collectFreeValues bound fun ++ collectFreeValues bound arg
-        P.ELet v _ rhs body -> collectFreeValues bound rhs ++ collectFreeValues (Set.insert v bound) body
-        P.EAnn inner _ -> collectFreeValues bound inner
-        P.ECase scrutinee alts ->
-          collectFreeValues bound scrutinee ++ concatMap (collectAlt bound) alts
-
-    collectAlt bound alt =
-      collectFreeValues (bindPattern bound (P.altPattern alt)) (P.altExpr alt)
-
-    bindPattern bound pat =
-      case pat of
-        P.PatCtor _ binders -> foldr Set.insert bound binders
-        P.PatVar v -> Set.insert v bound
-        P.PatWildcard -> bound
 
 checkDef :: ElaborateScope -> Scope -> P.DefDecl -> TcM CheckedBinding
 checkDef elaborateScope scope defDecl = do

@@ -66,10 +66,22 @@ typeCheckWithEnv env term = case term of
                       actualBody' = stripVacuousForallsDeep (substTypeCapture actualName actualMu actualBody)
                       expectedBodyPeeled = peelLeadingUnboundedForalls expectedBody'
                       actualBodyPeeled = peelLeadingUnboundedForalls actualBody'
+                      instantiatedActual =
+                        case (actualBody', expectedBody') of
+                          (TForall resultName Nothing resultBody, TArrow resultTy _) ->
+                            Just (stripVacuousForallsDeep (substTypeCapture resultName (stripVacuousForallsDeep resultTy) resultBody))
+                          _ -> Nothing
+                      instantiatedExpected =
+                        case (expectedBody', actualBody') of
+                          (TForall resultName Nothing resultBody, TArrow resultTy _) ->
+                            Just (stripVacuousForallsDeep (substTypeCapture resultName (stripVacuousForallsDeep resultTy) resultBody))
+                          _ -> Nothing
                    in alphaEqType expectedBody' actualBody'
                         || churchAwareEqType expectedBody' actualBody'
                         || alphaEqType expectedBodyPeeled actualBodyPeeled
                         || churchAwareEqType expectedBodyPeeled actualBodyPeeled
+                        || maybe False (\ty -> alphaEqType expectedBody' ty || churchAwareEqType expectedBody' ty) instantiatedActual
+                        || maybe False (\ty -> alphaEqType ty actualBody' || churchAwareEqType ty actualBody') instantiatedExpected
                 (expectedMu@(TMu expectedName expectedBody), actualTy) ->
                   let expectedBody' = stripVacuousForallsDeep (substTypeCapture expectedName expectedMu expectedBody)
                       expectedBodyPeeled = peelLeadingUnboundedForalls expectedBody'

@@ -1,23 +1,32 @@
 # Task Plan
 
 ## Summary
-Goal: finish the remaining `.mlfp` ProgramSpec regression repairs while
-preserving the exact old eMLF surface route. No new surface forms, no direct
-`.mlfp -> ElabTerm` fallback, no permissive `EUnroll`, and no broad
-`TypeCheck` weakening.
+Goal: implement deferred `.mlfp` program obligations so all 7 current
+pending-success rows in `ProgramSpec` become strict runtime-success tests,
+without widening public eMLF syntax or adding a direct `.mlfp -> ElabTerm`
+route.
+
+## Current Phase
+Completed: deferred `.mlfp` program obligations are implemented and validated.
 
 ## Phases
-1. Confirm current baseline and failure clusters. - completed
-2. Fix Phase 7 binder hygiene for `TCTypeAbsVarInScope "b"`. - completed
-3. Fix remaining recursive-ADT Phase 6 regressions locally. - completed
-4. Fix remaining CLI/helper and module-ordering regressions. - completed
-5. Run serial focused and full Cabal validation. - completed
+1. Discovery and obligation design. - completed
+2. Refactor `.mlfp` lowering/finalization for deferred program obligations. - completed
+3. Move pending rows to strict matrix and add negative guards. - completed
+4. Run focused validation and repair failures. - completed
+5. Run full validation and update docs. - completed
+
+## Decisions Made
+| Decision | Rationale |
+|----------|-----------|
+| Keep public eMLF parser/API unchanged | User plan and repo invariants require `.mlfp`-internal obligations only |
+| Preserve existing Church ADT runtime representation | Current recursive ADT/program runtime depends on this encoding |
+| Use post-eMLF finalization as the dispatch point | Matches the existing deferred overload path and lets eMLF infer terms first |
+| Defer ordinary ADT constructor applications, not constructor definitions | Source constructor uses can wait for eMLF inference while runtime Church constructor bindings remain the executable representation; GADT/existential constructors stay direct until obligations carry constructor-local `forall` evidence |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
-|------|---------|------------|
-| `recursive-list-tail` fails with `TCTypeAbsVarInScope "b"` | 1 | Target producer-side freshening in `MLF.Elab.Run.Pipeline` first |
-| `recursive-existential` fails with `GenSchemeFreeVars` | 1 | Strip vacuous constructor foralls after recursive ADT lowering so the handler scheme no longer owns an outer Church result variable |
-| public `authoritative-case-analysis` regressed to a Church result mismatch | 1 | Keep canonical constructor result naming only for non-existential constructor groups and retain explicit result names for existential groups |
-| fail-fast reaches `\y. let id = (\x. x) in id y` with `forall a1. forall b. a1 -> a1` | 1 | Prune vacuous leading type abstractions after final closure freshening; targeted `let id` slice is green |
-| fail-fast reaches stale xMLF goldens for `church-true` and `choose` | 1 | Rebaseline the golden files to the non-vacuous leading-forall output produced by the current closure cleanup |
+|-------|---------|------------|
+| Installed `haskell-pro` path from `AGENTS.md` is missing | 1 | Follow repo formatting conventions directly |
+| Planning skill relative path under worktree was absent | 1 | Read installed skill at `/Users/ares/.codex/skills/planning-with-files/SKILL.md` |
+| Recursive overloaded method calls hit locked-node failures when resolved through synthetic local wrappers or reannotated pattern variables | 2 | Finalize instance method bodies as their runtime binding, defer overloaded runtime resolution, and leave pattern-bound recursive fields unannotated |

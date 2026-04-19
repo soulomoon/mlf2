@@ -10,6 +10,9 @@ module MLF.Frontend.Program.Types
     ValueInfo (..),
     InstanceInfo (..),
     DeferredMethodCall (..),
+    DeferredConstructorCall (..),
+    DeferredCaseCall (..),
+    DeferredProgramObligation (..),
     ExportedTypeInfo (..),
     ModuleExports (..),
     LoweredBinding (..),
@@ -134,8 +137,31 @@ data DeferredMethodCall = DeferredMethodCall
   { deferredMethodPlaceholder :: String,
     deferredMethodInfo :: MethodInfo,
     deferredMethodArgCount :: Int,
+    deferredMethodFullArity :: Int,
     deferredMethodName :: P.MethodName
   }
+  deriving (Eq, Show)
+
+data DeferredConstructorCall = DeferredConstructorCall
+  { deferredConstructorPlaceholder :: String,
+    deferredConstructorInfo :: ConstructorInfo,
+    deferredConstructorArgCount :: Int
+  }
+  deriving (Eq, Show)
+
+data DeferredCaseCall = DeferredCaseCall
+  { deferredCasePlaceholder :: String,
+    deferredCaseDataInfo :: DataInfo,
+    deferredCaseResultType :: SrcType,
+    deferredCaseHandlerNames :: [String],
+    deferredCaseExpectedArgCount :: Int
+  }
+  deriving (Eq, Show)
+
+data DeferredProgramObligation
+  = DeferredMethod DeferredMethodCall
+  | DeferredConstructor DeferredConstructorCall
+  | DeferredCase DeferredCaseCall
   deriving (Eq, Show)
 
 data ExportedTypeInfo = ExportedTypeInfo
@@ -155,7 +181,7 @@ data LoweredBinding = LoweredBinding
   { loweredBindingName :: String,
     loweredBindingExpectedType :: SrcType,
     loweredBindingSurfaceExpr :: SurfaceExpr,
-    loweredBindingDeferredMethods :: Map String DeferredMethodCall,
+    loweredBindingDeferredObligations :: Map String DeferredProgramObligation,
     loweredBindingExternalTypes :: Map String SrcType,
     loweredBindingExportedAsMain :: Bool
   }

@@ -8,20 +8,21 @@
   elaboration now preserves a top-level polymorphic argument when the callee
   expects the full polymorphic scheme, and `ProgramSpec` now covers the
   user-facing eMLF surface through `.mlfp`. The parity rows are now table-driven,
-  with a boundary matrix that now locks deferred overloaded-method dispatch
-  through eMLF inference, including `eq ((\x x) Zero) Zero`, let-polymorphic
-  arguments, explicit annotations, bare-method rejection, missing-instance
-  rejection, and duplicate-instance rejection. Deferred calls lower to typed
-  placeholders and resolve to concrete instance method runtime names after
-  eMLF elaboration, with the rewritten term typechecked before acceptance.
-  `ProgramSpec` also now has a pending-success matrix for the remaining
-  `.mlfp`/eMLF boundary gaps that should eventually run: case scrutinees,
-  first-class polymorphic constructor and pattern-bound values, partial
-  overloaded method application, and parameterized ADT instance recovery.
+  with a boundary matrix that locks deferred program-obligation behavior through
+  eMLF inference: overloaded dispatch, inferred case scrutinees, first-class
+  polymorphic constructor and pattern-bound values, partial overloaded method
+  application, parameterized ADT instance recovery, and the existing negative
+  guards for bare methods, missing instances, and duplicate instances. Deferred
+  obligations lower to typed placeholders and resolve after eMLF elaboration,
+  with rewritten terms typechecked before acceptance; ordinary ADT constructor
+  applications now use the deferred path while Church constructor definitions
+  remain the runtime representation, and explicit/derived recursive `Eq Nat`
+  coverage is restored. The former pending-success matrix has been folded into
+  strict positive coverage.
   Validated with `MLF.Program eMLF`
-  (`27 examples, 0 failures, 7 pending`),
-  `MLF.Program` (`60 examples, 0 failures, 7 pending`), and
-  `cabal build all && cabal test` (`1609 examples, 0 failures, 7 pending`).
+  (`27 examples, 0 failures`),
+  `MLF.Program` (`60 examples, 0 failures`), and
+  `cabal build all && cabal test` (`1609 examples, 0 failures`).
 - Hardened the unified `.mlfp` eMLF/xMLF contract. Executable bindings are now
   documented and guarded as `SurfaceExpr -> runPipelineElabWithEnv -> xMLF
   typecheck -> normalize/run`, `runPipelineElabChecked` is documented as a

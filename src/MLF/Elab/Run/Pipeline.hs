@@ -8,6 +8,9 @@ module MLF.Elab.Run.Pipeline
     runPipelineElabCheckedWithConfig,
     runPipelineElabWithEnv,
     runPipelineElabWithConfigAndEnv,
+    PipelineElabDetailedResult (..),
+    runPipelineElabDetailedWithEnv,
+    runPipelineElabDetailedWithConfigAndEnv,
   )
 where
 
@@ -86,6 +89,13 @@ data TraceCopyArtifacts = TraceCopyArtifacts
     tcaInstCopyMapFull :: IntMap.IntMap NodeId
   }
 
+data PipelineElabDetailedResult = PipelineElabDetailedResult
+  { pedTerm :: ElabTerm,
+    pedType :: ElabType,
+    pedRootAnn :: AnnExpr,
+    pedTypeCheckEnv :: TypeCheck.Env
+  }
+
 validateDirectRecursiveAnnotations :: NormSurfaceExpr -> Either ConstraintError ()
 validateDirectRecursiveAnnotations = goExpr
   where
@@ -149,8 +159,8 @@ runPipelineElabChecked :: PolySyms -> NormSurfaceExpr -> Either PipelineError (E
 runPipelineElabChecked = runPipelineElabCheckedWithConfig defaultPipelineConfig
 
 runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
-runPipelineElabWithConfig config polySyms =
-  runPipelineElabWith (pcTraceConfig config) Map.empty (generateConstraints polySyms)
+runPipelineElabWithConfig config polySyms expr =
+  detailedPair <$> runPipelineElabWith (pcTraceConfig config) Map.empty (generateConstraints polySyms) expr
 
 -- Compatibility alias: the shared pipeline now reports the typechecker result
 -- as authoritative, so the checked entrypoint no longer selects a second path.
@@ -163,15 +173,25 @@ runPipelineElabWithEnv :: PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either P
 runPipelineElabWithEnv = runPipelineElabWithConfigAndEnv defaultPipelineConfig
 
 runPipelineElabWithConfigAndEnv :: PipelineConfig -> PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
-runPipelineElabWithConfigAndEnv config polySyms extEnv =
+runPipelineElabWithConfigAndEnv config polySyms extEnv expr =
+  detailedPair <$> runPipelineElabDetailedWithConfigAndEnv config polySyms extEnv expr
+
+runPipelineElabDetailedWithEnv :: PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedWithEnv = runPipelineElabDetailedWithConfigAndEnv defaultPipelineConfig
+
+runPipelineElabDetailedWithConfigAndEnv :: PipelineConfig -> PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedWithConfigAndEnv config polySyms extEnv =
   runPipelineElabWith (pcTraceConfig config) extEnv (generateConstraintsWithEnv polySyms extEnv)
+
+detailedPair :: PipelineElabDetailedResult -> (ElabTerm, ElabType)
+detailedPair result = (pedTerm result, pedType result)
 
 runPipelineElabWith ::
   TraceConfig ->
   ExternalEnv ->
   (NormSurfaceExpr -> Either ConstraintError ConstraintResult) ->
   NormSurfaceExpr ->
-  Either PipelineError (ElabTerm, ElabType)
+  Either PipelineError PipelineElabDetailedResult
 runPipelineElabWith traceCfg extEnv genConstraints expr = do
   () <- fromConstraintError (validateDirectRecursiveAnnotations expr)
   ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} <- fromConstraintError (genConstraints expr)
@@ -305,7 +325,13 @@ runPipelineElabWith traceCfg extEnv genConstraints expr = do
           case typeCheckWithEnv initialTcEnv termClosedFresh of
             Right ty -> pure ty
             Left err -> fromTypeCheckError (Left err)
-        pure (termClosedFresh, tyChecked)
+        pure
+          PipelineElabDetailedResult
+            { pedTerm = termClosedFresh,
+              pedType = tyChecked,
+              pedRootAnn = authoritativeAnnCanonFinal,
+              pedTypeCheckEnv = initialTcEnv
+            }
 
   -- Keep result-type reconstruction for diagnostics, but report the
   -- type-checker result as authoritative.
