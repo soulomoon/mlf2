@@ -121,6 +121,44 @@ emlfSurfaceParityMatrix =
 emlfBoundaryMatrix :: [ProgramMatrixCase]
 emlfBoundaryMatrix =
     [ ProgramMatrixCase
+        "runs overloaded method dispatch with ordinary nullary constructors"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = eq Zero Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs overloaded method dispatch with nested ordinary constructors"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = eq (Succ Zero) (Succ Zero);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs overloaded method dispatch with lambda/application-inferred argument"
         ( InlineProgram $
             unlines
@@ -231,11 +269,7 @@ emlfBoundaryMatrix =
                 ]
         )
         (ExpectCheckFailureContaining "ProgramDuplicateInstance \"Eq\" (STBase \"Bool\")")
-    ]
-
-emlfPendingSuccessMatrix :: [ProgramMatrixCase]
-emlfPendingSuccessMatrix =
-    [ ProgramMatrixCase
+    , ProgramMatrixCase
         "case scrutinee inferred through lambda/application should run"
         ( InlineProgram $
             unlines
@@ -362,6 +396,57 @@ emlfPendingSuccessMatrix =
                 ]
         )
         (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "GADT indexed constructor application should run through recursive case"
+        (ProgramFile "test/programs/recursive-adt/recursive-gadt.mlfp")
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "existential constructor application should run through recursive case"
+        (ProgramFile "test/programs/recursive-adt/recursive-existential.mlfp")
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "nullary indexed constructor value should run through case analysis"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Witness(..), main) {"
+                , "  data Witness a ="
+                , "      WInt : Witness Int;"
+                , ""
+                , "  def main : Bool = case WInt of {"
+                , "    WInt -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "polymorphic nullary constructor with explicit result type should run"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Option(..), main) {"
+                , "  data Option a ="
+                , "      None : Option a"
+                , "    | Some : a -> Option a;"
+                , ""
+                , "  def isNone : Option Bool -> Bool = \\opt true;"
+                , "  def main : Bool = isNone (None : Option Bool);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "rejects constructor-local forall with no recoverable evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Hidden(..), main) {"
+                , "  data Hidden ="
+                , "      Hidden : forall a. Hidden;"
+                , ""
+                , "  def main : Bool = let ignore = \\x true in ignore Hidden;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramAmbiguousConstructorUse \"Hidden\"")
     ]
 
 spec :: Spec
@@ -577,9 +662,6 @@ spec = do
     describe "MLF.Program eMLF boundary matrix" $ do
         mapM_ runProgramMatrixCase emlfBoundaryMatrix
 
-    describe "MLF.Program eMLF pending success matrix" $ do
-        mapM_ runPendingProgramMatrixCase emlfPendingSuccessMatrix
-
     describe "MLF.Program eMLF-owned `.mlfp` integration" $ do
         mapM_ runUnifiedFixture unifiedFixtureExpectations
 
@@ -622,17 +704,6 @@ spec = do
                     checkProgram program `shouldSatisfy` either
                         (isInfixOf expectedFragment . show)
                         (const False)
-
-    runPendingProgramMatrixCase matrixCase =
-        it (matrixCaseName matrixCase) $ do
-            _program <- loadProgramMatrixSource (matrixCaseSource matrixCase)
-            pendingWith ("should eventually satisfy " ++ renderProgramMatrixExpectation (matrixCaseExpectation matrixCase))
-
-    renderProgramMatrixExpectation expectation =
-        case expectation of
-            ExpectRunValue expectedValue -> "runtime value " ++ show expectedValue
-            ExpectCheckSuccess -> "check success"
-            ExpectCheckFailureContaining expectedFragment -> "check failure containing " ++ show expectedFragment
 
     loadProgramMatrixSource source =
         case source of

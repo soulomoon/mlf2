@@ -1,34 +1,42 @@
-## 2026-04-19 - `.mlfp` deferred overloaded dispatch through eMLF
+## 2026-04-19 - `.mlfp` deferred program obligations through eMLF
 
-- `.mlfp` overloaded method applications now lower to per-binding deferred
-  placeholders instead of requiring class-argument resolution before eMLF
-  inference. Finalization resolves each placeholder from the inferred argument
-  terms, rewrites it to the concrete instance method runtime name, and reruns
-  xMLF typechecking on the rewritten term.
-- Source-known method arguments still specialize the placeholder's visible type
-  without choosing the instance early. Lambda/application-shaped arguments use
-  a looser placeholder argument surface so eMLF can infer the argument term
-  before the program layer applies the class template and instance environment.
-- The former boundary-gap row `eq ((\x x) Zero) Zero` is now positive coverage
-  in `ProgramSpec`, alongside let-polymorphic and explicitly annotated argument
-  rows plus negative rows for bare overloaded methods, missing instances, and
-  duplicate instances.
-- `ProgramSpec` now separates the currently supported boundary matrix from a
-  pending-success matrix for `.mlfp` surfaces that should eventually succeed
-  but still make decisions before eMLF has finished inference: case scrutinees
-  inferred through lambda/application or let-polymorphism, first-class
-  polymorphic constructor arguments, local first-class polymorphic lets crossing
-  constructor boundaries, pattern-bound first-class polymorphic variables,
-  partial overloaded method application, and parameterized ADT instance recovery.
-  The pending rows parse their source programs and then mark the intended
-  runtime success as pending.
+- `.mlfp` lowering now records a unified deferred program obligation map for
+  overloaded methods, constructors, and case eliminators. Program finalization
+  uses the internal detailed eMLF pipeline result, rewrites deferred obligations
+  after inference, and reruns xMLF typechecking on rewritten terms.
+- Every source constructor occurrence now lowers through a typed placeholder,
+  including ordinary applications, bare nullary values, recursive indexed
+  constructors, GADT-style constructors, and existential constructors.
+  Deferred constructor metadata carries expected-type seeds, occurrence
+  templates, constructor-local `forall` binders, and runtime instantiation
+  order. Constructor definitions remain Church-encoded runtime bindings.
+  Method lowering supports partial overloaded applications via eta expansion;
+  bare overloaded methods still fail.
+- Program finalization uses internal external binding modes so constructor and
+  case placeholders can be inference-local when recursive or indexed evidence
+  would be too early as a public external scheme. The unchecked detailed
+  pipeline entrypoint is restricted to program obligations and generated
+  constructor-forall bindings, and every fully rewritten binding is accepted
+  only after the xMLF typecheck guard.
+- Source-known overloaded method arguments can still provide expected-type
+  guidance, but runtime instance-method selection is deferred until
+  post-eMLF finalization. Explicit and derived recursive `Eq Nat` calls remain
+  strict runtime coverage.
+- Source-type recovery now handles parameterized ADT heads well enough for
+  post-eMLF instance recovery such as `Box Nat`.
+- The former `emlfPendingSuccessMatrix` rows now live in the strict eMLF
+  boundary matrix and pass as runtime `true`: inferred case scrutinees,
+  first-class polymorphic constructor and pattern-bound values, partial
+  overloaded method application, and parameterized ADT instance recovery.
 - Fresh focused verification:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program eMLF"'`
-    -> `27 examples, 0 failures, 7 pending`
+    -> `34 examples, 0 failures`
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
-    -> `60 examples, 0 failures, 7 pending`
+    -> `67 examples, 0 failures`
   - `cabal build all && cabal test`
-    -> `1609 examples, 0 failures, 7 pending`
+    -> `1616 examples, 0 failures`
+  - `git diff --check`
+    -> clean
 
 ## 2026-04-19 - `.mlfp` first-class polymorphism parity locked
 

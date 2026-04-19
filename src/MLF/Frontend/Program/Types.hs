@@ -9,7 +9,11 @@ module MLF.Frontend.Program.Types
     ClassInfo (..),
     ValueInfo (..),
     InstanceInfo (..),
+    DeferredBindingMode (..),
     DeferredMethodCall (..),
+    DeferredConstructorCall (..),
+    DeferredCaseCall (..),
+    DeferredProgramObligation (..),
     ExportedTypeInfo (..),
     ModuleExports (..),
     LoweredBinding (..),
@@ -54,6 +58,7 @@ data ProgramError
   | ProgramUnexpectedInstanceMethod P.ClassName P.MethodName
   | ProgramNoMatchingInstance P.ClassName SrcType
   | ProgramAmbiguousMethodUse P.MethodName
+  | ProgramAmbiguousConstructorUse P.ConstructorName
   | ProgramExpectedFunction SrcType
   | ProgramTypeMismatch SrcType SrcType
   | ProgramCaseOnNonDataType SrcType
@@ -130,12 +135,45 @@ data InstanceInfo = InstanceInfo
   }
   deriving (Eq, Show)
 
+data DeferredBindingMode
+  = DeferredBindingScheme
+  | DeferredBindingMonomorphic
+  deriving (Eq, Show)
+
 data DeferredMethodCall = DeferredMethodCall
   { deferredMethodPlaceholder :: String,
     deferredMethodInfo :: MethodInfo,
     deferredMethodArgCount :: Int,
+    deferredMethodFullArity :: Int,
     deferredMethodName :: P.MethodName
   }
+  deriving (Eq, Show)
+
+data DeferredConstructorCall = DeferredConstructorCall
+  { deferredConstructorPlaceholder :: String,
+    deferredConstructorInfo :: ConstructorInfo,
+    deferredConstructorArgCount :: Int,
+    deferredConstructorSourceType :: SrcType,
+    deferredConstructorOccurrenceType :: SrcType,
+    deferredConstructorInstBinders :: [String],
+    deferredConstructorInitialSubst :: Map String SrcType,
+    deferredConstructorBindingMode :: DeferredBindingMode
+  }
+  deriving (Eq, Show)
+
+data DeferredCaseCall = DeferredCaseCall
+  { deferredCasePlaceholder :: String,
+    deferredCaseDataInfo :: DataInfo,
+    deferredCaseResultType :: SrcType,
+    deferredCaseHandlerNames :: [String],
+    deferredCaseExpectedArgCount :: Int
+  }
+  deriving (Eq, Show)
+
+data DeferredProgramObligation
+  = DeferredMethod DeferredMethodCall
+  | DeferredConstructor DeferredConstructorCall
+  | DeferredCase DeferredCaseCall
   deriving (Eq, Show)
 
 data ExportedTypeInfo = ExportedTypeInfo
@@ -155,7 +193,7 @@ data LoweredBinding = LoweredBinding
   { loweredBindingName :: String,
     loweredBindingExpectedType :: SrcType,
     loweredBindingSurfaceExpr :: SurfaceExpr,
-    loweredBindingDeferredMethods :: Map String DeferredMethodCall,
+    loweredBindingDeferredObligations :: Map String DeferredProgramObligation,
     loweredBindingExternalTypes :: Map String SrcType,
     loweredBindingExportedAsMain :: Bool
   }

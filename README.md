@@ -95,7 +95,7 @@ Internally, `.mlfp` now reuses the old MLF ownership boundary:
 
 - `MLF.Frontend.Program.Check` assembles module/import/class/data environments
 - `MLF.Frontend.Program.Elaborate` lowers executable `.mlfp` bindings to `SurfaceExpr`
-- `MLF.Frontend.Program.Finalize` normalizes those surface eMLF terms and calls `runPipelineElabWithEnv`
+- `MLF.Frontend.Program.Finalize` normalizes those surface eMLF terms and calls the internal detailed eMLF pipeline entrypoint
 - `MLF.Elab.TypeCheck` remains the typing-judgment owner for checked `.mlfp` / xMLF terms
 - `MLF.Frontend.Program.Run` evaluates checked bindings through the existing xMLF reducer; static module/import/data/class validation may still fail before the eMLF pipeline
 

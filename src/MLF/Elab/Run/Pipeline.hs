@@ -8,6 +8,12 @@ module MLF.Elab.Run.Pipeline
     runPipelineElabCheckedWithConfig,
     runPipelineElabWithEnv,
     runPipelineElabWithConfigAndEnv,
+    PipelineElabDetailedResult (..),
+    runPipelineElabDetailedWithEnv,
+    runPipelineElabDetailedWithConfigAndEnv,
+    runPipelineElabDetailedWithExternalBindings,
+    runPipelineElabDetailedWithConfigAndExternalBindings,
+    runPipelineElabDetailedUncheckedWithExternalBindings,
   )
 where
 
@@ -68,7 +74,17 @@ import MLF.Elab.TermClosure
 import MLF.Elab.TypeCheck (typeCheckWithEnv)
 import qualified MLF.Elab.TypeCheck as TypeCheck
 import MLF.Elab.Types
-import MLF.Frontend.ConstraintGen (AnnExpr (..), ConstraintError (..), ConstraintResult (..), ExternalEnv, generateConstraints, generateConstraintsWithEnv)
+import MLF.Frontend.ConstraintGen
+  ( AnnExpr (..),
+    ConstraintError (..),
+    ConstraintResult (..),
+    ExternalBinding (..),
+    ExternalBindingMode (..),
+    ExternalBindings,
+    ExternalEnv,
+    generateConstraints,
+    generateConstraintsWithExternalBindings,
+  )
 import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound)
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Reify.TypeOps (freeTypeVarsType, freshNameLike, substTypeCapture)
@@ -84,6 +100,13 @@ data TraceCopyArtifacts = TraceCopyArtifacts
   { tcaEdgeTracesForCopy :: IntMap.IntMap EdgeTrace,
     tcaInstCopyNodes :: IntSet.IntSet,
     tcaInstCopyMapFull :: IntMap.IntMap NodeId
+  }
+
+data PipelineElabDetailedResult = PipelineElabDetailedResult
+  { pedTerm :: ElabTerm,
+    pedType :: ElabType,
+    pedRootAnn :: AnnExpr,
+    pedTypeCheckEnv :: TypeCheck.Env
   }
 
 validateDirectRecursiveAnnotations :: NormSurfaceExpr -> Either ConstraintError ()
@@ -149,8 +172,8 @@ runPipelineElabChecked :: PolySyms -> NormSurfaceExpr -> Either PipelineError (E
 runPipelineElabChecked = runPipelineElabCheckedWithConfig defaultPipelineConfig
 
 runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
-runPipelineElabWithConfig config polySyms =
-  runPipelineElabWith (pcTraceConfig config) Map.empty (generateConstraints polySyms)
+runPipelineElabWithConfig config polySyms expr =
+  detailedPair <$> runPipelineElabWith True (pcTraceConfig config) Map.empty (generateConstraints polySyms) expr
 
 -- Compatibility alias: the shared pipeline now reports the typechecker result
 -- as authoritative, so the checked entrypoint no longer selects a second path.
@@ -163,16 +186,43 @@ runPipelineElabWithEnv :: PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either P
 runPipelineElabWithEnv = runPipelineElabWithConfigAndEnv defaultPipelineConfig
 
 runPipelineElabWithConfigAndEnv :: PipelineConfig -> PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
-runPipelineElabWithConfigAndEnv config polySyms extEnv =
-  runPipelineElabWith (pcTraceConfig config) extEnv (generateConstraintsWithEnv polySyms extEnv)
+runPipelineElabWithConfigAndEnv config polySyms extEnv expr =
+  detailedPair <$> runPipelineElabDetailedWithConfigAndEnv config polySyms extEnv expr
+
+runPipelineElabDetailedWithEnv :: PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedWithEnv = runPipelineElabDetailedWithConfigAndEnv defaultPipelineConfig
+
+runPipelineElabDetailedWithConfigAndEnv :: PipelineConfig -> PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedWithConfigAndEnv config polySyms extEnv =
+  runPipelineElabDetailedWithConfigAndExternalBindings config polySyms (schemeExternalBindings extEnv)
+
+runPipelineElabDetailedWithExternalBindings :: PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedWithExternalBindings =
+  runPipelineElabDetailedWithConfigAndExternalBindings defaultPipelineConfig
+
+runPipelineElabDetailedWithConfigAndExternalBindings :: PipelineConfig -> PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedWithConfigAndExternalBindings config polySyms extBindings =
+  runPipelineElabWith True (pcTraceConfig config) extBindings (generateConstraintsWithExternalBindings polySyms extBindings)
+
+runPipelineElabDetailedUncheckedWithExternalBindings :: PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either PipelineError PipelineElabDetailedResult
+runPipelineElabDetailedUncheckedWithExternalBindings polySyms extBindings =
+  runPipelineElabWith False (pcTraceConfig defaultPipelineConfig) extBindings (generateConstraintsWithExternalBindings polySyms extBindings)
+
+schemeExternalBindings :: ExternalEnv -> ExternalBindings
+schemeExternalBindings =
+  Map.map (\srcTy -> ExternalBinding {externalBindingType = srcTy, externalBindingMode = ExternalBindingScheme})
+
+detailedPair :: PipelineElabDetailedResult -> (ElabTerm, ElabType)
+detailedPair result = (pedTerm result, pedType result)
 
 runPipelineElabWith ::
+  Bool ->
   TraceConfig ->
-  ExternalEnv ->
+  ExternalBindings ->
   (NormSurfaceExpr -> Either ConstraintError ConstraintResult) ->
   NormSurfaceExpr ->
-  Either PipelineError (ElabTerm, ElabType)
-runPipelineElabWith traceCfg extEnv genConstraints expr = do
+  Either PipelineError PipelineElabDetailedResult
+runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints expr = do
   () <- fromConstraintError (validateDirectRecursiveAnnotations expr)
   ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} <- fromConstraintError (genConstraints expr)
   let c1 = normalize c0
@@ -205,8 +255,8 @@ runPipelineElabWith traceCfg extEnv genConstraints expr = do
   -- graph-internal variable names that conflict with constructor types.
   let initialSchemeInfos =
         Map.map
-          (\srcTy -> SchemeInfo {siScheme = schemeFromType (srcTypeToElabType srcTy), siSubst = IntMap.empty})
-          extEnv
+          (\ExternalBinding {externalBindingType = srcTy} -> SchemeInfo {siScheme = schemeFromType (srcTypeToElabType srcTy), siSubst = IntMap.empty})
+          extBindings
   let initialTcEnv =
         TypeCheck.Env
           { TypeCheck.termEnv = Map.map (schemeToType . siScheme) initialSchemeInfos,
@@ -300,29 +350,49 @@ runPipelineElabWith traceCfg extEnv genConstraints expr = do
           Just termAdjusted -> closeTermWithSchemeSubstIfNeeded rootSubst rootScheme termAdjusted
           Nothing -> termClosed0
   let termClosedFresh = freshenTypeAbsAgainstEnv initialTcEnv termClosed
+      uncheckedAuthoritative =
+        pure
+          PipelineElabDetailedResult
+            { pedTerm = termClosedFresh,
+              pedType = schemeToType rootScheme,
+              pedRootAnn = authoritativeAnnCanonFinal,
+              pedTypeCheckEnv = initialTcEnv
+            }
       checkedAuthoritative = do
         tyChecked <-
           case typeCheckWithEnv initialTcEnv termClosedFresh of
             Right ty -> pure ty
             Left err -> fromTypeCheckError (Left err)
-        pure (termClosedFresh, tyChecked)
+        pure
+          PipelineElabDetailedResult
+            { pedTerm = termClosedFresh,
+              pedType = tyChecked,
+              pedRootAnn = authoritativeAnnCanonFinal,
+              pedTypeCheckEnv = initialTcEnv
+            }
+      authoritativeResult =
+        if requireFinalTypeCheck
+          then checkedAuthoritative
+          else uncheckedAuthoritative
 
   -- Keep result-type reconstruction for diagnostics, but report the
   -- type-checker result as authoritative.
-  case (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) of
-    (AAnn inner annNodeId eid, AAnn innerPre _ _) -> do
-      _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid)
-      checkedAuthoritative
-    (AUnfold inner annNodeId eid, _) -> do
-      let innerPre = case authoritativeAnnPreFinal of
-            AUnfold ip _ _ -> ip
-            AAnn ip _ _ -> ip
-            other -> other
-      _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid)
-      checkedAuthoritative
-    _ -> do
-      _ <- fromElabError (computeResultTypeFallback resultTypeInputs authoritativeAnnCanonFinal authoritativeAnnPreFinal)
-      checkedAuthoritative
+  if not requireFinalTypeCheck
+    then authoritativeResult
+    else case (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) of
+      (AAnn inner annNodeId eid, AAnn innerPre _ _) -> do
+        _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid)
+        authoritativeResult
+      (AUnfold inner annNodeId eid, _) -> do
+        let innerPre = case authoritativeAnnPreFinal of
+              AUnfold ip _ _ -> ip
+              AAnn ip _ _ -> ip
+              other -> other
+        _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid)
+        authoritativeResult
+      _ -> do
+        _ <- fromElabError (computeResultTypeFallback resultTypeInputs authoritativeAnnCanonFinal authoritativeAnnPreFinal)
+        authoritativeResult
 
 freshenTypeAbsAgainstEnv :: TypeCheck.Env -> ElabTerm -> ElabTerm
 freshenTypeAbsAgainstEnv env term0 = pruneVacuousLeadingTyAbsAgainstEnv env (go reserved term0)
