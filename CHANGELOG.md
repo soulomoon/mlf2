@@ -18,13 +18,15 @@
   overlap imported schemas, validates pattern annotations against matched and
   catch-all-only scrutinee types, rejects branches after constructor-local
   catch-all patterns, preserves method-level constraints when eager and
-  deferred typeclass evidence is materialized, and avoids decoding non-data
-  `main` values through the global ADT fallback.
+  deferred typeclass evidence is materialized, avoids duplicate unqualified
+  instance matches for aliased imports whose instance heads do not qualify, and
+  avoids decoding non-data `main` values or typed non-data constructor fields
+  through the global ADT fallback.
   Validation:
   `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
-  (`95 examples, 0 failures`), `MLF.Program eMLF`
-  (`57 examples, 0 failures`), and `cabal build all && cabal test`
-  (`1644 examples, 0 failures`).
+  (`97 examples, 0 failures`), `MLF.Program eMLF`
+  (`58 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1646 examples, 0 failures`).
 - Made `.mlfp` more usable as a source-language surface. The program parser
   now has located entrypoints and the checker/runner expose
   `ProgramDiagnostic` with file/line/column rendering and mechanically

@@ -476,16 +476,28 @@ qualifiedInstancesForImport priorExports priorInstances imp =
       case Map.lookup (P.importModuleName imp) priorExports of
         Nothing -> []
         Just exports ->
-          [ qualifyInstance alias exports instanceInfo
-            | instanceInfo <- priorInstances,
-              instanceBelongsToModule (P.importModuleName imp) instanceInfo,
-              instanceClassName instanceInfo `Map.member` exportedClasses exports
-          ]
-            ++ [ qualifyInstanceHeadOnly alias exports instanceInfo
-                 | instanceInfo <- priorInstances,
-                   instanceBelongsToModule (P.importModuleName imp) instanceInfo,
-                   instanceClassName instanceInfo `Map.member` exportedClasses exports
-               ]
+          let importedInstances =
+                [ instanceInfo
+                  | instanceInfo <- priorInstances,
+                    instanceBelongsToModule (P.importModuleName imp) instanceInfo,
+                    instanceClassName instanceInfo `Map.member` exportedClasses exports
+                ]
+              qualifiedInstances =
+                [ qualifyInstance alias exports instanceInfo
+                  | instanceInfo <- importedInstances
+                ]
+              headOnlyInstances =
+                [ headOnly
+                  | instanceInfo <- importedInstances,
+                    let headOnly = qualifyInstanceHeadOnly alias exports instanceInfo,
+                    not (sameInstanceHead instanceInfo headOnly)
+                ]
+           in qualifiedInstances ++ headOnlyInstances
+
+sameInstanceHead :: InstanceInfo -> InstanceInfo -> Bool
+sameInstanceHead left right =
+  instanceClassName left == instanceClassName right
+    && instanceHeadType left == instanceHeadType right
 
 instanceBelongsToModule :: P.ModuleName -> InstanceInfo -> Bool
 instanceBelongsToModule moduleName0 instanceInfo =

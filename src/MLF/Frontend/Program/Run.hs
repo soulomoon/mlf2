@@ -249,10 +249,12 @@ decodeArg :: CheckedProgram -> SrcType -> ElabTerm -> Value
 decodeArg checked srcTy term =
   case decodeSourceValue checked srcTy term of
     Just value -> value
-    Nothing ->
-      case decodeAnyData checked term of
-        Just value -> value
-        Nothing -> toValue term
+    Nothing
+      | sourceTypeIsData checked srcTy ->
+          case decodeAnyData checked term of
+            Just value -> value
+            Nothing -> toValue term
+      | otherwise -> toValue term
 
 lookupByHandler :: [String] -> [ConstructorInfo] -> String -> Maybe ConstructorInfo
 lookupByHandler handlerNames constructors selected =

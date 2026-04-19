@@ -891,6 +891,27 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs aliased import exposing a closed-type instance without duplicate matches"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Int {"
+                , "    eq = \\x \\y true;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C exposing (eq);"
+                , "  def main : Bool = eq 1 1;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs qualified type name in annotation"
         ( InlineProgram $
             unlines
@@ -1209,6 +1230,24 @@ spec = do
             program <- requireParsed programText
             case prettyValue <$> runProgram program of
                 Right rendered -> rendered `shouldSatisfy` (/= "Token")
+                Left err -> expectationFailure ("unexpected program failure: " ++ show err)
+
+        it "does not decode typed non-data constructor fields through fallback ADT decoding" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Token(..), Holder(..), main) {"
+                        , "  data Token ="
+                        , "      Token : Token;"
+                        , ""
+                        , "  data Holder ="
+                        , "      Holder : (Bool -> Bool) -> Holder;"
+                        , ""
+                        , "  def main : Holder = Holder (\\(x : Bool) x);"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case prettyValue <$> runProgram program of
+                Right rendered -> rendered `shouldSatisfy` (/= "Holder Token")
                 Left err -> expectationFailure ("unexpected program failure: " ++ show err)
 
     describe "MLF.Program performance baseline" $ do
