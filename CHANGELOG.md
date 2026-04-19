@@ -15,14 +15,18 @@
   guards for bare methods, missing instances, and duplicate instances. Deferred
   obligations lower to typed placeholders and resolve after eMLF elaboration,
   with rewritten terms typechecked before acceptance; ordinary ADT constructor
-  applications now use the deferred path while Church constructor definitions
-  remain the runtime representation, and explicit/derived recursive `Eq Nat`
-  coverage is restored. The former pending-success matrix has been folded into
-  strict positive coverage.
+  applications, bare nullary constructor values, GADT-style indexed
+  constructors, and existential constructors now use the deferred path while
+  Church constructor definitions remain the runtime representation, and
+  explicit/derived recursive `Eq Nat` coverage is restored. Constructor
+  obligations carry expected-type seeds, constructor-local `forall` evidence,
+  and runtime instantiation order, with ambiguous constructor evidence failing
+  as `ProgramAmbiguousConstructorUse`. The former pending-success matrix has
+  been folded into strict positive coverage.
   Validated with `MLF.Program eMLF`
-  (`27 examples, 0 failures`),
-  `MLF.Program` (`60 examples, 0 failures`), and
-  `cabal build all && cabal test` (`1609 examples, 0 failures`).
+  (`34 examples, 0 failures`),
+  `MLF.Program` (`67 examples, 0 failures`), and
+  `cabal build all && cabal test` (`1616 examples, 0 failures`).
 - Hardened the unified `.mlfp` eMLF/xMLF contract. Executable bindings are now
   documented and guarded as `SurfaceExpr -> runPipelineElabWithEnv -> xMLF
   typecheck -> normalize/run`, `runPipelineElabChecked` is documented as a

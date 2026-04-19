@@ -4,12 +4,20 @@
   overloaded methods, constructors, and case eliminators. Program finalization
   uses the internal detailed eMLF pipeline result, rewrites deferred obligations
   after inference, and reruns xMLF typechecking on rewritten terms.
-- Ordinary ADT constructor applications lower through typed placeholders, while
-  nullary constructor values remain inline Church values and GADT/existential
-  constructor applications stay direct until deferred obligations carry
-  constructor-local `forall` evidence. Constructor definitions remain
-  Church-encoded runtime bindings. Method lowering supports partial overloaded
-  applications via eta expansion; bare overloaded methods still fail.
+- Every source constructor occurrence now lowers through a typed placeholder,
+  including ordinary applications, bare nullary values, recursive indexed
+  constructors, GADT-style constructors, and existential constructors.
+  Deferred constructor metadata carries expected-type seeds, occurrence
+  templates, constructor-local `forall` binders, and runtime instantiation
+  order. Constructor definitions remain Church-encoded runtime bindings.
+  Method lowering supports partial overloaded applications via eta expansion;
+  bare overloaded methods still fail.
+- Program finalization uses internal external binding modes so constructor and
+  case placeholders can be inference-local when recursive or indexed evidence
+  would be too early as a public external scheme. The unchecked detailed
+  pipeline entrypoint is restricted to program obligations and generated
+  constructor-forall bindings, and every fully rewritten binding is accepted
+  only after the xMLF typecheck guard.
 - Source-known overloaded method arguments can still provide expected-type
   guidance, but runtime instance-method selection is deferred until
   post-eMLF finalization. Explicit and derived recursive `Eq Nat` calls remain
@@ -22,11 +30,13 @@
   overloaded method application, and parameterized ADT instance recovery.
 - Fresh focused verification:
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program eMLF"'`
-    -> `27 examples, 0 failures`
+    -> `34 examples, 0 failures`
   - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
-    -> `60 examples, 0 failures`
+    -> `67 examples, 0 failures`
   - `cabal build all && cabal test`
-    -> `1609 examples, 0 failures`
+    -> `1616 examples, 0 failures`
+  - `git diff --check`
+    -> clean
 
 ## 2026-04-19 - `.mlfp` first-class polymorphism parity locked
 

@@ -144,8 +144,10 @@ spec = describe "Repository guardrails" $ do
     checkSrc `shouldSatisfy` isInfixOf "import MLF.Frontend.Program.Finalize"
     typesSrc `shouldSatisfy` isInfixOf "loweredBindingSurfaceExpr :: SurfaceExpr"
     typesSrc `shouldSatisfy` (not . isInfixOf "loweredBindingTerm :: ElabTerm")
-    finalizeSrc `shouldSatisfy` isInfixOf "runPipelineElabDetailedWithEnv"
+    finalizeSrc `shouldSatisfy` isInfixOf "runPipelineElabDetailedWithExternalBindings"
+    finalizeSrc `shouldSatisfy` isInfixOf "runPipelineElabDetailedUncheckedWithExternalBindings"
     finalizeSrc `shouldSatisfy` isInfixOf "normalizeExpr surfaceExpr"
+    finalizeSrc `shouldSatisfy` isInfixOf "typeCheckWithEnv caseRewriteEnv rewritten"
     pipelineRunSrc `shouldSatisfy` isInfixOf "Compatibility alias"
     pipelineRunSrc `shouldSatisfy` isInfixOf "runPipelineElabCheckedWithConfig = runPipelineElabWithConfig"
     forM_

@@ -3,6 +3,7 @@
 module MLF.Frontend.ConstraintGen.Translate
   ( buildRootExpr,
     buildRootExprWithEnv,
+    buildRootExprWithExternalBindings,
   )
 where
 
@@ -27,15 +28,29 @@ import MLF.Frontend.Syntax
 buildRootExpr :: NormCoreExpr -> ConstraintM (GenNodeId, Env, NodeId, AnnExpr)
 buildRootExpr = buildRootExprWithEnv Map.empty
 
+schemeExternalBindings :: ExternalEnv -> ExternalBindings
+schemeExternalBindings =
+  Map.map
+    ( \srcTy ->
+        ExternalBinding
+          { externalBindingType = srcTy,
+            externalBindingMode = ExternalBindingScheme
+          }
+    )
+
 -- | Like 'buildRootExpr', but first injects external type assumptions
 -- into the constraint graph as let-bound polymorphic schemes.  Each
 -- entry in the 'ExternalEnv' becomes a binding whose scheme root is
 -- the flexible internalization of the given 'NormSrcType', so that
 -- variable references in the expression get proper expansion nodes.
 buildRootExprWithEnv :: ExternalEnv -> NormCoreExpr -> ConstraintM (GenNodeId, Env, NodeId, AnnExpr)
-buildRootExprWithEnv extEnv expr = do
+buildRootExprWithEnv extEnv =
+  buildRootExprWithExternalBindings (schemeExternalBindings extEnv)
+
+buildRootExprWithExternalBindings :: ExternalBindings -> NormCoreExpr -> ConstraintM (GenNodeId, Env, NodeId, AnnExpr)
+buildRootExprWithExternalBindings extBindings expr = do
   rootGen <- allocGenNode []
-  initialBindings <- buildInitialEnv rootGen extEnv
+  initialBindings <- buildInitialEnv rootGen extBindings
   (rootNode, annRoot) <- buildExpr initialBindings rootGen expr
   topFrame <- Scope.peekScope
   rebindScopeRoot (genRef rootGen) rootNode topFrame
@@ -45,30 +60,36 @@ buildRootExprWithEnv extEnv expr = do
 
 -- | Build an initial 'Env' from an 'ExternalEnv' by internalizing each
 -- source type as a let-bound polymorphic scheme under the given root gen.
-buildInitialEnv :: GenNodeId -> ExternalEnv -> ConstraintM Env
-buildInitialEnv rootGen extEnv =
+buildInitialEnv :: GenNodeId -> ExternalBindings -> ConstraintM Env
+buildInitialEnv rootGen extBindings =
   foldM
-    ( \env (name, srcTy) -> do
-        binding <- buildExternalBinding rootGen name srcTy
+    ( \env (name, externalBinding) -> do
+        binding <- buildExternalBinding rootGen name externalBinding
         pure (Map.insert name binding env)
     )
     Map.empty
-    (Map.toList extEnv)
+    (Map.toList extBindings)
 
 -- | Create a let-bound polymorphic 'Binding' for an external variable.
 -- Allocates a child gen node under the root, internalizes the source
 -- type as a flexible copy, and returns a binding with the scheme root
 -- and gen node so that variable references get expansion nodes.
-buildExternalBinding :: GenNodeId -> VarName -> NormSrcType -> ConstraintM Binding
-buildExternalBinding rootGen _name srcTy = do
-  extSchemeGen <- allocChildGenUnder rootGen
-  ((extSchemeRoot, _shared), scopeFrame) <-
-    withScopedBuild
-      (internalizeCoercionCopy BindFlex True extSchemeGen extSchemeGen Map.empty Map.empty srcTy)
-  rebindScopeRoot (genRef extSchemeGen) extSchemeRoot scopeFrame
-  setBindParentIfMissing (typeRef extSchemeRoot) (genRef extSchemeGen) BindFlex
-  setGenNodeSchemes extSchemeGen [extSchemeRoot]
-  pure Binding {bindingNode = extSchemeRoot, bindingGen = Just extSchemeGen}
+buildExternalBinding :: GenNodeId -> VarName -> ExternalBinding -> ConstraintM Binding
+buildExternalBinding rootGen _name ExternalBinding {externalBindingType = srcTy, externalBindingMode = mode} =
+  case mode of
+    ExternalBindingScheme -> do
+      extSchemeGen <- allocChildGenUnder rootGen
+      ((extSchemeRoot, _shared), scopeFrame) <-
+        withScopedBuild
+          (internalizeCoercionCopy BindFlex True extSchemeGen extSchemeGen Map.empty Map.empty srcTy)
+      rebindScopeRoot (genRef extSchemeGen) extSchemeRoot scopeFrame
+      setBindParentIfMissing (typeRef extSchemeRoot) (genRef extSchemeGen) BindFlex
+      setGenNodeSchemes extSchemeGen [extSchemeRoot]
+      pure Binding {bindingNode = extSchemeRoot, bindingGen = Just extSchemeGen}
+    ExternalBindingMonomorphic -> do
+      monoRoot <- allocVar
+      setBindParentIfMissing (typeRef monoRoot) (genRef rootGen) BindFlex
+      pure Binding {bindingNode = monoRoot, bindingGen = Nothing}
 
 buildExpr :: Env -> GenNodeId -> NormCoreExpr -> ConstraintM (NodeId, AnnExpr)
 buildExpr env scopeRoot expr = do

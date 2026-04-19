@@ -9,6 +9,9 @@ module MLF.Frontend.ConstraintGen.Types
     Binding (..),
     Env,
     ExternalEnv,
+    ExternalBindingMode (..),
+    ExternalBinding (..),
+    ExternalBindings,
     replaceScopeRoot,
   )
 where
@@ -115,11 +118,24 @@ data Binding = Binding
 
 type Env = Map VarName Binding
 
+data ExternalBindingMode
+  = ExternalBindingScheme
+  | ExternalBindingMonomorphic
+  deriving (Eq, Show)
+
+data ExternalBinding = ExternalBinding
+  { externalBindingType :: NormSrcType,
+    externalBindingMode :: ExternalBindingMode
+  }
+  deriving (Eq, Show)
+
 -- | External environment: maps free variable names to their normalized
 -- source types.  Used by 'generateConstraintsWithEnv' to inject
 -- pre-existing type assumptions (e.g. from .mlfp program scope) into
 -- constraint generation without wrapping the expression in ELamAnn.
 type ExternalEnv = Map VarName NormSrcType
+
+type ExternalBindings = Map VarName ExternalBinding
 
 replaceScopeRoot :: GenNodeId -> GenNodeId -> AnnExpr -> AnnExpr
 replaceScopeRoot from to = cata alg

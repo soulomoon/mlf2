@@ -50,7 +50,7 @@ import MLF.Frontend.Program.Types
     splitArrows,
     splitForalls,
   )
-import MLF.Frontend.Syntax (Lit (..), SrcTy (..), SrcType)
+import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as P
 
 type TcM a = Either ProgramError a
@@ -207,8 +207,7 @@ checkModule priorModules mod0 = do
       [ ctor
         | dataInfo <- Map.elems localData,
           ctor <- dataConstructors dataInfo,
-          null (ctorForalls ctor),
-          ctorResult ctor == dataHeadTypeForInfo dataInfo
+          constructorRuntimeBindingRecoverable ctor
       ]
   instanceBindings <- concat <$> mapM (checkInstance elaborateScope scope1) (derivedInstances ++ explicitInstances mod0)
   defBindings <- mapM (checkDef elaborateScope scope1) (moduleDefDecls mod0)
@@ -444,11 +443,22 @@ addConstructorValues moduleName0 dataInfos =
           ctor <- dataConstructors dataInfo
       ]
 
-dataHeadTypeForInfo :: DataInfo -> SrcType
-dataHeadTypeForInfo dataInfo =
-  case dataParams dataInfo of
-    [] -> STBase (dataName dataInfo)
-    param : params -> STCon (dataName dataInfo) (STVar param :| map STVar params)
+constructorRuntimeBindingRecoverable :: ConstructorInfo -> Bool
+constructorRuntimeBindingRecoverable ctor =
+  let evidenceVars = foldMap freeTypeVars (ctorArgs ctor ++ [ctorResult ctor])
+   in all (\(name, _) -> name `Set.member` evidenceVars) (ctorForalls ctor)
+  where
+    freeTypeVars ty =
+      case ty of
+        STVar name -> Set.singleton name
+        STArrow dom cod -> freeTypeVars dom `Set.union` freeTypeVars cod
+        STBase {} -> Set.empty
+        STCon _ args -> foldMap freeTypeVars args
+        STForall name mb body ->
+          maybe Set.empty (freeTypeVars . unSrcBound) mb
+            `Set.union` Set.delete name (freeTypeVars body)
+        STMu name body -> Set.delete name (freeTypeVars body)
+        STBottom -> Set.empty
 
 synthesizeDerivedInstances :: Scope -> P.Module -> TcM [P.InstanceDecl]
 synthesizeDerivedInstances scope mod0 = concat <$> mapM deriveForData (moduleDataDecls mod0)

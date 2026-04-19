@@ -253,16 +253,8 @@ compileExpr scope mbExpected expr = case expr of
       Just OverloadedMethod {} -> throwError (ProgramAmbiguousMethodUse name)
       Just OrdinaryValue {valueRuntimeName = runtimeName} -> pure (surfaceVar runtimeName)
       Just ConstructorValue {valueCtorInfo = ctorInfo} -> do
-        let ctorExpr =
-              if null (ctorArgs ctorInfo)
-                then constructorSurfaceExprRaw scope ctorInfo
-                else constructorSurfaceExpr scope ctorInfo
-        pure $ case mbExpected of
-          Just expectedTy
-            | null (ctorArgs ctorInfo),
-              isRecursiveResultType expectedTy || lowerType scope expectedTy == lowerType scope (ctorResult ctorInfo) ->
-                surfaceAnn ctorExpr (lowerType scope expectedTy)
-          _ -> ctorExpr
+        placeholder <- deferConstructorCall scope ctorInfo 0 mbExpected
+        pure (surfaceVar placeholder)
       Nothing -> throwError (ProgramUnknownValue name)
   ELit lit -> pure (surfaceLit lit)
   ELam param body -> do
@@ -343,15 +335,11 @@ explicitExprAnnotation expr =
     _ -> Nothing
 
 compileValueApp :: ElaborateScope -> Maybe SrcType -> ValueInfo -> [P.Expr] -> ElaborateM SurfaceExpr
-compileValueApp scope _mbExpected ConstructorValue {valueCtorInfo = ctorInfo} args = do
+compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} args = do
   argSurfaces <-
     zipWithM compileConstructorArg (take (length args) (ctorArgs ctorInfo)) args
-  if shouldDeferConstructorApplication scope ctorInfo
-    then do
-      placeholder <- deferConstructorCall scope ctorInfo (length args)
-      pure (foldl surfaceApp (surfaceVar placeholder) argSurfaces)
-    else
-      pure (foldl surfaceApp (constructorSurfaceExpr scope ctorInfo) argSurfaces)
+  placeholder <- deferConstructorCall scope ctorInfo (length args) mbExpected
+  pure (foldl surfaceApp (surfaceVar placeholder) argSurfaces)
   where
     compileConstructorArg expectedTy arg = do
       case inferKnownExprType scope arg of
@@ -377,14 +365,6 @@ compileValueApp scope mbExpected valueInfo args = do
         isRecursiveResultType expectedTy || isRecursiveResultType (lowerType scope expectedTy) ->
           surfaceAnn applied (lowerType scope expectedTy)
     _ -> applied
-
-shouldDeferConstructorApplication :: ElaborateScope -> ConstructorInfo -> Bool
-shouldDeferConstructorApplication scope ctorInfo =
-  case Map.lookup (ctorOwningType ctorInfo) (esTypes scope) of
-    Just dataInfo ->
-      null (ctorForalls ctorInfo)
-        && ctorResult ctorInfo == dataHeadType dataInfo
-    Nothing -> False
 
 isLocalOrdinaryValue :: ValueInfo -> Bool
 isLocalOrdinaryValue OrdinaryValue {valueOriginModule = "<local>"} = True
@@ -487,18 +467,64 @@ deferMethodCall scope methodInfo fullArity placeholderSourceTy = do
   registerDeferredObligation placeholder placeholderTy (DeferredMethod deferred)
   pure placeholder
 
-deferConstructorCall :: ElaborateScope -> ConstructorInfo -> Int -> ElaborateM String
-deferConstructorCall scope ctorInfo argCount = do
+deferConstructorCall :: ElaborateScope -> ConstructorInfo -> Int -> Maybe SrcType -> ElaborateM String
+deferConstructorCall scope ctorInfo argCount mbExpected = do
   placeholder <- freshDeferredConstructorName (ctorName ctorInfo)
-  let placeholderTy = lowerType scope (quantifyFreeTypeVars (ctorType ctorInfo))
+  let quantifiedTy = quantifyFreeTypeVars (ctorType ctorInfo)
+      occurrenceTy = constructorOccurrenceType ctorInfo argCount
+      instBinders = map fst (fst (splitForalls quantifiedTy))
+      initialSubst =
+        case mbExpected >>= matchTypes Map.empty occurrenceTy of
+          Just subst -> subst
+          Nothing -> Map.empty
+      placeholderSourceTy = specializeQuantifiedType initialSubst quantifiedTy
+      placeholderTy = lowerType scope placeholderSourceTy
+      bindingMode = DeferredBindingMonomorphic
       deferred =
         DeferredConstructorCall
           { deferredConstructorPlaceholder = placeholder,
             deferredConstructorInfo = ctorInfo,
-            deferredConstructorArgCount = argCount
+            deferredConstructorArgCount = argCount,
+            deferredConstructorSourceType = placeholderSourceTy,
+            deferredConstructorOccurrenceType = specializeSrcType initialSubst occurrenceTy,
+            deferredConstructorInstBinders = instBinders,
+            deferredConstructorInitialSubst = initialSubst,
+            deferredConstructorBindingMode = bindingMode
           }
   registerDeferredObligation placeholder placeholderTy (DeferredConstructor deferred)
   pure placeholder
+
+constructorOccurrenceType :: ConstructorInfo -> Int -> SrcType
+constructorOccurrenceType ctorInfo argCount =
+  foldr STArrow (ctorResult ctorInfo) (drop argCount (ctorArgs ctorInfo))
+
+specializeQuantifiedType :: Map String SrcType -> SrcType -> SrcType
+specializeQuantifiedType subst ty =
+  let (foralls, body) = splitForalls ty
+      kept =
+        [ (name, fmap (specializeSrcType subst) mb)
+          | (name, mb) <- foralls,
+            Map.notMember name subst
+        ]
+   in foldr
+        (\(name, mb) acc -> STForall name (fmap SrcBound mb) acc)
+        (specializeSrcType subst body)
+        kept
+
+specializeSrcType :: Map String SrcType -> SrcType -> SrcType
+specializeSrcType subst ty = case ty of
+  STVar name -> Map.findWithDefault ty name subst
+  STArrow dom cod -> STArrow (specializeSrcType subst dom) (specializeSrcType subst cod)
+  STBase {} -> ty
+  STCon name args -> STCon name (fmap (specializeSrcType subst) args)
+  STForall name mb body
+    | Map.member name subst -> STForall name mb body
+    | otherwise ->
+        STForall name (fmap (SrcBound . specializeSrcType subst . unSrcBound) mb) (specializeSrcType subst body)
+  STMu name body
+    | Map.member name subst -> STMu name body
+    | otherwise -> STMu name (specializeSrcType subst body)
+  STBottom -> STBottom
 
 deferCaseCall :: ElaborateScope -> DataInfo -> SrcType -> ElaborateM String
 deferCaseCall scope dataInfo resultTy = do
@@ -637,23 +663,12 @@ compileCase scope mbExpected scrutinee alts = do
             pure (STVar resultVar, True)
       case localIdentityScrutinee scope scrutinee of
         Just inner -> compileCase scope mbExpected inner alts
-        Nothing -> case directConstructorScrutinee scope scrutinee of
-          Just (ctorInfo, args)
-            | ctorOwningType ctorInfo == dataName dataInfo ->
-                compileDirectConstructorCase scope mbExpected headTy ctorInfo args alts catchAll
-          _
-            | variableScrutinee scrutinee || isLocalOrdinaryCall scope scrutinee -> do
-                scrutineeExpr <- compileExpr scope Nothing scrutinee
-                handlers <- mapM (compileHandler scope scrutineeExpr resultTy headTy dataInfo alts catchAll False) (dataConstructors dataInfo)
-                pure (foldl surfaceApp scrutineeExpr handlers)
-            | otherwise -> do
-                scrutineeExpr <- compileExpr scope (Just headTy) scrutinee
-                scrutineeName <- freshRuntimeName "case_scrut"
-                let scrutineeRef = surfaceVar scrutineeName
-                handlers <- mapM (compileHandler scope scrutineeRef resultTy headTy dataInfo alts catchAll True) (dataConstructors dataInfo)
-                placeholder <- deferCaseCall scope dataInfo resultTy
-                let caseExpr = foldl surfaceApp (surfaceVar placeholder) (scrutineeRef : handlers)
-                pure (surfaceLet scrutineeName scrutineeExpr caseExpr)
+        Nothing -> do
+          scrutineeExpr <- compileExpr scope (Just headTy) scrutinee
+          let forceAnnotateHandlers = any (not . null . ctorForalls) (dataConstructors dataInfo)
+          handlers <- mapM (compileHandler scope scrutineeExpr resultTy headTy dataInfo alts catchAll forceAnnotateHandlers) (dataConstructors dataInfo)
+          placeholder <- deferCaseCall scope dataInfo resultTy
+          pure (foldl surfaceApp (surfaceVar placeholder) (scrutineeExpr : handlers))
 
 localIdentityScrutinee :: ElaborateScope -> P.Expr -> Maybe P.Expr
 localIdentityScrutinee scope expr =
@@ -666,86 +681,6 @@ localIdentityScrutinee scope expr =
         Just OrdinaryValue {valueOriginModule = "<local>"} <- Map.lookup name (esValues scope) ->
           Just arg
     _ -> Nothing
-
-variableScrutinee :: P.Expr -> Bool
-variableScrutinee = \case
-  EVar _ -> True
-  EAnn inner _ -> variableScrutinee inner
-  _ -> False
-
-isLocalOrdinaryCall :: ElaborateScope -> P.Expr -> Bool
-isLocalOrdinaryCall scope expr =
-  case collectApps expr of
-    (EVar name, _ : _) ->
-      case Map.lookup name (esValues scope) of
-        Just OrdinaryValue {valueOriginModule = "<local>"} -> True
-        _ -> False
-    _ -> False
-
-directConstructorScrutinee :: ElaborateScope -> P.Expr -> Maybe (ConstructorInfo, [P.Expr])
-directConstructorScrutinee scope expr =
-  case collectApps (stripAnn expr) of
-    (EVar name, args)
-      | Just ConstructorValue {valueCtorInfo = ctorInfo} <- Map.lookup name (esValues scope) ->
-          Just (ctorInfo, args)
-    _ -> Nothing
-  where
-    stripAnn = \case
-      EAnn inner _ -> stripAnn inner
-      other -> other
-
-compileDirectConstructorCase :: ElaborateScope -> Maybe SrcType -> SrcType -> ConstructorInfo -> [P.Expr] -> [P.Alt] -> Maybe P.Alt -> ElaborateM SurfaceExpr
-compileDirectConstructorCase scope mbExpected headTy ctorInfo args alts catchAll =
-  case findMatchingAlt of
-    Just (P.Alt (P.PatCtor _ binders) body)
-      | length binders /= length (ctorArgs ctorInfo) ->
-          throwError (ProgramPatternConstructorMismatch (ctorName ctorInfo) headTy)
-      | length args /= length (ctorArgs ctorInfo) ->
-          throwError (ProgramPatternConstructorMismatch (ctorName ctorInfo) headTy)
-      | otherwise -> do
-          argSurfaces <- zipWithM compileArg (ctorArgs ctorInfo) args
-          runtimeNames <- mapM freshRuntimeName binders
-          let binderTriples = zip3 binders runtimeNames (ctorArgs ctorInfo)
-              liveBinderTriples = filter (\(srcName, _, _) -> srcName /= "_") binderTriples
-          scope' <- foldM (\acc (srcName, runtimeName, argTy) -> extendLocal acc srcName runtimeName (Just argTy)) scope liveBinderTriples
-          bodyExpr <- compileExpr scope' mbExpected body
-          let liveBindings =
-                [ (runtimeName, argSurface)
-                  | (srcName, runtimeName, argSurface) <- zip3 binders runtimeNames argSurfaces,
-                    srcName /= "_"
-                ]
-          pure (foldr (\(runtimeName, argSurface) acc -> surfaceLet runtimeName argSurface acc) bodyExpr liveBindings)
-    Just _ ->
-      throwError (ProgramPatternConstructorMismatch (ctorName ctorInfo) headTy)
-    Nothing ->
-      case catchAll of
-        Just (P.Alt P.PatWildcard body) -> compileExpr scope mbExpected body
-        Just (P.Alt (P.PatVar name) body) -> do
-          scrutineeExpr <- directConstructorSurface
-          runtimeName <- freshRuntimeName name
-          scope' <- extendLocal scope name runtimeName (Just (ctorResult ctorInfo))
-          bodyExpr <- compileExpr scope' mbExpected body
-          pure (surfaceLet runtimeName scrutineeExpr bodyExpr)
-        _ -> throwError (ProgramNonExhaustiveCase [ctorName ctorInfo])
-  where
-    findMatchingAlt =
-      find
-        ( \case
-            P.Alt (P.PatCtor ctorName0 _) _ -> ctorName0 == ctorName ctorInfo
-            _ -> False
-        )
-        alts
-
-    compileArg expectedTy arg = do
-      argSurface <- compileExpr scope Nothing arg
-      pure $
-        if hasLeadingForall expectedTy && inferKnownExprType scope arg /= Just expectedTy
-          then surfaceAnn argSurface (lowerType scope expectedTy)
-          else argSurface
-
-    directConstructorSurface = do
-      argSurfaces <- zipWithM compileArg (ctorArgs ctorInfo) args
-      pure (foldl surfaceApp (constructorSurfaceExprRaw scope ctorInfo) argSurfaces)
 
 compileCatchAllOnly :: ElaborateScope -> Maybe SrcType -> SurfaceExpr -> [P.Alt] -> ElaborateM SurfaceExpr
 compileCatchAllOnly scope mbExpected scrutineeExpr alts =

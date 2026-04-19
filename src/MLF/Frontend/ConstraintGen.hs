@@ -6,10 +6,15 @@ module MLF.Frontend.ConstraintGen
     ConstraintResult (..),
     AnnExpr (..),
     ExternalEnv,
+    ExternalBindingMode (..),
+    ExternalBinding (..),
+    ExternalBindings,
     generateConstraints,
     generateConstraintsCore,
     generateConstraintsWithEnv,
+    generateConstraintsWithExternalBindings,
     generateConstraintsCoreWithEnv,
+    generateConstraintsCoreWithExternalBindings,
   )
 where
 
@@ -18,7 +23,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import MLF.Constraint.Types.Graph (NodeId, PolySyms, cAnnEdges, getEdgeId)
 import MLF.Frontend.ConstraintGen.State
-import MLF.Frontend.ConstraintGen.Translate (buildRootExprWithEnv)
+import MLF.Frontend.ConstraintGen.Translate (buildRootExprWithExternalBindings)
 import MLF.Frontend.ConstraintGen.Types
 import MLF.Frontend.Desugar (desugarSurface)
 import MLF.Frontend.Syntax
@@ -113,6 +118,10 @@ generateConstraintsWithEnv :: PolySyms -> ExternalEnv -> NormSurfaceExpr -> Eith
 generateConstraintsWithEnv polySyms extEnv expr =
   generateConstraintsCoreWithEnv polySyms extEnv (desugarSurface expr)
 
+generateConstraintsWithExternalBindings :: PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either ConstraintError ConstraintResult
+generateConstraintsWithExternalBindings polySyms extBindings expr =
+  generateConstraintsCoreWithExternalBindings polySyms extBindings (desugarSurface expr)
+
 -- | Generate constraints from a normalized core expression.
 --
 -- This is primarily useful for regression tests that need to exercise
@@ -125,9 +134,22 @@ generateConstraintsCore polySyms =
 -- | Like 'generateConstraintsCore' but with an external environment.
 generateConstraintsCoreWithEnv :: PolySyms -> ExternalEnv -> NormCoreExpr -> Either ConstraintError ConstraintResult
 generateConstraintsCoreWithEnv polySyms extEnv expr = do
+  let extBindings =
+        Map.map
+          ( \srcTy ->
+              ExternalBinding
+                { externalBindingType = srcTy,
+                  externalBindingMode = ExternalBindingScheme
+                }
+          )
+          extEnv
+  generateConstraintsCoreWithExternalBindings polySyms extBindings expr
+
+generateConstraintsCoreWithExternalBindings :: PolySyms -> ExternalBindings -> NormCoreExpr -> Either ConstraintError ConstraintResult
+generateConstraintsCoreWithExternalBindings polySyms extBindings expr = do
   let initialState = mkInitialStateWithPolySyms polySyms
   ((_rootGen, initialEnv, rootNode, annRoot), finalState) <-
-    runConstraintM (buildRootExprWithEnv extEnv expr) initialState
+    runConstraintM (buildRootExprWithExternalBindings extBindings expr) initialState
   let annEdges = collectAnnEdges annRoot
       constraint = (buildConstraint finalState) {cAnnEdges = annEdges}
   pure

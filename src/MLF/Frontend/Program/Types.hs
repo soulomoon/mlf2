@@ -9,6 +9,7 @@ module MLF.Frontend.Program.Types
     ClassInfo (..),
     ValueInfo (..),
     InstanceInfo (..),
+    DeferredBindingMode (..),
     DeferredMethodCall (..),
     DeferredConstructorCall (..),
     DeferredCaseCall (..),
@@ -57,6 +58,7 @@ data ProgramError
   | ProgramUnexpectedInstanceMethod P.ClassName P.MethodName
   | ProgramNoMatchingInstance P.ClassName SrcType
   | ProgramAmbiguousMethodUse P.MethodName
+  | ProgramAmbiguousConstructorUse P.ConstructorName
   | ProgramExpectedFunction SrcType
   | ProgramTypeMismatch SrcType SrcType
   | ProgramCaseOnNonDataType SrcType
@@ -133,6 +135,11 @@ data InstanceInfo = InstanceInfo
   }
   deriving (Eq, Show)
 
+data DeferredBindingMode
+  = DeferredBindingScheme
+  | DeferredBindingMonomorphic
+  deriving (Eq, Show)
+
 data DeferredMethodCall = DeferredMethodCall
   { deferredMethodPlaceholder :: String,
     deferredMethodInfo :: MethodInfo,
@@ -145,7 +152,12 @@ data DeferredMethodCall = DeferredMethodCall
 data DeferredConstructorCall = DeferredConstructorCall
   { deferredConstructorPlaceholder :: String,
     deferredConstructorInfo :: ConstructorInfo,
-    deferredConstructorArgCount :: Int
+    deferredConstructorArgCount :: Int,
+    deferredConstructorSourceType :: SrcType,
+    deferredConstructorOccurrenceType :: SrcType,
+    deferredConstructorInstBinders :: [String],
+    deferredConstructorInitialSubst :: Map String SrcType,
+    deferredConstructorBindingMode :: DeferredBindingMode
   }
   deriving (Eq, Show)
 
