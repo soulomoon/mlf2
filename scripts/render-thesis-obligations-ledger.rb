@@ -3,6 +3,7 @@
 
 require 'optparse'
 require 'pathname'
+require 'date'
 require 'yaml'
 
 ROOT = File.expand_path('..', __dir__)
@@ -62,6 +63,15 @@ def validate_schema!(doc)
       fail_validation("obligation #{o['id']} test_anchor missing `#{field}`") unless ta[field].is_a?(String) && !ta[field].strip.empty?
     end
   end
+end
+
+def load_yaml_file(path)
+  YAML.safe_load(
+    File.read(path),
+    permitted_classes: [Date],
+    aliases: true,
+    filename: path
+  )
 end
 
 def render_markdown(obligations)
@@ -124,7 +134,7 @@ OptionParser.new do |opts|
   end
 end.parse!
 
-doc = YAML.load_file(LEDGER_PATH)
+doc = load_yaml_file(LEDGER_PATH)
 validate_schema!(doc)
 obligations = doc['obligations']
 

@@ -24,10 +24,16 @@ trap 'rm -f "${tmp_rows}"' EXIT
 
 echo "[thesis-obligations] Validating ledger schema, ID set, and anchors"
 ruby - "${LEDGER}" "${ROOT}" >"${tmp_rows}" <<'RUBY'
+require 'date'
 require 'yaml'
 
 ledger_path = ARGV.fetch(0)
-doc = YAML.load_file(ledger_path)
+doc = YAML.safe_load(
+  File.read(ledger_path),
+  permitted_classes: [Date],
+  aliases: true,
+  filename: ledger_path
+)
 root = ARGV.fetch(1)
 
 expected_ids = []
@@ -170,6 +176,12 @@ parse_failures=()
 zero_examples=()
 test_failures=()
 
+hspec_summary_line() {
+  ruby -pe '$_.gsub!(/\e\[[0-9;?]*[ -\/]*[@-~]/, "")' "$1" |
+    grep -E '^[0-9]+ examples?, [0-9]+ failures$' |
+    tail -n 1 || true
+}
+
 while IFS=$'\t' read -r id matcher _file; do
   [[ -n "${id}" ]] || continue
   log_file="$(mktemp)"
@@ -186,7 +198,7 @@ while IFS=$'\t' read -r id matcher _file; do
 
   cat "${log_file}"
 
-  summary_line="$(grep -E '^[0-9]+ examples?, [0-9]+ failures$' "${log_file}" | tail -n 1 || true)"
+  summary_line="$(hspec_summary_line "${log_file}")"
   if [[ -z "${summary_line}" ]]; then
     parse_failures+=("${id}")
     rm -f "${log_file}"
