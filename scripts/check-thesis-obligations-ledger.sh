@@ -170,6 +170,12 @@ parse_failures=()
 zero_examples=()
 test_failures=()
 
+hspec_summary_line() {
+  ruby -pe '$_.gsub!(/\e\[[0-9;?]*[ -\/]*[@-~]/, "")' "$1" |
+    grep -E '^[0-9]+ examples?, [0-9]+ failures$' |
+    tail -n 1 || true
+}
+
 while IFS=$'\t' read -r id matcher _file; do
   [[ -n "${id}" ]] || continue
   log_file="$(mktemp)"
@@ -186,7 +192,7 @@ while IFS=$'\t' read -r id matcher _file; do
 
   cat "${log_file}"
 
-  summary_line="$(grep -E '^[0-9]+ examples?, [0-9]+ failures$' "${log_file}" | tail -n 1 || true)"
+  summary_line="$(hspec_summary_line "${log_file}")"
   if [[ -z "${summary_line}" ]]; then
     parse_failures+=("${id}")
     rm -f "${log_file}"
