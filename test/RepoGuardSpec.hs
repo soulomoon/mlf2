@@ -82,9 +82,15 @@ spec = describe "Repository guardrails" $ do
     typecheckProgramExists <- doesFileExist "src/MLF/Elab/TypeCheck/Program.hs"
     checkSrc <- readFile "src/MLF/Frontend/Program/Check.hs"
     elaborateSrc <- readFile "src/MLF/Frontend/Program/Elaborate.hs"
+    finalizeSrc <- readFile "src/MLF/Frontend/Program/Finalize.hs"
+    typesSrc <- readFile "src/MLF/Frontend/Program/Types.hs"
     runSrc <- readFile "src/MLF/Frontend/Program/Run.hs"
     pipelineSrc <- readFile "src-public/MLF/Pipeline.hs"
+    pipelineRunSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
     syntaxSrc <- readFile "src/MLF/Frontend/Syntax.hs"
+    readmeSrc <- readFile "README.md"
+    architectureSrc <- readFile "docs/architecture.md"
+    notesSrc <- readFile "implementation_notes.md"
     authorityExists `shouldBe` False
     typecheckProgramExists `shouldBe` False
     forM_
@@ -101,18 +107,32 @@ spec = describe "Repository guardrails" $ do
         "Program.Authority",
         "MLF.Elab.TypeCheck.Program",
         "constructorTerm",
-        "import MLF.Elab.TypeCheck",
-        "Elab.ETyAbs",
-        "Elab.ELam",
-        "Elab.EApp",
-        "Elab.ERoll",
-        "Elab.EUnroll"
+        "import MLF.Elab.TypeCheck"
       ]
       $ \marker -> do
         checkSrc `shouldSatisfy` (not . isInfixOf marker)
         elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
         runSrc `shouldSatisfy` (not . isInfixOf marker)
         pipelineSrc `shouldSatisfy` (not . isInfixOf marker)
+    forM_
+      [ "MLF.Elab.",
+        "ElabTerm",
+        "ElabType",
+        "runPipelineElab",
+        "typeCheck",
+        "CheckedBinding",
+        "checkedBindingTerm",
+        "checkedBindingType",
+        ".ETyAbs",
+        ".ELam",
+        ".EApp",
+        ".ERoll",
+        ".EUnroll",
+        ".ELet",
+        ".ETyInst"
+      ]
+      $ \marker ->
+        elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
     forM_
       [ "EUnfold ::",
         "EUnfoldSurfaceF",
@@ -121,7 +141,22 @@ spec = describe "Repository guardrails" $ do
       $ \marker ->
         syntaxSrc `shouldSatisfy` (not . isInfixOf marker)
     checkSrc `shouldSatisfy` isInfixOf "import MLF.Frontend.Program.Elaborate"
-    elaborateSrc `shouldSatisfy` isInfixOf "runPipelineElabWithEnv"
+    checkSrc `shouldSatisfy` isInfixOf "import MLF.Frontend.Program.Finalize"
+    typesSrc `shouldSatisfy` isInfixOf "loweredBindingSurfaceExpr :: SurfaceExpr"
+    typesSrc `shouldSatisfy` (not . isInfixOf "loweredBindingTerm :: ElabTerm")
+    finalizeSrc `shouldSatisfy` isInfixOf "runPipelineElabWithEnv"
+    finalizeSrc `shouldSatisfy` isInfixOf "normalizeExpr surfaceExpr"
+    pipelineRunSrc `shouldSatisfy` isInfixOf "Compatibility alias"
+    pipelineRunSrc `shouldSatisfy` isInfixOf "runPipelineElabCheckedWithConfig = runPipelineElabWithConfig"
+    forM_
+      [ "where possible and only emits direct",
+        "direct `ElabTerm`s for constructs",
+        "direct `ElabTerm`s only when"
+      ]
+      $ \marker -> do
+        readmeSrc `shouldSatisfy` (not . isInfixOf marker)
+        architectureSrc `shouldSatisfy` (not . isInfixOf marker)
+        notesSrc `shouldSatisfy` (not . isInfixOf marker)
     runSrc `shouldSatisfy` isInfixOf "normalize"
 
   it "split facades stay thin and child-owned" $ do

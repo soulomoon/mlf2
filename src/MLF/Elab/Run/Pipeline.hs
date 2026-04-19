@@ -152,6 +152,8 @@ runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Ei
 runPipelineElabWithConfig config polySyms =
   runPipelineElabWith (pcTraceConfig config) Map.empty (generateConstraints polySyms)
 
+-- Compatibility alias: the shared pipeline now reports the typechecker result
+-- as authoritative, so the checked entrypoint no longer selects a second path.
 runPipelineElabCheckedWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabCheckedWithConfig = runPipelineElabWithConfig
 

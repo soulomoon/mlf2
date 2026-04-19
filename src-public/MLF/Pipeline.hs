@@ -48,8 +48,10 @@ module MLF.Pipeline
     , pipelineErrorPhase
     , pipelineErrorPhaseName
     , runPipelineElab
+    -- Compatibility alias for the checker-authoritative shared pipeline.
     , runPipelineElabChecked
     , runPipelineElabWithConfig
+    -- Compatibility alias for the checker-authoritative shared pipeline.
     , runPipelineElabCheckedWithConfig
     -- * Phase 7 helpers
     , typeCheck

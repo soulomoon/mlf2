@@ -1,5 +1,6 @@
 module ProgramSpec (spec) where
 
+import Data.Either (isRight)
 import Data.List (isInfixOf)
 import MLF.API (SrcTy (..))
 import MLF.Program
@@ -173,6 +174,45 @@ spec = do
                         ]
             program <- requireParsed programText
             checkProgram program `shouldBe` Left (ProgramTypeMismatch (STBase "Bool") (STBase "Int"))
+
+        it "rejects an unused constructor whose result is not its owning type" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Nat, main) {"
+                        , "  data Nat ="
+                        , "      Bad : Bool;"
+                        , ""
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramInvalidConstructorResult "Bad" (STBase "Bool") "Nat")
+
+        it "rejects a parameterized constructor result with missing type arguments" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Box, main) {"
+                        , "  data Box a ="
+                        , "      MkBox : Box;"
+                        , ""
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramInvalidConstructorResult "MkBox" (STBase "Box") "Box")
+
+        it "accepts GADT-style constructor results with the owning head and correct arity" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Expr, main) {"
+                        , "  data Expr a ="
+                        , "      IntLit : Int -> Expr Int;"
+                        , ""
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
 
     describe "MLF.Program performance baseline" $ do
         it "evaluates a recursive Nat equality example at representative depth" $ do

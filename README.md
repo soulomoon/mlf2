@@ -94,8 +94,10 @@ The unified `.mlfp` surface includes:
 Internally, `.mlfp` now reuses the old MLF ownership boundary:
 
 - `MLF.Frontend.Program.Check` assembles module/import/class/data environments
-- `MLF.Frontend.Program.Elaborate` lowers `.mlfp` expressions to surface eMLF where possible and only emits direct `ElabTerm`s for constructs the old surface cannot encode cleanly
-- `MLF.Elab.TypeCheck` remains the typing-judgment owner for checked `.mlfp` terms
+- `MLF.Frontend.Program.Elaborate` lowers executable `.mlfp` bindings to `SurfaceExpr`
+- `MLF.Frontend.Program.Finalize` normalizes those surface eMLF terms and calls `runPipelineElabWithEnv`
+- `MLF.Elab.TypeCheck` remains the typing-judgment owner for checked `.mlfp` / xMLF terms
+- `MLF.Frontend.Program.Run` evaluates checked bindings through the existing xMLF reducer; static module/import/data/class validation may still fail before the eMLF pipeline
 
 Frozen examples live under `test/programs/recursive-adt/`, and the Phase-0
 syntax/corpus freeze is documented in
