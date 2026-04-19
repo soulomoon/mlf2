@@ -877,19 +877,63 @@ propNormGraft size =
         ]
 
 propNormMerge :: Int -> Property
-propNormMerge _size =
-  propSolveVarVar 0
+propNormMerge size =
+  let mergeBase = BaseTy ("Merge" ++ show size)
+      c =
+        emptyConstraint
+          { cNodes =
+              nodeMapFromList
+                [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}),
+                  (1, TyBase (NodeId 1) mergeBase)
+                ],
+            cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
+          }
+      normalized = normalize c
+   in conjoin
+        [ cUnifyEdges normalized === [],
+          lookupNodeIn (cNodes normalized) (NodeId 0) === Just (TyBase (NodeId 0) mergeBase)
+        ]
 
 propNormDrop :: Int -> Property
-propNormDrop _size =
-  let c = varTripleConstraint {cUnifyEdges = [UnifyEdge (NodeId 1) (NodeId 1)]}
-   in case solveUnify defaultTraceConfig c of
-        Right SolveResult {srConstraint = solved} -> cUnifyEdges solved === []
-        Left err -> counterexample (show err) False
+propNormDrop size =
+  let node = TyVar {tnId = NodeId 0, tnBound = Nothing}
+      edge = InstEdge (EdgeId size) (NodeId 0) (NodeId 0)
+      c =
+        emptyConstraint
+          { cNodes = nodeMapFromList [(0, node)],
+            cInstEdges = [edge]
+          }
+      normalized = normalize c
+   in conjoin
+        [ cInstEdges normalized === [],
+          cUnifyEdges normalized === [],
+          lookupNodeIn (cNodes normalized) (NodeId 0) === Just node
+        ]
 
 propNormFixpoint :: Int -> Property
-propNormFixpoint _size =
-  propSolveValidate 0
+propNormFixpoint size =
+  let fixpointBase = BaseTy ("Fixpoint" ++ show size)
+      c =
+        emptyConstraint
+          { cNodes =
+              nodeMapFromList
+                [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}),
+                  (1, TyVar {tnId = NodeId 1, tnBound = Nothing}),
+                  (2, TyBase (NodeId 2) fixpointBase)
+                ],
+            cInstEdges =
+              [ InstEdge (EdgeId size) (NodeId 0) (NodeId 1),
+                InstEdge (EdgeId (size + 1)) (NodeId 1) (NodeId 2)
+              ]
+          }
+      normalized = normalize c
+   in conjoin
+        [ normalized === normalize normalized,
+          cInstEdges normalized === [],
+          cUnifyEdges normalized === [],
+          lookupNodeIn (cNodes normalized) (NodeId 0) === Just (TyBase (NodeId 0) fixpointBase),
+          lookupNodeIn (cNodes normalized) (NodeId 1) === Just (TyBase (NodeId 1) fixpointBase)
+        ]
 
 propSolveVarBase :: Int -> Property
 propSolveVarBase _size =
