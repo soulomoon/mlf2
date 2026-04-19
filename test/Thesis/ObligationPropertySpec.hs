@@ -16,6 +16,7 @@ import MLF.Binding.GraphOps qualified as GraphOps
 import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Acyclicity (AcyclicityResult (..), checkAcyclicity)
 import MLF.Constraint.Inert qualified as Inert
+import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Presolution (PresolutionError (..), PresolutionResult (..))
 import MLF.Constraint.Presolution.TestSupport (validateTranslatablePresolution)
 import MLF.Constraint.Presolution.Witness
@@ -739,8 +740,29 @@ propReifyInline _size =
   elaboratesTo (Surf.EAnn (Surf.ELit (Surf.LInt 1)) (Surf.STBase "Int")) intTy
 
 propInlinePred :: Int -> Property
-propInlinePred size =
-  propInertNodes size
+propInlinePred _size =
+  let inlineable :: Elab.ElabType
+      inlineable =
+        Elab.TForall
+          "a"
+          (Just (boundFromType intTy))
+          (Elab.TArrow (Elab.TVar "a") boolTy)
+      inlined :: Elab.ElabType
+      inlined = Elab.TArrow intTy boolTy
+      selfBound :: Elab.ElabType
+      selfBound =
+        Elab.TForall
+          "a"
+          (Just (Elab.TArrow (Elab.TVar "a") intTy))
+          (Elab.TArrow (Elab.TVar "a") boolTy)
+   in conjoin
+        [ counterexample (Elab.prettyDisplay inlineable) $
+            Elab.prettyDisplay inlineable == Elab.prettyDisplay inlined,
+          counterexample (Elab.prettyDisplay inlineable) $
+            Elab.prettyDisplay inlineable /= Elab.pretty inlineable,
+          counterexample (Elab.prettyDisplay selfBound) $
+            Elab.prettyDisplay selfBound == Elab.pretty selfBound
+        ]
 
 propCgenRoot :: Int -> Property
 propCgenRoot _size =
@@ -833,8 +855,26 @@ propCopyInst _size =
   propCopyScheme 0
 
 propNormGraft :: Int -> Property
-propNormGraft _size =
-  propUnifyDecompose 0
+propNormGraft size =
+  let graftBase = BaseTy ("Graft" ++ show size)
+      c =
+        rootedConstraintLocal
+          emptyConstraint
+            { cNodes =
+                nodeMapFromList
+                  [ (0, TyVar {tnId = NodeId 0, tnBound = Nothing}),
+                    (1, TyBase (NodeId 1) graftBase)
+                  ],
+              cBindParents = bindParentsFromPairs [(NodeId 1, NodeId 0, BindFlex)],
+              cInstEdges = [InstEdge (EdgeId size) (NodeId 0) (NodeId 1)]
+            }
+      normalized = normalize c
+   in conjoin
+        [ cInstEdges normalized === [],
+          cUnifyEdges normalized === [],
+          lookupNodeIn (cNodes normalized) (NodeId 0) === Just (TyBase (NodeId 0) graftBase),
+          Binding.checkBindingTree normalized === Right ()
+        ]
 
 propNormMerge :: Int -> Property
 propNormMerge _size =

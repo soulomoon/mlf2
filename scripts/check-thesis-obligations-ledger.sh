@@ -196,14 +196,42 @@ hspec_summary_line() {
 }
 
 quickcheck_pass_count() {
-  ruby - "$1" <<'RUBY'
-path = ARGV.fetch(0)
+  ruby - "$1" "$2" <<'RUBY'
+target_id = ARGV.fetch(0)
+path = ARGV.fetch(1)
 max = 0
+in_evidence_section = false
+watching_target = false
 File.foreach(path) do |line|
   line = line.gsub(/\e\[[0-9;?]*[ -\/]*[@-~]/, '')
-  if line =~ /\+\+\+ OK, passed ([0-9]+) tests?/
+  line = line.chomp
+
+  if line == 'Thesis obligation property evidence'
+    in_evidence_section = true
+    watching_target = false
+    next
+  end
+
+  if in_evidence_section && line =~ /^\S/ && line != 'Thesis obligation property evidence'
+    in_evidence_section = false
+    watching_target = false
+  end
+
+  next unless in_evidence_section
+
+  if line =~ /^  #{Regexp.escape(target_id)} \[[^\]]+\]$/
+    watching_target = true
+    next
+  end
+
+  if watching_target && line =~ /^  \S/
+    watching_target = false
+  end
+
+  if watching_target && line =~ /^    \+\+\+ OK, passed ([0-9]+) tests?/
     count = Regexp.last_match(1).to_i
     max = count if count > max
+    watching_target = false
   end
 end
 puts max
@@ -248,7 +276,7 @@ while IFS=$'\t' read -r id matcher _file min_success; do
   if (( failures != 0 )); then
     test_failures+=("${id}")
   fi
-  quickcheck_passes="$(quickcheck_pass_count "${log_file}")"
+  quickcheck_passes="$(quickcheck_pass_count "${id}" "${log_file}")"
   if (( quickcheck_passes < 1 )); then
     missing_property_success+=("${id}")
   elif (( quickcheck_passes < min_success )); then
