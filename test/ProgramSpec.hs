@@ -372,6 +372,24 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramTypeMismatch (STBase \"Bool\") (STBase \"Nat\")")
     , ProgramMatrixCase
+        "rejects catch-all pattern annotations when scrutinee type is inferred later"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  def main : Bool ="
+                , "    let f = \\x -> case x of {"
+                , "      (_ : Int) -> true"
+                , "    } in"
+                , "    f Zero;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramTypeMismatch")
+    , ProgramMatrixCase
         "rejects branches after catch-all as unreachable"
         ( InlineProgram $
             unlines

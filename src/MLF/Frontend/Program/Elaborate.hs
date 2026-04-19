@@ -827,7 +827,10 @@ compileCase :: ElaborateScope -> Maybe SrcType -> P.Expr -> [P.Alt] -> Elaborate
 compileCase scope mbExpected scrutinee alts = do
   case ctorOwners alts of
     [] -> do
-      let mbScrutineeTy = inferKnownExprType scope scrutinee
+      let mbScrutineeTy =
+            case inferKnownExprType scope scrutinee of
+              Just knownTy -> Just knownTy
+              Nothing -> catchAllPatternAnnotationType alts
       mapM_ (\scrutineeTy -> mapM_ (validatePatternType scope scrutineeTy . P.altPattern) alts) mbScrutineeTy
       scrutineeExpr <- compileExpr scope mbScrutineeTy scrutinee
       compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts
@@ -985,6 +988,21 @@ ctorOwners = foldr go []
       P.PatCtor ctorName0 _ -> ctorName0 : acc
       P.PatAnn inner _ -> go (P.Alt inner (P.altExpr alt)) acc
       _ -> acc
+
+catchAllPatternAnnotationType :: [P.Alt] -> Maybe SrcType
+catchAllPatternAnnotationType alts =
+  case alts of
+    [P.Alt pattern0 _] -> patternAnnotationType pattern0
+    _ -> Nothing
+
+patternAnnotationType :: P.Pattern -> Maybe SrcType
+patternAnnotationType pattern0 =
+  case pattern0 of
+    P.PatAnn inner annTy ->
+      case patternAnnotationType inner of
+        Just innerTy -> Just innerTy
+        Nothing -> Just annTy
+    _ -> Nothing
 
 validatePatternType :: ElaborateScope -> SrcType -> P.Pattern -> ElaborateM ()
 validatePatternType scope expectedTy pattern0 =
