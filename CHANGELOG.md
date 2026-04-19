@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Converted the thesis-obligations ledger to property-first evidence: all 107
+  obligations now point at QuickCheck anchors keyed by obligation ID with
+  `kind: quickcheck` and `min_success: 100`. The obligations gate now rejects
+  example-only evidence by requiring a matching QuickCheck success line and
+  pass count, while source anchors remain navigational code paths.
 - Fixed the thesis-conformance CI gate so colored Hspec summaries and Ruby
   3.2 YAML dates from GitHub Actions are parsed before enforcing matcher
   coverage. Validation:

@@ -47,6 +47,7 @@ import SolveSpec qualified
 import System.Exit (die)
 import Test.Hspec
 import ThesisFixDirectionSpec qualified
+import Thesis.ObligationPropertySpec qualified
 import TranslatablePresolutionSpec qualified
 import TypeCheckSpec qualified
 import TypeSoundnessSpec qualified
@@ -113,4 +114,5 @@ main = do
     Reify.TypeSpec.spec
     Reify.CoreSpec.spec
     Property.QuickCheckPropertySpec.spec
+    Thesis.ObligationPropertySpec.spec
     GoldenSpec.spec
