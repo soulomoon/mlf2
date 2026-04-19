@@ -83,13 +83,13 @@ workflow.
 
 The unified `.mlfp` surface includes:
 
-- `module` / `import ... exposing (...)`
+- `module` / `import ... exposing (...)` plus qualified `import ... as ...`
 - `data` declarations with explicit constructor signatures
 - `case` / constructor pattern matching
 - recursive GADT-style constructor result types
 - existential constructors via `forall`
-- single-parameter typeclasses / instances
-- `deriving Eq` for the initial recursive-ADT corpus
+- single-parameter typeclasses, class constraints, and schema instances
+- `deriving Eq` for nullary, recursive, and parameterized ADTs whose fields have Eq evidence
 
 Internally, `.mlfp` now reuses the old MLF ownership boundary:
 
@@ -103,6 +103,9 @@ Frozen examples live under `test/programs/recursive-adt/`, and the Phase-0
 syntax/corpus freeze is documented in
 `docs/plans/2026-04-13-recursive-adt-syntax-freeze.md`.
 
+The current user-facing `.mlfp` language contract is documented in
+`docs/mlfp-language-reference.md`.
+
 The first-class-polymorphism program example lives at
 `test/programs/unified/first-class-polymorphism.mlfp`.
 
@@ -115,6 +118,7 @@ cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.ml
 ## Syntax and paper alignment
 
 - Canonical syntax spec: `docs/syntax.md`
+- `.mlfp` language reference: `docs/mlfp-language-reference.md`
 - Implementation notes and thesis alignment: `implementation_notes.md`
 - Roadmap: `roadmap.md`
 - Known issues / faithfulness gaps: `Bugs.md`

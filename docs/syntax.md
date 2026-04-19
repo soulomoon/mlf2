@@ -142,19 +142,23 @@ currently accepts the following core shapes:
 ```ebnf
 Program      ::= Module+
 Module       ::= "module" UIdent ["export" "(" ExportItem ("," ExportItem)* ")"] "{" Import* Decl* "}"
-Import       ::= "import" UIdent ["exposing" "(" ExportItem ("," ExportItem)* ")"] ";"
+Import       ::= "import" UIdent ["as" UIdent] ["exposing" "(" ExportItem ("," ExportItem)* ")"] ";"
 ExportItem   ::= lIdent | UIdent | UIdent "(..)"
 
 Decl         ::= DataDecl | ClassDecl | InstanceDecl | DefDecl
-DataDecl     ::= "data" UIdent lIdent* "=" CtorDecl ("|" CtorDecl)* ["deriving" UIdent ("," UIdent)*] ";"
+DataDecl     ::= "data" UIdent lIdent* "=" CtorDecl ("|" CtorDecl)* ["deriving" QName ("," QName)*] ";"
 CtorDecl     ::= UIdent ":" SrcType
 ClassDecl    ::= "class" UIdent lIdent "{" MethodSig* "}"
-MethodSig    ::= lIdent ":" SrcType ";"
-InstanceDecl ::= "instance" UIdent SrcType "{" MethodDef* "}"
+MethodSig    ::= lIdent ":" ConstrainedType ";"
+InstanceDecl ::= "instance" [ConstraintPrefix "=>"] QName SrcType "{" MethodDef* "}"
 MethodDef    ::= lIdent "=" Expr ";"
-DefDecl      ::= "def" lIdent ":" SrcType "=" Expr ";"
+DefDecl      ::= "def" lIdent ":" ConstrainedType "=" Expr ";"
 
-Expr         ::= lIdent | UIdent | Literal
+ConstrainedType ::= [ConstraintPrefix "=>"] SrcType
+ConstraintPrefix ::= ClassConstraint | "(" ClassConstraint ("," ClassConstraint)* ")"
+ClassConstraint ::= QName SrcType
+
+Expr         ::= QName | Literal
                | "\" Param Expr
                | Expr Expr
                | "let" lIdent [":" SrcType] "=" Expr "in" Expr
@@ -163,7 +167,10 @@ Expr         ::= lIdent | UIdent | Literal
 
 Param        ::= lIdent | "(" lIdent [":" SrcType] ")"
 Alt          ::= Pattern "->" Expr
-Pattern      ::= UIdent lIdent* | lIdent | "_"
+Pattern      ::= PatternAtom+
+               | "(" Pattern ":" SrcType ")"
+PatternAtom  ::= QName | "_" | "(" Pattern ")"
+QName        ::= [UIdent "."] (lIdent | UIdent)
 ```
 
 Current checked/evaluated recursive-ADT corpus examples live under

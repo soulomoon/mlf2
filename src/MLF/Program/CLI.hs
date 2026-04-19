@@ -7,13 +7,15 @@ import Control.Exception (IOException, try)
 import Data.Bifunctor (first)
 
 import MLF.Frontend.Parse.Program
-    ( parseRawProgram
+    ( parseLocatedProgramWithFile
     , renderProgramParseError
     )
 import MLF.Frontend.Program.Run
     ( prettyValue
-    , runProgram
+    , runLocatedProgram
     )
+import MLF.Frontend.Program.Prelude (withPreludeLocated)
+import MLF.Frontend.Program.Types (renderProgramDiagnostic)
 
 programCliUsage :: String
 programCliUsage =
@@ -30,5 +32,5 @@ runProgramFile path = do
     fileResult <- try (readFile path) :: IO (Either IOException String)
     pure $ do
         source <- first show fileResult
-        program <- first renderProgramParseError (parseRawProgram source)
-        first show (prettyValue <$> runProgram program)
+        program <- first renderProgramParseError (parseLocatedProgramWithFile path source)
+        first renderProgramDiagnostic (prettyValue <$> runLocatedProgram (withPreludeLocated program))

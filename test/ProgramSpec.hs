@@ -304,6 +304,92 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs ordered nested constructor patterns"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  def main : Bool = case Succ (Succ Zero) of {"
+                , "    Succ Zero -> false;"
+                , "    Succ (Succ n) -> true;"
+                , "    _ -> false"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs wildcard fallthrough after constructor patterns"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  def main : Bool = case Zero of {"
+                , "    Succ _ -> false;"
+                , "    _ -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs pattern annotations"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  def main : Bool = case Succ Zero of {"
+                , "    Zero -> false;"
+                , "    Succ (n : Nat) -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "rejects branches after catch-all as unreachable"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  def main : Bool = case Zero of {"
+                , "    _ -> true;"
+                , "    Zero -> false"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramDuplicateCaseBranch \"Zero\"")
+    , ProgramMatrixCase
+        "rejects non-exhaustive nested constructor patterns"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  def main : Bool = case Succ Zero of {"
+                , "    Zero -> false;"
+                , "    Succ (Succ n) -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramNonExhaustiveCase [\"Succ\"]")
+    , ProgramMatrixCase
         "constructor argument inferred as first-class polymorphic value should run"
         ( InlineProgram $
             unlines
@@ -447,6 +533,281 @@ emlfBoundaryMatrix =
                 ]
         )
         (ExpectCheckFailureContaining "ProgramAmbiguousConstructorUse \"Hidden\"")
+    , ProgramMatrixCase
+        "runs constrained helper through hidden Eq evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), eq, same, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  def same : Eq a => a -> a -> Bool = \\x \\y eq x y;"
+                , "  def main : Bool = same Zero Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "rejects constrained helper call without a satisfiable instance"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), Box(..), eq, same, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  def same : Eq a => a -> a -> Bool = \\x \\y eq x y;"
+                , "  def main : Bool = same (Box Zero) (Box Zero);"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STCon \"Box\"")
+    , ProgramMatrixCase
+        "runs explicit constrained parameterized Eq instance"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), Option(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  data Option a ="
+                , "      None : Option a"
+                , "    | Some : a -> Option a;"
+                , ""
+                , "  instance Eq a => Eq (Option a) {"
+                , "    eq = \\left \\right case left of {"
+                , "      None -> case right of {"
+                , "        None -> true;"
+                , "        Some _ -> false"
+                , "      };"
+                , "      Some l -> case right of {"
+                , "        None -> false;"
+                , "        Some r -> eq l r"
+                , "      }"
+                , "    };"
+                , "  }"
+                , ""
+                , "  def main : Bool = eq (Some (Some Zero)) (Some (Some Zero));"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "rejects overlapping parameterized and concrete instance heads"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), Box(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  instance Eq a => Eq (Box a) {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  instance Eq (Box Nat) {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramOverlappingInstance \"Eq\"")
+    , ProgramMatrixCase
+        "runs parameterized deriving Eq for Option"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), Option(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  data Option a ="
+                , "      None : Option a"
+                , "    | Some : a -> Option a"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool ="
+                , "    eq (Some Zero) (Some Zero);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs parameterized deriving Eq for recursive List"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), List(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  data List a ="
+                , "      Nil : List a"
+                , "    | Cons : a -> List a -> List a"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool ="
+                , "    eq (Cons Zero (Cons (Succ Zero) Nil)) (Cons Zero (Cons (Succ Zero) Nil));"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "rejects parameterized deriving when a field has no Eq evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Bad(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Bad a ="
+                , "      Bad : (a -> a) -> Bad a"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramDerivingMissingFieldInstance \"Eq\"")
+    , ProgramMatrixCase
+        "runs qualified import with alias-only value and constructor access"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Nat(..), eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , "  def main : Bool = C.eq C.Zero C.Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs aliased import with exposed method and qualified constructors"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Nat(..), eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C exposing (eq);"
+                , "  def main : Bool = eq C.Zero C.Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs qualified type name in annotation"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Nat(..)) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , "  def main : C.Nat = C.Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "Zero")
+    , ProgramMatrixCase
+        "rejects qualified access to hidden constructors"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Nat) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , "  def main : C.Nat = C.Zero;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramUnknownValue \"C.Zero\"")
+    , ProgramMatrixCase
+        "rejects duplicate import aliases in one module"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (main) {"
+                , "  def main : Bool = true;"
+                , "}"
+                , ""
+                , "module Other export (main) {"
+                , "  def main : Bool = false;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , "  import Other as C;"
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramDuplicateImportAlias \"C\"")
     ]
 
 spec :: Spec
@@ -461,6 +822,32 @@ spec = do
         it "runs a frozen sample file by path" $ do
             runProgramFile "test/programs/recursive-adt/plain-recursive-nat.mlfp"
                 `shouldReturn` Right "true"
+
+        it "prepends the built-in Prelude for explicit imports" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Nat(..), Option(..));"
+                        , "  def main : Option Nat = Some Zero;"
+                        , "}"
+                        ]
+            (prettyValue <$> runLocatedProgram (withPreludeLocated located)) `shouldBe` Right "Some Zero"
+
+        it "rejects a user module named Prelude when the built-in Prelude is active" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Prelude export () {"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            runLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                ((== ProgramDuplicateModule "Prelude") . diagnosticError)
+                (const False)
 
     describe "MLF.Program diagnostics" $ do
         it "rejects importing constructors from an abstract type export" $ do
@@ -634,6 +1021,45 @@ spec = do
             program <- requireParsed programText
             checkProgram program `shouldSatisfy` isRight
 
+        it "renders located diagnostics with a mechanically justified hint" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Option(..), main) {"
+                        , "  data Option a ="
+                        , "      None : Option a"
+                        , "    | Some : a -> Option a;"
+                        , ""
+                        , "  def main : Bool = let ignore = \\x true in ignore None;"
+                        , "}"
+                        ]
+            located <- requireLocatedWithFile "ambiguous.mlfp" programText
+            case checkLocatedProgram located of
+                Left diagnostic -> do
+                    let rendered = renderProgramDiagnostic diagnostic
+                    rendered `shouldSatisfy` isInfixOf "ambiguous.mlfp:3:7"
+                    rendered `shouldSatisfy` isInfixOf "error: ambiguous constructor use `None`"
+                    rendered `shouldSatisfy` isInfixOf "hint: add an explicit result type annotation"
+                Right _ -> expectationFailure "expected ambiguous constructor diagnostic"
+
+    describe "MLF.Program runtime value rendering" $ do
+        it "renders closed ADT values with source constructor syntax" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Nat(..), Option(..), main) {"
+                        , "  data Nat ="
+                        , "      Zero : Nat"
+                        , "    | Succ : Nat -> Nat;"
+                        , ""
+                        , "  data Option a ="
+                        , "      None : Option a"
+                        , "    | Some : a -> Option a;"
+                        , ""
+                        , "  def main : Option Nat = Some (Succ Zero);"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            (prettyValue <$> runProgram program) `shouldBe` Right "Some (Succ Zero)"
+
     describe "MLF.Program performance baseline" $ do
         it "evaluates a recursive Nat equality example at representative depth" $ do
             let depth = (24 :: Int)
@@ -713,5 +1139,14 @@ spec = do
 requireParsed :: String -> IO Program
 requireParsed input =
     case parseRawProgram input of
+        Left err -> expectationFailure (renderProgramParseError err) >> fail "parse failed"
+        Right program -> pure program
+
+requireLocated :: String -> IO LocatedProgram
+requireLocated = requireLocatedWithFile "<test>"
+
+requireLocatedWithFile :: FilePath -> String -> IO LocatedProgram
+requireLocatedWithFile path input =
+    case parseLocatedProgramWithFile path input of
         Left err -> expectationFailure (renderProgramParseError err) >> fail "parse failed"
         Right program -> pure program

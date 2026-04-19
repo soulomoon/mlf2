@@ -78,6 +78,7 @@ library mlf2-internal
                       MLF.Frontend.Program.Pretty,
                       MLF.Frontend.Program.Types,
                       MLF.Frontend.Program.Surface,
+                      MLF.Frontend.Program.Prelude,
                       MLF.Frontend.Program.Elaborate,
                       MLF.Frontend.Program.Finalize,
                       MLF.Frontend.Program.Check,

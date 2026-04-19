@@ -1,40 +1,38 @@
 # Task Plan
 
 ## Summary
-Goal: implement deferred `.mlfp` program obligations, including constructor
-obligations that carry constructor-local `forall` evidence, so program-owned
-features resolve after eMLF inference without widening public eMLF syntax or
-adding a direct `.mlfp -> ElabTerm` route.
+Goal: make `.mlfp` a more usable source language while preserving the shared
+eMLF/xMLF pipeline boundary. Implement additive diagnostics, a language
+reference, nested/ordered patterns, explicit prelude support, readable ADT
+runtime values, and the first typeclass/module ergonomics slice
+without adding a second `.mlfp -> ElabTerm` authority path.
 
 ## Current Phase
-Completed: constructor-local `forall` evidence is carried in deferred constructor obligations and all source constructor uses lower through placeholders.
+Complete.
 
 ## Phases
-1. Discovery and obligation design. - completed
-2. Refactor `.mlfp` lowering/finalization for deferred program obligations. - completed
-3. Move pending rows to strict matrix and add negative guards. - completed
-4. Run focused validation and repair failures. - completed
-5. Run full validation and update docs. - completed
-6. Add constructor-local `forall` evidence and defer all source constructor uses. - completed
+1. Discovery and planning refresh. - completed
+2. Add located parsing and user-facing diagnostics. - completed
+3. Upgrade patterns to nested/ordered lowering. - completed
+4. Add language reference and readable example programs. - completed
+5. Add explicit prelude support and ADT value rendering. - completed
+6. Add constrained typeclass/deriving and module ergonomics slice. - completed
+7. Run focused and full validation. - completed
 
 ## Decisions Made
 | Decision | Rationale |
 |----------|-----------|
-| Keep public eMLF parser/API unchanged | User plan and repo invariants require `.mlfp`-internal obligations only |
-| Preserve existing Church ADT runtime representation | Current recursive ADT/program runtime depends on this encoding |
-| Use post-eMLF finalization as the dispatch point | Matches the existing deferred overload path and lets eMLF infer terms first |
-| Defer every source constructor occurrence | Constructor placeholders now carry expected-type seeds, constructor-local forall binders, and runtime instantiation order so GADT, existential, nullary, and ordinary constructors all finalize after eMLF inference |
-| Preserve public pipeline APIs while adding internal external binding modes | `.mlfp` needs monomorphic constructor placeholders without exposing new public eMLF APIs |
-| Use an unchecked internal detailed pipeline only for program obligations/generated constructor-forall bindings | Program placeholders may not typecheck until finalization rewrites them; public eMLF APIs still keep the normal typecheck guard |
-| Skip generated runtime bindings for constructor-local foralls with no recoverable evidence | Such constructors cannot be instantiated safely; source occurrences fail later with `ProgramAmbiguousConstructorUse` |
+| Keep public raw eMLF unchanged | User plan and repo invariants reserve language features for `.mlfp` |
+| Keep current unlocated APIs | Additive APIs let existing equality tests continue while CLI can use richer diagnostics |
+| Preserve Church runtime representation | Existing constructor/case lowering and runtime tests depend on it |
+| Compile nested patterns to existing case/deferred-case machinery | Avoids adding a runtime pattern primitive or direct `.mlfp -> ElabTerm` path |
+| Make the prelude explicit-import in v1 | Avoids surprising user namespace collisions |
+| Keep constraints and qualified names as `.mlfp`-owned source semantics | Public raw eMLF remains thesis-facing and unchanged |
+| Keep derived recursive Eq monomorphic internally | Avoids re-inferring a polymorphic schema instance from hidden evidence during recursive field comparison |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
 |-------|---------|------------|
-| Installed `haskell-pro` path from `AGENTS.md` is missing | 1 | Follow repo formatting conventions directly |
-| Planning skill relative path under worktree was absent | 1 | Read installed skill at `/Users/ares/.codex/skills/planning-with-files/SKILL.md` |
-| Recursive overloaded method calls hit locked-node failures when resolved through synthetic local wrappers or reannotated pattern variables | 2 | Finalize instance method bodies as their runtime binding, defer overloaded runtime resolution, and leave pattern-bound recursive fields unannotated |
-| All-deferred constructor placeholders exposed recursive μ types as external schemes and hit locked-node failures | 6 | Added internal external binding modes and made constructor/case placeholders inference-local while retaining concrete types for finalization/typecheck |
-| Direct deferred cases applied handlers to data-typed placeholders and clashed with μ encodings | 6 | Lower deferred cases as placeholder applications and rewrite them after constructor finalization |
-| Generated constructor-local forall runtime bindings could fail before source ambiguity was checked | 6 | Route recoverable generated bindings through the unchecked internal path and skip unrecoverable generated bindings |
-| Repository guard expected the older scheme-only detailed pipeline marker | 6 | Guard now requires the internal external-binding detailed/unchecked entrypoints plus the final post-rewrite typecheck |
+| `/Users/ares/.agents/skills/haskell-pro/SKILL.md` missing | 1 | Follow existing repo Haskell style directly |
+| Concurrent `cabal run` probes collided on `package.conf.inplace` | 1 | Avoid parallel Cabal invocations; run build/test commands sequentially |
+| Recursive parameterized `List` deriving exposed constructor quantifier ordering issues | 1 | Repair parameterized constructor runtime spines and use monomorphic local self for generated recursive Eq |

@@ -6,10 +6,19 @@ module MLF.Frontend.Syntax.Program
     , ClassName
     , MethodName
     , ValueName
+    , SourcePosition (..)
+    , SourceSpan (..)
+    , ProgramSpanIndex (..)
+    , LocatedProgram (..)
+    , emptyProgramSpanIndex
+    , appendProgramSpanIndex
     , Program (..)
     , Module (..)
     , ExportItem (..)
     , Import (..)
+    , ClassConstraint (..)
+    , ConstrainedType (..)
+    , unconstrainedType
     , Decl (..)
     , ClassDecl (..)
     , MethodSig (..)
@@ -24,6 +33,8 @@ module MLF.Frontend.Syntax.Program
     , Pattern (..)
     ) where
 
+import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import MLF.Frontend.Syntax (Lit (..), SrcType)
 
 type ModuleName = String
@@ -37,6 +48,54 @@ type ClassName = String
 type MethodName = String
 
 type ValueName = String
+
+data SourcePosition = SourcePosition
+    { sourceLine :: Int
+    , sourceColumn :: Int
+    }
+    deriving (Eq, Ord, Show)
+
+data SourceSpan = SourceSpan
+    { sourceFile :: FilePath
+    , sourceStart :: SourcePosition
+    , sourceEnd :: SourcePosition
+    }
+    deriving (Eq, Ord, Show)
+
+data ProgramSpanIndex = ProgramSpanIndex
+    { spanModules :: Map ModuleName SourceSpan
+    , spanValues :: Map ValueName [SourceSpan]
+    , spanTypes :: Map TypeName [SourceSpan]
+    , spanConstructors :: Map ConstructorName [SourceSpan]
+    , spanClasses :: Map ClassName [SourceSpan]
+    }
+    deriving (Eq, Show)
+
+data LocatedProgram = LocatedProgram
+    { locatedProgram :: Program
+    , locatedProgramSpans :: ProgramSpanIndex
+    }
+    deriving (Eq, Show)
+
+emptyProgramSpanIndex :: ProgramSpanIndex
+emptyProgramSpanIndex =
+    ProgramSpanIndex
+        { spanModules = Map.empty
+        , spanValues = Map.empty
+        , spanTypes = Map.empty
+        , spanConstructors = Map.empty
+        , spanClasses = Map.empty
+        }
+
+appendProgramSpanIndex :: ProgramSpanIndex -> ProgramSpanIndex -> ProgramSpanIndex
+appendProgramSpanIndex left right =
+    ProgramSpanIndex
+        { spanModules = spanModules left `Map.union` spanModules right
+        , spanValues = Map.unionWith (++) (spanValues left) (spanValues right)
+        , spanTypes = Map.unionWith (++) (spanTypes left) (spanTypes right)
+        , spanConstructors = Map.unionWith (++) (spanConstructors left) (spanConstructors right)
+        , spanClasses = Map.unionWith (++) (spanClasses left) (spanClasses right)
+        }
 
 newtype Program = Program
     { programModules :: [Module]
@@ -59,9 +118,25 @@ data ExportItem
 
 data Import = Import
     { importModuleName :: ModuleName
+    , importAlias :: Maybe ModuleName
     , importExposing :: Maybe [ExportItem]
     }
     deriving (Eq, Show)
+
+data ClassConstraint = ClassConstraint
+    { constraintClassName :: ClassName
+    , constraintType :: SrcType
+    }
+    deriving (Eq, Show)
+
+data ConstrainedType = ConstrainedType
+    { constrainedConstraints :: [ClassConstraint]
+    , constrainedBody :: SrcType
+    }
+    deriving (Eq, Show)
+
+unconstrainedType :: SrcType -> ConstrainedType
+unconstrainedType = ConstrainedType []
 
 data Decl
     = DeclClass ClassDecl
@@ -79,12 +154,13 @@ data ClassDecl = ClassDecl
 
 data MethodSig = MethodSig
     { methodSigName :: MethodName
-    , methodSigType :: SrcType
+    , methodSigType :: ConstrainedType
     }
     deriving (Eq, Show)
 
 data InstanceDecl = InstanceDecl
-    { instanceDeclClass :: ClassName
+    { instanceDeclConstraints :: [ClassConstraint]
+    , instanceDeclClass :: ClassName
     , instanceDeclType :: SrcType
     , instanceDeclMethods :: [MethodDef]
     }
@@ -112,7 +188,7 @@ data ConstructorDecl = ConstructorDecl
 
 data DefDecl = DefDecl
     { defDeclName :: ValueName
-    , defDeclType :: SrcType
+    , defDeclType :: ConstrainedType
     , defDeclExpr :: Expr
     }
     deriving (Eq, Show)
@@ -140,7 +216,8 @@ data Alt = Alt
     deriving (Eq, Show)
 
 data Pattern
-    = PatCtor ConstructorName [ValueName]
+    = PatCtor ConstructorName [Pattern]
     | PatVar ValueName
     | PatWildcard
+    | PatAnn Pattern SrcType
     deriving (Eq, Show)
