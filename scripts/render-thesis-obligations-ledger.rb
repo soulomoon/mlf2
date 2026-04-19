@@ -4,6 +4,7 @@
 require 'optparse'
 require 'pathname'
 require 'yaml'
+require 'date'
 
 ROOT = File.expand_path('..', __dir__)
 LEDGER_PATH = File.join(ROOT, 'docs/thesis-obligations.yaml')
@@ -34,6 +35,12 @@ end
 def fail_validation(message)
   warn("thesis-obligations render: #{message}")
   exit(1)
+end
+
+def load_yaml_file(path)
+  YAML.load_file(path, permitted_classes: [Date])
+rescue ArgumentError
+  YAML.load_file(path)
 end
 
 def validate_schema!(doc)
@@ -124,7 +131,7 @@ OptionParser.new do |opts|
   end
 end.parse!
 
-doc = YAML.load_file(LEDGER_PATH)
+doc = load_yaml_file(LEDGER_PATH)
 validate_schema!(doc)
 obligations = doc['obligations']
 

@@ -3,10 +3,11 @@
 ## Unreleased
 
 ### Changed
-- Hardened the thesis conformance scripts against ANSI-colored Hspec output in
-  CI. The obligation ledger and top-level thesis gate now strip terminal color
-  escapes before parsing `N examples, M failures` summaries, matching the
-  passing local behavior when GitHub Actions emits colored summaries.
+- Hardened the thesis conformance scripts against CI-specific output and Ruby
+  loading behavior. The obligation ledger and top-level thesis gate now strip
+  terminal color escapes before parsing `N examples, M failures` summaries, and
+  thesis YAML loaders now explicitly permit date values under newer Psych
+  versions while remaining compatible with the local Ruby 2.6 runtime.
   Validated with `./scripts/thesis-conformance-gate.sh`.
 - Added `.mlfp` first-class-polymorphism parity at
   `test/programs/unified/first-class-polymorphism.mlfp`. `.mlfp` application
