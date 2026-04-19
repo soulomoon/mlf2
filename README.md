@@ -103,6 +103,9 @@ Frozen examples live under `test/programs/recursive-adt/`, and the Phase-0
 syntax/corpus freeze is documented in
 `docs/plans/2026-04-13-recursive-adt-syntax-freeze.md`.
 
+The first-class-polymorphism program example lives at
+`test/programs/unified/first-class-polymorphism.mlfp`.
+
 Run a program file directly from the executable:
 
 ```bash

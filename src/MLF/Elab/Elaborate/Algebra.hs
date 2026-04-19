@@ -890,6 +890,13 @@ elabAlg algebraContext layer =
                 fAppForArgInference = case funInstValidated of
                   InstId -> fHead
                   _ -> ETyInst fHead funInstValidated
+                firstClassPolymorphicArgInst =
+                  case (sourceAnnIsPolymorphic schemeEnv aAnn, argSourceSchemeTy, TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference) of
+                    (True, Just sourceTy, Right (TArrow paramTy _))
+                      | alphaEqType paramTy sourceTy || churchAwareEqType paramTy sourceTy,
+                        Right _ <- TypeCheck.typeCheckWithEnv tcEnv (EApp fAppForArgInference a') ->
+                          Just InstId
+                    _ -> Nothing
                 argInstFromFun =
                   let shouldInlineParamTy =
                         case (sourceVarName fAnn, sourceVarName aAnn) of
@@ -922,7 +929,7 @@ elabAlg algebraContext layer =
                                 pure (instSeqApps (map (inlineBoundVarsType presolutionView) args))
                               _ -> Nothing
                           _ -> Nothing
-                argInst' =
+                argInstFallback =
                   case (sourceVarName fAnn, sourceVarName aAnn, TypeCheck.typeCheckWithEnv tcEnv fAppForArgInference, argInst) of
                     (Just fName, Just argName, Right (TArrow paramTy _), InstApp argTy)
                       | fName == argName,
@@ -978,6 +985,8 @@ elabAlg algebraContext layer =
                       case (sourceAnnIsPolymorphic schemeEnv aAnn, argInstFromFun) of
                         (True, Just inst) -> inst
                         _ -> argInst
+                argInst' =
+                  fromMaybe argInstFallback firstClassPolymorphicArgInst
                 argInstFinal =
                   case transparentOrIdentityBypassTerm of
                     Just _ -> InstId

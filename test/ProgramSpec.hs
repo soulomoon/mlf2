@@ -16,6 +16,7 @@ fixturePaths =
     , "test/programs/recursive-adt/deriving-eq.mlfp"
     , "test/programs/recursive-adt/recursive-tree-deriving.mlfp"
     , "test/programs/recursive-adt/typeclass-integration.mlfp"
+    , "test/programs/recursive-adt/complex-recursive-program.mlfp"
     , "test/programs/recursive-adt/abstract-module-use.mlfp"
     , "test/programs/recursive-adt/module-integrated.mlfp"
     ]
@@ -27,6 +28,340 @@ unifiedFixtureExpectations =
     , ("test/programs/unified/authoritative-case-analysis.mlfp", "1")
     , ("test/programs/unified/authoritative-overloaded-method.mlfp", "true")
     , ("test/programs/unified/authoritative-recursive-let.mlfp", "true")
+    , ("test/programs/unified/first-class-polymorphism.mlfp", "true")
+    ]
+
+data ProgramMatrixSource
+    = InlineProgram String
+    | ProgramFile FilePath
+
+data ProgramMatrixExpectation
+    = ExpectRunValue String
+    | ExpectCheckSuccess
+    | ExpectCheckFailureContaining String
+
+data ProgramMatrixCase = ProgramMatrixCase
+    { matrixCaseName :: String
+    , matrixCaseSource :: ProgramMatrixSource
+    , matrixCaseExpectation :: ProgramMatrixExpectation
+    }
+
+emlfSurfaceParityMatrix :: [ProgramMatrixCase]
+emlfSurfaceParityMatrix =
+    [ ProgramMatrixCase
+        "runs lambda/application"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  def main : Int = (\\x x) 1;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "1")
+    , ProgramMatrixCase
+        "runs let polymorphism at Int and Bool"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  def main : Bool = let id = \\x x in let keepInt = id 1 in id true;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs typed let annotation"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  def main : Int = let id : forall a. a -> a = \\x x in id 1;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "1")
+    , ProgramMatrixCase
+        "runs term annotation"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  def main : Int = ((\\x x) : Int -> Int) 1;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "1")
+    , ProgramMatrixCase
+        "checks annotated rank-2 lambda"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  def main : (forall a. a -> a) -> Bool ="
+                , "    \\(poly : forall a. a -> a) let keepInt = poly 1 in poly true;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
+    , ProgramMatrixCase
+        "runs first-class polymorphic top-level argument"
+        (ProgramFile "test/programs/unified/first-class-polymorphism.mlfp")
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs first-class polymorphic local argument"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  def main : Bool ="
+                , "    let usePoly : (forall a. a -> a) -> Bool ="
+                , "      \\(poly : forall a. a -> a) let keepInt = poly 1 in poly true"
+                , "    in let id : forall a. a -> a = \\x x in usePoly id;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    ]
+
+emlfBoundaryMatrix :: [ProgramMatrixCase]
+emlfBoundaryMatrix =
+    [ ProgramMatrixCase
+        "runs overloaded method dispatch with lambda/application-inferred argument"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = eq ((\\x x) Zero) Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs overloaded method dispatch with let-polymorphism-inferred argument"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = let id = \\x x in eq (id Zero) Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs overloaded method dispatch with explicit argument annotation"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = eq (((\\x x) Zero) : Nat) Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "rejects bare overloaded method use"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  def main : Bool = eq;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramAmbiguousMethodUse \"eq\"")
+    , ProgramMatrixCase
+        "rejects deferred overloaded method dispatch with no matching instance"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  def main : Bool = eq ((\\x x) Zero) Zero;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STBase \"Nat\")")
+    , ProgramMatrixCase
+        "rejects duplicate instances before deferred overload resolution"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eq = \\left \\right false;"
+                , "  }"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramDuplicateInstance \"Eq\" (STBase \"Bool\")")
+    ]
+
+emlfPendingSuccessMatrix :: [ProgramMatrixCase]
+emlfPendingSuccessMatrix =
+    [ ProgramMatrixCase
+        "case scrutinee inferred through lambda/application should run"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  def main : Bool = case ((\\x x) Zero) of {"
+                , "    Zero -> true;"
+                , "    Succ _ -> false"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "case scrutinee inferred through let-polymorphism should run"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  def main : Bool = let id = \\x x in case (id Zero) of {"
+                , "    Zero -> true;"
+                , "    Succ _ -> false"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "constructor argument inferred as first-class polymorphic value should run"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (PolyBox(..), main) {"
+                , "  data PolyBox ="
+                , "      PolyBox : (forall a. a -> a) -> PolyBox;"
+                , ""
+                , "  def main : Bool = case PolyBox (\\x x) of {"
+                , "    PolyBox poly -> let keepInt = poly 1 in poly true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "local first-class polymorphic let through constructor boundary should run"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (PolyBox(..), main) {"
+                , "  data PolyBox ="
+                , "      PolyBox : (forall a. a -> a) -> PolyBox;"
+                , ""
+                , "  def main : Bool ="
+                , "    let id : forall a. a -> a = \\x x"
+                , "    in case PolyBox id of {"
+                , "      PolyBox poly -> let keepInt = poly 1 in poly true"
+                , "    };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "pattern-bound first-class polymorphic variable should run"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (PolyBox(..), main) {"
+                , "  data PolyBox ="
+                , "      PolyBox : (forall a. a -> a) -> PolyBox;"
+                , ""
+                , "  def main : Bool ="
+                , "    let id : forall a. a -> a = \\x x"
+                , "    in case PolyBox id of {"
+                , "      PolyBox patternPoly -> let keepInt = patternPoly 1 in patternPoly true"
+                , "    };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "partial overloaded method application should run after deferred resolution"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = let eqZero = eq Zero in eqZero Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "parameterized ADT instance recovery after eMLF inference should run"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), Box(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  instance Eq (Box Nat) {"
+                , "    eq = \\(left : Box Nat) \\(right : Box Nat) true;"
+                , "  }"
+                , ""
+                , "  def main : Bool = eq ((\\x x) (Box Zero)) (Box Zero);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
     ]
 
 spec :: Spec
@@ -236,6 +571,15 @@ spec = do
             program <- requireParsed programText
             (prettyValue <$> runProgram program) `shouldBe` Right "true"
 
+    describe "MLF.Program eMLF surface parity matrix" $ do
+        mapM_ runProgramMatrixCase emlfSurfaceParityMatrix
+
+    describe "MLF.Program eMLF boundary matrix" $ do
+        mapM_ runProgramMatrixCase emlfBoundaryMatrix
+
+    describe "MLF.Program eMLF pending success matrix" $ do
+        mapM_ runPendingProgramMatrixCase emlfPendingSuccessMatrix
+
     describe "MLF.Program eMLF-owned `.mlfp` integration" $ do
         mapM_ runUnifiedFixture unifiedFixtureExpectations
 
@@ -265,6 +609,35 @@ spec = do
         it ("runs " ++ path ++ " through the eMLF-owned `.mlfp` path") $ do
             program <- requireParsed =<< readFile path
             (prettyValue <$> runProgram program) `shouldBe` Right expectedValue
+
+    runProgramMatrixCase matrixCase =
+        it (matrixCaseName matrixCase) $ do
+            program <- loadProgramMatrixSource (matrixCaseSource matrixCase)
+            case matrixCaseExpectation matrixCase of
+                ExpectRunValue expectedValue ->
+                    (prettyValue <$> runProgram program) `shouldBe` Right expectedValue
+                ExpectCheckSuccess ->
+                    checkProgram program `shouldSatisfy` isRight
+                ExpectCheckFailureContaining expectedFragment ->
+                    checkProgram program `shouldSatisfy` either
+                        (isInfixOf expectedFragment . show)
+                        (const False)
+
+    runPendingProgramMatrixCase matrixCase =
+        it (matrixCaseName matrixCase) $ do
+            _program <- loadProgramMatrixSource (matrixCaseSource matrixCase)
+            pendingWith ("should eventually satisfy " ++ renderProgramMatrixExpectation (matrixCaseExpectation matrixCase))
+
+    renderProgramMatrixExpectation expectation =
+        case expectation of
+            ExpectRunValue expectedValue -> "runtime value " ++ show expectedValue
+            ExpectCheckSuccess -> "check success"
+            ExpectCheckFailureContaining expectedFragment -> "check failure containing " ++ show expectedFragment
+
+    loadProgramMatrixSource source =
+        case source of
+            InlineProgram programText -> requireParsed programText
+            ProgramFile path -> requireParsed =<< readFile path
 
 requireParsed :: String -> IO Program
 requireParsed input =

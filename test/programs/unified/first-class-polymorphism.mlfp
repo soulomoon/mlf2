@@ -1,0 +1,8 @@
+module FirstClassPolymorphism export (usePoly, id, main) {
+  def usePoly : (forall a. a -> a) -> Bool =
+    \(poly : forall a. a -> a) let keepInt = poly 1 in poly true;
+
+  def id : forall a. a -> a = \x x;
+
+  def main : Bool = usePoly id;
+}
