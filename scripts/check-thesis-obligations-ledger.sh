@@ -186,7 +186,7 @@ while IFS=$'\t' read -r id matcher _file; do
 
   cat "${log_file}"
 
-  summary_line="$(grep -E '^[0-9]+ examples?, [0-9]+ failures$' "${log_file}" | tail -n 1 || true)"
+  summary_line="$(perl -pe 's/\e\[[0-9;]*[A-Za-z]//g' "${log_file}" | grep -E '^[0-9]+ examples?, [0-9]+ failures$' | tail -n 1 || true)"
   if [[ -z "${summary_line}" ]]; then
     parse_failures+=("${id}")
     rm -f "${log_file}"

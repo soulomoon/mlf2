@@ -24,7 +24,7 @@ run_anchor() {
 
   cat "${tmp_log}"
 
-  summary_line="$(grep -E '^[0-9]+ examples?, [0-9]+ failures$' "${tmp_log}" | tail -n 1 || true)"
+  summary_line="$(perl -pe 's/\e\[[0-9;]*[A-Za-z]//g' "${tmp_log}" | grep -E '^[0-9]+ examples?, [0-9]+ failures$' | tail -n 1 || true)"
   if [[ -z "${summary_line}" ]]; then
     echo "[thesis-gate] FAILED: could not parse Hspec summary for '${label}'"
     exit 1

@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Hardened the thesis conformance scripts against ANSI-colored Hspec output in
+  CI. The obligation ledger and top-level thesis gate now strip terminal color
+  escapes before parsing `N examples, M failures` summaries, matching the
+  passing local behavior when GitHub Actions emits colored summaries.
+  Validated with `./scripts/thesis-conformance-gate.sh`.
 - Added `.mlfp` first-class-polymorphism parity at
   `test/programs/unified/first-class-polymorphism.mlfp`. `.mlfp` application
   elaboration now preserves a top-level polymorphic argument when the callee
