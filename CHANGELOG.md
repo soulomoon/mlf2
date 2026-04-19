@@ -3,8 +3,9 @@
 ## Unreleased
 
 ### Changed
-- Fixed the thesis-conformance CI gate so colored Hspec summaries from GitHub
-  Actions are parsed before enforcing matcher coverage. Validation:
+- Fixed the thesis-conformance CI gate so colored Hspec summaries and Ruby
+  3.2 YAML dates from GitHub Actions are parsed before enforcing matcher
+  coverage. Validation:
   `cabal build all && cabal test` (`1609 examples, 0 failures, 7 pending`) and
   `./scripts/thesis-conformance-gate.sh`.
 - Added `.mlfp` first-class-polymorphism parity at

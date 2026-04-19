@@ -22,6 +22,7 @@ fi
 
 echo "[thesis-claims] Validating claims, deviations, and cross-links"
 ruby - "${CLAIMS}" "${DEVIATIONS}" "${OBLIGATIONS}" "${ROOT}" <<'RUBY'
+require 'date'
 require 'yaml'
 require 'set'
 
@@ -30,9 +31,18 @@ deviations_path = ARGV.fetch(1)
 obligations_path = ARGV.fetch(2)
 root = ARGV.fetch(3)
 
-claims_doc = YAML.load_file(claims_path)
-deviations_doc = YAML.load_file(deviations_path)
-obligations_doc = YAML.load_file(obligations_path)
+def load_yaml_file(path)
+  YAML.safe_load(
+    File.read(path),
+    permitted_classes: [Date],
+    aliases: true,
+    filename: path
+  )
+end
+
+claims_doc = load_yaml_file(claims_path)
+deviations_doc = load_yaml_file(deviations_path)
+obligations_doc = load_yaml_file(obligations_path)
 
 errors = Hash.new { |h, k| h[k] = [] }
 

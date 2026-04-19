@@ -24,10 +24,16 @@ trap 'rm -f "${tmp_rows}"' EXIT
 
 echo "[thesis-obligations] Validating ledger schema, ID set, and anchors"
 ruby - "${LEDGER}" "${ROOT}" >"${tmp_rows}" <<'RUBY'
+require 'date'
 require 'yaml'
 
 ledger_path = ARGV.fetch(0)
-doc = YAML.load_file(ledger_path)
+doc = YAML.safe_load(
+  File.read(ledger_path),
+  permitted_classes: [Date],
+  aliases: true,
+  filename: ledger_path
+)
 root = ARGV.fetch(1)
 
 expected_ids = []
