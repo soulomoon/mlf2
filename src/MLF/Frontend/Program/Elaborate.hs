@@ -827,12 +827,19 @@ compileCase :: ElaborateScope -> Maybe SrcType -> P.Expr -> [P.Alt] -> Elaborate
 compileCase scope mbExpected scrutinee alts = do
   case ctorOwners alts of
     [] -> do
-      scrutineeExpr <- compileExpr scope Nothing scrutinee
-      compileCatchAllOnly scope mbExpected scrutineeExpr alts
+      let mbScrutineeTy = inferKnownExprType scope scrutinee
+      mapM_ (\scrutineeTy -> mapM_ (validatePatternType scope scrutineeTy . P.altPattern) alts) mbScrutineeTy
+      scrutineeExpr <- compileExpr scope mbScrutineeTy scrutinee
+      compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts
     owners -> do
       dataInfo <- requireSingleDataOwner scope owners
       let headTy = dataHeadType dataInfo
+          scrutineeTy =
+            case inferKnownExprType scope scrutinee of
+              Just knownTy -> knownTy
+              Nothing -> headTy
       validateOrderedPatterns alts
+      mapM_ (validatePatternType scope scrutineeTy . P.altPattern) alts
       (resultTy, _quantifyResult) <-
         case mbExpected of
           Just expectedTy -> pure (expectedTy, False)
@@ -842,7 +849,7 @@ compileCase scope mbExpected scrutinee alts = do
       case localIdentityScrutinee scope scrutinee of
         Just inner -> compileCase scope mbExpected inner alts
         Nothing -> do
-          scrutineeExpr <- compileExpr scope (Just headTy) scrutinee
+          scrutineeExpr <- compileExpr scope (Just scrutineeTy) scrutinee
           let forceAnnotateHandlers = any (not . null . ctorForalls) (dataConstructors dataInfo)
           handlers <- mapM (compileHandler scope scrutineeExpr resultTy dataInfo alts forceAnnotateHandlers) (dataConstructors dataInfo)
           placeholder <- deferCaseCall scope dataInfo resultTy
@@ -860,8 +867,8 @@ localIdentityScrutinee scope expr =
           Just arg
     _ -> Nothing
 
-compileCatchAllOnly :: ElaborateScope -> Maybe SrcType -> SurfaceExpr -> [P.Alt] -> ElaborateM SurfaceExpr
-compileCatchAllOnly scope mbExpected scrutineeExpr alts =
+compileCatchAllOnly :: ElaborateScope -> Maybe SrcType -> Maybe SrcType -> SurfaceExpr -> [P.Alt] -> ElaborateM SurfaceExpr
+compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts =
   case alts of
     [P.Alt P.PatWildcard body] -> compileExpr scope mbExpected body
     [P.Alt (P.PatVar name) body] -> do
@@ -869,7 +876,7 @@ compileCatchAllOnly scope mbExpected scrutineeExpr alts =
       scope' <- extendLocalLowered scope name runtimeName =<< freshTypeName
       bodyExpr <- compileExpr scope' mbExpected body
       pure (surfaceLet runtimeName scrutineeExpr bodyExpr)
-    [P.Alt (P.PatAnn inner _) body] -> compileCatchAllOnly scope mbExpected scrutineeExpr [P.Alt inner body]
+    [P.Alt (P.PatAnn inner _) body] -> compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr [P.Alt inner body]
     _ -> throwError (ProgramCaseOnNonDataType STBottom)
 
 compileHandler :: ElaborateScope -> SurfaceExpr -> SrcType -> DataInfo -> [P.Alt] -> Bool -> ConstructorInfo -> ElaborateM SurfaceExpr
@@ -979,6 +986,54 @@ ctorOwners = foldr go []
       P.PatAnn inner _ -> go (P.Alt inner (P.altExpr alt)) acc
       _ -> acc
 
+validatePatternType :: ElaborateScope -> SrcType -> P.Pattern -> ElaborateM ()
+validatePatternType scope expectedTy pattern0 =
+  case pattern0 of
+    P.PatWildcard -> pure ()
+    P.PatVar {} -> pure ()
+    P.PatAnn inner annTy -> do
+      validatePatternAnnotation scope expectedTy annTy
+      validatePatternType scope expectedTy inner
+    P.PatCtor ctorName0 patterns -> do
+      ctorInfo <- lookupConstructorInfo ctorName0
+      subst <-
+        case matchPatternTypes (ctorResult ctorInfo) expectedTy of
+          Just subst0 -> pure subst0
+          Nothing -> throwError (ProgramPatternConstructorMismatch ctorName0 expectedTy)
+      if length patterns /= length (ctorArgs ctorInfo)
+        then throwError (ProgramPatternConstructorMismatch ctorName0 expectedTy)
+        else
+          mapM_
+            ( \(nestedPattern, argTy) ->
+                validatePatternType scope (specializeSrcType subst argTy) nestedPattern
+            )
+            (zip patterns (ctorArgs ctorInfo))
+  where
+    lookupConstructorInfo ctorName0 =
+      case Map.lookup ctorName0 (esValues scope) of
+        Just ConstructorValue {valueCtorInfo = ctorInfo} -> pure ctorInfo
+        _ -> throwError (ProgramUnknownConstructor ctorName0)
+
+    matchPatternTypes template actual =
+      case matchTypes Map.empty template actual of
+        Just subst -> Just subst
+        Nothing ->
+          case matchTypes Map.empty actual template of
+            Just subst -> Just subst
+            Nothing
+              | lowerType scope template == lowerType scope actual -> Just Map.empty
+            Nothing -> Nothing
+
+validatePatternAnnotation :: ElaborateScope -> SrcType -> SrcType -> ElaborateM ()
+validatePatternAnnotation scope expectedTy annTy =
+  when (not (patternAnnotationCompatible expectedTy annTy)) $
+    throwError (ProgramTypeMismatch annTy expectedTy)
+  where
+    patternAnnotationCompatible left right =
+      lowerType scope left == lowerType scope right
+        || matchTypes Map.empty left right /= Nothing
+        || matchTypes Map.empty right left /= Nothing
+
 validateOrderedPatterns :: [P.Alt] -> ElaborateM ()
 validateOrderedPatterns = go Set.empty False
   where
@@ -988,10 +1043,11 @@ validateOrderedPatterns = go Set.empty False
           throwError (ProgramDuplicateCaseBranch (maybe "_" id (topConstructorName pattern0)))
       | isCatchAllPattern pattern0 =
           go seen True rest
+      | Just ctorName0 <- topConstructorName pattern0,
+        ctorName0 `Set.member` seen =
+          throwError (ProgramDuplicateCaseBranch ctorName0)
       | Just ctorName0 <- flatCatchAllConstructor pattern0 =
-          if ctorName0 `Set.member` seen
-            then throwError (ProgramDuplicateCaseBranch ctorName0)
-            else go (Set.insert ctorName0 seen) False rest
+          go (Set.insert ctorName0 seen) False rest
       | otherwise = go seen False rest
 
 topConstructorName :: P.Pattern -> Maybe String

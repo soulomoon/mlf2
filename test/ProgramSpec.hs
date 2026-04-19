@@ -356,6 +356,22 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "rejects mismatched pattern annotations"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  def main : Bool = case Zero of {"
+                , "    (_ : Bool) -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramTypeMismatch (STBase \"Bool\") (STBase \"Nat\")")
+    , ProgramMatrixCase
         "rejects branches after catch-all as unreachable"
         ( InlineProgram $
             unlines
@@ -372,6 +388,24 @@ emlfBoundaryMatrix =
                 ]
         )
         (ExpectCheckFailureContaining "ProgramDuplicateCaseBranch \"Zero\"")
+    , ProgramMatrixCase
+        "rejects branches after constructor-local catch-all as unreachable"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  def main : Bool = case Succ Zero of {"
+                , "    Succ _ -> true;"
+                , "    Succ Zero -> false;"
+                , "    _ -> false"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramDuplicateCaseBranch \"Succ\"")
     , ProgramMatrixCase
         "rejects non-exhaustive nested constructor patterns"
         ( InlineProgram $
@@ -634,6 +668,35 @@ emlfBoundaryMatrix =
                 , "  }"
                 , ""
                 , "  instance Eq (Box Nat) {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramOverlappingInstance \"Eq\"")
+    , ProgramMatrixCase
+        "rejects local instance overlapping an imported schema"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Box(..), eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  instance Eq a => Eq (Box a) {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (Eq, Box(..), eq);"
+                , ""
+                , "  instance Eq (Box Bool) {"
                 , "    eq = \\left \\right true;"
                 , "  }"
                 , ""

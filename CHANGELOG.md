@@ -14,11 +14,14 @@
   as `import Core as C exposing (eq);`, with qualified names available in
   expressions, patterns, types, constraints, classes, constructors, and methods.
   The built-in Prelude now exports `Nat(..)`, `Option(..)`, `List(..)`, `Eq`,
-  `eq`, `and`, and `id`. Validation:
+  `eq`, `and`, and `id`. Review hardening now rejects local instances that
+  overlap imported schemas, validates pattern annotations against the matched
+  source type, and rejects branches after constructor-local catch-all patterns.
+  Validation:
   `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
-  (`88 examples, 0 failures`), `MLF.Program eMLF`
-  (`51 examples, 0 failures`), and `cabal build all && cabal test`
-  (`1637 examples, 0 failures`).
+  (`91 examples, 0 failures`), `MLF.Program eMLF`
+  (`54 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1640 examples, 0 failures`).
 - Made `.mlfp` more usable as a source-language surface. The program parser
   now has located entrypoints and the checker/runner expose
   `ProgramDiagnostic` with file/line/column rendering and mechanically

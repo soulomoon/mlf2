@@ -873,7 +873,14 @@ buildInstanceSkeletons scope mod0 derived = do
   let instances0 = derived ++ explicitInstances mod0
   infos <- mapM toInstanceInfo instances0
   ensureDistinctPlain (\(className0, ty) -> ProgramDuplicateInstance className0 ty) [(instanceClassName info, instanceHeadType info) | info <- infos]
+  case duplicateExistingInstances infos of
+    info : _ -> throwError (ProgramDuplicateInstance (instanceClassName info) (instanceHeadType info))
+    [] -> pure ()
   case overlappingInstances infos of
+    (left, right) : _ ->
+      throwError (ProgramOverlappingInstance (instanceClassName left) (instanceHeadType left) (instanceHeadType right))
+    [] -> pure ()
+  case overlappingWithExistingInstances infos of
     (left, right) : _ ->
       throwError (ProgramOverlappingInstance (instanceClassName left) (instanceHeadType left) (instanceHeadType right))
     [] -> pure ()
@@ -925,6 +932,23 @@ buildInstanceSkeletons scope mod0 derived = do
           instanceClassName left == instanceClassName right,
           instanceHeadType left /= instanceHeadType right,
           instanceHeadsOverlap (instanceHeadType left) (instanceHeadType right)
+      ]
+
+    duplicateExistingInstances infos =
+      [ local
+        | local <- infos,
+          existing <- scopeInstances scope,
+          instanceClassName local == instanceClassName existing,
+          instanceHeadType local == instanceHeadType existing
+      ]
+
+    overlappingWithExistingInstances infos =
+      [ (local, existing)
+        | local <- infos,
+          existing <- scopeInstances scope,
+          instanceClassName local == instanceClassName existing,
+          instanceHeadType local /= instanceHeadType existing,
+          instanceHeadsOverlap (instanceHeadType local) (instanceHeadType existing)
       ]
 
     instanceHeadsOverlap left right =
