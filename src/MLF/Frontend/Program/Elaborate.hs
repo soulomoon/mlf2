@@ -9,13 +9,15 @@ module MLF.Frontend.Program.Elaborate
     mkElaborateScope,
     lowerConstructorBinding,
     lowerExprBinding,
+    inferClassArgument,
     lowerType,
+    resolveInstanceInfo,
   )
 where
 
 import Control.Monad (foldM, zipWithM)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
-import Control.Monad.State.Strict (State, evalState, get, modify)
+import Control.Monad.State.Strict (State, get, gets, modify, runState)
 import Data.List (find, nub)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
@@ -52,10 +54,40 @@ data ElaborateScope = ElaborateScope
     esInstances :: [InstanceInfo]
   }
 
-type ElaborateM a = ExceptT ProgramError (State Int) a
+data ElaborateState = ElaborateState
+  { elaborateFreshCounter :: Int,
+    elaborateDeferredMethods :: Map String DeferredMethodCall,
+    elaborateExternalTypes :: Map String SrcType,
+    elaborateAnnotateNullaryConstructors :: Bool
+  }
 
-runElaborateM :: ElaborateM a -> Either ProgramError a
-runElaborateM action = evalState (runExceptT action) 0
+type ElaborateM a = ExceptT ProgramError (State ElaborateState) a
+
+data ElaborateResult a = ElaborateResult
+  { elaborateResultValue :: a,
+    elaborateResultDeferredMethods :: Map String DeferredMethodCall,
+    elaborateResultExternalTypes :: Map String SrcType
+  }
+
+runElaborateM :: ElaborateM a -> Either ProgramError (ElaborateResult a)
+runElaborateM action =
+  let initialState =
+        ElaborateState
+          { elaborateFreshCounter = 0,
+            elaborateDeferredMethods = Map.empty,
+            elaborateExternalTypes = Map.empty,
+            elaborateAnnotateNullaryConstructors = False
+          }
+      (result, finalState) = runState (runExceptT action) initialState
+   in case result of
+        Left err -> Left err
+        Right value ->
+          Right
+            ElaborateResult
+              { elaborateResultValue = value,
+                elaborateResultDeferredMethods = elaborateDeferredMethods finalState,
+                elaborateResultExternalTypes = elaborateExternalTypes finalState
+              }
 
 mkElaborateScope :: Map String ValueInfo -> Map String DataInfo -> [InstanceInfo] -> ElaborateScope
 mkElaborateScope values0 dataTypes instances0 =
@@ -168,17 +200,21 @@ lowerConstructorBinding scope ctorInfo =
     { loweredBindingName = ctorRuntimeName ctorInfo,
       loweredBindingExpectedType = lowerType scope (ctorType ctorInfo),
       loweredBindingSurfaceExpr = constructorSurfaceExpr scope ctorInfo,
+      loweredBindingDeferredMethods = Map.empty,
+      loweredBindingExternalTypes = Map.empty,
       loweredBindingExportedAsMain = False
     }
 
 lowerExprBinding :: ElaborateScope -> String -> SrcType -> Bool -> P.Expr -> Either ProgramError LoweredBinding
 lowerExprBinding scope runtimeName expectedTy exportedAsMain expr = do
-  surfaceExpr <- runElaborateM (compileExpr scope (Just expectedTy) expr)
+  result <- runElaborateM (compileExpr scope (Just expectedTy) expr)
   pure
     LoweredBinding
       { loweredBindingName = runtimeName,
         loweredBindingExpectedType = lowerType scope expectedTy,
-        loweredBindingSurfaceExpr = surfaceExpr,
+        loweredBindingSurfaceExpr = elaborateResultValue result,
+        loweredBindingDeferredMethods = elaborateResultDeferredMethods result,
+        loweredBindingExternalTypes = elaborateResultExternalTypes result,
         loweredBindingExportedAsMain = exportedAsMain
       }
 
@@ -217,12 +253,16 @@ compileExpr scope mbExpected expr = case expr of
     case Map.lookup name (esValues scope) of
       Just OverloadedMethod {} -> throwError (ProgramAmbiguousMethodUse name)
       Just OrdinaryValue {valueRuntimeName = runtimeName} -> pure (surfaceVar runtimeName)
-      Just ConstructorValue {valueCtorInfo = ctorInfo} ->
-        let ctorExpr = if null (ctorArgs ctorInfo) then constructorSurfaceExprRaw scope ctorInfo else constructorSurfaceExpr scope ctorInfo
-         in pure $ case mbExpected of
-              Just expectedTy
-                | null (ctorArgs ctorInfo), isRecursiveResultType expectedTy -> surfaceAnn ctorExpr (lowerType scope expectedTy)
-              _ -> ctorExpr
+      Just ConstructorValue {valueCtorInfo = ctorInfo} -> do
+        annotateNullary <- gets elaborateAnnotateNullaryConstructors
+        let ctorExpr =
+              if null (ctorArgs ctorInfo) && not annotateNullary
+                then constructorSurfaceExprRaw scope ctorInfo
+                else constructorSurfaceExpr scope ctorInfo
+        pure $ case mbExpected of
+          Just expectedTy
+            | null (ctorArgs ctorInfo), isRecursiveResultType expectedTy -> surfaceAnn ctorExpr (lowerType scope expectedTy)
+          _ -> ctorExpr
       Nothing -> throwError (ProgramUnknownValue name)
   ELit lit -> pure (surfaceLit lit)
   ELam param body -> do
@@ -316,23 +356,79 @@ compileMethodApp :: ElaborateScope -> Maybe SrcType -> MethodInfo -> [P.Expr] ->
 compileMethodApp scope _mbExpected methodInfo args
   | null args = throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
   | otherwise = do
-      argTypes <- mapM inferArgType args
-      let loweredMethodTy = lowerType scope (methodType methodInfo)
-      classArgTy <-
-        case inferClassArgument loweredMethodTy (methodParamName methodInfo) argTypes of
-          Just ty -> pure ty
-          Nothing -> throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
-      argSurfaces <- mapM (compileExpr scope Nothing) args
-      instanceInfo <- resolveInstance scope (methodClassName methodInfo) classArgTy
-      case Map.lookup (methodName methodInfo) (instanceMethods instanceInfo) of
-        Just OrdinaryValue {valueRuntimeName = runtimeName} ->
-          pure (foldl surfaceApp (surfaceVar runtimeName) argSurfaces)
-        _ -> throwError (ProgramUnknownMethod (methodName methodInfo))
-  where
-    inferArgType expr =
-      case inferKnownExprType scope expr of
-        Just ty -> pure ty
-        Nothing -> throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
+      argSurfaces <- withNullaryConstructorAnnotations (mapM (compileExpr scope Nothing) args)
+      placeholder <- deferMethodCall scope methodInfo args
+      pure (foldl surfaceApp (surfaceVar placeholder) argSurfaces)
+
+withNullaryConstructorAnnotations :: ElaborateM a -> ElaborateM a
+withNullaryConstructorAnnotations action = do
+  wasAnnotating <- gets elaborateAnnotateNullaryConstructors
+  modify (\state -> state {elaborateAnnotateNullaryConstructors = True})
+  result <- action
+  modify (\state -> state {elaborateAnnotateNullaryConstructors = wasAnnotating})
+  pure result
+
+deferMethodCall :: ElaborateScope -> MethodInfo -> [P.Expr] -> ElaborateM String
+deferMethodCall scope methodInfo args = do
+  placeholder <- freshDeferredMethodName (methodName methodInfo)
+  let placeholderTy = lowerType scope (placeholderMethodType scope methodInfo args)
+      deferred =
+        DeferredMethodCall
+          { deferredMethodPlaceholder = placeholder,
+            deferredMethodInfo = methodInfo,
+            deferredMethodArgCount = length args,
+            deferredMethodName = methodName methodInfo
+          }
+  modify
+    ( \state ->
+        state
+          { elaborateDeferredMethods = Map.insert placeholder deferred (elaborateDeferredMethods state),
+            elaborateExternalTypes = Map.insert placeholder placeholderTy (elaborateExternalTypes state)
+          }
+    )
+  pure placeholder
+
+placeholderMethodType :: ElaborateScope -> MethodInfo -> [P.Expr] -> SrcType
+placeholderMethodType scope methodInfo args =
+  let paramName = methodParamName methodInfo
+      methodTy = methodType methodInfo
+      (foralls, _) = splitForalls methodTy
+      quantifiedMethodTy =
+        if any ((== paramName) . fst) foralls || paramName `Set.notMember` freeTypeVarsSrcType methodTy
+          then methodTy
+          else STForall paramName Nothing methodTy
+      knownClassArg = do
+        argTypes <- traverse (inferKnownExprType scope) args
+        inferClassArgument (lowerType scope methodTy) paramName argTypes
+   in case knownClassArg of
+        Just classArgTy -> stripVacuousSrcForalls (specializeMethodType methodTy paramName classArgTy)
+        Nothing -> loosenPlaceholderArgumentTypes args quantifiedMethodTy
+
+loosenPlaceholderArgumentTypes :: [P.Expr] -> SrcType -> SrcType
+loosenPlaceholderArgumentTypes args methodTy =
+  let (foralls, bodyTy) = splitForalls methodTy
+      (argTys, resultTy) = splitArrows bodyTy
+      placeholderArgTys =
+        if any needsLoosePlaceholderArg args
+          then replicate (length argTys) STBottom
+          else argTys
+      placeholderBody = foldr STArrow resultTy placeholderArgTys
+   in foldr (\(name, mb) acc -> STForall name (fmap SrcBound mb) acc) placeholderBody foralls
+
+needsLoosePlaceholderArg :: P.Expr -> Bool
+needsLoosePlaceholderArg expr =
+  case stripExprAnn expr of
+    EApp fun _ ->
+      case stripExprAnn fun of
+        ELam {} -> True
+        _ -> False
+    _ -> False
+
+stripExprAnn :: P.Expr -> P.Expr
+stripExprAnn expr =
+  case expr of
+    EAnn inner _ -> stripExprAnn inner
+    _ -> expr
 
 inferKnownExprType :: ElaborateScope -> P.Expr -> Maybe SrcType
 inferKnownExprType scope expr =
@@ -643,12 +739,12 @@ isRecursiveResultType ty =
     STForall _ _ body -> isRecursiveResultType body
     _ -> False
 
-resolveInstance :: ElaborateScope -> P.ClassName -> SrcType -> ElaborateM InstanceInfo
-resolveInstance scope className0 headTy =
+resolveInstanceInfo :: ElaborateScope -> P.ClassName -> SrcType -> Either ProgramError InstanceInfo
+resolveInstanceInfo scope className0 headTy =
   case filter matches (esInstances scope) of
-    [info] -> pure info
-    [] -> throwError (ProgramNoMatchingInstance className0 headTy)
-    _ -> throwError (ProgramNoMatchingInstance className0 headTy)
+    [info] -> Right info
+    [] -> Left (ProgramNoMatchingInstance className0 headTy)
+    _ -> Left (ProgramNoMatchingInstance className0 headTy)
   where
     matches info =
       instanceClassName info == className0
@@ -808,18 +904,27 @@ duplicates xs = [x | x <- nub xs, length (filter (== x) xs) > 1]
 
 freshRuntimeName :: String -> ElaborateM String
 freshRuntimeName base = do
-  n <- get
-  modify (+ 1)
+  n <- freshCounter
   pure ("$" ++ base ++ "#" ++ show n)
 
 freshTypeName :: ElaborateM SrcType
 freshTypeName = do
-  n <- get
-  modify (+ 1)
+  n <- freshCounter
   pure (STVar ("p$" ++ show n))
 
 freshTypeVarName :: ElaborateM String
 freshTypeVarName = do
-  n <- get
-  modify (+ 1)
+  n <- freshCounter
   pure ("r$" ++ show n)
+
+freshDeferredMethodName :: String -> ElaborateM String
+freshDeferredMethodName methodName0 = do
+  n <- freshCounter
+  pure ("$deferred_" ++ methodName0 ++ "_" ++ show n)
+
+freshCounter :: ElaborateM Int
+freshCounter = do
+  state <- get
+  let n = elaborateFreshCounter state
+  modify (\state' -> state' {elaborateFreshCounter = n + 1})
+  pure n

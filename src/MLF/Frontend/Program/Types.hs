@@ -9,6 +9,7 @@ module MLF.Frontend.Program.Types
     ClassInfo (..),
     ValueInfo (..),
     InstanceInfo (..),
+    DeferredMethodCall (..),
     ExportedTypeInfo (..),
     ModuleExports (..),
     LoweredBinding (..),
@@ -129,6 +130,14 @@ data InstanceInfo = InstanceInfo
   }
   deriving (Eq, Show)
 
+data DeferredMethodCall = DeferredMethodCall
+  { deferredMethodPlaceholder :: String,
+    deferredMethodInfo :: MethodInfo,
+    deferredMethodArgCount :: Int,
+    deferredMethodName :: P.MethodName
+  }
+  deriving (Eq, Show)
+
 data ExportedTypeInfo = ExportedTypeInfo
   { exportedTypeData :: DataInfo,
     exportedTypeConstructors :: Map String ConstructorInfo
@@ -146,6 +155,8 @@ data LoweredBinding = LoweredBinding
   { loweredBindingName :: String,
     loweredBindingExpectedType :: SrcType,
     loweredBindingSurfaceExpr :: SurfaceExpr,
+    loweredBindingDeferredMethods :: Map String DeferredMethodCall,
+    loweredBindingExternalTypes :: Map String SrcType,
     loweredBindingExportedAsMain :: Bool
   }
   deriving (Eq, Show)

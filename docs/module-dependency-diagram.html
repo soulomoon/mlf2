@@ -3,51 +3,72 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>mlf4 / mlf2 Module Dependency Diagram</title>
+  <title>mlf4 Module Dependency Diagram</title>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: 'JetBrains Mono', monospace;
       background: #020617;
+      color: white;
       min-height: 100vh;
       padding: 2rem;
-      color: white;
     }
-    .container { max-width: 1460px; margin: 0 auto; }
-    .header { margin-bottom: 2rem; }
-    .header-row { display: flex; align-items: center; gap: 1rem; margin-bottom: 0.5rem; }
+    .container { max-width: 1480px; margin: 0 auto; }
+    .header { margin-bottom: 1.5rem; }
+    .header-row { display: flex; align-items: center; gap: 0.9rem; margin-bottom: 0.6rem; }
     .pulse-dot { width: 12px; height: 12px; background: #22d3ee; border-radius: 50%; animation: pulse 2s infinite; }
     @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.45;} }
-    h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -0.025em; }
-    .subtitle { color: #94a3b8; font-size: 0.9rem; margin-left: 1.75rem; line-height: 1.5; max-width: 1180px; }
+    h1 { font-size: 1.7rem; letter-spacing: -0.03em; }
+    .subtitle { color: #94a3b8; font-size: 0.9rem; line-height: 1.55; max-width: 1220px; margin-left: 1.9rem; }
     .diagram-container {
       background: rgba(15, 23, 42, 0.5);
-      border-radius: 1rem;
       border: 1px solid #1e293b;
-      padding: 1.5rem;
+      border-radius: 1rem;
+      padding: 1rem;
       overflow-x: auto;
     }
     svg { width: 100%; display: block; }
     .cards {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
       gap: 1rem;
-      margin-top: 2rem;
+      margin-top: 1.5rem;
     }
     .card {
       background: rgba(15, 23, 42, 0.5);
-      border-radius: 0.75rem;
       border: 1px solid #1e293b;
-      padding: 1.25rem;
+      border-radius: 0.85rem;
+      padding: 1.1rem 1.15rem;
     }
-    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
-    .card-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .card-header { display: flex; align-items: center; gap: 0.55rem; margin-bottom: 0.8rem; }
+    .card-dot { width: 9px; height: 9px; border-radius: 50%; }
     .cyan { background:#22d3ee; } .emerald { background:#34d399; } .violet { background:#a78bfa; } .amber { background:#fbbf24; }
-    .card h3 { font-size: 0.9rem; font-weight: 600; }
+    .card h3 { font-size: 0.92rem; }
     .card ul { list-style: none; color: #94a3b8; font-size: 0.78rem; line-height: 1.55; }
     .card li { margin-bottom: 0.35rem; }
-    .footer { text-align: center; margin-top: 1.5rem; color: #475569; font-size: 0.75rem; }
+    .tables {
+      display: grid;
+      grid-template-columns: 1.05fr 1.2fr 0.85fr;
+      gap: 1rem;
+      margin-top: 1.5rem;
+      align-items: start;
+    }
+    .table-card {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid #1e293b;
+      border-radius: 0.85rem;
+      padding: 1rem;
+      overflow: hidden;
+    }
+    .table-card h3 { font-size: 0.92rem; margin-bottom: 0.85rem; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+    th, td { padding: 0.42rem 0.45rem; border-bottom: 1px solid #1e293b; text-align: left; vertical-align: top; }
+    th { color: #cbd5e1; font-weight: 600; }
+    td { color: #94a3b8; }
+    tr:last-child td { border-bottom: none; }
+    .footer { text-align: center; margin-top: 1.3rem; color: #475569; font-size: 0.75rem; }
+    @media (max-width: 1200px) { .tables { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -55,250 +76,297 @@
     <div class="header">
       <div class="header-row">
         <div class="pulse-dot"></div>
-        <h1>mlf4 / mlf2 Module Dependency Diagram</h1>
+        <h1>mlf4 Module Dependency Diagram</h1>
       </div>
-      <p class="subtitle">This view compresses the Haskell module graph into dependency domains derived from imports in `src/`, `src-public/`, `src-research/`, `app/`, and `test/`. Numbers on arrows are cross-domain import counts, so the diagram shows which module families depend on which others most heavily.</p>
+      <p class="subtitle">This diagram is a domain-level map derived from real Haskell <code>module</code>/<code>import</code> relationships across <code>src/</code>, <code>src-public/</code>, <code>src-research/</code>, <code>app/</code>, and <code>test/</code>. It favors readability over a full 273-node explosion, so the main SVG shows domain families and cross-domain import counts, while the tables below preserve concrete hotspot detail.</p>
     </div>
 
     <div class="diagram-container">
-      <svg viewBox="0 0 1400 980">
-        <defs>
-          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#64748b" /></marker>
-          <marker id="arrowhead-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" /></marker>
-          <marker id="arrowhead-emerald" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#34d399" /></marker>
-          <marker id="arrowhead-violet" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#a78bfa" /></marker>
-          <marker id="arrowhead-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24" /></marker>
-          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
-        </defs>
-
-        <rect width="100%" height="100%" fill="url(#grid)" />
-        <rect x="20" y="20" width="1360" height="845" rx="16" fill="rgba(251, 191, 36, 0.04)" stroke="#fbbf24" stroke-width="1.2" stroke-dasharray="8,4"/>
-        <text x="40" y="44" fill="#fbbf24" font-size="11" font-weight="600">Cross-domain Haskell imports for /Users/ares/.codex/worktrees/d432/mlf4</text>
-
-        <!-- arrows first -->
-        <line x1="245" y1="145" x2="310" y2="145" stroke="#22d3ee" stroke-width="2.2" marker-end="url(#arrowhead-cyan)"/>
-        <text x="277" y="136" fill="#94a3b8" font-size="9" text-anchor="middle">surface parse / pretty</text>
-
-        <line x1="475" y1="145" x2="615" y2="145" stroke="#22d3ee" stroke-width="2.2" marker-end="url(#arrowhead-cyan)"/>
-        <text x="545" y="136" fill="#94a3b8" font-size="9" text-anchor="middle">6 imports</text>
-
-        <line x1="790" y1="145" x2="920" y2="145" stroke="#34d399" stroke-width="3.2" marker-end="url(#arrowhead-emerald)"/>
-        <text x="855" y="136" fill="#94a3b8" font-size="9" text-anchor="middle">1 import</text>
-
-        <line x1="1020" y1="145" x2="1130" y2="145" stroke="#a78bfa" stroke-width="3.2" marker-end="url(#arrowhead-violet)"/>
-        <text x="1075" y="136" fill="#94a3b8" font-size="9" text-anchor="middle">1 import</text>
-
-        <line x1="1230" y1="145" x2="1330" y2="145" stroke="#22d3ee" stroke-width="2.2" marker-end="url(#arrowhead-cyan)"/>
-        <text x="1280" y="136" fill="#94a3b8" font-size="9" text-anchor="middle">3 re-export links</text>
-
-        <line x1="705" y1="250" x2="705" y2="312" stroke="#34d399" stroke-width="4.5" marker-end="url(#arrowhead-emerald)"/>
-        <text x="718" y="286" fill="#94a3b8" font-size="9">5 imports</text>
-
-        <line x1="1040" y1="250" x2="1040" y2="312" stroke="#a78bfa" stroke-width="6" marker-end="url(#arrowhead-violet)"/>
-        <text x="1052" y="286" fill="#94a3b8" font-size="9">70 imports</text>
-
-        <line x1="840" y1="545" x2="930" y2="545" stroke="#34d399" stroke-width="3" marker-end="url(#arrowhead-emerald)"/>
-        <text x="885" y="536" fill="#94a3b8" font-size="9" text-anchor="middle">5 imports</text>
-
-        <line x1="840" y1="575" x2="930" y2="575" stroke="#64748b" stroke-width="2" marker-end="url(#arrowhead)"/>
-        <text x="885" y="566" fill="#94a3b8" font-size="9" text-anchor="middle">36 imports</text>
-
-        <line x1="1140" y1="545" x2="1230" y2="545" stroke="#a78bfa" stroke-width="4.2" marker-end="url(#arrowhead-violet)"/>
-        <text x="1185" y="536" fill="#94a3b8" font-size="9" text-anchor="middle">23 imports</text>
-
-        <line x1="1140" y1="575" x2="1230" y2="575" stroke="#a78bfa" stroke-width="4.4" marker-end="url(#arrowhead-violet)"/>
-        <text x="1185" y="566" fill="#94a3b8" font-size="9" text-anchor="middle">70 constraint deps</text>
-
-        <line x1="1040" y1="610" x2="1040" y2="705" stroke="#a78bfa" stroke-width="4" marker-end="url(#arrowhead-violet)"/>
-        <text x="1053" y="661" fill="#94a3b8" font-size="9">20 back-links</text>
-
-        <path d="M 285 610 C 350 610, 390 610, 470 610" fill="none" stroke="#fbbf24" stroke-width="2.2" marker-end="url(#arrowhead-amber)"/>
-        <text x="377" y="600" fill="#94a3b8" font-size="9" text-anchor="middle">run-program</text>
-
-        <path d="M 285 760 C 405 760, 420 760, 560 760" fill="none" stroke="#fbbf24" stroke-width="2.2" marker-end="url(#arrowhead-amber)"/>
-        <text x="425" y="750" fill="#94a3b8" font-size="9" text-anchor="middle">120 constraint imports</text>
-
-        <path d="M 285 790 C 460 790, 620 790, 820 790" fill="none" stroke="#fbbf24" stroke-width="2.2" marker-end="url(#arrowhead-amber)"/>
-        <text x="555" y="780" fill="#94a3b8" font-size="9" text-anchor="middle">34 frontend / 27 elab imports</text>
-
-        <path d="M 285 820 C 560 820, 780 820, 1155 820" fill="none" stroke="#fbbf24" stroke-width="2.2" marker-end="url(#arrowhead-amber)"/>
-        <text x="735" y="810" fill="#94a3b8" font-size="9" text-anchor="middle">10 reify / 9 util / 3 xmlf imports</text>
-
-        <path d="M 1320 220 C 1320 290, 1320 360, 1320 430" fill="none" stroke="#22d3ee" stroke-width="2" stroke-dasharray="5,5" marker-end="url(#arrowhead-cyan)"/>
-        <text x="1332" y="332" fill="#94a3b8" font-size="9">public XMLF helpers</text>
-
-        <path d="M 210 145 C 210 95, 1210 95, 1210 145" fill="none" stroke="#64748b" stroke-width="1.4" stroke-dasharray="5,5"/>
-        <text x="710" y="87" fill="#94a3b8" font-size="8" text-anchor="middle">left-to-right path = public façade → frontend → constraint/solve → elaboration → explicit xMLF surface</text>
-
-        <!-- nodes -->
-        <rect x="40" y="90" width="205" height="110" rx="10" fill="#0f172a"/>
-        <rect x="40" y="90" width="205" height="110" rx="10" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
-        <text x="143" y="115" fill="white" font-size="12" font-weight="600" text-anchor="middle">MLF.API</text>
-        <text x="143" y="133" fill="#94a3b8" font-size="8" text-anchor="middle">imports 7 frontend modules</text>
-        <text x="143" y="148" fill="#94a3b8" font-size="8" text-anchor="middle">Syntax / Parse / Pretty / Normalize</text>
-        <text x="143" y="166" fill="#22d3ee" font-size="8" text-anchor="middle">main public surface</text>
-
-        <rect x="310" y="90" width="165" height="110" rx="10" fill="#0f172a"/>
-        <rect x="310" y="90" width="165" height="110" rx="10" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
-        <text x="392" y="115" fill="white" font-size="12" font-weight="600" text-anchor="middle">MLF.Pipeline</text>
-        <text x="392" y="133" fill="#94a3b8" font-size="8" text-anchor="middle">imports Frontend(6)</text>
-        <text x="392" y="148" fill="#94a3b8" font-size="8" text-anchor="middle">Constraint(1) · Elab(1)</text>
-        <text x="392" y="166" fill="#22d3ee" font-size="8" text-anchor="middle">canonical runtime API</text>
-
-        <rect x="615" y="90" width="175" height="110" rx="10" fill="#0f172a"/>
-        <rect x="615" y="90" width="175" height="110" rx="10" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
-        <text x="702" y="115" fill="white" font-size="12" font-weight="600" text-anchor="middle">MLF.Frontend.*</text>
-        <text x="702" y="133" fill="#94a3b8" font-size="8" text-anchor="middle">21 modules</text>
-        <text x="702" y="148" fill="#94a3b8" font-size="8" text-anchor="middle">parse · desugar · program check</text>
-        <text x="702" y="166" fill="#22d3ee" font-size="8" text-anchor="middle">generates constraints</text>
-
-        <rect x="920" y="90" width="100" height="110" rx="10" fill="#0f172a"/>
-        <rect x="920" y="90" width="100" height="110" rx="10" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-        <text x="970" y="115" fill="white" font-size="12" font-weight="600" text-anchor="middle">Constraint</text>
-        <text x="970" y="133" fill="#94a3b8" font-size="8" text-anchor="middle">82 modules</text>
-        <text x="970" y="148" fill="#94a3b8" font-size="8" text-anchor="middle">graph / solve</text>
-        <text x="970" y="166" fill="#34d399" font-size="8" text-anchor="middle">largest domain</text>
-
-        <rect x="1130" y="90" width="100" height="110" rx="10" fill="#0f172a"/>
-        <rect x="1130" y="90" width="100" height="110" rx="10" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-        <text x="1180" y="115" fill="white" font-size="12" font-weight="600" text-anchor="middle">Elab</text>
-        <text x="1180" y="133" fill="#94a3b8" font-size="8" text-anchor="middle">51 modules</text>
-        <text x="1180" y="148" fill="#94a3b8" font-size="8" text-anchor="middle">generalize / reduce</text>
-        <text x="1180" y="166" fill="#a78bfa" font-size="8" text-anchor="middle">xMLF elaboration</text>
-
-        <rect x="1230" y="90" width="110" height="110" rx="10" fill="#0f172a"/>
-        <rect x="1230" y="90" width="110" height="110" rx="10" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
-        <text x="1285" y="115" fill="white" font-size="12" font-weight="600" text-anchor="middle">MLF.XMLF</text>
-        <text x="1285" y="133" fill="#94a3b8" font-size="8" text-anchor="middle">public XMLF facade</text>
-        <text x="1285" y="148" fill="#94a3b8" font-size="8" text-anchor="middle">Syntax / Parse / Pretty</text>
-        <text x="1285" y="166" fill="#22d3ee" font-size="8" text-anchor="middle">explicit term surface</text>
-
-        <rect x="635" y="312" width="140" height="110" rx="10" fill="#0f172a"/>
-        <rect x="635" y="312" width="140" height="110" rx="10" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-        <text x="705" y="337" fill="white" font-size="12" font-weight="600" text-anchor="middle">Presolution</text>
-        <text x="705" y="355" fill="#94a3b8" font-size="8" text-anchor="middle">inside Constraint.*</text>
-        <text x="705" y="370" fill="#94a3b8" font-size="8" text-anchor="middle">plan / witness / unify</text>
-        <text x="705" y="388" fill="#34d399" font-size="8" text-anchor="middle">frontier before solve</text>
-
-        <rect x="930" y="500" width="210" height="120" rx="10" fill="#0f172a"/>
-        <rect x="930" y="500" width="210" height="120" rx="10" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-        <text x="1035" y="525" fill="white" font-size="12" font-weight="600" text-anchor="middle">MLF.Constraint.*</text>
-        <text x="1035" y="543" fill="#94a3b8" font-size="8" text-anchor="middle">depends on Util(36) · Reify(5) · Binding(3)</text>
-        <text x="1035" y="558" fill="#94a3b8" font-size="8" text-anchor="middle">owns Types / Normalize / Acyclicity / Solve</text>
-        <text x="1035" y="576" fill="#34d399" font-size="8" text-anchor="middle">central dependency hub</text>
-        <text x="1035" y="592" fill="#94a3b8" font-size="8" text-anchor="middle">receives heavy imports from Elab + Tests</text>
-
-        <rect x="1230" y="500" width="130" height="120" rx="10" fill="#0f172a"/>
-        <rect x="1230" y="500" width="130" height="120" rx="10" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-        <text x="1295" y="525" fill="white" font-size="12" font-weight="600" text-anchor="middle">MLF.Reify.*</text>
-        <text x="1295" y="543" fill="#94a3b8" font-size="8" text-anchor="middle">7 modules</text>
-        <text x="1295" y="558" fill="#94a3b8" font-size="8" text-anchor="middle">depends on Constraint(20)</text>
-        <text x="1295" y="576" fill="#a78bfa" font-size="8" text-anchor="middle">returns graph→type view</text>
-        <text x="1295" y="592" fill="#94a3b8" font-size="8" text-anchor="middle">also uses Types(6) / Util(9)</text>
-
-        <rect x="930" y="312" width="220" height="110" rx="10" fill="#0f172a"/>
-        <rect x="930" y="312" width="220" height="110" rx="10" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-        <text x="1040" y="337" fill="white" font-size="12" font-weight="600" text-anchor="middle">MLF.Elab.*</text>
-        <text x="1040" y="355" fill="#94a3b8" font-size="8" text-anchor="middle">depends on Constraint(70) · Reify(23)</text>
-        <text x="1040" y="370" fill="#94a3b8" font-size="8" text-anchor="middle">plus Frontend(21) · Util(11)</text>
-        <text x="1040" y="388" fill="#a78bfa" font-size="8" text-anchor="middle">translation + typecheck + runtime</text>
-
-        <rect x="650" y="500" width="190" height="120" rx="10" fill="#0f172a"/>
-        <rect x="650" y="500" width="190" height="120" rx="10" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
-        <text x="745" y="525" fill="white" font-size="12" font-weight="600" text-anchor="middle">MLF.Frontend.*</text>
-        <text x="745" y="543" fill="#94a3b8" font-size="8" text-anchor="middle">depends on Constraint(5)</text>
-        <text x="745" y="558" fill="#94a3b8" font-size="8" text-anchor="middle">plus Elab(2), Reify(1), Util(2)</text>
-        <text x="745" y="576" fill="#22d3ee" font-size="8" text-anchor="middle">upstream producer for pipeline</text>
-        <text x="745" y="592" fill="#94a3b8" font-size="8" text-anchor="middle">`.mlfp` check/elaborate/run boundary</text>
-
-        <rect x="470" y="500" width="150" height="120" rx="10" fill="#0f172a"/>
-        <rect x="470" y="500" width="150" height="120" rx="10" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="545" y="525" fill="white" font-size="12" font-weight="600" text-anchor="middle">app/Main.hs</text>
-        <text x="545" y="543" fill="#94a3b8" font-size="8" text-anchor="middle">imports MLF.Program.CLI</text>
-        <text x="545" y="558" fill="#94a3b8" font-size="8" text-anchor="middle">and MLF.Research.*</text>
-        <text x="545" y="576" fill="#fbbf24" font-size="8" text-anchor="middle">binary entrypoint</text>
-
-        <rect x="40" y="500" width="245" height="140" rx="10" fill="#0f172a"/>
-        <rect x="40" y="500" width="245" height="140" rx="10" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="162" y="525" fill="white" font-size="12" font-weight="600" text-anchor="middle">Public façades / runners</text>
-        <text x="162" y="543" fill="#94a3b8" font-size="8" text-anchor="middle">MLF.Program → API + Pipeline</text>
-        <text x="162" y="558" fill="#94a3b8" font-size="8" text-anchor="middle">MLF.XMLF → XMLF.Syntax/Parse/Pretty</text>
-        <text x="162" y="576" fill="#94a3b8" font-size="8" text-anchor="middle">compat surface for downstream callers</text>
-        <text x="162" y="594" fill="#fbbf24" font-size="8" text-anchor="middle">thin wrappers, not the heavy implementation layer</text>
-
-        <rect x="40" y="690" width="245" height="150" rx="10" fill="#0f172a"/>
-        <rect x="40" y="690" width="245" height="150" rx="10" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="162" y="715" fill="white" font-size="12" font-weight="600" text-anchor="middle">test/Main.hs + spec graph</text>
-        <text x="162" y="733" fill="#94a3b8" font-size="8" text-anchor="middle">61+ spec modules aggregated as “Tests”</text>
-        <text x="162" y="748" fill="#94a3b8" font-size="8" text-anchor="middle">imports Constraint(120), Frontend(34), Elab(27)</text>
-        <text x="162" y="766" fill="#94a3b8" font-size="8" text-anchor="middle">also API(7), Reify(10), Util(9), XMLF(3)</text>
-        <text x="162" y="784" fill="#fbbf24" font-size="8" text-anchor="middle">broadest consumer of internal modules</text>
-
-        <rect x="560" y="690" width="220" height="110" rx="10" fill="#0f172a"/>
-        <rect x="560" y="690" width="220" height="110" rx="10" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
-        <text x="670" y="715" fill="white" font-size="12" font-weight="600" text-anchor="middle">MLF.Research.*</text>
-        <text x="670" y="733" fill="#94a3b8" font-size="8" text-anchor="middle">10 modules in src-research</text>
-        <text x="670" y="748" fill="#94a3b8" font-size="8" text-anchor="middle">depends on Constraint(7), Elab(8), Frontend(5)</text>
-        <text x="670" y="766" fill="#fbbf24" font-size="8" text-anchor="middle">prototype / experiment lane</text>
-
-        <rect x="820" y="690" width="155" height="110" rx="10" fill="#0f172a"/>
-        <rect x="820" y="690" width="155" height="110" rx="10" fill="rgba(30, 41, 59, 0.5)" stroke="#94a3b8" stroke-width="1.5"/>
-        <text x="897" y="715" fill="white" font-size="12" font-weight="600" text-anchor="middle">MLF.Util.*</text>
-        <text x="897" y="733" fill="#94a3b8" font-size="8" text-anchor="middle">7 modules</text>
-        <text x="897" y="748" fill="#94a3b8" font-size="8" text-anchor="middle">shared helpers</text>
-        <text x="897" y="766" fill="#94a3b8" font-size="8" text-anchor="middle">consumed heavily by Constraint / Reify / Elab</text>
-
-        <rect x="1000" y="690" width="165" height="110" rx="10" fill="#0f172a"/>
-        <rect x="1000" y="690" width="165" height="110" rx="10" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
-        <text x="1082" y="715" fill="white" font-size="12" font-weight="600" text-anchor="middle">MLF.Binding /</text>
-        <text x="1082" y="731" fill="white" font-size="12" font-weight="600" text-anchor="middle">Witness / Types</text>
-        <text x="1082" y="748" fill="#94a3b8" font-size="8" text-anchor="middle">Binding(7) · Witness(1) · Types(1)</text>
-        <text x="1082" y="766" fill="#a78bfa" font-size="8" text-anchor="middle">supporting semantic data</text>
-
-        <!-- legend outside main content cluster -->
-        <text x="1175" y="900" fill="white" font-size="10" font-weight="600">Legend</text>
-        <rect x="1175" y="913" width="16" height="10" rx="2" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
-        <text x="1198" y="921" fill="#94a3b8" font-size="8">public API / frontend surface</text>
-        <rect x="1175" y="930" width="16" height="10" rx="2" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
-        <text x="1198" y="938" fill="#94a3b8" font-size="8">constraint / solve core</text>
-        <rect x="1175" y="947" width="16" height="10" rx="2" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
-        <text x="1198" y="955" fill="#94a3b8" font-size="8">elab / reify / semantic support</text>
-        <rect x="1175" y="964" width="16" height="10" rx="2" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1"/>
-        <text x="1198" y="972" fill="#94a3b8" font-size="8">app / tests / research / wrappers</text>
-      </svg>
+      <svg viewBox="0 0 1420 760" aria-label="mlf4 module dependency diagram">
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#94a3b8" /></marker>
+    <marker id="arrowhead-cyan" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#22d3ee" /></marker>
+    <marker id="arrowhead-emerald" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#34d399" /></marker>
+    <marker id="arrowhead-violet" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#a78bfa" /></marker>
+    <marker id="arrowhead-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill="#fbbf24" /></marker>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/></pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="url(#grid)" />
+  <rect x="20" y="20" width="1380" height="610" rx="18" fill="rgba(251, 191, 36, 0.04)" stroke="#fbbf24" stroke-width="1.2" stroke-dasharray="8,4"/>
+  <text x="42" y="46" fill="#fbbf24" font-size="11" font-weight="600">Cross-domain internal imports for /Users/ares/.codex/worktrees/d432/mlf4</text>
+  <text x="42" y="63" fill="#94a3b8" font-size="9">273 Haskell modules · 1,593 internal imports · layout derived from actual module/import declarations</text>
+  <line x1="135.0" y1="210.0" x2="332.5" y2="420.0" stroke="#fbbf24" stroke-width="1.7" marker-end="url(#arrowhead-amber)" stroke-dasharray="6,5"/>
+  <text x="251.8" y="315.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">2 imports</text>
+  <line x1="425.0" y1="150.0" x2="470.0" y2="150.0" stroke="#22d3ee" stroke-width="2.4" marker-end="url(#arrowhead-cyan)"/>
+  <text x="447.5" y="140.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">11 imports</text>
+  <line x1="425.0" y1="150.0" x2="700.0" y2="150.0" stroke="#22d3ee" stroke-width="1.7" marker-end="url(#arrowhead-cyan)"/>
+  <text x="562.5" y="140.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">3 imports</text>
+  <line x1="425.0" y1="150.0" x2="925.0" y2="125.0" stroke="#22d3ee" stroke-width="1.7" marker-end="url(#arrowhead-cyan)"/>
+  <text x="675.0" y="127.5" fill="#cbd5e1" font-size="8.5" text-anchor="middle">2 imports</text>
+  <line x1="337.5" y1="210.0" x2="560.0" y2="420.0" stroke="#22d3ee" stroke-width="1.7" marker-end="url(#arrowhead-cyan)"/>
+  <text x="448.8" y="305.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">3 imports</text>
+  <line x1="700.0" y1="150.0" x2="650.0" y2="150.0" stroke="#22d3ee" stroke-width="2.4" marker-end="url(#arrowhead-cyan)"/>
+  <text x="675.0" y="140.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">16 imports</text>
+  <line x1="650.0" y1="150.0" x2="920.0" y2="285.0" stroke="#22d3ee" stroke-width="1.7" marker-end="url(#arrowhead-cyan)"/>
+  <text x="785.0" y="207.5" fill="#cbd5e1" font-size="8.5" text-anchor="middle">5 imports</text>
+  <line x1="560.0" y1="210.0" x2="560.0" y2="420.0" stroke="#22d3ee" stroke-width="1.7" marker-end="url(#arrowhead-cyan)"/>
+  <text x="578.0" y="315.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">6 imports</text>
+  <line x1="1002.5" y1="225.0" x2="1002.5" y2="180.0" stroke="#34d399" stroke-width="3.2" marker-end="url(#arrowhead-emerald)"/>
+  <text x="1020.5" y="202.5" fill="#cbd5e1" font-size="8.5" text-anchor="middle">22 imports</text>
+  <line x1="920.0" y1="285.0" x2="650.0" y2="492.5" stroke="#34d399" stroke-width="3.2" marker-end="url(#arrowhead-emerald)"/>
+  <text x="785.0" y="378.8" fill="#cbd5e1" font-size="8.5" text-anchor="middle">25 imports</text>
+  <line x1="1145.0" y1="255.0" x2="1085.0" y2="285.0" stroke="#34d399" stroke-width="6.0" marker-end="url(#arrowhead-emerald)"/>
+  <text x="1115.0" y="260.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">103 imports</text>
+  <line x1="1145.0" y1="255.0" x2="1080.0" y2="125.0" stroke="#34d399" stroke-width="2.4" marker-end="url(#arrowhead-emerald)"/>
+  <text x="1130.5" y="190.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">11 imports</text>
+  <line x1="1145.0" y1="255.0" x2="650.0" y2="492.5" stroke="#34d399" stroke-width="6.0" marker-end="url(#arrowhead-emerald)"/>
+  <text x="897.5" y="363.8" fill="#cbd5e1" font-size="8.5" text-anchor="middle">96 imports</text>
+  <line x1="790.0" y1="400.0" x2="560.0" y2="210.0" stroke="#a78bfa" stroke-width="1.7" marker-end="url(#arrowhead-violet)"/>
+  <text x="675.0" y="295.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">9 imports</text>
+  <line x1="875.0" y1="465.0" x2="920.0" y2="285.0" stroke="#a78bfa" stroke-width="3.2" marker-end="url(#arrowhead-violet)"/>
+  <text x="915.5" y="375.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">32 imports</text>
+  <line x1="875.0" y1="465.0" x2="1145.0" y2="255.0" stroke="#a78bfa" stroke-width="2.4" marker-end="url(#arrowhead-violet)"/>
+  <text x="1010.0" y="350.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">12 imports</text>
+  <line x1="875.0" y1="465.0" x2="930.0" y2="470.0" stroke="#a78bfa" stroke-width="2.4" marker-end="url(#arrowhead-violet)"/>
+  <text x="902.5" y="457.5" fill="#cbd5e1" font-size="8.5" text-anchor="middle">18 imports</text>
+  <line x1="705.0" y1="465.0" x2="650.0" y2="492.5" stroke="#a78bfa" stroke-width="4.0" marker-end="url(#arrowhead-violet)"/>
+  <text x="677.5" y="468.8" fill="#cbd5e1" font-size="8.5" text-anchor="middle">56 imports</text>
+  <line x1="930.0" y1="470.0" x2="650.0" y2="150.0" stroke="#a78bfa" stroke-width="2.4" marker-end="url(#arrowhead-violet)"/>
+  <text x="808.0" y="310.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">12 imports</text>
+  <line x1="1015.0" y1="405.0" x2="1002.5" y2="345.0" stroke="#a78bfa" stroke-width="4.0" marker-end="url(#arrowhead-violet)"/>
+  <text x="1026.8" y="375.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">42 imports</text>
+  <line x1="1015.0" y1="405.0" x2="1002.5" y2="180.0" stroke="#a78bfa" stroke-width="2.4" marker-end="url(#arrowhead-violet)"/>
+  <text x="1026.8" y="292.5" fill="#cbd5e1" font-size="8.5" text-anchor="middle">13 imports</text>
+  <line x1="1100.0" y1="470.0" x2="1145.0" y2="255.0" stroke="#a78bfa" stroke-width="2.4" marker-end="url(#arrowhead-violet)"/>
+  <text x="1140.5" y="362.5" fill="#cbd5e1" font-size="8.5" text-anchor="middle">10 imports</text>
+  <line x1="930.0" y1="470.0" x2="875.0" y2="465.0" stroke="#a78bfa" stroke-width="3.2" marker-end="url(#arrowhead-violet)"/>
+  <text x="902.5" y="457.5" fill="#cbd5e1" font-size="8.5" text-anchor="middle">27 imports</text>
+  <line x1="930.0" y1="470.0" x2="650.0" y2="492.5" stroke="#a78bfa" stroke-width="3.2" marker-end="url(#arrowhead-violet)"/>
+  <text x="790.0" y="471.2" fill="#cbd5e1" font-size="8.5" text-anchor="middle">31 imports</text>
+  <line x1="1135.0" y1="485.0" x2="425.0" y2="150.0" stroke="#fbbf24" stroke-width="2.4" marker-end="url(#arrowhead-amber)" stroke-dasharray="6,5"/>
+  <text x="780.0" y="307.5" fill="#cbd5e1" font-size="8.5" text-anchor="middle">17 imports</text>
+  <line x1="1135.0" y1="485.0" x2="650.0" y2="150.0" stroke="#fbbf24" stroke-width="4.0" marker-end="url(#arrowhead-amber)" stroke-dasharray="6,5"/>
+  <text x="892.5" y="307.5" fill="#cbd5e1" font-size="8.5" text-anchor="middle">41 imports</text>
+  <line x1="1135.0" y1="485.0" x2="1085.0" y2="285.0" stroke="#fbbf24" stroke-width="5.0" marker-end="url(#arrowhead-amber)" stroke-dasharray="6,5"/>
+  <text x="1128.0" y="385.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">85 imports</text>
+  <line x1="1245.0" y1="410.0" x2="1002.5" y2="180.0" stroke="#fbbf24" stroke-width="5.0" marker-end="url(#arrowhead-amber)" stroke-dasharray="6,5"/>
+  <text x="1123.8" y="285.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">69 imports</text>
+  <line x1="1245.0" y1="410.0" x2="1247.5" y2="330.0" stroke="#fbbf24" stroke-width="4.0" marker-end="url(#arrowhead-amber)" stroke-dasharray="6,5"/>
+  <text x="1264.2" y="370.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">36 imports</text>
+  <line x1="1135.0" y1="485.0" x2="875.0" y2="465.0" stroke="#fbbf24" stroke-width="2.4" marker-end="url(#arrowhead-amber)" stroke-dasharray="6,5"/>
+  <text x="1005.0" y="465.0" fill="#cbd5e1" font-size="8.5" text-anchor="middle">16 imports</text>
+  <line x1="1135.0" y1="485.0" x2="1100.0" y2="470.0" stroke="#fbbf24" stroke-width="2.4" marker-end="url(#arrowhead-amber)" stroke-dasharray="6,5"/>
+  <text x="1117.5" y="467.5" fill="#cbd5e1" font-size="8.5" text-anchor="middle">14 imports</text>
+  <line x1="1135.0" y1="485.0" x2="650.0" y2="492.5" stroke="#fbbf24" stroke-width="4.0" marker-end="url(#arrowhead-amber)" stroke-dasharray="6,5"/>
+  <text x="892.5" y="478.8" fill="#cbd5e1" font-size="8.5" text-anchor="middle">51 imports</text>
+  <rect x="60" y="120" width="150" height="90" rx="12" fill="#0f172a"/>
+  <rect x="60" y="120" width="150" height="90" rx="12" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="135.0" y="144" fill="white" font-size="12" font-weight="600" text-anchor="middle">Executable</text>
+  <text x="135.0" y="162" fill="#94a3b8" font-size="8.5" text-anchor="middle">1 modules</text>
+  <text x="135.0" y="178" fill="#94a3b8" font-size="7.8" text-anchor="middle">app/Main.hs</text>
+  <text x="135.0" y="182" fill="#fbbf24" font-size="7.8" text-anchor="middle">hub: Main</text>
+  <rect x="250" y="90" width="175" height="120" rx="12" fill="#0f172a"/>
+  <rect x="250" y="90" width="175" height="120" rx="12" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="337.5" y="114" fill="white" font-size="12" font-weight="600" text-anchor="middle">Public Surface</text>
+  <text x="337.5" y="132" fill="#94a3b8" font-size="8.5" text-anchor="middle">4 modules</text>
+  <text x="337.5" y="148" fill="#94a3b8" font-size="7.8" text-anchor="middle">MLF.API · MLF.Pipeline · MLF.Program · MLF.XMLF</text>
+  <text x="337.5" y="182" fill="#22d3ee" font-size="7.8" text-anchor="middle">hub: MLF.API</text>
+  <text x="337.5" y="196" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Pipeline</text>
+  <rect x="470" y="90" width="180" height="120" rx="12" fill="#0f172a"/>
+  <rect x="470" y="90" width="180" height="120" rx="12" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="560.0" y="114" fill="white" font-size="12" font-weight="600" text-anchor="middle">Frontend Core</text>
+  <text x="560.0" y="132" fill="#94a3b8" font-size="8.5" text-anchor="middle">16 modules</text>
+  <text x="560.0" y="148" fill="#94a3b8" font-size="7.8" text-anchor="middle">syntax / parse / pretty / normalize / constraint gen</text>
+  <text x="560.0" y="182" fill="#22d3ee" font-size="7.8" text-anchor="middle">hub: MLF.Frontend.Syntax</text>
+  <text x="560.0" y="196" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Frontend.ConstraintGen</text>
+  <rect x="700" y="90" width="175" height="120" rx="12" fill="#0f172a"/>
+  <rect x="700" y="90" width="175" height="120" rx="12" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1.5"/>
+  <text x="787.5" y="114" fill="white" font-size="12" font-weight="600" text-anchor="middle">Program Frontend</text>
+  <text x="787.5" y="132" fill="#94a3b8" font-size="8.5" text-anchor="middle">10 modules</text>
+  <text x="787.5" y="148" fill="#94a3b8" font-size="7.8" text-anchor="middle">.mlfp env assembly / lowering / run boundary</text>
+  <text x="787.5" y="182" fill="#22d3ee" font-size="7.8" text-anchor="middle">hub: MLF.Frontend.Program.Finalize</text>
+  <text x="787.5" y="196" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Frontend.Program.Types</text>
+  <rect x="925" y="70" width="155" height="110" rx="12" fill="#0f172a"/>
+  <rect x="925" y="70" width="155" height="110" rx="12" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="1002.5" y="94" fill="white" font-size="12" font-weight="600" text-anchor="middle">Constraint Types</text>
+  <text x="1002.5" y="112" fill="#94a3b8" font-size="8.5" text-anchor="middle">8 modules</text>
+  <text x="1002.5" y="128" fill="#94a3b8" font-size="7.8" text-anchor="middle">Graph / Witness / Presolution types</text>
+  <text x="1002.5" y="152" fill="#34d399" font-size="7.8" text-anchor="middle">hub: MLF.Constraint.Types.Graph</text>
+  <text x="1002.5" y="166" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Constraint.Types.Witness</text>
+  <rect x="920" y="225" width="165" height="120" rx="12" fill="#0f172a"/>
+  <rect x="920" y="225" width="165" height="120" rx="12" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="1002.5" y="249" fill="white" font-size="12" font-weight="600" text-anchor="middle">Constraint Core</text>
+  <text x="1002.5" y="267" fill="#94a3b8" font-size="8.5" text-anchor="middle">26 modules</text>
+  <text x="1002.5" y="283" fill="#94a3b8" font-size="7.8" text-anchor="middle">types facade / finalize / unification / node access</text>
+  <text x="1002.5" y="317" fill="#34d399" font-size="7.8" text-anchor="middle">hub: MLF.Constraint.Types</text>
+  <text x="1002.5" y="331" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Constraint.Presolution</text>
+  <rect x="1145" y="180" width="205" height="150" rx="12" fill="#0f172a"/>
+  <rect x="1145" y="180" width="205" height="150" rx="12" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1.5"/>
+  <text x="1247.5" y="204" fill="white" font-size="12" font-weight="600" text-anchor="middle">Constraint Presolution</text>
+  <text x="1247.5" y="222" fill="#94a3b8" font-size="8.5" text-anchor="middle">48 modules</text>
+  <text x="1247.5" y="238" fill="#94a3b8" font-size="7.8" text-anchor="middle">planner / interpreter / state / test support</text>
+  <text x="1247.5" y="302" fill="#34d399" font-size="7.8" text-anchor="middle">hub: MLF.Constraint.Presolution.Base</text>
+  <text x="1247.5" y="316" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Constraint.Presolution.View</text>
+  <rect x="705" y="400" width="170" height="130" rx="12" fill="#0f172a"/>
+  <rect x="705" y="400" width="170" height="130" rx="12" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="790.0" y="424" fill="white" font-size="12" font-weight="600" text-anchor="middle">Elab Core</text>
+  <text x="790.0" y="442" fill="#94a3b8" font-size="8.5" text-anchor="middle">26 modules</text>
+  <text x="790.0" y="458" fill="#94a3b8" font-size="7.8" text-anchor="middle">generalize / phi / elaboration / pipeline</text>
+  <text x="790.0" y="502" fill="#a78bfa" font-size="7.8" text-anchor="middle">hub: MLF.Elab.Types</text>
+  <text x="790.0" y="516" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Elab.Pipeline</text>
+  <rect x="930" y="405" width="170" height="130" rx="12" fill="#0f172a"/>
+  <rect x="930" y="405" width="170" height="130" rx="12" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1.5"/>
+  <text x="1015.0" y="429" fill="white" font-size="12" font-weight="600" text-anchor="middle">Elab Runtime</text>
+  <text x="1015.0" y="447" fill="#94a3b8" font-size="8.5" text-anchor="middle">25 modules</text>
+  <text x="1015.0" y="463" fill="#94a3b8" font-size="7.8" text-anchor="middle">run pipeline / result type / apps / lets / vars</text>
+  <text x="1015.0" y="507" fill="#a78bfa" font-size="7.8" text-anchor="middle">hub: MLF.Elab.Run.Pipeline</text>
+  <text x="1015.0" y="521" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Elab.Run.ResultType</text>
+  <rect x="470" y="420" width="180" height="145" rx="12" fill="#0f172a"/>
+  <rect x="470" y="420" width="180" height="145" rx="12" fill="rgba(30, 41, 59, 0.55)" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="560.0" y="444" fill="white" font-size="12" font-weight="600" text-anchor="middle">Support &amp; XMLF</text>
+  <text x="560.0" y="462" fill="#94a3b8" font-size="8.5" text-anchor="middle">33 modules</text>
+  <text x="560.0" y="478" fill="#94a3b8" font-size="7.8" text-anchor="middle">binding / util / reify / XMLF / witness / types</text>
+  <text x="560.0" y="537" fill="#94a3b8" font-size="7.8" text-anchor="middle">hub: MLF.Binding.Tree</text>
+  <text x="560.0" y="551" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Reify.TypeOps</text>
+  <rect x="245" y="420" width="175" height="130" rx="12" fill="#0f172a"/>
+  <rect x="245" y="420" width="175" height="130" rx="12" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="332.5" y="444" fill="white" font-size="12" font-weight="600" text-anchor="middle">Research</text>
+  <text x="332.5" y="462" fill="#94a3b8" font-size="8.5" text-anchor="middle">10 modules</text>
+  <text x="332.5" y="478" fill="#94a3b8" font-size="7.8" text-anchor="middle">src-research prototype lanes</text>
+  <text x="332.5" y="522" fill="#fbbf24" font-size="7.8" text-anchor="middle">hub: MLF.Research.URI.R2.C1.Prototype.P2</text>
+  <text x="332.5" y="536" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Research.URI.R2.C1.Prototype.Entrypoint</text>
+  <rect x="1135" y="410" width="220" height="150" rx="12" fill="#0f172a"/>
+  <rect x="1135" y="410" width="220" height="150" rx="12" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
+  <text x="1245.0" y="434" fill="white" font-size="12" font-weight="600" text-anchor="middle">Tests</text>
+  <text x="1245.0" y="452" fill="#94a3b8" font-size="8.5" text-anchor="middle">66 modules</text>
+  <text x="1245.0" y="468" fill="#94a3b8" font-size="7.8" text-anchor="middle">66 spec modules + Test.Main / SpecUtil</text>
+  <text x="1245.0" y="532" fill="#fbbf24" font-size="7.8" text-anchor="middle">hub: SpecUtil</text>
+  <text x="1245.0" y="546" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: Test.Main</text>
+  <rect x="85" y="662" width="130" height="26" rx="6" fill="#0f172a"/>
+  <rect x="85" y="662" width="130" height="26" rx="6" fill="rgba(8, 51, 68, 0.4)" stroke="#22d3ee" stroke-width="1"/>
+  <text x="150" y="679" fill="white" font-size="8" text-anchor="middle">public / frontend surfaces</text>
+  <rect x="350" y="662" width="130" height="26" rx="6" fill="#0f172a"/>
+  <rect x="350" y="662" width="130" height="26" rx="6" fill="rgba(6, 78, 59, 0.4)" stroke="#34d399" stroke-width="1"/>
+  <text x="415" y="679" fill="white" font-size="8" text-anchor="middle">constraint stack</text>
+  <rect x="615" y="662" width="130" height="26" rx="6" fill="#0f172a"/>
+  <rect x="615" y="662" width="130" height="26" rx="6" fill="rgba(76, 29, 149, 0.4)" stroke="#a78bfa" stroke-width="1"/>
+  <text x="680" y="679" fill="white" font-size="8" text-anchor="middle">elaboration + runtime</text>
+  <rect x="880" y="662" width="130" height="26" rx="6" fill="#0f172a"/>
+  <rect x="880" y="662" width="130" height="26" rx="6" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1"/>
+  <text x="945" y="679" fill="white" font-size="8" text-anchor="middle">executable / research / tests</text>
+  <rect x="1145" y="662" width="130" height="26" rx="6" fill="#0f172a"/>
+  <rect x="1145" y="662" width="130" height="26" rx="6" fill="rgba(30, 41, 59, 0.55)" stroke="#94a3b8" stroke-width="1"/>
+  <text x="1210" y="679" fill="white" font-size="8" text-anchor="middle">shared support + XMLF internals</text>
+</svg>
     </div>
 
     <div class="cards">
       <div class="card">
-        <div class="card-header"><div class="card-dot cyan"></div><h3>Public entry structure</h3></div>
+        <div class="card-header"><div class="card-dot cyan"></div><h3>What changed in this refresh</h3></div>
         <ul>
-          <li>• `MLF.API` is mostly a frontend façade: 7 imports, all into `MLF.Frontend.*`.</li>
-          <li>• `MLF.Pipeline` is the real bridge: it touches frontend, one constraint module, and one elaboration module.</li>
-          <li>• `MLF.Program` is thin compatibility glue over `MLF.API` + `MLF.Pipeline`.</li>
-          <li>• `MLF.XMLF` is a wrapper over explicit xMLF syntax/parse/pretty helpers.</li>
+          <li>• Recomputed from the current repo instead of hand-maintained counts.</li>
+          <li>• The biggest internal family is now <strong>Constraint Presolution</strong> with 48 modules.</li>
+          <li>• The graph shows 1,593 internal imports across 273 Haskell modules.</li>
         </ul>
       </div>
       <div class="card">
-        <div class="card-header"><div class="card-dot emerald"></div><h3>Heavy dependency hubs</h3></div>
+        <div class="card-header"><div class="card-dot emerald"></div><h3>Main architectural pressure points</h3></div>
         <ul>
-          <li>• `MLF.Constraint.*` is the largest domain at 82 modules.</li>
-          <li>• `MLF.Elab.*` depends most heavily on `Constraint` (70 cross-domain imports).</li>
-          <li>• `Constraint` itself leans hardest on `Util` (36 imports) and lightly on `Binding` / `Reify`.</li>
-          <li>• `Reify` forms a feedback edge back into `Constraint` (20 imports), reflecting graph-to-type reconstruction.</li>
+          <li>• <strong>Constraint Presolution → Constraint Core</strong> is the strongest cross-domain flow at 103 imports.</li>
+          <li>• <strong>Elab Core</strong> and <strong>Elab Runtime</strong> both lean heavily on Constraint + Support layers.</li>
+          <li>• <strong>Tests</strong> touch nearly every major domain, especially Constraint Core/Types and Support.</li>
         </ul>
       </div>
       <div class="card">
-        <div class="card-header"><div class="card-dot amber"></div><h3>Non-production consumers</h3></div>
+        <div class="card-header"><div class="card-dot violet"></div><h3>How to read it</h3></div>
         <ul>
-          <li>• `test/Main.hs` and its spec tree are the widest consumers of internal modules.</li>
-          <li>• `src-research` stays separate, but still depends on frontend/constraint/elab families.</li>
-          <li>• `app/Main.hs` is lightweight: it mostly delegates into `MLF.Program.CLI` and research entrypoints.</li>
-          <li>• This diagram is intentionally domain-compressed, not a full per-module graph.</li>
+          <li>• Cyan boxes are public/frontend surfaces; green is the constraint stack; violet is elaboration/runtime.</li>
+          <li>• Amber dashed arrows highlight executable/test-driver style dependencies.</li>
+          <li>• Use the hub table below when you need exact module names behind the boxes.</li>
         </ul>
       </div>
     </div>
 
-    <div class="footer">module-dependency-diagram.html · derived from repository import structure</div>
+    <div class="tables">
+      <div class="table-card">
+        <h3>Domain summary</h3>
+        <table>
+          <thead><tr><th>Domain</th><th>Modules</th><th>Representative hubs</th></tr></thead>
+          <tbody>
+            <tr><td>Executable</td><td>1</td><td>Main (3)</td></tr>
+<tr><td>Public Surface</td><td>4</td><td>MLF.API (16); MLF.Pipeline (16)</td></tr>
+<tr><td>Frontend Core</td><td>16</td><td>MLF.Frontend.Syntax (59); MLF.Frontend.ConstraintGen (28)</td></tr>
+<tr><td>Program Frontend</td><td>10</td><td>MLF.Frontend.Program.Finalize (9); MLF.Frontend.Program.Types (8)</td></tr>
+<tr><td>Constraint Types</td><td>8</td><td>MLF.Constraint.Types.Graph (94); MLF.Constraint.Types.Witness (29)</td></tr>
+<tr><td>Constraint Core</td><td>26</td><td>MLF.Constraint.Types (99); MLF.Constraint.Presolution (50)</td></tr>
+<tr><td>Constraint Presolution</td><td>48</td><td>MLF.Constraint.Presolution.Base (50); MLF.Constraint.Presolution.View (30)</td></tr>
+<tr><td>Elab Core</td><td>26</td><td>MLF.Elab.Types (41); MLF.Elab.Pipeline (34)</td></tr>
+<tr><td>Elab Runtime</td><td>25</td><td>MLF.Elab.Run.Pipeline (28); MLF.Elab.Run.ResultType (22)</td></tr>
+<tr><td>Support &amp; XMLF</td><td>33</td><td>MLF.Binding.Tree (67); MLF.Reify.TypeOps (36)</td></tr>
+<tr><td>Research</td><td>10</td><td>MLF.Research.URI.R2.C1.Prototype.P2 (27); MLF.Research.URI.R2.C1.Prototype.Entrypoint (14)</td></tr>
+<tr><td>Tests</td><td>66</td><td>SpecUtil (52); Test.Main (50)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-card">
+        <h3>Top module hubs</h3>
+        <table>
+          <thead><tr><th>Module</th><th>Domain</th><th>In</th><th>Out</th><th>Total</th><th>File</th></tr></thead>
+          <tbody>
+            <tr><td>MLF.Constraint.Types</td><td>Constraint Core</td><td>96</td><td>3</td><td>99</td><td>src/MLF/Constraint/Types.hs</td></tr>
+<tr><td>MLF.Constraint.Types.Graph</td><td>Constraint Types</td><td>91</td><td>3</td><td>94</td><td>src/MLF/Constraint/Types/Graph.hs</td></tr>
+<tr><td>MLF.Binding.Tree</td><td>Support &amp; XMLF</td><td>55</td><td>12</td><td>67</td><td>src/MLF/Binding/Tree.hs</td></tr>
+<tr><td>MLF.Frontend.Syntax</td><td>Frontend Core</td><td>58</td><td>1</td><td>59</td><td>src/MLF/Frontend/Syntax.hs</td></tr>
+<tr><td>SpecUtil</td><td>Tests</td><td>40</td><td>12</td><td>52</td><td>test/SpecUtil.hs</td></tr>
+<tr><td>MLF.Constraint.Presolution</td><td>Constraint Core</td><td>47</td><td>3</td><td>50</td><td>src/MLF/Constraint/Presolution.hs</td></tr>
+<tr><td>MLF.Constraint.Presolution.Base</td><td>Constraint Presolution</td><td>33</td><td>17</td><td>50</td><td>src/MLF/Constraint/Presolution/Base.hs</td></tr>
+<tr><td>Test.Main</td><td>Tests</td><td>0</td><td>50</td><td>50</td><td>test/Main.hs</td></tr>
+<tr><td>MLF.Constraint.NodeAccess</td><td>Constraint Core</td><td>47</td><td>1</td><td>48</td><td>src/MLF/Constraint/NodeAccess.hs</td></tr>
+<tr><td>MLF.Elab.Types</td><td>Elab Core</td><td>34</td><td>7</td><td>41</td><td>src/MLF/Elab/Types.hs</td></tr>
+<tr><td>MLF.Reify.TypeOps</td><td>Support &amp; XMLF</td><td>29</td><td>7</td><td>36</td><td>src/MLF/Reify/TypeOps.hs</td></tr>
+<tr><td>MLF.Elab.Pipeline</td><td>Elab Core</td><td>20</td><td>14</td><td>34</td><td>src/MLF/Elab/Pipeline.hs</td></tr>
+<tr><td>MLF.Util.Trace</td><td>Support &amp; XMLF</td><td>33</td><td>0</td><td>33</td><td>src/MLF/Util/Trace.hs</td></tr>
+<tr><td>MLF.Elab.Generalize</td><td>Elab Core</td><td>14</td><td>18</td><td>32</td><td>src/MLF/Elab/Generalize.hs</td></tr>
+<tr><td>MLF.Constraint.VarStore</td><td>Constraint Core</td><td>28</td><td>2</td><td>30</td><td>src/MLF/Constraint/VarStore.hs</td></tr>
+<tr><td>MLF.Constraint.Presolution.View</td><td>Constraint Presolution</td><td>24</td><td>6</td><td>30</td><td>src/MLF/Constraint/Presolution/View.hs</td></tr>
+<tr><td>MLF.Constraint.Types.Witness</td><td>Constraint Types</td><td>27</td><td>2</td><td>29</td><td>src/MLF/Constraint/Types/Witness.hs</td></tr>
+<tr><td>MLF.Util.ElabError</td><td>Support &amp; XMLF</td><td>27</td><td>2</td><td>29</td><td>src/MLF/Util/ElabError.hs</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="table-card">
+        <h3>Strongest cross-domain edges</h3>
+        <table>
+          <thead><tr><th>From</th><th>To</th><th>Imports</th></tr></thead>
+          <tbody>
+            <tr><td>Constraint Presolution</td><td>Constraint Core</td><td>103</td></tr>
+<tr><td>Constraint Presolution</td><td>Support &amp; XMLF</td><td>96</td></tr>
+<tr><td>Tests</td><td>Constraint Core</td><td>85</td></tr>
+<tr><td>Tests</td><td>Constraint Types</td><td>69</td></tr>
+<tr><td>Elab Core</td><td>Support &amp; XMLF</td><td>56</td></tr>
+<tr><td>Tests</td><td>Support &amp; XMLF</td><td>51</td></tr>
+<tr><td>Elab Runtime</td><td>Constraint Core</td><td>42</td></tr>
+<tr><td>Support &amp; XMLF</td><td>Constraint Core</td><td>42</td></tr>
+<tr><td>Tests</td><td>Frontend Core</td><td>41</td></tr>
+<tr><td>Tests</td><td>Constraint Presolution</td><td>36</td></tr>
+<tr><td>Elab Core</td><td>Constraint Core</td><td>32</td></tr>
+<tr><td>Elab Runtime</td><td>Support &amp; XMLF</td><td>31</td></tr>
+<tr><td>Elab Runtime</td><td>Elab Core</td><td>27</td></tr>
+<tr><td>Constraint Core</td><td>Support &amp; XMLF</td><td>25</td></tr>
+<tr><td>Constraint Core</td><td>Constraint Types</td><td>22</td></tr>
+<tr><td>Elab Core</td><td>Elab Runtime</td><td>18</td></tr>
+<tr><td>Tests</td><td>Public Surface</td><td>17</td></tr>
+<tr><td>Program Frontend</td><td>Frontend Core</td><td>16</td></tr>
+<tr><td>Tests</td><td>Elab Core</td><td>16</td></tr>
+<tr><td>Tests</td><td>Elab Runtime</td><td>14</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="footer">Generated from the current mlf4 worktree at <code>/Users/ares/.codex/worktrees/d432/mlf4</code>.</div>
   </div>
 </body>
 </html>

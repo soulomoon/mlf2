@@ -82,6 +82,7 @@ import MLF.Elab.Run.Util
     makeCanonicalizer,
   )
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
+import MLF.Frontend.Parse (parseRawEmlfExpr, renderEmlfParseError)
 import MLF.Frontend.Syntax (Expr (..), Lit (..), NormSrcType, SrcTy (..), SrcType, SurfaceExpr, mkSrcBound)
 import MLF.Reify.Core qualified as Reify
 import MLF.Util.Order qualified as Order
@@ -1277,6 +1278,25 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             Elab.TArrow
               (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
               (Elab.TBase (BaseTy "Int"))
+      ty `shouldAlphaEqType` expected
+      (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+      checkedTy `shouldAlphaEqType` ty
+
+    it "elaborates first-class polymorphic parameter used at Int and Bool" $ do
+      -- \poly : (∀a. a -> a). let keepInt = poly 1 in poly true
+      -- This needs the argument itself to remain polymorphic after being passed
+      -- as a value; ordinary rank-1 let-polymorphism is not enough.
+      let source = "\\(poly : forall a. a -> a) let keepInt = poly 1 in poly true"
+      expr <-
+        case parseRawEmlfExpr source of
+          Left err -> expectationFailure (renderEmlfParseError err) >> fail "parse failed"
+          Right parsed -> pure parsed
+
+      (_term, ty) <- requirePipeline expr
+      let expected =
+            Elab.TArrow
+              (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
+              (Elab.TBase (BaseTy "Bool"))
       ty `shouldAlphaEqType` expected
       (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
       checkedTy `shouldAlphaEqType` ty

@@ -1,3 +1,74 @@
+## 2026-04-19 - `.mlfp` deferred overloaded dispatch through eMLF
+
+- `.mlfp` overloaded method applications now lower to per-binding deferred
+  placeholders instead of requiring class-argument resolution before eMLF
+  inference. Finalization resolves each placeholder from the inferred argument
+  terms, rewrites it to the concrete instance method runtime name, and reruns
+  xMLF typechecking on the rewritten term.
+- Source-known method arguments still specialize the placeholder's visible type
+  without choosing the instance early. Lambda/application-shaped arguments use
+  a looser placeholder argument surface so eMLF can infer the argument term
+  before the program layer applies the class template and instance environment.
+- The former boundary-gap row `eq ((\x x) Zero) Zero` is now positive coverage
+  in `ProgramSpec`, alongside let-polymorphic and explicitly annotated argument
+  rows plus negative rows for bare overloaded methods, missing instances, and
+  duplicate instances.
+- `ProgramSpec` now separates the currently supported boundary matrix from a
+  pending-success matrix for `.mlfp` surfaces that should eventually succeed
+  but still make decisions before eMLF has finished inference: case scrutinees
+  inferred through lambda/application or let-polymorphism, first-class
+  polymorphic constructor arguments, local first-class polymorphic lets crossing
+  constructor boundaries, pattern-bound first-class polymorphic variables,
+  partial overloaded method application, and parameterized ADT instance recovery.
+  The pending rows parse their source programs and then mark the intended
+  runtime success as pending.
+- Fresh focused verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program eMLF"'`
+    -> `27 examples, 0 failures, 7 pending`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
+    -> `60 examples, 0 failures, 7 pending`
+  - `cabal build all && cabal test`
+    -> `1609 examples, 0 failures, 7 pending`
+
+## 2026-04-19 - `.mlfp` first-class polymorphism parity locked
+
+- Added `test/programs/unified/first-class-polymorphism.mlfp` as the durable
+  program example for passing a top-level polymorphic value as a first-class
+  argument. The `.mlfp` application elaborator now preserves such an argument
+  when the callee already expects the full polymorphic scheme and the
+  uninstantiated application typechecks.
+- Added `ProgramSpec` parity coverage for the current user-facing eMLF surface
+  through `.mlfp`: lambda/application, let polymorphism, typed let annotation,
+  term annotation, annotated rank-2 lambdas, and first-class polymorphic
+  arguments. The lower-level `ElaborationSpec` eMLF regression remains inline
+  as an engine check rather than as the program example.
+- Promoted the `.mlfp` parity coverage into table-driven matrices. The supported
+  surface matrix now includes a local first-class polymorphic argument row.
+- Fresh focused verification:
+  - `cabal run mlf2 -- run-program test/programs/unified/first-class-polymorphism.mlfp`
+    -> `true`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program eMLF"'`
+    -> `15 examples, 0 failures`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "first-class polymorphic parameter"'`
+    -> `1 example, 0 failures`
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
+    -> `48 examples, 0 failures`
+  - `cabal build all && cabal test`
+    -> `1597 examples, 0 failures`
+
+## 2026-04-19 - Complex recursive `.mlfp` corpus fixture
+
+- Added `test/programs/recursive-adt/complex-recursive-program.mlfp` to the
+  recursive-ADT corpus. The fixture composes multiple self-recursive `Tree`
+  traversals (`mirror`, `leftDepth`, and `rightDepth`) over nested branching
+  and checks the result through derived `Eq Nat`.
+- `ProgramSpec` now roundtrips and executes ten recursive-ADT fixtures.
+- Fresh verification:
+  - `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
+    -> `46 examples, 0 failures`
+  - `cabal build all && cabal test`
+    -> `1595 examples, 0 failures`
+
 ## 2026-04-19 - `.mlfp` unified path contract hardened
 
 - Executable `.mlfp` bindings now have an explicit documented route:

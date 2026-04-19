@@ -7,11 +7,19 @@ where
 
 import Data.List (find, sort)
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified MLF.Constraint.Types.Graph as Graph
-import MLF.Elab.Pipeline (ExternalEnv, renderPipelineError, runPipelineElabWithEnv)
+import MLF.Elab.Pipeline
+  ( Env (..),
+    ExternalEnv,
+    renderPipelineError,
+    runPipelineElabWithEnv,
+    schemeToType,
+    typeCheckWithEnv,
+  )
 import MLF.Elab.Types (ElabTerm, ElabType)
 import qualified MLF.Elab.Types as X
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
@@ -19,20 +27,27 @@ import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
     elaborateScopeRuntimeTypes,
+    inferClassArgument,
     lowerType,
+    resolveInstanceInfo,
   )
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     DataInfo (..),
+    DeferredMethodCall (..),
+    InstanceInfo (..),
     LoweredBinding (..),
+    MethodInfo (..),
     ProgramError (..),
+    ValueInfo (..),
   )
 import MLF.Frontend.Syntax (Expr (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarsType)
 
 finalizeBinding :: ElaborateScope -> LoweredBinding -> Either ProgramError CheckedBinding
 finalizeBinding scope lowered = do
-  (term, actualTy) <- runSurfacePipeline scope (loweredBindingSurfaceExpr lowered)
+  (term0, actualTy0, tcEnv) <- runSurfacePipeline scope (loweredBindingExternalTypes lowered) (loweredBindingSurfaceExpr lowered)
+  (term, actualTy) <- finalizeDeferredMethods scope (loweredBindingDeferredMethods lowered) tcEnv term0 actualTy0
   let actualTyForCompare = stripVacuousForalls actualTy
       expectedTyForCompare = stripVacuousForalls (srcTypeToElabType (loweredBindingExpectedType lowered))
       recoveredActualSrcTy = recoverSourceType scope (elabTypeToSrcType actualTyForCompare)
@@ -53,8 +68,8 @@ finalizeBinding scope lowered = do
           }
     else Left (ProgramTypeMismatch recoveredActualSrcTy (loweredBindingExpectedType lowered))
 
-runSurfacePipeline :: ElaborateScope -> SurfaceExpr -> Either ProgramError (ElabTerm, ElabType)
-runSurfacePipeline scope surfaceExpr = do
+runSurfacePipeline :: ElaborateScope -> Map String SrcType -> SurfaceExpr -> Either ProgramError (ElabTerm, ElabType, Env)
+runSurfacePipeline scope externalTypes surfaceExpr = do
   let freeVars = sort (Set.toList (surfaceFreeVars surfaceExpr))
   envBindings <- traverse resolveRuntimeType freeVars
   let extEnv :: ExternalEnv
@@ -64,13 +79,129 @@ runSurfacePipeline scope surfaceExpr = do
             | (name, ty) <- envBindings,
               let normTy = either (error . show) id (normalizeType ty)
           ]
+      tcEnv =
+        Env
+          { termEnv = Map.map srcTypeToElabType extEnv,
+            typeEnv = Map.empty
+          }
   normExpr <- either (Left . ProgramPipelineError . show) Right (normalizeExpr surfaceExpr)
-  either (Left . ProgramPipelineError . renderPipelineError) Right (runPipelineElabWithEnv Set.empty extEnv normExpr)
+  (term, inferredTy) <- either (Left . ProgramPipelineError . renderPipelineError) Right (runPipelineElabWithEnv Set.empty extEnv normExpr)
+  pure (term, inferredTy, tcEnv)
   where
+    runtimeTypes = externalTypes `Map.union` elaborateScopeRuntimeTypes scope
+
     resolveRuntimeType name =
-      case Map.lookup name (elaborateScopeRuntimeTypes scope) of
+      case Map.lookup name runtimeTypes of
         Just ty -> Right (name, ty)
         Nothing -> Left (ProgramUnknownValue name)
+
+finalizeDeferredMethods ::
+  ElaborateScope ->
+  Map String DeferredMethodCall ->
+  Env ->
+  ElabTerm ->
+  ElabType ->
+  Either ProgramError (ElabTerm, ElabType)
+finalizeDeferredMethods _ deferredMethods _ term inferredTy
+  | Map.null deferredMethods = Right (term, inferredTy)
+finalizeDeferredMethods scope deferredMethods tcEnv term _ = do
+  let rewriteEnv = extendTypeCheckEnvWithRuntimeScope scope tcEnv
+  rewritten <- resolveDeferredMethods scope deferredMethods rewriteEnv term
+  rewrittenTy <-
+    either
+      (Left . ProgramPipelineError . ("deferred method rewrite failed type check: " ++) . show)
+      Right
+      (typeCheckWithEnv rewriteEnv rewritten)
+  Right (rewritten, rewrittenTy)
+
+extendTypeCheckEnvWithRuntimeScope :: ElaborateScope -> Env -> Env
+extendTypeCheckEnvWithRuntimeScope scope env =
+  env
+    { termEnv =
+        termEnv env
+          `Map.union` Map.map srcTypeToElabType (elaborateScopeRuntimeTypes scope)
+    }
+
+resolveDeferredMethods :: ElaborateScope -> Map String DeferredMethodCall -> Env -> ElabTerm -> Either ProgramError ElabTerm
+resolveDeferredMethods scope deferredMethods = go
+  where
+    go env term =
+      case term of
+        X.EVar {} -> Right term
+        X.ELit {} -> Right term
+        X.ELam name ty body -> do
+          let env' = env {termEnv = Map.insert name ty (termEnv env)}
+          X.ELam name ty <$> go env' body
+        X.EApp {} -> rewriteApplication env term
+        X.ELet name scheme rhs body -> do
+          let schemeTy = schemeToType scheme
+              env' = env {termEnv = Map.insert name schemeTy (termEnv env)}
+          rhs' <- go env' rhs
+          body' <- go env' body
+          Right (X.ELet name scheme rhs' body')
+        X.ETyAbs name mbBound body -> do
+          let boundTy = maybe X.TBottom X.tyToElab mbBound
+              env' = env {typeEnv = Map.insert name boundTy (typeEnv env)}
+          X.ETyAbs name mbBound <$> go env' body
+        X.ETyInst inner inst ->
+          (`X.ETyInst` inst) <$> go env inner
+        X.ERoll ty body ->
+          X.ERoll ty <$> go env body
+        X.EUnroll inner ->
+          X.EUnroll <$> go env inner
+
+    rewriteApplication env term =
+      let (headTerm, args) = collectElabApps term
+       in case deferredPlaceholderHead headTerm >>= (`Map.lookup` deferredMethods) of
+            Just deferred -> do
+              args' <- mapM (go env) args
+              resolveDeferredApplication env deferred args'
+            Nothing ->
+              case term of
+                X.EApp fun arg -> X.EApp <$> go env fun <*> go env arg
+                _ -> Right term
+
+    resolveDeferredApplication env deferred args = do
+      let methodInfo = deferredMethodInfo deferred
+          requiredArgCount = deferredMethodArgCount deferred
+      if length args < requiredArgCount
+        then Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+        else do
+          argTypes <- mapM (inferDeferredArgType env) (take requiredArgCount args)
+          classArgTy <-
+            case inferClassArgument (lowerType scope (methodType methodInfo)) (methodParamName methodInfo) argTypes of
+              Just ty -> Right ty
+              Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+          instanceInfo <- resolveInstanceInfo scope (methodClassName methodInfo) classArgTy
+          runtimeName <- concreteMethodRuntimeName instanceInfo methodInfo
+          Right (foldl X.EApp (X.EVar runtimeName) args)
+
+    inferDeferredArgType env arg =
+      case typeCheckWithEnv env arg of
+        Right ty ->
+          Right (recoverSourceType scope (elabTypeToSrcType (stripVacuousForalls ty)))
+        Left err ->
+          Left (ProgramPipelineError ("deferred method argument type check failed: " ++ show err))
+
+    concreteMethodRuntimeName instanceInfo methodInfo =
+      case Map.lookup (methodName methodInfo) (instanceMethods instanceInfo) of
+        Just OrdinaryValue {valueRuntimeName = runtimeName} -> Right runtimeName
+        _ -> Left (ProgramUnknownMethod (methodName methodInfo))
+
+collectElabApps :: ElabTerm -> (ElabTerm, [ElabTerm])
+collectElabApps = go []
+  where
+    go args term =
+      case term of
+        X.EApp fun arg -> go (arg : args) fun
+        _ -> (term, args)
+
+deferredPlaceholderHead :: ElabTerm -> Maybe String
+deferredPlaceholderHead term =
+  case term of
+    X.EVar name -> Just name
+    X.ETyInst inner _ -> deferredPlaceholderHead inner
+    _ -> Nothing
 
 {- Note [recoverSourceType]
 

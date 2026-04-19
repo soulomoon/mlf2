@@ -3,6 +3,25 @@
 ## Unreleased
 
 ### Changed
+- Added `.mlfp` first-class-polymorphism parity at
+  `test/programs/unified/first-class-polymorphism.mlfp`. `.mlfp` application
+  elaboration now preserves a top-level polymorphic argument when the callee
+  expects the full polymorphic scheme, and `ProgramSpec` now covers the
+  user-facing eMLF surface through `.mlfp`. The parity rows are now table-driven,
+  with a boundary matrix that now locks deferred overloaded-method dispatch
+  through eMLF inference, including `eq ((\x x) Zero) Zero`, let-polymorphic
+  arguments, explicit annotations, bare-method rejection, missing-instance
+  rejection, and duplicate-instance rejection. Deferred calls lower to typed
+  placeholders and resolve to concrete instance method runtime names after
+  eMLF elaboration, with the rewritten term typechecked before acceptance.
+  `ProgramSpec` also now has a pending-success matrix for the remaining
+  `.mlfp`/eMLF boundary gaps that should eventually run: case scrutinees,
+  first-class polymorphic constructor and pattern-bound values, partial
+  overloaded method application, and parameterized ADT instance recovery.
+  Validated with `MLF.Program eMLF`
+  (`27 examples, 0 failures, 7 pending`),
+  `MLF.Program` (`60 examples, 0 failures, 7 pending`), and
+  `cabal build all && cabal test` (`1609 examples, 0 failures, 7 pending`).
 - Hardened the unified `.mlfp` eMLF/xMLF contract. Executable bindings are now
   documented and guarded as `SurfaceExpr -> runPipelineElabWithEnv -> xMLF
   typecheck -> normalize/run`, `runPipelineElabChecked` is documented as a
@@ -14,12 +33,11 @@
   `.mlfp -> ElabTerm` fallback, no permissive `EUnroll`, and no broad
   `TypeCheck` weakening. The recursive-ADT corpus, CLI/helper diagnostics,
   module-ordering case, and unified `.mlfp` integration checks are green.
-  Validation: `MLF.Program execution corpus` (`9 examples, 0 failures`),
-  `MLF.Program` (`34 examples, 0 failures`), fail-fast `mlf2-test`
-  (`1582 examples, 0 failures`), direct public probes returning `true` for
-  `authoritative-overloaded-method.mlfp` and `1` for
-  `authoritative-case-analysis.mlfp`, plus final serial `cabal test`,
-  `cabal build all`, and `cabal test` again.
+  Validation: `MLF.Program execution corpus` (`10 examples, 0 failures`),
+  `MLF.Program` (`46 examples, 0 failures`), direct public probes returning
+  `true` for `authoritative-overloaded-method.mlfp` and `1` for
+  `authoritative-case-analysis.mlfp`, plus `cabal build all && cabal test`
+  (`1595 examples, 0 failures`).
 - Added a new public recursive-ADT program surface via `MLF.Program`. The repo
   now parses, pretty-prints, checks, and evaluates module-oriented recursive
   algebraic data type programs with `data` declarations, constructor-pattern
@@ -33,13 +51,15 @@
 - Wired the `mlf2` executable to run recursive-ADT program files directly via
   `cabal run mlf2 -- run-program <file.mlfp>`, and expanded the sample corpus
   with `recursive-list-tail.mlfp`, `recursive-tree-deriving.mlfp`, and
-  `abstract-module-use.mlfp`. `ProgramSpec` now roundtrips/runs all nine sample
-  programs and verifies the CLI helper path. Validated with
+  `abstract-module-use.mlfp`, followed by
+  `complex-recursive-program.mlfp` for composed recursive tree traversals.
+  `ProgramSpec` now roundtrips/runs all ten sample programs and verifies the
+  CLI helper path. Validated with
   `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
-  (`24 examples, 0 failures`),
+  (`46 examples, 0 failures`),
   `cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp`
   (`true`), and `cabal build all && cabal test`
-  (`1565 examples, 0 failures`).
+  (`1595 examples, 0 failures`).
 - The repo can now honestly claim fully automatic unannotated iso-recursive
   inference across its representative family matrix inside the inherited
   explicit-only / iso-recursive / non-equi-recursive / no-fallback /

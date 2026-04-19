@@ -1,0 +1,45 @@
+module ComplexRecursiveProgram export (Eq, Nat(..), Tree(..), eq, mirror, leftDepth, rightDepth, main) {
+  class Eq a {
+    eq : a -> a -> Bool;
+  }
+
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat
+    deriving Eq;
+
+  data Tree =
+      Leaf : Tree
+    | Branch : Tree -> Tree -> Tree;
+
+  def mirror : Tree -> Tree = \(tree : Tree) case tree of {
+    Leaf -> Leaf;
+    Branch left right -> Branch (mirror right) (mirror left)
+  };
+
+  def leftDepth : Tree -> Nat = \(tree : Tree) case tree of {
+    Leaf -> Zero;
+    Branch left _ -> Succ (leftDepth left)
+  };
+
+  def rightDepth : Tree -> Nat = \(tree : Tree) case tree of {
+    Leaf -> Zero;
+    Branch _ right -> Succ (rightDepth right)
+  };
+
+  def main : Bool =
+    eq
+      (leftDepth
+        (mirror
+          (Branch
+            (Branch Leaf Leaf)
+            (Branch
+              Leaf
+              (Branch Leaf Leaf)))))
+      (rightDepth
+        (Branch
+          (Branch Leaf Leaf)
+          (Branch
+            Leaf
+            (Branch Leaf Leaf))));
+}
