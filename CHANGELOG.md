@@ -15,13 +15,16 @@
   expressions, patterns, types, constraints, classes, constructors, and methods.
   The built-in Prelude now exports `Nat(..)`, `Option(..)`, `List(..)`, `Eq`,
   `eq`, `and`, and `id`. Review hardening now rejects local instances that
-  overlap imported schemas, validates pattern annotations against the matched
-  source type, and rejects branches after constructor-local catch-all patterns.
+  overlap imported schemas, validates pattern annotations against matched and
+  catch-all-only scrutinee types, rejects branches after constructor-local
+  catch-all patterns, preserves method-level constraints when eager and
+  deferred typeclass evidence is materialized, and avoids decoding non-data
+  `main` values through the global ADT fallback.
   Validation:
   `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
-  (`91 examples, 0 failures`), `MLF.Program eMLF`
-  (`54 examples, 0 failures`), and `cabal build all && cabal test`
-  (`1640 examples, 0 failures`).
+  (`95 examples, 0 failures`), `MLF.Program eMLF`
+  (`57 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1644 examples, 0 failures`).
 - Made `.mlfp` more usable as a source-language surface. The program parser
   now has located entrypoints and the checker/runner expose
   `ProgramDiagnostic` with file/line/column rendering and mechanically

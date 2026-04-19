@@ -550,12 +550,12 @@ resolveMethodHeadExpr scope seen methodInfo classArgTy =
     Nothing -> do
       (instanceInfo, subst) <- liftEitherElab (resolveInstanceInfoWithSubst scope (methodClassName methodInfo) classArgTy)
       case Map.lookup (methodName methodInfo) (instanceMethods instanceInfo) of
-        Just OrdinaryValue {valueRuntimeName = runtimeName} -> do
+        Just OrdinaryValue {valueRuntimeName = runtimeName, valueConstraints = constraints} -> do
           evidenceArgs <-
             concat
               <$> mapM
                 (resolveConstraintEvidenceExpr scope seen . applyConstraintSubst subst)
-                (instanceConstraints instanceInfo)
+                constraints
           pure (foldl surfaceApp (surfaceVar runtimeName) evidenceArgs)
         _ -> throwError (ProgramUnknownMethod (methodName methodInfo))
 
@@ -827,12 +827,22 @@ compileCase :: ElaborateScope -> Maybe SrcType -> P.Expr -> [P.Alt] -> Elaborate
 compileCase scope mbExpected scrutinee alts = do
   case ctorOwners alts of
     [] -> do
-      let mbScrutineeTy =
-            case inferKnownExprType scope scrutinee of
+      let mbInferredScrutineeTy = inferKnownExprType scope scrutinee
+          mbAnnotationScrutineeTy = catchAllPatternAnnotationType alts
+          mbScrutineeTy =
+            case mbInferredScrutineeTy of
               Just knownTy -> Just knownTy
-              Nothing -> catchAllPatternAnnotationType alts
+              Nothing -> mbAnnotationScrutineeTy
+          annotateScrutinee =
+            case (mbInferredScrutineeTy, mbAnnotationScrutineeTy) of
+              (Nothing, Just annTy) -> Just annTy
+              _ -> Nothing
       mapM_ (\scrutineeTy -> mapM_ (validatePatternType scope scrutineeTy . P.altPattern) alts) mbScrutineeTy
-      scrutineeExpr <- compileExpr scope mbScrutineeTy scrutinee
+      scrutineeExpr0 <- compileExpr scope mbScrutineeTy scrutinee
+      let scrutineeExpr =
+            case annotateScrutinee of
+              Just annTy -> surfaceAnn scrutineeExpr0 (lowerType scope annTy)
+              Nothing -> scrutineeExpr0
       compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts
     owners -> do
       dataInfo <- requireSingleDataOwner scope owners
@@ -873,7 +883,13 @@ localIdentityScrutinee scope expr =
 compileCatchAllOnly :: ElaborateScope -> Maybe SrcType -> Maybe SrcType -> SurfaceExpr -> [P.Alt] -> ElaborateM SurfaceExpr
 compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts =
   case alts of
-    [P.Alt P.PatWildcard body] -> compileExpr scope mbExpected body
+    [P.Alt P.PatWildcard body] -> do
+      bodyExpr <- compileExpr scope mbExpected body
+      case mbScrutineeTy of
+        Just _ -> do
+          scrutineeName <- freshRuntimeName "case_scrutinee"
+          pure (surfaceLet scrutineeName scrutineeExpr bodyExpr)
+        Nothing -> pure bodyExpr
     [P.Alt (P.PatVar name) body] -> do
       runtimeName <- freshRuntimeName name
       scope' <- extendLocalLowered scope name runtimeName =<< freshTypeName

@@ -381,14 +381,14 @@ emlfBoundaryMatrix =
                 , "    | Succ : Nat -> Nat;"
                 , ""
                 , "  def main : Bool ="
-                , "    let f = \\x -> case x of {"
+                , "    let f = \\x case x of {"
                 , "      (_ : Int) -> true"
                 , "    } in"
                 , "    f Zero;"
                 , "}"
                 ]
         )
-        (ExpectCheckFailureContaining "ProgramTypeMismatch")
+        (ExpectCheckFailureContaining "ProgramPipelineError")
     , ProgramMatrixCase
         "rejects branches after catch-all as unreachable"
         ( InlineProgram $
@@ -606,7 +606,7 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
-        "runs class method with method-level Eq constraint"
+        "runs deferred class method with method-level Eq constraint"
         ( InlineProgram $
             unlines
                 [ "module Main export (Eq, ShowEq, Nat(..), eq, showEq, main) {"
@@ -627,7 +627,35 @@ emlfBoundaryMatrix =
                 , "    showEq = \\x \\y eq x y;"
                 , "  }"
                 , ""
-                , "  def main : Bool = showEq Zero Zero;"
+                , "  def main : Bool = showEq ((\\x x) Zero) Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs constrained helper through method-level evidence constraints"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, ShowEq, Nat(..), eq, showEq, sameShow, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  class ShowEq a {"
+                , "    showEq : Eq a => a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  instance ShowEq Nat {"
+                , "    showEq = \\x \\y eq x y;"
+                , "  }"
+                , ""
+                , "  def sameShow : ShowEq a => a -> a -> Bool = \\x \\y showEq x y;"
+                , "  def main : Bool = sameShow Zero Zero;"
                 , "}"
                 ]
         )
@@ -1167,6 +1195,21 @@ spec = do
                         ]
             program <- requireParsed programText
             (prettyValue <$> runProgram program) `shouldBe` Right "Some (Succ Zero)"
+
+        it "does not decode non-data main values through fallback ADT decoding" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Token(..), main) {"
+                        , "  data Token ="
+                        , "      Token : Token;"
+                        , ""
+                        , "  def main : Bool -> Bool = \\x x;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case prettyValue <$> runProgram program of
+                Right rendered -> rendered `shouldSatisfy` (/= "Token")
+                Left err -> expectationFailure ("unexpected program failure: " ++ show err)
 
     describe "MLF.Program performance baseline" $ do
         it "evaluates a recursive Nat equality example at representative depth" $ do

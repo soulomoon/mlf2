@@ -716,9 +716,6 @@ resolveDeferredMethods scope deferredMethods = go
         Just valueInfo@OrdinaryValue {} -> Right valueInfo
         _ -> Left (ProgramUnknownMethod (methodName methodInfo))
 
-    methodValueConstraints OrdinaryValue {valueConstraints = constraints} = constraints
-    methodValueConstraints _ = []
-
 resolveConstraintEvidenceTerms :: ElaborateScope -> Set (P.ClassName, String) -> [P.ClassConstraint] -> Either ProgramError [ElabTerm]
 resolveConstraintEvidenceTerms scope seen constraints =
   concat <$> mapM (resolveConstraintEvidenceTerm scope seen) constraints
@@ -730,12 +727,22 @@ resolveConstraintEvidenceTerm scope seen constraint = do
     then Left (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
     else do
       (instanceInfo, subst) <- resolveInstanceInfoWithSubst scope (P.constraintClassName constraint) (P.constraintType constraint)
-      let nestedConstraints = map (applyConstraintSubst subst) (instanceConstraints instanceInfo)
-      nestedEvidence <- resolveConstraintEvidenceTerms scope (Set.insert key seen) nestedConstraints
-      pure
-        [ foldl X.EApp (instantiateMethodValue scope subst valueInfo) nestedEvidence
-          | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethods instanceInfo)
-        ]
+      mapM (materializeMethodEvidence (Set.insert key seen) subst) (ordinaryInstanceMethods instanceInfo)
+  where
+    ordinaryInstanceMethods instanceInfo =
+      [valueInfo | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethods instanceInfo)]
+
+    materializeMethodEvidence seen' subst valueInfo = do
+      nestedEvidence <-
+        resolveConstraintEvidenceTerms
+          scope
+          seen'
+          (map (applyConstraintSubst subst) (methodValueConstraints valueInfo))
+      pure (foldl X.EApp (instantiateMethodValue scope subst valueInfo) nestedEvidence)
+
+methodValueConstraints :: ValueInfo -> [P.ClassConstraint]
+methodValueConstraints OrdinaryValue {valueConstraints = constraints} = constraints
+methodValueConstraints _ = []
 
 instantiateMethodValue :: ElaborateScope -> Map String SrcType -> ValueInfo -> ElabTerm
 instantiateMethodValue scope subst OrdinaryValue {valueRuntimeName = runtimeName, valueType = visibleTy} =

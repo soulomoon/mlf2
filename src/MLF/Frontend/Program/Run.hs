@@ -100,8 +100,16 @@ stripUnusedTopTyAbs term = case term of
 
 toValueWithProgram :: CheckedProgram -> ElabTerm -> Value
 toValueWithProgram checked term =
-  case mainSourceType checked >>= \srcTy -> decodeSourceValue checked srcTy term of
-    Just value -> value
+  case mainSourceType checked of
+    Just srcTy ->
+      case decodeSourceValue checked srcTy term of
+        Just value -> value
+        Nothing
+          | sourceTypeIsData checked srcTy ->
+              case decodeAnyData checked term of
+                Just value -> value
+                Nothing -> toValue term
+          | otherwise -> toValue term
     Nothing ->
       case decodeAnyData checked term of
         Just value -> value
@@ -135,8 +143,14 @@ mainSourceType checked =
         checkedBindingName binding == checkedProgramMain checked
     ]
   of
-    ty : _ -> Just (recoverSourceType (programElaborateScope checked) ty)
+    ty : _ -> Just (recoverMainSourceType checked ty)
     [] -> Nothing
+
+recoverMainSourceType :: CheckedProgram -> SrcType -> SrcType
+recoverMainSourceType checked ty =
+  case ty of
+    STArrow {} -> ty
+    _ -> recoverSourceType (programElaborateScope checked) ty
 
 programElaborateScope :: CheckedProgram -> ElaborateScope
 programElaborateScope checked =
@@ -157,6 +171,12 @@ lookupDataInfoForType checked srcTy =
     STBase name -> lookupDataInfoByName checked name
     STCon name _ -> lookupDataInfoByName checked name
     _ -> Nothing
+
+sourceTypeIsData :: CheckedProgram -> SrcType -> Bool
+sourceTypeIsData checked srcTy =
+  case lookupDataInfoForType checked srcTy of
+    Just _ -> True
+    Nothing -> False
 
 lookupDataInfoByName :: CheckedProgram -> String -> Maybe DataInfo
 lookupDataInfoByName checked name =
