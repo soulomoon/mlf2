@@ -588,6 +588,33 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs class method with method-level Eq constraint"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, ShowEq, Nat(..), eq, showEq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  class ShowEq a {"
+                , "    showEq : Eq a => a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  instance ShowEq Nat {"
+                , "    showEq = \\x \\y eq x y;"
+                , "  }"
+                , ""
+                , "  def main : Bool = showEq Zero Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "rejects constrained helper call without a satisfiable instance"
         ( InlineProgram $
             unlines

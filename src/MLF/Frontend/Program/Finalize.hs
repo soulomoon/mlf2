@@ -700,7 +700,7 @@ resolveDeferredMethods scope deferredMethods = go
               Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
           (instanceInfo, subst) <- resolveInstanceInfoWithSubst scope (methodClassName methodInfo) classArgTy
           methodValue <- concreteMethodValue instanceInfo methodInfo
-          evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty (map (applyConstraintSubst subst) (instanceConstraints instanceInfo))
+          evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty (map (applyConstraintSubst subst) (methodValueConstraints methodValue))
           let methodHead = instantiateMethodValue scope subst methodValue
           Right (foldl X.EApp (foldl X.EApp methodHead evidenceArgs) args)
 
@@ -715,6 +715,9 @@ resolveDeferredMethods scope deferredMethods = go
       case Map.lookup (methodName methodInfo) (instanceMethods instanceInfo) of
         Just valueInfo@OrdinaryValue {} -> Right valueInfo
         _ -> Left (ProgramUnknownMethod (methodName methodInfo))
+
+    methodValueConstraints OrdinaryValue {valueConstraints = constraints} = constraints
+    methodValueConstraints _ = []
 
 resolveConstraintEvidenceTerms :: ElaborateScope -> Set (P.ClassName, String) -> [P.ClassConstraint] -> Either ProgramError [ElabTerm]
 resolveConstraintEvidenceTerms scope seen constraints =
