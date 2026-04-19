@@ -3,8 +3,8 @@
 
 require 'optparse'
 require 'pathname'
-require 'yaml'
 require 'date'
+require 'yaml'
 
 ROOT = File.expand_path('..', __dir__)
 LEDGER_PATH = File.join(ROOT, 'docs/thesis-obligations.yaml')
@@ -37,12 +37,6 @@ def fail_validation(message)
   exit(1)
 end
 
-def load_yaml_file(path)
-  YAML.load_file(path, permitted_classes: [Date])
-rescue ArgumentError
-  YAML.load_file(path)
-end
-
 def validate_schema!(doc)
   fail_validation('root must be a mapping') unless doc.is_a?(Hash)
   obligations = doc['obligations']
@@ -69,6 +63,15 @@ def validate_schema!(doc)
       fail_validation("obligation #{o['id']} test_anchor missing `#{field}`") unless ta[field].is_a?(String) && !ta[field].strip.empty?
     end
   end
+end
+
+def load_yaml_file(path)
+  YAML.safe_load(
+    File.read(path),
+    permitted_classes: [Date],
+    aliases: true,
+    filename: path
+  )
 end
 
 def render_markdown(obligations)

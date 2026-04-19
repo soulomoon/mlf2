@@ -2,6 +2,12 @@
 
 set -euo pipefail
 
+hspec_summary_line() {
+  ruby -pe '$_.gsub!(/\e\[[0-9;?]*[ -\/]*[@-~]/, "")' "$1" |
+    grep -E '^[0-9]+ examples?, [0-9]+ failures$' |
+    tail -n 1 || true
+}
+
 run_anchor() {
   local label="$1"
   local matcher="$2"
@@ -24,7 +30,7 @@ run_anchor() {
 
   cat "${tmp_log}"
 
-  summary_line="$(perl -pe 's/\e\[[0-9;]*[A-Za-z]//g' "${tmp_log}" | grep -E '^[0-9]+ examples?, [0-9]+ failures$' | tail -n 1 || true)"
+  summary_line="$(hspec_summary_line "${tmp_log}")"
   if [[ -z "${summary_line}" ]]; then
     echo "[thesis-gate] FAILED: could not parse Hspec summary for '${label}'"
     exit 1
