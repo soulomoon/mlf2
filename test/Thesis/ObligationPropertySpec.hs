@@ -17,8 +17,14 @@ import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Acyclicity (AcyclicityResult (..), checkAcyclicity)
 import MLF.Constraint.Inert qualified as Inert
 import MLF.Constraint.Normalize (normalize)
-import MLF.Constraint.Presolution (PresolutionError (..), PresolutionResult (..))
-import MLF.Constraint.Presolution.TestSupport (validateTranslatablePresolution)
+import MLF.Constraint.Presolution (PresolutionError (..), PresolutionResult (..), PresolutionView (..))
+import MLF.Constraint.Presolution.TestSupport
+  ( PresolutionState (..),
+    runPresolutionM,
+    unifyAcyclic,
+    validateTranslatablePresolution,
+  )
+import MLF.Constraint.Types.Presolution (Presolution (..))
 import MLF.Constraint.Presolution.Witness
   ( OmegaNormalizeEnv (..),
     OmegaNormalizeError (..),
@@ -141,7 +147,7 @@ obligations =
     Obligation "O05-INERT-LOCKED" propInertLocked,
     Obligation "O05-WEAKEN-INERT" propInertWeaken,
     Obligation "O07-UNIF-CORE" propUnifyDecompose,
-    Obligation "O07-UNIF-PRESOL" propSolveVar,
+    Obligation "O07-UNIF-PRESOL" propPresolutionUnify,
     Obligation "O07-REBIND" propRebindHarmonize,
     Obligation "O07-GENUNIF" propGeneralizedUnify,
     Obligation "O08-REIFY-TYPE" propReifyType,
@@ -285,6 +291,20 @@ propSolveVar _size =
               frWith uf (NodeId 1) === frWith uf (NodeId 3),
               Binding.checkBindingTree solved === Right ()
             ]
+        Left err -> counterexample (show err) False
+
+propPresolutionUnify :: Int -> Property
+propPresolutionUnify _size =
+  let c = varTripleConstraint
+      st0 = emptyPresolutionState c
+   in case runPresolutionM defaultTraceConfig st0 (unifyAcyclic (NodeId 1) (NodeId 3)) of
+        Right ((), st1) ->
+          let uf = psUnionFind st1
+              solved = psConstraint st1
+           in conjoin
+                [ frWith uf (NodeId 1) === frWith uf (NodeId 3),
+                  Binding.checkBindingTree solved === Right ()
+                ]
         Left err -> counterexample (show err) False
 
 propSolveArrow :: Int -> Property
@@ -544,14 +564,17 @@ propSigmaReorderIdentity _size =
 
 propContextFind :: Int -> Property
 propContextFind size =
-  let c = chainConstraint size
-   in case Binding.bindingPathToRoot c (typeRef (NodeId (size - 1))) of
-        Right path -> counterexample (show path) (last path == genRef (GenNodeId 0) && length path >= 2)
+  let (c, root, target, expected) = contextFindFixture size
+   in case Elab.contextToNodeBound (identityPresolutionView c) root target of
+        Right steps -> steps === Just expected
         Left err -> counterexample (show err) False
 
 propContextReject :: Int -> Property
-propContextReject _size =
-  lookupNodeIn (cNodes binderConstraint) (NodeId 99) === Nothing
+propContextReject size =
+  let (c, root, target) = contextRejectFixture size
+   in case Elab.contextToNodeBound (identityPresolutionView c) root target of
+        Right steps -> steps === Nothing
+        Left err -> counterexample (show err) False
 
 propEdgeTranslation :: Int -> Property
 propEdgeTranslation _size =
@@ -1092,6 +1115,93 @@ boundFromType ty =
     Elab.TBottom -> Elab.TBottom
     Elab.TForall v mb body -> Elab.TForall v mb body
     Elab.TMu v body -> Elab.TMu v body
+
+emptyPresolutionState :: Constraint -> PresolutionState
+emptyPresolutionState c =
+  PresolutionState
+    c
+    (Presolution IntMap.empty)
+    IntMap.empty
+    (maxNodeIdKeyOr0 c + 1)
+    IntSet.empty
+    IntMap.empty
+    IntMap.empty
+    IntMap.empty
+    IntMap.empty
+    IntMap.empty
+
+identityPresolutionView :: Constraint -> PresolutionView
+identityPresolutionView c =
+  PresolutionView
+    { pvConstraint = c,
+      pvCanonicalMap = IntMap.empty,
+      pvCanonical = id,
+      pvLookupNode = \nid -> lookupNodeIn (cNodes c) nid,
+      pvLookupVarBound =
+        \nid -> case lookupNodeIn (cNodes c) nid of
+          Just TyVar {tnBound = mbBound} -> mbBound
+          _ -> Nothing,
+      pvLookupBindParent = Binding.lookupBindParent c,
+      pvBindParents = cBindParents c,
+      pvCanonicalConstraint = c
+    }
+
+contextFindFixture :: Int -> (Constraint, NodeId, NodeId, [Elab.ContextStep])
+contextFindFixture size =
+  (c, root, cN, [Elab.StepUnder ("t" ++ show (getNodeId aN)), Elab.StepInside])
+  where
+    base = max 3 size * 10
+    root = NodeId (base + 100)
+    body = NodeId (base + 101)
+    aN = NodeId (base + 1)
+    bN = NodeId (base + 2)
+    cN = NodeId (base + 3)
+    c =
+      rootedConstraintLocal
+        emptyConstraint
+          { cNodes =
+              nodeMapFromList
+                [ (getNodeId root, TyForall root body),
+                  (getNodeId body, TyArrow body aN bN),
+                  (getNodeId aN, TyVar {tnId = aN, tnBound = Nothing}),
+                  (getNodeId bN, TyVar {tnId = bN, tnBound = Just cN}),
+                  (getNodeId cN, TyVar {tnId = cN, tnBound = Nothing})
+                ],
+            cBindParents =
+              bindParentsFromPairs
+                [ (body, root, BindFlex),
+                  (aN, root, BindFlex),
+                  (bN, root, BindFlex),
+                  (cN, bN, BindFlex)
+                ]
+          }
+
+contextRejectFixture :: Int -> (Constraint, NodeId, NodeId)
+contextRejectFixture size =
+  (c, root, bodyOnly)
+  where
+    base = max 3 size * 10
+    root = NodeId (base + 100)
+    body = NodeId (base + 101)
+    aN = NodeId (base + 1)
+    bodyOnly = NodeId (base + 2)
+    c =
+      rootedConstraintLocal
+        emptyConstraint
+          { cNodes =
+              nodeMapFromList
+                [ (getNodeId root, TyForall root body),
+                  (getNodeId body, TyArrow body aN bodyOnly),
+                  (getNodeId aN, TyVar {tnId = aN, tnBound = Nothing}),
+                  (getNodeId bodyOnly, TyVar {tnId = bodyOnly, tnBound = Nothing})
+                ],
+            cBindParents =
+              bindParentsFromPairs
+                [ (body, root, BindFlex),
+                  (aN, root, BindFlex),
+                  (bodyOnly, body, BindFlex)
+                ]
+          }
 
 chainConstraint :: Int -> Constraint
 chainConstraint rawSize =
