@@ -18,7 +18,7 @@ module MLF.Frontend.Program.Check
   )
 where
 
-import Control.Monad (foldM, forM, when)
+import Control.Monad (foldM, forM, when, zipWithM)
 import Control.Monad.Except (MonadError (throwError))
 import Data.List (find, intercalate, nub)
 import Data.List.NonEmpty (NonEmpty (..))
@@ -28,9 +28,10 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
-    elaborateExprBinding,
+    lowerExprBinding,
     mkElaborateScope,
   )
+import MLF.Frontend.Program.Finalize (finalizeBinding)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
@@ -328,7 +329,7 @@ buildLocalDataInfo mod0 = do
   pure . Map.fromList =<< mapM toDataInfo dataDecls
   where
     toDataInfo dataDecl = do
-      let constructors = zipWith (toCtorInfo dataDecl) [0 ..] (P.dataDeclConstructors dataDecl)
+      constructors <- zipWithM (toCtorInfo dataDecl) [0 ..] (P.dataDeclConstructors dataDecl)
       pure
         ( P.dataDeclName dataDecl,
           DataInfo
@@ -342,16 +343,31 @@ buildLocalDataInfo mod0 = do
     toCtorInfo dataDecl index ctorDecl =
       let (foralls, ctorBody) = splitForalls (P.constructorDeclType ctorDecl)
           (args0, result0) = splitArrows ctorBody
-       in ConstructorInfo
-            { ctorName = P.constructorDeclName ctorDecl,
-              ctorRuntimeName = qualify (P.moduleName mod0) (P.constructorDeclName ctorDecl),
-              ctorType = P.constructorDeclType ctorDecl,
-              ctorForalls = foralls,
-              ctorArgs = args0,
-              ctorResult = result0,
-              ctorOwningType = P.dataDeclName dataDecl,
-              ctorIndex = index
-            }
+       in do
+            validateConstructorResult dataDecl ctorDecl result0
+            pure
+              ConstructorInfo
+                { ctorName = P.constructorDeclName ctorDecl,
+                  ctorRuntimeName = qualify (P.moduleName mod0) (P.constructorDeclName ctorDecl),
+                  ctorType = P.constructorDeclType ctorDecl,
+                  ctorForalls = foralls,
+                  ctorArgs = args0,
+                  ctorResult = result0,
+                  ctorOwningType = P.dataDeclName dataDecl,
+                  ctorIndex = index
+                }
+
+    validateConstructorResult :: P.DataDecl -> P.ConstructorDecl -> SrcType -> TcM ()
+    validateConstructorResult dataDecl ctorDecl resultTy =
+      let owner = P.dataDeclName dataDecl
+          params = P.dataDeclParams dataDecl
+          invalid = throwError (ProgramInvalidConstructorResult (P.constructorDeclName ctorDecl) resultTy owner)
+       in case (params, resultTy) of
+            ([], STBase name)
+              | name == owner -> pure ()
+            (_ : _, STCon name args)
+              | name == owner && NE.length args == length params -> pure ()
+            _ -> invalid
 
 buildLocalClassInfo :: P.Module -> TcM (Map String ClassInfo)
 buildLocalClassInfo mod0 = do
@@ -551,7 +567,9 @@ checkInstance elaborateScope scope instDecl = do
                     (P.EVar (P.methodDefName methodDef))
                 else P.methodDefExpr methodDef
         liftEither
-          (elaborateExprBinding elaborateScope (valueRuntimeName valueInfo) (valueType valueInfo) False methodExpr)
+          ( lowerExprBinding elaborateScope (valueRuntimeName valueInfo) (valueType valueInfo) False methodExpr
+              >>= finalizeBinding elaborateScope
+          )
       _ -> throwError (ProgramUnexpectedInstanceMethod (P.instanceDeclClass instDecl) (P.methodDefName methodDef))
   where
     findInstance scope0 className0 headTy =
@@ -589,7 +607,10 @@ checkDef elaborateScope scope defDecl = do
   valueInfo <- lookupValueInfo scope (P.defDeclName defDecl)
   case valueInfo of
     ordinary@OrdinaryValue {} -> do
-      liftEither (elaborateExprBinding elaborateScope (valueRuntimeName ordinary) (valueType ordinary) (P.defDeclName defDecl == "main") (P.defDeclExpr defDecl))
+      liftEither
+        ( lowerExprBinding elaborateScope (valueRuntimeName ordinary) (valueType ordinary) (P.defDeclName defDecl == "main") (P.defDeclExpr defDecl)
+            >>= finalizeBinding elaborateScope
+        )
     _ -> throwError (ProgramDuplicateValue (P.defDeclName defDecl))
 
 buildExports :: P.Module -> Map String DataInfo -> Map String ClassInfo -> Map String ValueInfo -> TcM ModuleExports

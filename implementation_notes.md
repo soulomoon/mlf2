@@ -1,3 +1,15 @@
+## 2026-04-19 - `.mlfp` unified path contract hardened
+
+- Executable `.mlfp` bindings now have an explicit documented route:
+  `Program.Check -> Program.Elaborate SurfaceExpr -> Program.Finalize ->
+  runPipelineElabWithEnv -> xMLF typecheck -> normalize/run`.
+- Constructor declarations are validated while building module data
+  environments, so invalid result heads fail even when the constructor is
+  unused by runtime definitions.
+- `runPipelineElabChecked` / `runPipelineElabCheckedWithConfig` remain public
+  compatibility aliases; the shared pipeline already returns typechecker-
+  authoritative output.
+
 ## 2026-04-14 - `.mlfp` now reuses the existing MLF typecheck/runtime path
 
 - `.mlfp` syntax ownership moved under the main frontend boundary via
@@ -6,8 +18,9 @@
   `Parse`, and `Pretty` modules are now thin forwarding seams.
 - `.mlfp` expression elaboration now lives in `MLF.Frontend.Program.Elaborate`.
   `Program.Check` assembles module/import/class/data environments, then lowers
-  expressions into ordinary surface eMLF where possible and direct `ElabTerm`s
-  only when the old surface language cannot express the construct cleanly.
+  executable expressions into ordinary surface eMLF `SurfaceExpr`s.  The
+  downstream `Program.Finalize` handoff normalizes those terms and calls
+  `runPipelineElabWithEnv`.
 - `MLF.Elab.TypeCheck` owns the typing judgment for checked `.mlfp` terms, and
   `Program.Run` evaluates those checked bindings through the existing xMLF
   runtime instead of a separate `.mlfp` authority/runtime layer.

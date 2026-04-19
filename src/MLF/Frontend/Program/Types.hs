@@ -11,6 +11,7 @@ module MLF.Frontend.Program.Types
     InstanceInfo (..),
     ExportedTypeInfo (..),
     ModuleExports (..),
+    LoweredBinding (..),
     CheckedBinding (..),
     CheckedModule (..),
     CheckedProgram (..),
@@ -45,6 +46,7 @@ data ProgramError
   | ProgramUnknownType String
   | ProgramUnknownClass String
   | ProgramUnknownMethod String
+  | ProgramInvalidConstructorResult P.ConstructorName SrcType P.TypeName
   | ProgramUnsupportedDeriving P.ClassName
   | ProgramDerivingRequiresNullaryType P.TypeName
   | ProgramMissingInstanceMethod P.ClassName P.MethodName
@@ -137,6 +139,14 @@ data ModuleExports = ModuleExports
   { exportedValues :: Map String ValueInfo,
     exportedTypes :: Map String ExportedTypeInfo,
     exportedClasses :: Map String ClassInfo
+  }
+  deriving (Eq, Show)
+
+data LoweredBinding = LoweredBinding
+  { loweredBindingName :: String,
+    loweredBindingExpectedType :: SrcType,
+    loweredBindingSurfaceExpr :: SurfaceExpr,
+    loweredBindingExportedAsMain :: Bool
   }
   deriving (Eq, Show)
 

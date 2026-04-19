@@ -42,8 +42,9 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 
 - `MLF.Frontend.*` — surface syntax, desugaring, constraint generation
 - `MLF.Frontend.Syntax.Program` / `MLF.Frontend.Parse.Program` / `MLF.Frontend.Pretty.Program` — canonical `.mlfp` syntax ownership under the main frontend boundary
-- `MLF.Frontend.Program.Check` — module/import/class/data environment assembly for `.mlfp`
-- `MLF.Frontend.Program.Elaborate` — lowers `.mlfp` expressions into surface eMLF where possible and direct `ElabTerm`s only when the eMLF surface cannot express the needed construct
+- `MLF.Frontend.Program.Check` — module/import/class/data environment assembly for `.mlfp`, including static validation that may fail before the eMLF pipeline
+- `MLF.Frontend.Program.Elaborate` — lowers executable `.mlfp` bindings to surface eMLF `SurfaceExpr`
+- `MLF.Frontend.Program.Finalize` — normalizes lowered surface eMLF and calls `runPipelineElabWithEnv` to produce checked xMLF bindings
 - `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates checked `.mlfp` bindings through the existing xMLF runtime
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
 - `MLF.Binding.*` — binding tree queries + executable χe ops + harmonization

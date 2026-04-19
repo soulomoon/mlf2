@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Changed
+- Hardened the unified `.mlfp` eMLF/xMLF contract. Executable bindings are now
+  documented and guarded as `SurfaceExpr -> runPipelineElabWithEnv -> xMLF
+  typecheck -> normalize/run`, `runPipelineElabChecked` is documented as a
+  compatibility alias for the checker-authoritative shared pipeline, and
+  constructor declarations now fail early when their result type is not headed
+  by the owning data type with the required arity.
 - Repaired the `.mlfp` ProgramSpec regression cluster while keeping `.mlfp`
   on the shared old eMLF/typecheck route: no new surface forms, no direct
   `.mlfp -> ElabTerm` fallback, no permissive `EUnroll`, and no broad
