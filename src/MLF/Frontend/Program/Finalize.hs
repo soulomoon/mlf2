@@ -619,12 +619,13 @@ resolveDeferredCases scope deferredCases = go
         _ -> Left (ProgramCaseOnNonDataType STBottom)
 
     validateCaseScrutineeType dataInfo scrutineeTy =
-      case scrutineeTy of
-        STBase name
-          | name == dataName dataInfo -> Right ()
-        STCon name _
-          | name == dataName dataInfo -> Right ()
-        other -> Left (ProgramCaseOnNonDataType other)
+      let validHeadNames = Set.fromList (dataInfoHeadNames scope dataInfo)
+       in case scrutineeTy of
+            STBase name
+              | name `Set.member` validHeadNames -> Right ()
+            STCon name _
+              | name `Set.member` validHeadNames -> Right ()
+            other -> Left (ProgramCaseOnNonDataType other)
 
     inferDeferredArgType env arg =
       case typeCheckWithEnv env arg of
@@ -839,6 +840,19 @@ deferredPlaceholderHeadWithInsts = go []
         X.ETyInst inner _ -> go insts inner
         _ -> Nothing
 
+dataInfoHeadNames :: ElaborateScope -> DataInfo -> [String]
+dataInfoHeadNames scope info =
+  dataName info
+    : [ name
+        | (name, candidate) <- Map.toList (elaborateScopeDataTypes scope),
+          name /= dataName info,
+          sameDataIdentity candidate info
+      ]
+  where
+    sameDataIdentity left right =
+      dataModule left == dataModule right
+        && dataName left == dataName right
+
 {- Note [recoverSourceType]
 
 When the eMLF pipeline infers a type, it returns raw Church-encoded μ forms
@@ -888,30 +902,40 @@ matchDataInfoEncoding = matchDataInfoEncodingWith id
 
 matchDataInfoEncodingWith :: (SrcType -> SrcType) -> ElaborateScope -> DataInfo -> SrcType -> Maybe (SrcType, Map String SrcType)
 matchDataInfoEncodingWith recover scope info ty =
-  let params = dataParams info
-      templateHead =
-        case params of
-          [] -> STBase (dataName info)
-          p : ps -> STCon (dataName info) (STVar p :| map STVar ps)
-      loweredTemplate = lowerType scope templateHead
-      matchTemplate template =
-        matchRecoverType (Set.fromList params) Map.empty Map.empty template ty
-      matched =
-        case matchTemplate loweredTemplate of
-          Just subst -> Just subst
-          Nothing ->
-            case loweredTemplate of
-              STMu _ body -> matchTemplate body
-              _ -> Nothing
-   in case matched of
-        Just subst ->
-          let recoveredArgs = map (\param -> recover (Map.findWithDefault (STVar param) param subst)) params
-              recoveredHead =
-                case recoveredArgs of
-                  [] -> STBase (dataName info)
-                  arg : args -> STCon (dataName info) (arg :| args)
-           in Just (recoveredHead, subst)
-        Nothing -> Nothing
+  firstMatch (dataInfoHeadNames scope info)
+  where
+    params = dataParams info
+
+    firstMatch [] = Nothing
+    firstMatch (headName : rest) =
+      case matchHeadName headName of
+        Just matched -> Just matched
+        Nothing -> firstMatch rest
+
+    matchHeadName headName =
+      let templateHead =
+            case params of
+              [] -> STBase headName
+              p : ps -> STCon headName (STVar p :| map STVar ps)
+          loweredTemplate = lowerType scope templateHead
+          matchTemplate template =
+            matchRecoverType (Set.fromList params) Map.empty Map.empty template ty
+          matched =
+            case matchTemplate loweredTemplate of
+              Just subst -> Just subst
+              Nothing ->
+                case loweredTemplate of
+                  STMu _ body -> matchTemplate body
+                  _ -> Nothing
+       in case matched of
+            Just subst ->
+              let recoveredArgs = map (\param -> recover (Map.findWithDefault (STVar param) param subst)) params
+                  recoveredHead =
+                    case recoveredArgs of
+                      [] -> STBase headName
+                      arg : args -> STCon headName (arg :| args)
+               in Just (recoveredHead, subst)
+            Nothing -> Nothing
 
 matchRecoverType ::
   Set String ->

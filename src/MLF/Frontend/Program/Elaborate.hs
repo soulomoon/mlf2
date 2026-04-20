@@ -1268,7 +1268,7 @@ requireSingleDataOwner scope ctorNames0 = do
   case owners of
     [owner] ->
       case Map.lookup owner (esTypes scope) of
-        Just info -> pure info
+        Just info -> pure (info {dataName = owner})
         Nothing -> throwError (ProgramUnknownType owner)
     _ -> throwError (ProgramCaseOnNonDataType STBottom)
   where

@@ -1341,6 +1341,24 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "Zero")
     , ProgramMatrixCase
+        "runs alias-only qualified case over imported ADT"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..)) {"
+                , "  data Box ="
+                , "      Box : Box;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , "  def main : Bool = case C.Box of {"
+                , "    C.Box -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs exposed constructor with qualified alias type identity"
         ( InlineProgram $
             unlines
