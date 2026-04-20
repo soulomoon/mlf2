@@ -783,29 +783,44 @@ synthesizeDerivedInstances scope mod0 = concat <$> mapM deriveForData (moduleDat
       fst (splitArrows (snd (splitForalls (P.constructorDeclType ctor))))
 
     validateEqDerivingField dataDecl fieldTy
-      | fieldCoveredByDerivedConstraints dataDecl fieldTy = pure ()
+      | eqTypeSatisfiable dataDecl Set.empty fieldTy = pure ()
+      | otherwise = throwError (ProgramDerivingMissingFieldInstance "Eq" fieldTy)
+
+    eqTypeSatisfiable dataDecl seen fieldTy
+      | fieldCoveredByDerivedConstraints dataDecl fieldTy = True
+      | key `Set.member` seen = False
       | otherwise =
           case resolveInstanceInfoWithSubst (scopeToElaborateScope scope) "Eq" fieldTy of
-            Right _ -> pure ()
-            Left _ -> throwError (ProgramDerivingMissingFieldInstance "Eq" fieldTy)
+            Right (instanceInfo, subst) ->
+              let seen' = Set.insert key seen
+               in all
+                    (eqConstraintSatisfiable dataDecl seen' . applyConstraintSubst subst)
+                    (instanceConstraints instanceInfo)
+            Left _ -> False
+      where
+        key = ("Eq", show fieldTy)
+
+    eqConstraintSatisfiable dataDecl seen constraint
+      | P.constraintClassName constraint == "Eq" =
+          eqTypeSatisfiable dataDecl seen (P.constraintType constraint)
+      | otherwise = False
+
+    applyConstraintSubst subst constraint =
+      constraint
+        { P.constraintType =
+            Map.foldrWithKey substituteTypeVar (P.constraintType constraint) subst
+        }
 
     fieldCoveredByDerivedConstraints dataDecl fieldTy =
       case fieldTy of
         STVar name -> name `elem` P.dataDeclParams dataDecl
-        STBase name -> name == P.dataDeclName dataDecl
-        STCon name _ -> name == P.dataDeclName dataDecl
-        _ -> False
+        _ -> isRecursiveOwnerField dataDecl fieldTy
 
     scopeToElaborateScope scope0 =
       mkElaborateScope (scopeValues scope0) (scopeTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
 
     mkEqInstance dataDecl =
-      let actualHead = case P.dataDeclParams dataDecl of
-            [] -> STBase (P.dataDeclName dataDecl)
-            (param0 : paramsRest) -> STCon (P.dataDeclName dataDecl) (STVar param0 :| map STVar paramsRest)
-          headTy = case P.dataDeclParams dataDecl of
-            [] -> STBase (P.dataDeclName dataDecl)
-            _ -> actualHead
+      let headTy = dataDeclHeadType dataDecl
           left = P.Param "left" (Just headTy)
           right = P.Param "right" (Just headTy)
           selfName = "__derived_eq_" ++ P.dataDeclName dataDecl
@@ -875,10 +890,12 @@ synthesizeDerivedInstances scope mod0 = concat <$> mapM deriveForData (moduleDat
            in P.EApp (P.EApp (P.EVar eqName) (P.EVar l)) (P.EVar r)
 
     isRecursiveOwnerField dataDecl argTy =
-      case argTy of
-        STBase name -> name == P.dataDeclName dataDecl
-        STCon name _ -> name == P.dataDeclName dataDecl
-        _ -> False
+      argTy == dataDeclHeadType dataDecl
+
+    dataDeclHeadType dataDecl =
+      case P.dataDeclParams dataDecl of
+        [] -> STBase (P.dataDeclName dataDecl)
+        param0 : paramsRest -> STCon (P.dataDeclName dataDecl) (STVar param0 :| map STVar paramsRest)
 
 buildInstanceSkeletons :: Scope -> P.Module -> [P.InstanceDecl] -> TcM [InstanceInfo]
 buildInstanceSkeletons scope mod0 derived = do

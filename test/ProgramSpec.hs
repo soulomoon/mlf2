@@ -847,6 +847,55 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramDerivingMissingFieldInstance \"Eq\"")
     , ProgramMatrixCase
+        "rejects parameterized deriving when transitive field constraints lack Eq evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Option(..), eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Option a ="
+                , "      None : Option a"
+                , "    | Some : a -> Option a"
+                , "    deriving Eq;"
+                , "}"
+                , ""
+                , "module Main export (Bad(..), main) {"
+                , "  import Core exposing (Eq, Option(..), eq);"
+                , ""
+                , "  data Bad a ="
+                , "      Bad : Option (a -> a) -> Bad a"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramDerivingMissingFieldInstance \"Eq\"")
+    , ProgramMatrixCase
+        "rejects non-regular recursive deriving fields"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, List(..), Weird(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data List a ="
+                , "      Nil : List a"
+                , "    | Cons : a -> List a -> List a;"
+                , ""
+                , "  data Weird a ="
+                , "      Weird : Weird (List a) -> Weird a"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramDerivingMissingFieldInstance \"Eq\"")
+    , ProgramMatrixCase
         "runs qualified import with alias-only value and constructor access"
         ( InlineProgram $
             unlines
