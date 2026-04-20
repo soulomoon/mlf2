@@ -723,6 +723,27 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Marker\"")
     , ProgramMatrixCase
+        "runs qualified zero-method class instance through aliased import"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Marker) {"
+                , "  class Marker a {"
+                , "  }"
+                , ""
+                , "  instance Marker Bool {"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , ""
+                , "  def needsMarker : C.Marker Bool => Bool -> Bool = \\x x;"
+                , "  def main : Bool = needsMarker true;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs deferred class method with method-level Eq constraint"
         ( InlineProgram $
             unlines

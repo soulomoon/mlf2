@@ -501,11 +501,7 @@ sameInstanceHead left right =
 
 instanceBelongsToModule :: P.ModuleName -> InstanceInfo -> Bool
 instanceBelongsToModule moduleName0 instanceInfo =
-  any belongs (Map.elems (instanceMethods instanceInfo))
-  where
-    belongs OrdinaryValue {valueOriginModule = origin} = origin == moduleName0
-    belongs ConstructorValue {valueOriginModule = origin} = origin == moduleName0
-    belongs OverloadedMethod {valueOriginModule = origin} = origin == moduleName0
+  instanceOriginModule instanceInfo == moduleName0
 
 qualifyInstance :: P.ModuleName -> ModuleExports -> InstanceInfo -> InstanceInfo
 qualifyInstance alias exports instanceInfo =
@@ -786,6 +782,7 @@ synthesizeDerivedInstances scope mod0 = do
     pendingDerivedInstance instDecl =
       InstanceInfo
         { instanceClassName = P.instanceDeclClass instDecl,
+          instanceOriginModule = P.moduleName mod0,
           instanceConstraints = P.instanceDeclConstraints instDecl,
           instanceHeadType = P.instanceDeclType instDecl,
           instanceMethods = Map.empty
@@ -987,6 +984,7 @@ buildInstanceSkeletons scope mod0 derived = do
       pure
         InstanceInfo
           { instanceClassName = P.instanceDeclClass instDecl,
+            instanceOriginModule = P.moduleName mod0,
             instanceConstraints = P.instanceDeclConstraints instDecl,
             instanceHeadType = P.instanceDeclType instDecl,
             instanceMethods = instanceMethodInfos
