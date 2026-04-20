@@ -1826,6 +1826,29 @@ spec = do
                     rendered `shouldSatisfy` isInfixOf "error: module `Hidden` does not export `Nat`"
                 Right _ -> expectationFailure "expected import visibility diagnostic"
 
+        it "does not report missing-instance diagnostics at class declarations" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Eq, Nat(..), eq, main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  data Nat ="
+                        , "      Zero : Nat;"
+                        , ""
+                        , "  def main : Bool = eq Zero Zero;"
+                        , "}"
+                        ]
+            located <- requireLocatedWithFile "missing-instance.mlfp" programText
+            case checkLocatedProgram located of
+                Left diagnostic -> do
+                    diagnosticError diagnostic `shouldBe` ProgramNoMatchingInstance "Eq" (STBase "Nat")
+                    diagnosticSpan diagnostic `shouldBe` Nothing
+                    renderProgramDiagnostic diagnostic
+                        `shouldSatisfy` isInfixOf "error: no matching instance for `Eq STBase \"Nat\"`"
+                Right _ -> expectationFailure "expected missing instance diagnostic"
+
     describe "MLF.Program runtime value rendering" $ do
         it "renders closed ADT values with source constructor syntax" $ do
             let programText =

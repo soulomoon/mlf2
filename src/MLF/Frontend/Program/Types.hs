@@ -146,7 +146,7 @@ spanForError err index =
     ProgramDerivingMissingFieldInstance className0 _ -> firstSpan className0 (P.spanClasses index)
     ProgramMissingInstanceMethod _ methodName0 -> firstSpan methodName0 (P.spanValues index)
     ProgramUnexpectedInstanceMethod _ methodName0 -> firstSpan methodName0 (P.spanValues index)
-    ProgramNoMatchingInstance className0 _ -> firstSpan className0 (P.spanClasses index)
+    ProgramNoMatchingInstance {} -> Nothing
     ProgramAmbiguousMethodUse methodName0 -> firstSpan methodName0 (P.spanValues index)
     ProgramAmbiguousConstrainedValueUse valueName -> firstSpan valueName (P.spanValues index)
     ProgramAmbiguousConstructorUse ctor -> firstSpan ctor (P.spanConstructors index)
