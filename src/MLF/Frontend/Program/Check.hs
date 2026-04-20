@@ -394,7 +394,7 @@ qualifyModuleExports alias exports =
                 ctorOwningType = qualifiedTypeName
               }
        in dataInfo
-            { dataName = qualifiedTypeName,
+            { dataName = dataName dataInfo,
               dataConstructors = map qualifyCtor (dataConstructors dataInfo)
             }
 

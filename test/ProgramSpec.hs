@@ -1202,6 +1202,23 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "Zero")
     , ProgramMatrixCase
+        "runs exposed constructor with qualified alias type identity"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Nat(..)) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C exposing (Nat(..));"
+                , "  def main : C.Nat = Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "Zero")
+    , ProgramMatrixCase
         "rejects qualified access to hidden constructors"
         ( InlineProgram $
             unlines

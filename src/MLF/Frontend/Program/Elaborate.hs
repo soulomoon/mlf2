@@ -210,13 +210,13 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
       STVar name -> Map.findWithDefault ty name subst
       STArrow dom cod -> STArrow (lowerCtorArg subst currentData selfTy dom) (lowerCtorArg subst currentData selfTy cod)
       STBase name
-        | Just name == currentData -> selfTy
+        | isCurrentDataAlias currentData name -> selfTy
         | otherwise ->
             case Map.lookup name dataTypes of
               Just info -> encodeDataType subst info []
               Nothing -> STBase name
       STCon name args
-        | Just name == currentData -> selfTy
+        | isCurrentDataAlias currentData name -> selfTy
         | otherwise ->
             case Map.lookup name dataTypes of
               Just info -> encodeDataType subst info (map (lowerCtorArg subst currentData selfTy) (toListNE args))
@@ -226,6 +226,15 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
          in STForall name (fmap (SrcBound . lowerCtorArg subst' currentData selfTy . unSrcBound) mb) (lowerCtorArg subst' currentData selfTy body)
       STMu name body -> STMu name (lowerCtorArg (Map.delete name subst) currentData selfTy body)
       STBottom -> STBottom
+
+    isCurrentDataAlias currentData name =
+      case currentData of
+        Nothing -> False
+        Just ownerName ->
+          name == ownerName
+            || case Map.lookup name dataTypes of
+              Just info -> dataName info == ownerName
+              Nothing -> False
 
 toListNE :: NonEmpty a -> [a]
 toListNE (x :| xs) = x : xs
