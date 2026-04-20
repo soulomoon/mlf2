@@ -1344,6 +1344,28 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs aliased import exposing a type without duplicate alias-head instance matches"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Nat(..), eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C exposing (Nat(..), eq);"
+                , "  def main : Bool = eq C.Zero C.Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs aliased instance head when class is imported from another module"
         ( InlineProgram $
             unlines

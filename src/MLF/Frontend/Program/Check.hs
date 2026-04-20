@@ -482,7 +482,20 @@ qualifiedInstancesForImport priorExports priorInstances imp =
                     instanceBelongsToModule (P.importModuleName imp) instanceInfo,
                     instanceVisibleForQualifiedImport exports instanceInfo
                 ]
-           in concatMap (qualifiedInstanceVariants alias exports) importedInstances
+              unqualifiedTypeNames = importExposedTypeNames imp
+           in concatMap (qualifiedInstanceVariants alias exports unqualifiedTypeNames) importedInstances
+
+importExposedTypeNames :: P.Import -> Set.Set String
+importExposedTypeNames imp =
+  case P.importExposing imp of
+    Nothing -> Set.empty
+    Just items -> Set.fromList (concatMap exposedTypeName items)
+  where
+    exposedTypeName item =
+      case item of
+        P.ExportType name -> [name]
+        P.ExportTypeWithConstructors name -> [name]
+        P.ExportValue {} -> []
 
 instanceVisibleForQualifiedImport :: ModuleExports -> InstanceInfo -> Bool
 instanceVisibleForQualifiedImport exports instanceInfo =
@@ -502,13 +515,26 @@ srcTypeMentionsAny names ty =
     STMu _ body -> srcTypeMentionsAny names body
     STBottom -> False
 
-qualifiedInstanceVariants :: P.ModuleName -> ModuleExports -> InstanceInfo -> [InstanceInfo]
-qualifiedInstanceVariants alias exports instanceInfo =
+qualifiedInstanceVariants :: P.ModuleName -> ModuleExports -> Set.Set String -> InstanceInfo -> [InstanceInfo]
+qualifiedInstanceVariants alias exports unqualifiedTypeNames instanceInfo =
   distinctInstanceHeads
     [ variant
-      | variant <- [qualifyInstance alias exports instanceInfo, qualifyInstanceHeadOnly alias exports instanceInfo],
+      | variant <-
+          qualifyInstance alias exports instanceInfo
+            : [ qualifyInstanceHeadOnly alias exports instanceInfo
+                | needsAliasHeadInstanceVariant exports unqualifiedTypeNames instanceInfo
+              ],
         not (sameInstanceHead instanceInfo variant)
     ]
+
+needsAliasHeadInstanceVariant :: ModuleExports -> Set.Set String -> InstanceInfo -> Bool
+needsAliasHeadInstanceVariant exports unqualifiedTypeNames instanceInfo =
+  not (Set.null mentionedTypeNames)
+    && not (mentionedTypeNames `Set.isSubsetOf` unqualifiedTypeNames)
+  where
+    exportedTypeNames = Map.keysSet (exportedTypes exports)
+    mentionedTypeNames =
+      instanceExportedTypeMentions exportedTypeNames instanceInfo
 
 distinctInstanceHeads :: [InstanceInfo] -> [InstanceInfo]
 distinctInstanceHeads = reverse . foldl' add []
@@ -521,6 +547,41 @@ sameInstanceHead :: InstanceInfo -> InstanceInfo -> Bool
 sameInstanceHead left right =
   instanceClassName left == instanceClassName right
     && instanceHeadType left == instanceHeadType right
+
+instanceExportedTypeMentions :: Set.Set String -> InstanceInfo -> Set.Set String
+instanceExportedTypeMentions exportedTypeNames instanceInfo =
+  Set.unions (headMentions : constraintMentions ++ methodMentions)
+  where
+    headMentions = srcTypeMentionedNames exportedTypeNames (instanceHeadType instanceInfo)
+    constraintMentions = map (srcTypeMentionedNames exportedTypeNames . P.constraintType) (instanceConstraints instanceInfo)
+    methodMentions = concatMap valueExportedTypeMentions (Map.elems (instanceMethods instanceInfo))
+
+    valueExportedTypeMentions valueInfo =
+      case valueInfo of
+        OrdinaryValue {} ->
+          srcTypeMentionedNames exportedTypeNames (valueType valueInfo)
+            : map (srcTypeMentionedNames exportedTypeNames . P.constraintType) (valueConstraints valueInfo)
+        _ -> []
+
+srcTypeMentionedNames :: Set.Set String -> SrcType -> Set.Set String
+srcTypeMentionedNames names ty =
+  case ty of
+    STVar {} -> Set.empty
+    STBase name
+      | name `Set.member` names -> Set.singleton name
+      | otherwise -> Set.empty
+    STCon name args ->
+      let headNames
+            | name `Set.member` names = Set.singleton name
+            | otherwise = Set.empty
+       in Set.unions (headNames : map (srcTypeMentionedNames names) (NE.toList args))
+    STArrow dom cod ->
+      srcTypeMentionedNames names dom `Set.union` srcTypeMentionedNames names cod
+    STForall _ mb body ->
+      maybe Set.empty (srcTypeMentionedNames names . unSrcBound) mb
+        `Set.union` srcTypeMentionedNames names body
+    STMu _ body -> srcTypeMentionedNames names body
+    STBottom -> Set.empty
 
 instanceBelongsToModule :: P.ModuleName -> InstanceInfo -> Bool
 instanceBelongsToModule moduleName0 instanceInfo =
