@@ -778,6 +778,41 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs deferred method after resolving zero-method prerequisites"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Marker, Uses, Nat(..), eq, uses, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  class Marker a {"
+                , "  }"
+                , ""
+                , "  class Uses a {"
+                , "    uses : Marker a => a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , ""
+                , "  instance Eq Nat {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  instance Eq a => Marker a {"
+                , "  }"
+                , ""
+                , "  instance Uses Nat {"
+                , "    uses = \\x true;"
+                , "  }"
+                , ""
+                , "  def main : Bool = uses Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "rejects zero-method class constraint without matching instance"
         ( InlineProgram $
             unlines
@@ -811,6 +846,37 @@ emlfBoundaryMatrix =
                 , ""
                 , "  def needsMarker : Marker Nat => Bool -> Bool = \\x x;"
                 , "  def main : Bool = needsMarker true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\"")
+    , ProgramMatrixCase
+        "rejects deferred method when zero-method prerequisite is missing"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Marker, Uses, Nat(..), eq, uses, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  class Marker a {"
+                , "  }"
+                , ""
+                , "  class Uses a {"
+                , "    uses : Marker a => a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , ""
+                , "  instance Eq a => Marker a {"
+                , "  }"
+                , ""
+                , "  instance Uses Nat {"
+                , "    uses = \\x true;"
+                , "  }"
+                , ""
+                , "  def main : Bool = uses Zero;"
                 , "}"
                 ]
         )
@@ -1488,6 +1554,27 @@ spec = do
                         ]
             program <- requireParsed programText
             checkProgram program `shouldBe` Left (ProgramNonExhaustiveCase ["Succ"])
+
+        it "preserves wildcard-only case scrutinee evaluation without a known source type" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : Bool = case ((\\x x) true) of {"
+                        , "    _ -> true"
+                        , "  };"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case checkProgram program of
+                Right checked ->
+                    unlines
+                        [ show (checkedBindingSurfaceExpr binding)
+                        | checkedModule <- checkedProgramModules checked
+                        , binding <- checkedModuleBindings checkedModule
+                        , checkedBindingExportedAsMain binding
+                        ]
+                        `shouldSatisfy` isInfixOf "$case_scrutinee"
+                Left err -> expectationFailure ("checkProgram failed: " ++ show err)
 
         it "rejects constructor arity mismatches as pattern errors" $ do
             let programText =

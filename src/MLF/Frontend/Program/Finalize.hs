@@ -764,7 +764,17 @@ resolveConstraintEvidenceTerm scope seen constraint = do
     then Left (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
     else do
       (instanceInfo, subst) <- resolveInstanceInfoWithSubst scope (P.constraintClassName constraint) (P.constraintType constraint)
-      mapM (materializeMethodEvidence (Set.insert key seen) subst) (ordinaryInstanceMethods instanceInfo)
+      let seen' = Set.insert key seen
+          methodValues = ordinaryInstanceMethods instanceInfo
+      if null methodValues
+        then do
+          _ <-
+            resolveConstraintEvidenceTerms
+              scope
+              seen'
+              (map (applyConstraintSubst subst) (instanceConstraints instanceInfo))
+          Right []
+        else mapM (materializeMethodEvidence seen' subst) methodValues
   where
     ordinaryInstanceMethods instanceInfo =
       [valueInfo | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethods instanceInfo)]

@@ -1006,11 +1006,19 @@ compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts =
   case alts of
     [P.Alt P.PatWildcard body] -> do
       bodyExpr <- compileExpr scope mbExpected body
+      scrutineeName <- freshRuntimeName "case_scrutinee"
       case mbScrutineeTy of
-        Just _ -> do
-          scrutineeName <- freshRuntimeName "case_scrutinee"
-          pure (surfaceLet scrutineeName scrutineeExpr bodyExpr)
-        Nothing -> pure bodyExpr
+        Just _ -> pure (surfaceLet scrutineeName scrutineeExpr bodyExpr)
+        Nothing -> do
+          -- Keep the scrutinee binding referenced so eMLF infers its own scheme
+          -- while the strict let still preserves evaluation before the body.
+          forceName <- freshRuntimeName "case_scrutinee_force"
+          pure
+            ( surfaceLet
+                scrutineeName
+                scrutineeExpr
+                (surfaceLet forceName (surfaceVar scrutineeName) bodyExpr)
+            )
     [P.Alt (P.PatVar name) body] -> do
       runtimeName <- freshRuntimeName name
       scope' <-
