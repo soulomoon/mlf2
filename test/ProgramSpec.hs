@@ -216,6 +216,27 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs overloaded method dispatch on pattern-bound variable"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = case Zero of {"
+                , "    n -> eq n n"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "rejects bare overloaded method use"
         ( InlineProgram $
             unlines

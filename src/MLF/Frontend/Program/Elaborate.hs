@@ -563,7 +563,7 @@ shouldResolveMethodBeforeInference :: ElaborateScope -> MethodInfo -> SrcType ->
 shouldResolveMethodBeforeInference scope methodInfo classArgTy =
   case lookupEvidenceMethod scope (methodClassName methodInfo) classArgTy (methodName methodInfo) of
     Just _ -> True
-    Nothing -> not (Set.null (freeTypeVarsSrcType classArgTy))
+    Nothing -> False
 
 resolveConstraintEvidenceExpr :: ElaborateScope -> Set (P.ClassName, String) -> P.ClassConstraint -> ElaborateM [SurfaceExpr]
 resolveConstraintEvidenceExpr scope seen constraint =
@@ -892,7 +892,10 @@ compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts =
         Nothing -> pure bodyExpr
     [P.Alt (P.PatVar name) body] -> do
       runtimeName <- freshRuntimeName name
-      scope' <- extendLocalLowered scope name runtimeName =<< freshTypeName
+      scope' <-
+        case mbScrutineeTy of
+          Just scrutineeTy -> extendLocal scope name runtimeName (Just scrutineeTy)
+          Nothing -> extendLocalLowered scope name runtimeName =<< freshTypeName
       bodyExpr <- compileExpr scope' mbExpected body
       pure (surfaceLet runtimeName scrutineeExpr bodyExpr)
     [P.Alt (P.PatAnn inner _) body] -> compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr [P.Alt inner body]
