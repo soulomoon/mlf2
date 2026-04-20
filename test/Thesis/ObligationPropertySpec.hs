@@ -17,9 +17,10 @@ import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Acyclicity (AcyclicityResult (..), checkAcyclicity)
 import MLF.Constraint.Inert qualified as Inert
 import MLF.Constraint.Normalize (normalize)
-import MLF.Constraint.Presolution (PresolutionError (..), PresolutionResult (..), PresolutionView (..))
+import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionError (..), PresolutionResult (..), PresolutionView (..))
 import MLF.Constraint.Presolution.TestSupport
   ( PresolutionState (..),
+    fromListInterior,
     runPresolutionM,
     unifyAcyclic,
     validateTranslatablePresolution,
@@ -35,7 +36,7 @@ import MLF.Constraint.Presolution.Witness
   )
 import MLF.Constraint.Solve (SolveResult (..), frWith, solveUnify)
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness (EdgeWitness (..), InstanceOp (..), ReplayContract (..))
+import MLF.Constraint.Types.Witness (EdgeWitness (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
 import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Frontend.ConstraintGen (ConstraintResult (..))
@@ -202,9 +203,9 @@ propBindingInterior size =
 
 propBindingOrder :: Int -> Property
 propBindingOrder size =
-  let c = chainConstraint size
-   in case Binding.orderedBinders id c (typeRef (NodeId 0)) of
-        Right binders -> counterexample (show binders) True
+  let (c, root, expected) = orderedBinderFixture size
+   in case Binding.orderedBinders id c (typeRef root) of
+        Right binders -> counterexample (show binders) (binders === expected)
         Left err -> counterexample (show err) False
 
 propGraphWeaken :: Int -> Property
@@ -696,8 +697,72 @@ propTrNodeMerge _size =
    in normalizeInstanceOpsFull env [OpMerge mLess nGreater] === Left (MergeDirectionInvalid mLess nGreater)
 
 propTrNodeRaiseMerge :: Int -> Property
-propTrNodeRaiseMerge _size =
-  propTrRootRaiseMerge 0
+propTrNodeRaiseMerge size =
+  let base = max 3 size * 10
+      root = NodeId (base + 100)
+      binderA = NodeId (base + 1)
+      forallB = NodeId (base + 102)
+      binderB = NodeId (base + 2)
+      bodyNode = NodeId (base + 103)
+      c =
+        rootedConstraint
+          emptyConstraint
+            { cNodes =
+                nodeMapFromList
+                  [ (getNodeId root, TyForall root forallB),
+                    (getNodeId binderA, TyVar {tnId = binderA, tnBound = Nothing}),
+                    (getNodeId forallB, TyForall forallB bodyNode),
+                    (getNodeId binderB, TyVar {tnId = binderB, tnBound = Nothing}),
+                    (getNodeId bodyNode, TyArrow bodyNode binderA binderB)
+                  ],
+              cBindParents =
+                bindParentsFromPairs
+                  [ (binderA, root, BindFlex),
+                    (forallB, root, BindFlex),
+                    (binderB, forallB, BindFlex),
+                    (bodyNode, forallB, BindFlex)
+                  ]
+            }
+      scheme =
+        Elab.schemeFromType
+          (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+      si =
+        Elab.SchemeInfo
+          { Elab.siScheme = scheme,
+            Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
+          }
+      tr =
+        EdgeTrace
+          { etRoot = root,
+            etBinderArgs = [],
+            etInterior = fromListInterior [root, binderA, forallB, binderB, bodyNode],
+            etReplayContract = ReplayContractNone,
+            etBinderReplayMap = mempty,
+            etReplayDomainBinders = [],
+            etCopyMap = mempty
+          }
+      ew =
+        EdgeWitness
+          { ewEdgeId = EdgeId size,
+            ewLeft = root,
+            ewRight = root,
+            ewRoot = root,
+            ewForallIntros = 0,
+            ewWitness = InstanceWitness [OpRaiseMerge binderB binderA]
+          }
+      expected =
+        Elab.TForall
+          "a"
+          Nothing
+          (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+      generalizeAt _ _ _ =
+        Left (Elab.InstantiationError "propTrNodeRaiseMerge: unexpected generalization")
+   in case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAt (identityPresolutionView c) Nothing (Just si) (Just tr) ew of
+        Left err -> counterexample (show err) False
+        Right phi ->
+          case Elab.applyInstantiation (Elab.schemeToType scheme) phi of
+            Left err -> counterexample (show err) False
+            Right out -> counterexample (Elab.pretty out) (out === expected)
 
 propTrNodeWeaken :: Int -> Property
 propTrNodeWeaken _size =
@@ -1145,6 +1210,33 @@ identityPresolutionView c =
       pvBindParents = cBindParents c,
       pvCanonicalConstraint = c
     }
+
+orderedBinderFixture :: Int -> (Constraint, NodeId, [NodeId])
+orderedBinderFixture size =
+  (c, root, [bN, aN])
+  where
+    base = max 3 size * 10
+    root = NodeId (base + 100)
+    body = NodeId (base + 101)
+    aN = NodeId (base + 1)
+    bN = NodeId (base + 2)
+    c =
+      rootedConstraint
+        emptyConstraint
+          { cNodes =
+              nodeMapFromList
+                [ (getNodeId root, TyForall root body),
+                  (getNodeId body, TyArrow body bN aN),
+                  (getNodeId aN, TyVar {tnId = aN, tnBound = Nothing}),
+                  (getNodeId bN, TyVar {tnId = bN, tnBound = Nothing})
+                ],
+            cBindParents =
+              bindParentsFromPairs
+                [ (body, root, BindFlex),
+                  (aN, root, BindFlex),
+                  (bN, root, BindFlex)
+                ]
+          }
 
 contextFindFixture :: Int -> (Constraint, NodeId, NodeId, [Elab.ContextStep])
 contextFindFixture size =
