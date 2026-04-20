@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Converted the thesis-obligations ledger to property-first evidence: all 107
+  obligations now point at QuickCheck anchors keyed by obligation ID with
+  `kind: quickcheck` and `min_success: 100`. The obligations gate now rejects
+  example-only evidence by requiring a matching QuickCheck success line and
+  pass count, while source anchors remain navigational code paths.
 - Added the next `.mlfp` typeclass/module ergonomics slice. Program types now
   parse and carry class constraints on definitions, methods, and instance
   declarations; constrained values lower to hidden method evidence, schema

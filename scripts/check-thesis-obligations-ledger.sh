@@ -98,9 +98,11 @@ groups = {
   'extra-ids' => [],
   'duplicate-ids' => [],
   'unmapped-rules' => [],
+  'matcher-id-mismatch' => [],
+  'evidence-kind' => [],
+  'min-success' => [],
   'status' => [],
   'missing-files' => [],
-  'missing-symbols' => [],
   'invalid-code-anchors' => []
 }
 
@@ -120,10 +122,20 @@ obligations.each do |o|
   ta = o['test_anchor']
   matcher = ta.is_a?(Hash) ? ta['matcher'].to_s.strip : ''
   test_file = ta.is_a?(Hash) ? ta['file'].to_s.strip : ''
+  kind = ta.is_a?(Hash) ? ta['kind'].to_s.strip : ''
+  min_success = ta.is_a?(Hash) ? ta['min_success'] : nil
   status = o['status'].to_s.strip
 
   if matcher.empty?
     groups['unmapped-rules'] << "#{id}: blank test matcher"
+  elsif matcher != id
+    groups['matcher-id-mismatch'] << "#{id}: test matcher must be the obligation id, got #{matcher.inspect}"
+  end
+  if kind != 'quickcheck'
+    groups['evidence-kind'] << "#{id}: expected test_anchor.kind=quickcheck, got #{kind.inspect}"
+  end
+  unless min_success.is_a?(Integer) && min_success.positive?
+    groups['min-success'] << "#{id}: expected positive integer test_anchor.min_success, got #{min_success.inspect}"
   end
   if test_file.empty?
     groups['unmapped-rules'] << "#{id}: blank test file"
@@ -143,8 +155,8 @@ obligations.each do |o|
         groups['invalid-code-anchors'] << "#{id}: invalid code anchor #{anchor.inspect}"
         next
       end
-      path, symbol = anchor.split('#', 2)
-      if path.to_s.empty? || symbol.to_s.empty?
+      path, fragment = anchor.split('#', 2)
+      if path.to_s.empty? || fragment.to_s.empty?
         groups['invalid-code-anchors'] << "#{id}: invalid code anchor #{anchor.inspect}"
         next
       end
@@ -153,10 +165,9 @@ obligations.each do |o|
         groups['missing-files'] << "#{id}: code file not found: #{path}"
         next
       end
-      contents = File.read(full_path)
-      unless contents.include?(symbol)
-        groups['missing-symbols'] << "#{id}: symbol #{symbol.inspect} not found in #{path}"
-      end
+      # Code anchors are navigational source references. The executable matcher
+      # checks below are the semantic gate; a function-name substring is not
+      # evidence that an obligation remains implemented.
     end
   end
 end
@@ -166,7 +177,7 @@ if groups.values.any? { |entries| !entries.empty? }
 end
 
 obligations.each do |o|
-  puts [o['id'], o.dig('test_anchor', 'matcher'), o.dig('test_anchor', 'file')].join("\t")
+  puts [o['id'], o.dig('test_anchor', 'matcher'), o.dig('test_anchor', 'file'), o.dig('test_anchor', 'min_success')].join("\t")
 end
 RUBY
 
@@ -175,6 +186,8 @@ command_failures=()
 parse_failures=()
 zero_examples=()
 test_failures=()
+missing_property_success=()
+insufficient_property_success=()
 
 hspec_summary_line() {
   ruby -pe '$_.gsub!(/\e\[[0-9;?]*[ -\/]*[@-~]/, "")' "$1" |
@@ -182,7 +195,50 @@ hspec_summary_line() {
     tail -n 1 || true
 }
 
-while IFS=$'\t' read -r id matcher _file; do
+quickcheck_pass_count() {
+  ruby - "$1" "$2" <<'RUBY'
+target_id = ARGV.fetch(0)
+path = ARGV.fetch(1)
+max = 0
+in_evidence_section = false
+watching_target = false
+File.foreach(path) do |line|
+  line = line.gsub(/\e\[[0-9;?]*[ -\/]*[@-~]/, '')
+  line = line.chomp
+
+  if line == 'Thesis obligation property evidence'
+    in_evidence_section = true
+    watching_target = false
+    next
+  end
+
+  if in_evidence_section && line =~ /^\S/ && line != 'Thesis obligation property evidence'
+    in_evidence_section = false
+    watching_target = false
+  end
+
+  next unless in_evidence_section
+
+  if line =~ /^  #{Regexp.escape(target_id)} \[[^\]]+\]$/
+    watching_target = true
+    next
+  end
+
+  if watching_target && line =~ /^  \S/
+    watching_target = false
+  end
+
+  if watching_target && line =~ /^    \+\+\+ OK, passed ([0-9]+) tests?/
+    count = Regexp.last_match(1).to_i
+    max = count if count > max
+    watching_target = false
+  end
+end
+puts max
+RUBY
+}
+
+while IFS=$'\t' read -r id matcher _file min_success; do
   [[ -n "${id}" ]] || continue
   log_file="$(mktemp)"
   trap 'rm -f "${tmp_rows}" "${log_file}"' EXIT
@@ -220,11 +276,17 @@ while IFS=$'\t' read -r id matcher _file; do
   if (( failures != 0 )); then
     test_failures+=("${id}")
   fi
+  quickcheck_passes="$(quickcheck_pass_count "${id}" "${log_file}")"
+  if (( quickcheck_passes < 1 )); then
+    missing_property_success+=("${id}")
+  elif (( quickcheck_passes < min_success )); then
+    insufficient_property_success+=("${id}: passed ${quickcheck_passes}, required ${min_success}")
+  fi
 
   rm -f "${log_file}"
 done <"${tmp_rows}"
 
-if (( ${#command_failures[@]} > 0 || ${#parse_failures[@]} > 0 || ${#zero_examples[@]} > 0 || ${#test_failures[@]} > 0 )); then
+if (( ${#command_failures[@]} > 0 || ${#parse_failures[@]} > 0 || ${#zero_examples[@]} > 0 || ${#test_failures[@]} > 0 || ${#missing_property_success[@]} > 0 || ${#insufficient_property_success[@]} > 0 )); then
   echo
   echo "[thesis-obligations] FAILED: executable anchor checks"
   if (( ${#command_failures[@]} > 0 )); then
@@ -242,6 +304,14 @@ if (( ${#command_failures[@]} > 0 || ${#parse_failures[@]} > 0 || ${#zero_exampl
   if (( ${#test_failures[@]} > 0 )); then
     echo "- matcher failures:"
     printf '  - %s\n' "${test_failures[@]}"
+  fi
+  if (( ${#missing_property_success[@]} > 0 )); then
+    echo "- missing QuickCheck success lines:"
+    printf '  - %s\n' "${missing_property_success[@]}"
+  fi
+  if (( ${#insufficient_property_success[@]} > 0 )); then
+    echo "- insufficient QuickCheck success counts:"
+    printf '  - %s\n' "${insufficient_property_success[@]}"
   fi
   exit 1
 fi

@@ -436,6 +436,7 @@ test-suite mlf2-test
                       SolvedFacadeTestUtil,
                       Parity.FrozenArtifacts,
                       Property.QuickCheckPropertySpec,
+                      Thesis.ObligationPropertySpec,
                       SpecUtil,
                       GoldenSpec,
 

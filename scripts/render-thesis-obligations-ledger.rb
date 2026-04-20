@@ -45,7 +45,7 @@ def validate_schema!(doc)
   required_fields = %w[
     id chapter section figure_or_definition thesis_rule_label judgment_or_equation code_anchors test_anchor status supports_claims
   ]
-  required_test_anchor_fields = %w[matcher file rationale]
+  required_test_anchor_fields = %w[matcher file kind rationale]
 
   obligations.each_with_index do |o, idx|
     fail_validation("obligation ##{idx + 1} must be a mapping") unless o.is_a?(Hash)
@@ -61,6 +61,15 @@ def validate_schema!(doc)
     fail_validation("obligation #{o['id']} has invalid test_anchor") unless ta.is_a?(Hash)
     required_test_anchor_fields.each do |field|
       fail_validation("obligation #{o['id']} test_anchor missing `#{field}`") unless ta[field].is_a?(String) && !ta[field].strip.empty?
+    end
+    unless ta['matcher'] == o['id']
+      fail_validation("obligation #{o['id']} test_anchor matcher must equal the obligation id")
+    end
+    unless ta['kind'] == 'quickcheck'
+      fail_validation("obligation #{o['id']} test_anchor kind must be quickcheck")
+    end
+    unless ta['min_success'].is_a?(Integer) && ta['min_success'].positive?
+      fail_validation("obligation #{o['id']} test_anchor min_success must be a positive integer")
     end
   end
 end
@@ -94,8 +103,8 @@ def render_markdown(obligations)
   by_chapter.keys.sort.each do |chapter|
     lines << "## Chapter #{chapter}"
     lines << ''
-    lines << '| ID | Section | Figure/Def | Rule | Test Matcher | Test File | Claims |'
-    lines << '|---|---|---|---|---|---|---|'
+    lines << '| ID | Section | Figure/Def | Rule | Evidence | Min Success | Test Matcher | Test File | Claims |'
+    lines << '|---|---|---|---|---|---|---|---|---|'
     by_chapter[chapter].sort_by { |o| [o['section'].to_s, o['id'].to_s] }.each do |o|
       claims = (o['supports_claims'] || []).map { |c| "`#{c}`" }.join(', ')
       lines << [
@@ -103,6 +112,8 @@ def render_markdown(obligations)
         "`#{o['section']}`",
         "`#{o['figure_or_definition']}`",
         o['thesis_rule_label'],
+        "`#{o.dig('test_anchor', 'kind')}`",
+        "`#{o.dig('test_anchor', 'min_success')}`",
         "`#{o.dig('test_anchor', 'matcher')}`",
         "`#{o.dig('test_anchor', 'file')}`",
         "#{claims} |"
@@ -114,7 +125,8 @@ def render_markdown(obligations)
   lines << '## Validation Notes'
   lines << ''
   lines << '- This file is generated; edit the YAML source instead.'
-  lines << '- Gate enforcement additionally verifies id set, mapping completeness, file/symbol anchors, and executable test anchors.'
+  lines << '- Gate enforcement additionally verifies id set, mapping completeness, code-anchor files, executable test anchors keyed by obligation ID, QuickCheck evidence kind, and minimum property success counts.'
+  lines << '- Code-anchor fragments are navigational labels; QuickCheck property anchors carry the semantic obligation evidence.'
   lines << ''
   lines.join("\n")
 end

@@ -57,10 +57,7 @@ claims:
       obligations:
         - O10-EXP-DECIDE
         - O10-EXP-APPLY
-      property_tests:
-        - matcher: "Expansion minimality"
-          file: test/ExpansionMinimalitySpec.hs
-          kind: example
+      property_tests: []
       code_paths:
         - src/MLF/Constraint/Presolution/Expansion.hs#decideMinimalExpansion
     deviations:
@@ -100,10 +97,7 @@ claims:
         - O11-WITNESS-COALESCE
         - O11-WITNESS-REORDER
         - O11-UNIFY-STRUCT
-      property_tests:
-        - matcher: "R-"
-          file: test/Presolution/WitnessSpec.hs
-          kind: gate-anchor
+      property_tests: []
       code_paths:
         - src/MLF/Constraint/Presolution/WitnessNorm.hs#normalizeEdgeWitnessesM
         - src/MLF/Constraint/Presolution/WitnessCanon.hs#normalizeInstanceOpsFull
@@ -186,10 +180,7 @@ claims:
       obligations:
         - O07-GENUNIF
         - O07-REBIND
-      property_tests:
-        - matcher: "Generalized unification (Ch 7.6)"
-          file: test/SolveSpec.hs
-          kind: example
+      property_tests: []
       code_paths:
         - src/MLF/Constraint/Unify/Closure.hs#batchHarmonize
         - src/MLF/Binding/Adjustment.hs#harmonizeBindParentsMulti
@@ -216,10 +207,7 @@ claims:
         - O14-RED-INNER
         - O14-RED-OUTER
         - O14-RED-CONTEXT
-      property_tests:
-        - matcher: "Phase 7 theorem obligations"
-          file: test/TypeSoundnessSpec.hs
-          kind: quickcheck
+      property_tests: []
       code_paths:
         - src/MLF/Elab/TypeCheck.hs#typeCheckWithEnv
         - src/MLF/Elab/Reduce.hs#step
@@ -239,10 +227,7 @@ claims:
         - O14-RED-BETA
         - O14-RED-BETALET
         - O14-RED-CONTEXT
-      property_tests:
-        - matcher: "Phase 7 theorem obligations"
-          file: test/TypeSoundnessSpec.hs
-          kind: quickcheck
+      property_tests: []
       code_paths:
         - src/MLF/Elab/Reduce.hs#step
         - src/MLF/Elab/Reduce.hs#isValue
@@ -258,11 +243,13 @@ claims:
     thesis_ref: "Proposition 14.3 (Determinism)"
     statement: "xMLF reduction is deterministic."
     evidence:
-      obligations: []
-      property_tests:
-        - matcher: "Phase 7 theorem obligations"
-          file: test/TypeSoundnessSpec.hs
-          kind: quickcheck
+      obligations:
+        - O14-RED-BETA
+        - O14-RED-BETALET
+        - O14-RED-REFLEX
+        - O14-RED-TRANS
+        - O14-RED-CONTEXT
+      property_tests: []
       code_paths:
         - src/MLF/Elab/Reduce.hs#step
     deviations:
@@ -380,10 +367,7 @@ claims:
         - O15-TRANS-SCHEME-ROOT-RIGID
         - O15-TRANS-ARROW-RIGID
         - O15-TRANS-NON-INTERIOR-RIGID
-      property_tests:
-        - matcher: "Translatable presolution"
-          file: test/TranslatablePresolutionSpec.hs
-          kind: example
+      property_tests: []
       code_paths:
         - src/MLF/Constraint/Presolution/Validation.hs#validateTranslatablePresolution
     deviations: []
@@ -414,13 +398,7 @@ claims:
         - O15-EDGE-TRANSLATION
         - O15-CONTEXT-FIND
         - O15-CONTEXT-REJECT
-      property_tests:
-        - matcher: "R-"
-          file: test/Presolution/WitnessSpec.hs
-          kind: gate-anchor
-        - matcher: "Phi soundness"
-          file: test/PhiSoundnessSpec.hs
-          kind: example
+      property_tests: []
       code_paths:
         - src/MLF/Elab/Phi/Translate.hs#phiFromEdgeWitnessWithTrace
     deviations: []
@@ -492,10 +470,7 @@ claims:
         - O15-TR-NODE-RAISEMERGE
         - O15-TR-NODE-WEAKEN
         - O15-TR-NODE-RAISE
-      property_tests:
-        - matcher: "R-"
-          file: test/Presolution/WitnessSpec.hs
-          kind: gate-anchor
+      property_tests: []
       code_paths:
         - src/MLF/Elab/Phi/Translate.hs#phiFromEdgeWitnessWithTrace
         - src/MLF/Elab/Phi/Omega.hs#phiWithSchemeOmega

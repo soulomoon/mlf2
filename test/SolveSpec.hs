@@ -4,7 +4,11 @@ import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
 import Data.List (isPrefixOf)
 import Data.List.NonEmpty (NonEmpty(..))
+import qualified Data.List.NonEmpty as NonEmpty
 
+import Test.QuickCheck (choose, conjoin, counterexample, forAll, property, (===))
+
+import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Solve
     ( SolveError(..)
@@ -38,6 +42,48 @@ resultUnionFind = srUnionFind
 
 mkSolveResult :: Constraint -> IntMap.IntMap NodeId -> SolveResult
 mkSolveResult c uf = SolveResult { srConstraint = c, srUnionFind = uf }
+
+genUnificationConstraint :: Int -> Constraint
+genUnificationConstraint depth =
+    let v0 = NodeId 0
+        v1 = NodeId 1
+        v2 = NodeId 2
+        parentIdsNE = NodeId 3 :| map NodeId [4 .. 3 + max 1 depth - 1]
+        parentIds = NonEmpty.toList parentIdsNE
+        firstParent = NonEmpty.head parentIdsNE
+        root = NonEmpty.last parentIdsNE
+        arrowNode lhs nid =
+            let rhs =
+                    if nid == root
+                        then v2
+                        else v1
+             in (getNodeId nid, TyArrow nid lhs rhs)
+        nodes =
+            nodeMapFromList $
+                [ (0, TyVar { tnId = v0, tnBound = Nothing })
+                , (1, TyVar { tnId = v1, tnBound = Nothing })
+                , (2, TyVar { tnId = v2, tnBound = Nothing })
+                ]
+                    ++ zipWith arrowNode (v0 : parentIds) parentIds
+        parentEdges =
+            [ (nodeRefKey (typeRef v0), (typeRef firstParent, BindFlex))
+            , (nodeRefKey (typeRef v1), (typeRef firstParent, BindFlex))
+            , (nodeRefKey (typeRef v2), (typeRef root, BindFlex))
+            ]
+                ++ [ (nodeRefKey (typeRef child), (typeRef parent, BindFlex))
+                   | (child, parent) <- zip parentIds (drop 1 parentIds)
+                   ]
+        constraint =
+            rootedConstraint $
+                emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = IntMap.fromList parentEdges
+                    , cUnifyEdges =
+                        [ UnifyEdge v0 v1
+                        , UnifyEdge v1 v2
+                        ]
+                    }
+    in constraint
 
 spec :: Spec
 spec = describe "Phase 5 -- Solve" $ do
@@ -831,38 +877,27 @@ spec = describe "Phase 5 -- Solve" $ do
                 msgs = validateSolvedGraphStrict res
             msgs `shouldSatisfy` (not . null)
 
-    describe "Generalized unification (Ch 7.6)" $ do
-        it "deferred harmonization produces same result as per-pair for chained vars" $ do
-            -- Three variables chained: v0 = v1, v1 = v2, with different bind depths.
-            -- Verifies batch harmonize after worklist matches sequential behavior.
-            let v0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
-                v1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
-                v2 = TyVar { tnId = NodeId 2, tnBound = Nothing }
-                arrow = TyArrow (NodeId 3) (NodeId 0) (NodeId 1)
-                root = TyArrow (NodeId 4) (NodeId 3) (NodeId 2)
-                nodes = nodeMapFromList
-                    [ (0, v0), (1, v1), (2, v2)
-                    , (3, arrow), (4, root)
-                    ]
-                constraint = rootedConstraint $ emptyConstraint
-                    { cNodes = nodes
-                    , cBindParents = IntMap.fromList
-                        [ (nodeRefKey (typeRef (NodeId 0)), (typeRef (NodeId 3), BindFlex))
-                        , (nodeRefKey (typeRef (NodeId 1)), (typeRef (NodeId 3), BindFlex))
-                        , (nodeRefKey (typeRef (NodeId 2)), (typeRef (NodeId 4), BindFlex))
-                        , (nodeRefKey (typeRef (NodeId 3)), (typeRef (NodeId 4), BindFlex))
-                        ]
-                    , cUnifyEdges =
-                        [ UnifyEdge (NodeId 0) (NodeId 1)
-                        , UnifyEdge (NodeId 1) (NodeId 2)
-                        ]
-                    }
-            case solveUnify defaultTraceConfig constraint of
-                Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
-                Right res -> do
-                    let sc = resultConstraint res
-                    -- All three vars should end up unified, queue drained
-                    cUnifyEdges sc `shouldBe` []
+    describe "O07-GENUNIF: Generalized unification (Ch 7.6)" $ do
+        it "O07-GENUNIF: batch harmonization raises chained equivalence classes to their LCA" $ property $
+            forAll (choose (1, 8)) $ \depth ->
+                let constraint = genUnificationConstraint depth
+                 in case solveUnify defaultTraceConfig constraint of
+                        Left err -> counterexample ("Unexpected solve error: " ++ show err) False
+                        Right res ->
+                            let sc = resultConstraint res
+                                uf = resultUnionFind res
+                                rep = frWith uf (NodeId 0)
+                            in conjoin
+                                [ cUnifyEdges sc === []
+                                , frWith uf (NodeId 1) === rep
+                                , frWith uf (NodeId 2) === rep
+                                , case IntMap.lookup (nodeRefKey (typeRef rep)) (cBindParents sc) of
+                                    Just (_, BindFlex) -> property True
+                                    other -> counterexample ("representative parent: " ++ show other) False
+                                , case Binding.checkBindingTree sc of
+                                    Right () -> property True
+                                    Left err -> counterexample ("invalid binding tree: " ++ show err) False
+                                ]
 
         it "multi-node harmonize raises all members to LCA" $ do
             -- Four nodes: v0 bound to inner, v1 bound to inner, v2 bound to root.
