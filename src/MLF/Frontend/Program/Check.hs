@@ -1099,19 +1099,21 @@ renderInstanceName className0 headTy methodName0 = className0 ++ "__" ++ sanitiz
 
 sanitizeType :: SrcType -> String
 sanitizeType = \case
-  STVar v -> map sanitizeChar v
+  STVar v -> sanitizeName v
   STArrow dom cod -> "arr_" ++ sanitizeType dom ++ "_" ++ sanitizeType cod
-  STBase base -> map sanitizeChar base
-  STCon con args -> intercalate "_" (map sanitizeChar con : map sanitizeType (NE.toList args))
-  STForall v _ body -> "forall_" ++ map sanitizeChar v ++ "_" ++ sanitizeType body
-  STMu v body -> "mu_" ++ map sanitizeChar v ++ "_" ++ sanitizeType body
+  STBase base -> sanitizeName base
+  STCon con args -> intercalate "_" (sanitizeName con : map sanitizeType (NE.toList args))
+  STForall v _ body -> "forall_" ++ sanitizeName v ++ "_" ++ sanitizeType body
+  STMu v body -> "mu_" ++ sanitizeName v ++ "_" ++ sanitizeType body
   STBottom -> "bottom"
   where
+    sanitizeName = concatMap sanitizeChar
+
     sanitizeChar c
-      | c `elem` ['a' .. 'z'] = c
-      | c `elem` ['A' .. 'Z'] = c
-      | c `elem` ['0' .. '9'] = c
-      | otherwise = '_'
+      | c `elem` ['a' .. 'z'] = [c]
+      | c `elem` ['A' .. 'Z'] = [c]
+      | c `elem` ['0' .. '9'] = [c]
+      | otherwise = "_u" ++ show (fromEnum c) ++ "_"
 
 checkInstance :: ElaborateScope -> Scope -> P.InstanceDecl -> TcM [CheckedBinding]
 checkInstance elaborateScope scope instDecl = do

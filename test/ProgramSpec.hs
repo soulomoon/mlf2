@@ -686,6 +686,27 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "checks constrained method use from specialized parameterized case binder"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (C, c, Box(..), f, main) {"
+                , "  class C a {"
+                , "    c : a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  def f : C Int => Box Int -> Bool = \\x case x of {"
+                , "    Box n -> c n"
+                , "  };"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs deferred method with method-level type variable constraint"
         ( InlineProgram $
             unlines
@@ -1218,6 +1239,38 @@ emlfBoundaryMatrix =
                 ]
         )
         (ExpectRunValue "Zero")
+    , ProgramMatrixCase
+        "runs distinct instances whose qualified heads would sanitize alike"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (B(..)) {"
+                , "  data B ="
+                , "      B : Int -> B;"
+                , "}"
+                , ""
+                , "module Main export (Eq, A_B(..), eq, main) {"
+                , "  import Core as A;"
+                , ""
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data A_B ="
+                , "      A_B : A_B;"
+                , ""
+                , "  instance Eq A.B {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  instance Eq A_B {"
+                , "    eq = \\left \\right false;"
+                , "  }"
+                , ""
+                , "  def main : Bool = eq (A.B 1) (A.B 2);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
     , ProgramMatrixCase
         "rejects qualified access to hidden constructors"
         ( InlineProgram $

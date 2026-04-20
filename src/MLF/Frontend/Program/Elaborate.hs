@@ -824,13 +824,12 @@ specializeSrcType subst ty = case ty of
     | otherwise -> STMu name (specializeSrcType subst body)
   STBottom -> STBottom
 
-deferCaseCall :: ElaborateScope -> DataInfo -> SrcType -> ElaborateM String
-deferCaseCall scope dataInfo resultTy = do
+deferCaseCall :: ElaborateScope -> DataInfo -> SrcType -> SrcType -> ElaborateM String
+deferCaseCall scope dataInfo scrutineeTy resultTy = do
   placeholder <- freshDeferredCaseName (dataName dataInfo)
-  let headTy = dataHeadType dataInfo
-      resultTyElab = lowerType scope resultTy
+  let resultTyElab = lowerType scope resultTy
       handlerTys = replicate (length (dataConstructors dataInfo)) STBottom
-      placeholderTy = foldr STArrow resultTyElab (lowerType scope headTy : handlerTys)
+      placeholderTy = foldr STArrow resultTyElab (lowerType scope scrutineeTy : handlerTys)
       deferred =
         DeferredCaseCall
           { deferredCasePlaceholder = placeholder,
@@ -979,8 +978,8 @@ compileCase scope mbExpected scrutinee alts = do
         Nothing -> do
           scrutineeExpr <- compileExpr scope (Just scrutineeTy) scrutinee
           let forceAnnotateHandlers = any (not . null . ctorForalls) (dataConstructors dataInfo)
-          handlers <- mapM (compileHandler scope scrutineeExpr resultTy dataInfo alts forceAnnotateHandlers) (dataConstructors dataInfo)
-          placeholder <- deferCaseCall scope dataInfo resultTy
+          handlers <- mapM (compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnotateHandlers) (dataConstructors dataInfo)
+          placeholder <- deferCaseCall scope dataInfo scrutineeTy resultTy
           pure (foldl surfaceApp (surfaceVar placeholder) (scrutineeExpr : handlers))
 
 localIdentityScrutinee :: ElaborateScope -> P.Expr -> Maybe P.Expr
@@ -1016,21 +1015,23 @@ compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts =
     [P.Alt (P.PatAnn inner _) body] -> compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr [P.Alt inner body]
     _ -> throwError (ProgramCaseOnNonDataType STBottom)
 
-compileHandler :: ElaborateScope -> SurfaceExpr -> SrcType -> DataInfo -> [P.Alt] -> Bool -> ConstructorInfo -> ElaborateM SurfaceExpr
-compileHandler scope scrutineeExpr resultTy dataInfo alts forceAnnotateHandlers ctorInfo = do
-  runtimeNames <- mapM freshRuntimeName ["case" ++ show ix | ix <- [1 .. length (ctorArgs ctorInfo)]]
-  let topArgs = zip3 (map (const P.PatWildcard) (ctorArgs ctorInfo)) runtimeNames (ctorArgs ctorInfo)
+compileHandler :: ElaborateScope -> SurfaceExpr -> SrcType -> SrcType -> DataInfo -> [P.Alt] -> Bool -> ConstructorInfo -> ElaborateM SurfaceExpr
+compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnotateHandlers ctorInfo = do
+  let ctorArgTys = specializeConstructorArgsForScrutinee scrutineeTy ctorInfo
+      specializedCtorInfo = ctorInfo {ctorArgs = ctorArgTys}
+  runtimeNames <- mapM freshRuntimeName ["case" ++ show ix | ix <- [1 .. length ctorArgTys]]
+  let topArgs = zip3 (map (const P.PatWildcard) ctorArgTys) runtimeNames ctorArgTys
       candidates = matchingCandidates ctorInfo
   bodyExpr <- compileCandidates topArgs candidates
   let handlerBody =
         foldr
           (\(name, argTy) acc -> surfaceLamAnn name (lowerType scope argTy) acc)
           bodyExpr
-          (zip runtimeNames (ctorArgs ctorInfo))
+          (zip runtimeNames ctorArgTys)
   if not forceAnnotateHandlers && null (ctorForalls ctorInfo)
     then pure handlerBody
     else do
-      let handlerTy = handlerSurfaceType scope ctorInfo (lowerType scope resultTy)
+      let handlerTy = handlerSurfaceType scope specializedCtorInfo (lowerType scope resultTy)
       pure (surfaceAnn handlerBody handlerTy)
   where
     matchingCandidates ctor =
@@ -1048,13 +1049,13 @@ compileHandler scope scrutineeExpr resultTy dataInfo alts forceAnnotateHandlers 
         P.PatWildcard -> compileExpr scope (Just resultTy) body
         P.PatVar name -> do
           scrutineeName <- freshRuntimeName name
-          scope' <- extendLocalLowered scope name scrutineeName (lowerType scope (dataHeadType dataInfo))
+          scope' <- extendLocalLowered scope name scrutineeName (lowerType scope scrutineeTy)
           bodyExpr <- compileExpr scope' (Just resultTy) body
           pure (surfaceLet scrutineeName scrutineeExpr bodyExpr)
         P.PatCtor ctorName0 patterns
           | ctorName0 == ctorName ctorInfo,
             length patterns == length (ctorArgs ctorInfo) ->
-              compilePatternSequence scope (zip3 patterns (map middle topArgs) (ctorArgs ctorInfo)) body mbFallback
+              compilePatternSequence scope (zip3 patterns (map middle topArgs) (map third topArgs)) body mbFallback
           | ctorName0 == ctorName ctorInfo ->
               throwError (ProgramPatternConstructorMismatch ctorName0 (dataHeadType dataInfo))
           | otherwise ->
@@ -1064,6 +1065,7 @@ compileHandler scope scrutineeExpr resultTy dataInfo alts forceAnnotateHandlers 
         P.PatAnn inner _ -> compileAltCandidate topArgs (P.Alt inner body) mbFallback
 
     middle (_, value, _) = value
+    third (_, _, value) = value
 
     compilePatternSequence scope0 [] body _ =
       compileExpr scope0 (Just resultTy) body
@@ -1085,25 +1087,33 @@ compileHandler scope scrutineeExpr resultTy dataInfo alts forceAnnotateHandlers 
                   Nothing -> throwError (ProgramNonExhaustiveCase [ctorName ctorInfo])
               nestedRuntimeNames <- mapM freshRuntimeName ["pat" ++ show ix | ix <- [1 .. length (ctorArgs nestedCtorInfo)]]
               let forceNestedAnnotations = any (not . null . ctorForalls) (dataConstructors nestedDataInfo)
-              matchingBody <- compilePatternSequence scope0 (zip3 nestedPatterns nestedRuntimeNames (ctorArgs nestedCtorInfo) ++ rest) body mbFallback
-              handlers <- mapM (nestedHandler forceNestedAnnotations nestedCtorInfo nestedRuntimeNames matchingBody fallback) (dataConstructors nestedDataInfo)
-              placeholder <- deferCaseCall scope0 nestedDataInfo resultTy
+                  nestedArgTys = specializeConstructorArgsForScrutinee argTy nestedCtorInfo
+              matchingBody <- compilePatternSequence scope0 (zip3 nestedPatterns nestedRuntimeNames nestedArgTys ++ rest) body mbFallback
+              handlers <- mapM (nestedHandler forceNestedAnnotations argTy nestedCtorInfo nestedRuntimeNames matchingBody fallback) (dataConstructors nestedDataInfo)
+              placeholder <- deferCaseCall scope0 nestedDataInfo argTy resultTy
               pure (foldl surfaceApp (surfaceVar placeholder) (surfaceVar runtimeName : handlers))
         P.PatAnn inner _ -> compilePatternSequence scope0 ((inner, runtimeName, argTy) : rest) body mbFallback
 
-    nestedHandler forceNestedAnnotations targetCtor nestedRuntimeNames matchingBody fallback ctor =
-      let argNames = if ctorName ctor == ctorName targetCtor then nestedRuntimeNames else ["unused" ++ show ix | ix <- [1 .. length (ctorArgs ctor)]]
+    nestedHandler forceNestedAnnotations nestedScrutineeTy targetCtor nestedRuntimeNames matchingBody fallback ctor =
+      let ctorArgTys = specializeConstructorArgsForScrutinee nestedScrutineeTy ctor
+          specializedCtor = ctor {ctorArgs = ctorArgTys}
+          argNames = if ctorName ctor == ctorName targetCtor then nestedRuntimeNames else ["unused" ++ show ix | ix <- [1 .. length ctorArgTys]]
           selectedBody = if ctorName ctor == ctorName targetCtor then matchingBody else fallback
           handlerBody =
             foldr
               (\(name, argTy) acc -> surfaceLamAnn name (lowerType scope argTy) acc)
               selectedBody
-              (zip argNames (ctorArgs ctor))
+              (zip argNames ctorArgTys)
        in if not forceNestedAnnotations && null (ctorForalls ctor)
             then pure handlerBody
             else do
-              let handlerTy = handlerSurfaceType scope ctor (lowerType scope resultTy)
+              let handlerTy = handlerSurfaceType scope specializedCtor (lowerType scope resultTy)
               pure (surfaceAnn handlerBody handlerTy)
+
+    specializeConstructorArgsForScrutinee actualScrutineeTy ctor =
+      case matchTypes Map.empty (ctorResult ctor) actualScrutineeTy of
+        Just subst -> map (specializeSrcType subst) (ctorArgs ctor)
+        Nothing -> ctorArgs ctor
 
     lookupConstructorInfo ctorName0 =
       case Map.lookup ctorName0 (esValues scope) of
