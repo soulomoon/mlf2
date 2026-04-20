@@ -20,6 +20,7 @@ import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionError (..), PresolutionResult (..), PresolutionView (..))
 import MLF.Constraint.Presolution.TestSupport
   ( PresolutionState (..),
+    decideMinimalExpansion,
     fromListInterior,
     runPresolutionM,
     unifyAcyclic,
@@ -28,7 +29,6 @@ import MLF.Constraint.Presolution.TestSupport
 import MLF.Constraint.Types.Presolution (Presolution (..))
 import MLF.Constraint.Presolution.Witness
   ( OmegaNormalizeEnv (..),
-    OmegaNormalizeError (..),
     coalesceRaiseMergeWithEnv,
     normalizeInstanceOpsFull,
     reorderWeakenWithEnv,
@@ -36,12 +36,12 @@ import MLF.Constraint.Presolution.Witness
   )
 import MLF.Constraint.Solve (SolveResult (..), frWith, solveUnify)
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness (EdgeWitness (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
+import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..), ForallSpec (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
 import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Frontend.ConstraintGen (ConstraintResult (..))
 import MLF.Frontend.Syntax qualified as Surf
-import Presolution.Util (mkNormalizeConstraint, mkNormalizeEnv, orderedPairByPrec)
+import Presolution.Util (mkNormalizeConstraint, mkNormalizeEnv)
 import SpecUtil
   ( PipelineArtifacts (..),
     bindParentsFromPairs,
@@ -689,80 +689,12 @@ propTrNodeGraft _size =
    in normalizeInstanceOpsFull env [OpGraft arg binder, OpWeaken binder] === Right [OpGraft arg binder, OpWeaken binder]
 
 propTrNodeMerge :: Int -> Property
-propTrNodeMerge _size =
-  let c = mkNormalizeConstraint
-      root = NodeId 0
-      (mLess, nGreater) = orderedPairByPrec c root
-      env = mkNormalizeEnv c root (IntSet.fromList [getNodeId mLess, getNodeId nGreater])
-   in normalizeInstanceOpsFull env [OpMerge mLess nGreater] === Left (MergeDirectionInvalid mLess nGreater)
+propTrNodeMerge size =
+  assertNodeAliasTranslation size OpMerge
 
 propTrNodeRaiseMerge :: Int -> Property
 propTrNodeRaiseMerge size =
-  let base = max 3 size * 10
-      root = NodeId (base + 100)
-      binderA = NodeId (base + 1)
-      forallB = NodeId (base + 102)
-      binderB = NodeId (base + 2)
-      bodyNode = NodeId (base + 103)
-      c =
-        rootedConstraint
-          emptyConstraint
-            { cNodes =
-                nodeMapFromList
-                  [ (getNodeId root, TyForall root forallB),
-                    (getNodeId binderA, TyVar {tnId = binderA, tnBound = Nothing}),
-                    (getNodeId forallB, TyForall forallB bodyNode),
-                    (getNodeId binderB, TyVar {tnId = binderB, tnBound = Nothing}),
-                    (getNodeId bodyNode, TyArrow bodyNode binderA binderB)
-                  ],
-              cBindParents =
-                bindParentsFromPairs
-                  [ (binderA, root, BindFlex),
-                    (forallB, root, BindFlex),
-                    (binderB, forallB, BindFlex),
-                    (bodyNode, forallB, BindFlex)
-                  ]
-            }
-      scheme =
-        Elab.schemeFromType
-          (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
-      si =
-        Elab.SchemeInfo
-          { Elab.siScheme = scheme,
-            Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
-          }
-      tr =
-        EdgeTrace
-          { etRoot = root,
-            etBinderArgs = [],
-            etInterior = fromListInterior [root, binderA, forallB, binderB, bodyNode],
-            etReplayContract = ReplayContractNone,
-            etBinderReplayMap = mempty,
-            etReplayDomainBinders = [],
-            etCopyMap = mempty
-          }
-      ew =
-        EdgeWitness
-          { ewEdgeId = EdgeId size,
-            ewLeft = root,
-            ewRight = root,
-            ewRoot = root,
-            ewForallIntros = 0,
-            ewWitness = InstanceWitness [OpRaiseMerge binderB binderA]
-          }
-      expected =
-        Elab.TForall
-          "a"
-          Nothing
-          (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
-      generalizeAt _ _ _ =
-        Left (Elab.InstantiationError "propTrNodeRaiseMerge: unexpected generalization")
-   in case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAt (identityPresolutionView c) Nothing (Just si) (Just tr) ew of
-        Left err -> counterexample (show err) False
-        Right phi ->
-          case Elab.applyInstantiation (Elab.schemeToType scheme) phi of
-            Left err -> counterexample (show err) False
-            Right out -> counterexample (Elab.pretty out) (out === expected)
+  assertNodeAliasTranslation size OpRaiseMerge
 
 propTrNodeWeaken :: Int -> Property
 propTrNodeWeaken _size =
@@ -873,8 +805,144 @@ propCgenExpr _size =
     Left err -> counterexample err False
 
 propExpDecide :: Int -> Property
-propExpDecide _size =
-  propPresolutionClearsEdges letIdAppExpr
+propExpDecide size =
+  conjoin
+    [ assertMinimalDecision "identity" cId expId targetId $ \(expansion, unifications) ->
+        conjoin
+          [ expansion === ExpIdentity,
+            unifications === [(bodyId, targetId)]
+          ],
+      assertMinimalDecision "instantiate" cInst expInst targetArrow $ \(expansion, unifications) ->
+        case expansion of
+          ExpInstantiate args ->
+            conjoin
+              [ counterexample (show args) (length args === 1),
+                unifications === []
+              ]
+          other -> counterexample (show other) False,
+      assertMinimalDecision "compose" cCompose expCompose targetForall2 $ \(expansion, unifications) ->
+        case expansion of
+          ExpCompose (ExpInstantiate args :| [ExpForall (ForallSpec 2 [Nothing, Nothing] :| [])]) ->
+            conjoin
+              [ counterexample (show args) (length args === 1),
+                unifications === []
+              ]
+          other -> counterexample (show other) False,
+      assertMinimalDecision "forall-intro" cForallIntro expForallIntro targetForallIntro $ \(expansion, unifications) ->
+        conjoin
+          [ expansion === ExpForall (ForallSpec 2 [Nothing, Nothing] :| []),
+            unifications === []
+          ]
+    ]
+  where
+    base = max 3 size * 20
+    bodyId = NodeId (base + 1)
+    targetId = NodeId (base + 2)
+    expId = NodeId (base + 3)
+    cId =
+      rootedConstraint
+        emptyConstraint
+          { cNodes =
+              nodeMapFromList
+                [ (getNodeId bodyId, TyBase bodyId (BaseTy "Int")),
+                  (getNodeId targetId, TyBase targetId (BaseTy "Int")),
+                  (getNodeId expId, TyExp expId (ExpVarId base) bodyId)
+                ],
+            cBindParents = bindParentsFromPairs [(bodyId, expId, BindFlex)]
+          }
+
+    srcVar = NodeId (base + 10)
+    srcArrow = NodeId (base + 11)
+    srcForall = NodeId (base + 12)
+    targetDom = NodeId (base + 13)
+    targetCod = NodeId (base + 14)
+    targetArrow = NodeId (base + 15)
+    expInst = NodeId (base + 16)
+    cInst =
+      rootedConstraint
+        emptyConstraint
+          { cNodes =
+              nodeMapFromList
+                [ (getNodeId srcVar, TyVar {tnId = srcVar, tnBound = Nothing}),
+                  (getNodeId srcArrow, TyArrow srcArrow srcVar srcVar),
+                  (getNodeId srcForall, TyForall srcForall srcArrow),
+                  (getNodeId targetDom, TyBase targetDom (BaseTy "Int")),
+                  (getNodeId targetCod, TyBase targetCod (BaseTy "Int")),
+                  (getNodeId targetArrow, TyArrow targetArrow targetDom targetCod),
+                  (getNodeId expInst, TyExp expInst (ExpVarId (base + 1)) srcForall)
+                ],
+            cBindParents =
+              bindParentsFromPairs
+                [ (srcVar, srcForall, BindFlex),
+                  (srcArrow, srcForall, BindFlex),
+                  (targetDom, targetArrow, BindFlex),
+                  (targetCod, targetArrow, BindFlex),
+                  (srcForall, expInst, BindFlex)
+                ]
+          }
+
+    srcVarC = NodeId (base + 20)
+    srcForallC = NodeId (base + 21)
+    targetDomC = NodeId (base + 22)
+    targetCodC = NodeId (base + 23)
+    targetArrowC = NodeId (base + 24)
+    targetForall2 = NodeId (base + 25)
+    expCompose = NodeId (base + 26)
+    cCompose =
+      rootedConstraint
+        emptyConstraint
+          { cNodes =
+              nodeMapFromList
+                [ (getNodeId srcVarC, TyVar {tnId = srcVarC, tnBound = Nothing}),
+                  (getNodeId srcForallC, TyForall srcForallC srcVarC),
+                  (getNodeId targetDomC, TyVar {tnId = targetDomC, tnBound = Nothing}),
+                  (getNodeId targetCodC, TyVar {tnId = targetCodC, tnBound = Nothing}),
+                  (getNodeId targetArrowC, TyArrow targetArrowC targetDomC targetCodC),
+                  (getNodeId targetForall2, TyForall targetForall2 targetArrowC),
+                  (getNodeId expCompose, TyExp expCompose (ExpVarId (base + 2)) srcForallC)
+                ],
+            cBindParents =
+              bindParentsFromPairs
+                [ (srcVarC, srcForallC, BindFlex),
+                  (srcForallC, expCompose, BindFlex),
+                  (targetDomC, targetForall2, BindFlex),
+                  (targetCodC, targetForall2, BindFlex),
+                  (targetArrowC, targetForall2, BindFlex)
+                ]
+          }
+
+    srcDomF = NodeId (base + 30)
+    srcCodF = NodeId (base + 31)
+    srcArrowF = NodeId (base + 32)
+    targetDomF = NodeId (base + 33)
+    targetCodF = NodeId (base + 34)
+    targetArrowF = NodeId (base + 35)
+    targetForallIntro = NodeId (base + 36)
+    expForallIntro = NodeId (base + 37)
+    cForallIntro =
+      rootedConstraint
+        emptyConstraint
+          { cNodes =
+              nodeMapFromList
+                [ (getNodeId srcDomF, TyBase srcDomF (BaseTy "Int")),
+                  (getNodeId srcCodF, TyBase srcCodF (BaseTy "Bool")),
+                  (getNodeId srcArrowF, TyArrow srcArrowF srcDomF srcCodF),
+                  (getNodeId targetDomF, TyVar {tnId = targetDomF, tnBound = Nothing}),
+                  (getNodeId targetCodF, TyVar {tnId = targetCodF, tnBound = Nothing}),
+                  (getNodeId targetArrowF, TyArrow targetArrowF targetDomF targetCodF),
+                  (getNodeId targetForallIntro, TyForall targetForallIntro targetArrowF),
+                  (getNodeId expForallIntro, TyExp expForallIntro (ExpVarId (base + 3)) srcArrowF)
+                ],
+            cBindParents =
+              bindParentsFromPairs
+                [ (srcDomF, srcArrowF, BindFlex),
+                  (srcCodF, srcArrowF, BindFlex),
+                  (srcArrowF, expForallIntro, BindFlex),
+                  (targetDomF, targetForallIntro, BindFlex),
+                  (targetCodF, targetForallIntro, BindFlex),
+                  (targetArrowF, targetForallIntro, BindFlex)
+                ]
+          }
 
 propExpApply :: Int -> Property
 propExpApply _size =
@@ -1210,6 +1278,102 @@ identityPresolutionView c =
       pvBindParents = cBindParents c,
       pvCanonicalConstraint = c
     }
+
+assertMinimalDecision ::
+  String ->
+  Constraint ->
+  NodeId ->
+  NodeId ->
+  ((Expansion, [(NodeId, NodeId)]) -> Property) ->
+  Property
+assertMinimalDecision caseName c expNodeId targetNodeId checkDecision =
+  case decideMinimalFor c expNodeId targetNodeId of
+    Right decision -> counterexample (caseName ++ ": " ++ show decision) (checkDecision decision)
+    Left err -> counterexample (caseName ++ ": " ++ err) False
+
+decideMinimalFor :: Constraint -> NodeId -> NodeId -> Either String (Expansion, [(NodeId, NodeId)])
+decideMinimalFor c expNodeId targetNodeId =
+  case (lookupNodeIn (cNodes c) expNodeId, lookupNodeIn (cNodes c) targetNodeId) of
+    (Just expNode, Just targetNode) ->
+      case runPresolutionM defaultTraceConfig (emptyPresolutionState c) (decideMinimalExpansion (GenNodeId 0) True expNode targetNode) of
+        Right (decision, _st) -> Right decision
+        Left err -> Left (show err)
+    (Nothing, _) -> Left ("missing expansion node " ++ show expNodeId)
+    (_, Nothing) -> Left ("missing target node " ++ show targetNodeId)
+
+assertNodeAliasTranslation :: Int -> (NodeId -> NodeId -> InstanceOp) -> Property
+assertNodeAliasTranslation size mkOp =
+  let (c, root, binderA, binderB, scheme, si, tr) = nodeAliasTranslationFixture size
+      ew =
+        EdgeWitness
+          { ewEdgeId = EdgeId size,
+            ewLeft = root,
+            ewRight = root,
+            ewRoot = root,
+            ewForallIntros = 0,
+            ewWitness = InstanceWitness [mkOp binderB binderA]
+          }
+      expected =
+        Elab.TForall
+          "a"
+          Nothing
+          (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+      generalizeAt _ _ _ =
+        Left (Elab.InstantiationError "assertNodeAliasTranslation: unexpected generalization")
+   in case Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig generalizeAt (identityPresolutionView c) Nothing (Just si) (Just tr) ew of
+        Left err -> counterexample (show err) False
+        Right phi ->
+          case Elab.applyInstantiation (Elab.schemeToType scheme) phi of
+            Left err -> counterexample (show err) False
+            Right out -> counterexample (Elab.pretty phi ++ " => " ++ Elab.pretty out) (out === expected)
+
+nodeAliasTranslationFixture :: Int -> (Constraint, NodeId, NodeId, NodeId, Elab.ElabScheme, Elab.SchemeInfo, EdgeTrace)
+nodeAliasTranslationFixture size =
+  (c, root, binderA, binderB, scheme, si, tr)
+  where
+    base = max 3 size * 10
+    root = NodeId (base + 100)
+    binderA = NodeId (base + 1)
+    forallB = NodeId (base + 102)
+    binderB = NodeId (base + 2)
+    bodyNode = NodeId (base + 103)
+    c =
+      rootedConstraint
+        emptyConstraint
+          { cNodes =
+              nodeMapFromList
+                [ (getNodeId root, TyForall root forallB),
+                  (getNodeId binderA, TyVar {tnId = binderA, tnBound = Nothing}),
+                  (getNodeId forallB, TyForall forallB bodyNode),
+                  (getNodeId binderB, TyVar {tnId = binderB, tnBound = Nothing}),
+                  (getNodeId bodyNode, TyArrow bodyNode binderA binderB)
+                ],
+            cBindParents =
+              bindParentsFromPairs
+                [ (binderA, root, BindFlex),
+                  (forallB, root, BindFlex),
+                  (binderB, forallB, BindFlex),
+                  (bodyNode, forallB, BindFlex)
+                ]
+          }
+    scheme =
+      Elab.schemeFromType
+        (Elab.TForall "a" Nothing (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b"))))
+    si =
+      Elab.SchemeInfo
+        { Elab.siScheme = scheme,
+          Elab.siSubst = IntMap.fromList [(getNodeId binderA, "a"), (getNodeId binderB, "b")]
+        }
+    tr =
+      EdgeTrace
+        { etRoot = root,
+          etBinderArgs = [],
+          etInterior = fromListInterior [root, binderA, forallB, binderB, bodyNode],
+          etReplayContract = ReplayContractNone,
+          etBinderReplayMap = mempty,
+          etReplayDomainBinders = [],
+          etCopyMap = mempty
+        }
 
 orderedBinderFixture :: Int -> (Constraint, NodeId, [NodeId])
 orderedBinderFixture size =
