@@ -1630,7 +1630,7 @@ obligations:
   test_anchor:
     matcher: O10-COPY-SCHEME
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises presolution completion and binding-tree validity over source terms.
+    rationale: QuickCheck exercises Chi-e scheme copy by asserting fresh copied roots, preserved shared structure, binder substitution, source graph immutability, and binding-tree validity.
     kind: quickcheck
     min_success: 100
   status: anchored
@@ -1767,7 +1767,7 @@ obligations:
   test_anchor:
     matcher: O12-COPY-INST
     file: test/Thesis/ObligationPropertySpec.hs
-    rationale: QuickCheck exercises presolution completion and binding-tree validity over source terms.
+    rationale: QuickCheck exercises trace-aware Inst-Copy by asserting frontier-to-bottom replacement, interior and copy-map bookkeeping, recorded binder arguments, live trace targets, and binding-tree validity.
     kind: quickcheck
     min_success: 100
   status: anchored

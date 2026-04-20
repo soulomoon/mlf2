@@ -19,9 +19,14 @@ import MLF.Constraint.Inert qualified as Inert
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionError (..), PresolutionResult (..), PresolutionView (..))
 import MLF.Constraint.Presolution.TestSupport
-  ( PresolutionState (..),
+  ( CopyMapping (..),
+    PresolutionState (..),
     decideMinimalExpansion,
     fromListInterior,
+    instantiateScheme,
+    instantiateSchemeWithTrace,
+    lookupCopy,
+    processInstEdge,
     runPresolutionM,
     unifyAcyclic,
     validateTranslatablePresolution,
@@ -970,10 +975,52 @@ propPropWitness _size =
     Left err -> counterexample err False
 
 propCopyScheme :: Int -> Property
-propCopyScheme _size =
-  case runToPresolutionDefault Set.empty letIdAppExpr of
-    Right PresolutionResult {prEdgeTraces = traces} -> counterexample (show (IntMap.size traces)) (not (IntMap.null traces))
-    Left err -> counterexample err False
+propCopyScheme size =
+  let base = size * 100
+      bound = NodeId (base + 1)
+      sharedArrow = NodeId (base + 5)
+      body = NodeId (base + 6)
+      fresh = NodeId (base + 10)
+      c =
+        rootedConstraint
+          emptyConstraint
+            { cNodes =
+                nodeMapFromList
+                  [ (getNodeId bound, TyVar {tnId = bound, tnBound = Nothing}),
+                    (getNodeId sharedArrow, TyArrow sharedArrow bound bound),
+                    (getNodeId body, TyArrow body sharedArrow sharedArrow),
+                    (getNodeId fresh, TyVar {tnId = fresh, tnBound = Nothing})
+                  ],
+              cBindParents =
+                bindParentsFromPairs
+                  [ (bound, sharedArrow, BindFlex),
+                    (sharedArrow, body, BindFlex)
+                  ]
+            }
+      st0 = emptyPresolutionState c
+   in case runPresolutionM defaultTraceConfig st0 (instantiateScheme body [(bound, fresh)]) of
+        Right (root, st1) ->
+          let c1 = psConstraint st1
+              nodes = cNodes c1
+              expectedSourceBody = TyArrow body sharedArrow sharedArrow
+           in case lookupNodeIn nodes root of
+                Just TyArrow {tnDom = dom, tnCod = cod} ->
+                  conjoin
+                    [ counterexample "scheme root is copied to a fresh node" (root /= body),
+                      counterexample "shared body child is copied once and reused" (dom == cod && dom /= sharedArrow),
+                      counterexample "source body remains unchanged" (lookupNodeIn nodes body == Just expectedSourceBody),
+                      case lookupNodeIn nodes dom of
+                        Just TyArrow {tnDom = innerDom, tnCod = innerCod} ->
+                          conjoin
+                            [ counterexample "substituted binder is used in copied domain" (innerDom == fresh),
+                              counterexample "substituted binder is used in copied codomain" (innerCod == fresh)
+                            ]
+                        other -> counterexample ("expected copied shared arrow, got " ++ show other) False,
+                      counterexample "fresh substitution node remains live" (isJust (lookupNodeIn nodes fresh)),
+                      Binding.checkBindingTree c1 === Right ()
+                    ]
+                other -> counterexample ("expected copied scheme root arrow, got " ++ show other) False
+        Left err -> counterexample (show err) False
 
 propWitnessNorm :: Int -> Property
 propWitnessNorm _size =
@@ -1007,8 +1054,133 @@ propAcyclicTopo size =
         Left err -> counterexample (show err) False
 
 propCopyInst :: Int -> Property
-propCopyInst _size =
-  propCopyScheme 0
+propCopyInst size =
+  let base = size * 100
+      binder = NodeId (base + 1)
+      outerVar = NodeId (base + 2)
+      frontierArrow = NodeId (base + 3)
+      bodyArrow = NodeId (base + 4)
+      forallNode = NodeId (base + 5)
+      expNode = NodeId (base + 6)
+      meta = NodeId (base + 10)
+      c =
+        rootedConstraint
+          emptyConstraint
+            { cNodes =
+                nodeMapFromList
+                  [ (getNodeId binder, TyVar {tnId = binder, tnBound = Nothing}),
+                    (getNodeId outerVar, TyVar {tnId = outerVar, tnBound = Nothing}),
+                    (getNodeId frontierArrow, TyArrow frontierArrow outerVar outerVar),
+                    (getNodeId bodyArrow, TyArrow bodyArrow frontierArrow binder),
+                    (getNodeId forallNode, TyForall forallNode bodyArrow),
+                    (getNodeId expNode, TyExp expNode (ExpVarId base) forallNode),
+                    (getNodeId meta, TyVar {tnId = meta, tnBound = Nothing})
+                  ],
+              cBindParents =
+                bindParentsFromPairs
+                  [ (forallNode, expNode, BindFlex),
+                    (bodyArrow, forallNode, BindFlex),
+                    (binder, bodyArrow, BindFlex),
+                    (frontierArrow, expNode, BindFlex),
+                    (outerVar, frontierArrow, BindFlex)
+                  ]
+            }
+      st0 = emptyPresolutionState c
+      directCopy =
+        case runPresolutionM defaultTraceConfig st0 (instantiateSchemeWithTrace bodyArrow [(binder, meta)]) of
+          Right ((root, copyMap, interior, frontier), st1) ->
+            let c1 = psConstraint st1
+                nodes = cNodes c1
+             in case lookupNodeIn nodes root of
+                  Just TyArrow {tnDom = dom, tnCod = cod} ->
+                    conjoin
+                      [ counterexample "Inst-Copy root is freshly copied" (root /= bodyArrow),
+                        lookupCopy bodyArrow copyMap === Just root,
+                        lookupCopy binder copyMap === Just meta,
+                        lookupCopy frontierArrow copyMap === Just dom,
+                        counterexample "binder argument is substituted into the copied codomain" (cod == meta),
+                        counterexample "frontier source is recorded in the frontier set" $
+                          IntSet.member (getNodeId frontierArrow) frontier,
+                        counterexample "fresh copied root is recorded in trace interior" $
+                          IntSet.member (getNodeId root) interior,
+                        counterexample "binder argument is recorded in trace interior" $
+                          IntSet.member (getNodeId meta) interior,
+                        case lookupNodeIn nodes dom of
+                          Just TyBottom {tnId = bottomId} ->
+                            counterexample "frontier copy is replaced with bottom" (bottomId == dom)
+                          other -> counterexample ("expected bottom frontier copy, got " ++ show other) False,
+                        counterexample "trace copy map records source-to-copy bookkeeping" $
+                          not (IntMap.null (getCopyMapping copyMap)),
+                        Binding.checkBindingTree c1 === Right ()
+                      ]
+                  other -> counterexample ("expected copied Inst-Copy arrow, got " ++ show other) False
+          Left err -> counterexample (show err) False
+      recordedTrace =
+        let edgeId = EdgeId (base + 20)
+            edgeSourceBinder = NodeId (base + 21)
+            edgeSourceArrow = NodeId (base + 22)
+            edgeSourceForall = NodeId (base + 23)
+            edgeTargetDom = NodeId (base + 24)
+            edgeTargetCod = NodeId (base + 25)
+            edgeTargetArrow = NodeId (base + 26)
+            edgeExp = NodeId (base + 27)
+            edge =
+              InstEdge
+                edgeId
+                edgeExp
+                edgeTargetArrow
+            edgeConstraint =
+              rootedConstraint
+                emptyConstraint
+                  { cNodes =
+                      nodeMapFromList
+                        [ (getNodeId edgeSourceBinder, TyVar {tnId = edgeSourceBinder, tnBound = Nothing}),
+                          (getNodeId edgeSourceArrow, TyArrow edgeSourceArrow edgeSourceBinder edgeSourceBinder),
+                          (getNodeId edgeSourceForall, TyForall edgeSourceForall edgeSourceArrow),
+                          (getNodeId edgeTargetDom, TyBase edgeTargetDom (BaseTy "Int")),
+                          (getNodeId edgeTargetCod, TyBase edgeTargetCod (BaseTy "Int")),
+                          (getNodeId edgeTargetArrow, TyArrow edgeTargetArrow edgeTargetDom edgeTargetCod),
+                          (getNodeId edgeExp, TyExp edgeExp (ExpVarId (base + 28)) edgeSourceForall)
+                        ],
+                    cBindParents =
+                      bindParentsFromPairs
+                        [ (edgeSourceBinder, edgeSourceForall, BindFlex),
+                          (edgeSourceArrow, edgeSourceForall, BindFlex),
+                          (edgeSourceForall, edgeExp, BindFlex),
+                          (edgeTargetDom, edgeTargetArrow, BindFlex),
+                          (edgeTargetCod, edgeTargetArrow, BindFlex)
+                        ]
+                  }
+            edgeSt0 = emptyPresolutionState edgeConstraint
+         in case runPresolutionM defaultTraceConfig edgeSt0 (processInstEdge edge) of
+              Right (_, edgeSt1) ->
+                let traces = psEdgeTraces edgeSt1
+                 in case IntMap.lookup (getEdgeId edgeId) traces of
+                      Just tr ->
+                        conjoin
+                          [ counterexample ("empty binder args in trace: " ++ show tr) $
+                              not (null (etBinderArgs tr)),
+                            edgeTraceCopyEvidence (psConstraint edgeSt1) tr
+                          ]
+                      Nothing -> counterexample ("missing trace keys: " ++ show (IntMap.keys traces)) False
+              Left err -> counterexample (show err) False
+   in conjoin [directCopy, recordedTrace]
+
+edgeTraceCopyEvidence :: Constraint -> EdgeTrace -> Property
+edgeTraceCopyEvidence c tr =
+  let copyPairs = IntMap.toList (getCopyMapping (etCopyMap tr))
+      binderPairs = etBinderArgs tr
+   in conjoin
+        [ counterexample "trace root is live in the presolved constraint" $
+            isJust (lookupNodeIn (cNodes c) (etRoot tr)),
+          counterexample ("empty trace copy map for " ++ show binderPairs) (not (null copyPairs)),
+          counterexample ("binder sources are absent from the trace copy map: " ++ show (binderPairs, copyPairs)) $
+            all (\(binder, _arg) -> IntMap.member (getNodeId binder) (getCopyMapping (etCopyMap tr))) binderPairs,
+          counterexample ("binder arguments are not live: " ++ show binderPairs) $
+            all (\(_binder, arg) -> isJust (lookupNodeIn (cNodes c) arg)) binderPairs,
+          counterexample ("copy map targets are not live: " ++ show copyPairs) $
+            all (\(_source, copied) -> isJust (lookupNodeIn (cNodes c) copied)) copyPairs
+        ]
 
 propNormGraft :: Int -> Property
 propNormGraft size =
