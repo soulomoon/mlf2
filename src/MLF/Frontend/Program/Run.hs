@@ -154,7 +154,7 @@ recoverMainSourceType checked ty =
 
 programElaborateScope :: CheckedProgram -> ElaborateScope
 programElaborateScope checked =
-  mkElaborateScope Map.empty (Map.fromList [(dataName info, info) | info <- allDataInfos checked]) Map.empty []
+  mkElaborateScope Map.empty (Map.fromList [(qualifiedDataName info, info) | info <- allDataInfos checked]) Map.empty []
 
 decodeSourceValue :: CheckedProgram -> SrcType -> ElabTerm -> Maybe Value
 decodeSourceValue checked srcTy term =
@@ -188,21 +188,22 @@ sourceTypeIsData checked srcTy =
 
 lookupDataInfosByName :: CheckedProgram -> String -> [DataInfo]
 lookupDataInfosByName checked name =
-  case exactMatches of
-    [] -> [dataInfo | dataInfo <- infos, dataTypeHeadMatches dataInfo name]
-    _ -> exactMatches
-  where
-    infos = allDataInfos checked
-    exactMatches = [dataInfo | dataInfo <- infos, dataName dataInfo == name]
+  [ dataInfo
+    | dataInfo <- allDataInfos checked,
+      dataTypeHeadMatches dataInfo name
+  ]
 
 dataTypeHeadMatches :: DataInfo -> String -> Bool
 dataTypeHeadMatches dataInfo name =
-  dataName dataInfo == name
-    || dataName dataInfo == unqualifiedSourceHead name
+  if isQualifiedSourceHead name
+    then qualifiedDataName dataInfo == name
+    else dataName dataInfo == name
 
-unqualifiedSourceHead :: String -> String
-unqualifiedSourceHead =
-  reverse . takeWhile (/= '.') . reverse
+isQualifiedSourceHead :: String -> Bool
+isQualifiedSourceHead = elem '.'
+
+qualifiedDataName :: DataInfo -> String
+qualifiedDataName dataInfo = dataModule dataInfo ++ "." ++ dataName dataInfo
 
 allDataInfos :: CheckedProgram -> [DataInfo]
 allDataInfos checked =
@@ -233,7 +234,9 @@ decodeChurchData checked dataInfo subst term = do
       ctorInfo <- lookupByHandler activeHandlers constructors selectedHandler
       if length args /= length (ctorArgs ctorInfo)
         then Nothing
-        else Just (VData (ctorName ctorInfo) (zipWith (decodeArg checked) (map (substDataParams subst) (ctorArgs ctorInfo)) args))
+        else
+          let argTypes = map (canonicalFieldType checked dataInfo . substDataParams subst) (ctorArgs ctorInfo)
+           in Just (VData (ctorName ctorInfo) (zipWith (decodeArg checked) argTypes args))
 
 dataTypeSubst :: DataInfo -> SrcType -> Map.Map String SrcType
 dataTypeSubst dataInfo srcTy =
@@ -258,6 +261,39 @@ substDataParams subst ty =
     STMu name body ->
       STMu name (substDataParams (Map.delete name subst) body)
     STBottom -> STBottom
+
+canonicalFieldType :: CheckedProgram -> DataInfo -> SrcType -> SrcType
+canonicalFieldType checked ownerInfo = canonical
+  where
+    canonical ty =
+      case ty of
+        STVar {} -> ty
+        STBase name ->
+          case lookupDataInfoInModule checked (dataModule ownerInfo) name of
+            Just info -> STBase (qualifiedDataName info)
+            Nothing -> ty
+        STCon name args ->
+          let args' = fmap canonical args
+           in case lookupDataInfoInModule checked (dataModule ownerInfo) name of
+                Just info -> STCon (qualifiedDataName info) args'
+                Nothing -> STCon name args'
+        STArrow dom cod -> STArrow (canonical dom) (canonical cod)
+        STForall name mb body ->
+          STForall name (fmap (SrcBound . canonical . unSrcBound) mb) (canonical body)
+        STMu name body -> STMu name (canonical body)
+        STBottom -> STBottom
+
+lookupDataInfoInModule :: CheckedProgram -> ProgramSyntax.ModuleName -> String -> Maybe DataInfo
+lookupDataInfoInModule checked moduleName0 name =
+  case
+    [ dataInfo
+      | dataInfo <- allDataInfos checked,
+        dataModule dataInfo == moduleName0,
+        dataName dataInfo == name
+    ]
+  of
+    dataInfo : _ -> Just dataInfo
+    [] -> Nothing
 
 decodeArg :: CheckedProgram -> SrcType -> ElabTerm -> Value
 decodeArg checked srcTy term =

@@ -146,6 +146,29 @@ elaborateScopeInstances = esInstances
 lowerType :: ElaborateScope -> SrcType -> SrcType
 lowerType scope = lowerTypeRaw (esTypes scope)
 
+canonicalSourceType :: ElaborateScope -> SrcType -> SrcType
+canonicalSourceType scope = canonical
+  where
+    canonical ty =
+      case ty of
+        STVar {} -> ty
+        STBase name ->
+          case Map.lookup name (esTypes scope) of
+            Just info -> STBase (qualifiedDataName info)
+            Nothing -> ty
+        STCon name args ->
+          let args' = fmap canonical args
+           in case Map.lookup name (esTypes scope) of
+                Just info -> STCon (qualifiedDataName info) args'
+                Nothing -> STCon name args'
+        STArrow dom cod -> STArrow (canonical dom) (canonical cod)
+        STForall name mb body ->
+          STForall name (fmap (SrcBound . canonical . unSrcBound) mb) (canonical body)
+        STMu name body -> STMu name (canonical body)
+        STBottom -> STBottom
+
+    qualifiedDataName info = dataModule info ++ "." ++ dataName info
+
 constrainedRuntimeType :: ElaborateScope -> [P.ClassConstraint] -> SrcType -> SrcType
 constrainedRuntimeType scope =
   constrainedRuntimeTypeRaw (esTypes scope) (esClasses scope)
@@ -243,6 +266,7 @@ lowerConstructorBinding :: ElaborateScope -> ConstructorInfo -> LoweredBinding
 lowerConstructorBinding scope ctorInfo =
   LoweredBinding
     { loweredBindingName = ctorRuntimeName ctorInfo,
+      loweredBindingSourceType = canonicalSourceType scope (quantifyFreeTypeVars (ctorType ctorInfo)),
       loweredBindingExpectedType = lowerType scope (quantifyFreeTypeVars (ctorType ctorInfo)),
       loweredBindingSurfaceExpr = constructorSurfaceExpr scope ctorInfo,
       loweredBindingDeferredObligations = Map.empty,
@@ -256,6 +280,7 @@ lowerExprBinding scope runtimeName expectedTy exportedAsMain expr = do
   pure
     LoweredBinding
       { loweredBindingName = runtimeName,
+        loweredBindingSourceType = canonicalSourceType scope expectedTy,
         loweredBindingExpectedType = lowerType scope expectedTy,
         loweredBindingSurfaceExpr = elaborateResultValue result,
         loweredBindingDeferredObligations = elaborateResultDeferredObligations result,
@@ -274,6 +299,7 @@ lowerConstrainedExprBinding scope runtimeName constraints visibleTy exportedAsMa
   pure
     LoweredBinding
       { loweredBindingName = runtimeName,
+        loweredBindingSourceType = canonicalSourceType scope visibleTy,
         loweredBindingExpectedType = lowerType scope expectedTy,
         loweredBindingSurfaceExpr = elaborateResultValue result,
         loweredBindingDeferredObligations = elaborateResultDeferredObligations result,

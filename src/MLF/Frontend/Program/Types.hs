@@ -368,6 +368,7 @@ data ModuleExports = ModuleExports
 
 data LoweredBinding = LoweredBinding
   { loweredBindingName :: String,
+    loweredBindingSourceType :: SrcType,
     loweredBindingExpectedType :: SrcType,
     loweredBindingSurfaceExpr :: SurfaceExpr,
     loweredBindingDeferredObligations :: Map String DeferredProgramObligation,

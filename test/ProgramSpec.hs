@@ -1888,6 +1888,28 @@ spec = do
             program <- requireParsed programText
             (prettyValue <$> runProgram program) `shouldBe` Right "Some Zero"
 
+        it "uses qualified ADT heads to disambiguate runtime decoding" $ do
+            let programText =
+                    unlines
+                        [ "module A export (Bit(..)) {"
+                        , "  data Bit ="
+                        , "      ABit : Bit;"
+                        , "}"
+                        , ""
+                        , "module B export (Bit(..)) {"
+                        , "  data Bit ="
+                        , "      BBit : Bit;"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  import A as L;"
+                        , "  import B as R;"
+                        , "  def main : R.Bit = R.BBit;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            (prettyValue <$> runProgram program) `shouldBe` Right "BBit"
+
         it "does not decode non-data main values through fallback ADT decoding" $ do
             let programText =
                     unlines

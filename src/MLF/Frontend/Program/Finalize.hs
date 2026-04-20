@@ -84,7 +84,7 @@ finalizeBinding scope lowered = do
       Right
         CheckedBinding
           { checkedBindingName = loweredBindingName lowered,
-            checkedBindingSourceType = loweredBindingExpectedType lowered,
+            checkedBindingSourceType = loweredBindingSourceType lowered,
             checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
             checkedBindingTerm = acceptedTerm,
             checkedBindingType = acceptedTy,
@@ -104,7 +104,7 @@ finalizeBinding scope lowered = do
           Right
             CheckedBinding
               { checkedBindingName = loweredBindingName lowered,
-                checkedBindingSourceType = loweredBindingExpectedType lowered,
+                checkedBindingSourceType = loweredBindingSourceType lowered,
                 checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
                 checkedBindingTerm = acceptedTerm,
                 checkedBindingType = acceptedTy,
