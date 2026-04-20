@@ -768,41 +768,58 @@ constructorRuntimeBindingRecoverable ctor =
         STBottom -> Set.empty
 
 synthesizeDerivedInstances :: Scope -> P.Module -> TcM [P.InstanceDecl]
-synthesizeDerivedInstances scope mod0 = concat <$> mapM deriveForData (moduleDataDecls mod0)
+synthesizeDerivedInstances scope mod0 = do
+  candidates <- concat <$> mapM deriveForData (moduleDataDecls mod0)
+  let pendingInstances = map (pendingDerivedInstance . snd) candidates
+      validationScope = scope {scopeInstances = scopeInstances scope ++ pendingInstances}
+  mapM_ (validateEqDerivingFields validationScope . fst) candidates
+  pure (map snd candidates)
   where
     deriveForData dataDecl = do
       forM (P.dataDeclDeriving dataDecl) $ \className0 ->
         case className0 of
           "Eq" -> do
             _ <- lookupClassInfo scope className0
-            mapM_ (validateEqDerivingField dataDecl) (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
-            pure (mkEqInstance dataDecl)
+            pure (dataDecl, mkEqInstance dataDecl)
           other -> throwError (ProgramUnsupportedDeriving other)
+
+    pendingDerivedInstance instDecl =
+      InstanceInfo
+        { instanceClassName = P.instanceDeclClass instDecl,
+          instanceConstraints = P.instanceDeclConstraints instDecl,
+          instanceHeadType = P.instanceDeclType instDecl,
+          instanceMethods = Map.empty
+        }
 
     constructorFieldTypes ctor =
       fst (splitArrows (snd (splitForalls (P.constructorDeclType ctor))))
 
-    validateEqDerivingField dataDecl fieldTy
-      | eqTypeSatisfiable dataDecl Set.empty fieldTy = pure ()
+    validateEqDerivingFields :: Scope -> P.DataDecl -> TcM ()
+    validateEqDerivingFields validationScope dataDecl =
+      mapM_ (validateEqDerivingField validationScope dataDecl) (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
+
+    validateEqDerivingField :: Scope -> P.DataDecl -> SrcType -> TcM ()
+    validateEqDerivingField validationScope dataDecl fieldTy
+      | eqTypeSatisfiable validationScope dataDecl Set.empty fieldTy = pure ()
       | otherwise = throwError (ProgramDerivingMissingFieldInstance "Eq" fieldTy)
 
-    eqTypeSatisfiable dataDecl seen fieldTy
+    eqTypeSatisfiable validationScope dataDecl seen fieldTy
       | fieldCoveredByDerivedConstraints dataDecl fieldTy = True
       | key `Set.member` seen = False
       | otherwise =
-          case resolveInstanceInfoWithSubst (scopeToElaborateScope scope) "Eq" fieldTy of
+          case resolveInstanceInfoWithSubst (scopeToElaborateScope validationScope) "Eq" fieldTy of
             Right (instanceInfo, subst) ->
               let seen' = Set.insert key seen
                in all
-                    (eqConstraintSatisfiable dataDecl seen' . applyConstraintSubst subst)
+                    (eqConstraintSatisfiable validationScope dataDecl seen' . applyConstraintSubst subst)
                     (instanceConstraints instanceInfo)
             Left _ -> False
       where
         key = ("Eq", show fieldTy)
 
-    eqConstraintSatisfiable dataDecl seen constraint
+    eqConstraintSatisfiable validationScope dataDecl seen constraint
       | P.constraintClassName constraint == "Eq" =
-          eqTypeSatisfiable dataDecl seen (P.constraintType constraint)
+          eqTypeSatisfiable validationScope dataDecl seen (P.constraintType constraint)
       | otherwise = False
 
     applyConstraintSubst subst constraint =
@@ -981,12 +998,12 @@ buildInstanceSkeletons scope mod0 derived = do
       ]
 
     instanceHeadsOverlap left right =
-      case unifyOverlap Map.empty left right of
+      case unifyOverlap Map.empty (tagTypeVars "__overlap_left__" left) (tagTypeVars "__overlap_right__" right) of
         Just _ -> True
         Nothing -> False
 
     unifyOverlap subst left right =
-      case (left, right) of
+      case (applyOverlapSubst subst left, applyOverlapSubst subst right) of
         (STVar name, ty) -> bindOverlap name ty subst
         (ty, STVar name) -> bindOverlap name ty subst
         (STBase leftName, STBase rightName)
@@ -1004,10 +1021,54 @@ buildInstanceSkeletons scope mod0 derived = do
 
     bindOverlap name ty subst =
       case Map.lookup name subst of
-        Nothing -> Just (Map.insert name ty subst)
-        Just existing
-          | existing == ty -> Just subst
-          | otherwise -> Nothing
+        Just existing -> unifyOverlap subst existing ty
+        Nothing
+          | ty == STVar name -> Just subst
+          | name `Set.member` freeTypeVarsInType ty -> Nothing
+          | otherwise -> Just (Map.insert name ty subst)
+
+    applyOverlapSubst subst ty =
+      case ty of
+        STVar name ->
+          case Map.lookup name subst of
+            Just replacement -> applyOverlapSubst subst replacement
+            Nothing -> ty
+        STArrow dom cod -> STArrow (applyOverlapSubst subst dom) (applyOverlapSubst subst cod)
+        STCon name args -> STCon name (fmap (applyOverlapSubst subst) args)
+        STForall name mb body ->
+          STForall name (fmap (SrcBound . applyOverlapSubst subst . unSrcBound) mb) (applyOverlapSubst subst body)
+        STMu name body -> STMu name (applyOverlapSubst subst body)
+        STBase {} -> ty
+        STBottom -> STBottom
+
+    tagTypeVars prefix = go Map.empty
+      where
+        go env ty =
+          case ty of
+            STVar name -> STVar (Map.findWithDefault (prefix ++ name) name env)
+            STArrow dom cod -> STArrow (go env dom) (go env cod)
+            STCon name args -> STCon name (fmap (go env) args)
+            STForall name mb body ->
+              let tagged = prefix ++ name
+                  env' = Map.insert name tagged env
+               in STForall tagged (fmap (SrcBound . go env . unSrcBound) mb) (go env' body)
+            STMu name body ->
+              let tagged = prefix ++ name
+               in STMu tagged (go (Map.insert name tagged env) body)
+            STBase {} -> ty
+            STBottom -> STBottom
+
+    freeTypeVarsInType ty =
+      case ty of
+        STVar name -> Set.singleton name
+        STArrow dom cod -> freeTypeVarsInType dom `Set.union` freeTypeVarsInType cod
+        STCon _ args -> foldMap freeTypeVarsInType args
+        STForall name mb body ->
+          maybe Set.empty (freeTypeVarsInType . unSrcBound) mb
+            `Set.union` Set.delete name (freeTypeVarsInType body)
+        STMu name body -> Set.delete name (freeTypeVarsInType body)
+        STBase {} -> Set.empty
+        STBottom -> Set.empty
 
     substituteConstraint paramName headTy constraint =
       constraint

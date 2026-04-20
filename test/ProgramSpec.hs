@@ -779,6 +779,31 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramOverlappingInstance \"Eq\"")
     , ProgramMatrixCase
+        "rejects overlapping instance heads after alpha-renaming variables"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Pair(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Pair a b ="
+                , "      Pair : a -> b -> Pair a b;"
+                , ""
+                , "  instance Eq (Pair a a) {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  instance Eq (Pair a b) {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramOverlappingInstance \"Eq\"")
+    , ProgramMatrixCase
         "runs parameterized deriving Eq for Option"
         ( InlineProgram $
             unlines
@@ -799,6 +824,28 @@ emlfBoundaryMatrix =
                 , ""
                 , "  def main : Bool ="
                 , "    eq (Some Zero) (Some Zero);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs same-module deriving through pending derived field instances"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, B(..), A(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data B ="
+                , "      MkB : B"
+                , "    deriving Eq;"
+                , ""
+                , "  data A ="
+                , "      MkA : B -> A"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = eq (MkA MkB) (MkA MkB);"
                 , "}"
                 ]
         )
