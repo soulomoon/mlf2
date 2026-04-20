@@ -1725,6 +1725,65 @@ spec = do
                     rendered `shouldSatisfy` isInfixOf "hint: add an explicit result type annotation"
                 Right _ -> expectationFailure "expected ambiguous constructor diagnostic"
 
+        it "renders unknown import diagnostics at the import site" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Missing;"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            located <- requireLocatedWithFile "missing-import.mlfp" programText
+            case checkLocatedProgram located of
+                Left diagnostic -> do
+                    let rendered = renderProgramDiagnostic diagnostic
+                    rendered `shouldSatisfy` isInfixOf "missing-import.mlfp:2:10"
+                    rendered `shouldSatisfy` isInfixOf "error: unknown imported module `Missing`"
+                Right _ -> expectationFailure "expected unknown import diagnostic"
+
+        it "renders duplicate import alias diagnostics at the alias site" $ do
+            let programText =
+                    unlines
+                        [ "module A export () {"
+                        , "}"
+                        , "module B export () {"
+                        , "}"
+                        , "module Main export (main) {"
+                        , "  import A as C;"
+                        , "  import B as C;"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            located <- requireLocatedWithFile "duplicate-alias.mlfp" programText
+            case checkLocatedProgram located of
+                Left diagnostic -> do
+                    let rendered = renderProgramDiagnostic diagnostic
+                    rendered `shouldSatisfy` \text ->
+                        "duplicate-alias.mlfp:6:15" `isInfixOf` text
+                            || "duplicate-alias.mlfp:7:15" `isInfixOf` text
+                    rendered `shouldSatisfy` isInfixOf "error: duplicate import alias `C`"
+                Right _ -> expectationFailure "expected duplicate import alias diagnostic"
+
+        it "renders import visibility diagnostics at the exposing item" $ do
+            let programText =
+                    unlines
+                        [ "module Hidden export () {"
+                        , "  data Nat ="
+                        , "      Zero : Nat;"
+                        , "}"
+                        , "module Main export (main) {"
+                        , "  import Hidden exposing (Nat);"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            located <- requireLocatedWithFile "hidden-import.mlfp" programText
+            case checkLocatedProgram located of
+                Left diagnostic -> do
+                    let rendered = renderProgramDiagnostic diagnostic
+                    rendered `shouldSatisfy` isInfixOf "hidden-import.mlfp:6:27"
+                    rendered `shouldSatisfy` isInfixOf "error: module `Hidden` does not export `Nat`"
+                Right _ -> expectationFailure "expected import visibility diagnostic"
+
     describe "MLF.Program runtime value rendering" $ do
         it "renders closed ADT values with source constructor syntax" $ do
             let programText =

@@ -123,8 +123,8 @@ spanForError :: ProgramError -> P.ProgramSpanIndex -> Maybe P.SourceSpan
 spanForError err index =
   case err of
     ProgramDuplicateModule name -> Map.lookup name (P.spanModules index)
-    ProgramUnknownImportModule name -> Map.lookup name (P.spanModules index)
-    ProgramImportNotExported _ name -> lookupAnyName name index
+    ProgramUnknownImportModule name -> firstSpan name (P.spanImports index) <|> Map.lookup name (P.spanModules index)
+    ProgramImportNotExported _ name -> firstSpan name (P.spanImportItems index) <|> lookupAnyName name index
     ProgramInvalidExport name -> lookupAnyName name index
     ProgramExportNotLocal name -> lookupAnyName name index
     ProgramDuplicateVisibleName name -> lookupAnyName name index
@@ -133,7 +133,7 @@ spanForError err index =
     ProgramDuplicateClass name -> firstSpan name (P.spanClasses index)
     ProgramDuplicateValue name -> firstSpan name (P.spanValues index)
     ProgramDuplicateMethod name -> firstSpan name (P.spanValues index)
-    ProgramDuplicateImportAlias name -> Map.lookup name (P.spanModules index)
+    ProgramDuplicateImportAlias name -> firstSpan name (P.spanImportAliases index) <|> Map.lookup name (P.spanModules index)
     ProgramOverlappingInstance className0 _ _ -> firstSpan className0 (P.spanClasses index)
     ProgramUnknownValue name -> lookupAnyName name index
     ProgramUnknownConstructor name -> firstSpan name (P.spanConstructors index)

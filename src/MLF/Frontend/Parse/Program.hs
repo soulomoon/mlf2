@@ -216,6 +216,18 @@ singletonModuleSpan :: ModuleName -> SourceSpan -> ProgramSpanIndex
 singletonModuleSpan name span0 =
     emptyProgramSpanIndex { spanModules = Map.singleton name span0 }
 
+singletonImportSpan :: ModuleName -> SourceSpan -> ProgramSpanIndex
+singletonImportSpan name span0 =
+    emptyProgramSpanIndex { spanImports = Map.singleton name [span0] }
+
+singletonImportAliasSpan :: ModuleName -> SourceSpan -> ProgramSpanIndex
+singletonImportAliasSpan name span0 =
+    emptyProgramSpanIndex { spanImportAliases = Map.singleton name [span0] }
+
+singletonImportItemSpan :: String -> SourceSpan -> ProgramSpanIndex
+singletonImportItemSpan name span0 =
+    emptyProgramSpanIndex { spanImportItems = Map.singleton name [span0] }
+
 singletonValueSpan :: ValueName -> SourceSpan -> ProgramSpanIndex
 singletonValueSpan name span0 =
     emptyProgramSpanIndex { spanValues = Map.singleton name [span0] }
@@ -242,7 +254,7 @@ pLocatedModule = do
     name <- upperIdent reservedWords
     exports <- optional pExportList
     (imports, decls) <- braces $ do
-        imports <- many (try pImport)
+        imports <- many (try pLocatedImport)
         decls <- many pLocatedDecl
         pure (imports, decls)
     end <- getSourcePos
@@ -251,11 +263,12 @@ pLocatedModule = do
             Module
                 { moduleName = name
                 , moduleExports = exports
-                , moduleImports = imports
+                , moduleImports = map fst imports
                 , moduleDecls = map fst decls
                 }
         spanIndex =
             singletonModuleSpan name moduleSpan
+                `appendProgramSpanIndex` mergeSpanIndexes (map snd imports)
                 `appendProgramSpanIndex` mergeSpanIndexes (map snd decls)
     pure (module0, spanIndex)
 
@@ -277,22 +290,40 @@ pExportItem =
         void (symbol ")")
         pure (ExportTypeWithConstructors tyName)
 
-pImport :: Parser Import
-pImport = do
+pLocatedImport :: Parser (Import, ProgramSpanIndex)
+pLocatedImport = do
     void (symbol "import")
-    name <- upperIdent reservedWords
+    (name, nameSpan) <- withSpan (upperIdent reservedWords)
     alias <- optional $ do
         void (symbol "as")
-        upperIdent reservedWords
+        withSpan (upperIdent reservedWords)
     exposing <- optional $ do
         void (symbol "exposing")
-        parens (commaSep pExportItem)
+        parens (commaSep pLocatedExportItem)
     void semi
-    pure Import
-        { importModuleName = name
-        , importAlias = alias
-        , importExposing = exposing
-        }
+    let import0 =
+            Import
+                { importModuleName = name
+                , importAlias = fst <$> alias
+                , importExposing = fmap (map fst) exposing
+                }
+        spans =
+            singletonImportSpan name nameSpan
+                `appendProgramSpanIndex` maybe emptyProgramSpanIndex (uncurry singletonImportAliasSpan) alias
+                `appendProgramSpanIndex` mergeSpanIndexes (maybe [] (map snd) exposing)
+    pure (import0, spans)
+
+pLocatedExportItem :: Parser (ExportItem, ProgramSpanIndex)
+pLocatedExportItem = do
+    (item, span0) <- withSpan pExportItem
+    pure (item, singletonImportItemSpan (exportItemName item) span0)
+
+exportItemName :: ExportItem -> String
+exportItemName item =
+    case item of
+        ExportValue name -> name
+        ExportType name -> name
+        ExportTypeWithConstructors name -> name
 
 pLocatedDecl :: Parser (Decl, ProgramSpanIndex)
 pLocatedDecl =
