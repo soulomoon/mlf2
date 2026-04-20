@@ -311,8 +311,6 @@ compileExpr scope mbExpected expr = case expr of
   EVar name ->
     case Map.lookup name (esValues scope) of
       Just OverloadedMethod {} -> throwError (ProgramAmbiguousMethodUse name)
-      Just OrdinaryValue {valueConstraints = _ : _} ->
-        throwError (ProgramAmbiguousConstrainedValueUse name)
       Just valueInfo@OrdinaryValue {valueRuntimeName = runtimeName} -> do
         evidenceSurfaces <- valueEvidenceArgs scope valueInfo []
         pure (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces)

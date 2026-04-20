@@ -647,6 +647,26 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramAmbiguousConstrainedValueUse \"same\"")
     , ProgramMatrixCase
+        "runs ground constrained helper alias with resolved evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, eq, sameBool, alias, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  def sameBool : Eq Bool => Bool -> Bool -> Bool = \\x \\y eq x y;"
+                , "  def alias : Bool -> Bool -> Bool = sameBool;"
+                , "  def main : Bool = alias true true;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs constrained helper after local lambda inference"
         ( InlineProgram $
             unlines
