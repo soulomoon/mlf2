@@ -393,6 +393,26 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramTypeMismatch (STBase \"Bool\") (STBase \"Nat\")")
     , ProgramMatrixCase
+        "rejects nested constructor patterns that violate their annotation"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), Box(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  def main : Bool ="
+                , "    let f = \\x case x of {"
+                , "      Box (Zero : Bool) -> true"
+                , "    } in"
+                , "    f (Box Zero);"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramTypeMismatch (STBase \"Bool\") (STBase \"Nat\")")
+    , ProgramMatrixCase
         "rejects catch-all pattern annotations when scrutinee type is inferred later"
         ( InlineProgram $
             unlines

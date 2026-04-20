@@ -1170,7 +1170,7 @@ validatePatternType scope expectedTy pattern0 =
     P.PatVar {} -> pure ()
     P.PatAnn inner annTy -> do
       validatePatternAnnotation scope expectedTy annTy
-      validatePatternType scope expectedTy inner
+      validatePatternType scope annTy inner
     P.PatCtor ctorName0 patterns -> do
       ctorInfo <- lookupConstructorInfo ctorName0
       subst <-
