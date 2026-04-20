@@ -692,6 +692,37 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs zero-method class constraint with matching instance"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Marker, needsMarker, main) {"
+                , "  class Marker a {"
+                , "  }"
+                , ""
+                , "  instance Marker Bool {"
+                , "  }"
+                , ""
+                , "  def needsMarker : Marker Bool => Bool -> Bool = \\x x;"
+                , "  def main : Bool = needsMarker true;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "rejects zero-method class constraint without matching instance"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Marker, needsMarker, main) {"
+                , "  class Marker a {"
+                , "  }"
+                , ""
+                , "  def needsMarker : Marker Bool => Bool -> Bool = \\x x;"
+                , "  def main : Bool = needsMarker true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Marker\"")
+    , ProgramMatrixCase
         "runs deferred class method with method-level Eq constraint"
         ( InlineProgram $
             unlines
@@ -910,6 +941,25 @@ emlfBoundaryMatrix =
                 , ""
                 , "  def main : Bool ="
                 , "    eq (Some Zero) (Some Zero);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs parameterized deriving Eq for phantom parameter without Eq constraint"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Phantom(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Phantom a ="
+                , "      Phantom : Phantom a"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool ="
+                , "    eq (Phantom : Phantom (Bool -> Bool)) (Phantom : Phantom (Bool -> Bool));"
                 , "}"
                 ]
         )

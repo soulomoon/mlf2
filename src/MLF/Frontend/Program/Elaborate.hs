@@ -497,21 +497,28 @@ constraintCoveredByEvidence :: ElaborateScope -> P.ClassConstraint -> Bool
 constraintCoveredByEvidence scope constraint =
   case Map.lookup (P.constraintClassName constraint) (esClasses scope) of
     Nothing -> False
-    Just classInfo ->
-      all
-        ( \methodInfo ->
-            case lookupEvidenceMethod scope (P.constraintClassName constraint) (P.constraintType constraint) (methodName methodInfo) of
-              Just _ -> True
-              Nothing -> False
-        )
-        (Map.elems (classMethods classInfo))
+    Just classInfo
+      | Map.null (classMethods classInfo) ->
+          zeroMethodConstraintCoveredByEvidence scope constraint
+      | otherwise ->
+          all
+            ( \methodInfo ->
+                case lookupEvidenceMethod scope (P.constraintClassName constraint) (P.constraintType constraint) (methodName methodInfo) of
+                  Just _ -> True
+                  Nothing -> False
+            )
+            (Map.elems (classMethods classInfo))
 
 deferConstraintEvidenceExprs :: ElaborateScope -> P.ClassConstraint -> ElaborateM [SurfaceExpr]
 deferConstraintEvidenceExprs scope constraint =
   case Map.lookup (P.constraintClassName constraint) (esClasses scope) of
     Nothing -> throwError (ProgramUnknownClass (P.constraintClassName constraint))
-    Just classInfo ->
-      mapM (deferMethodEvidenceExpr scope (P.constraintType constraint)) (Map.elems (classMethods classInfo))
+    Just classInfo
+      | Map.null (classMethods classInfo) -> do
+          _ <- liftEitherElab (resolveInstanceInfo scope (P.constraintClassName constraint) (P.constraintType constraint))
+          pure []
+      | otherwise ->
+          mapM (deferMethodEvidenceExpr scope (P.constraintType constraint)) (Map.elems (classMethods classInfo))
 
 deferMethodEvidenceExpr :: ElaborateScope -> SrcType -> MethodInfo -> ElaborateM SurfaceExpr
 deferMethodEvidenceExpr scope classArgTy methodInfo = do
@@ -656,19 +663,36 @@ resolveConstraintEvidenceExpr scope seen constraint =
     Just classInfo -> do
       let key = (P.constraintClassName constraint, show (P.constraintType constraint))
       whenSeen key
-      mapM
-        ( \methodInfo ->
-            resolveMethodHeadExpr
-              scope
-              (Set.insert key seen)
-              methodInfo
-              (P.constraintType constraint)
-        )
-        (Map.elems (classMethods classInfo))
+      if Map.null (classMethods classInfo)
+        then do
+          if zeroMethodConstraintCoveredByEvidence scope constraint
+            then pure []
+            else do
+              _ <- liftEitherElab (resolveInstanceInfo scope (P.constraintClassName constraint) (P.constraintType constraint))
+              pure []
+        else
+          mapM
+            ( \methodInfo ->
+                resolveMethodHeadExpr
+                  scope
+                  (Set.insert key seen)
+                  methodInfo
+                  (P.constraintType constraint)
+            )
+            (Map.elems (classMethods classInfo))
   where
     whenSeen key =
       when (key `Set.member` seen) $
         throwError (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
+
+zeroMethodConstraintCoveredByEvidence :: ElaborateScope -> P.ClassConstraint -> Bool
+zeroMethodConstraintCoveredByEvidence scope constraint =
+  any
+    ( \evidence ->
+        evidenceClassName evidence == P.constraintClassName constraint
+          && lowerType scope (evidenceType evidence) == lowerType scope (P.constraintType constraint)
+    )
+    (esEvidence scope)
 
 lookupEvidenceMethod :: ElaborateScope -> P.ClassName -> SrcType -> P.MethodName -> Maybe (String, SrcType)
 lookupEvidenceMethod scope className0 headTy methodName0 =

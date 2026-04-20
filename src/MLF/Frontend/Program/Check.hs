@@ -833,6 +833,27 @@ synthesizeDerivedInstances scope mod0 = do
         STVar name -> name `elem` P.dataDeclParams dataDecl
         _ -> isRecursiveOwnerField dataDecl fieldTy
 
+    derivedConstraintParams dataDecl =
+      let params = Set.fromList (P.dataDeclParams dataDecl)
+          fieldTypes =
+            filter
+              (not . isRecursiveOwnerField dataDecl)
+              (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
+          usedParams = Set.intersection params (foldMap freeTypeVars fieldTypes)
+       in [paramName | paramName <- P.dataDeclParams dataDecl, paramName `Set.member` usedParams]
+
+    freeTypeVars ty =
+      case ty of
+        STVar name -> Set.singleton name
+        STArrow dom cod -> freeTypeVars dom `Set.union` freeTypeVars cod
+        STBase {} -> Set.empty
+        STCon _ args -> foldMap freeTypeVars args
+        STForall name mb body ->
+          maybe Set.empty (freeTypeVars . unSrcBound) mb
+            `Set.union` Set.delete name (freeTypeVars body)
+        STMu name body -> Set.delete name (freeTypeVars body)
+        STBottom -> Set.empty
+
     scopeToElaborateScope scope0 =
       mkElaborateScope (scopeValues scope0) (scopeTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
 
@@ -855,7 +876,7 @@ synthesizeDerivedInstances scope mod0 = do
             { P.instanceDeclClass = "Eq",
               P.instanceDeclConstraints =
                 [ P.ClassConstraint "Eq" (STVar paramName)
-                  | paramName <- P.dataDeclParams dataDecl
+                  | paramName <- derivedConstraintParams dataDecl
                 ],
               P.instanceDeclType = headTy,
               P.instanceDeclMethods = [P.MethodDef "eq" methodBody]
