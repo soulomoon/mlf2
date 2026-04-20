@@ -1744,6 +1744,26 @@ spec = do
             program <- requireParsed programText
             (prettyValue <$> runProgram program) `shouldBe` Right "Some (Succ Zero)"
 
+        it "renders qualified ADT main annotations with source constructor syntax" $ do
+            let programText =
+                    unlines
+                        [ "module Core export (Nat(..), Option(..)) {"
+                        , "  data Nat ="
+                        , "      Zero : Nat;"
+                        , ""
+                        , "  data Option a ="
+                        , "      None : Option a"
+                        , "    | Some : a -> Option a;"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  import Core as A;"
+                        , "  def main : A.Option A.Nat = A.Some A.Zero;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            (prettyValue <$> runProgram program) `shouldBe` Right "Some Zero"
+
         it "does not decode non-data main values through fallback ADT decoding" $ do
             let programText =
                     unlines

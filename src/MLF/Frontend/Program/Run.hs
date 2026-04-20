@@ -158,37 +158,51 @@ programElaborateScope checked =
 
 decodeSourceValue :: CheckedProgram -> SrcType -> ElabTerm -> Maybe Value
 decodeSourceValue checked srcTy term =
-  case lookupDataInfoForType checked srcTy of
-    Just dataInfo -> decodeChurchData checked dataInfo (dataTypeSubst dataInfo srcTy) term
-    Nothing ->
+  case lookupDataInfosForType checked srcTy of
+    [] ->
       case stripRuntimeWrappers term of
         ELit lit -> Just (VLit lit)
         _ -> Nothing
+    dataInfos ->
+      firstJust
+        [ decodeChurchData checked dataInfo (dataTypeSubst dataInfo srcTy) term
+          | dataInfo <- dataInfos
+        ]
 
-lookupDataInfoForType :: CheckedProgram -> SrcType -> Maybe DataInfo
-lookupDataInfoForType checked srcTy =
+firstJust :: [Maybe a] -> Maybe a
+firstJust values =
+  case [value | Just value <- values] of
+    value : _ -> Just value
+    [] -> Nothing
+
+lookupDataInfosForType :: CheckedProgram -> SrcType -> [DataInfo]
+lookupDataInfosForType checked srcTy =
   case srcTy of
-    STBase name -> lookupDataInfoByName checked name
-    STCon name _ -> lookupDataInfoByName checked name
-    _ -> Nothing
+    STBase name -> lookupDataInfosByName checked name
+    STCon name _ -> lookupDataInfosByName checked name
+    _ -> []
 
 sourceTypeIsData :: CheckedProgram -> SrcType -> Bool
 sourceTypeIsData checked srcTy =
-  case lookupDataInfoForType checked srcTy of
-    Just _ -> True
-    Nothing -> False
+  not (null (lookupDataInfosForType checked srcTy))
 
-lookupDataInfoByName :: CheckedProgram -> String -> Maybe DataInfo
-lookupDataInfoByName checked name =
-  case
-    [ dataInfo
-      | checkedModule <- checkedProgramModules checked,
-        dataInfo <- map snd (Map.toList (checkedModuleData checkedModule)),
-        dataName dataInfo == name
-    ]
-  of
-    dataInfo : _ -> Just dataInfo
-    [] -> Nothing
+lookupDataInfosByName :: CheckedProgram -> String -> [DataInfo]
+lookupDataInfosByName checked name =
+  case exactMatches of
+    [] -> [dataInfo | dataInfo <- infos, dataTypeHeadMatches dataInfo name]
+    _ -> exactMatches
+  where
+    infos = allDataInfos checked
+    exactMatches = [dataInfo | dataInfo <- infos, dataName dataInfo == name]
+
+dataTypeHeadMatches :: DataInfo -> String -> Bool
+dataTypeHeadMatches dataInfo name =
+  dataName dataInfo == name
+    || dataName dataInfo == unqualifiedSourceHead name
+
+unqualifiedSourceHead :: String -> String
+unqualifiedSourceHead =
+  reverse . takeWhile (/= '.') . reverse
 
 allDataInfos :: CheckedProgram -> [DataInfo]
 allDataInfos checked =
@@ -225,9 +239,9 @@ dataTypeSubst :: DataInfo -> SrcType -> Map.Map String SrcType
 dataTypeSubst dataInfo srcTy =
   case (dataParams dataInfo, srcTy) of
     ([], STBase name)
-      | name == dataName dataInfo -> Map.empty
+      | dataTypeHeadMatches dataInfo name -> Map.empty
     (params, STCon name args)
-      | name == dataName dataInfo && length params == length args ->
+      | dataTypeHeadMatches dataInfo name && length params == length args ->
           Map.fromList (zip params (toList args))
     _ -> Map.empty
 
