@@ -409,7 +409,7 @@ emlfBoundaryMatrix =
                 , "}"
                 ]
         )
-        (ExpectCheckFailureContaining "ProgramPipelineError")
+        (ExpectCheckFailureContaining "ProgramTypeMismatch (STBase \"Int\") (STBase \"Nat\")")
     , ProgramMatrixCase
         "rejects branches after catch-all as unreachable"
         ( InlineProgram $
@@ -622,6 +622,25 @@ emlfBoundaryMatrix =
                 , ""
                 , "  def same : Eq a => a -> a -> Bool = \\x \\y eq x y;"
                 , "  def main : Bool = same Zero Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs constrained helper after local lambda inference"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, eq, same, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  def same : Eq a => a -> a -> Bool = \\x \\y eq x y;"
+                , "  def main : Bool = let f = \\x same x x in f true;"
                 , "}"
                 ]
         )

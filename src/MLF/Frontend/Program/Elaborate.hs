@@ -338,33 +338,37 @@ compileExpr scope mbExpected expr = case expr of
     if name `notElem` collectFreeValues Set.empty body && mbTy == Nothing
       then compileExpr scope mbExpected body
       else do
-        runtimeName <- freshRuntimeName name
         let recursive = mentionsFreeValue name rhs
-        provisionalTy <- case (recursive, mbTy) of
-          (True, Nothing) -> Just <$> freshTypeName
-          _ -> pure mbTy
-        selfScope <-
-          if recursive
-            then extendLocal scope name runtimeName provisionalTy
-            else pure scope
-        rhsExpr <- compileExpr selfScope provisionalTy rhs
-        bindingTy <- case mbTy of
-          Just ty -> pure (lowerType scope ty)
-          Nothing
-            | Just rhsTy <- explicitExprAnnotation rhs -> pure (lowerType scope rhsTy)
-            | Just rhsTy <- inferKnownExprType selfScope rhs -> pure (lowerType scope rhsTy)
-            | Just ty <- provisionalTy -> pure (lowerType scope ty)
-          Nothing -> freshTypeName
-        let rhsExpr' =
-              case mbTy of
-                Just ty -> surfaceAnn rhsExpr (lowerType scope ty)
-                Nothing ->
-                  case inferKnownExprType selfScope rhs of
+        case (recursive, mbTy, inlineImmediateLetUse name rhs body) of
+          (False, Nothing, Just inlined) ->
+            compileExpr scope mbExpected inlined
+          _ -> do
+            runtimeName <- freshRuntimeName name
+            provisionalTy <- case (recursive, mbTy) of
+              (True, Nothing) -> Just <$> freshTypeName
+              _ -> pure mbTy
+            selfScope <-
+              if recursive
+                then extendLocal scope name runtimeName provisionalTy
+                else pure scope
+            rhsExpr <- compileExpr selfScope provisionalTy rhs
+            bindingTy <- case mbTy of
+              Just ty -> pure (lowerType scope ty)
+              Nothing
+                | Just rhsTy <- explicitExprAnnotation rhs -> pure (lowerType scope rhsTy)
+                | Just rhsTy <- inferKnownExprType selfScope rhs -> pure (lowerType scope rhsTy)
+                | Just ty <- provisionalTy -> pure (lowerType scope ty)
+              Nothing -> freshTypeName
+            let rhsExpr' =
+                  case mbTy of
                     Just ty -> surfaceAnn rhsExpr (lowerType scope ty)
-                    Nothing -> rhsExpr
-        bodyScope <- extendLocalLowered scope name runtimeName bindingTy
-        bodyExpr <- compileExpr bodyScope mbExpected body
-        pure (surfaceLet runtimeName rhsExpr' bodyExpr)
+                    Nothing ->
+                      case inferKnownExprType selfScope rhs of
+                        Just ty -> surfaceAnn rhsExpr (lowerType scope ty)
+                        Nothing -> rhsExpr
+            bodyScope <- extendLocalLowered scope name runtimeName bindingTy
+            bodyExpr <- compileExpr bodyScope mbExpected body
+            pure (surfaceLet runtimeName rhsExpr' bodyExpr)
   EAnn inner annTy -> do
     innerExpr <- compileExpr scope (Just annTy) inner
     pure (surfaceAnn innerExpr (lowerType scope annTy))
@@ -380,8 +384,16 @@ compileApp scope mbExpected expr =
           compileValueApp scope mbExpected valueInfo args
     (headExpr, [arg])
       | Just expectedTy <- mbExpected -> do
-          headSurface <- compileExpr scope (Just (STArrow expectedTy expectedTy)) headExpr
-          argSurface <- compileExpr scope (Just expectedTy) arg
+          (expectedHeadTy, argSurface) <-
+            case inferKnownExprType scope arg of
+              Just argTy -> do
+                argSurface <- compileExpr scope (Just argTy) arg
+                pure (STArrow argTy expectedTy, argSurface)
+              Nothing -> do
+                argTy <- freshTypeName
+                argSurface <- compileExpr scope Nothing arg
+                pure (STArrow argTy expectedTy, argSurface)
+          headSurface <- compileExpr scope (Just expectedHeadTy) headExpr
           pure (surfaceApp headSurface argSurface)
     (headExpr, args) -> do
       headSurface <- compileExpr scope Nothing headExpr
@@ -455,8 +467,50 @@ valueEvidenceArgs scope OrdinaryValue {valueType = visibleTy, valueConstraints =
             case constraints of
               constraint : _ -> throwError (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
               [] -> pure Map.empty
-      concat <$> mapM (resolveConstraintEvidenceExpr scope Set.empty . applyConstraintSubst subst) constraints
+      concat <$> mapM (constraintEvidenceArgExprs scope . applyConstraintSubst subst) constraints
 valueEvidenceArgs _ _ _ = pure []
+
+constraintEvidenceArgExprs :: ElaborateScope -> P.ClassConstraint -> ElaborateM [SurfaceExpr]
+constraintEvidenceArgExprs scope constraint
+  | shouldDeferConstraintEvidence scope constraint =
+      deferConstraintEvidenceExprs scope constraint
+  | otherwise =
+      resolveConstraintEvidenceExpr scope Set.empty constraint
+
+shouldDeferConstraintEvidence :: ElaborateScope -> P.ClassConstraint -> Bool
+shouldDeferConstraintEvidence scope constraint =
+  not (Set.null (freeTypeVarsSrcType (P.constraintType constraint)))
+    && not (constraintCoveredByEvidence scope constraint)
+
+constraintCoveredByEvidence :: ElaborateScope -> P.ClassConstraint -> Bool
+constraintCoveredByEvidence scope constraint =
+  case Map.lookup (P.constraintClassName constraint) (esClasses scope) of
+    Nothing -> False
+    Just classInfo ->
+      all
+        ( \methodInfo ->
+            case lookupEvidenceMethod scope (P.constraintClassName constraint) (P.constraintType constraint) (methodName methodInfo) of
+              Just _ -> True
+              Nothing -> False
+        )
+        (Map.elems (classMethods classInfo))
+
+deferConstraintEvidenceExprs :: ElaborateScope -> P.ClassConstraint -> ElaborateM [SurfaceExpr]
+deferConstraintEvidenceExprs scope constraint =
+  case Map.lookup (P.constraintClassName constraint) (esClasses scope) of
+    Nothing -> throwError (ProgramUnknownClass (P.constraintClassName constraint))
+    Just classInfo ->
+      mapM (deferMethodEvidenceExpr scope (P.constraintType constraint)) (Map.elems (classMethods classInfo))
+
+deferMethodEvidenceExpr :: ElaborateScope -> SrcType -> MethodInfo -> ElaborateM SurfaceExpr
+deferMethodEvidenceExpr scope classArgTy methodInfo = do
+  let methodTy =
+        stripVacuousSrcForalls $
+          specializeMethodType (methodType methodInfo) (methodParamName methodInfo) classArgTy
+      fullArity = methodFullArity methodInfo
+  placeholder <- deferMethodCall scope methodInfo fullArity methodTy
+  expanded <- etaExpandMissingArgs scope methodInfo methodTy 0 fullArity (surfaceVar placeholder)
+  pure (surfaceAnn expanded (lowerType scope methodTy))
 
 inferCallSubst :: ElaborateScope -> SrcType -> [P.Expr] -> Maybe (Map String SrcType)
 inferCallSubst scope visibleTy args = do
@@ -468,6 +522,25 @@ inferCallSubst scope visibleTy args = do
             Just actualTy <- [inferKnownExprType scope arg]
         ]
   foldM (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy) Map.empty knownPairs
+
+inlineImmediateLetUse :: String -> P.Expr -> P.Expr -> Maybe P.Expr
+inlineImmediateLetUse bindingName rhs body =
+  let (headExpr, args) = collectApps body
+   in case (headExpr, args) of
+        (EVar name, _ : _)
+          | name == bindingName,
+            rhsConsumesAppliedArgs rhs (length args) ->
+              Just (foldl EApp rhs args)
+        _ -> Nothing
+
+rhsConsumesAppliedArgs :: P.Expr -> Int -> Bool
+rhsConsumesAppliedArgs _ 0 = True
+rhsConsumesAppliedArgs expr argCount =
+  case expr of
+    ELam param body ->
+      mentionsFreeValue (P.paramName param) body
+        && rhsConsumesAppliedArgs body (argCount - 1)
+    _ -> True
 
 isLocalOrdinaryValue :: ValueInfo -> Bool
 isLocalOrdinaryValue OrdinaryValue {valueOriginModule = "<local>"} = True

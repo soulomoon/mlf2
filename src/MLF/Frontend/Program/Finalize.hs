@@ -218,6 +218,12 @@ runSurfacePipeline scope forceUnchecked deferredObligations externalTypes surfac
 
     externalBindingModeFor name =
       case Map.lookup name deferredObligations of
+        Just (DeferredMethod {}) ->
+          case Map.lookup name externalTypes of
+            Just ty
+              | not (Set.null (freeTypeVarsSrcTypeLocal ty)) ->
+                  ExternalBindingMonomorphic
+            _ -> ExternalBindingScheme
         Just (DeferredConstructor deferred) -> convertDeferredBindingMode (deferredConstructorBindingMode deferred)
         Just (DeferredCase {}) -> ExternalBindingMonomorphic
         _ -> ExternalBindingScheme
@@ -226,6 +232,22 @@ runSurfacePipeline scope forceUnchecked deferredObligations externalTypes surfac
       case mode of
         DeferredBindingScheme -> ExternalBindingScheme
         DeferredBindingMonomorphic -> ExternalBindingMonomorphic
+
+    freeTypeVarsSrcTypeLocal = go Set.empty
+      where
+        go boundVars ty =
+          case ty of
+            STVar name
+              | name `Set.member` boundVars -> Set.empty
+              | otherwise -> Set.singleton name
+            STArrow dom cod -> go boundVars dom `Set.union` go boundVars cod
+            STBase {} -> Set.empty
+            STCon _ args -> foldMap (go boundVars) args
+            STForall name mb body ->
+              maybe Set.empty (go boundVars . unSrcBound) mb
+                `Set.union` go (Set.insert name boundVars) body
+            STMu name body -> go (Set.insert name boundVars) body
+            STBottom -> Set.empty
 
 finalizeDeferredObligations ::
   ElaborateScope ->
