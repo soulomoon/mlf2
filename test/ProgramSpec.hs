@@ -1324,6 +1324,33 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs aliased instance head when class is imported from another module"
+        ( InlineProgram $
+            unlines
+                [ "module Classes export (Eq, eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Core export (Foo(..)) {"
+                , "  import Classes exposing (Eq, eq);"
+                , ""
+                , "  data Foo ="
+                , "      Foo : Foo"
+                , "    deriving Eq;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Classes exposing (Eq, eq);"
+                , "  import Core as A;"
+                , ""
+                , "  def main : Bool = eq A.Foo A.Foo;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs qualified type name in annotation"
         ( InlineProgram $
             unlines

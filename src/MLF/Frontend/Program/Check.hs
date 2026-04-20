@@ -480,19 +480,42 @@ qualifiedInstancesForImport priorExports priorInstances imp =
                 [ instanceInfo
                   | instanceInfo <- priorInstances,
                     instanceBelongsToModule (P.importModuleName imp) instanceInfo,
-                    instanceClassName instanceInfo `Map.member` exportedClasses exports
+                    instanceVisibleForQualifiedImport exports instanceInfo
                 ]
-              qualifiedInstances =
-                [ qualifyInstance alias exports instanceInfo
-                  | instanceInfo <- importedInstances
-                ]
-              headOnlyInstances =
-                [ headOnly
-                  | instanceInfo <- importedInstances,
-                    let headOnly = qualifyInstanceHeadOnly alias exports instanceInfo,
-                    not (sameInstanceHead instanceInfo headOnly)
-                ]
-           in qualifiedInstances ++ headOnlyInstances
+           in concatMap (qualifiedInstanceVariants alias exports) importedInstances
+
+instanceVisibleForQualifiedImport :: ModuleExports -> InstanceInfo -> Bool
+instanceVisibleForQualifiedImport exports instanceInfo =
+  instanceClassName instanceInfo `Map.member` exportedClasses exports
+    || srcTypeMentionsAny (Map.keysSet (exportedTypes exports)) (instanceHeadType instanceInfo)
+
+srcTypeMentionsAny :: Set.Set String -> SrcType -> Bool
+srcTypeMentionsAny names ty =
+  case ty of
+    STVar {} -> False
+    STBase name -> name `Set.member` names
+    STCon name args -> name `Set.member` names || any (srcTypeMentionsAny names) args
+    STArrow dom cod -> srcTypeMentionsAny names dom || srcTypeMentionsAny names cod
+    STForall _ mb body ->
+      maybe False (srcTypeMentionsAny names . unSrcBound) mb
+        || srcTypeMentionsAny names body
+    STMu _ body -> srcTypeMentionsAny names body
+    STBottom -> False
+
+qualifiedInstanceVariants :: P.ModuleName -> ModuleExports -> InstanceInfo -> [InstanceInfo]
+qualifiedInstanceVariants alias exports instanceInfo =
+  distinctInstanceHeads
+    [ variant
+      | variant <- [qualifyInstance alias exports instanceInfo, qualifyInstanceHeadOnly alias exports instanceInfo],
+        not (sameInstanceHead instanceInfo variant)
+    ]
+
+distinctInstanceHeads :: [InstanceInfo] -> [InstanceInfo]
+distinctInstanceHeads = reverse . foldl' add []
+  where
+    add acc instanceInfo
+      | any (sameInstanceHead instanceInfo) acc = acc
+      | otherwise = instanceInfo : acc
 
 sameInstanceHead :: InstanceInfo -> InstanceInfo -> Bool
 sameInstanceHead left right =
