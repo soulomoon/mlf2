@@ -15,6 +15,7 @@ module MLF.Constraint.Presolution.TestSupport (
     decideMinimalExpansion,
     processInstEdge,
     validateReplayMapTraceContract,
+    unifyAcyclic,
     unifyAcyclicRawWithRaiseTrace,
     runEdgeUnifyForTest,
     instantiateScheme,
@@ -56,7 +57,10 @@ import MLF.Constraint.Presolution.Expansion
     , mergeExpansions
     )
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
-import MLF.Constraint.Presolution.Unify (unifyAcyclicRawWithRaiseTrace)
+import MLF.Constraint.Presolution.Unify
+    ( unifyAcyclic
+    , unifyAcyclicRawWithRaiseTrace
+    )
 import MLF.Constraint.Presolution.Validation
     ( translatableWeakenedNodes
     , validateTranslatablePresolution
