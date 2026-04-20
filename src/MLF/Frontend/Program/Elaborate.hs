@@ -1188,7 +1188,7 @@ compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnot
     compilePatternSequence scope0 [] body _ =
       compileExpr scope0 (Just resultTy) body
     compilePatternSequence scope0 ((pattern0, runtimeName, argTy) : rest) body mbFallback =
-      case stripPatternAnn pattern0 of
+      case pattern0 of
         P.PatWildcard -> compilePatternSequence scope0 rest body mbFallback
         P.PatVar sourceName -> do
           scope' <- extendLocal scope0 sourceName runtimeName (Just argTy)
@@ -1199,24 +1199,34 @@ compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnot
           if length nestedPatterns /= length (ctorArgs nestedCtorInfo)
             then throwError (ProgramPatternConstructorMismatch nestedCtorName argTy)
             else do
-              fallback <-
-                case mbFallback of
-                  Just fallback0 -> pure fallback0
-                  Nothing -> throwError (ProgramNonExhaustiveCase [ctorName ctorInfo])
               nestedRuntimeNames <- mapM freshRuntimeName ["pat" ++ show ix | ix <- [1 .. length (ctorArgs nestedCtorInfo)]]
               let forceNestedAnnotations = any (not . null . ctorForalls) (dataConstructors nestedDataInfo)
                   nestedArgTys = specializeConstructorArgsForScrutinee argTy nestedCtorInfo
               matchingBody <- compilePatternSequence scope0 (zip3 nestedPatterns nestedRuntimeNames nestedArgTys ++ rest) body mbFallback
+              fallback <-
+                case mbFallback of
+                  Just fallback0 -> pure (Just fallback0)
+                  Nothing
+                    | nestedPatternNeedsFallback nestedDataInfo nestedCtorInfo ->
+                        throwError (ProgramNonExhaustiveCase [ctorName ctorInfo])
+                  Nothing -> pure Nothing
               handlers <- mapM (nestedHandler forceNestedAnnotations argTy nestedCtorInfo nestedRuntimeNames matchingBody fallback) (dataConstructors nestedDataInfo)
               placeholder <- deferCaseCall scope0 nestedDataInfo argTy resultTy
               pure (foldl surfaceApp (surfaceVar placeholder) (surfaceVar runtimeName : handlers))
-        P.PatAnn inner _ -> compilePatternSequence scope0 ((inner, runtimeName, argTy) : rest) body mbFallback
+        P.PatAnn inner annTy -> compilePatternSequence scope0 ((inner, runtimeName, annTy) : rest) body mbFallback
 
-    nestedHandler forceNestedAnnotations nestedScrutineeTy targetCtor nestedRuntimeNames matchingBody fallback ctor =
+    nestedPatternNeedsFallback nestedDataInfo targetCtor =
+      any ((/= ctorName targetCtor) . ctorName) (dataConstructors nestedDataInfo)
+
+    nestedHandler forceNestedAnnotations nestedScrutineeTy targetCtor nestedRuntimeNames matchingBody mbFallback ctor =
       let ctorArgTys = specializeConstructorArgsForScrutinee nestedScrutineeTy ctor
           specializedCtor = ctor {ctorArgs = ctorArgTys}
           argNames = if ctorName ctor == ctorName targetCtor then nestedRuntimeNames else ["unused" ++ show ix | ix <- [1 .. length ctorArgTys]]
-          selectedBody = if ctorName ctor == ctorName targetCtor then matchingBody else fallback
+          selectedBody =
+            case (ctorName ctor == ctorName targetCtor, mbFallback) of
+              (True, _) -> matchingBody
+              (False, Just fallback) -> fallback
+              (False, Nothing) -> matchingBody
           handlerBody =
             foldr
               (\(name, argTy) acc -> surfaceLamAnn name (lowerType scope argTy) acc)

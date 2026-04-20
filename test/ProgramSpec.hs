@@ -377,6 +377,49 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs exhaustive nested constructor pattern without fallback"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Unit(..), Wrap(..), main) {"
+                , "  data Unit ="
+                , "      Unit : Unit;"
+                , ""
+                , "  data Wrap ="
+                , "      Wrap : Unit -> Wrap;"
+                , ""
+                , "  def main : Bool = case Wrap Unit of {"
+                , "    Wrap Unit -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "uses nested pattern annotations to type binders"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Nat(..), Box(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    deriving Eq;"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  def main : Bool ="
+                , "    let useBox = \\box case box of {"
+                , "      Box (n : Nat) -> eq n n"
+                , "    } in"
+                , "    useBox (Box Zero);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "rejects mismatched pattern annotations"
         ( InlineProgram $
             unlines
