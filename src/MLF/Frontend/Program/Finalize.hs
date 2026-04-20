@@ -34,6 +34,7 @@ import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
     elaborateScopeRuntimeTypes,
+    freeTypeVarsSrcType,
     inferClassArgument,
     lowerType,
     matchTypes,
@@ -775,18 +776,26 @@ resolveConstraintEvidenceTerm scope seen constraint = do
               seen'
               (map (applyConstraintSubst subst) (instanceConstraints instanceInfo))
           Right []
-        else mapM (materializeMethodEvidence seen' subst) methodValues
+        else mapM (materializeMethodEvidence (freeTypeVarsSrcType (P.constraintType constraint)) seen' subst) methodValues
   where
     ordinaryInstanceMethods instanceInfo =
       [valueInfo | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethods instanceInfo)]
 
-    materializeMethodEvidence seen' subst valueInfo = do
+    materializeMethodEvidence headVars seen' subst valueInfo = do
+      let eagerConstraints =
+            filter
+              (constraintDeterminedByTypeVars headVars)
+              (map (applyConstraintSubst subst) (methodValueConstraints valueInfo))
       nestedEvidence <-
         resolveConstraintEvidenceTerms
           scope
           seen'
-          (map (applyConstraintSubst subst) (methodValueConstraints valueInfo))
+          eagerConstraints
       pure (foldl X.EApp (instantiateMethodValue scope subst valueInfo) nestedEvidence)
+
+constraintDeterminedByTypeVars :: Set String -> P.ClassConstraint -> Bool
+constraintDeterminedByTypeVars typeVars constraint =
+  freeTypeVarsSrcType (P.constraintType constraint) `Set.isSubsetOf` typeVars
 
 methodValueConstraints :: ValueInfo -> [P.ClassConstraint]
 methodValueConstraints OrdinaryValue {valueConstraints = constraints} = constraints

@@ -753,6 +753,33 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs constrained helper with method-local evidence fixed by call args"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Mix, eq, mix, callMix, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  class Mix a {"
+                , "    mix : Eq b => a -> b -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Mix Bool {"
+                , "    mix = \\x \\y eq y y;"
+                , "  }"
+                , ""
+                , "  def callMix : Mix Bool => Bool -> Bool -> Bool = \\x \\y mix x y;"
+                , "  def main : Bool = callMix true true;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs zero-method class constraint with matching instance"
         ( InlineProgram $
             unlines
