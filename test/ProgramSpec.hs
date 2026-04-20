@@ -750,6 +750,34 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs zero-method class instance after resolving prerequisites"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Marker, Nat(..), eq, needsMarker, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  class Marker a {"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , ""
+                , "  instance Eq Nat {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  instance Eq a => Marker a {"
+                , "  }"
+                , ""
+                , "  def needsMarker : Marker Nat => Bool -> Bool = \\x x;"
+                , "  def main : Bool = needsMarker true;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "rejects zero-method class constraint without matching instance"
         ( InlineProgram $
             unlines
@@ -763,6 +791,30 @@ emlfBoundaryMatrix =
                 ]
         )
         (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Marker\"")
+    , ProgramMatrixCase
+        "rejects zero-method class instance when prerequisite is missing"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Marker, Nat(..), eq, needsMarker, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  class Marker a {"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , ""
+                , "  instance Eq a => Marker a {"
+                , "  }"
+                , ""
+                , "  def needsMarker : Marker Nat => Bool -> Bool = \\x x;"
+                , "  def main : Bool = needsMarker true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\"")
     , ProgramMatrixCase
         "runs qualified zero-method class instance through aliased import"
         ( InlineProgram $

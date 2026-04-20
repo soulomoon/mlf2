@@ -521,9 +521,8 @@ deferConstraintEvidenceExprs scope constraint =
   case Map.lookup (P.constraintClassName constraint) (esClasses scope) of
     Nothing -> throwError (ProgramUnknownClass (P.constraintClassName constraint))
     Just classInfo
-      | Map.null (classMethods classInfo) -> do
-          _ <- liftEitherElab (resolveInstanceInfo scope (P.constraintClassName constraint) (P.constraintType constraint))
-          pure []
+      | Map.null (classMethods classInfo) ->
+          resolveZeroMethodEvidenceExpr scope Set.empty constraint
       | otherwise ->
           mapM (deferMethodEvidenceExpr scope (P.constraintType constraint)) (Map.elems (classMethods classInfo))
 
@@ -671,12 +670,7 @@ resolveConstraintEvidenceExpr scope seen constraint =
       let key = (P.constraintClassName constraint, show (P.constraintType constraint))
       whenSeen key
       if Map.null (classMethods classInfo)
-        then do
-          if zeroMethodConstraintCoveredByEvidence scope constraint
-            then pure []
-            else do
-              _ <- liftEitherElab (resolveInstanceInfo scope (P.constraintClassName constraint) (P.constraintType constraint))
-              pure []
+        then resolveZeroMethodEvidenceExpr scope seen constraint
         else
           mapM
             ( \methodInfo ->
@@ -691,6 +685,19 @@ resolveConstraintEvidenceExpr scope seen constraint =
     whenSeen key =
       when (key `Set.member` seen) $
         throwError (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
+
+resolveZeroMethodEvidenceExpr :: ElaborateScope -> Set (P.ClassName, String) -> P.ClassConstraint -> ElaborateM [SurfaceExpr]
+resolveZeroMethodEvidenceExpr scope seen constraint
+  | zeroMethodConstraintCoveredByEvidence scope constraint = pure []
+  | otherwise = do
+      let key = (P.constraintClassName constraint, show (P.constraintType constraint))
+      (instanceInfo, subst) <- liftEitherElab (resolveInstanceInfoWithSubst scope (P.constraintClassName constraint) (P.constraintType constraint))
+      _ <-
+        concat
+          <$> mapM
+            (resolveConstraintEvidenceExpr scope (Set.insert key seen) . applyConstraintSubst subst)
+            (instanceConstraints instanceInfo)
+      pure []
 
 zeroMethodConstraintCoveredByEvidence :: ElaborateScope -> P.ClassConstraint -> Bool
 zeroMethodConstraintCoveredByEvidence scope constraint =
