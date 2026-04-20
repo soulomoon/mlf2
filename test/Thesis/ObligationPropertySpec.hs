@@ -503,7 +503,14 @@ propApplyO _size =
 
 propApplySeq :: Int -> Property
 propApplySeq _size =
-  applyShouldBe forallA (Elab.InstApp intTy) intTy
+  let first = Elab.InstIntro
+      second = Elab.InstElim
+      lhs = Elab.applyInstantiation intTy (Elab.InstSeq first second)
+      rhs = Elab.applyInstantiation intTy first >>= \midTy -> Elab.applyInstantiation midTy second
+   in conjoin
+        [ lhs === rhs,
+          lhs === Right intTy
+        ]
 
 propApplyInner :: Int -> Property
 propApplyInner _size =
