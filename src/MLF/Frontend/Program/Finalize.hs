@@ -53,8 +53,10 @@ import MLF.Frontend.Program.Types
     MethodInfo (..),
     ProgramError (..),
     ValueInfo (..),
+    splitArrows,
     splitForalls,
     substituteTypeVar,
+    specializeMethodType,
   )
 import MLF.Frontend.Syntax (Expr (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
 import qualified MLF.Frontend.Syntax.Program as P
@@ -722,8 +724,12 @@ resolveDeferredMethods scope deferredMethods = go
               Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
           (instanceInfo, subst) <- resolveInstanceInfoWithSubst scope (methodClassName methodInfo) classArgTy
           methodValue <- concreteMethodValue instanceInfo methodInfo
-          evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty (map (applyConstraintSubst subst) (methodValueConstraints methodValue))
-          let methodHead = instantiateMethodValue scope subst methodValue
+          methodSubst <-
+            case inferMethodArgumentSubst methodInfo classArgTy subst argTypes of
+              Just subst' -> Right subst'
+              Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+          evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty (map (applyConstraintSubst methodSubst) (methodValueConstraints methodValue))
+          let methodHead = instantiateMethodValue scope methodSubst methodValue
           Right (foldl X.EApp (foldl X.EApp methodHead evidenceArgs) args)
 
     inferDeferredArgType env arg =
@@ -737,6 +743,15 @@ resolveDeferredMethods scope deferredMethods = go
       case Map.lookup (methodName methodInfo) (instanceMethods instanceInfo) of
         Just valueInfo@OrdinaryValue {} -> Right valueInfo
         _ -> Left (ProgramUnknownMethod (methodName methodInfo))
+
+    inferMethodArgumentSubst methodInfo classArgTy subst argTypes =
+      let specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) classArgTy
+          (_, bodyTy) = splitForalls specializedMethodTy
+          (paramTys, _) = splitArrows bodyTy
+       in foldM
+            (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy)
+            subst
+            (zip paramTys argTypes)
 
 resolveConstraintEvidenceTerms :: ElaborateScope -> Set (P.ClassName, String) -> [P.ClassConstraint] -> Either ProgramError [ElabTerm]
 resolveConstraintEvidenceTerms scope seen constraints =

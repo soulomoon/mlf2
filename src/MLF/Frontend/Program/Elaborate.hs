@@ -311,7 +311,11 @@ compileExpr scope mbExpected expr = case expr of
   EVar name ->
     case Map.lookup name (esValues scope) of
       Just OverloadedMethod {} -> throwError (ProgramAmbiguousMethodUse name)
-      Just OrdinaryValue {valueRuntimeName = runtimeName} -> pure (surfaceVar runtimeName)
+      Just OrdinaryValue {valueConstraints = _ : _} ->
+        throwError (ProgramAmbiguousConstrainedValueUse name)
+      Just valueInfo@OrdinaryValue {valueRuntimeName = runtimeName} -> do
+        evidenceSurfaces <- valueEvidenceArgs scope valueInfo []
+        pure (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces)
       Just ConstructorValue {valueCtorInfo = ctorInfo} -> do
         placeholder <- deferConstructorCall scope ctorInfo 0 mbExpected
         pure (surfaceVar placeholder)
@@ -457,7 +461,7 @@ constructorExpectedArgTypes scope ctorInfo args =
        in (subst', expectedTy : acc)
 
 valueEvidenceArgs :: ElaborateScope -> ValueInfo -> [P.Expr] -> ElaborateM [SurfaceExpr]
-valueEvidenceArgs scope OrdinaryValue {valueType = visibleTy, valueConstraints = constraints} args
+valueEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, valueType = visibleTy, valueConstraints = constraints} args
   | null constraints = pure []
   | otherwise = do
       subst <-
@@ -467,7 +471,14 @@ valueEvidenceArgs scope OrdinaryValue {valueType = visibleTy, valueConstraints =
             case constraints of
               constraint : _ -> throwError (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
               [] -> pure Map.empty
-      concat <$> mapM (constraintEvidenceArgExprs scope . applyConstraintSubst subst) constraints
+      let specializedConstraints = map (applyConstraintSubst subst) constraints
+      if any usesLocalPolymorphicEvidence specializedConstraints
+        then throwError (ProgramAmbiguousConstrainedValueUse displayName)
+        else concat <$> mapM (constraintEvidenceArgExprs scope) specializedConstraints
+  where
+    usesLocalPolymorphicEvidence constraint =
+      not (Set.null (freeTypeVarsSrcType (P.constraintType constraint)))
+        && constraintCoveredByEvidence scope constraint
 valueEvidenceArgs _ _ _ = pure []
 
 constraintEvidenceArgExprs :: ElaborateScope -> P.ClassConstraint -> ElaborateM [SurfaceExpr]

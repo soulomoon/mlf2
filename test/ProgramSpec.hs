@@ -627,6 +627,26 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "rejects constrained helper alias through local hidden Eq evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, eq, same, alias, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  def same : Eq a => a -> a -> Bool = \\x \\y eq x y;"
+                , "  def alias : Eq a => a -> a -> Bool = same;"
+                , "  def main : Bool = alias true true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramAmbiguousConstrainedValueUse \"same\"")
+    , ProgramMatrixCase
         "runs constrained helper after local lambda inference"
         ( InlineProgram $
             unlines
@@ -641,6 +661,32 @@ emlfBoundaryMatrix =
                 , ""
                 , "  def same : Eq a => a -> a -> Bool = \\x \\y eq x y;"
                 , "  def main : Bool = let f = \\x same x x in f true;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs deferred method with method-level type variable constraint"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Mix, eq, mix, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  class Mix a {"
+                , "    mix : Eq b => a -> b -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Mix Bool {"
+                , "    mix = \\x \\y eq y y;"
+                , "  }"
+                , ""
+                , "  def main : Bool = mix true true;"
                 , "}"
                 ]
         )

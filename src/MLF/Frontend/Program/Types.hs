@@ -69,6 +69,7 @@ data ProgramError
   | ProgramUnexpectedInstanceMethod P.ClassName P.MethodName
   | ProgramNoMatchingInstance P.ClassName SrcType
   | ProgramAmbiguousMethodUse P.MethodName
+  | ProgramAmbiguousConstrainedValueUse String
   | ProgramAmbiguousConstructorUse P.ConstructorName
   | ProgramExpectedFunction SrcType
   | ProgramTypeMismatch SrcType SrcType
@@ -147,6 +148,7 @@ spanForError err index =
     ProgramUnexpectedInstanceMethod _ methodName0 -> firstSpan methodName0 (P.spanValues index)
     ProgramNoMatchingInstance className0 _ -> firstSpan className0 (P.spanClasses index)
     ProgramAmbiguousMethodUse methodName0 -> firstSpan methodName0 (P.spanValues index)
+    ProgramAmbiguousConstrainedValueUse valueName -> firstSpan valueName (P.spanValues index)
     ProgramAmbiguousConstructorUse ctor -> firstSpan ctor (P.spanConstructors index)
     ProgramPatternConstructorMismatch ctor _ -> firstSpan ctor (P.spanConstructors index)
     ProgramNonExhaustiveCase (ctor : _) -> firstSpan ctor (P.spanConstructors index)
@@ -199,6 +201,7 @@ programErrorMessage err =
     ProgramUnexpectedInstanceMethod className0 methodName0 -> "instance for `" ++ className0 ++ "` defines unexpected method `" ++ methodName0 ++ "`"
     ProgramNoMatchingInstance className0 ty -> "no matching instance for `" ++ className0 ++ " " ++ show ty ++ "`"
     ProgramAmbiguousMethodUse methodName0 -> "ambiguous overloaded method use `" ++ methodName0 ++ "`"
+    ProgramAmbiguousConstrainedValueUse valueName -> "ambiguous constrained value use `" ++ valueName ++ "`"
     ProgramAmbiguousConstructorUse ctor -> "ambiguous constructor use `" ++ ctor ++ "`"
     ProgramExpectedFunction ty -> "expected a function, got `" ++ show ty ++ "`"
     ProgramTypeMismatch actual expected -> "type mismatch: expected `" ++ show expected ++ "`, got `" ++ show actual ++ "`"
@@ -217,6 +220,8 @@ programErrorHints err =
       ["add an explicit result type annotation, for example `" ++ ctor ++ " : <Type>`"]
     ProgramAmbiguousMethodUse methodName0 ->
       ["apply `" ++ methodName0 ++ "` to enough arguments or add an annotation that fixes the instance type"]
+    ProgramAmbiguousConstrainedValueUse valueName ->
+      ["use `" ++ valueName ++ "` at a concrete instance type; generic constrained value aliases are not supported yet"]
     ProgramNoMatchingInstance className0 ty ->
       ["define or import an instance for `" ++ className0 ++ " " ++ show ty ++ "`"]
     ProgramDerivingMissingFieldInstance className0 ty ->
