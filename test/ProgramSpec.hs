@@ -1513,6 +1513,36 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs local class instance for alias-only imported type"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Token(..), eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Token ="
+                , "      Token : Token"
+                , "    deriving Eq;"
+                , "}"
+                , ""
+                , "module Main export (Eq, eq, main) {"
+                , "  import Core as C;"
+                , ""
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq C.Token {"
+                , "    eq = \\left \\right false;"
+                , "  }"
+                , ""
+                , "  def main : Bool = eq C.Token C.Token;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "false")
+    , ProgramMatrixCase
         "runs alias-only qualified deriving Eq"
         ( InlineProgram $
             unlines

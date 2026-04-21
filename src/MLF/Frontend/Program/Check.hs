@@ -27,6 +27,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
@@ -205,7 +206,11 @@ checkModule :: [CheckedModule] -> P.Module -> TcM CheckedModule
 checkModule priorModules mod0 = do
   let priorExports = Map.fromList [(checkedModuleName checked, checkedModuleExports checked) | checked <- priorModules]
       priorInstances = concatMap checkedModuleInstances priorModules
-      qualifiedPriorInstances = concatMap (qualifiedInstancesForImport priorExports priorInstances) (P.moduleImports mod0)
+      unqualifiedClassNames = importedUnqualifiedClassNames priorExports (P.moduleImports mod0)
+      qualifiedPriorInstances =
+        concatMap
+          (qualifiedInstancesForImport priorExports priorInstances unqualifiedClassNames)
+          (P.moduleImports mod0)
   ensureDistinctImportAliases (P.moduleImports mod0)
   importScope <- buildImportScope priorExports (P.moduleImports mod0)
   localData <- buildLocalDataInfo mod0
@@ -478,8 +483,8 @@ unqualifyQualifiedName alias name =
       | prefix == alias ++ "." -> rest
     _ -> name
 
-qualifiedInstancesForImport :: Map P.ModuleName ModuleExports -> [InstanceInfo] -> P.Import -> [InstanceInfo]
-qualifiedInstancesForImport priorExports priorInstances imp =
+qualifiedInstancesForImport :: Map P.ModuleName ModuleExports -> [InstanceInfo] -> Set.Set String -> P.Import -> [InstanceInfo]
+qualifiedInstancesForImport priorExports priorInstances unqualifiedClassNames imp =
   case P.importAlias imp of
     Nothing -> []
     Just alias ->
@@ -493,7 +498,45 @@ qualifiedInstancesForImport priorExports priorInstances imp =
                     instanceVisibleForQualifiedImport exports instanceInfo
                 ]
               unqualifiedTypeNames = importExposedTypeNames imp
-           in concatMap (qualifiedInstanceVariants alias exports unqualifiedTypeNames) importedInstances
+           in concatMap (qualifiedInstanceVariants alias exports unqualifiedTypeNames unqualifiedClassNames) importedInstances
+
+importedUnqualifiedClassNames ::
+  Map P.ModuleName ModuleExports ->
+  [P.Import] ->
+  Set.Set String
+importedUnqualifiedClassNames priorExports =
+  Set.unions . map importUnqualifiedClassNames
+  where
+    importUnqualifiedClassNames imp =
+      case Map.lookup (P.importModuleName imp) priorExports of
+        Nothing -> Set.empty
+        Just exports ->
+          case (P.importAlias imp, P.importExposing imp) of
+            (Nothing, Nothing) ->
+              Map.keysSet (exportedClasses exports)
+                `Set.union` overloadedMethodClassNames (Map.elems (exportedValues exports))
+            (_, Just items) -> Set.unions (map (importItemClassNames exports) items)
+            (Just _, Nothing) -> Set.empty
+
+    importItemClassNames exports item =
+      case item of
+        P.ExportType name
+          | name `Map.member` exportedClasses exports -> Set.singleton name
+        P.ExportValue name ->
+          case Map.lookup name (exportedValues exports) of
+            Just OverloadedMethod {valueMethodInfo = methodInfo} -> Set.singleton (methodClassName methodInfo)
+            _ -> Set.empty
+        _ -> Set.empty
+
+    overloadedMethodClassNames =
+      Set.fromList
+        . map methodClassName
+        . mapMaybe overloadedMethodInfo
+
+    overloadedMethodInfo valueInfo =
+      case valueInfo of
+        OverloadedMethod {valueMethodInfo = methodInfo} -> Just methodInfo
+        _ -> Nothing
 
 importExposedTypeNames :: P.Import -> Set.Set String
 importExposedTypeNames imp =
@@ -525,8 +568,8 @@ srcTypeMentionsAny names ty =
     STMu _ body -> srcTypeMentionsAny names body
     STBottom -> False
 
-qualifiedInstanceVariants :: P.ModuleName -> ModuleExports -> Set.Set String -> InstanceInfo -> [InstanceInfo]
-qualifiedInstanceVariants alias exports unqualifiedTypeNames instanceInfo =
+qualifiedInstanceVariants :: P.ModuleName -> ModuleExports -> Set.Set String -> Set.Set String -> InstanceInfo -> [InstanceInfo]
+qualifiedInstanceVariants alias exports unqualifiedTypeNames unqualifiedClassNames instanceInfo =
   distinctInstanceHeads
     [ variant
       | variant <- fullQualifiedVariants ++ aliasHeadVariants,
@@ -534,7 +577,9 @@ qualifiedInstanceVariants alias exports unqualifiedTypeNames instanceInfo =
     ]
   where
     qualifiedInstance = qualifyInstance alias exports instanceInfo
-    aliasHeadNeeded = needsAliasHeadInstanceVariant exports unqualifiedTypeNames instanceInfo
+    aliasHeadNeeded =
+      instanceClassName instanceInfo `Set.member` unqualifiedClassNames
+        && needsAliasHeadInstanceVariant exports unqualifiedTypeNames instanceInfo
     fullQualifiedVariants =
       [ qualifiedInstance
         | shouldEmitQualifiedInstanceVariant
