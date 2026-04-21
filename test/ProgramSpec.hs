@@ -2170,6 +2170,25 @@ spec = do
                         `shouldSatisfy` isInfixOf "unknown-instance-class.mlfp:2:12"
                 Right _ -> expectationFailure "expected unknown instance class diagnostic"
 
+        it "renders unknown method constraint class diagnostics at the constraint site" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (C, main) {"
+                        , "  class C a {"
+                        , "    m : Missing a => a -> a;"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            located <- requireLocatedWithFile "unknown-method-constraint.mlfp" programText
+            case checkLocatedProgram located of
+                Left diagnostic -> do
+                    diagnosticError diagnostic `shouldBe` ProgramUnknownClass "Missing"
+                    renderProgramDiagnostic diagnostic
+                        `shouldSatisfy` isInfixOf "unknown-method-constraint.mlfp:3:9"
+                Right _ -> expectationFailure "expected unknown method constraint diagnostic"
+
         it "renders duplicate instance diagnostics with a class span" $ do
             let programText =
                     unlines

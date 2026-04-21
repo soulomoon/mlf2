@@ -163,26 +163,18 @@ pType = try pProgramForall <|> try pProgramMu <|> parseArrowTypeWith programType
         void (symbol ".")
         STMu v <$> pType
 
-pConstrainedType :: Parser ConstrainedType
-pConstrainedType =
+pLocatedConstrainedType :: Parser (ConstrainedType, ProgramSpanIndex)
+pLocatedConstrainedType =
     try
         ( do
-            constraints <- pConstraintList
+            (constraints, spans) <- pLocatedConstraintList
             void (symbol "=>")
-            ConstrainedType constraints <$> pType
+            ty <- pType
+            pure (ConstrainedType constraints ty, spans)
         )
-        <|> (unconstrainedType <$> pType)
-
-pConstraintList :: Parser [ClassConstraint]
-pConstraintList =
-    try (parens (commaSep pClassConstraint))
-        <|> fmap (: []) pClassConstraint
-
-pClassConstraint :: Parser ClassConstraint
-pClassConstraint =
-    ClassConstraint
-        <$> qualifiedUpperIdent
-        <*> pType
+        <|> do
+            ty <- pType
+            pure (unconstrainedType ty, emptyProgramSpanIndex)
 
 pLocatedClassConstraint :: Parser (ClassConstraint, ProgramSpanIndex)
 pLocatedClassConstraint = do
@@ -373,21 +365,25 @@ pLocatedClassDecl = do
                 `appendProgramSpanIndex` mergeSpanIndexes (map snd methods)
     pure (decl, spans)
 
-pMethodSig :: Parser MethodSig
-pMethodSig = do
-    name <- lowerIdent reservedWords
-    void (symbol ":")
-    ty <- pConstrainedType
-    void semi
-    pure MethodSig
-        { methodSigName = name
-        , methodSigType = ty
-        }
-
 pLocatedMethodSig :: Parser (MethodSig, ProgramSpanIndex)
 pLocatedMethodSig = do
-    (sig, span0) <- withSpan pMethodSig
-    pure (sig, singletonValueSpan (methodSigName sig) span0)
+    start <- getSourcePos
+    name <- lowerIdent reservedWords
+    void (symbol ":")
+    (ty, constraintSpans) <- pLocatedConstrainedType
+    void semi
+    end <- getSourcePos
+    let span0 = sourceSpanFromPositions start end
+        sig =
+            MethodSig
+                { methodSigName = name
+                , methodSigType = ty
+                }
+    pure
+        ( sig
+        , singletonValueSpan name span0
+            `appendProgramSpanIndex` constraintSpans
+        )
 
 pLocatedInstanceDecl :: Parser (InstanceDecl, ProgramSpanIndex)
 pLocatedInstanceDecl = do
@@ -472,25 +468,29 @@ pDerivingClause = do
     void (symbol "deriving")
     commaSep qualifiedUpperIdent
 
-pDefDecl :: Parser DefDecl
-pDefDecl = do
+pLocatedDefDecl :: Parser (DefDecl, ProgramSpanIndex)
+pLocatedDefDecl = do
+    start <- getSourcePos
     void (symbol "def")
     name <- lowerIdent reservedWords
     void (symbol ":")
-    ty <- pConstrainedType
+    (ty, constraintSpans) <- pLocatedConstrainedType
     void (symbol "=")
     body <- pExpr
     void semi
-    pure DefDecl
-        { defDeclName = name
-        , defDeclType = ty
-        , defDeclExpr = body
-        }
-
-pLocatedDefDecl :: Parser (DefDecl, ProgramSpanIndex)
-pLocatedDefDecl = do
-    (def, span0) <- withSpan pDefDecl
-    pure (def, singletonValueSpan (defDeclName def) span0)
+    end <- getSourcePos
+    let span0 = sourceSpanFromPositions start end
+        def =
+            DefDecl
+                { defDeclName = name
+                , defDeclType = ty
+                , defDeclExpr = body
+                }
+    pure
+        ( def
+        , singletonValueSpan name span0
+            `appendProgramSpanIndex` constraintSpans
+        )
 
 pExpr :: Parser Expr
 pExpr = choice [try pLet, try pLambda, try pCase, pAnnOrApp]
