@@ -184,6 +184,25 @@ pClassConstraint =
         <$> qualifiedUpperIdent
         <*> pType
 
+pLocatedClassConstraint :: Parser (ClassConstraint, ProgramSpanIndex)
+pLocatedClassConstraint = do
+    (className, classSpan) <- withSpan qualifiedUpperIdent
+    ty <- pType
+    pure
+        ( ClassConstraint
+            { constraintClassName = className
+            , constraintType = ty
+            }
+        , singletonClassSpan className classSpan
+        )
+
+pLocatedConstraintList :: Parser ([ClassConstraint], ProgramSpanIndex)
+pLocatedConstraintList = do
+    constraints <-
+        try (parens (commaSep pLocatedClassConstraint))
+            <|> fmap (: []) pLocatedClassConstraint
+    pure (map fst constraints, mergeSpanIndexes (map snd constraints))
+
 pLocatedProgram :: Parser LocatedProgram
 pLocatedProgram = do
     modules <- some pLocatedModule
@@ -374,20 +393,24 @@ pLocatedInstanceDecl :: Parser (InstanceDecl, ProgramSpanIndex)
 pLocatedInstanceDecl = do
     void (symbol "instance")
     constraints <- optional $ try $ do
-        constraints0 <- pConstraintList
+        constraints0 <- pLocatedConstraintList
         void (symbol "=>")
         pure constraints0
-    className <- qualifiedUpperIdent
+    (className, classSpan) <- withSpan qualifiedUpperIdent
     instTy <- pType
     methods <- braces (many pLocatedMethodDef)
     let decl =
             InstanceDecl
-                { instanceDeclConstraints = maybe [] id constraints
+                { instanceDeclConstraints = maybe [] fst constraints
                 , instanceDeclClass = className
                 , instanceDeclType = instTy
                 , instanceDeclMethods = map fst methods
                 }
-    pure (decl, mergeSpanIndexes (map snd methods))
+        spans =
+            maybe emptyProgramSpanIndex snd constraints
+                `appendProgramSpanIndex` singletonClassSpan className classSpan
+                `appendProgramSpanIndex` mergeSpanIndexes (map snd methods)
+    pure (decl, spans)
 
 pMethodDef :: Parser MethodDef
 pMethodDef = do

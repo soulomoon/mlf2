@@ -2043,6 +2043,24 @@ spec = do
                         `shouldSatisfy` isInfixOf "error: no matching instance for `Eq STBase \"Nat\"`"
                 Right _ -> expectationFailure "expected missing instance diagnostic"
 
+        it "renders unknown instance class diagnostics at the instance head" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  instance Missing Bool {"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            located <- requireLocatedWithFile "unknown-instance-class.mlfp" programText
+            case checkLocatedProgram located of
+                Left diagnostic -> do
+                    diagnosticError diagnostic `shouldBe` ProgramUnknownClass "Missing"
+                    renderProgramDiagnostic diagnostic
+                        `shouldSatisfy` isInfixOf "unknown-instance-class.mlfp:2:12"
+                Right _ -> expectationFailure "expected unknown instance class diagnostic"
+
         it "renders duplicate instance diagnostics with a class span" $ do
             let programText =
                     unlines
