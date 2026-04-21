@@ -978,27 +978,31 @@ synthesizeDerivedInstances scope mod0 = do
 
     validateEqDerivingField :: P.ClassName -> Scope -> P.DataDecl -> SrcType -> TcM ()
     validateEqDerivingField eqClassName validationScope dataDecl fieldTy
-      | eqTypeSatisfiable eqClassName validationScope dataDecl Set.empty fieldTy = pure ()
+      | constraintTypeSatisfiable eqClassName validationScope dataDecl Set.empty eqClassName fieldTy = pure ()
       | otherwise = throwError (ProgramDerivingMissingFieldInstance eqClassName fieldTy)
 
-    eqTypeSatisfiable eqClassName validationScope dataDecl seen fieldTy
-      | fieldCoveredByDerivedConstraints dataDecl fieldTy = True
+    constraintTypeSatisfiable derivedClassName validationScope dataDecl seen className0 fieldTy
+      | className0 == derivedClassName && fieldCoveredByDerivedConstraints dataDecl fieldTy = True
       | key `Set.member` seen = False
       | otherwise =
-          case resolveInstanceInfoWithSubst (scopeToElaborateScope validationScope) eqClassName fieldTy of
+          case resolveInstanceInfoWithSubst (scopeToElaborateScope validationScope) className0 fieldTy of
             Right (instanceInfo, subst) ->
               let seen' = Set.insert key seen
                in all
-                    (eqConstraintSatisfiable eqClassName validationScope dataDecl seen' . applyConstraintSubst subst)
+                    (constraintSatisfiable derivedClassName validationScope dataDecl seen' . applyConstraintSubst subst)
                     (instanceConstraints instanceInfo)
             Left _ -> False
       where
-        key = (eqClassName, show fieldTy)
+        key = (className0, show fieldTy)
 
-    eqConstraintSatisfiable eqClassName validationScope dataDecl seen constraint
-      | P.constraintClassName constraint == eqClassName =
-          eqTypeSatisfiable eqClassName validationScope dataDecl seen (P.constraintType constraint)
-      | otherwise = False
+    constraintSatisfiable derivedClassName validationScope dataDecl seen constraint =
+      constraintTypeSatisfiable
+        derivedClassName
+        validationScope
+        dataDecl
+        seen
+        (P.constraintClassName constraint)
+        (P.constraintType constraint)
 
     applyConstraintSubst subst constraint =
       constraint

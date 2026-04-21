@@ -1334,6 +1334,41 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs deriving Eq when field instance has non-Eq prerequisite"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Ord, BoxInt(..), eq) {"
+                , "  class Eq item {"
+                , "    eq : item -> item -> Bool;"
+                , "  }"
+                , ""
+                , "  class Ord item {"
+                , "  }"
+                , ""
+                , "  instance Ord Int {"
+                , "  }"
+                , ""
+                , "  data BoxInt ="
+                , "      MkBoxInt : Int -> BoxInt;"
+                , ""
+                , "  instance Ord Int => Eq BoxInt {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (UsesBox(..), main) {"
+                , "  import Core exposing (Eq, Ord, BoxInt(..), eq);"
+                , ""
+                , "  data UsesBox ="
+                , "      UsesBox : BoxInt -> UsesBox"
+                , "    deriving Eq;"
+                , ""
+                , "  def main : Bool = eq (UsesBox (MkBoxInt 1)) (UsesBox (MkBoxInt 2));"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs parameterized deriving Eq for recursive List"
         ( InlineProgram $
             unlines
