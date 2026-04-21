@@ -890,16 +890,30 @@ synthesizeDerivedInstances scope mod0 = do
   candidates <- concat <$> mapM deriveForData (moduleDataDecls mod0)
   let pendingInstances = map (pendingDerivedInstance . snd) candidates
       validationScope = scope {scopeInstances = scopeInstances scope ++ pendingInstances}
-  mapM_ (validateEqDerivingFields validationScope . fst) candidates
+  mapM_
+    (\(dataDecl, instDecl) -> validateEqDerivingFields (P.instanceDeclClass instDecl) validationScope dataDecl)
+    candidates
   pure (map snd candidates)
   where
     deriveForData dataDecl = do
-      forM (P.dataDeclDeriving dataDecl) $ \className0 ->
-        case className0 of
-          "Eq" -> do
-            _ <- lookupClassInfo scope className0
-            pure (dataDecl, mkEqInstance dataDecl)
-          other -> throwError (ProgramUnsupportedDeriving other)
+      forM (P.dataDeclDeriving dataDecl) $ \className0 -> do
+        if unqualifiedName className0 == "Eq"
+          then do
+            classInfo <- lookupClassInfo scope className0
+            case eqMethodReference classInfo of
+              Just eqMethodName -> pure (dataDecl, mkEqInstance classInfo eqMethodName dataDecl)
+              Nothing -> throwError (ProgramUnsupportedDeriving className0)
+          else throwError (ProgramUnsupportedDeriving className0)
+
+    unqualifiedName =
+      reverse . takeWhile (/= '.') . reverse
+
+    eqMethodReference classInfo =
+      fst <$> find matchesEqMethod (Map.toList (scopeValues scope))
+      where
+        matchesEqMethod (_, OverloadedMethod {valueMethodInfo = methodInfo}) =
+          methodClassName methodInfo == className classInfo && methodName methodInfo == "eq"
+        matchesEqMethod _ = False
 
     pendingDerivedInstance instDecl =
       InstanceInfo
@@ -913,32 +927,32 @@ synthesizeDerivedInstances scope mod0 = do
     constructorFieldTypes ctor =
       fst (splitArrows (snd (splitForalls (P.constructorDeclType ctor))))
 
-    validateEqDerivingFields :: Scope -> P.DataDecl -> TcM ()
-    validateEqDerivingFields validationScope dataDecl =
-      mapM_ (validateEqDerivingField validationScope dataDecl) (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
+    validateEqDerivingFields :: P.ClassName -> Scope -> P.DataDecl -> TcM ()
+    validateEqDerivingFields eqClassName validationScope dataDecl =
+      mapM_ (validateEqDerivingField eqClassName validationScope dataDecl) (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
 
-    validateEqDerivingField :: Scope -> P.DataDecl -> SrcType -> TcM ()
-    validateEqDerivingField validationScope dataDecl fieldTy
-      | eqTypeSatisfiable validationScope dataDecl Set.empty fieldTy = pure ()
-      | otherwise = throwError (ProgramDerivingMissingFieldInstance "Eq" fieldTy)
+    validateEqDerivingField :: P.ClassName -> Scope -> P.DataDecl -> SrcType -> TcM ()
+    validateEqDerivingField eqClassName validationScope dataDecl fieldTy
+      | eqTypeSatisfiable eqClassName validationScope dataDecl Set.empty fieldTy = pure ()
+      | otherwise = throwError (ProgramDerivingMissingFieldInstance eqClassName fieldTy)
 
-    eqTypeSatisfiable validationScope dataDecl seen fieldTy
+    eqTypeSatisfiable eqClassName validationScope dataDecl seen fieldTy
       | fieldCoveredByDerivedConstraints dataDecl fieldTy = True
       | key `Set.member` seen = False
       | otherwise =
-          case resolveInstanceInfoWithSubst (scopeToElaborateScope validationScope) "Eq" fieldTy of
+          case resolveInstanceInfoWithSubst (scopeToElaborateScope validationScope) eqClassName fieldTy of
             Right (instanceInfo, subst) ->
               let seen' = Set.insert key seen
                in all
-                    (eqConstraintSatisfiable validationScope dataDecl seen' . applyConstraintSubst subst)
+                    (eqConstraintSatisfiable eqClassName validationScope dataDecl seen' . applyConstraintSubst subst)
                     (instanceConstraints instanceInfo)
             Left _ -> False
       where
-        key = ("Eq", show fieldTy)
+        key = (eqClassName, show fieldTy)
 
-    eqConstraintSatisfiable validationScope dataDecl seen constraint
-      | P.constraintClassName constraint == "Eq" =
-          eqTypeSatisfiable validationScope dataDecl seen (P.constraintType constraint)
+    eqConstraintSatisfiable eqClassName validationScope dataDecl seen constraint
+      | P.constraintClassName constraint == eqClassName =
+          eqTypeSatisfiable eqClassName validationScope dataDecl seen (P.constraintType constraint)
       | otherwise = False
 
     applyConstraintSubst subst constraint =
@@ -976,8 +990,9 @@ synthesizeDerivedInstances scope mod0 = do
     scopeToElaborateScope scope0 =
       mkElaborateScope (scopeValues scope0) (scopeTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
 
-    mkEqInstance dataDecl =
+    mkEqInstance classInfo eqMethodName dataDecl =
       let headTy = dataDeclHeadType dataDecl
+          eqClassName = className classInfo
           left = P.Param "left" (Just headTy)
           right = P.Param "right" (Just headTy)
           selfName = "__derived_eq_" ++ P.dataDeclName dataDecl
@@ -987,14 +1002,14 @@ synthesizeDerivedInstances scope mod0 = do
                 P.ELet
                   selfName
                   (Just (STArrow headTy (STArrow headTy (STBase "Bool"))))
-                  (P.ELam left (P.ELam right (deriveEqBody headTy dataDecl (Just selfName))))
+                  (P.ELam left (P.ELam right (deriveEqBody eqClassName eqMethodName headTy dataDecl (Just selfName))))
                   (P.EVar selfName)
               else
-                P.ELam left (P.ELam right (deriveEqBody headTy dataDecl Nothing))
+                P.ELam left (P.ELam right (deriveEqBody eqClassName eqMethodName headTy dataDecl Nothing))
        in P.InstanceDecl
-            { P.instanceDeclClass = "Eq",
+            { P.instanceDeclClass = eqClassName,
               P.instanceDeclConstraints =
-                [ P.ClassConstraint "Eq" (STVar paramName)
+                [ P.ClassConstraint eqClassName (STVar paramName)
                   | paramName <- derivedConstraintParams dataDecl
                 ],
               P.instanceDeclType = headTy,
@@ -1004,7 +1019,7 @@ synthesizeDerivedInstances scope mod0 = do
     hasRecursiveOwnerFields dataDecl =
       any (isRecursiveOwnerField dataDecl) (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
 
-    deriveEqBody headTy dataDecl mbSelfName =
+    deriveEqBody eqClassName eqMethodName headTy dataDecl mbSelfName =
       P.ECase
         (P.EVar "left")
         [ P.Alt
@@ -1016,7 +1031,7 @@ synthesizeDerivedInstances scope mod0 = do
       where
         ctorArgTypes ctor = fst (splitArrows (snd (splitForalls (P.constructorDeclType ctor))))
 
-        recursiveEqName = qualify (P.moduleName mod0) (renderInstanceName "Eq" headTy "eq")
+        recursiveEqName = qualify (P.moduleName mod0) (renderInstanceName eqClassName headTy "eq")
 
         matchingAlt ctor leftNames =
           let rightNames = ["r" ++ show i | i <- [1 .. length leftNames]]
@@ -1043,7 +1058,7 @@ synthesizeDerivedInstances scope mod0 = do
                   _ ->
                     if isRecursiveOwnerField dataDecl argTy
                       then recursiveEqName
-                      else "eq"
+                      else eqMethodName
            in P.EApp (P.EApp (P.EVar eqName) (P.EVar l)) (P.EVar r)
 
     isRecursiveOwnerField dataDecl argTy =

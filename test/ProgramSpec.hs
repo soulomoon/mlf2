@@ -1495,6 +1495,32 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs alias-only qualified deriving Eq"
+        ( InlineProgram $
+            unlines
+                [ "module Classes export (Eq, eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eq = \\x \\y true;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Classes as P;"
+                , ""
+                , "  data Box ="
+                , "      Box : Bool -> Box"
+                , "    deriving P.Eq;"
+                , ""
+                , "  def main : Bool = P.eq (Box true) (Box false);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs aliased instance head when class is imported from another module"
         ( InlineProgram $
             unlines
