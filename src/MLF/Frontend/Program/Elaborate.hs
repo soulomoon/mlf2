@@ -23,7 +23,7 @@ where
 import Control.Monad ((>=>), foldM, replicateM, when, zipWithM)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.State.Strict (State, get, modify, runState)
-import Data.List (find, sort)
+import Data.List (find, partition, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -1522,25 +1522,53 @@ resolveInstanceInfo scope className0 headTy =
 
 resolveInstanceInfoWithSubst :: ElaborateScope -> P.ClassName -> SrcType -> Either ProgramError (InstanceInfo, Map String SrcType)
 resolveInstanceInfoWithSubst scope className0 headTy =
-  case matches of
-    [match] -> Right match
+  case deduplicatedMatches of
+    [(match, subst, _direct)] -> Right (match, subst)
     [] -> Left (ProgramNoMatchingInstance className0 headTy)
     _ -> Left (ProgramNoMatchingInstance className0 headTy)
   where
+    deduplicatedMatches = deduplicateEquivalentMatches matches
+
     matches =
-      [ (info, subst)
+      [ (info, subst, direct)
         | info <- esInstances scope,
           instanceClassName info == className0,
-          Just subst <- [matchInstanceHead info]
+          Just (subst, direct) <- [matchInstanceHead info]
       ]
 
     matchInstanceHead info =
       case matchTypes Map.empty (instanceHeadType info) headTy of
-        Just subst -> Just subst
+        Just subst -> Just (subst, True)
         Nothing ->
           if lowerType scope (instanceHeadType info) == lowerType scope headTy
-            then Just Map.empty
+            then Just (Map.empty, False)
             else Nothing
+
+    deduplicateEquivalentMatches [] = []
+    deduplicateEquivalentMatches (match : rest) =
+      let (equivalent, different) = partition (equivalentInstanceMatch match) rest
+       in foldl preferredInstanceMatch match equivalent : deduplicateEquivalentMatches different
+
+    equivalentInstanceMatch (left, _, _) (right, _, _) =
+      instanceOriginModule left == instanceOriginModule right
+        && instanceClassName left == instanceClassName right
+        && lowerType scope (instanceHeadType left) == lowerType scope (instanceHeadType right)
+        && map lowerConstraint (instanceConstraints left) == map lowerConstraint (instanceConstraints right)
+        && fmap methodRuntimeIdentity (instanceMethods left) == fmap methodRuntimeIdentity (instanceMethods right)
+
+    lowerConstraint constraint =
+      constraint {P.constraintType = lowerType scope (P.constraintType constraint)}
+
+    methodRuntimeIdentity valueInfo =
+      case valueInfo of
+        OrdinaryValue {valueRuntimeName = runtimeName} -> runtimeName
+        ConstructorValue {valueRuntimeName = runtimeName} -> runtimeName
+        OverloadedMethod {valueMethodInfo = methodInfo} -> methodRuntimeBase methodInfo
+
+    preferredInstanceMatch left@(_, leftSubst, leftDirect) right@(_, rightSubst, rightDirect)
+      | rightDirect && not leftDirect = right
+      | rightDirect == leftDirect && Map.size rightSubst > Map.size leftSubst = right
+      | otherwise = left
 
 inferClassArgument :: SrcType -> String -> [SrcType] -> Maybe SrcType
 inferClassArgument methodTy classParam args =

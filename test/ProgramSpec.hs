@@ -1575,6 +1575,29 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "deduplicates equivalent instances from mixed unqualified and aliased imports"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Nat(..), eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (Eq, Nat(..), eq);"
+                , "  import Core as C;"
+                , "  def main : Bool = eq C.Zero C.Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs local class instance for alias-only imported type"
         ( InlineProgram $
             unlines
