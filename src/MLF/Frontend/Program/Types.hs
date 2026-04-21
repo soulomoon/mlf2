@@ -134,6 +134,7 @@ spanForError err index =
     ProgramDuplicateValue name -> firstSpan name (P.spanValues index)
     ProgramDuplicateMethod name -> firstSpan name (P.spanValues index)
     ProgramDuplicateImportAlias name -> firstSpan name (P.spanImportAliases index) <|> Map.lookup name (P.spanModules index)
+    ProgramDuplicateInstance className0 _ -> firstSpan className0 (P.spanClasses index)
     ProgramOverlappingInstance className0 _ _ -> firstSpan className0 (P.spanClasses index)
     ProgramUnknownValue name -> lookupAnyName name index
     ProgramUnknownConstructor name -> firstSpan name (P.spanConstructors index)

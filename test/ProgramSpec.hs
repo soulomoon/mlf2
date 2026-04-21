@@ -1221,6 +1221,35 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramOverlappingInstance \"Eq\"")
     , ProgramMatrixCase
+        "rejects alias-equivalent overlapping instance heads"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Nat(..)) {"
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , "}"
+                , ""
+                , "module Main export (Eq, eq, main) {"
+                , "  import Core as A exposing (Nat(..));"
+                , ""
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Nat {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  instance Eq A.Nat {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramOverlappingInstance \"Eq\"")
+    , ProgramMatrixCase
         "runs parameterized deriving Eq for Option"
         ( InlineProgram $
             unlines
@@ -1975,6 +2004,33 @@ spec = do
                     renderProgramDiagnostic diagnostic
                         `shouldSatisfy` isInfixOf "error: no matching instance for `Eq STBase \"Nat\"`"
                 Right _ -> expectationFailure "expected missing instance diagnostic"
+
+        it "renders duplicate instance diagnostics with a class span" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Eq, eq, main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  instance Eq Bool {"
+                        , "    eq = \\x \\y true;"
+                        , "  }"
+                        , ""
+                        , "  instance Eq Bool {"
+                        , "    eq = \\x \\y true;"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            located <- requireLocatedWithFile "duplicate-instance.mlfp" programText
+            case checkLocatedProgram located of
+                Left diagnostic -> do
+                    diagnosticError diagnostic `shouldBe` ProgramDuplicateInstance "Eq" (STBase "Bool")
+                    renderProgramDiagnostic diagnostic
+                        `shouldSatisfy` isInfixOf "duplicate-instance.mlfp:2:3"
+                Right _ -> expectationFailure "expected duplicate instance diagnostic"
 
     describe "MLF.Program runtime value rendering" $ do
         it "renders closed ADT values with source constructor syntax" $ do

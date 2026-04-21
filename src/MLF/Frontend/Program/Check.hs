@@ -1131,9 +1131,33 @@ buildInstanceSkeletons scope mod0 derived = do
       ]
 
     instanceHeadsOverlap left right =
-      case unifyOverlap Map.empty (tagTypeVars "__overlap_left__" left) (tagTypeVars "__overlap_right__" right) of
+      case
+        unifyOverlap
+          Map.empty
+          (tagTypeVars "__overlap_left__" (canonicalInstanceHead left))
+          (tagTypeVars "__overlap_right__" (canonicalInstanceHead right))
+        of
         Just _ -> True
         Nothing -> False
+
+    canonicalInstanceHead :: SrcType -> SrcType
+    canonicalInstanceHead = canonical
+      where
+        canonical ty =
+          case ty of
+            STVar {} -> ty
+            STArrow dom cod -> STArrow (canonical dom) (canonical cod)
+            STBase name -> STBase (canonicalTypeName name)
+            STCon name args -> STCon (canonicalTypeName name) (fmap canonical args)
+            STForall name mb body ->
+              STForall name (fmap (SrcBound . canonical . unSrcBound) mb) (canonical body)
+            STMu name body -> STMu name (canonical body)
+            STBottom -> STBottom
+
+        canonicalTypeName name =
+          case Map.lookup name (scopeTypes scope) of
+            Just info -> dataModule info ++ "." ++ dataName info
+            Nothing -> name
 
     unifyOverlap subst left right =
       case (applyOverlapSubst subst left, applyOverlapSubst subst right) of
