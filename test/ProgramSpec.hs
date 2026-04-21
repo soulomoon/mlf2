@@ -796,6 +796,33 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs partial deferred method after method-local evidence is fixed by application"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Mix, eq, mix, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  class Mix a {"
+                , "    mix : Eq b => a -> b -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Mix Bool {"
+                , "    mix = \\x \\y eq y y;"
+                , "  }"
+                , ""
+                , "  def applyBool : (Bool -> Bool) -> Bool = \\f f true;"
+                , "  def main : Bool = applyBool (mix true);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs deferred method when only a later forall binder is inferred"
         ( InlineProgram $
             unlines

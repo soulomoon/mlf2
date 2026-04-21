@@ -508,7 +508,8 @@ compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} arg
               else argSurface
 
 compileValueApp scope mbExpected valueInfo args = do
-  argSurfaces <- mapM (compileExpr scope Nothing) args
+  let expectedArgTys = valueExpectedArgTypes valueInfo args
+  argSurfaces <- zipWithM compileValueArg (expectedArgTys ++ repeat Nothing) args
   evidenceSurfaces <- valueEvidenceArgs scope valueInfo args
   let headSurface =
         case valueInfo of
@@ -522,6 +523,33 @@ compileValueApp scope mbExpected valueInfo args = do
         isRecursiveResultType expectedTy || isRecursiveResultType (lowerType scope expectedTy) ->
           surfaceAnn applied (lowerType scope expectedTy)
     _ -> applied
+  where
+    compileValueArg (Just expectedTy) arg
+      | isPartialOverloadedMethodApp scope arg =
+          compileExpr scope (Just expectedTy) arg
+    compileValueArg _ arg =
+      compileExpr scope Nothing arg
+
+valueExpectedArgTypes :: ValueInfo -> [P.Expr] -> [Maybe SrcType]
+valueExpectedArgTypes valueInfo args =
+  let argTys =
+        case valueInfo of
+          OrdinaryValue {valueType = ty} ->
+            fst (splitArrows (snd (splitForalls ty)))
+          _ -> []
+   in map concreteExpectedTy (take (length args) argTys)
+  where
+    concreteExpectedTy ty
+      | Set.null (freeTypeVarsSrcType ty) = Just ty
+      | otherwise = Nothing
+
+isPartialOverloadedMethodApp :: ElaborateScope -> P.Expr -> Bool
+isPartialOverloadedMethodApp scope expr =
+  case collectApps expr of
+    (EVar name, args)
+      | Just OverloadedMethod {valueMethodInfo = methodInfo} <- Map.lookup name (esValues scope) ->
+          not (null args) && length args < methodFullArity methodInfo
+    _ -> False
 
 constructorExpectedArgTypes :: ElaborateScope -> ConstructorInfo -> [P.Expr] -> [SrcType]
 constructorExpectedArgTypes scope ctorInfo args =
@@ -601,7 +629,7 @@ deferMethodEvidenceExpr scope classArgTy methodInfo = do
           specializeMethodType (methodType methodInfo) (methodParamName methodInfo) classArgTy
       fullArity = methodFullArity methodInfo
   placeholder <- deferMethodCall scope methodInfo fullArity methodTy
-  expanded <- etaExpandMissingArgs scope methodInfo methodTy 0 fullArity (surfaceVar placeholder)
+  expanded <- etaExpandMissingArgs scope methodInfo methodTy Nothing 0 fullArity (surfaceVar placeholder)
   pure (surfaceAnn expanded (lowerType scope methodTy))
 
 inferCallSubst :: ElaborateScope -> SrcType -> [P.Expr] -> Maybe (Map String SrcType)
@@ -645,7 +673,7 @@ knownConstructorResultType scope ctorInfo args = do
   pure (Map.foldrWithKey substituteTypeVar (ctorResult ctorInfo) subst)
 
 compileMethodApp :: ElaborateScope -> Maybe SrcType -> MethodInfo -> [P.Expr] -> ElaborateM SurfaceExpr
-compileMethodApp scope _mbExpected methodInfo args
+compileMethodApp scope mbExpected methodInfo args
   | null args = throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
   | otherwise = do
       let fullArity = methodFullArity methodInfo
@@ -665,21 +693,23 @@ compileMethodApp scope _mbExpected methodInfo args
           | shouldResolveMethodBeforeInference scope methodInfo classArgTy -> do
               methodHead <- resolveMethodHeadForCall scope Set.empty methodInfo classArgTy args
               let applied = foldl surfaceApp methodHead argSurfaces
-              expanded <- etaExpandMissingArgs scope methodInfo placeholderTy suppliedArity fullArity applied
-              pure $
-                case peelAppliedType placeholderTy suppliedArity of
-                  Just remainingTy
-                    | suppliedArity < fullArity -> surfaceAnn expanded (lowerType scope remainingTy)
-                  _ -> expanded
+              expanded <- etaExpandMissingArgs scope methodInfo placeholderTy mbExpected suppliedArity fullArity applied
+              pure (annotatePartialMethod expanded placeholderTy suppliedArity fullArity)
         _ -> do
           placeholder <- deferMethodCall scope methodInfo fullArity placeholderTy
           let applied = foldl surfaceApp (surfaceVar placeholder) argSurfaces
-          expanded <- etaExpandMissingArgs scope methodInfo placeholderTy suppliedArity fullArity applied
-          pure $
-            case peelAppliedType placeholderTy suppliedArity of
-              Just remainingTy
-                | suppliedArity < fullArity -> surfaceAnn expanded (lowerType scope remainingTy)
-              _ -> expanded
+          expanded <- etaExpandMissingArgs scope methodInfo placeholderTy mbExpected suppliedArity fullArity applied
+          pure (annotatePartialMethod expanded placeholderTy suppliedArity fullArity)
+  where
+    annotatePartialMethod expanded placeholderTy suppliedArity fullArity
+      | suppliedArity < fullArity =
+          case mbExpected of
+            Just expectedTy -> surfaceAnn expanded (lowerType scope expectedTy)
+            Nothing ->
+              case peelAppliedType placeholderTy suppliedArity of
+                Just remainingTy -> surfaceAnn expanded (lowerType scope remainingTy)
+                Nothing -> expanded
+      | otherwise = expanded
 
 compileExpectedMethodArg :: ElaborateScope -> SrcType -> P.Expr -> ElaborateM SurfaceExpr
 compileExpectedMethodArg scope expectedTy expr =
@@ -839,17 +869,31 @@ applySrcSubst subst ty =
 liftEitherElab :: Either ProgramError a -> ElaborateM a
 liftEitherElab = either throwError pure
 
-etaExpandMissingArgs :: ElaborateScope -> MethodInfo -> SrcType -> Int -> Int -> SurfaceExpr -> ElaborateM SurfaceExpr
-etaExpandMissingArgs scope methodInfo methodTy suppliedArity fullArity applied = do
+etaExpandMissingArgs :: ElaborateScope -> MethodInfo -> SrcType -> Maybe SrcType -> Int -> Int -> SurfaceExpr -> ElaborateM SurfaceExpr
+etaExpandMissingArgs scope methodInfo methodTy mbExpected suppliedArity fullArity applied = do
   let missingArity = max 0 (fullArity - suppliedArity)
   if missingArity == 0
     then pure applied
     else do
       missingNames <- replicateM missingArity (freshRuntimeName (methodName methodInfo ++ "_arg"))
-      let missingTypes = drop suppliedArity (methodArgumentTypes methodTy)
+      let missingTypes = zipWith preferExpectedType methodMissingTypes (expectedMissingTypes ++ repeat Nothing)
           body = foldl surfaceApp applied (map surfaceVar missingNames)
       pure (foldr wrapMissingArg body (zip missingNames missingTypes))
   where
+    methodMissingTypes =
+      drop suppliedArity (methodArgumentTypes methodTy)
+
+    expectedMissingTypes =
+      case mbExpected of
+        Just expectedTy ->
+          map Just (fst (splitArrows (snd (splitForalls expectedTy))))
+        Nothing -> []
+
+    preferExpectedType methodTy0 (Just expectedTy)
+      | Set.null (freeTypeVarsSrcType expectedTy) = expectedTy
+      | otherwise = methodTy0
+    preferExpectedType methodTy0 Nothing = methodTy0
+
     wrapMissingArg (name, ty) body
       | Set.null (freeTypeVarsSrcType ty) = surfaceLamAnn name (lowerType scope ty) body
       | otherwise = surfaceLam name body

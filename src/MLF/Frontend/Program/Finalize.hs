@@ -730,7 +730,11 @@ resolveDeferredMethods scope deferredMethods = go
             case inferMethodArgumentSubst methodInfo classArgTy subst argTypes of
               Just subst' -> Right subst'
               Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-          evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty (map (applyConstraintSubst methodSubst) (methodValueConstraints methodValue))
+          let eagerConstraints =
+                filter
+                  constraintGround
+                  (map (applyConstraintSubst methodSubst) (methodValueConstraints methodValue))
+          evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty eagerConstraints
           let methodHead = instantiateMethodValue scope methodSubst methodValue
           Right (foldl X.EApp (foldl X.EApp methodHead evidenceArgs) args)
 
@@ -796,6 +800,10 @@ resolveConstraintEvidenceTerm scope seen constraint = do
 constraintDeterminedByTypeVars :: Set String -> P.ClassConstraint -> Bool
 constraintDeterminedByTypeVars typeVars constraint =
   freeTypeVarsSrcType (P.constraintType constraint) `Set.isSubsetOf` typeVars
+
+constraintGround :: P.ClassConstraint -> Bool
+constraintGround constraint =
+  Set.null (freeTypeVarsSrcType (P.constraintType constraint))
 
 methodValueConstraints :: ValueInfo -> [P.ClassConstraint]
 methodValueConstraints OrdinaryValue {valueConstraints = constraints} = constraints
