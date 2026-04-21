@@ -519,13 +519,23 @@ qualifiedInstanceVariants :: P.ModuleName -> ModuleExports -> Set.Set String -> 
 qualifiedInstanceVariants alias exports unqualifiedTypeNames instanceInfo =
   distinctInstanceHeads
     [ variant
-      | variant <-
-          qualifyInstance alias exports instanceInfo
-            : [ qualifyInstanceHeadOnly alias exports instanceInfo
-                | needsAliasHeadInstanceVariant exports unqualifiedTypeNames instanceInfo
-              ],
+      | variant <- fullQualifiedVariants ++ aliasHeadVariants,
         not (sameInstanceHead instanceInfo variant)
     ]
+  where
+    qualifiedInstance = qualifyInstance alias exports instanceInfo
+    aliasHeadNeeded = needsAliasHeadInstanceVariant exports unqualifiedTypeNames instanceInfo
+    fullQualifiedVariants =
+      [ qualifiedInstance
+        | shouldEmitQualifiedInstanceVariant
+      ]
+    aliasHeadVariants =
+      [ qualifyInstanceHeadOnly alias exports instanceInfo
+        | aliasHeadNeeded
+      ]
+    shouldEmitQualifiedInstanceVariant =
+      instanceClassName qualifiedInstance /= instanceClassName instanceInfo
+        || aliasHeadNeeded
 
 needsAliasHeadInstanceVariant :: ModuleExports -> Set.Set String -> InstanceInfo -> Bool
 needsAliasHeadInstanceVariant exports unqualifiedTypeNames instanceInfo =
