@@ -2129,6 +2129,21 @@ spec = do
                     rendered `shouldSatisfy` isInfixOf "error: module `Hidden` does not export `Nat`"
                 Right _ -> expectationFailure "expected import visibility diagnostic"
 
+        it "renders export visibility diagnostics at the module export item" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (missing) {"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            located <- requireLocatedWithFile "missing-export.mlfp" programText
+            case checkLocatedProgram located of
+                Left diagnostic -> do
+                    diagnosticError diagnostic `shouldBe` ProgramExportNotLocal "missing"
+                    renderProgramDiagnostic diagnostic
+                        `shouldSatisfy` isInfixOf "missing-export.mlfp:1:21"
+                Right _ -> expectationFailure "expected export visibility diagnostic"
+
         it "does not report missing-instance diagnostics at class declarations" $ do
             let programText =
                     unlines

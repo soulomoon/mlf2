@@ -239,6 +239,10 @@ singletonImportItemSpan :: String -> SourceSpan -> ProgramSpanIndex
 singletonImportItemSpan name span0 =
     emptyProgramSpanIndex { spanImportItems = Map.singleton name [span0] }
 
+singletonExportItemSpan :: String -> SourceSpan -> ProgramSpanIndex
+singletonExportItemSpan name span0 =
+    emptyProgramSpanIndex { spanExportItems = Map.singleton name [span0] }
+
 singletonValueSpan :: ValueName -> SourceSpan -> ProgramSpanIndex
 singletonValueSpan name span0 =
     emptyProgramSpanIndex { spanValues = Map.singleton name [span0] }
@@ -263,7 +267,7 @@ pLocatedModule = do
     start <- getSourcePos
     void (symbol "module")
     name <- upperIdent reservedWords
-    exports <- optional pExportList
+    exports <- optional pLocatedExportList
     (imports, decls) <- braces $ do
         imports <- many (try pLocatedImport)
         decls <- many pLocatedDecl
@@ -273,20 +277,22 @@ pLocatedModule = do
         module0 =
             Module
                 { moduleName = name
-                , moduleExports = exports
+                , moduleExports = fmap fst exports
                 , moduleImports = map fst imports
                 , moduleDecls = map fst decls
                 }
         spanIndex =
             singletonModuleSpan name moduleSpan
+                `appendProgramSpanIndex` maybe emptyProgramSpanIndex snd exports
                 `appendProgramSpanIndex` mergeSpanIndexes (map snd imports)
                 `appendProgramSpanIndex` mergeSpanIndexes (map snd decls)
     pure (module0, spanIndex)
 
-pExportList :: Parser [ExportItem]
-pExportList = do
+pLocatedExportList :: Parser ([ExportItem], ProgramSpanIndex)
+pLocatedExportList = do
     void (symbol "export")
-    parens (commaSep pExportItem)
+    exports <- parens (commaSep pLocatedModuleExportItem)
+    pure (map fst exports, mergeSpanIndexes (map snd exports))
 
 pExportItem :: Parser ExportItem
 pExportItem =
@@ -324,9 +330,19 @@ pLocatedImport = do
                 `appendProgramSpanIndex` mergeSpanIndexes (maybe [] (map snd) exposing)
     pure (import0, spans)
 
+pLocatedExportItemSpan :: Parser (ExportItem, SourceSpan)
+pLocatedExportItemSpan = do
+    (item, span0) <- withSpan pExportItem
+    pure (item, span0)
+
+pLocatedModuleExportItem :: Parser (ExportItem, ProgramSpanIndex)
+pLocatedModuleExportItem = do
+    (item, span0) <- pLocatedExportItemSpan
+    pure (item, singletonExportItemSpan (exportItemName item) span0)
+
 pLocatedExportItem :: Parser (ExportItem, ProgramSpanIndex)
 pLocatedExportItem = do
-    (item, span0) <- withSpan pExportItem
+    (item, span0) <- pLocatedExportItemSpan
     pure (item, singletonImportItemSpan (exportItemName item) span0)
 
 exportItemName :: ExportItem -> String

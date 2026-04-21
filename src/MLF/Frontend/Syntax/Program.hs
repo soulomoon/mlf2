@@ -67,6 +67,7 @@ data ProgramSpanIndex = ProgramSpanIndex
     , spanImports :: Map ModuleName [SourceSpan]
     , spanImportAliases :: Map ModuleName [SourceSpan]
     , spanImportItems :: Map String [SourceSpan]
+    , spanExportItems :: Map String [SourceSpan]
     , spanValues :: Map ValueName [SourceSpan]
     , spanTypes :: Map TypeName [SourceSpan]
     , spanConstructors :: Map ConstructorName [SourceSpan]
@@ -87,6 +88,7 @@ emptyProgramSpanIndex =
         , spanImports = Map.empty
         , spanImportAliases = Map.empty
         , spanImportItems = Map.empty
+        , spanExportItems = Map.empty
         , spanValues = Map.empty
         , spanTypes = Map.empty
         , spanConstructors = Map.empty
@@ -100,6 +102,7 @@ appendProgramSpanIndex left right =
         , spanImports = Map.unionWith (++) (spanImports left) (spanImports right)
         , spanImportAliases = Map.unionWith (++) (spanImportAliases left) (spanImportAliases right)
         , spanImportItems = Map.unionWith (++) (spanImportItems left) (spanImportItems right)
+        , spanExportItems = Map.unionWith (++) (spanExportItems left) (spanExportItems right)
         , spanValues = Map.unionWith (++) (spanValues left) (spanValues right)
         , spanTypes = Map.unionWith (++) (spanTypes left) (spanTypes right)
         , spanConstructors = Map.unionWith (++) (spanConstructors left) (spanConstructors right)
