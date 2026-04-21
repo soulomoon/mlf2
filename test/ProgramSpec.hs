@@ -1775,6 +1775,26 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "Zero")
     , ProgramMatrixCase
+        "runs mixed exposed and qualified alias constructors in one case"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Nat(..)) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C exposing (Nat(..));"
+                , "  def main : Bool = case C.Succ Zero of {"
+                , "    Zero -> false;"
+                , "    C.Succ _ -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs distinct instances whose qualified heads would sanitize alike"
         ( InlineProgram $
             unlines

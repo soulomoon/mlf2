@@ -20,10 +20,10 @@ module MLF.Frontend.Program.Elaborate
   )
 where
 
-import Control.Monad (foldM, replicateM, when, zipWithM)
+import Control.Monad ((>=>), foldM, replicateM, when, zipWithM)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.State.Strict (State, get, modify, runState)
-import Data.List (nub, sort)
+import Data.List (find, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -378,10 +378,12 @@ constructorSurfaceExprRaw scope ctorInfo =
           (zip argNames (ctorArgs ctorInfo))
    in lifted
   where
+    ownerInfo =
+      visibleDataInfo <$> resolveConstructorDataInfo scope ctorInfo
     ctorOrder =
-      maybe [] dataConstructors (Map.lookup (ctorOwningType ctorInfo) (esTypes scope))
+      maybe [] dataConstructors ownerInfo
     constructorOwnerHasParams =
-      maybe False (not . null . dataParams) (Map.lookup (ctorOwningType ctorInfo) (esTypes scope))
+      maybe False (not . null . dataParams) ownerInfo
 
 compileExpr :: ElaborateScope -> Maybe SrcType -> P.Expr -> ElaborateM SurfaceExpr
 compileExpr scope mbExpected expr = case expr of
@@ -1201,7 +1203,7 @@ compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnot
       pure (surfaceAnn handlerBody handlerTy)
   where
     matchingCandidates ctor =
-      filter (patternCouldMatchConstructor ctor . P.altPattern) alts
+      filter (patternCouldMatchConstructor scope ctor . P.altPattern) alts
 
     compileCandidates _ [] = throwError (ProgramNonExhaustiveCase [ctorName ctorInfo])
     compileCandidates topArgs [alt] =
@@ -1219,11 +1221,10 @@ compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnot
           bodyExpr <- compileExpr scope' (Just resultTy) body
           pure (surfaceLet scrutineeName scrutineeExpr bodyExpr)
         P.PatCtor ctorName0 patterns
-          | ctorName0 == ctorName ctorInfo,
-            length patterns == length (ctorArgs ctorInfo) ->
-              compilePatternSequence scope (zip3 patterns (map middle topArgs) (map third topArgs)) body mbFallback
-          | ctorName0 == ctorName ctorInfo ->
-              throwError (ProgramPatternConstructorMismatch ctorName0 (dataHeadType dataInfo))
+          | constructorNameMatches scope ctorName0 ctorInfo ->
+              if length patterns == length (ctorArgs ctorInfo)
+                then compilePatternSequence scope (zip3 patterns (map middle topArgs) (map third topArgs)) body mbFallback
+                else throwError (ProgramPatternConstructorMismatch ctorName0 (dataHeadType dataInfo))
           | otherwise ->
               case mbFallback of
                 Just fallback -> pure fallback
@@ -1242,8 +1243,8 @@ compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnot
           scope' <- extendLocal scope0 sourceName runtimeName (Just argTy)
           compilePatternSequence scope' rest body mbFallback
         P.PatCtor nestedCtorName nestedPatterns -> do
-          nestedCtorInfo <- lookupConstructorInfo nestedCtorName
-          nestedDataInfo <- lookupDataInfo (ctorOwningType nestedCtorInfo)
+          nestedCtorInfo <- lookupConstructorInfo scope nestedCtorName
+          nestedDataInfo <- lookupDataInfoForConstructor scope nestedCtorInfo
           if length nestedPatterns /= length (ctorArgs nestedCtorInfo)
             then throwError (ProgramPatternConstructorMismatch nestedCtorName argTy)
             else do
@@ -1264,14 +1265,15 @@ compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnot
         P.PatAnn inner annTy -> compilePatternSequence scope0 ((inner, runtimeName, annTy) : rest) body mbFallback
 
     nestedPatternNeedsFallback nestedDataInfo targetCtor =
-      any ((/= ctorName targetCtor) . ctorName) (dataConstructors nestedDataInfo)
+      any (not . sameConstructorInfo targetCtor) (dataConstructors nestedDataInfo)
 
     nestedHandler forceNestedAnnotations nestedScrutineeTy targetCtor nestedRuntimeNames matchingBody mbFallback ctor =
       let ctorArgTys = specializeConstructorArgsForScrutinee nestedScrutineeTy ctor
           specializedCtor = ctor {ctorArgs = ctorArgTys}
-          argNames = if ctorName ctor == ctorName targetCtor then nestedRuntimeNames else ["unused" ++ show ix | ix <- [1 .. length ctorArgTys]]
+          targetSelected = sameConstructorInfo ctor targetCtor
+          argNames = if targetSelected then nestedRuntimeNames else ["unused" ++ show ix | ix <- [1 .. length ctorArgTys]]
           selectedBody =
-            case (ctorName ctor == ctorName targetCtor, mbFallback) of
+            case (targetSelected, mbFallback) of
               (True, _) -> matchingBody
               (False, Just fallback) -> fallback
               (False, Nothing) -> matchingBody
@@ -1290,16 +1292,6 @@ compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnot
       case matchTypes Map.empty (ctorResult ctor) actualScrutineeTy of
         Just subst -> map (specializeSrcType subst) (ctorArgs ctor)
         Nothing -> ctorArgs ctor
-
-    lookupConstructorInfo ctorName0 =
-      case Map.lookup ctorName0 (esValues scope) of
-        Just ConstructorValue {valueCtorInfo = ctorInfo0} -> pure ctorInfo0
-        _ -> throwError (ProgramUnknownConstructor ctorName0)
-
-    lookupDataInfo typeName =
-      case Map.lookup typeName (esTypes scope) of
-        Just info -> pure info
-        Nothing -> throwError (ProgramUnknownType typeName)
 
 ctorOwners :: [P.Alt] -> [String]
 ctorOwners = foldr go []
@@ -1333,7 +1325,7 @@ validatePatternType scope expectedTy pattern0 =
       validatePatternAnnotation scope expectedTy annTy
       validatePatternType scope annTy inner
     P.PatCtor ctorName0 patterns -> do
-      ctorInfo <- lookupConstructorInfo ctorName0
+      ctorInfo <- lookupConstructorInfo scope ctorName0
       subst <-
         case matchPatternTypes (ctorResult ctorInfo) expectedTy of
           Just subst0 -> pure subst0
@@ -1347,11 +1339,6 @@ validatePatternType scope expectedTy pattern0 =
             )
             (zip patterns (ctorArgs ctorInfo))
   where
-    lookupConstructorInfo ctorName0 =
-      case Map.lookup ctorName0 (esValues scope) of
-        Just ConstructorValue {valueCtorInfo = ctorInfo} -> pure ctorInfo
-        _ -> throwError (ProgramUnknownConstructor ctorName0)
-
     matchPatternTypes template actual =
       case matchTypes Map.empty template actual of
         Just subst -> Just subst
@@ -1408,13 +1395,13 @@ isCatchAllPattern pattern0 =
     P.PatVar {} -> True
     _ -> False
 
-patternCouldMatchConstructor :: ConstructorInfo -> P.Pattern -> Bool
-patternCouldMatchConstructor ctorInfo pattern0 =
+patternCouldMatchConstructor :: ElaborateScope -> ConstructorInfo -> P.Pattern -> Bool
+patternCouldMatchConstructor scope ctorInfo pattern0 =
   case stripPatternAnn pattern0 of
     P.PatWildcard -> True
     P.PatVar {} -> True
-    P.PatCtor ctorName0 _ -> ctorName0 == ctorName ctorInfo
-    P.PatAnn inner _ -> patternCouldMatchConstructor ctorInfo inner
+    P.PatCtor ctorName0 _ -> constructorNameMatches scope ctorName0 ctorInfo
+    P.PatAnn inner _ -> patternCouldMatchConstructor scope ctorInfo inner
 
 stripPatternAnn :: P.Pattern -> P.Pattern
 stripPatternAnn pattern0 =
@@ -1424,19 +1411,68 @@ stripPatternAnn pattern0 =
 
 requireSingleDataOwner :: ElaborateScope -> [String] -> ElaborateM DataInfo
 requireSingleDataOwner scope ctorNames0 = do
-  ctors <- mapM lookupCtor ctorNames0
-  let owners = nub (map ctorOwningType ctors)
+  owners <- mapM (lookupConstructorInfo scope >=> lookupResolvedDataInfo) ctorNames0
   case owners of
-    [owner] ->
-      case Map.lookup owner (esTypes scope) of
-        Just info -> pure (info {dataName = owner})
-        Nothing -> throwError (ProgramUnknownType owner)
-    _ -> throwError (ProgramCaseOnNonDataType STBottom)
+    [] -> throwError (ProgramCaseOnNonDataType STBottom)
+    owner : rest
+      | all (sameDataInfo owner) rest -> pure (visibleDataInfo owner)
+      | otherwise -> throwError (ProgramCaseOnNonDataType STBottom)
   where
-    lookupCtor ctorName0 =
-      case Map.lookup ctorName0 (esValues scope) of
-        Just ConstructorValue {valueCtorInfo = ctorInfo} -> pure ctorInfo
-        _ -> throwError (ProgramUnknownConstructor ctorName0)
+    lookupResolvedDataInfo ctorInfo =
+      case resolveConstructorDataInfo scope ctorInfo of
+        Just resolved -> pure resolved
+        Nothing -> throwError (ProgramUnknownType (ctorOwningType ctorInfo))
+
+lookupConstructorInfo :: ElaborateScope -> String -> ElaborateM ConstructorInfo
+lookupConstructorInfo scope ctorName0 =
+  case lookupConstructorInfoMaybe scope ctorName0 of
+    Just ctorInfo -> pure ctorInfo
+    Nothing -> throwError (ProgramUnknownConstructor ctorName0)
+
+lookupConstructorInfoMaybe :: ElaborateScope -> String -> Maybe ConstructorInfo
+lookupConstructorInfoMaybe scope ctorName0 =
+  case Map.lookup ctorName0 (esValues scope) of
+    Just ConstructorValue {valueCtorInfo = ctorInfo} -> Just ctorInfo
+    _ -> Nothing
+
+lookupDataInfoForConstructor :: ElaborateScope -> ConstructorInfo -> ElaborateM DataInfo
+lookupDataInfoForConstructor scope ctorInfo =
+  case resolveConstructorDataInfo scope ctorInfo of
+    Just resolved -> pure (visibleDataInfo resolved)
+    Nothing -> throwError (ProgramUnknownType (ctorOwningType ctorInfo))
+
+resolveConstructorDataInfo :: ElaborateScope -> ConstructorInfo -> Maybe (String, DataInfo)
+resolveConstructorDataInfo scope ctorInfo =
+  case Map.lookup (ctorOwningType ctorInfo) (esTypes scope) of
+    Just info
+      | constructorBelongsToDataInfo ctorInfo info ->
+          Just (ctorOwningType ctorInfo, info)
+    _ ->
+      find
+        (constructorBelongsToDataInfo ctorInfo . snd)
+        (Map.toList (esTypes scope))
+
+visibleDataInfo :: (String, DataInfo) -> DataInfo
+visibleDataInfo (visibleName, info) =
+  info {dataName = visibleName}
+
+sameDataInfo :: (String, DataInfo) -> (String, DataInfo) -> Bool
+sameDataInfo (_, left) (_, right) =
+  dataModule left == dataModule right && dataName left == dataName right
+
+constructorBelongsToDataInfo :: ConstructorInfo -> DataInfo -> Bool
+constructorBelongsToDataInfo ctorInfo =
+  any (sameConstructorInfo ctorInfo) . dataConstructors
+
+constructorNameMatches :: ElaborateScope -> String -> ConstructorInfo -> Bool
+constructorNameMatches scope ctorName0 ctorInfo =
+  case lookupConstructorInfoMaybe scope ctorName0 of
+    Just namedCtor -> sameConstructorInfo namedCtor ctorInfo
+    Nothing -> False
+
+sameConstructorInfo :: ConstructorInfo -> ConstructorInfo -> Bool
+sameConstructorInfo left right =
+  ctorRuntimeName left == ctorRuntimeName right
 
 handlerSurfaceType :: ElaborateScope -> ConstructorInfo -> SrcType -> SrcType
 handlerSurfaceType scope ctorInfo resultTy =

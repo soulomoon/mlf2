@@ -398,12 +398,8 @@ qualifyModuleExports alias exports =
           ctorType = qualifySrcType (ctorType ctor),
           ctorArgs = map qualifySrcType (ctorArgs ctor),
           ctorResult = qualifySrcType (ctorResult ctor),
-          ctorOwningType = qualifyExportedTypeName (ctorOwningType ctor)
+          ctorOwningType = ctorOwningType ctor
         }
-
-    qualifyExportedTypeName typeName
-      | typeName `Set.member` exportedTypeNames = qualifiedName typeName
-      | otherwise = typeName
 
     qualifyClassInfo classInfo =
       let qualifiedClassName = qualifiedName (className classInfo)
