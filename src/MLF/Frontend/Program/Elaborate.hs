@@ -261,10 +261,13 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
         STArrow
         resultTy
         [ foldr
-            (\(name, mbBound) acc -> STForall name (fmap (SrcBound . lowerCtorArg subst (Just (dataName info)) selfTy) mbBound) acc)
-            (foldr STArrow resultTy (map (lowerCtorArg subst (Just (dataName info)) selfTy) (ctorArgs ctor)))
+            (\(name, mbBound) acc ->
+               STForall name (fmap (SrcBound . lowerCtorArg subst ownerIdentity selfTy) mbBound) acc
+            )
+            (foldr STArrow resultTy (map (lowerCtorArg subst ownerIdentity selfTy) (ctorArgs ctor)))
             (ctorForalls ctor)
           | ctor <- dataConstructors info
+          , let ownerIdentity = Just (dataIdentity info)
         ]
 
     lowerCtorArg subst currentData selfTy ty = case ty of
@@ -291,11 +294,12 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
     isCurrentDataAlias currentData name =
       case currentData of
         Nothing -> False
-        Just ownerName ->
-          name == ownerName
-            || case Map.lookup name dataTypes of
-              Just info -> dataName info == ownerName
-              Nothing -> False
+        Just ownerIdentity ->
+          case Map.lookup name dataTypes of
+            Just info -> dataIdentity info == ownerIdentity
+            Nothing -> name == ownerIdentity
+
+    dataIdentity info = dataModule info ++ "." ++ dataName info
 
 toListNE :: NonEmpty a -> [a]
 toListNE (x :| xs) = x : xs

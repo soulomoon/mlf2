@@ -1584,6 +1584,28 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "keeps imported same-name ADT fields distinct from local recursion"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (T(..)) {"
+                , "  data T ="
+                , "      External : T;"
+                , "}"
+                , ""
+                , "module Main export (T(..), main) {"
+                , "  import Core as A;"
+                , ""
+                , "  data T ="
+                , "      Wrap : A.T -> T;"
+                , ""
+                , "  def main : Bool = case Wrap A.External of {"
+                , "    Wrap _ -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs exposed constructor with qualified alias type identity"
         ( InlineProgram $
             unlines
