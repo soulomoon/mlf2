@@ -1566,6 +1566,22 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "Zero")
     , ProgramMatrixCase
+        "runs qualified constructor from implicit default export"
+        ( InlineProgram $
+            unlines
+                [ "module Core {"
+                , "  data Token ="
+                , "      Token : Token;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , "  def main : C.Token = C.Token;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "Token")
+    , ProgramMatrixCase
         "runs alias-only qualified case over imported ADT"
         ( InlineProgram $
             unlines

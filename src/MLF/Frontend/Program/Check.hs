@@ -370,34 +370,35 @@ qualifyModuleExports alias exports =
             ctor <- Map.elems ctors
         ]
 
-    qualifiedOrdinaryValues =
+    qualifiedExportedValues =
       Map.fromList
         [ ( qualifiedName name,
             qualifyValueInfo name valueInfo
           )
-          | (name, valueInfo) <- Map.toList (exportedValues exports),
-            not (isConstructorValue valueInfo)
+          | (name, valueInfo) <- Map.toList (exportedValues exports)
         ]
 
-    qualifiedValues = qualifiedCtorValues `Map.union` qualifiedOrdinaryValues
-
-    isConstructorValue ConstructorValue {} = True
-    isConstructorValue _ = False
+    qualifiedValues = qualifiedCtorValues `Map.union` qualifiedExportedValues
 
     qualifyDataInfo dataInfo =
-      let qualifiedTypeName = qualifiedName (dataName dataInfo)
-          qualifyCtor ctor =
-            ctor
-              { ctorName = qualifiedName (ctorName ctor),
-                ctorType = qualifySrcType (ctorType ctor),
-                ctorArgs = map qualifySrcType (ctorArgs ctor),
-                ctorResult = qualifySrcType (ctorResult ctor),
-                ctorOwningType = qualifiedTypeName
-              }
+      let qualifyCtor ctor = qualifyConstructorInfo ctor
        in dataInfo
             { dataName = dataName dataInfo,
               dataConstructors = map qualifyCtor (dataConstructors dataInfo)
             }
+
+    qualifyConstructorInfo ctor =
+      ctor
+        { ctorName = qualifiedName (ctorName ctor),
+          ctorType = qualifySrcType (ctorType ctor),
+          ctorArgs = map qualifySrcType (ctorArgs ctor),
+          ctorResult = qualifySrcType (ctorResult ctor),
+          ctorOwningType = qualifyExportedTypeName (ctorOwningType ctor)
+        }
+
+    qualifyExportedTypeName typeName
+      | typeName `Set.member` exportedTypeNames = qualifiedName typeName
+      | otherwise = typeName
 
     qualifyClassInfo classInfo =
       let qualifiedClassName = qualifiedName (className classInfo)
@@ -426,7 +427,15 @@ qualifyModuleExports alias exports =
               valueMethodInfo = qualifyMethodFromExport methodInfo,
               valueOriginModule = valueOriginModule valueInfo
             }
-        ConstructorValue {} -> valueInfo
+        ConstructorValue {valueCtorInfo = ctorInfo} ->
+          let qualifiedCtorInfo = qualifyConstructorInfo ctorInfo
+           in ConstructorValue
+                { valueDisplayName = qualifiedName sourceName,
+                  valueRuntimeName = valueRuntimeName valueInfo,
+                  valueType = qualifySrcType (valueType valueInfo),
+                  valueCtorInfo = qualifiedCtorInfo,
+                  valueOriginModule = valueOriginModule valueInfo
+                }
 
     qualifyMethodFromExport methodInfo =
       methodInfo
