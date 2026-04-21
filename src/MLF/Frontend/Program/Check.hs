@@ -76,6 +76,8 @@ data Scope = Scope
   }
   deriving (Eq, Show)
 
+type ClassIdentity = (P.ModuleName, P.ClassName)
+
 emptyScope :: Scope
 emptyScope = Scope builtinValues Map.empty Map.empty []
 
@@ -206,10 +208,10 @@ checkModule :: [CheckedModule] -> P.Module -> TcM CheckedModule
 checkModule priorModules mod0 = do
   let priorExports = Map.fromList [(checkedModuleName checked, checkedModuleExports checked) | checked <- priorModules]
       priorInstances = concatMap checkedModuleInstances priorModules
-      unqualifiedClassNames = importedUnqualifiedClassNames priorExports (P.moduleImports mod0)
+      unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExports (P.moduleImports mod0)
       qualifiedPriorInstances =
         concatMap
-          (qualifiedInstancesForImport priorExports priorInstances unqualifiedClassNames)
+          (qualifiedInstancesForImport priorExports priorInstances unqualifiedClassIdentities)
           (P.moduleImports mod0)
   ensureDistinctImportAliases (P.moduleImports mod0)
   importScope <- buildImportScope priorExports (P.moduleImports mod0)
@@ -479,8 +481,27 @@ unqualifyQualifiedName alias name =
       | prefix == alias ++ "." -> rest
     _ -> name
 
-qualifiedInstancesForImport :: Map P.ModuleName ModuleExports -> [InstanceInfo] -> Set.Set String -> P.Import -> [InstanceInfo]
-qualifiedInstancesForImport priorExports priorInstances unqualifiedClassNames imp =
+unqualifiedName :: String -> String
+unqualifiedName =
+  reverse . takeWhile (/= '.') . reverse
+
+classIdentity :: ClassInfo -> ClassIdentity
+classIdentity classInfo =
+  (classModule classInfo, unqualifiedName (className classInfo))
+
+methodClassIdentity :: ValueInfo -> Maybe ClassIdentity
+methodClassIdentity valueInfo =
+  case valueInfo of
+    OverloadedMethod {valueMethodInfo = methodInfo} ->
+      Just (valueOriginModule valueInfo, unqualifiedName (methodClassName methodInfo))
+    _ -> Nothing
+
+instanceClassIdentity :: InstanceInfo -> ClassIdentity
+instanceClassIdentity instanceInfo =
+  (instanceClassModule instanceInfo, unqualifiedName (instanceClassName instanceInfo))
+
+qualifiedInstancesForImport :: Map P.ModuleName ModuleExports -> [InstanceInfo] -> Set.Set ClassIdentity -> P.Import -> [InstanceInfo]
+qualifiedInstancesForImport priorExports priorInstances unqualifiedClassIdentities imp =
   case P.importAlias imp of
     Nothing -> []
     Just alias ->
@@ -494,45 +515,38 @@ qualifiedInstancesForImport priorExports priorInstances unqualifiedClassNames im
                     instanceVisibleForQualifiedImport exports instanceInfo
                 ]
               unqualifiedTypeNames = importExposedTypeNames imp
-           in concatMap (qualifiedInstanceVariants alias exports unqualifiedTypeNames unqualifiedClassNames) importedInstances
+           in concatMap (qualifiedInstanceVariants alias exports unqualifiedTypeNames unqualifiedClassIdentities) importedInstances
 
-importedUnqualifiedClassNames ::
+importedUnqualifiedClassIdentities ::
   Map P.ModuleName ModuleExports ->
   [P.Import] ->
-  Set.Set String
-importedUnqualifiedClassNames priorExports =
-  Set.unions . map importUnqualifiedClassNames
+  Set.Set ClassIdentity
+importedUnqualifiedClassIdentities priorExports =
+  Set.unions . map importUnqualifiedClassIdentities
   where
-    importUnqualifiedClassNames imp =
+    importUnqualifiedClassIdentities imp =
       case Map.lookup (P.importModuleName imp) priorExports of
         Nothing -> Set.empty
         Just exports ->
           case (P.importAlias imp, P.importExposing imp) of
             (Nothing, Nothing) ->
-              Map.keysSet (exportedClasses exports)
-                `Set.union` overloadedMethodClassNames (Map.elems (exportedValues exports))
-            (_, Just items) -> Set.unions (map (importItemClassNames exports) items)
+              Set.fromList (map classIdentity (Map.elems (exportedClasses exports)))
+                `Set.union` overloadedMethodClassIdentities (Map.elems (exportedValues exports))
+            (_, Just items) -> Set.unions (map (importItemClassIdentities exports) items)
             (Just _, Nothing) -> Set.empty
 
-    importItemClassNames exports item =
+    importItemClassIdentities exports item =
       case item of
         P.ExportType name
-          | name `Map.member` exportedClasses exports -> Set.singleton name
+          | Just classInfo <- Map.lookup name (exportedClasses exports) -> Set.singleton (classIdentity classInfo)
         P.ExportValue name ->
           case Map.lookup name (exportedValues exports) of
-            Just OverloadedMethod {valueMethodInfo = methodInfo} -> Set.singleton (methodClassName methodInfo)
+            Just valueInfo -> maybe Set.empty Set.singleton (methodClassIdentity valueInfo)
             _ -> Set.empty
         _ -> Set.empty
 
-    overloadedMethodClassNames =
-      Set.fromList
-        . map methodClassName
-        . mapMaybe overloadedMethodInfo
-
-    overloadedMethodInfo valueInfo =
-      case valueInfo of
-        OverloadedMethod {valueMethodInfo = methodInfo} -> Just methodInfo
-        _ -> Nothing
+    overloadedMethodClassIdentities =
+      Set.fromList . mapMaybe methodClassIdentity
 
 importExposedTypeNames :: P.Import -> Set.Set String
 importExposedTypeNames imp =
@@ -564,8 +578,8 @@ srcTypeMentionsAny names ty =
     STMu _ body -> srcTypeMentionsAny names body
     STBottom -> False
 
-qualifiedInstanceVariants :: P.ModuleName -> ModuleExports -> Set.Set String -> Set.Set String -> InstanceInfo -> [InstanceInfo]
-qualifiedInstanceVariants alias exports unqualifiedTypeNames unqualifiedClassNames instanceInfo =
+qualifiedInstanceVariants :: P.ModuleName -> ModuleExports -> Set.Set String -> Set.Set ClassIdentity -> InstanceInfo -> [InstanceInfo]
+qualifiedInstanceVariants alias exports unqualifiedTypeNames unqualifiedClassIdentities instanceInfo =
   distinctInstanceHeads
     [ variant
       | variant <- fullQualifiedVariants ++ aliasHeadVariants,
@@ -574,7 +588,7 @@ qualifiedInstanceVariants alias exports unqualifiedTypeNames unqualifiedClassNam
   where
     qualifiedInstance = qualifyInstance alias exports instanceInfo
     aliasHeadNeeded =
-      instanceClassName instanceInfo `Set.member` unqualifiedClassNames
+      instanceClassIdentity instanceInfo `Set.member` unqualifiedClassIdentities
         && needsAliasHeadInstanceVariant exports unqualifiedTypeNames instanceInfo
     fullQualifiedVariants =
       [ qualifiedInstance
@@ -929,12 +943,12 @@ constructorRuntimeBindingRecoverable ctor =
 synthesizeDerivedInstances :: Scope -> P.Module -> TcM [P.InstanceDecl]
 synthesizeDerivedInstances scope mod0 = do
   candidates <- concat <$> mapM deriveForData (moduleDataDecls mod0)
-  let pendingInstances = map (pendingDerivedInstance . snd) candidates
+  let pendingInstances = map (\(_, classInfo, instDecl) -> pendingDerivedInstance classInfo instDecl) candidates
       validationScope = scope {scopeInstances = scopeInstances scope ++ pendingInstances}
   mapM_
-    (\(dataDecl, instDecl) -> validateEqDerivingFields (P.instanceDeclClass instDecl) validationScope dataDecl)
+    (\(dataDecl, _, instDecl) -> validateEqDerivingFields (P.instanceDeclClass instDecl) validationScope dataDecl)
     candidates
-  pure (map snd candidates)
+  pure [instDecl | (_, _, instDecl) <- candidates]
   where
     deriveForData dataDecl = do
       forM (P.dataDeclDeriving dataDecl) $ \className0 -> do
@@ -942,12 +956,9 @@ synthesizeDerivedInstances scope mod0 = do
           then do
             classInfo <- lookupClassInfo scope className0
             case eqMethodReference classInfo of
-              Just eqMethodName -> pure (dataDecl, mkEqInstance classInfo eqMethodName dataDecl)
+              Just eqMethodName -> pure (dataDecl, classInfo, mkEqInstance classInfo eqMethodName dataDecl)
               Nothing -> throwError (ProgramUnsupportedDeriving className0)
           else throwError (ProgramUnsupportedDeriving className0)
-
-    unqualifiedName =
-      reverse . takeWhile (/= '.') . reverse
 
     eqMethodReference classInfo =
       fst <$> find matchesEqMethod (Map.toList (scopeValues scope))
@@ -956,9 +967,10 @@ synthesizeDerivedInstances scope mod0 = do
           methodClassName methodInfo == className classInfo && methodName methodInfo == "eq"
         matchesEqMethod _ = False
 
-    pendingDerivedInstance instDecl =
+    pendingDerivedInstance classInfo instDecl =
       InstanceInfo
         { instanceClassName = P.instanceDeclClass instDecl,
+          instanceClassModule = classModule classInfo,
           instanceOriginModule = P.moduleName mod0,
           instanceConstraints = P.instanceDeclConstraints instDecl,
           instanceHeadType = P.instanceDeclType instDecl,
@@ -1167,6 +1179,7 @@ buildInstanceSkeletons scope mod0 derived = do
       pure
         InstanceInfo
           { instanceClassName = P.instanceDeclClass instDecl,
+            instanceClassModule = classModule classInfo,
             instanceOriginModule = P.moduleName mod0,
             instanceConstraints = P.instanceDeclConstraints instDecl,
             instanceHeadType = P.instanceDeclType instDecl,

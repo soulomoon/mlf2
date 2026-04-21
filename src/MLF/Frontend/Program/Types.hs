@@ -306,6 +306,7 @@ data ValueInfo
 
 data InstanceInfo = InstanceInfo
   { instanceClassName :: P.ClassName,
+    instanceClassModule :: P.ModuleName,
     instanceOriginModule :: P.ModuleName,
     instanceConstraints :: [P.ClassConstraint],
     instanceHeadType :: SrcType,

@@ -1681,6 +1681,38 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "rejects alias-head instance for same-named private class"
+        ( InlineProgram $
+            unlines
+                [ "module Classes export (Eq, eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Core export (Token(..)) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Token ="
+                , "      Token : Token;"
+                , ""
+                , "  instance Eq Token {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Classes exposing (Eq, eq);"
+                , "  import Core as C;"
+                , ""
+                , "  def main : Bool = eq C.Token C.Token;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STBase \"C.Token\")")
+    , ProgramMatrixCase
         "runs aliased exposing type without duplicate instance heads"
         ( InlineProgram $
             unlines
