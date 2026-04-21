@@ -266,6 +266,7 @@ data DataInfo = DataInfo
 
 data MethodInfo = MethodInfo
   { methodClassName :: P.ClassName,
+    methodClassModule :: P.ModuleName,
     methodName :: P.MethodName,
     methodRuntimeBase :: String,
     methodType :: SrcType,

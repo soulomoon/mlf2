@@ -39,6 +39,7 @@ import MLF.Frontend.Program.Elaborate
     lowerType,
     matchTypes,
     resolveInstanceInfoWithSubst,
+    resolveMethodInstanceInfoWithSubst,
   )
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -724,7 +725,7 @@ resolveDeferredMethods scope deferredMethods = go
             case inferClassArgument (lowerType scope (methodType methodInfo)) (methodParamName methodInfo) argTypes of
               Just ty -> Right ty
               Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-          (instanceInfo, subst) <- resolveInstanceInfoWithSubst scope (methodClassName methodInfo) classArgTy
+          (instanceInfo, subst) <- resolveMethodInstanceInfoWithSubst scope methodInfo classArgTy
           methodValue <- concreteMethodValue instanceInfo methodInfo
           methodSubst <-
             case inferMethodArgumentSubst methodInfo classArgTy subst argTypes of

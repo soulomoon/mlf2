@@ -17,6 +17,7 @@ module MLF.Frontend.Program.Elaborate
     freeTypeVarsSrcType,
     resolveInstanceInfo,
     resolveInstanceInfoWithSubst,
+    resolveMethodInstanceInfoWithSubst,
   )
 where
 
@@ -73,6 +74,8 @@ data ElaborateResult a = ElaborateResult
     elaborateResultDeferredObligations :: Map String DeferredProgramObligation,
     elaborateResultExternalTypes :: Map String SrcType
   }
+
+type ClassIdentity = (P.ModuleName, P.ClassName)
 
 runElaborateM :: ElaborateM a -> Either ProgramError (ElaborateResult a)
 runElaborateM action =
@@ -745,7 +748,7 @@ resolveMethodHeadExpr scope seen methodInfo classArgTy =
   case lookupEvidenceMethod scope (methodClassName methodInfo) classArgTy (methodName methodInfo) of
     Just (runtimeName, _) -> pure (surfaceVar runtimeName)
     Nothing -> do
-      (instanceInfo, subst) <- liftEitherElab (resolveInstanceInfoWithSubst scope (methodClassName methodInfo) classArgTy)
+      (instanceInfo, subst) <- liftEitherElab (resolveMethodInstanceInfoWithSubst scope methodInfo classArgTy)
       case Map.lookup (methodName methodInfo) (instanceMethods instanceInfo) of
         Just OrdinaryValue {valueRuntimeName = runtimeName, valueConstraints = constraints} -> do
           let headVars = freeTypeVarsSrcType classArgTy
@@ -1522,6 +1525,33 @@ resolveInstanceInfo scope className0 headTy =
 
 resolveInstanceInfoWithSubst :: ElaborateScope -> P.ClassName -> SrcType -> Either ProgramError (InstanceInfo, Map String SrcType)
 resolveInstanceInfoWithSubst scope className0 headTy =
+  resolveInstanceInfoWithIdentity scope className0 expectedClassIdentity headTy
+  where
+    expectedClassIdentity = classInfoIdentity <$> Map.lookup className0 (esClasses scope)
+
+resolveMethodInstanceInfoWithSubst :: ElaborateScope -> MethodInfo -> SrcType -> Either ProgramError (InstanceInfo, Map String SrcType)
+resolveMethodInstanceInfoWithSubst scope methodInfo =
+  resolveInstanceInfoWithIdentity scope (methodClassName methodInfo) (Just (methodInfoClassIdentity methodInfo))
+
+classInfoIdentity :: ClassInfo -> ClassIdentity
+classInfoIdentity classInfo =
+  (classModule classInfo, unqualifiedName (className classInfo))
+
+methodInfoClassIdentity :: MethodInfo -> ClassIdentity
+methodInfoClassIdentity methodInfo =
+  (methodClassModule methodInfo, unqualifiedName (methodClassName methodInfo))
+
+unqualifiedName :: String -> String
+unqualifiedName =
+  reverse . takeWhile (/= '.') . reverse
+
+resolveInstanceInfoWithIdentity ::
+  ElaborateScope ->
+  P.ClassName ->
+  Maybe ClassIdentity ->
+  SrcType ->
+  Either ProgramError (InstanceInfo, Map String SrcType)
+resolveInstanceInfoWithIdentity scope className0 expectedClassIdentity headTy =
   case deduplicatedMatches of
     [(match, subst, _direct)] -> Right (match, subst)
     [] -> Left (ProgramNoMatchingInstance className0 headTy)
@@ -1532,44 +1562,17 @@ resolveInstanceInfoWithSubst scope className0 headTy =
     matches =
       [ (info, subst, direct)
         | info <- esInstances scope,
-          instanceClassName info == className0,
           instanceMatchesClassIdentity info,
           Just (subst, direct) <- [matchInstanceHead info]
       ]
-
-    expectedClassIdentity =
-      case Map.lookup className0 (esClasses scope) of
-        Just classInfo -> Just (classInfoIdentity classInfo)
-        Nothing -> overloadedMethodClassIdentity
 
     instanceMatchesClassIdentity info =
       case expectedClassIdentity of
         Just identity -> instanceInfoClassIdentity info == identity
         Nothing -> False
 
-    classInfoIdentity classInfo =
-      (classModule classInfo, unqualifiedName (className classInfo))
-
     instanceInfoClassIdentity info =
       (instanceClassModule info, unqualifiedName (instanceClassName info))
-
-    overloadedMethodClassIdentity =
-      methodValueClassIdentity
-        =<< find visibleMethodForClass (Map.elems (esValues scope))
-
-    visibleMethodForClass valueInfo =
-      case valueInfo of
-        OverloadedMethod {valueMethodInfo = methodInfo} -> methodClassName methodInfo == className0
-        _ -> False
-
-    methodValueClassIdentity valueInfo =
-      case valueInfo of
-        OverloadedMethod {valueMethodInfo = methodInfo} ->
-          Just (valueOriginModule valueInfo, unqualifiedName (methodClassName methodInfo))
-        _ -> Nothing
-
-    unqualifiedName =
-      reverse . takeWhile (/= '.') . reverse
 
     matchInstanceHead info =
       case matchTypes Map.empty (instanceHeadType info) headTy of
@@ -1586,7 +1589,7 @@ resolveInstanceInfoWithSubst scope className0 headTy =
 
     equivalentInstanceMatch (left, _, _) (right, _, _) =
       instanceOriginModule left == instanceOriginModule right
-        && instanceClassName left == instanceClassName right
+        && instanceInfoClassIdentity left == instanceInfoClassIdentity right
         && lowerType scope (instanceHeadType left) == lowerType scope (instanceHeadType right)
         && map lowerConstraint (instanceConstraints left) == map lowerConstraint (instanceConstraints right)
         && fmap methodRuntimeIdentity (instanceMethods left) == fmap methodRuntimeIdentity (instanceMethods right)

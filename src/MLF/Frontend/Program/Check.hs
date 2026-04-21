@@ -492,7 +492,7 @@ methodClassIdentity :: ValueInfo -> Maybe ClassIdentity
 methodClassIdentity valueInfo =
   case valueInfo of
     OverloadedMethod {valueMethodInfo = methodInfo} ->
-      Just (valueOriginModule valueInfo, unqualifiedName (methodClassName methodInfo))
+      Just (methodClassModule methodInfo, unqualifiedName (methodClassName methodInfo))
     _ -> Nothing
 
 instanceClassIdentity :: InstanceInfo -> ClassIdentity
@@ -653,7 +653,7 @@ qualifiedInstanceVariants alias exports unqualifiedTypeNames unqualifiedClassIde
   distinctInstanceHeads
     [ variant
       | variant <- fullQualifiedVariants ++ aliasHeadVariants,
-        not (sameInstanceHead instanceInfo variant)
+        not (sameInstanceSurfaceHead instanceInfo variant)
     ]
   where
     qualifiedInstance = qualifyInstance alias exports instanceInfo
@@ -690,6 +690,11 @@ distinctInstanceHeads = reverse . foldl' add []
 
 sameInstanceHead :: InstanceInfo -> InstanceInfo -> Bool
 sameInstanceHead left right =
+  instanceClassIdentity left == instanceClassIdentity right
+    && instanceHeadType left == instanceHeadType right
+
+sameInstanceSurfaceHead :: InstanceInfo -> InstanceInfo -> Bool
+sameInstanceSurfaceHead left right =
   instanceClassName left == instanceClassName right
     && instanceHeadType left == instanceHeadType right
 
@@ -927,6 +932,7 @@ buildLocalClassInfo mod0 = do
               [ ( P.methodSigName sig,
                   MethodInfo
                     { methodClassName = P.classDeclName classDecl,
+                      methodClassModule = P.moduleName mod0,
                       methodName = P.methodSigName sig,
                       methodRuntimeBase = qualify (P.moduleName mod0) (P.classDeclName classDecl ++ "__" ++ P.methodSigName sig),
                       methodType = P.constrainedBody (P.methodSigType sig),

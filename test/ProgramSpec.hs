@@ -1745,6 +1745,72 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STBase \"Token\")")
     , ProgramMatrixCase
+        "keeps hidden same-named class instances across method-only imports"
+        ( InlineProgram $
+            unlines
+                [ "module A export (z) {"
+                , "  class Eq a {"
+                , "    z : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Int {"
+                , "    z = \\left \\right true;"
+                , "  }"
+                , "}"
+                , ""
+                , "module B export (a) {"
+                , "  class Eq a {"
+                , "    a : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Int {"
+                , "    a = \\left \\right false;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import A exposing (z);"
+                , "  import B exposing (a);"
+                , ""
+                , "  def main : Bool = a 1 1;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "false")
+    , ProgramMatrixCase
+        "resolves method-only import by selected hidden class identity"
+        ( InlineProgram $
+            unlines
+                [ "module A export (eqA) {"
+                , "  class Eq a {"
+                , "    eqA : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Int {"
+                , "    eqA = \\left \\right true;"
+                , "  }"
+                , "}"
+                , ""
+                , "module B export (eqB) {"
+                , "  class Eq a {"
+                , "    eqB : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eqB = \\left \\right false;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import A exposing (eqA);"
+                , "  import B exposing (eqB);"
+                , ""
+                , "  def main : Bool = eqB true false;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "false")
+    , ProgramMatrixCase
         "runs aliased exposing type without duplicate instance heads"
         ( InlineProgram $
             unlines
