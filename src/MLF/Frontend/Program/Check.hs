@@ -1212,7 +1212,9 @@ buildInstanceSkeletons :: Scope -> P.Module -> [P.InstanceDecl] -> TcM [Instance
 buildInstanceSkeletons scope mod0 derived = do
   let instances0 = derived ++ explicitInstances mod0
   infos <- mapM toInstanceInfo instances0
-  ensureDistinctPlain (\(className0, ty) -> ProgramDuplicateInstance className0 ty) [(instanceClassName info, instanceHeadType info) | info <- infos]
+  case duplicateLocalInstances infos of
+    info : _ -> throwError (ProgramDuplicateInstance (instanceClassName info) (instanceHeadType info))
+    [] -> pure ()
   case duplicateExistingInstances infos of
     info : _ -> throwError (ProgramDuplicateInstance (instanceClassName info) (instanceHeadType info))
     [] -> pure ()
@@ -1272,27 +1274,36 @@ buildInstanceSkeletons scope mod0 derived = do
       [ (left, right)
         | (ix, left) <- zip [(0 :: Int) ..] infos,
           right <- drop (ix + 1) infos,
-          instanceClassName left == instanceClassName right,
+          sameInstanceClass left right,
           instanceHeadType left /= instanceHeadType right,
           instanceHeadsOverlap (instanceHeadType left) (instanceHeadType right)
+      ]
+
+    duplicateLocalInstances infos =
+      [ left
+        | (ix, left) <- zip [(0 :: Int) ..] infos,
+          right <- drop (ix + 1) infos,
+          sameInstanceHead left right
       ]
 
     duplicateExistingInstances infos =
       [ local
         | local <- infos,
           existing <- scopeInstances scope,
-          instanceClassName local == instanceClassName existing,
-          instanceHeadType local == instanceHeadType existing
+          sameInstanceHead local existing
       ]
 
     overlappingWithExistingInstances infos =
       [ (local, existing)
         | local <- infos,
           existing <- scopeInstances scope,
-          instanceClassName local == instanceClassName existing,
+          sameInstanceClass local existing,
           instanceHeadType local /= instanceHeadType existing,
           instanceHeadsOverlap (instanceHeadType local) (instanceHeadType existing)
       ]
+
+    sameInstanceClass left right =
+      instanceClassIdentity left == instanceClassIdentity right
 
     instanceHeadsOverlap left right =
       case
@@ -1419,8 +1430,9 @@ sanitizeType = \case
 
 checkInstance :: ElaborateScope -> Scope -> P.InstanceDecl -> TcM [CheckedBinding]
 checkInstance elaborateScope scope instDecl = do
+  classInfo <- lookupClassInfo scope (P.instanceDeclClass instDecl)
   instanceInfo <-
-    case findInstance scope (P.instanceDeclClass instDecl) (P.instanceDeclType instDecl) of
+    case findInstance scope classInfo (P.instanceDeclType instDecl) of
       Just info -> pure info
       Nothing -> throwError (ProgramNoMatchingInstance (P.instanceDeclClass instDecl) (P.instanceDeclType instDecl))
   forM (P.instanceDeclMethods instDecl) $ \methodDef -> do
@@ -1434,9 +1446,9 @@ checkInstance elaborateScope scope instDecl = do
           )
       _ -> throwError (ProgramUnexpectedInstanceMethod (P.instanceDeclClass instDecl) (P.methodDefName methodDef))
   where
-    findInstance scope0 className0 headTy =
+    findInstance scope0 classInfo headTy =
       find
-        (\info -> instanceClassName info == className0 && instanceHeadType info == headTy)
+        (\info -> instanceClassIdentity info == classIdentity classInfo && instanceHeadType info == headTy)
         (scopeInstances scope0)
 
 checkDef :: ElaborateScope -> Scope -> P.DefDecl -> TcM CheckedBinding

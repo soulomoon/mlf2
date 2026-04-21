@@ -1295,6 +1295,36 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramOverlappingInstance \"Eq\"")
     , ProgramMatrixCase
+        "rejects alias-equivalent duplicate class instance heads"
+        ( InlineProgram $
+            unlines
+                [ "module Classes export (Eq, eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Classes exposing (Eq, eq);"
+                , "  import Classes as P;"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , ""
+                , "  instance Eq Nat {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  instance P.Eq Nat {"
+                , "    eq = \\left \\right false;"
+                , "  }"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramDuplicateInstance")
+    , ProgramMatrixCase
         "runs parameterized deriving Eq for Option"
         ( InlineProgram $
             unlines
@@ -1810,6 +1840,47 @@ emlfBoundaryMatrix =
                 ]
         )
         (ExpectRunValue "false")
+    , ProgramMatrixCase
+        "runs local same-named class instance beside hidden method-only imports"
+        ( InlineProgram $
+            unlines
+                [ "module A export (z) {"
+                , "  class Eq a {"
+                , "    z : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Int {"
+                , "    z = \\left \\right true;"
+                , "  }"
+                , "}"
+                , ""
+                , "module B export (a) {"
+                , "  class Eq a {"
+                , "    a : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Int {"
+                , "    a = \\left \\right false;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (Eq, eq, main) {"
+                , "  import A exposing (z);"
+                , "  import B exposing (a);"
+                , ""
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Int {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  def main : Bool = eq 1 1;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
     , ProgramMatrixCase
         "runs aliased exposing type without duplicate instance heads"
         ( InlineProgram $
