@@ -796,6 +796,24 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs deferred method when only a later forall binder is inferred"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Pick, pick, main) {"
+                , "  class Pick a {"
+                , "    pick : forall ghost. forall b. a -> b -> b;"
+                , "  }"
+                , ""
+                , "  instance Pick Bool {"
+                , "    pick = let impl : forall ghost. forall b. Bool -> b -> b = \\flag \\value value in impl;"
+                , "  }"
+                , ""
+                , "  def main : Bool = pick true false;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "false")
+    , ProgramMatrixCase
         "runs constrained helper with method-local evidence fixed by call args"
         ( InlineProgram $
             unlines

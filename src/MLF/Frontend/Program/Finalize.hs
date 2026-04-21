@@ -804,17 +804,24 @@ methodValueConstraints _ = []
 instantiateMethodValue :: ElaborateScope -> Map String SrcType -> ValueInfo -> ElabTerm
 instantiateMethodValue scope subst OrdinaryValue {valueRuntimeName = runtimeName, valueType = visibleTy} =
   foldl
-    ( \term (name, _) ->
-        case Map.lookup name subst of
-          Just ty -> X.ETyInst term (X.InstApp (srcTypeToElabType (lowerType scope ty)))
-          Nothing -> term
-    )
+    X.ETyInst
     (X.EVar runtimeName)
-    (fst (splitForalls visibleTy))
+    (methodForallInstantiations scope subst (fst (splitForalls visibleTy)))
 instantiateMethodValue _ _ ConstructorValue {valueRuntimeName = runtimeName} =
   X.EVar runtimeName
 instantiateMethodValue _ _ OverloadedMethod {} =
   X.EVar "<overloaded-method>"
+
+methodForallInstantiations :: ElaborateScope -> Map String SrcType -> [(String, Maybe SrcType)] -> [X.Instantiation]
+methodForallInstantiations scope subst = go
+  where
+    go [] = []
+    go ((name, _) : rest) =
+      case Map.lookup name subst of
+        Just ty -> X.InstApp (srcTypeToElabType (lowerType scope ty)) : go rest
+        Nothing
+          | any ((`Map.member` subst) . fst) rest -> X.InstElim : go rest
+          | otherwise -> []
 
 applyConstraintSubst :: Map String SrcType -> P.ClassConstraint -> P.ClassConstraint
 applyConstraintSubst subst constraint =
