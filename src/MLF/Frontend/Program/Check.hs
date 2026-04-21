@@ -207,12 +207,11 @@ topoSortModules modules0 = do
 checkModule :: [CheckedModule] -> P.Module -> TcM CheckedModule
 checkModule priorModules mod0 = do
   let priorExports = Map.fromList [(checkedModuleName checked, checkedModuleExports checked) | checked <- priorModules]
+      priorData = Map.fromList [(checkedModuleName checked, checkedModuleData checked) | checked <- priorModules]
       priorInstances = concatMap checkedModuleInstances priorModules
       unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExports (P.moduleImports mod0)
-      qualifiedPriorInstances =
-        concatMap
-          (qualifiedInstancesForImport priorExports priorInstances unqualifiedClassIdentities)
-          (P.moduleImports mod0)
+      visibleImportedInstances =
+        visibleInstancesForImports priorExports priorData priorInstances unqualifiedClassIdentities (P.moduleImports mod0)
   ensureDistinctImportAliases (P.moduleImports mod0)
   importScope <- buildImportScope priorExports (P.moduleImports mod0)
   localData <- buildLocalDataInfo mod0
@@ -230,7 +229,7 @@ checkModule priorModules mod0 = do
   valueScope <- liftEither =<< pure (addValues (scopeValues importScope) localValues)
   typeScope <- liftEither =<< pure (addTypes (scopeTypes importScope) localData)
   classScope <- liftEither =<< pure (addClasses (scopeClasses importScope) localClasses)
-  let scope0 = Scope valueScope typeScope classScope (scopeInstances importScope ++ priorInstances ++ qualifiedPriorInstances)
+  let scope0 = Scope valueScope typeScope classScope (scopeInstances importScope ++ visibleImportedInstances)
   validateLocalClassMethodConstraints scope0 mod0
   derivedInstances <- synthesizeDerivedInstances scope0 mod0
   instanceSkeletons <- buildInstanceSkeletons scope0 mod0 derivedInstances
@@ -500,8 +499,47 @@ instanceClassIdentity :: InstanceInfo -> ClassIdentity
 instanceClassIdentity instanceInfo =
   (instanceClassModule instanceInfo, unqualifiedName (instanceClassName instanceInfo))
 
-qualifiedInstancesForImport :: Map P.ModuleName ModuleExports -> [InstanceInfo] -> Set.Set ClassIdentity -> P.Import -> [InstanceInfo]
-qualifiedInstancesForImport priorExports priorInstances unqualifiedClassIdentities imp =
+visibleInstancesForImports ::
+  Map P.ModuleName ModuleExports ->
+  Map P.ModuleName (Map String DataInfo) ->
+  [InstanceInfo] ->
+  Set.Set ClassIdentity ->
+  [P.Import] ->
+  [InstanceInfo]
+visibleInstancesForImports priorExports priorData priorInstances unqualifiedClassIdentities =
+  distinctInstanceHeads . concatMap instancesForImport
+  where
+    instancesForImport imp =
+      unqualifiedInstancesForImport priorExports priorData priorInstances unqualifiedClassIdentities imp
+        ++ qualifiedInstancesForImport priorExports priorData priorInstances unqualifiedClassIdentities imp
+
+unqualifiedInstancesForImport ::
+  Map P.ModuleName ModuleExports ->
+  Map P.ModuleName (Map String DataInfo) ->
+  [InstanceInfo] ->
+  Set.Set ClassIdentity ->
+  P.Import ->
+  [InstanceInfo]
+unqualifiedInstancesForImport priorExports priorData priorInstances unqualifiedClassIdentities imp =
+  case Map.lookup (P.importModuleName imp) priorExports of
+    Nothing -> []
+    Just exports ->
+      let importClassIdentities = importUnqualifiedClassIdentitiesFor exports imp
+          unqualifiedTypeNames = importUnqualifiedTypeNames exports imp
+       in [ instanceInfo
+            | instanceInfo <- priorInstances,
+              instanceBelongsToModule (P.importModuleName imp) instanceInfo,
+              instanceVisibleForUnqualifiedImport priorData unqualifiedClassIdentities importClassIdentities unqualifiedTypeNames instanceInfo
+          ]
+
+qualifiedInstancesForImport ::
+  Map P.ModuleName ModuleExports ->
+  Map P.ModuleName (Map String DataInfo) ->
+  [InstanceInfo] ->
+  Set.Set ClassIdentity ->
+  P.Import ->
+  [InstanceInfo]
+qualifiedInstancesForImport priorExports priorData priorInstances unqualifiedClassIdentities imp =
   case P.importAlias imp of
     Nothing -> []
     Just alias ->
@@ -512,7 +550,7 @@ qualifiedInstancesForImport priorExports priorInstances unqualifiedClassIdentiti
                 [ instanceInfo
                   | instanceInfo <- priorInstances,
                     instanceBelongsToModule (P.importModuleName imp) instanceInfo,
-                    instanceVisibleForQualifiedImport exports instanceInfo
+                    instanceVisibleForQualifiedImport priorData exports instanceInfo
                 ]
               unqualifiedTypeNames = importExposedTypeNames imp
            in concatMap (qualifiedInstanceVariants alias exports unqualifiedTypeNames unqualifiedClassIdentities) importedInstances
@@ -527,15 +565,18 @@ importedUnqualifiedClassIdentities priorExports =
     importUnqualifiedClassIdentities imp =
       case Map.lookup (P.importModuleName imp) priorExports of
         Nothing -> Set.empty
-        Just exports ->
-          case (P.importAlias imp, P.importExposing imp) of
-            (Nothing, Nothing) ->
-              Set.fromList (map classIdentity (Map.elems (exportedClasses exports)))
-                `Set.union` overloadedMethodClassIdentities (Map.elems (exportedValues exports))
-            (_, Just items) -> Set.unions (map (importItemClassIdentities exports) items)
-            (Just _, Nothing) -> Set.empty
+        Just exports -> importUnqualifiedClassIdentitiesFor exports imp
 
-    importItemClassIdentities exports item =
+importUnqualifiedClassIdentitiesFor :: ModuleExports -> P.Import -> Set.Set ClassIdentity
+importUnqualifiedClassIdentitiesFor exports imp =
+  case (P.importAlias imp, P.importExposing imp) of
+    (Nothing, Nothing) ->
+      Set.fromList (map classIdentity (Map.elems (exportedClasses exports)))
+        `Set.union` overloadedMethodClassIdentities (Map.elems (exportedValues exports))
+    (_, Just items) -> Set.unions (map importItemClassIdentities items)
+    (Just _, Nothing) -> Set.empty
+  where
+    importItemClassIdentities item =
       case item of
         P.ExportType name
           | Just classInfo <- Map.lookup name (exportedClasses exports) -> Set.singleton (classIdentity classInfo)
@@ -547,6 +588,13 @@ importedUnqualifiedClassIdentities priorExports =
 
     overloadedMethodClassIdentities =
       Set.fromList . mapMaybe methodClassIdentity
+
+importUnqualifiedTypeNames :: ModuleExports -> P.Import -> Set.Set String
+importUnqualifiedTypeNames exports imp =
+  case (P.importAlias imp, P.importExposing imp) of
+    (Nothing, Nothing) -> Map.keysSet (exportedTypes exports)
+    (_, Just _) -> importExposedTypeNames imp
+    (Just _, Nothing) -> Set.empty
 
 importExposedTypeNames :: P.Import -> Set.Set String
 importExposedTypeNames imp =
@@ -560,10 +608,32 @@ importExposedTypeNames imp =
         P.ExportTypeWithConstructors name -> [name]
         P.ExportValue {} -> []
 
-instanceVisibleForQualifiedImport :: ModuleExports -> InstanceInfo -> Bool
-instanceVisibleForQualifiedImport exports instanceInfo =
-  instanceClassName instanceInfo `Map.member` exportedClasses exports
-    || srcTypeMentionsAny (Map.keysSet (exportedTypes exports)) (instanceHeadType instanceInfo)
+instanceVisibleForUnqualifiedImport ::
+  Map P.ModuleName (Map String DataInfo) ->
+  Set.Set ClassIdentity ->
+  Set.Set ClassIdentity ->
+  Set.Set String ->
+  InstanceInfo ->
+  Bool
+instanceVisibleForUnqualifiedImport priorData unqualifiedClassIdentities importClassIdentities unqualifiedTypeNames instanceInfo =
+  (classVisibleGlobally && originDataVisible && not (Set.null originDataMentions))
+    || (classVisibleThroughImport && Set.null originDataMentions)
+  where
+    identity = instanceClassIdentity instanceInfo
+    classVisibleGlobally = identity `Set.member` unqualifiedClassIdentities
+    classVisibleThroughImport = identity `Set.member` importClassIdentities
+    originDataMentions = instanceOriginDataMentions priorData instanceInfo
+    originDataVisible = originDataMentions `Set.isSubsetOf` unqualifiedTypeNames
+
+instanceVisibleForQualifiedImport :: Map P.ModuleName (Map String DataInfo) -> ModuleExports -> InstanceInfo -> Bool
+instanceVisibleForQualifiedImport priorData exports instanceInfo =
+  originDataVisible
+    && ( instanceClassName instanceInfo `Map.member` exportedClasses exports
+           || srcTypeMentionsAny exportedTypeNames (instanceHeadType instanceInfo)
+       )
+  where
+    exportedTypeNames = Map.keysSet (exportedTypes exports)
+    originDataVisible = instanceOriginDataMentions priorData instanceInfo `Set.isSubsetOf` exportedTypeNames
 
 srcTypeMentionsAny :: Set.Set String -> SrcType -> Bool
 srcTypeMentionsAny names ty =
@@ -637,6 +707,12 @@ instanceExportedTypeMentions exportedTypeNames instanceInfo =
           srcTypeMentionedNames exportedTypeNames (valueType valueInfo)
             : map (srcTypeMentionedNames exportedTypeNames . P.constraintType) (valueConstraints valueInfo)
         _ -> []
+
+instanceOriginDataMentions :: Map P.ModuleName (Map String DataInfo) -> InstanceInfo -> Set.Set String
+instanceOriginDataMentions priorData instanceInfo =
+  case Map.lookup (instanceOriginModule instanceInfo) priorData of
+    Nothing -> Set.empty
+    Just dataInfos -> instanceExportedTypeMentions (Map.keysSet dataInfos) instanceInfo
 
 srcTypeMentionedNames :: Set.Set String -> SrcType -> Set.Set String
 srcTypeMentionedNames names ty =

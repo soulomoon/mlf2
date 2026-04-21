@@ -1713,6 +1713,38 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STBase \"C.Token\")")
     , ProgramMatrixCase
+        "rejects unimported prior private instance for same-named local class"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (hidden) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Token ="
+                , "      Token : Token;"
+                , ""
+                , "  instance Eq Token {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  def hidden : Bool = true;"
+                , "}"
+                , ""
+                , "module Main export (Eq, Token(..), eq, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Token ="
+                , "      Token : Token;"
+                , ""
+                , "  def main : Bool = eq Token Token;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Eq\" (STBase \"Token\")")
+    , ProgramMatrixCase
         "runs aliased exposing type without duplicate instance heads"
         ( InlineProgram $
             unlines

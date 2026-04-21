@@ -1533,8 +1533,43 @@ resolveInstanceInfoWithSubst scope className0 headTy =
       [ (info, subst, direct)
         | info <- esInstances scope,
           instanceClassName info == className0,
+          instanceMatchesClassIdentity info,
           Just (subst, direct) <- [matchInstanceHead info]
       ]
+
+    expectedClassIdentity =
+      case Map.lookup className0 (esClasses scope) of
+        Just classInfo -> Just (classInfoIdentity classInfo)
+        Nothing -> overloadedMethodClassIdentity
+
+    instanceMatchesClassIdentity info =
+      case expectedClassIdentity of
+        Just identity -> instanceInfoClassIdentity info == identity
+        Nothing -> False
+
+    classInfoIdentity classInfo =
+      (classModule classInfo, unqualifiedName (className classInfo))
+
+    instanceInfoClassIdentity info =
+      (instanceClassModule info, unqualifiedName (instanceClassName info))
+
+    overloadedMethodClassIdentity =
+      methodValueClassIdentity
+        =<< find visibleMethodForClass (Map.elems (esValues scope))
+
+    visibleMethodForClass valueInfo =
+      case valueInfo of
+        OverloadedMethod {valueMethodInfo = methodInfo} -> methodClassName methodInfo == className0
+        _ -> False
+
+    methodValueClassIdentity valueInfo =
+      case valueInfo of
+        OverloadedMethod {valueMethodInfo = methodInfo} ->
+          Just (valueOriginModule valueInfo, unqualifiedName (methodClassName methodInfo))
+        _ -> Nothing
+
+    unqualifiedName =
+      reverse . takeWhile (/= '.') . reverse
 
     matchInstanceHead info =
       case matchTypes Map.empty (instanceHeadType info) headTy of
