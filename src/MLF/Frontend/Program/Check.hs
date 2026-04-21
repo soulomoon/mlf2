@@ -224,6 +224,7 @@ checkModule priorModules mod0 = do
   typeScope <- liftEither =<< pure (addTypes (scopeTypes importScope) localData)
   classScope <- liftEither =<< pure (addClasses (scopeClasses importScope) localClasses)
   let scope0 = Scope valueScope typeScope classScope (scopeInstances importScope ++ priorInstances ++ qualifiedPriorInstances)
+  validateLocalClassMethodConstraints scope0 mod0
   derivedInstances <- synthesizeDerivedInstances scope0 mod0
   instanceSkeletons <- buildInstanceSkeletons scope0 mod0 derivedInstances
   let scope1 = scope0 {scopeInstances = scopeInstances scope0 ++ instanceSkeletons}
@@ -805,6 +806,24 @@ buildLocalClassInfo mod0 = do
             }
         )
 
+validateLocalClassMethodConstraints :: Scope -> P.Module -> TcM ()
+validateLocalClassMethodConstraints scope mod0 =
+  mapM_ validateClassDecl (moduleClassDecls mod0)
+  where
+    validateClassDecl classDecl =
+      mapM_ validateMethodConstraints (P.classDeclMethods classDecl)
+
+    validateMethodConstraints =
+      validateClassConstraintClasses scope
+        . P.constrainedConstraints
+        . P.methodSigType
+
+validateClassConstraintClasses :: Scope -> [P.ClassConstraint] -> TcM ()
+validateClassConstraintClasses scope =
+  mapM_ $ \constraint -> do
+    _ <- lookupClassInfo scope (P.constraintClassName constraint)
+    pure ()
+
 buildLocalDefInfo :: P.Module -> TcM (Map String ValueInfo)
 buildLocalDefInfo mod0 = do
   let defs = moduleDefDecls mod0
@@ -1046,6 +1065,7 @@ buildInstanceSkeletons scope mod0 derived = do
   where
     toInstanceInfo instDecl = do
       classInfo <- lookupClassInfo scope (P.instanceDeclClass instDecl)
+      validateClassConstraintClasses scope (P.instanceDeclConstraints instDecl)
       let methodMap = classMethods classInfo
           expected = Map.keysSet methodMap
           provided = Set.fromList (map P.methodDefName (P.instanceDeclMethods instDecl))

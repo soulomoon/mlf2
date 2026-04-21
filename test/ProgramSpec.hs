@@ -917,6 +917,36 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramNoMatchingInstance \"Marker\"")
     , ProgramMatrixCase
+        "rejects method signature constraint with unknown class"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (C, main) {"
+                , "  class C a {"
+                , "    m : Missing a => a -> a;"
+                , "  }"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramUnknownClass \"Missing\"")
+    , ProgramMatrixCase
+        "rejects zero-method instance constraint with unknown class"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Marker, main) {"
+                , "  class Marker a {"
+                , "  }"
+                , ""
+                , "  instance Missing a => Marker a {"
+                , "  }"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramUnknownClass \"Missing\"")
+    , ProgramMatrixCase
         "rejects zero-method class instance when prerequisite is missing"
         ( InlineProgram $
             unlines
