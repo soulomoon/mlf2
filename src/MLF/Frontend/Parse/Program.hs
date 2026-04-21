@@ -1,10 +1,13 @@
 module MLF.Frontend.Parse.Program
     ( ProgramParseError
     , renderProgramParseError
+    , parseLocatedProgram
+    , parseLocatedProgramWithFile
     , parseRawProgram
     ) where
 
 import Control.Monad (void)
+import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Void (Void)
@@ -30,6 +33,7 @@ import Text.Megaparsec
     , choice
     , eof
     , errorBundlePretty
+    , getSourcePos
     , many
     , optional
     , parse
@@ -39,6 +43,8 @@ import Text.Megaparsec
     , try
     , (<|>)
     )
+import qualified Text.Megaparsec.Pos as MP
+import Text.Megaparsec.Pos (unPos)
 
 newtype ProgramParseError = ProgramParseError (ParseErrorBundle String Void)
     deriving (Eq, Show)
@@ -47,8 +53,14 @@ renderProgramParseError :: ProgramParseError -> String
 renderProgramParseError (ProgramParseError err) = errorBundlePretty err
 
 parseRawProgram :: String -> Either ProgramParseError Program
-parseRawProgram input =
-    case parse (sc *> pProgram <* eof) "<mlf-program>" input of
+parseRawProgram input = locatedProgram <$> parseLocatedProgram input
+
+parseLocatedProgram :: String -> Either ProgramParseError LocatedProgram
+parseLocatedProgram = parseLocatedProgramWithFile "<mlf-program>"
+
+parseLocatedProgramWithFile :: FilePath -> String -> Either ProgramParseError LocatedProgram
+parseLocatedProgramWithFile path input =
+    case parse (sc *> pLocatedProgram <* eof) path input of
         Left err -> Left (ProgramParseError err)
         Right program -> Right program
 
@@ -69,6 +81,7 @@ reservedWords =
         , "let"
         , "module"
         , "of"
+        , "as"
         , "true"
         , "false"
         ]
@@ -82,6 +95,28 @@ semi = symbol ";"
 commaSep :: Parser a -> Parser [a]
 commaSep item = item `sepBy` symbol ","
 
+qualifiedUpperIdent :: Parser String
+qualifiedUpperIdent =
+    try
+        ( do
+            qualifier <- upperIdent reservedWords
+            void (symbol ".")
+            name <- upperIdent reservedWords
+            pure (qualifier ++ "." ++ name)
+        )
+        <|> upperIdent reservedWords
+
+qualifiedLowerIdent :: Parser String
+qualifiedLowerIdent =
+    try
+        ( do
+            qualifier <- upperIdent reservedWords
+            void (symbol ".")
+            name <- lowerIdent reservedWords
+            pure (qualifier ++ "." ++ name)
+        )
+        <|> lowerIdent reservedWords
+
 programTypeConfig :: TypeParserConfig SrcType (Maybe SrcType)
 programTypeConfig =
     TypeParserConfig
@@ -90,7 +125,7 @@ programTypeConfig =
         , tpcSymbol = symbol
         , tpcParens = parens
         , tpcLowerIdent = lowerIdent reservedWords
-        , tpcUpperIdent = upperIdent reservedWords
+        , tpcUpperIdent = qualifiedUpperIdent
         , tpcBottomTok = bottomTok
         , tpcMkVar = STVar
         , tpcMkArrow = STArrow
@@ -128,29 +163,136 @@ pType = try pProgramForall <|> try pProgramMu <|> parseArrowTypeWith programType
         void (symbol ".")
         STMu v <$> pType
 
-pProgram :: Parser Program
-pProgram = Program <$> some pModule
+pLocatedConstrainedType :: Parser (ConstrainedType, ProgramSpanIndex)
+pLocatedConstrainedType =
+    try
+        ( do
+            (constraints, spans) <- pLocatedConstraintList
+            void (symbol "=>")
+            ty <- pType
+            pure (ConstrainedType constraints ty, spans)
+        )
+        <|> do
+            ty <- pType
+            pure (unconstrainedType ty, emptyProgramSpanIndex)
 
-pModule :: Parser Module
-pModule = do
-    void (symbol "module")
-    name <- upperIdent reservedWords
-    exports <- optional pExportList
-    (imports, decls) <- braces $ do
-        imports <- many (try pImport)
-        decls <- many pDecl
-        pure (imports, decls)
-    pure Module
-        { moduleName = name
-        , moduleExports = exports
-        , moduleImports = imports
-        , moduleDecls = decls
+pLocatedClassConstraint :: Parser (ClassConstraint, ProgramSpanIndex)
+pLocatedClassConstraint = do
+    (className, classSpan) <- withSpan qualifiedUpperIdent
+    ty <- pType
+    pure
+        ( ClassConstraint
+            { constraintClassName = className
+            , constraintType = ty
+            }
+        , singletonClassSpan className classSpan
+        )
+
+pLocatedConstraintList :: Parser ([ClassConstraint], ProgramSpanIndex)
+pLocatedConstraintList = do
+    constraints <-
+        try (parens (commaSep pLocatedClassConstraint))
+            <|> fmap (: []) pLocatedClassConstraint
+    pure (map fst constraints, mergeSpanIndexes (map snd constraints))
+
+pLocatedProgram :: Parser LocatedProgram
+pLocatedProgram = do
+    modules <- some pLocatedModule
+    let program = Program (map fst modules)
+        spanIndex = foldr appendProgramSpanIndex emptyProgramSpanIndex (map snd modules)
+    pure LocatedProgram { locatedProgram = program, locatedProgramSpans = spanIndex }
+
+withSpan :: Parser a -> Parser (a, SourceSpan)
+withSpan parser = do
+    start <- getSourcePos
+    value <- parser
+    end <- getSourcePos
+    pure (value, sourceSpanFromPositions start end)
+
+sourceSpanFromPositions :: MP.SourcePos -> MP.SourcePos -> SourceSpan
+sourceSpanFromPositions start end =
+    SourceSpan
+        { sourceFile = MP.sourceName start
+        , sourceStart = sourcePositionFromMegaparsec start
+        , sourceEnd = sourcePositionFromMegaparsec end
         }
 
-pExportList :: Parser [ExportItem]
-pExportList = do
+sourcePositionFromMegaparsec :: MP.SourcePos -> SourcePosition
+sourcePositionFromMegaparsec pos =
+    SourcePosition
+        (unPos (MP.sourceLine pos))
+        (unPos (MP.sourceColumn pos))
+
+singletonModuleSpan :: ModuleName -> SourceSpan -> ProgramSpanIndex
+singletonModuleSpan name span0 =
+    emptyProgramSpanIndex { spanModules = Map.singleton name span0 }
+
+singletonImportSpan :: ModuleName -> SourceSpan -> ProgramSpanIndex
+singletonImportSpan name span0 =
+    emptyProgramSpanIndex { spanImports = Map.singleton name [span0] }
+
+singletonImportAliasSpan :: ModuleName -> SourceSpan -> ProgramSpanIndex
+singletonImportAliasSpan name span0 =
+    emptyProgramSpanIndex { spanImportAliases = Map.singleton name [span0] }
+
+singletonImportItemSpan :: String -> SourceSpan -> ProgramSpanIndex
+singletonImportItemSpan name span0 =
+    emptyProgramSpanIndex { spanImportItems = Map.singleton name [span0] }
+
+singletonExportItemSpan :: String -> SourceSpan -> ProgramSpanIndex
+singletonExportItemSpan name span0 =
+    emptyProgramSpanIndex { spanExportItems = Map.singleton name [span0] }
+
+singletonValueSpan :: ValueName -> SourceSpan -> ProgramSpanIndex
+singletonValueSpan name span0 =
+    emptyProgramSpanIndex { spanValues = Map.singleton name [span0] }
+
+singletonTypeSpan :: TypeName -> SourceSpan -> ProgramSpanIndex
+singletonTypeSpan name span0 =
+    emptyProgramSpanIndex { spanTypes = Map.singleton name [span0] }
+
+singletonConstructorSpan :: ConstructorName -> SourceSpan -> ProgramSpanIndex
+singletonConstructorSpan name span0 =
+    emptyProgramSpanIndex { spanConstructors = Map.singleton name [span0] }
+
+singletonClassSpan :: ClassName -> SourceSpan -> ProgramSpanIndex
+singletonClassSpan name span0 =
+    emptyProgramSpanIndex { spanClasses = Map.singleton name [span0] }
+
+mergeSpanIndexes :: [ProgramSpanIndex] -> ProgramSpanIndex
+mergeSpanIndexes = foldr appendProgramSpanIndex emptyProgramSpanIndex
+
+pLocatedModule :: Parser (Module, ProgramSpanIndex)
+pLocatedModule = do
+    start <- getSourcePos
+    void (symbol "module")
+    name <- upperIdent reservedWords
+    exports <- optional pLocatedExportList
+    (imports, decls) <- braces $ do
+        imports <- many (try pLocatedImport)
+        decls <- many pLocatedDecl
+        pure (imports, decls)
+    end <- getSourcePos
+    let moduleSpan = sourceSpanFromPositions start end
+        module0 =
+            Module
+                { moduleName = name
+                , moduleExports = fmap fst exports
+                , moduleImports = map fst imports
+                , moduleDecls = map fst decls
+                }
+        spanIndex =
+            singletonModuleSpan name moduleSpan
+                `appendProgramSpanIndex` maybe emptyProgramSpanIndex snd exports
+                `appendProgramSpanIndex` mergeSpanIndexes (map snd imports)
+                `appendProgramSpanIndex` mergeSpanIndexes (map snd decls)
+    pure (module0, spanIndex)
+
+pLocatedExportList :: Parser ([ExportItem], ProgramSpanIndex)
+pLocatedExportList = do
     void (symbol "export")
-    parens (commaSep pExportItem)
+    exports <- parens (commaSep pLocatedModuleExportItem)
+    pure (map fst exports, mergeSpanIndexes (map snd exports))
 
 pExportItem :: Parser ExportItem
 pExportItem =
@@ -165,62 +307,122 @@ pExportItem =
         void (symbol ")")
         pure (ExportTypeWithConstructors tyName)
 
-pImport :: Parser Import
-pImport = do
+pLocatedImport :: Parser (Import, ProgramSpanIndex)
+pLocatedImport = do
     void (symbol "import")
-    name <- upperIdent reservedWords
+    (name, nameSpan) <- withSpan (upperIdent reservedWords)
+    alias <- optional $ do
+        void (symbol "as")
+        withSpan (upperIdent reservedWords)
     exposing <- optional $ do
         void (symbol "exposing")
-        parens (commaSep pExportItem)
+        parens (commaSep pLocatedExportItem)
     void semi
-    pure Import
-        { importModuleName = name
-        , importExposing = exposing
-        }
+    let import0 =
+            Import
+                { importModuleName = name
+                , importAlias = fst <$> alias
+                , importExposing = fmap (map fst) exposing
+                }
+        spans =
+            singletonImportSpan name nameSpan
+                `appendProgramSpanIndex` maybe emptyProgramSpanIndex (uncurry singletonImportAliasSpan) alias
+                `appendProgramSpanIndex` mergeSpanIndexes (maybe [] (map snd) exposing)
+    pure (import0, spans)
 
-pDecl :: Parser Decl
-pDecl =
+pLocatedExportItemSpan :: Parser (ExportItem, SourceSpan)
+pLocatedExportItemSpan = do
+    (item, span0) <- withSpan pExportItem
+    pure (item, span0)
+
+pLocatedModuleExportItem :: Parser (ExportItem, ProgramSpanIndex)
+pLocatedModuleExportItem = do
+    (item, span0) <- pLocatedExportItemSpan
+    pure (item, singletonExportItemSpan (exportItemName item) span0)
+
+pLocatedExportItem :: Parser (ExportItem, ProgramSpanIndex)
+pLocatedExportItem = do
+    (item, span0) <- pLocatedExportItemSpan
+    pure (item, singletonImportItemSpan (exportItemName item) span0)
+
+exportItemName :: ExportItem -> String
+exportItemName item =
+    case item of
+        ExportValue name -> name
+        ExportType name -> name
+        ExportTypeWithConstructors name -> name
+
+pLocatedDecl :: Parser (Decl, ProgramSpanIndex)
+pLocatedDecl =
     choice
-        [ DeclClass <$> try pClassDecl
-        , DeclInstance <$> try pInstanceDecl
-        , DeclData <$> try pDataDecl
-        , DeclDef <$> pDefDecl
+        [ fmap (\(decl, spans) -> (DeclClass decl, spans)) (try pLocatedClassDecl)
+        , fmap (\(decl, spans) -> (DeclInstance decl, spans)) (try pLocatedInstanceDecl)
+        , fmap (\(decl, spans) -> (DeclData decl, spans)) (try pLocatedDataDecl)
+        , fmap (\(decl, spans) -> (DeclDef decl, spans)) pLocatedDefDecl
         ]
 
-pClassDecl :: Parser ClassDecl
-pClassDecl = do
+pLocatedClassDecl :: Parser (ClassDecl, ProgramSpanIndex)
+pLocatedClassDecl = do
+    start <- getSourcePos
     void (symbol "class")
-    className <- upperIdent reservedWords
+    className <- qualifiedUpperIdent
     classParam <- lowerIdent reservedWords
-    methods <- braces (many pMethodSig)
-    pure ClassDecl
-        { classDeclName = className
-        , classDeclParam = classParam
-        , classDeclMethods = methods
-        }
+    methods <- braces (many pLocatedMethodSig)
+    end <- getSourcePos
+    let classSpan = sourceSpanFromPositions start end
+        decl =
+            ClassDecl
+                { classDeclName = className
+                , classDeclParam = classParam
+                , classDeclMethods = map fst methods
+                }
+        spans =
+            singletonClassSpan className classSpan
+                `appendProgramSpanIndex` mergeSpanIndexes (map snd methods)
+    pure (decl, spans)
 
-pMethodSig :: Parser MethodSig
-pMethodSig = do
+pLocatedMethodSig :: Parser (MethodSig, ProgramSpanIndex)
+pLocatedMethodSig = do
+    start <- getSourcePos
     name <- lowerIdent reservedWords
     void (symbol ":")
-    ty <- pType
+    (ty, constraintSpans) <- pLocatedConstrainedType
     void semi
-    pure MethodSig
-        { methodSigName = name
-        , methodSigType = ty
-        }
+    end <- getSourcePos
+    let span0 = sourceSpanFromPositions start end
+        sig =
+            MethodSig
+                { methodSigName = name
+                , methodSigType = ty
+                }
+    pure
+        ( sig
+        , singletonValueSpan name span0
+            `appendProgramSpanIndex` constraintSpans
+        )
 
-pInstanceDecl :: Parser InstanceDecl
-pInstanceDecl = do
+pLocatedInstanceDecl :: Parser (InstanceDecl, ProgramSpanIndex)
+pLocatedInstanceDecl = do
     void (symbol "instance")
-    className <- upperIdent reservedWords
+    constraints <- optional $ try $ do
+        constraints0 <- pLocatedConstraintList
+        void (symbol "=>")
+        pure constraints0
+    (className, classSpan) <- withSpan qualifiedUpperIdent
     instTy <- pType
-    methods <- braces (many pMethodDef)
-    pure InstanceDecl
-        { instanceDeclClass = className
-        , instanceDeclType = instTy
-        , instanceDeclMethods = methods
-        }
+    methods <- braces (many pLocatedMethodDef)
+    let decl =
+            InstanceDecl
+                { instanceDeclConstraints = maybe [] fst constraints
+                , instanceDeclClass = className
+                , instanceDeclType = instTy
+                , instanceDeclMethods = map fst methods
+                }
+        spans =
+            maybe emptyProgramSpanIndex snd constraints
+                `appendProgramSpanIndex` singletonClassSpan className classSpan
+                `appendProgramSpanIndex` mergeSpanIndexes (map snd methods)
+    pure (decl, spans)
 
 pMethodDef :: Parser MethodDef
 pMethodDef = do
@@ -233,21 +435,34 @@ pMethodDef = do
         , methodDefExpr = body
         }
 
-pDataDecl :: Parser DataDecl
-pDataDecl = do
+pLocatedMethodDef :: Parser (MethodDef, ProgramSpanIndex)
+pLocatedMethodDef = do
+    (methodDef, span0) <- withSpan pMethodDef
+    pure (methodDef, singletonValueSpan (methodDefName methodDef) span0)
+
+pLocatedDataDecl :: Parser (DataDecl, ProgramSpanIndex)
+pLocatedDataDecl = do
+    start <- getSourcePos
     void (symbol "data")
     dataName <- upperIdent reservedWords
     params <- many (lowerIdent reservedWords)
     void (symbol "=")
-    ctors <- pConstructorDecl `sepBy1` symbol "|"
+    ctors <- pLocatedConstructorDecl `sepBy1` symbol "|"
     derivingClasses <- maybe [] id <$> optional pDerivingClause
     void semi
-    pure DataDecl
-        { dataDeclName = dataName
-        , dataDeclParams = params
-        , dataDeclConstructors = ctors
-        , dataDeclDeriving = derivingClasses
-        }
+    end <- getSourcePos
+    let dataSpan = sourceSpanFromPositions start end
+        decl =
+            DataDecl
+                { dataDeclName = dataName
+                , dataDeclParams = params
+                , dataDeclConstructors = map fst ctors
+                , dataDeclDeriving = derivingClasses
+                }
+        spans =
+            singletonTypeSpan dataName dataSpan
+                `appendProgramSpanIndex` mergeSpanIndexes (map snd ctors)
+    pure (decl, spans)
 
 pConstructorDecl :: Parser ConstructorDecl
 pConstructorDecl = do
@@ -259,25 +474,39 @@ pConstructorDecl = do
         , constructorDeclType = ctorTy
         }
 
+pLocatedConstructorDecl :: Parser (ConstructorDecl, ProgramSpanIndex)
+pLocatedConstructorDecl = do
+    (ctor, span0) <- withSpan pConstructorDecl
+    pure (ctor, singletonConstructorSpan (constructorDeclName ctor) span0)
+
 pDerivingClause :: Parser [ClassName]
 pDerivingClause = do
     void (symbol "deriving")
-    commaSep (upperIdent reservedWords)
+    commaSep qualifiedUpperIdent
 
-pDefDecl :: Parser DefDecl
-pDefDecl = do
+pLocatedDefDecl :: Parser (DefDecl, ProgramSpanIndex)
+pLocatedDefDecl = do
+    start <- getSourcePos
     void (symbol "def")
     name <- lowerIdent reservedWords
     void (symbol ":")
-    ty <- pType
+    (ty, constraintSpans) <- pLocatedConstrainedType
     void (symbol "=")
     body <- pExpr
     void semi
-    pure DefDecl
-        { defDeclName = name
-        , defDeclType = ty
-        , defDeclExpr = body
-        }
+    end <- getSourcePos
+    let span0 = sourceSpanFromPositions start end
+        def =
+            DefDecl
+                { defDeclName = name
+                , defDeclType = ty
+                , defDeclExpr = body
+                }
+    pure
+        ( def
+        , singletonValueSpan name span0
+            `appendProgramSpanIndex` constraintSpans
+        )
 
 pExpr :: Parser Expr
 pExpr = choice [try pLet, try pLambda, try pCase, pAnnOrApp]
@@ -330,13 +559,30 @@ pAlt = do
     pure Alt { altPattern = pat, altExpr = body }
 
 pPattern :: Parser Pattern
-pPattern =
+pPattern = pPatternAnn
+
+pPatternAnn :: Parser Pattern
+pPatternAnn = do
+    pat <- pPatternApp
+    ann <- optional (symbol ":" *> pType)
+    pure (maybe pat (PatAnn pat) ann)
+
+pPatternApp :: Parser Pattern
+pPatternApp =
+    try
+        ( do
+            ctor <- qualifiedUpperIdent
+            args <- many pPatternAtom
+            pure (PatCtor ctor args)
+        )
+        <|> pPatternAtom
+
+pPatternAtom :: Parser Pattern
+pPatternAtom =
     choice
         [ PatWildcard <$ symbol "_"
-        , try $ do
-            ctor <- upperIdent reservedWords
-            binders <- many (lowerIdent reservedWords)
-            pure (PatCtor ctor binders)
+        , parens pPattern
+        , PatCtor <$> qualifiedUpperIdent <*> pure []
         , PatVar <$> lowerIdent reservedWords
         ]
 
@@ -357,6 +603,6 @@ pAtom =
     choice
         [ parens pExpr
         , ELit <$> pLit
-        , EVar <$> upperIdent reservedWords
-        , EVar <$> lowerIdent reservedWords
+        , EVar <$> qualifiedLowerIdent
+        , EVar <$> qualifiedUpperIdent
         ]

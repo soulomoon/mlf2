@@ -60,12 +60,16 @@ module MLF.Pipeline
     , isValue
     -- * Unified `.mlfp` program checking/runtime
     , ProgramError(..)
+    , ProgramDiagnostic(..)
     , CheckedProgram(..)
     , CheckedModule(..)
     , CheckedBinding(..)
     , Value(..)
     , checkProgram
+    , checkLocatedProgram
     , runProgram
+    , runLocatedProgram
+    , renderProgramDiagnostic
     , prettyValue
     ) where
 
@@ -79,12 +83,15 @@ import MLF.Frontend.Program.Types
     ( CheckedBinding(..)
     , CheckedModule(..)
     , CheckedProgram(..)
+    , ProgramDiagnostic(..)
     , ProgramError(..)
+    , renderProgramDiagnostic
     )
 import MLF.Frontend.Program.Check
-    ( checkProgram
+    ( checkLocatedProgram
+    , checkProgram
     )
-import MLF.Frontend.Program.Run (Value(..), prettyValue, runProgram)
+import MLF.Frontend.Program.Run (Value(..), prettyValue, runLocatedProgram, runProgram)
 import MLF.Constraint.Types.Graph (BaseTy(..), PolySyms)
 -- Keep legacy elaboration conversion helpers quarantined in MLF.Elab.Legacy.
 import MLF.Elab.Pipeline

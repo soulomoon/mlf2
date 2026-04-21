@@ -2,11 +2,12 @@
 
 module MLF.Frontend.Program.Finalize
   ( finalizeBinding,
+    recoverSourceType,
   )
 where
 
 import Control.Monad (foldM)
-import Data.List (sort)
+import Data.List (isPrefixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -33,10 +34,12 @@ import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
     elaborateScopeRuntimeTypes,
+    freeTypeVarsSrcType,
     inferClassArgument,
     lowerType,
     matchTypes,
-    resolveInstanceInfo,
+    resolveInstanceInfoWithSubst,
+    resolveMethodInstanceInfoWithSubst,
   )
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -52,8 +55,13 @@ import MLF.Frontend.Program.Types
     MethodInfo (..),
     ProgramError (..),
     ValueInfo (..),
+    splitArrows,
+    splitForalls,
+    substituteTypeVar,
+    specializeMethodType,
   )
 import MLF.Frontend.Syntax (Expr (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
+import qualified MLF.Frontend.Syntax.Program as P
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarsType)
 
 finalizeBinding :: ElaborateScope -> LoweredBinding -> Either ProgramError CheckedBinding
@@ -66,16 +74,22 @@ finalizeBinding scope lowered = do
       (loweredBindingExternalTypes lowered)
       (loweredBindingSurfaceExpr lowered)
   (term, actualTy) <-
-    finalizeDeferredObligations scope (loweredBindingDeferredObligations lowered) tcEnv term0 actualTy0
-  if constructorBindingNeedsUnchecked scope (loweredBindingName lowered)
+    finalizeDeferredObligations scope (loweredBindingDeferredObligations lowered) tcEnv term0 actualTy0 (loweredBindingExpectedType lowered)
+  let isUncheckedConstructor = constructorBindingNeedsUnchecked scope (loweredBindingName lowered)
+      acceptedTerm = repairConstructorBindingTerm scope (loweredBindingName lowered) term
+      acceptedTy =
+        if isUncheckedConstructor
+          then srcTypeToElabType (loweredBindingExpectedType lowered)
+          else actualTy
+  if isUncheckedConstructor
     then
       Right
         CheckedBinding
           { checkedBindingName = loweredBindingName lowered,
-            checkedBindingSourceType = loweredBindingExpectedType lowered,
+            checkedBindingSourceType = loweredBindingSourceType lowered,
             checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
-            checkedBindingTerm = term,
-            checkedBindingType = actualTy,
+            checkedBindingTerm = acceptedTerm,
+            checkedBindingType = acceptedTy,
             checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
           }
     else do
@@ -92,10 +106,10 @@ finalizeBinding scope lowered = do
           Right
             CheckedBinding
               { checkedBindingName = loweredBindingName lowered,
-                checkedBindingSourceType = loweredBindingExpectedType lowered,
+                checkedBindingSourceType = loweredBindingSourceType lowered,
                 checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
-                checkedBindingTerm = term,
-                checkedBindingType = actualTy,
+                checkedBindingTerm = acceptedTerm,
+                checkedBindingType = acceptedTy,
                 checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
               }
         else Left (ProgramTypeMismatch recoveredActualSrcTy (loweredBindingExpectedType lowered))
@@ -103,10 +117,78 @@ finalizeBinding scope lowered = do
 constructorBindingNeedsUnchecked :: ElaborateScope -> String -> Bool
 constructorBindingNeedsUnchecked scope runtimeName =
   or
-    [ ctorRuntimeName ctor == runtimeName && not (null (ctorForalls ctor))
+    [ ctorRuntimeName ctor == runtimeName
+        && (not (null (ctorForalls ctor)) || not (null (dataParams dataInfo)))
       | dataInfo <- Map.elems (elaborateScopeDataTypes scope),
         ctor <- dataConstructors dataInfo
     ]
+
+repairConstructorBindingTerm :: ElaborateScope -> String -> ElabTerm -> ElabTerm
+repairConstructorBindingTerm scope runtimeName term =
+  case lookupConstructorRuntime scope runtimeName of
+    Just (dataInfo, ctor)
+      | not (null (dataParams dataInfo)) ->
+          moveConstructorResultAbs (dataName dataInfo) (length (ctorArgs ctor)) term
+    _ -> term
+
+lookupConstructorRuntime :: ElaborateScope -> String -> Maybe (DataInfo, ConstructorInfo)
+lookupConstructorRuntime scope runtimeName =
+  case
+    [ (dataInfo, ctor)
+      | dataInfo <- Map.elems (elaborateScopeDataTypes scope),
+        ctor <- dataConstructors dataInfo,
+        ctorRuntimeName ctor == runtimeName
+    ]
+  of
+    match : _ -> Just match
+    [] -> Nothing
+
+data TypeAbsInfo = TypeAbsInfo
+  { typeAbsName :: String,
+    typeAbsBound :: Maybe X.BoundType
+  }
+
+data TermLamInfo = TermLamInfo String ElabType
+
+data ConstructorSpineItem
+  = SpineTypeAbs TypeAbsInfo
+  | SpineLam TermLamInfo
+
+moveConstructorResultAbs :: String -> Int -> ElabTerm -> ElabTerm
+moveConstructorResultAbs typeName argCount term =
+  let (spine, body) = collectConstructorSpine term
+      typeAbs = [info | SpineTypeAbs info <- spine]
+      lams = [info | SpineLam info <- spine]
+      (resultAbs, otherAbs) = partitionResultAbs typeAbs
+      (argLams, handlerLams) = splitAt argCount lams
+   in wrapTypeAbs otherAbs (wrapLams argLams (wrapTypeAbs resultAbs (wrapLams handlerLams body)))
+  where
+    resultPrefix = "$" ++ typeName ++ "_result"
+
+    partitionResultAbs =
+      foldr
+        ( \absInfo (results, others) ->
+            if resultPrefix `isPrefixOf` typeAbsName absInfo
+              then (absInfo : results, others)
+              else (results, absInfo : others)
+        )
+        ([], [])
+
+collectConstructorSpine :: ElabTerm -> ([ConstructorSpineItem], ElabTerm)
+collectConstructorSpine = go []
+  where
+    go acc = \case
+      X.ETyAbs name mb body -> go (acc ++ [SpineTypeAbs (TypeAbsInfo name mb)]) body
+      X.ELam name ty body -> go (acc ++ [SpineLam (TermLamInfo name ty)]) body
+      other -> (acc, other)
+
+wrapTypeAbs :: [TypeAbsInfo] -> ElabTerm -> ElabTerm
+wrapTypeAbs infos body =
+  foldr (\TypeAbsInfo {typeAbsName = name, typeAbsBound = mb} acc -> X.ETyAbs name mb acc) body infos
+
+wrapLams :: [TermLamInfo] -> ElabTerm -> ElabTerm
+wrapLams infos body =
+  foldr (\(TermLamInfo name ty) acc -> X.ELam name ty acc) body infos
 
 runSurfacePipeline :: ElaborateScope -> Bool -> Map String DeferredProgramObligation -> Map String SrcType -> SurfaceExpr -> Either ProgramError PipelineElabDetailedResult
 runSurfacePipeline scope forceUnchecked deferredObligations externalTypes surfaceExpr = do
@@ -140,6 +222,12 @@ runSurfacePipeline scope forceUnchecked deferredObligations externalTypes surfac
 
     externalBindingModeFor name =
       case Map.lookup name deferredObligations of
+        Just (DeferredMethod {}) ->
+          case Map.lookup name externalTypes of
+            Just ty
+              | not (Set.null (freeTypeVarsSrcTypeLocal ty)) ->
+                  ExternalBindingMonomorphic
+            _ -> ExternalBindingScheme
         Just (DeferredConstructor deferred) -> convertDeferredBindingMode (deferredConstructorBindingMode deferred)
         Just (DeferredCase {}) -> ExternalBindingMonomorphic
         _ -> ExternalBindingScheme
@@ -149,16 +237,33 @@ runSurfacePipeline scope forceUnchecked deferredObligations externalTypes surfac
         DeferredBindingScheme -> ExternalBindingScheme
         DeferredBindingMonomorphic -> ExternalBindingMonomorphic
 
+    freeTypeVarsSrcTypeLocal = go Set.empty
+      where
+        go boundVars ty =
+          case ty of
+            STVar name
+              | name `Set.member` boundVars -> Set.empty
+              | otherwise -> Set.singleton name
+            STArrow dom cod -> go boundVars dom `Set.union` go boundVars cod
+            STBase {} -> Set.empty
+            STCon _ args -> foldMap (go boundVars) args
+            STForall name mb body ->
+              maybe Set.empty (go boundVars . unSrcBound) mb
+                `Set.union` go (Set.insert name boundVars) body
+            STMu name body -> go (Set.insert name boundVars) body
+            STBottom -> Set.empty
+
 finalizeDeferredObligations ::
   ElaborateScope ->
   Map String DeferredProgramObligation ->
   Env ->
   ElabTerm ->
   ElabType ->
+  SrcType ->
   Either ProgramError (ElabTerm, ElabType)
-finalizeDeferredObligations _ deferredObligations _ term inferredTy
+finalizeDeferredObligations _ deferredObligations _ term inferredTy _
   | Map.null deferredObligations = Right (term, inferredTy)
-finalizeDeferredObligations scope deferredObligations tcEnv term _ = do
+finalizeDeferredObligations scope deferredObligations tcEnv term _ _ = do
   let rewriteEnv = extendTypeCheckEnvWithRuntimeScope scope tcEnv
       constructorObligations = Map.mapMaybe onlyConstructor deferredObligations
       caseObligations = Map.mapMaybe onlyCase deferredObligations
@@ -168,11 +273,10 @@ finalizeDeferredObligations scope deferredObligations tcEnv term _ = do
   methodsRewritten <- resolveDeferredMethods scope methodObligations caseRewriteEnv casesRewritten
   rewritten <- refreshLetSchemes caseRewriteEnv methodsRewritten
   rewrittenTy <-
-    fmap (inlineTypeEnvBounds caseRewriteEnv) $
-      either
-      (Left . ProgramPipelineError . ("deferred program obligation rewrite failed type check: " ++) . show)
-      Right
-      (typeCheckWithEnv caseRewriteEnv rewritten)
+    case typeCheckWithEnv caseRewriteEnv rewritten of
+      Right ty -> Right (inlineTypeEnvBounds caseRewriteEnv ty)
+      Left err ->
+        Left (ProgramPipelineError ("deferred program obligation rewrite failed type check: " ++ show err))
   Right (rewritten, rewrittenTy)
   where
     onlyConstructor = \case
@@ -408,7 +512,15 @@ resolveDeferredConstructors scope env deferredConstructors = go env
               (zip visibleArgTemplates argTypes)
           of
             Just subst -> subst
-            Nothing -> fst substFromHead
+            Nothing ->
+              case
+                foldM
+                  (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy)
+                  (deferredConstructorInitialSubst deferred)
+                  (zip visibleArgTemplates argTypes)
+              of
+                Just subst -> subst
+                Nothing -> fst substFromHead
       let substFinal =
             case matchTypes substFromArgs (deferredConstructorOccurrenceType deferred) occurrenceTy of
               Just subst -> subst
@@ -509,12 +621,13 @@ resolveDeferredCases scope deferredCases = go
         _ -> Left (ProgramCaseOnNonDataType STBottom)
 
     validateCaseScrutineeType dataInfo scrutineeTy =
-      case scrutineeTy of
-        STBase name
-          | name == dataName dataInfo -> Right ()
-        STCon name _
-          | name == dataName dataInfo -> Right ()
-        other -> Left (ProgramCaseOnNonDataType other)
+      let validHeadNames = Set.fromList (dataInfoHeadNames scope dataInfo)
+       in case scrutineeTy of
+            STBase name
+              | name `Set.member` validHeadNames -> Right ()
+            STCon name _
+              | name `Set.member` validHeadNames -> Right ()
+            other -> Left (ProgramCaseOnNonDataType other)
 
     inferDeferredArgType env arg =
       case typeCheckWithEnv env arg of
@@ -612,9 +725,19 @@ resolveDeferredMethods scope deferredMethods = go
             case inferClassArgument (lowerType scope (methodType methodInfo)) (methodParamName methodInfo) argTypes of
               Just ty -> Right ty
               Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-          instanceInfo <- resolveInstanceInfo scope (methodClassName methodInfo) classArgTy
-          runtimeName <- concreteMethodRuntimeName instanceInfo methodInfo
-          Right (foldl X.EApp (X.EVar runtimeName) args)
+          (instanceInfo, subst) <- resolveMethodInstanceInfoWithSubst scope methodInfo classArgTy
+          methodValue <- concreteMethodValue instanceInfo methodInfo
+          methodSubst <-
+            case inferMethodArgumentSubst methodInfo classArgTy subst argTypes of
+              Just subst' -> Right subst'
+              Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+          let eagerConstraints =
+                filter
+                  constraintGround
+                  (map (applyConstraintSubst methodSubst) (methodValueConstraints methodValue))
+          evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty eagerConstraints
+          let methodHead = instantiateMethodValue scope methodSubst methodValue
+          Right (foldl X.EApp (foldl X.EApp methodHead evidenceArgs) args)
 
     inferDeferredArgType env arg =
       case typeCheckWithEnv env arg of
@@ -623,10 +746,99 @@ resolveDeferredMethods scope deferredMethods = go
         Left err ->
           Left (ProgramPipelineError ("deferred method argument type check failed: " ++ show err))
 
-    concreteMethodRuntimeName instanceInfo methodInfo =
+    concreteMethodValue instanceInfo methodInfo =
       case Map.lookup (methodName methodInfo) (instanceMethods instanceInfo) of
-        Just OrdinaryValue {valueRuntimeName = runtimeName} -> Right runtimeName
+        Just valueInfo@OrdinaryValue {} -> Right valueInfo
         _ -> Left (ProgramUnknownMethod (methodName methodInfo))
+
+    inferMethodArgumentSubst methodInfo classArgTy subst argTypes =
+      let specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) classArgTy
+          (_, bodyTy) = splitForalls specializedMethodTy
+          (paramTys, _) = splitArrows bodyTy
+       in foldM
+            (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy)
+            subst
+            (zip paramTys argTypes)
+
+resolveConstraintEvidenceTerms :: ElaborateScope -> Set (P.ClassName, String) -> [P.ClassConstraint] -> Either ProgramError [ElabTerm]
+resolveConstraintEvidenceTerms scope seen constraints =
+  concat <$> mapM (resolveConstraintEvidenceTerm scope seen) constraints
+
+resolveConstraintEvidenceTerm :: ElaborateScope -> Set (P.ClassName, String) -> P.ClassConstraint -> Either ProgramError [ElabTerm]
+resolveConstraintEvidenceTerm scope seen constraint = do
+  let key = (P.constraintClassName constraint, show (P.constraintType constraint))
+  if key `Set.member` seen
+    then Left (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
+    else do
+      (instanceInfo, subst) <- resolveInstanceInfoWithSubst scope (P.constraintClassName constraint) (P.constraintType constraint)
+      let seen' = Set.insert key seen
+          methodValues = ordinaryInstanceMethods instanceInfo
+      if null methodValues
+        then do
+          _ <-
+            resolveConstraintEvidenceTerms
+              scope
+              seen'
+              (map (applyConstraintSubst subst) (instanceConstraints instanceInfo))
+          Right []
+        else mapM (materializeMethodEvidence (freeTypeVarsSrcType (P.constraintType constraint)) seen' subst) methodValues
+  where
+    ordinaryInstanceMethods instanceInfo =
+      [valueInfo | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethods instanceInfo)]
+
+    materializeMethodEvidence headVars seen' subst valueInfo = do
+      let eagerConstraints =
+            filter
+              (constraintDeterminedByTypeVars headVars)
+              (map (applyConstraintSubst subst) (methodValueConstraints valueInfo))
+      nestedEvidence <-
+        resolveConstraintEvidenceTerms
+          scope
+          seen'
+          eagerConstraints
+      pure (foldl X.EApp (instantiateMethodValue scope subst valueInfo) nestedEvidence)
+
+constraintDeterminedByTypeVars :: Set String -> P.ClassConstraint -> Bool
+constraintDeterminedByTypeVars typeVars constraint =
+  freeTypeVarsSrcType (P.constraintType constraint) `Set.isSubsetOf` typeVars
+
+constraintGround :: P.ClassConstraint -> Bool
+constraintGround constraint =
+  Set.null (freeTypeVarsSrcType (P.constraintType constraint))
+
+methodValueConstraints :: ValueInfo -> [P.ClassConstraint]
+methodValueConstraints OrdinaryValue {valueConstraints = constraints} = constraints
+methodValueConstraints _ = []
+
+instantiateMethodValue :: ElaborateScope -> Map String SrcType -> ValueInfo -> ElabTerm
+instantiateMethodValue scope subst OrdinaryValue {valueRuntimeName = runtimeName, valueType = visibleTy} =
+  foldl
+    X.ETyInst
+    (X.EVar runtimeName)
+    (methodForallInstantiations scope subst (fst (splitForalls visibleTy)))
+instantiateMethodValue _ _ ConstructorValue {valueRuntimeName = runtimeName} =
+  X.EVar runtimeName
+instantiateMethodValue _ _ OverloadedMethod {} =
+  X.EVar "<overloaded-method>"
+
+methodForallInstantiations :: ElaborateScope -> Map String SrcType -> [(String, Maybe SrcType)] -> [X.Instantiation]
+methodForallInstantiations scope subst = go
+  where
+    go [] = []
+    go ((name, _) : rest) =
+      case Map.lookup name subst of
+        Just ty -> X.InstApp (srcTypeToElabType (lowerType scope ty)) : go rest
+        Nothing
+          | any ((`Map.member` subst) . fst) rest -> X.InstElim : go rest
+          | otherwise -> []
+
+applyConstraintSubst :: Map String SrcType -> P.ClassConstraint -> P.ClassConstraint
+applyConstraintSubst subst constraint =
+  constraint {P.constraintType = applySrcSubst subst (P.constraintType constraint)}
+
+applySrcSubst :: Map String SrcType -> SrcType -> SrcType
+applySrcSubst subst ty =
+  Map.foldrWithKey substituteTypeVar ty subst
 
 collectElabApps :: ElabTerm -> (ElabTerm, [ElabTerm])
 collectElabApps = go []
@@ -652,6 +864,19 @@ deferredPlaceholderHeadWithInsts = go []
         X.ETyInst inner (X.InstApp ty) -> go (ty : insts) inner
         X.ETyInst inner _ -> go insts inner
         _ -> Nothing
+
+dataInfoHeadNames :: ElaborateScope -> DataInfo -> [String]
+dataInfoHeadNames scope info =
+  dataName info
+    : [ name
+        | (name, candidate) <- Map.toList (elaborateScopeDataTypes scope),
+          name /= dataName info,
+          sameDataIdentity candidate info
+      ]
+  where
+    sameDataIdentity left right =
+      dataModule left == dataModule right
+        && dataName left == dataName right
 
 {- Note [recoverSourceType]
 
@@ -702,30 +927,40 @@ matchDataInfoEncoding = matchDataInfoEncodingWith id
 
 matchDataInfoEncodingWith :: (SrcType -> SrcType) -> ElaborateScope -> DataInfo -> SrcType -> Maybe (SrcType, Map String SrcType)
 matchDataInfoEncodingWith recover scope info ty =
-  let params = dataParams info
-      templateHead =
-        case params of
-          [] -> STBase (dataName info)
-          p : ps -> STCon (dataName info) (STVar p :| map STVar ps)
-      loweredTemplate = lowerType scope templateHead
-      matchTemplate template =
-        matchRecoverType (Set.fromList params) Map.empty Map.empty template ty
-      matched =
-        case matchTemplate loweredTemplate of
-          Just subst -> Just subst
-          Nothing ->
-            case loweredTemplate of
-              STMu _ body -> matchTemplate body
-              _ -> Nothing
-   in case matched of
-        Just subst ->
-          let recoveredArgs = map (\param -> recover (Map.findWithDefault (STVar param) param subst)) params
-              recoveredHead =
-                case recoveredArgs of
-                  [] -> STBase (dataName info)
-                  arg : args -> STCon (dataName info) (arg :| args)
-           in Just (recoveredHead, subst)
-        Nothing -> Nothing
+  firstMatch (dataInfoHeadNames scope info)
+  where
+    params = dataParams info
+
+    firstMatch [] = Nothing
+    firstMatch (headName : rest) =
+      case matchHeadName headName of
+        Just matched -> Just matched
+        Nothing -> firstMatch rest
+
+    matchHeadName headName =
+      let templateHead =
+            case params of
+              [] -> STBase headName
+              p : ps -> STCon headName (STVar p :| map STVar ps)
+          loweredTemplate = lowerType scope templateHead
+          matchTemplate template =
+            matchRecoverType (Set.fromList params) Map.empty Map.empty template ty
+          matched =
+            case matchTemplate loweredTemplate of
+              Just subst -> Just subst
+              Nothing ->
+                case loweredTemplate of
+                  STMu _ body -> matchTemplate body
+                  _ -> Nothing
+       in case matched of
+            Just subst ->
+              let recoveredArgs = map (\param -> recover (Map.findWithDefault (STVar param) param subst)) params
+                  recoveredHead =
+                    case recoveredArgs of
+                      [] -> STBase headName
+                      arg : args -> STCon headName (arg :| args)
+               in Just (recoveredHead, subst)
+            Nothing -> Nothing
 
 matchRecoverType ::
   Set String ->
@@ -742,7 +977,6 @@ matchRecoverType params subst renames template actual =
       | Just actualName <- Map.lookup name renames ->
           case actual of
             STVar name' | name' == actualName -> Just subst
-            STVar name' -> Just (Map.insert name' (STVar actualName) subst)
             _ -> Nothing
       | otherwise ->
           case actual of

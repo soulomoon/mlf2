@@ -1,120 +1,96 @@
 # Progress
 
-## Session: 2026-04-19
+## Session: 2026-04-20
 
-### Phase 6: Constructor-local forall evidence
+### Phase 1: Discovery and planning refresh
 - **Status:** completed
-- **Started:** 2026-04-19
-- Actions taken:
-  - Re-read `AGENTS.md` and existing planning files.
-  - Confirmed branch is clean at `04631882`.
-  - Confirmed `/Users/ares/.agents/skills/haskell-pro/SKILL.md` is absent.
-  - Inspected current deferred constructor metadata, constructor lowering,
-    finalization, and external environment injection.
-  - Added internal external binding modes and an unchecked detailed pipeline
-    entrypoint for program-obligation finalization.
-  - Expanded deferred constructor metadata with occurrence type, source type,
-    expected-type substitution seed, runtime instantiation binder order, and
-    binding mode.
-  - Changed source constructor variables/applications to always lower through
-    deferred placeholders.
-  - Made constructor and case placeholders inference-local while retaining
-    concrete types in the finalization/typecheck environment.
-  - Reworked deferred case lowering to avoid pre-finalization direct Church
-    application and to leave ordinary ADT handlers unannotated unless
-    constructor-local foralls require annotations.
-  - Finalized constructor obligations by solving substitutions after eMLF
-    inference and rewriting placeholders to concrete runtime constructor names.
-  - Added generated-runtime handling for recoverable constructor-local forall
-    constructors and skipped unrecoverable generated bindings so source uses
-    fail with `ProgramAmbiguousConstructorUse`.
-  - Updated the repository guardrail to recognize the internal external-binding
-    detailed pipeline entrypoints and the post-rewrite typecheck guard.
-  - Added strict matrix rows for ordinary nullary/nested constructors, GADT,
-    existential, nullary indexed, explicit polymorphic nullary, and ambiguous
-    constructor-local forall cases.
-- Files modified:
-  - `task_plan.md`
-  - `findings.md`
-  - `progress.md`
-  - `src/MLF/Elab/Run/Pipeline.hs`
-  - `src/MLF/Frontend/ConstraintGen.hs`
-  - `src/MLF/Frontend/ConstraintGen/Translate.hs`
-  - `src/MLF/Frontend/ConstraintGen/Types.hs`
-  - `src/MLF/Frontend/Program/Check.hs`
-  - `src/MLF/Frontend/Program/Elaborate.hs`
-  - `src/MLF/Frontend/Program/Finalize.hs`
-  - `src/MLF/Frontend/Program/Types.hs`
-  - `test/ProgramSpec.hs`
-  - `test/RepoGuardSpec.hs`
-
-### Phase 1-5: Deferred program obligations implementation
-- **Status:** completed
-- **Started:** 2026-04-19 19:04:43 CST
+- **Started:** 2026-04-20
 - Actions taken:
   - Re-read `AGENTS.md`.
-  - Confirmed `git status --short --untracked-files=all` was initially clean.
-  - Read installed planning skill and refreshed stale planning files.
+  - Loaded the installed `planning-with-files` skill.
+  - Confirmed the branch is clean and aligned with origin before edits.
   - Confirmed `/Users/ares/.agents/skills/haskell-pro/SKILL.md` is absent.
-  - Added unified deferred program obligation types and switched lowering state
-    to record obligations instead of method-only entries.
-  - Lowered applied constructors and constructor-pattern cases through
-    placeholders.
-  - Added partial-method eta expansion for supplied overloaded method prefixes.
-  - Added an internal detailed pipeline result and changed program
-    finalization to call it.
-  - Drafted ordered constructor, case, then method finalization passes.
-  - Moved the 7 pending-success rows into the strict eMLF boundary matrix.
-  - Repaired regressions in local let-polymorphism, annotated overloaded
-    arguments, direct recursive ADT fixtures, and parameterized/GADT
-    constructor calls.
-  - Updated `RepoGuardSpec`, README, architecture notes, implementation notes,
-    and changelog for the detailed pipeline/deferred-obligation path.
-  - Ran full repository validation and the whitespace diff guard.
-  - Removed the initial typeclass/constructor fallback choices: recursive
-    explicit and derived `Eq Nat` are restored, overloaded method runtime
-    selection stays deferred, and constructor placeholders rewrite in
-    finalization.
-- Files modified:
-  - `task_plan.md`
-  - `findings.md`
-  - `progress.md`
-  - `src/MLF/Frontend/Program/Types.hs`
-  - `src/MLF/Frontend/Program/Elaborate.hs`
-  - `src/MLF/Frontend/Program/Finalize.hs`
-  - `src/MLF/Elab/Run/Pipeline.hs`
-  - `src/MLF/Elab/TypeCheck.hs`
-  - `src/MLF/Frontend/Program/Check.hs`
-  - `test/ProgramSpec.hs`
-  - `test/RepoGuardSpec.hs`
-  - `test/programs/recursive-adt/typeclass-integration.mlfp`
-  - `README.md`
-  - `docs/architecture.md`
-  - `implementation_notes.md`
-  - `CHANGELOG.md`
+  - Inspected current `.mlfp` AST, parser, checker, elaborator, runtime, public
+    exports, and tests.
+  - Replaced stale constructor-obligation planning files with the new language
+    surface implementation plan.
+
+### Phase 2: Located diagnostics
+- **Status:** completed
+- Actions taken:
+  - Added `SourceSpan`, `LocatedProgram`, parser span indexes, and located
+    parse/check/run entrypoints while keeping the existing unlocated APIs.
+  - Added `ProgramDiagnostic` with rendered source locations, messages, and
+    mechanically justified hints for high-value program errors.
+  - Updated the CLI to parse and run through the located path.
+
+### Phase 3: Ordered nested patterns
+- **Status:** completed
+- Actions taken:
+  - Replaced flat constructor binders with recursive `PatCtor`, `PatVar`,
+    `PatWildcard`, and `PatAnn`.
+  - Updated parser, pretty-printer, deriving generation, binder collection,
+    case lowering, and reachability checks.
+  - Added matrix coverage for nested constructor patterns, wildcard fallthrough,
+    pattern annotations, unreachable branches, and nested non-exhaustiveness.
+
+### Phase 4: Language reference
+- **Status:** completed
+- Actions taken:
+  - Added `docs/mlfp-language-reference.md`.
+  - Linked the reference from `README.md`.
+  - Updated `docs/syntax.md`, `docs/architecture.md`, `implementation_notes.md`,
+    and `CHANGELOG.md`.
+
+### Phase 5: Prelude and runtime values
+- **Status:** completed
+- Actions taken:
+  - Added source-level `MLF.Frontend.Program.Prelude`.
+  - Updated CLI/file execution to prepend the built-in Prelude for explicit
+    imports and reject user-defined `Prelude` conflicts.
+  - Added ADT value rendering for recovered closed Church values, including
+    parameterized payloads such as `Some (Succ Zero)`.
+
+### Phase 6: Typeclass/module ergonomics
+- **Status:** completed
+- Actions taken:
+  - Added constrained type syntax to definitions, methods, and instances.
+  - Lowered constraints to hidden typeclass evidence and resolved constrained
+    calls from local evidence or schema instances.
+  - Added overlapping instance rejection by unification.
+  - Implemented parameterized `deriving Eq`, including recursive `List a`.
+  - Added qualified and aliased imports with qualified references in
+    expressions, patterns, types, constraints, constructors, classes, and
+    methods.
+  - Updated Prelude to export `Nat(..)`, `Option(..)`, `List(..)`, `Eq`, `eq`,
+    `and`, and `id`.
+
+### Phase 7: Validation
+- **Status:** completed
+- Actions taken:
+  - Ran focused `MLF.Program` successfully after the typeclass/module slice.
+  - Ran focused `MLF.Program eMLF` successfully after the typeclass/module slice.
+  - Ran the full repository build and test gate successfully.
 
 ## Test Results
 | Test | Expected | Actual | Status |
 |------|----------|--------|--------|
-| Initial `git status --short --untracked-files=all` | Clean | Clean | pass |
-| `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program eMLF"'` | Pass | 27 examples, 0 failures | pass |
-| `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'` | Pass | 60 examples, 0 failures | pass |
-| `cabal build all && cabal test` | Pass | 1609 examples, 0 failures | pass |
-| `git diff --check` | Clean | Clean | pass |
-| `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program eMLF"'` | Pass | 34 examples, 0 failures | pass |
-| `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'` | Pass | 67 examples, 0 failures | pass |
-| `cabal test mlf2-test --test-show-details=direct --test-options='--match "Repository guardrails"'` | Pass | 8 examples, 0 failures | pass |
-| `cabal build all && cabal test` | Pass | 1616 examples, 0 failures | pass |
-| `git diff --check` | Clean | Clean | pass |
+| `cabal build mlf2:mlf2-internal lib:mlf2 exe:mlf2` | build succeeds | build succeeded | pass |
+| `cabal run mlf2 -- run-program` Prelude `Nat` probe | `Succ Zero` | `Succ Zero` | pass |
+| `cabal run mlf2 -- run-program` Prelude `Option` probe | `Some Zero` | `Some Zero` | pass |
+| `cabal run mlf2 -- run-program` Prelude `List` probe | `Nil` | `Nil` | pass |
+| `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'` | pass | 88 examples, 0 failures | pass |
+| `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program eMLF"'` | pass | 51 examples, 0 failures | pass |
+| `cabal test mlf2-test --test-show-details=direct --test-options='--match "Public surface"'` | pass | 24 examples, 0 failures | pass |
+| `cabal build all && cabal test` | pass | 1637 examples, 0 failures | pass |
+| `git diff --check` | clean | clean | pass |
 
 ## Error Log
 | Timestamp | Error | Attempt | Resolution |
 |-----------|-------|---------|------------|
-| 2026-04-19 19:04 CST | Worktree-local planning skill path missing | 1 | Used installed skill path |
-| 2026-04-19 19:04 CST | `haskell-pro` skill path missing | 1 | Continue with repo conventions |
-| 2026-04-19 19:04 CST | `cabal build mlf2` ambiguous between lib and exe | 1 | Use explicit Cabal component targets |
-| 2026-04-19 19:04 CST | Parallel `cabal run` probes collided in `dist-newstyle` | 1 | Use serial Cabal commands for probes and validation |
-| 2026-04-19 20:xx CST | `MLF.Program` corpus regressions in GADT/existential/typeclass fixtures | 1 | Replaced early method runtime resolution with typed placeholders, finalized instance method bodies directly, deferred constructor applications, and added nullary constructor placeholder rewrite |
-| 2026-04-19 21:xx CST | All-deferred constructor placeholders initially caused locked-node and stale-let-scheme failures | 1 | Made constructor/case placeholders inference-local, added unchecked internal pipeline entrypoint, refreshed let schemes after obligation rewrites, and lowered deferred cases without synthetic scrutinee lets |
-| 2026-04-19 21:xx CST | Constructor-local forall runtime bindings failed before source ambiguity/finalization | 1 | Accepted recoverable generated constructor-forall bindings through the internal unchecked path and skipped unrecoverable generated bindings |
-| 2026-04-19 21:xx CST | Repository guard still required the old scheme-only detailed pipeline marker | 1 | Updated the guard to require the new external-binding detailed/unchecked entrypoints and final post-rewrite typecheck |
+| 2026-04-20 | `haskell-pro` skill path from `AGENTS.md` missing | 1 | Continue using repo conventions |
+| 2026-04-20 | `cabal build mlf2` ambiguous between executable and library | 1 | Use explicit component targets such as `lib:mlf2` and `exe:mlf2` |
+| 2026-04-20 | Prelude `List` with recursive `Cons : a -> List a -> List a` failed generated constructor type comparison | 1 | Implemented constrained parameterized deriving and constructor-spine repair; Prelude now keeps `Cons` and derives `Eq (List a)` |
+| 2026-04-20 | Prelude `Eq (Option Nat)` inferred a field comparison as missing `Eq a` | 1 | Implemented schema instance evidence; Prelude now derives constrained `Eq (Option a)` |
+| 2026-04-20 | Recursive `Eq (List a)` initially normalized to an xMLF term instead of `true` | 1 | Generated recursive derived Eq through a monomorphic local self function and repaired parameterized constructor quantifier order |
+| 2026-04-20 | Parallel `cabal run` probes collided on `package.conf.inplace` | 1 | Avoid parallel Cabal invocations and run Cabal commands sequentially |

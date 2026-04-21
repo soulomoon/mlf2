@@ -8,6 +8,49 @@
   `kind: quickcheck` and `min_success: 100`. The obligations gate now rejects
   example-only evidence by requiring a matching QuickCheck success line and
   pass count, while source anchors remain navigational code paths.
+- Added the next `.mlfp` typeclass/module ergonomics slice. Program types now
+  parse and carry class constraints on definitions, methods, and instance
+  declarations; constrained values lower to hidden method evidence, schema
+  instances such as `Eq a => Eq (Option a)` resolve recursively, and overlapping
+  instance heads are rejected by unification. `deriving Eq` now generates
+  constrained instances for parameterized ADTs, including recursive `List a`,
+  and reports the first field type with missing Eq evidence. Imports now support
+  qualified aliases such as `import Core as C;` and selected alias imports such
+  as `import Core as C exposing (eq);`, with qualified names available in
+  expressions, patterns, types, constraints, classes, constructors, and methods.
+  The built-in Prelude now exports `Nat(..)`, `Option(..)`, `List(..)`, `Eq`,
+  `eq`, `and`, and `id`. Review hardening now rejects local instances that
+  overlap imported schemas, validates pattern annotations against matched and
+  catch-all-only scrutinee types, rejects branches after constructor-local
+  catch-all patterns, preserves method-level constraints when eager and
+  deferred typeclass evidence is materialized, avoids duplicate unqualified
+  instance matches for aliased imports whose instance heads do not qualify,
+  alpha-renames instance variables before overlap unification, validates
+  deriving fields against pending same-module derived instances, and validates
+  transitive deriving field constraints while rejecting non-regular recursive
+  fields instead of generating ill-typed self-equality calls. It also avoids
+  decoding non-data `main` values or typed non-data constructor fields through
+  the global ADT fallback.
+  Validation:
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
+  (`101 examples, 0 failures`), `MLF.Program eMLF`
+  (`62 examples, 0 failures`), and `cabal build all && cabal test`
+  (`1650 examples, 0 failures`).
+- Made `.mlfp` more usable as a source-language surface. The program parser
+  now has located entrypoints and the checker/runner expose
+  `ProgramDiagnostic` with file/line/column rendering and mechanically
+  justified hints for high-value failures. Pattern matching now supports
+  ordered nested constructor patterns, variables, wildcards, and pattern
+  annotations, with reachability-aware rejection of duplicate or unreachable
+  branches. The CLI prepends an explicit-import built-in `Prelude`, and closed
+  ADT runtime values render with source constructor syntax instead of raw
+  Church terms. Added `docs/mlfp-language-reference.md` and linked it from the
+  README. Focused validation:
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program"'`
+  (`76 examples, 0 failures`), `MLF.Program eMLF`
+  (`39 examples, 0 failures`), `Public surface` (`24 examples, 0 failures`),
+  `cabal build all && cabal test` (`1625 examples, 0 failures`), and
+  `git diff --check`.
 - Fixed the thesis-conformance CI gate so colored Hspec summaries and Ruby
   3.2 YAML dates from GitHub Actions are parsed before enforcing matcher
   coverage. Validation:

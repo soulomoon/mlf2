@@ -1,3 +1,50 @@
+## 2026-04-20 - Constraint-aware typeclasses and qualified imports
+
+- `.mlfp` constrained types are now source-level program semantics. The parser
+  accepts `Eq a => ...` and `(Eq a, Eq b) => ...` on definitions, method
+  signatures, and instances; lowering passes one hidden runtime method value per
+  class constraint while raw eMLF syntax remains unchanged.
+- Instance resolution now handles schema instances such as
+  `Eq a => Eq (Option a)` and rejects overlapping heads by unification, not only
+  exact equality. Evidence resolution fails closed through the existing
+  no-matching-instance lane when a required dictionary cannot be built.
+- `deriving Eq` generates constrained instances for parameterized ADTs. Recursive
+  derived instances use a monomorphic local self function inside the generated
+  method body so recursive fields do not re-infer the polymorphic schema through
+  hidden evidence on every call.
+- Parameterized constructor runtime bindings keep the Church representation but
+  repair generated constructor spines so data-parameter type abstractions are
+  instantiated before the eliminator result abstraction. This preserves the
+  deferred constructor-use path while keeping recursive `List a` values
+  executable.
+- Qualified imports are `.mlfp`-owned names. `import M as A;` imports exported
+  names qualified only, while `import M as A exposing (...)` also imports the
+  selected names unqualified; hidden constructors stay hidden through qualified
+  access.
+
+## 2026-04-20 - `.mlfp` source-surface usability slice
+
+- Added located `.mlfp` parser/checker/runner entrypoints while preserving the
+  unlocated compatibility APIs. `ProgramDiagnostic` is now the user-facing
+  diagnostic wrapper for program errors, with optional source spans, primary
+  messages, and hints that are only emitted when mechanically justified.
+- Pattern matching now supports nested constructor patterns, variable
+  patterns, wildcards, and pattern annotations. Branches remain ordered:
+  repeated top constructors are allowed when nested patterns distinguish them,
+  while flat duplicates and branches after a catch-all are rejected as
+  unreachable. Lowering still targets deferred case obligations and the
+  existing Church eliminator representation.
+- Added an explicit built-in `Prelude` module for the CLI/file runner and kept
+  checker APIs free of implicit imports. Current prelude contents are source
+  definitions only: `Nat(..)`, `Option(..)`, `List(..)` with `Nil` and `Cons`,
+  `Eq`, `eq`, `and`, and `id`. User modules named `Prelude` conflict with the
+  built-in runner prelude.
+- Runtime rendering now recovers source ADT heads from lowered Church types and
+  prints closed ADT values as source constructors, including parameterized
+  payloads such as `Some (Succ Zero)`.
+- The user-level contract is now documented in
+  `docs/mlfp-language-reference.md`.
+
 ## 2026-04-19 - `.mlfp` deferred program obligations through eMLF
 
 - `.mlfp` lowering now records a unified deferred program obligation map for

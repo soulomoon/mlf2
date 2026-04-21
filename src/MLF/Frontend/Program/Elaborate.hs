@@ -5,22 +5,26 @@
 module MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
+    elaborateScopeInstances,
     elaborateScopeRuntimeTypes,
     mkElaborateScope,
     lowerConstructorBinding,
+    lowerConstrainedExprBinding,
     lowerExprBinding,
     inferClassArgument,
     lowerType,
     matchTypes,
     freeTypeVarsSrcType,
     resolveInstanceInfo,
+    resolveInstanceInfoWithSubst,
+    resolveMethodInstanceInfoWithSubst,
   )
 where
 
-import Control.Monad (foldM, replicateM, zipWithM)
+import Control.Monad ((>=>), foldM, replicateM, when, zipWithM)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.State.Strict (State, get, modify, runState)
-import Data.List (find, nub, sort)
+import Data.List (find, partition, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
@@ -52,6 +56,8 @@ data ElaborateScope = ElaborateScope
   { esValues :: Map String ValueInfo,
     esRuntimeTypes :: Map String SrcType,
     esTypes :: Map String DataInfo,
+    esClasses :: Map String ClassInfo,
+    esEvidence :: [EvidenceInfo],
     esInstances :: [InstanceInfo]
   }
 
@@ -68,6 +74,8 @@ data ElaborateResult a = ElaborateResult
     elaborateResultDeferredObligations :: Map String DeferredProgramObligation,
     elaborateResultExternalTypes :: Map String SrcType
   }
+
+type ClassIdentity = (P.ModuleName, P.ClassName)
 
 runElaborateM :: ElaborateM a -> Either ProgramError (ElaborateResult a)
 runElaborateM action =
@@ -88,10 +96,10 @@ runElaborateM action =
                 elaborateResultExternalTypes = elaborateExternalTypes finalState
               }
 
-mkElaborateScope :: Map String ValueInfo -> Map String DataInfo -> [InstanceInfo] -> ElaborateScope
-mkElaborateScope values0 dataTypes instances0 =
+mkElaborateScope :: Map String ValueInfo -> Map String DataInfo -> Map String ClassInfo -> [InstanceInfo] -> ElaborateScope
+mkElaborateScope values0 dataTypes classes0 instances0 =
   ElaborateScope
-    { esValues = values0,
+    { esValues = values0 `Map.union` instanceRuntimeValues,
       esRuntimeTypes =
         Map.fromList
           [ (runtimeNameFor info, lowerTypeRaw dataTypes (valueTypeFor info))
@@ -105,6 +113,8 @@ mkElaborateScope values0 dataTypes instances0 =
                 shouldTrackRuntimeType methodInfo
             ],
       esTypes = dataTypes,
+      esClasses = classes0,
+      esEvidence = [],
       esInstances = instances0
     }
   where
@@ -115,9 +125,17 @@ mkElaborateScope values0 dataTypes instances0 =
     runtimeNameFor ConstructorValue {valueRuntimeName = runtimeName} = runtimeName
     runtimeNameFor OverloadedMethod {} = error "overloaded methods do not have runtime names"
 
-    valueTypeFor OrdinaryValue {valueType = ty} = ty
+    valueTypeFor OrdinaryValue {valueType = ty, valueConstraints = constraints} =
+      constrainedRuntimeTypeRaw dataTypes classes0 constraints ty
     valueTypeFor ConstructorValue {valueType = ty} = quantifyFreeTypeVars ty
     valueTypeFor OverloadedMethod {} = error "overloaded methods do not have concrete runtime types"
+
+    instanceRuntimeValues =
+      Map.fromList
+        [ (runtimeName, methodValue)
+          | instanceInfo <- instances0,
+            methodValue@OrdinaryValue {valueRuntimeName = runtimeName} <- Map.elems (instanceMethods instanceInfo)
+        ]
 
 elaborateScopeRuntimeTypes :: ElaborateScope -> Map String SrcType
 elaborateScopeRuntimeTypes = esRuntimeTypes
@@ -125,8 +143,91 @@ elaborateScopeRuntimeTypes = esRuntimeTypes
 elaborateScopeDataTypes :: ElaborateScope -> Map String DataInfo
 elaborateScopeDataTypes = esTypes
 
+elaborateScopeInstances :: ElaborateScope -> [InstanceInfo]
+elaborateScopeInstances = esInstances
+
 lowerType :: ElaborateScope -> SrcType -> SrcType
 lowerType scope = lowerTypeRaw (esTypes scope)
+
+canonicalSourceType :: ElaborateScope -> SrcType -> SrcType
+canonicalSourceType scope = canonical
+  where
+    canonical ty =
+      case ty of
+        STVar {} -> ty
+        STBase name ->
+          case Map.lookup name (esTypes scope) of
+            Just info -> STBase (qualifiedDataName info)
+            Nothing -> ty
+        STCon name args ->
+          let args' = fmap canonical args
+           in case Map.lookup name (esTypes scope) of
+                Just info -> STCon (qualifiedDataName info) args'
+                Nothing -> STCon name args'
+        STArrow dom cod -> STArrow (canonical dom) (canonical cod)
+        STForall name mb body ->
+          STForall name (fmap (SrcBound . canonical . unSrcBound) mb) (canonical body)
+        STMu name body -> STMu name (canonical body)
+        STBottom -> STBottom
+
+    qualifiedDataName info = dataModule info ++ "." ++ dataName info
+
+constrainedRuntimeType :: ElaborateScope -> [P.ClassConstraint] -> SrcType -> SrcType
+constrainedRuntimeType scope =
+  constrainedRuntimeTypeRaw (esTypes scope) (esClasses scope)
+
+constrainedRuntimeTypeRaw :: Map String DataInfo -> Map String ClassInfo -> [P.ClassConstraint] -> SrcType -> SrcType
+constrainedRuntimeTypeRaw dataTypes classes0 constraints visibleTy =
+  let (foralls, bodyTy) = splitForalls visibleTy
+      evidenceTys = concatMap constraintEvidenceTypes constraints
+      runtimeBody = foldr STArrow bodyTy evidenceTys
+   in foldr (\(name, mb) acc -> STForall name (fmap SrcBound mb) acc) runtimeBody foralls
+  where
+    constraintEvidenceTypes constraint =
+      case Map.lookup (P.constraintClassName constraint) classes0 of
+        Nothing -> []
+        Just classInfo ->
+          [ lowerTypeRaw dataTypes (methodEvidenceSourceTypeRaw dataTypes classes0 classInfo (P.constraintType constraint) methodInfo)
+            | methodInfo <- Map.elems (classMethods classInfo)
+          ]
+
+methodEvidenceSourceType :: ElaborateScope -> ClassInfo -> SrcType -> MethodInfo -> SrcType
+methodEvidenceSourceType scope =
+  methodEvidenceSourceTypeRaw (esTypes scope) (esClasses scope)
+
+methodEvidenceSourceTypeRaw :: Map String DataInfo -> Map String ClassInfo -> ClassInfo -> SrcType -> MethodInfo -> SrcType
+methodEvidenceSourceTypeRaw dataTypes classes0 classInfo classArgTy methodInfo =
+  let specializedMethodTy =
+        specializeMethodType (methodType methodInfo) (classParamName classInfo) classArgTy
+      specializedConstraints =
+        map
+          (specializeConstraintType (classParamName classInfo) classArgTy)
+          (methodConstraints methodInfo)
+      headVars = freeTypeVarsSrcType classArgTy
+      deferredConstraints =
+        filter (not . constraintDeterminedByTypeVars headVars) specializedConstraints
+      evidenceVisibleTy =
+        quantifyMethodLocalVars headVars specializedConstraints specializedMethodTy
+   in constrainedRuntimeTypeRaw dataTypes classes0 deferredConstraints evidenceVisibleTy
+
+specializeConstraintType :: String -> SrcType -> P.ClassConstraint -> P.ClassConstraint
+specializeConstraintType paramName headTy constraint =
+  constraint {P.constraintType = substituteTypeVar paramName headTy (P.constraintType constraint)}
+
+constraintDeterminedByTypeVars :: Set String -> P.ClassConstraint -> Bool
+constraintDeterminedByTypeVars typeVars constraint =
+  freeTypeVarsSrcType (P.constraintType constraint) `Set.isSubsetOf` typeVars
+
+quantifyMethodLocalVars :: Set String -> [P.ClassConstraint] -> SrcType -> SrcType
+quantifyMethodLocalVars headVars constraints ty =
+  let (foralls, _) = splitForalls ty
+      alreadyQuantified = Set.fromList (map fst foralls)
+      constraintVars = foldMap (freeTypeVarsSrcType . P.constraintType) constraints
+      localVars =
+        (freeTypeVarsSrcType ty `Set.union` constraintVars)
+          Set.\\ headVars
+          Set.\\ alreadyQuantified
+   in foldr (\name acc -> STForall name Nothing acc) ty (sort (Set.toList localVars))
 
 lowerTypeRaw :: Map String DataInfo -> SrcType -> SrcType
 lowerTypeRaw dataTypes = lower Map.empty Nothing
@@ -163,23 +264,26 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
         STArrow
         resultTy
         [ foldr
-            (\(name, mbBound) acc -> STForall name (fmap (SrcBound . lowerCtorArg subst (Just (dataName info)) selfTy) mbBound) acc)
-            (foldr STArrow resultTy (map (lowerCtorArg subst (Just (dataName info)) selfTy) (ctorArgs ctor)))
+            (\(name, mbBound) acc ->
+               STForall name (fmap (SrcBound . lowerCtorArg subst ownerIdentity selfTy) mbBound) acc
+            )
+            (foldr STArrow resultTy (map (lowerCtorArg subst ownerIdentity selfTy) (ctorArgs ctor)))
             (ctorForalls ctor)
           | ctor <- dataConstructors info
+          , let ownerIdentity = Just (dataIdentity info)
         ]
 
     lowerCtorArg subst currentData selfTy ty = case ty of
       STVar name -> Map.findWithDefault ty name subst
       STArrow dom cod -> STArrow (lowerCtorArg subst currentData selfTy dom) (lowerCtorArg subst currentData selfTy cod)
       STBase name
-        | Just name == currentData -> selfTy
+        | isCurrentDataAlias currentData name -> selfTy
         | otherwise ->
             case Map.lookup name dataTypes of
               Just info -> encodeDataType subst info []
               Nothing -> STBase name
       STCon name args
-        | Just name == currentData -> selfTy
+        | isCurrentDataAlias currentData name -> selfTy
         | otherwise ->
             case Map.lookup name dataTypes of
               Just info -> encodeDataType subst info (map (lowerCtorArg subst currentData selfTy) (toListNE args))
@@ -190,6 +294,16 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
       STMu name body -> STMu name (lowerCtorArg (Map.delete name subst) currentData selfTy body)
       STBottom -> STBottom
 
+    isCurrentDataAlias currentData name =
+      case currentData of
+        Nothing -> False
+        Just ownerIdentity ->
+          case Map.lookup name dataTypes of
+            Just info -> dataIdentity info == ownerIdentity
+            Nothing -> name == ownerIdentity
+
+    dataIdentity info = dataModule info ++ "." ++ dataName info
+
 toListNE :: NonEmpty a -> [a]
 toListNE (x :| xs) = x : xs
 
@@ -197,6 +311,7 @@ lowerConstructorBinding :: ElaborateScope -> ConstructorInfo -> LoweredBinding
 lowerConstructorBinding scope ctorInfo =
   LoweredBinding
     { loweredBindingName = ctorRuntimeName ctorInfo,
+      loweredBindingSourceType = canonicalSourceType scope (quantifyFreeTypeVars (ctorType ctorInfo)),
       loweredBindingExpectedType = lowerType scope (quantifyFreeTypeVars (ctorType ctorInfo)),
       loweredBindingSurfaceExpr = constructorSurfaceExpr scope ctorInfo,
       loweredBindingDeferredObligations = Map.empty,
@@ -210,12 +325,35 @@ lowerExprBinding scope runtimeName expectedTy exportedAsMain expr = do
   pure
     LoweredBinding
       { loweredBindingName = runtimeName,
+        loweredBindingSourceType = canonicalSourceType scope expectedTy,
         loweredBindingExpectedType = lowerType scope expectedTy,
         loweredBindingSurfaceExpr = elaborateResultValue result,
         loweredBindingDeferredObligations = elaborateResultDeferredObligations result,
         loweredBindingExternalTypes = elaborateResultExternalTypes result,
         loweredBindingExportedAsMain = exportedAsMain
       }
+
+lowerConstrainedExprBinding :: ElaborateScope -> String -> [P.ClassConstraint] -> SrcType -> Bool -> P.Expr -> Either ProgramError LoweredBinding
+lowerConstrainedExprBinding scope runtimeName constraints visibleTy exportedAsMain expr = do
+  result <- runElaborateM $ do
+    (scopeWithEvidence, evidenceParams) <- extendConstraintEvidence scope constraints
+    let (_, bodyExpectedTy) = splitForalls visibleTy
+    bodyExpr <- compileExpr scopeWithEvidence (Just bodyExpectedTy) expr
+    pure (foldr wrapEvidence bodyExpr evidenceParams)
+  let expectedTy = constrainedRuntimeType scope constraints visibleTy
+  pure
+    LoweredBinding
+      { loweredBindingName = runtimeName,
+        loweredBindingSourceType = canonicalSourceType scope visibleTy,
+        loweredBindingExpectedType = lowerType scope expectedTy,
+        loweredBindingSurfaceExpr = elaborateResultValue result,
+        loweredBindingDeferredObligations = elaborateResultDeferredObligations result,
+        loweredBindingExternalTypes = elaborateResultExternalTypes result,
+        loweredBindingExportedAsMain = exportedAsMain
+      }
+  where
+    wrapEvidence (runtimeName0, evidenceTy) acc =
+      surfaceLamAnn runtimeName0 evidenceTy acc
 
 constructorSurfaceExpr :: ElaborateScope -> ConstructorInfo -> SurfaceExpr
 constructorSurfaceExpr scope ctorInfo =
@@ -226,7 +364,7 @@ constructorSurfaceExprRaw scope ctorInfo =
   let argNames = ["$" ++ ctorName ctorInfo ++ "_arg" ++ show ix | ix <- [1 .. length (ctorArgs ctorInfo)]]
       handlerNames = ["$" ++ ctorName ctorInfo ++ "_k" ++ show ix | ix <- [1 .. length ctorOrder]]
       resultVar =
-        if any (not . null . ctorForalls) ctorOrder
+        if any (not . null . ctorForalls) ctorOrder || constructorOwnerHasParams
           then "$" ++ ctorOwningType ctorInfo ++ "_result"
           else "a"
       handlerTypes = map (\ctor -> handlerSurfaceType scope ctor (STVar resultVar)) ctorOrder
@@ -243,15 +381,21 @@ constructorSurfaceExprRaw scope ctorInfo =
           (zip argNames (ctorArgs ctorInfo))
    in lifted
   where
+    ownerInfo =
+      visibleDataInfo <$> resolveConstructorDataInfo scope ctorInfo
     ctorOrder =
-      maybe [] dataConstructors (Map.lookup (ctorOwningType ctorInfo) (esTypes scope))
+      maybe [] dataConstructors ownerInfo
+    constructorOwnerHasParams =
+      maybe False (not . null . dataParams) ownerInfo
 
 compileExpr :: ElaborateScope -> Maybe SrcType -> P.Expr -> ElaborateM SurfaceExpr
 compileExpr scope mbExpected expr = case expr of
   EVar name ->
     case Map.lookup name (esValues scope) of
       Just OverloadedMethod {} -> throwError (ProgramAmbiguousMethodUse name)
-      Just OrdinaryValue {valueRuntimeName = runtimeName} -> pure (surfaceVar runtimeName)
+      Just valueInfo@OrdinaryValue {valueRuntimeName = runtimeName} -> do
+        evidenceSurfaces <- valueEvidenceArgs scope valueInfo []
+        pure (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces)
       Just ConstructorValue {valueCtorInfo = ctorInfo} -> do
         placeholder <- deferConstructorCall scope ctorInfo 0 mbExpected
         pure (surfaceVar placeholder)
@@ -278,33 +422,37 @@ compileExpr scope mbExpected expr = case expr of
     if name `notElem` collectFreeValues Set.empty body && mbTy == Nothing
       then compileExpr scope mbExpected body
       else do
-        runtimeName <- freshRuntimeName name
         let recursive = mentionsFreeValue name rhs
-        provisionalTy <- case (recursive, mbTy) of
-          (True, Nothing) -> Just <$> freshTypeName
-          _ -> pure mbTy
-        selfScope <-
-          if recursive
-            then extendLocal scope name runtimeName provisionalTy
-            else pure scope
-        rhsExpr <- compileExpr selfScope provisionalTy rhs
-        bindingTy <- case mbTy of
-          Just ty -> pure (lowerType scope ty)
-          Nothing
-            | Just rhsTy <- explicitExprAnnotation rhs -> pure (lowerType scope rhsTy)
-            | Just rhsTy <- inferKnownExprType selfScope rhs -> pure (lowerType scope rhsTy)
-            | Just ty <- provisionalTy -> pure (lowerType scope ty)
-          Nothing -> freshTypeName
-        let rhsExpr' =
-              case mbTy of
-                Just ty -> surfaceAnn rhsExpr (lowerType scope ty)
-                Nothing ->
-                  case inferKnownExprType selfScope rhs of
+        case (recursive, mbTy, inlineImmediateLetUse name rhs body) of
+          (False, Nothing, Just inlined) ->
+            compileExpr scope mbExpected inlined
+          _ -> do
+            runtimeName <- freshRuntimeName name
+            provisionalTy <- case (recursive, mbTy) of
+              (True, Nothing) -> Just <$> freshTypeName
+              _ -> pure mbTy
+            selfScope <-
+              if recursive
+                then extendLocal scope name runtimeName provisionalTy
+                else pure scope
+            rhsExpr <- compileExpr selfScope provisionalTy rhs
+            bindingTy <- case mbTy of
+              Just ty -> pure (lowerType scope ty)
+              Nothing
+                | Just rhsTy <- explicitExprAnnotation rhs -> pure (lowerType scope rhsTy)
+                | Just rhsTy <- inferKnownExprType selfScope rhs -> pure (lowerType scope rhsTy)
+                | Just ty <- provisionalTy -> pure (lowerType scope ty)
+              Nothing -> freshTypeName
+            let rhsExpr' =
+                  case mbTy of
                     Just ty -> surfaceAnn rhsExpr (lowerType scope ty)
-                    Nothing -> rhsExpr
-        bodyScope <- extendLocalLowered scope name runtimeName bindingTy
-        bodyExpr <- compileExpr bodyScope mbExpected body
-        pure (surfaceLet runtimeName rhsExpr' bodyExpr)
+                    Nothing ->
+                      case inferKnownExprType selfScope rhs of
+                        Just ty -> surfaceAnn rhsExpr (lowerType scope ty)
+                        Nothing -> rhsExpr
+            bodyScope <- extendLocalLowered scope name runtimeName bindingTy
+            bodyExpr <- compileExpr bodyScope mbExpected body
+            pure (surfaceLet runtimeName rhsExpr' bodyExpr)
   EAnn inner annTy -> do
     innerExpr <- compileExpr scope (Just annTy) inner
     pure (surfaceAnn innerExpr (lowerType scope annTy))
@@ -320,8 +468,16 @@ compileApp scope mbExpected expr =
           compileValueApp scope mbExpected valueInfo args
     (headExpr, [arg])
       | Just expectedTy <- mbExpected -> do
-          headSurface <- compileExpr scope (Just (STArrow expectedTy expectedTy)) headExpr
-          argSurface <- compileExpr scope (Just expectedTy) arg
+          (expectedHeadTy, argSurface) <-
+            case inferKnownExprType scope arg of
+              Just argTy -> do
+                argSurface <- compileExpr scope (Just argTy) arg
+                pure (STArrow argTy expectedTy, argSurface)
+              Nothing -> do
+                argTy <- freshTypeName
+                argSurface <- compileExpr scope Nothing arg
+                pure (STArrow argTy expectedTy, argSurface)
+          headSurface <- compileExpr scope (Just expectedHeadTy) headExpr
           pure (surfaceApp headSurface argSurface)
     (headExpr, args) -> do
       headSurface <- compileExpr scope Nothing headExpr
@@ -336,15 +492,19 @@ explicitExprAnnotation expr =
 
 compileValueApp :: ElaborateScope -> Maybe SrcType -> ValueInfo -> [P.Expr] -> ElaborateM SurfaceExpr
 compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} args = do
+  let expectedArgTys = constructorExpectedArgTypes scope ctorInfo args
   argSurfaces <-
-    zipWithM compileConstructorArg (take (length args) (ctorArgs ctorInfo)) args
+    zipWithM compileConstructorArg expectedArgTys args
   placeholder <- deferConstructorCall scope ctorInfo (length args) mbExpected
   pure (foldl surfaceApp (surfaceVar placeholder) argSurfaces)
   where
     compileConstructorArg expectedTy arg = do
       case inferKnownExprType scope arg of
-        Just knownTy ->
-          compileExpr scope (Just knownTy) arg
+        Just knownTy
+          | Set.null (freeTypeVarsSrcType knownTy) ->
+              compileExpr scope (Just knownTy) arg
+          | otherwise ->
+              compileExpr scope (Just expectedTy) arg
         Nothing -> do
           argSurface <- compileExpr scope Nothing arg
           pure $
@@ -353,18 +513,159 @@ compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} arg
               else argSurface
 
 compileValueApp scope mbExpected valueInfo args = do
-  argSurfaces <- mapM (compileExpr scope Nothing) args
+  let expectedArgTys = valueExpectedArgTypes valueInfo args
+  argSurfaces <- zipWithM compileValueArg (expectedArgTys ++ repeat Nothing) args
+  evidenceSurfaces <- valueEvidenceArgs scope valueInfo args
   let headSurface =
         case valueInfo of
           OrdinaryValue {valueRuntimeName = runtimeName} -> surfaceVar runtimeName
           OverloadedMethod {} -> error "compileValueApp does not handle overloaded methods"
-      applied = foldl surfaceApp headSurface argSurfaces
+      headWithEvidence = foldl surfaceApp headSurface evidenceSurfaces
+      applied = foldl surfaceApp headWithEvidence argSurfaces
   pure $ case mbExpected of
     Just expectedTy
       | not (isLocalOrdinaryValue valueInfo),
         isRecursiveResultType expectedTy || isRecursiveResultType (lowerType scope expectedTy) ->
           surfaceAnn applied (lowerType scope expectedTy)
     _ -> applied
+  where
+    compileValueArg (Just expectedTy) arg
+      | isPartialOverloadedMethodApp scope arg =
+          compileExpr scope (Just expectedTy) arg
+    compileValueArg _ arg =
+      compileExpr scope Nothing arg
+
+valueExpectedArgTypes :: ValueInfo -> [P.Expr] -> [Maybe SrcType]
+valueExpectedArgTypes valueInfo args =
+  let argTys =
+        case valueInfo of
+          OrdinaryValue {valueType = ty} ->
+            fst (splitArrows (snd (splitForalls ty)))
+          _ -> []
+   in map concreteExpectedTy (take (length args) argTys)
+  where
+    concreteExpectedTy ty
+      | Set.null (freeTypeVarsSrcType ty) = Just ty
+      | otherwise = Nothing
+
+isPartialOverloadedMethodApp :: ElaborateScope -> P.Expr -> Bool
+isPartialOverloadedMethodApp scope expr =
+  case collectApps expr of
+    (EVar name, args)
+      | Just OverloadedMethod {valueMethodInfo = methodInfo} <- Map.lookup name (esValues scope) ->
+          not (null args) && length args < methodFullArity methodInfo
+    _ -> False
+
+constructorExpectedArgTypes :: ElaborateScope -> ConstructorInfo -> [P.Expr] -> [SrcType]
+constructorExpectedArgTypes scope ctorInfo args =
+  reverse (snd (foldl step (Map.empty, []) (zip (ctorArgs ctorInfo) args)))
+  where
+    step (subst, acc) (templateTy, arg) =
+      let expectedTy = specializeSrcType subst templateTy
+          subst' =
+            case inferKnownExprType scope arg >>= matchTypes subst templateTy of
+              Just matched -> matched
+              Nothing -> subst
+       in (subst', expectedTy : acc)
+
+valueEvidenceArgs :: ElaborateScope -> ValueInfo -> [P.Expr] -> ElaborateM [SurfaceExpr]
+valueEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, valueType = visibleTy, valueConstraints = constraints} args
+  | null constraints = pure []
+  | otherwise = do
+      subst <-
+        case inferCallSubst scope visibleTy args of
+          Just subst0 -> pure subst0
+          Nothing ->
+            case constraints of
+              constraint : _ -> throwError (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
+              [] -> pure Map.empty
+      let specializedConstraints = map (applyConstraintSubst subst) constraints
+      if any usesLocalPolymorphicEvidence specializedConstraints
+        then throwError (ProgramAmbiguousConstrainedValueUse displayName)
+        else concat <$> mapM (constraintEvidenceArgExprs scope) specializedConstraints
+  where
+    usesLocalPolymorphicEvidence constraint =
+      not (Set.null (freeTypeVarsSrcType (P.constraintType constraint)))
+        && constraintCoveredByEvidence scope constraint
+valueEvidenceArgs _ _ _ = pure []
+
+constraintEvidenceArgExprs :: ElaborateScope -> P.ClassConstraint -> ElaborateM [SurfaceExpr]
+constraintEvidenceArgExprs scope constraint
+  | shouldDeferConstraintEvidence scope constraint =
+      deferConstraintEvidenceExprs scope constraint
+  | otherwise =
+      resolveConstraintEvidenceExpr scope Set.empty constraint
+
+shouldDeferConstraintEvidence :: ElaborateScope -> P.ClassConstraint -> Bool
+shouldDeferConstraintEvidence scope constraint =
+  not (Set.null (freeTypeVarsSrcType (P.constraintType constraint)))
+    && not (constraintCoveredByEvidence scope constraint)
+
+constraintCoveredByEvidence :: ElaborateScope -> P.ClassConstraint -> Bool
+constraintCoveredByEvidence scope constraint =
+  case Map.lookup (P.constraintClassName constraint) (esClasses scope) of
+    Nothing -> False
+    Just classInfo
+      | Map.null (classMethods classInfo) ->
+          zeroMethodConstraintCoveredByEvidence scope constraint
+      | otherwise ->
+          all
+            ( \methodInfo ->
+                case lookupEvidenceMethod scope (P.constraintClassName constraint) (P.constraintType constraint) (methodName methodInfo) of
+                  Just _ -> True
+                  Nothing -> False
+            )
+            (Map.elems (classMethods classInfo))
+
+deferConstraintEvidenceExprs :: ElaborateScope -> P.ClassConstraint -> ElaborateM [SurfaceExpr]
+deferConstraintEvidenceExprs scope constraint =
+  case Map.lookup (P.constraintClassName constraint) (esClasses scope) of
+    Nothing -> throwError (ProgramUnknownClass (P.constraintClassName constraint))
+    Just classInfo
+      | Map.null (classMethods classInfo) ->
+          resolveZeroMethodEvidenceExpr scope Set.empty constraint
+      | otherwise ->
+          mapM (deferMethodEvidenceExpr scope (P.constraintType constraint)) (Map.elems (classMethods classInfo))
+
+deferMethodEvidenceExpr :: ElaborateScope -> SrcType -> MethodInfo -> ElaborateM SurfaceExpr
+deferMethodEvidenceExpr scope classArgTy methodInfo = do
+  let methodTy =
+        stripVacuousSrcForalls $
+          specializeMethodType (methodType methodInfo) (methodParamName methodInfo) classArgTy
+      fullArity = methodFullArity methodInfo
+  placeholder <- deferMethodCall scope methodInfo fullArity methodTy
+  expanded <- etaExpandMissingArgs scope methodInfo methodTy Nothing 0 fullArity (surfaceVar placeholder)
+  pure (surfaceAnn expanded (lowerType scope methodTy))
+
+inferCallSubst :: ElaborateScope -> SrcType -> [P.Expr] -> Maybe (Map String SrcType)
+inferCallSubst scope visibleTy args = do
+  let (_, bodyTy) = splitForalls visibleTy
+      (argTys, _) = splitArrows bodyTy
+      knownPairs =
+        [ (templateTy, actualTy)
+          | (templateTy, arg) <- zip argTys args,
+            Just actualTy <- [inferKnownExprType scope arg]
+        ]
+  foldM (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy) Map.empty knownPairs
+
+inlineImmediateLetUse :: String -> P.Expr -> P.Expr -> Maybe P.Expr
+inlineImmediateLetUse bindingName rhs body =
+  let (headExpr, args) = collectApps body
+   in case (headExpr, args) of
+        (EVar name, _ : _)
+          | name == bindingName,
+            rhsConsumesAppliedArgs rhs (length args) ->
+              Just (foldl EApp rhs args)
+        _ -> Nothing
+
+rhsConsumesAppliedArgs :: P.Expr -> Int -> Bool
+rhsConsumesAppliedArgs _ 0 = True
+rhsConsumesAppliedArgs expr argCount =
+  case expr of
+    ELam param body ->
+      mentionsFreeValue (P.paramName param) body
+        && rhsConsumesAppliedArgs body (argCount - 1)
+    _ -> True
 
 isLocalOrdinaryValue :: ValueInfo -> Bool
 isLocalOrdinaryValue OrdinaryValue {valueOriginModule = "<local>"} = True
@@ -377,28 +678,43 @@ knownConstructorResultType scope ctorInfo args = do
   pure (Map.foldrWithKey substituteTypeVar (ctorResult ctorInfo) subst)
 
 compileMethodApp :: ElaborateScope -> Maybe SrcType -> MethodInfo -> [P.Expr] -> ElaborateM SurfaceExpr
-compileMethodApp scope _mbExpected methodInfo args
+compileMethodApp scope mbExpected methodInfo args
   | null args = throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
   | otherwise = do
       let fullArity = methodFullArity methodInfo
           suppliedArity = length args
+          knownClassArg = knownMethodClassArg scope methodInfo args
           placeholderTy = placeholderMethodType scope methodInfo args
           knownArgTys =
-            case knownMethodClassArg scope methodInfo args of
+            case knownClassArg of
               Just _ -> Just (take suppliedArity (methodArgumentTypes placeholderTy))
               Nothing -> Nothing
       argSurfaces <-
         case knownArgTys of
           Just argTys -> zipWithM (compileExpectedMethodArg scope) argTys args
           Nothing -> mapM (compileExpr scope Nothing) args
-      placeholder <- deferMethodCall scope methodInfo fullArity placeholderTy
-      let applied = foldl surfaceApp (surfaceVar placeholder) argSurfaces
-      expanded <- etaExpandMissingArgs scope methodInfo placeholderTy suppliedArity fullArity applied
-      pure $
-        case peelAppliedType placeholderTy suppliedArity of
-          Just remainingTy
-            | suppliedArity < fullArity -> surfaceAnn expanded (lowerType scope remainingTy)
-          _ -> expanded
+      case knownClassArg of
+        Just classArgTy
+          | shouldResolveMethodBeforeInference scope methodInfo classArgTy -> do
+              methodHead <- resolveMethodHeadForCall scope Set.empty methodInfo classArgTy args
+              let applied = foldl surfaceApp methodHead argSurfaces
+              expanded <- etaExpandMissingArgs scope methodInfo placeholderTy mbExpected suppliedArity fullArity applied
+              pure (annotatePartialMethod expanded placeholderTy suppliedArity fullArity)
+        _ -> do
+          placeholder <- deferMethodCall scope methodInfo fullArity placeholderTy
+          let applied = foldl surfaceApp (surfaceVar placeholder) argSurfaces
+          expanded <- etaExpandMissingArgs scope methodInfo placeholderTy mbExpected suppliedArity fullArity applied
+          pure (annotatePartialMethod expanded placeholderTy suppliedArity fullArity)
+  where
+    annotatePartialMethod expanded placeholderTy suppliedArity fullArity
+      | suppliedArity < fullArity =
+          case mbExpected of
+            Just expectedTy -> surfaceAnn expanded (lowerType scope expectedTy)
+            Nothing ->
+              case peelAppliedType placeholderTy suppliedArity of
+                Just remainingTy -> surfaceAnn expanded (lowerType scope remainingTy)
+                Nothing -> expanded
+      | otherwise = expanded
 
 compileExpectedMethodArg :: ElaborateScope -> SrcType -> P.Expr -> ElaborateM SurfaceExpr
 compileExpectedMethodArg scope expectedTy expr =
@@ -427,17 +743,162 @@ compileExpectedMethodArg scope expectedTy expr =
       argExpr <- compileExpr scope Nothing expr
       pure (surfaceAnn argExpr (lowerType scope expectedTy))
 
-etaExpandMissingArgs :: ElaborateScope -> MethodInfo -> SrcType -> Int -> Int -> SurfaceExpr -> ElaborateM SurfaceExpr
-etaExpandMissingArgs scope methodInfo methodTy suppliedArity fullArity applied = do
+resolveMethodHeadExpr :: ElaborateScope -> Set (P.ClassName, String) -> MethodInfo -> SrcType -> ElaborateM SurfaceExpr
+resolveMethodHeadExpr scope seen methodInfo classArgTy =
+  case lookupEvidenceMethod scope (methodClassName methodInfo) classArgTy (methodName methodInfo) of
+    Just (runtimeName, _) -> pure (surfaceVar runtimeName)
+    Nothing -> do
+      (instanceInfo, subst) <- liftEitherElab (resolveMethodInstanceInfoWithSubst scope methodInfo classArgTy)
+      case Map.lookup (methodName methodInfo) (instanceMethods instanceInfo) of
+        Just OrdinaryValue {valueRuntimeName = runtimeName, valueConstraints = constraints} -> do
+          let headVars = freeTypeVarsSrcType classArgTy
+              eagerConstraints =
+                filter
+                  (constraintDeterminedByTypeVars headVars)
+                  (map (applyConstraintSubst subst) constraints)
+          evidenceArgs <-
+            concat
+              <$> mapM
+                (resolveConstraintEvidenceExpr scope seen)
+                eagerConstraints
+          pure (foldl surfaceApp (surfaceVar runtimeName) evidenceArgs)
+        _ -> throwError (ProgramUnknownMethod (methodName methodInfo))
+
+resolveMethodHeadForCall :: ElaborateScope -> Set (P.ClassName, String) -> MethodInfo -> SrcType -> [P.Expr] -> ElaborateM SurfaceExpr
+resolveMethodHeadForCall scope seen methodInfo classArgTy args =
+  case lookupEvidenceMethod scope (methodClassName methodInfo) classArgTy (methodName methodInfo) of
+    Just (runtimeName, _) -> do
+      evidenceArgs <- methodLocalEvidenceArgsForCall scope methodInfo classArgTy args
+      pure (foldl surfaceApp (surfaceVar runtimeName) evidenceArgs)
+    Nothing -> resolveMethodHeadExpr scope seen methodInfo classArgTy
+
+methodLocalEvidenceArgsForCall :: ElaborateScope -> MethodInfo -> SrcType -> [P.Expr] -> ElaborateM [SurfaceExpr]
+methodLocalEvidenceArgsForCall scope methodInfo classArgTy args = do
+  subst <-
+    case inferMethodCallSubst scope methodInfo classArgTy args of
+      Just subst0 -> pure subst0
+      Nothing -> pure Map.empty
+  let headVars = freeTypeVarsSrcType classArgTy
+      methodLocalConstraints =
+        filter
+          (not . constraintDeterminedByTypeVars headVars)
+          (map (specializeConstraintType (methodParamName methodInfo) classArgTy) (methodConstraints methodInfo))
+      specializedConstraints = map (applyConstraintSubst subst) methodLocalConstraints
+  concat <$> mapM (constraintEvidenceArgExprs scope) specializedConstraints
+
+inferMethodCallSubst :: ElaborateScope -> MethodInfo -> SrcType -> [P.Expr] -> Maybe (Map String SrcType)
+inferMethodCallSubst scope methodInfo classArgTy args = do
+  let specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) classArgTy
+      (_, bodyTy) = splitForalls specializedMethodTy
+      (paramTys, _) = splitArrows bodyTy
+      knownPairs =
+        [ (templateTy, actualTy)
+          | (templateTy, arg) <- zip paramTys args,
+            Just actualTy <- [inferKnownExprType scope arg]
+        ]
+  foldM (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy) Map.empty knownPairs
+
+shouldResolveMethodBeforeInference :: ElaborateScope -> MethodInfo -> SrcType -> Bool
+shouldResolveMethodBeforeInference scope methodInfo classArgTy =
+  case lookupEvidenceMethod scope (methodClassName methodInfo) classArgTy (methodName methodInfo) of
+    Just _ -> True
+    Nothing -> False
+
+resolveConstraintEvidenceExpr :: ElaborateScope -> Set (P.ClassName, String) -> P.ClassConstraint -> ElaborateM [SurfaceExpr]
+resolveConstraintEvidenceExpr scope seen constraint =
+  case Map.lookup (P.constraintClassName constraint) (esClasses scope) of
+    Nothing -> throwError (ProgramUnknownClass (P.constraintClassName constraint))
+    Just classInfo -> do
+      let key = (P.constraintClassName constraint, show (P.constraintType constraint))
+      whenSeen key
+      if Map.null (classMethods classInfo)
+        then resolveZeroMethodEvidenceExpr scope seen constraint
+        else
+          mapM
+            ( \methodInfo ->
+                resolveMethodHeadExpr
+                  scope
+                  (Set.insert key seen)
+                  methodInfo
+                  (P.constraintType constraint)
+            )
+            (Map.elems (classMethods classInfo))
+  where
+    whenSeen key =
+      when (key `Set.member` seen) $
+        throwError (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
+
+resolveZeroMethodEvidenceExpr :: ElaborateScope -> Set (P.ClassName, String) -> P.ClassConstraint -> ElaborateM [SurfaceExpr]
+resolveZeroMethodEvidenceExpr scope seen constraint
+  | zeroMethodConstraintCoveredByEvidence scope constraint = pure []
+  | otherwise = do
+      let key = (P.constraintClassName constraint, show (P.constraintType constraint))
+      (instanceInfo, subst) <- liftEitherElab (resolveInstanceInfoWithSubst scope (P.constraintClassName constraint) (P.constraintType constraint))
+      _ <-
+        concat
+          <$> mapM
+            (resolveConstraintEvidenceExpr scope (Set.insert key seen) . applyConstraintSubst subst)
+            (instanceConstraints instanceInfo)
+      pure []
+
+zeroMethodConstraintCoveredByEvidence :: ElaborateScope -> P.ClassConstraint -> Bool
+zeroMethodConstraintCoveredByEvidence scope constraint =
+  any
+    ( \evidence ->
+        evidenceClassName evidence == P.constraintClassName constraint
+          && lowerType scope (evidenceType evidence) == lowerType scope (P.constraintType constraint)
+    )
+    (esEvidence scope)
+
+lookupEvidenceMethod :: ElaborateScope -> P.ClassName -> SrcType -> P.MethodName -> Maybe (String, SrcType)
+lookupEvidenceMethod scope className0 headTy methodName0 =
+  case
+    [ methodEvidence
+      | evidence <- esEvidence scope,
+        evidenceClassName evidence == className0,
+        lowerType scope (evidenceType evidence) == lowerType scope headTy,
+        Just methodEvidence <- [Map.lookup methodName0 (evidenceMethods evidence)]
+    ]
+  of
+    methodEvidence : _ -> Just methodEvidence
+    [] -> Nothing
+
+applyConstraintSubst :: Map String SrcType -> P.ClassConstraint -> P.ClassConstraint
+applyConstraintSubst subst constraint =
+  constraint {P.constraintType = applySrcSubst subst (P.constraintType constraint)}
+
+applySrcSubst :: Map String SrcType -> SrcType -> SrcType
+applySrcSubst subst ty =
+  Map.foldrWithKey substituteTypeVar ty subst
+
+liftEitherElab :: Either ProgramError a -> ElaborateM a
+liftEitherElab = either throwError pure
+
+etaExpandMissingArgs :: ElaborateScope -> MethodInfo -> SrcType -> Maybe SrcType -> Int -> Int -> SurfaceExpr -> ElaborateM SurfaceExpr
+etaExpandMissingArgs scope methodInfo methodTy mbExpected suppliedArity fullArity applied = do
   let missingArity = max 0 (fullArity - suppliedArity)
   if missingArity == 0
     then pure applied
     else do
       missingNames <- replicateM missingArity (freshRuntimeName (methodName methodInfo ++ "_arg"))
-      let missingTypes = drop suppliedArity (methodArgumentTypes methodTy)
+      let missingTypes = zipWith preferExpectedType methodMissingTypes (expectedMissingTypes ++ repeat Nothing)
           body = foldl surfaceApp applied (map surfaceVar missingNames)
       pure (foldr wrapMissingArg body (zip missingNames missingTypes))
   where
+    methodMissingTypes =
+      drop suppliedArity (methodArgumentTypes methodTy)
+
+    expectedMissingTypes =
+      case mbExpected of
+        Just expectedTy ->
+          map Just (fst (splitArrows (snd (splitForalls expectedTy))))
+        Nothing -> []
+
+    preferExpectedType methodTy0 (Just expectedTy)
+      | Set.null (freeTypeVarsSrcType expectedTy) = expectedTy
+      | otherwise = methodTy0
+    preferExpectedType methodTy0 Nothing = methodTy0
+
     wrapMissingArg (name, ty) body
       | Set.null (freeTypeVarsSrcType ty) = surfaceLamAnn name (lowerType scope ty) body
       | otherwise = surfaceLam name body
@@ -526,13 +987,12 @@ specializeSrcType subst ty = case ty of
     | otherwise -> STMu name (specializeSrcType subst body)
   STBottom -> STBottom
 
-deferCaseCall :: ElaborateScope -> DataInfo -> SrcType -> ElaborateM String
-deferCaseCall scope dataInfo resultTy = do
+deferCaseCall :: ElaborateScope -> DataInfo -> SrcType -> SrcType -> ElaborateM String
+deferCaseCall scope dataInfo scrutineeTy resultTy = do
   placeholder <- freshDeferredCaseName (dataName dataInfo)
-  let headTy = dataHeadType dataInfo
-      resultTyElab = lowerType scope resultTy
+  let resultTyElab = lowerType scope resultTy
       handlerTys = replicate (length (dataConstructors dataInfo)) STBottom
-      placeholderTy = foldr STArrow resultTyElab (lowerType scope headTy : handlerTys)
+      placeholderTy = foldr STArrow resultTyElab (lowerType scope scrutineeTy : handlerTys)
       deferred =
         DeferredCaseCall
           { deferredCasePlaceholder = placeholder,
@@ -644,17 +1104,32 @@ compileCase :: ElaborateScope -> Maybe SrcType -> P.Expr -> [P.Alt] -> Elaborate
 compileCase scope mbExpected scrutinee alts = do
   case ctorOwners alts of
     [] -> do
-      scrutineeExpr <- compileExpr scope Nothing scrutinee
-      compileCatchAllOnly scope mbExpected scrutineeExpr alts
+      let mbInferredScrutineeTy = inferKnownExprType scope scrutinee
+          mbAnnotationScrutineeTy = catchAllPatternAnnotationType alts
+          mbScrutineeTy =
+            case mbInferredScrutineeTy of
+              Just knownTy -> Just knownTy
+              Nothing -> mbAnnotationScrutineeTy
+          annotateScrutinee =
+            case (mbInferredScrutineeTy, mbAnnotationScrutineeTy) of
+              (Nothing, Just annTy) -> Just annTy
+              _ -> Nothing
+      mapM_ (\scrutineeTy -> mapM_ (validatePatternType scope scrutineeTy . P.altPattern) alts) mbScrutineeTy
+      scrutineeExpr0 <- compileExpr scope mbScrutineeTy scrutinee
+      let scrutineeExpr =
+            case annotateScrutinee of
+              Just annTy -> surfaceAnn scrutineeExpr0 (lowerType scope annTy)
+              Nothing -> scrutineeExpr0
+      compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts
     owners -> do
       dataInfo <- requireSingleDataOwner scope owners
       let headTy = dataHeadType dataInfo
-          ctorNames = [name | P.Alt (P.PatCtor name _) _ <- alts]
-          dupes = duplicates ctorNames
-      case dupes of
-        (dup : _) -> throwError (ProgramDuplicateCaseBranch dup)
-        [] -> pure ()
-      catchAll <- pure (findCatchAll alts)
+          scrutineeTy =
+            case inferKnownExprType scope scrutinee of
+              Just knownTy -> knownTy
+              Nothing -> headTy
+      validateOrderedPatterns alts
+      mapM_ (validatePatternType scope scrutineeTy . P.altPattern) alts
       (resultTy, _quantifyResult) <-
         case mbExpected of
           Just expectedTy -> pure (expectedTy, False)
@@ -664,10 +1139,10 @@ compileCase scope mbExpected scrutinee alts = do
       case localIdentityScrutinee scope scrutinee of
         Just inner -> compileCase scope mbExpected inner alts
         Nothing -> do
-          scrutineeExpr <- compileExpr scope (Just headTy) scrutinee
+          scrutineeExpr <- compileExpr scope (Just scrutineeTy) scrutinee
           let forceAnnotateHandlers = any (not . null . ctorForalls) (dataConstructors dataInfo)
-          handlers <- mapM (compileHandler scope scrutineeExpr resultTy headTy dataInfo alts catchAll forceAnnotateHandlers) (dataConstructors dataInfo)
-          placeholder <- deferCaseCall scope dataInfo resultTy
+          handlers <- mapM (compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnotateHandlers) (dataConstructors dataInfo)
+          placeholder <- deferCaseCall scope dataInfo scrutineeTy resultTy
           pure (foldl surfaceApp (surfaceVar placeholder) (scrutineeExpr : handlers))
 
 localIdentityScrutinee :: ElaborateScope -> P.Expr -> Maybe P.Expr
@@ -682,130 +1157,325 @@ localIdentityScrutinee scope expr =
           Just arg
     _ -> Nothing
 
-compileCatchAllOnly :: ElaborateScope -> Maybe SrcType -> SurfaceExpr -> [P.Alt] -> ElaborateM SurfaceExpr
-compileCatchAllOnly scope mbExpected scrutineeExpr alts =
+compileCatchAllOnly :: ElaborateScope -> Maybe SrcType -> Maybe SrcType -> SurfaceExpr -> [P.Alt] -> ElaborateM SurfaceExpr
+compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts =
   case alts of
-    [P.Alt P.PatWildcard body] -> compileExpr scope mbExpected body
+    [P.Alt P.PatWildcard body] -> do
+      bodyExpr <- compileExpr scope mbExpected body
+      scrutineeName <- freshRuntimeName "case_scrutinee"
+      case mbScrutineeTy of
+        Just _ -> pure (surfaceLet scrutineeName scrutineeExpr bodyExpr)
+        Nothing -> do
+          -- Keep the scrutinee binding referenced so eMLF infers its own scheme
+          -- while the strict let still preserves evaluation before the body.
+          forceName <- freshRuntimeName "case_scrutinee_force"
+          pure
+            ( surfaceLet
+                scrutineeName
+                scrutineeExpr
+                (surfaceLet forceName (surfaceVar scrutineeName) bodyExpr)
+            )
     [P.Alt (P.PatVar name) body] -> do
       runtimeName <- freshRuntimeName name
-      scope' <- extendLocalLowered scope name runtimeName =<< freshTypeName
+      scope' <-
+        case mbScrutineeTy of
+          Just scrutineeTy -> extendLocal scope name runtimeName (Just scrutineeTy)
+          Nothing -> extendLocalLowered scope name runtimeName =<< freshTypeName
       bodyExpr <- compileExpr scope' mbExpected body
       pure (surfaceLet runtimeName scrutineeExpr bodyExpr)
+    [P.Alt (P.PatAnn inner _) body] -> compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr [P.Alt inner body]
     _ -> throwError (ProgramCaseOnNonDataType STBottom)
 
-compileHandler :: ElaborateScope -> SurfaceExpr -> SrcType -> SrcType -> DataInfo -> [P.Alt] -> Maybe P.Alt -> Bool -> ConstructorInfo -> ElaborateM SurfaceExpr
-compileHandler scope scrutineeExpr resultTy headTy dataInfo alts catchAll forceAnnotateHandlers ctorInfo =
-  case findMatchingAlt ctorInfo of
-    Just alt -> compileMatchingAlt scope resultTy headTy forceAnnotateHandlers ctorInfo alt
-    Nothing ->
-      case catchAll of
-        Just alt -> compileCatchAllAlt scope scrutineeExpr resultTy forceAnnotateHandlers ctorInfo alt
-        Nothing -> throwError (ProgramNonExhaustiveCase missing)
+compileHandler :: ElaborateScope -> SurfaceExpr -> SrcType -> SrcType -> DataInfo -> [P.Alt] -> Bool -> ConstructorInfo -> ElaborateM SurfaceExpr
+compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnotateHandlers ctorInfo = do
+  let ctorArgTys = specializeConstructorArgsForScrutinee scrutineeTy ctorInfo
+      specializedCtorInfo = ctorInfo {ctorArgs = ctorArgTys}
+  runtimeNames <- mapM freshRuntimeName ["case" ++ show ix | ix <- [1 .. length ctorArgTys]]
+  let topArgs = zip3 (map (const P.PatWildcard) ctorArgTys) runtimeNames ctorArgTys
+      candidates = matchingCandidates ctorInfo
+  bodyExpr <- compileCandidates topArgs candidates
+  let handlerBody =
+        foldr
+          (\(name, argTy) acc -> surfaceLamAnn name (lowerType scope argTy) acc)
+          bodyExpr
+          (zip runtimeNames ctorArgTys)
+  if not forceAnnotateHandlers && null (ctorForalls ctorInfo)
+    then pure handlerBody
+    else do
+      let handlerTy = handlerSurfaceType scope specializedCtorInfo (lowerType scope resultTy)
+      pure (surfaceAnn handlerBody handlerTy)
   where
-    missing = [ctorName ctor | ctor <- dataConstructors dataInfo, not (hasAlt ctor)]
+    matchingCandidates ctor =
+      filter (patternCouldMatchConstructor scope ctor . P.altPattern) alts
 
-    hasAlt ctor =
-      any
-        ( \case
-            P.Alt (P.PatCtor ctorName0 _) _ -> ctorName0 == ctorName ctor
-            P.Alt P.PatVar {} _ -> True
-            P.Alt P.PatWildcard _ -> True
-        )
-        alts
+    compileCandidates _ [] = throwError (ProgramNonExhaustiveCase [ctorName ctorInfo])
+    compileCandidates topArgs [alt] =
+      compileAltCandidate topArgs alt Nothing
+    compileCandidates topArgs (alt : rest) = do
+      fallback <- compileCandidates topArgs rest
+      compileAltCandidate topArgs alt (Just fallback)
 
-    findMatchingAlt ctor =
-      find
-        ( \case
-            P.Alt (P.PatCtor ctorName0 _) _ -> ctorName0 == ctorName ctor
-            _ -> False
-        )
-        alts
+    compileAltCandidate topArgs (P.Alt pattern0 body) mbFallback =
+      case stripPatternAnn pattern0 of
+        P.PatWildcard -> compileExpr scope (Just resultTy) body
+        P.PatVar name -> do
+          scrutineeName <- freshRuntimeName name
+          scope' <- extendLocalLowered scope name scrutineeName (lowerType scope scrutineeTy)
+          bodyExpr <- compileExpr scope' (Just resultTy) body
+          pure (surfaceLet scrutineeName scrutineeExpr bodyExpr)
+        P.PatCtor ctorName0 patterns
+          | constructorNameMatches scope ctorName0 ctorInfo ->
+              if length patterns == length (ctorArgs ctorInfo)
+                then compilePatternSequence scope (zip3 patterns (map middle topArgs) (map third topArgs)) body mbFallback
+                else throwError (ProgramPatternConstructorMismatch ctorName0 (dataHeadType dataInfo))
+          | otherwise ->
+              case mbFallback of
+                Just fallback -> pure fallback
+                Nothing -> throwError (ProgramNonExhaustiveCase [ctorName ctorInfo])
+        P.PatAnn inner _ -> compileAltCandidate topArgs (P.Alt inner body) mbFallback
 
-compileMatchingAlt :: ElaborateScope -> SrcType -> SrcType -> Bool -> ConstructorInfo -> P.Alt -> ElaborateM SurfaceExpr
-compileMatchingAlt scope resultTy headTy forceAnnotateHandlers ctorInfo (P.Alt (P.PatCtor _ binders) body)
-  | length binders /= length (ctorArgs ctorInfo) = throwError (ProgramPatternConstructorMismatch (ctorName ctorInfo) headTy)
-  | otherwise = do
-      runtimeNames <- mapM freshRuntimeName binders
-      scope' <- foldM (\acc (srcName, runtimeName, argTy) -> extendLocal acc srcName runtimeName (Just argTy)) scope (zip3 binders runtimeNames (ctorArgs ctorInfo))
-      let resultTyElab = lowerType scope resultTy
-      bodyExpr <- compileExpr scope' (Just resultTy) body
-      let handlerBody =
+    middle (_, value, _) = value
+    third (_, _, value) = value
+
+    compilePatternSequence scope0 [] body _ =
+      compileExpr scope0 (Just resultTy) body
+    compilePatternSequence scope0 ((pattern0, runtimeName, argTy) : rest) body mbFallback =
+      case pattern0 of
+        P.PatWildcard -> compilePatternSequence scope0 rest body mbFallback
+        P.PatVar sourceName -> do
+          scope' <- extendLocal scope0 sourceName runtimeName (Just argTy)
+          compilePatternSequence scope' rest body mbFallback
+        P.PatCtor nestedCtorName nestedPatterns -> do
+          nestedCtorInfo <- lookupConstructorInfo scope nestedCtorName
+          nestedDataInfo <- lookupDataInfoForConstructor scope nestedCtorInfo
+          if length nestedPatterns /= length (ctorArgs nestedCtorInfo)
+            then throwError (ProgramPatternConstructorMismatch nestedCtorName argTy)
+            else do
+              nestedRuntimeNames <- mapM freshRuntimeName ["pat" ++ show ix | ix <- [1 .. length (ctorArgs nestedCtorInfo)]]
+              let forceNestedAnnotations = any (not . null . ctorForalls) (dataConstructors nestedDataInfo)
+                  nestedArgTys = specializeConstructorArgsForScrutinee argTy nestedCtorInfo
+              matchingBody <- compilePatternSequence scope0 (zip3 nestedPatterns nestedRuntimeNames nestedArgTys ++ rest) body mbFallback
+              fallback <-
+                case mbFallback of
+                  Just fallback0 -> pure (Just fallback0)
+                  Nothing
+                    | nestedPatternNeedsFallback nestedDataInfo nestedCtorInfo ->
+                        throwError (ProgramNonExhaustiveCase [ctorName ctorInfo])
+                  Nothing -> pure Nothing
+              handlers <- mapM (nestedHandler forceNestedAnnotations argTy nestedCtorInfo nestedRuntimeNames matchingBody fallback) (dataConstructors nestedDataInfo)
+              placeholder <- deferCaseCall scope0 nestedDataInfo argTy resultTy
+              pure (foldl surfaceApp (surfaceVar placeholder) (surfaceVar runtimeName : handlers))
+        P.PatAnn inner annTy -> compilePatternSequence scope0 ((inner, runtimeName, annTy) : rest) body mbFallback
+
+    nestedPatternNeedsFallback nestedDataInfo targetCtor =
+      any (not . sameConstructorInfo targetCtor) (dataConstructors nestedDataInfo)
+
+    nestedHandler forceNestedAnnotations nestedScrutineeTy targetCtor nestedRuntimeNames matchingBody mbFallback ctor =
+      let ctorArgTys = specializeConstructorArgsForScrutinee nestedScrutineeTy ctor
+          specializedCtor = ctor {ctorArgs = ctorArgTys}
+          targetSelected = sameConstructorInfo ctor targetCtor
+          argNames = if targetSelected then nestedRuntimeNames else ["unused" ++ show ix | ix <- [1 .. length ctorArgTys]]
+          selectedBody =
+            case (targetSelected, mbFallback) of
+              (True, _) -> matchingBody
+              (False, Just fallback) -> fallback
+              (False, Nothing) -> matchingBody
+          handlerBody =
             foldr
               (\(name, argTy) acc -> surfaceLamAnn name (lowerType scope argTy) acc)
-              bodyExpr
-              (zip runtimeNames (ctorArgs ctorInfo))
-      if not forceAnnotateHandlers && null (ctorForalls ctorInfo)
-        then pure handlerBody
-        else do
-          let handlerTy = handlerSurfaceType scope ctorInfo resultTyElab
-          pure (surfaceAnn handlerBody handlerTy)
-compileMatchingAlt _ _ headTy _ ctorInfo _ =
-  throwError (ProgramPatternConstructorMismatch (ctorName ctorInfo) headTy)
+              selectedBody
+              (zip argNames ctorArgTys)
+       in if not forceNestedAnnotations && null (ctorForalls ctor)
+            then pure handlerBody
+            else do
+              let handlerTy = handlerSurfaceType scope specializedCtor (lowerType scope resultTy)
+              pure (surfaceAnn handlerBody handlerTy)
 
-compileCatchAllAlt :: ElaborateScope -> SurfaceExpr -> SrcType -> Bool -> ConstructorInfo -> P.Alt -> ElaborateM SurfaceExpr
-compileCatchAllAlt scope scrutineeExpr resultTy forceAnnotateHandlers ctorInfo alt = do
-  runtimeNames <- mapM freshRuntimeName ["case" ++ show ix | ix <- [1 .. length (ctorArgs ctorInfo)]]
-  let lambdaBinders = zip runtimeNames (ctorArgs ctorInfo)
-  case P.altPattern alt of
-    P.PatWildcard -> do
-      let resultTyElab = lowerType scope resultTy
-      bodyExpr <- compileExpr scope (Just resultTy) (P.altExpr alt)
-      let handlerBody =
-            foldr
-              (\(name, argTy) acc -> surfaceLamAnn name (lowerType scope argTy) acc)
-              bodyExpr
-              lambdaBinders
-      if not forceAnnotateHandlers && null (ctorForalls ctorInfo)
-        then pure handlerBody
-        else do
-          let handlerTy = handlerSurfaceType scope ctorInfo resultTyElab
-          pure (surfaceAnn handlerBody handlerTy)
-    P.PatVar name -> do
-      scrutineeName <- freshRuntimeName name
-      scope' <- extendLocalLowered scope name scrutineeName (lowerType scope (ctorResult ctorInfo))
-      let resultTyElab = lowerType scope resultTy
-      bodyExpr <- compileExpr scope' (Just resultTy) (P.altExpr alt)
-      let handlerBody =
-            foldr
-              (\(name', argTy) acc -> surfaceLamAnn name' (lowerType scope argTy) acc)
-              (surfaceLet scrutineeName scrutineeExpr bodyExpr)
-              lambdaBinders
-      if not forceAnnotateHandlers && null (ctorForalls ctorInfo)
-        then pure handlerBody
-        else do
-          let handlerTy = handlerSurfaceType scope ctorInfo resultTyElab
-          pure (surfaceAnn handlerBody handlerTy)
-    _ -> throwError (ProgramUnknownConstructor (ctorName ctorInfo))
+    specializeConstructorArgsForScrutinee actualScrutineeTy ctor =
+      case matchTypes Map.empty (ctorResult ctor) actualScrutineeTy of
+        Just subst -> map (specializeSrcType subst) (ctorArgs ctor)
+        Nothing -> ctorArgs ctor
 
 ctorOwners :: [P.Alt] -> [String]
 ctorOwners = foldr go []
   where
     go alt acc = case P.altPattern alt of
       P.PatCtor ctorName0 _ -> ctorName0 : acc
+      P.PatAnn inner _ -> go (P.Alt inner (P.altExpr alt)) acc
       _ -> acc
+
+catchAllPatternAnnotationType :: [P.Alt] -> Maybe SrcType
+catchAllPatternAnnotationType alts =
+  case alts of
+    [P.Alt pattern0 _] -> patternAnnotationType pattern0
+    _ -> Nothing
+
+patternAnnotationType :: P.Pattern -> Maybe SrcType
+patternAnnotationType pattern0 =
+  case pattern0 of
+    P.PatAnn inner annTy ->
+      case patternAnnotationType inner of
+        Just innerTy -> Just innerTy
+        Nothing -> Just annTy
+    _ -> Nothing
+
+validatePatternType :: ElaborateScope -> SrcType -> P.Pattern -> ElaborateM ()
+validatePatternType scope expectedTy pattern0 =
+  case pattern0 of
+    P.PatWildcard -> pure ()
+    P.PatVar {} -> pure ()
+    P.PatAnn inner annTy -> do
+      validatePatternAnnotation scope expectedTy annTy
+      validatePatternType scope annTy inner
+    P.PatCtor ctorName0 patterns -> do
+      ctorInfo <- lookupConstructorInfo scope ctorName0
+      subst <-
+        case matchPatternTypes (ctorResult ctorInfo) expectedTy of
+          Just subst0 -> pure subst0
+          Nothing -> throwError (ProgramPatternConstructorMismatch ctorName0 expectedTy)
+      if length patterns /= length (ctorArgs ctorInfo)
+        then throwError (ProgramPatternConstructorMismatch ctorName0 expectedTy)
+        else
+          mapM_
+            ( \(nestedPattern, argTy) ->
+                validatePatternType scope (specializeSrcType subst argTy) nestedPattern
+            )
+            (zip patterns (ctorArgs ctorInfo))
+  where
+    matchPatternTypes template actual =
+      case matchTypes Map.empty template actual of
+        Just subst -> Just subst
+        Nothing ->
+          case matchTypes Map.empty actual template of
+            Just subst -> Just subst
+            Nothing
+              | lowerType scope template == lowerType scope actual -> Just Map.empty
+            Nothing -> Nothing
+
+validatePatternAnnotation :: ElaborateScope -> SrcType -> SrcType -> ElaborateM ()
+validatePatternAnnotation scope expectedTy annTy =
+  when (not (patternAnnotationCompatible expectedTy annTy)) $
+    throwError (ProgramTypeMismatch annTy expectedTy)
+  where
+    patternAnnotationCompatible left right =
+      lowerType scope left == lowerType scope right
+        || matchTypes Map.empty left right /= Nothing
+        || matchTypes Map.empty right left /= Nothing
+
+validateOrderedPatterns :: [P.Alt] -> ElaborateM ()
+validateOrderedPatterns = go Set.empty False
+  where
+    go _ _ [] = pure ()
+    go seen catchAllSeen (P.Alt pattern0 _ : rest)
+      | catchAllSeen =
+          throwError (ProgramDuplicateCaseBranch (maybe "_" id (topConstructorName pattern0)))
+      | isCatchAllPattern pattern0 =
+          go seen True rest
+      | Just ctorName0 <- topConstructorName pattern0,
+        ctorName0 `Set.member` seen =
+          throwError (ProgramDuplicateCaseBranch ctorName0)
+      | Just ctorName0 <- flatCatchAllConstructor pattern0 =
+          go (Set.insert ctorName0 seen) False rest
+      | otherwise = go seen False rest
+
+topConstructorName :: P.Pattern -> Maybe String
+topConstructorName pattern0 =
+  case stripPatternAnn pattern0 of
+    P.PatCtor ctorName0 _ -> Just ctorName0
+    _ -> Nothing
+
+flatCatchAllConstructor :: P.Pattern -> Maybe String
+flatCatchAllConstructor pattern0 =
+  case stripPatternAnn pattern0 of
+    P.PatCtor ctorName0 patterns
+      | all isCatchAllPattern patterns -> Just ctorName0
+    _ -> Nothing
+
+isCatchAllPattern :: P.Pattern -> Bool
+isCatchAllPattern pattern0 =
+  case stripPatternAnn pattern0 of
+    P.PatWildcard -> True
+    P.PatVar {} -> True
+    _ -> False
+
+patternCouldMatchConstructor :: ElaborateScope -> ConstructorInfo -> P.Pattern -> Bool
+patternCouldMatchConstructor scope ctorInfo pattern0 =
+  case stripPatternAnn pattern0 of
+    P.PatWildcard -> True
+    P.PatVar {} -> True
+    P.PatCtor ctorName0 _ -> constructorNameMatches scope ctorName0 ctorInfo
+    P.PatAnn inner _ -> patternCouldMatchConstructor scope ctorInfo inner
+
+stripPatternAnn :: P.Pattern -> P.Pattern
+stripPatternAnn pattern0 =
+  case pattern0 of
+    P.PatAnn inner _ -> stripPatternAnn inner
+    _ -> pattern0
 
 requireSingleDataOwner :: ElaborateScope -> [String] -> ElaborateM DataInfo
 requireSingleDataOwner scope ctorNames0 = do
-  ctors <- mapM lookupCtor ctorNames0
-  let owners = nub (map ctorOwningType ctors)
+  owners <- mapM (lookupConstructorInfo scope >=> lookupResolvedDataInfo) ctorNames0
   case owners of
-    [owner] ->
-      case Map.lookup owner (esTypes scope) of
-        Just info -> pure info
-        Nothing -> throwError (ProgramUnknownType owner)
-    _ -> throwError (ProgramCaseOnNonDataType STBottom)
+    [] -> throwError (ProgramCaseOnNonDataType STBottom)
+    owner : rest
+      | all (sameDataInfo owner) rest -> pure (visibleDataInfo owner)
+      | otherwise -> throwError (ProgramCaseOnNonDataType STBottom)
   where
-    lookupCtor ctorName0 =
-      case Map.lookup ctorName0 (esValues scope) of
-        Just ConstructorValue {valueCtorInfo = ctorInfo} -> pure ctorInfo
-        _ -> throwError (ProgramUnknownConstructor ctorName0)
+    lookupResolvedDataInfo ctorInfo =
+      case resolveConstructorDataInfo scope ctorInfo of
+        Just resolved -> pure resolved
+        Nothing -> throwError (ProgramUnknownType (ctorOwningType ctorInfo))
 
-findCatchAll :: [P.Alt] -> Maybe P.Alt
-findCatchAll = find isCatchAll
-  where
-    isCatchAll (P.Alt P.PatVar {} _) = True
-    isCatchAll (P.Alt P.PatWildcard _) = True
-    isCatchAll _ = False
+lookupConstructorInfo :: ElaborateScope -> String -> ElaborateM ConstructorInfo
+lookupConstructorInfo scope ctorName0 =
+  case lookupConstructorInfoMaybe scope ctorName0 of
+    Just ctorInfo -> pure ctorInfo
+    Nothing -> throwError (ProgramUnknownConstructor ctorName0)
+
+lookupConstructorInfoMaybe :: ElaborateScope -> String -> Maybe ConstructorInfo
+lookupConstructorInfoMaybe scope ctorName0 =
+  case Map.lookup ctorName0 (esValues scope) of
+    Just ConstructorValue {valueCtorInfo = ctorInfo} -> Just ctorInfo
+    _ -> Nothing
+
+lookupDataInfoForConstructor :: ElaborateScope -> ConstructorInfo -> ElaborateM DataInfo
+lookupDataInfoForConstructor scope ctorInfo =
+  case resolveConstructorDataInfo scope ctorInfo of
+    Just resolved -> pure (visibleDataInfo resolved)
+    Nothing -> throwError (ProgramUnknownType (ctorOwningType ctorInfo))
+
+resolveConstructorDataInfo :: ElaborateScope -> ConstructorInfo -> Maybe (String, DataInfo)
+resolveConstructorDataInfo scope ctorInfo =
+  case Map.lookup (ctorOwningType ctorInfo) (esTypes scope) of
+    Just info
+      | constructorBelongsToDataInfo ctorInfo info ->
+          Just (ctorOwningType ctorInfo, info)
+    _ ->
+      find
+        (constructorBelongsToDataInfo ctorInfo . snd)
+        (Map.toList (esTypes scope))
+
+visibleDataInfo :: (String, DataInfo) -> DataInfo
+visibleDataInfo (visibleName, info) =
+  info {dataName = visibleName}
+
+sameDataInfo :: (String, DataInfo) -> (String, DataInfo) -> Bool
+sameDataInfo (_, left) (_, right) =
+  dataModule left == dataModule right && dataName left == dataName right
+
+constructorBelongsToDataInfo :: ConstructorInfo -> DataInfo -> Bool
+constructorBelongsToDataInfo ctorInfo =
+  any (sameConstructorInfo ctorInfo) . dataConstructors
+
+constructorNameMatches :: ElaborateScope -> String -> ConstructorInfo -> Bool
+constructorNameMatches scope ctorName0 ctorInfo =
+  case lookupConstructorInfoMaybe scope ctorName0 of
+    Just namedCtor -> sameConstructorInfo namedCtor ctorInfo
+    Nothing -> False
+
+sameConstructorInfo :: ConstructorInfo -> ConstructorInfo -> Bool
+sameConstructorInfo left right =
+  ctorRuntimeName left == ctorRuntimeName right
 
 handlerSurfaceType :: ElaborateScope -> ConstructorInfo -> SrcType -> SrcType
 handlerSurfaceType scope ctorInfo resultTy =
@@ -851,14 +1521,92 @@ isRecursiveResultType ty =
 
 resolveInstanceInfo :: ElaborateScope -> P.ClassName -> SrcType -> Either ProgramError InstanceInfo
 resolveInstanceInfo scope className0 headTy =
-  case filter matches (esInstances scope) of
-    [info] -> Right info
+  fst <$> resolveInstanceInfoWithSubst scope className0 headTy
+
+resolveInstanceInfoWithSubst :: ElaborateScope -> P.ClassName -> SrcType -> Either ProgramError (InstanceInfo, Map String SrcType)
+resolveInstanceInfoWithSubst scope className0 headTy =
+  resolveInstanceInfoWithIdentity scope className0 expectedClassIdentity headTy
+  where
+    expectedClassIdentity = classInfoIdentity <$> Map.lookup className0 (esClasses scope)
+
+resolveMethodInstanceInfoWithSubst :: ElaborateScope -> MethodInfo -> SrcType -> Either ProgramError (InstanceInfo, Map String SrcType)
+resolveMethodInstanceInfoWithSubst scope methodInfo =
+  resolveInstanceInfoWithIdentity scope (methodClassName methodInfo) (Just (methodInfoClassIdentity methodInfo))
+
+classInfoIdentity :: ClassInfo -> ClassIdentity
+classInfoIdentity classInfo =
+  (classModule classInfo, unqualifiedName (className classInfo))
+
+methodInfoClassIdentity :: MethodInfo -> ClassIdentity
+methodInfoClassIdentity methodInfo =
+  (methodClassModule methodInfo, unqualifiedName (methodClassName methodInfo))
+
+unqualifiedName :: String -> String
+unqualifiedName =
+  reverse . takeWhile (/= '.') . reverse
+
+resolveInstanceInfoWithIdentity ::
+  ElaborateScope ->
+  P.ClassName ->
+  Maybe ClassIdentity ->
+  SrcType ->
+  Either ProgramError (InstanceInfo, Map String SrcType)
+resolveInstanceInfoWithIdentity scope className0 expectedClassIdentity headTy =
+  case deduplicatedMatches of
+    [(match, subst, _direct)] -> Right (match, subst)
     [] -> Left (ProgramNoMatchingInstance className0 headTy)
     _ -> Left (ProgramNoMatchingInstance className0 headTy)
   where
-    matches info =
-      instanceClassName info == className0
-        && lowerType scope (instanceHeadType info) == lowerType scope headTy
+    deduplicatedMatches = deduplicateEquivalentMatches matches
+
+    matches =
+      [ (info, subst, direct)
+        | info <- esInstances scope,
+          instanceMatchesClassIdentity info,
+          Just (subst, direct) <- [matchInstanceHead info]
+      ]
+
+    instanceMatchesClassIdentity info =
+      case expectedClassIdentity of
+        Just identity -> instanceInfoClassIdentity info == identity
+        Nothing -> False
+
+    instanceInfoClassIdentity info =
+      (instanceClassModule info, unqualifiedName (instanceClassName info))
+
+    matchInstanceHead info =
+      case matchTypes Map.empty (instanceHeadType info) headTy of
+        Just subst -> Just (subst, True)
+        Nothing ->
+          if lowerType scope (instanceHeadType info) == lowerType scope headTy
+            then Just (Map.empty, False)
+            else Nothing
+
+    deduplicateEquivalentMatches [] = []
+    deduplicateEquivalentMatches (match : rest) =
+      let (equivalent, different) = partition (equivalentInstanceMatch match) rest
+       in foldl preferredInstanceMatch match equivalent : deduplicateEquivalentMatches different
+
+    equivalentInstanceMatch (left, _, _) (right, _, _) =
+      instanceOriginModule left == instanceOriginModule right
+        && instanceInfoClassIdentity left == instanceInfoClassIdentity right
+        && lowerType scope (instanceHeadType left) == lowerType scope (instanceHeadType right)
+        && map lowerConstraint (instanceConstraints left) == map lowerConstraint (instanceConstraints right)
+        && fmap methodRuntimeIdentity (instanceMethods left) == fmap methodRuntimeIdentity (instanceMethods right)
+
+    lowerConstraint constraint =
+      constraint {P.constraintType = lowerType scope (P.constraintType constraint)}
+
+    methodRuntimeIdentity valueInfo =
+      case valueInfo of
+        OrdinaryValue {valueRuntimeName = runtimeName} -> runtimeName
+        ConstructorValue {valueRuntimeName = runtimeName} -> runtimeName
+        OverloadedMethod {valueMethodInfo = methodInfo} -> methodRuntimeBase methodInfo
+
+    preferredInstanceMatch left@(_, leftSubst, leftDirect) right@(_, rightSubst, rightDirect)
+      | rightDirect && not leftDirect = right
+      | rightDirect == leftDirect && Map.size rightSubst > Map.size leftSubst = right
+      | otherwise = left
 
 inferClassArgument :: SrcType -> String -> [SrcType] -> Maybe SrcType
 inferClassArgument methodTy classParam args =
@@ -934,6 +1682,42 @@ freeTypeVarsSrcType = go Set.empty
        in mbFvs `Set.union` go bound' body
     go bound (STMu name body) = go (Set.insert name bound) body
 
+extendConstraintEvidence :: ElaborateScope -> [P.ClassConstraint] -> ElaborateM (ElaborateScope, [(String, SrcType)])
+extendConstraintEvidence scope constraints = do
+  built <- mapM buildEvidence constraints
+  let evidenceInfos = concatMap fst built
+      params = concatMap snd built
+  let runtimeTypes = Map.fromList params
+  pure
+    ( scope
+        { esEvidence = evidenceInfos ++ esEvidence scope,
+          esRuntimeTypes = runtimeTypes `Map.union` esRuntimeTypes scope
+        },
+      params
+    )
+  where
+    buildEvidence constraint = do
+      classInfo <-
+        case Map.lookup (P.constraintClassName constraint) (esClasses scope) of
+          Just info -> pure info
+          Nothing -> throwError (ProgramUnknownClass (P.constraintClassName constraint))
+      methodEntries <-
+        mapM
+          ( \methodInfo -> do
+              runtimeName <- freshRuntimeName ("evidence_" ++ P.constraintClassName constraint ++ "_" ++ methodName methodInfo)
+              let evidenceTy = lowerType scope (methodEvidenceSourceType scope classInfo (P.constraintType constraint) methodInfo)
+              pure (methodName methodInfo, (runtimeName, evidenceTy))
+          )
+          (Map.elems (classMethods classInfo))
+      let evidenceInfo =
+            EvidenceInfo
+              { evidenceClassName = P.constraintClassName constraint,
+                evidenceType = P.constraintType constraint,
+                evidenceMethods = Map.fromList methodEntries
+              }
+          params = map snd methodEntries
+      pure ([evidenceInfo], params)
+
 extendLocal :: ElaborateScope -> String -> String -> Maybe SrcType -> ElaborateM ElaborateScope
 extendLocal scope sourceName runtimeName mbTy = do
   case mbTy of
@@ -956,6 +1740,7 @@ extendLocalLoweredPure scope sourceName runtimeName loweredTy =
             { valueDisplayName = sourceName,
               valueRuntimeName = runtimeName,
               valueType = loweredTy,
+              valueConstraints = [],
               valueOriginModule = "<local>"
             }
           (esValues scope),
@@ -972,6 +1757,7 @@ extendLocalSourceTypePure scope sourceName runtimeName sourceTy =
             { valueDisplayName = sourceName,
               valueRuntimeName = runtimeName,
               valueType = sourceTy,
+              valueConstraints = [],
               valueOriginModule = "<local>"
             }
           (esValues scope),
@@ -1003,9 +1789,10 @@ collectFreeValues bound expr = case expr of
       collectFreeValues (Set.union bound (Set.fromList (patternBinders pattern0))) body
 
     patternBinders = \case
-      P.PatCtor _ binders -> binders
+      P.PatCtor _ patterns -> concatMap patternBinders patterns
       P.PatVar name -> [name]
       P.PatWildcard -> []
+      P.PatAnn inner _ -> patternBinders inner
 
 collectApps :: P.Expr -> (P.Expr, [P.Expr])
 collectApps = go []
@@ -1013,8 +1800,6 @@ collectApps = go []
     go acc (EApp fun arg) = go (arg : acc) fun
     go acc headExpr = (headExpr, acc)
 
-duplicates :: (Eq a) => [a] -> [a]
-duplicates xs = [x | x <- nub xs, length (filter (== x) xs) > 1]
 
 freshRuntimeName :: String -> ElaborateM String
 freshRuntimeName base = do

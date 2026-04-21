@@ -3,6 +3,10 @@
 
 module MLF.Frontend.Program.Types
   ( ProgramError (..),
+    ProgramDiagnostic (..),
+    diagnosticForProgramError,
+    renderProgramDiagnostic,
+    EvidenceInfo (..),
     ConstructorInfo (..),
     DataInfo (..),
     MethodInfo (..),
@@ -24,10 +28,14 @@ module MLF.Frontend.Program.Types
     splitArrows,
     substituteTypeVar,
     specializeMethodType,
+    constrainedVisibleType,
   )
 where
 
+import Control.Applicative ((<|>))
+import Data.Foldable (toList)
 import Data.Map.Strict (Map)
+import qualified Data.Map.Strict as Map
 import MLF.Elab.Types (ElabTerm, ElabType)
 import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
 import qualified MLF.Frontend.Syntax.Program as P
@@ -45,7 +53,9 @@ data ProgramError
   | ProgramDuplicateClass String
   | ProgramDuplicateValue String
   | ProgramDuplicateMethod String
+  | ProgramDuplicateImportAlias P.ModuleName
   | ProgramDuplicateInstance P.ClassName SrcType
+  | ProgramOverlappingInstance P.ClassName SrcType SrcType
   | ProgramUnknownValue String
   | ProgramUnknownConstructor String
   | ProgramUnknownType String
@@ -54,10 +64,12 @@ data ProgramError
   | ProgramInvalidConstructorResult P.ConstructorName SrcType P.TypeName
   | ProgramUnsupportedDeriving P.ClassName
   | ProgramDerivingRequiresNullaryType P.TypeName
+  | ProgramDerivingMissingFieldInstance P.ClassName SrcType
   | ProgramMissingInstanceMethod P.ClassName P.MethodName
   | ProgramUnexpectedInstanceMethod P.ClassName P.MethodName
   | ProgramNoMatchingInstance P.ClassName SrcType
   | ProgramAmbiguousMethodUse P.MethodName
+  | ProgramAmbiguousConstrainedValueUse String
   | ProgramAmbiguousConstructorUse P.ConstructorName
   | ProgramExpectedFunction SrcType
   | ProgramTypeMismatch SrcType SrcType
@@ -68,6 +80,168 @@ data ProgramError
   | ProgramPipelineError String
   | ProgramMainNotFound
   | ProgramMultipleMainDefinitions [String]
+  deriving (Eq, Show)
+
+data ProgramDiagnostic = ProgramDiagnostic
+  { diagnosticError :: ProgramError,
+    diagnosticSpan :: Maybe P.SourceSpan,
+    diagnosticMessage :: String,
+    diagnosticHints :: [String]
+  }
+  deriving (Eq, Show)
+
+diagnosticForProgramError :: Maybe P.LocatedProgram -> ProgramError -> ProgramDiagnostic
+diagnosticForProgramError mbLocated err =
+  ProgramDiagnostic
+    { diagnosticError = err,
+      diagnosticSpan = mbLocated >>= spanForError err . P.locatedProgramSpans,
+      diagnosticMessage = programErrorMessage err,
+      diagnosticHints = programErrorHints err
+    }
+
+renderProgramDiagnostic :: ProgramDiagnostic -> String
+renderProgramDiagnostic diagnostic =
+  unlines $
+    header
+      ++ ["error: " ++ diagnosticMessage diagnostic]
+      ++ map ("hint: " ++) (diagnosticHints diagnostic)
+  where
+    header =
+      case diagnosticSpan diagnostic of
+        Just span0 -> [renderSourceSpan span0]
+        Nothing -> []
+
+renderSourceSpan :: P.SourceSpan -> String
+renderSourceSpan span0 =
+  P.sourceFile span0
+    ++ ":"
+    ++ show (P.sourceLine (P.sourceStart span0))
+    ++ ":"
+    ++ show (P.sourceColumn (P.sourceStart span0))
+
+spanForError :: ProgramError -> P.ProgramSpanIndex -> Maybe P.SourceSpan
+spanForError err index =
+  case err of
+    ProgramDuplicateModule name -> Map.lookup name (P.spanModules index)
+    ProgramUnknownImportModule name -> firstSpan name (P.spanImports index) <|> Map.lookup name (P.spanModules index)
+    ProgramImportNotExported _ name -> firstSpan name (P.spanImportItems index) <|> lookupAnyName name index
+    ProgramInvalidExport name -> firstSpan name (P.spanExportItems index) <|> lookupAnyName name index
+    ProgramExportNotLocal name -> firstSpan name (P.spanExportItems index) <|> lookupAnyName name index
+    ProgramDuplicateVisibleName name -> lookupAnyName name index
+    ProgramDuplicateType name -> firstSpan name (P.spanTypes index)
+    ProgramDuplicateConstructor name -> firstSpan name (P.spanConstructors index)
+    ProgramDuplicateClass name -> firstSpan name (P.spanClasses index)
+    ProgramDuplicateValue name -> firstSpan name (P.spanValues index)
+    ProgramDuplicateMethod name -> firstSpan name (P.spanValues index)
+    ProgramDuplicateImportAlias name -> firstSpan name (P.spanImportAliases index) <|> Map.lookup name (P.spanModules index)
+    ProgramDuplicateInstance className0 _ -> firstSpan className0 (P.spanClasses index)
+    ProgramOverlappingInstance className0 _ _ -> firstSpan className0 (P.spanClasses index)
+    ProgramUnknownValue name -> lookupAnyName name index
+    ProgramUnknownConstructor name -> firstSpan name (P.spanConstructors index)
+    ProgramUnknownType name -> firstSpan name (P.spanTypes index)
+    ProgramUnknownClass name -> firstSpan name (P.spanClasses index)
+    ProgramUnknownMethod name -> firstSpan name (P.spanValues index)
+    ProgramInvalidConstructorResult ctor _ _ -> firstSpan ctor (P.spanConstructors index)
+    ProgramUnsupportedDeriving className0 -> firstSpan className0 (P.spanClasses index)
+    ProgramDerivingRequiresNullaryType typeName -> firstSpan typeName (P.spanTypes index)
+    ProgramDerivingMissingFieldInstance className0 _ -> firstSpan className0 (P.spanClasses index)
+    ProgramMissingInstanceMethod _ methodName0 -> firstSpan methodName0 (P.spanValues index)
+    ProgramUnexpectedInstanceMethod _ methodName0 -> firstSpan methodName0 (P.spanValues index)
+    ProgramNoMatchingInstance {} -> Nothing
+    ProgramAmbiguousMethodUse methodName0 -> firstSpan methodName0 (P.spanValues index)
+    ProgramAmbiguousConstrainedValueUse valueName -> firstSpan valueName (P.spanValues index)
+    ProgramAmbiguousConstructorUse ctor -> firstSpan ctor (P.spanConstructors index)
+    ProgramPatternConstructorMismatch ctor _ -> firstSpan ctor (P.spanConstructors index)
+    ProgramNonExhaustiveCase (ctor : _) -> firstSpan ctor (P.spanConstructors index)
+    ProgramDuplicateCaseBranch ctor -> firstSpan ctor (P.spanConstructors index)
+    _ -> Nothing
+
+firstSpan :: String -> Map String [P.SourceSpan] -> Maybe P.SourceSpan
+firstSpan name spans = do
+  matches <- Map.lookup name spans
+  case matches of
+    span0 : _ -> Just span0
+    [] -> Nothing
+
+lookupAnyName :: String -> P.ProgramSpanIndex -> Maybe P.SourceSpan
+lookupAnyName name index =
+  firstSpan name (P.spanValues index)
+    <|> firstSpan name (P.spanConstructors index)
+    <|> firstSpan name (P.spanTypes index)
+    <|> firstSpan name (P.spanClasses index)
+    <|> Map.lookup name (P.spanModules index)
+
+programErrorMessage :: ProgramError -> String
+programErrorMessage err =
+  case err of
+    ProgramDuplicateModule name -> "duplicate module `" ++ name ++ "`"
+    ProgramUnknownImportModule name -> "unknown imported module `" ++ name ++ "`"
+    ProgramImportNotExported moduleName name -> "module `" ++ moduleName ++ "` does not export `" ++ name ++ "`"
+    ProgramImportCycle modules0 -> "module import cycle: " ++ show modules0
+    ProgramInvalidExport name -> "invalid export `" ++ name ++ "`"
+    ProgramExportNotLocal name -> "export is not local: `" ++ name ++ "`"
+    ProgramDuplicateVisibleName name -> "duplicate visible name `" ++ name ++ "`"
+    ProgramDuplicateType name -> "duplicate type `" ++ name ++ "`"
+    ProgramDuplicateConstructor name -> "duplicate constructor `" ++ name ++ "`"
+    ProgramDuplicateClass name -> "duplicate class `" ++ name ++ "`"
+    ProgramDuplicateValue name -> "duplicate value `" ++ name ++ "`"
+    ProgramDuplicateMethod name -> "duplicate method `" ++ name ++ "`"
+    ProgramDuplicateImportAlias name -> "duplicate import alias `" ++ name ++ "`"
+    ProgramDuplicateInstance className0 ty -> "duplicate instance `" ++ className0 ++ " " ++ show ty ++ "`"
+    ProgramOverlappingInstance className0 left right -> "overlapping instances for `" ++ className0 ++ "`: `" ++ show left ++ "` overlaps `" ++ show right ++ "`"
+    ProgramUnknownValue name -> "unknown value `" ++ name ++ "`"
+    ProgramUnknownConstructor name -> "unknown constructor `" ++ name ++ "`"
+    ProgramUnknownType name -> "unknown type `" ++ name ++ "`"
+    ProgramUnknownClass name -> "unknown class `" ++ name ++ "`"
+    ProgramUnknownMethod name -> "unknown method `" ++ name ++ "`"
+    ProgramInvalidConstructorResult ctor resultTy owner -> "constructor `" ++ ctor ++ "` returns `" ++ show resultTy ++ "` instead of owning type `" ++ owner ++ "`"
+    ProgramUnsupportedDeriving className0 -> "unsupported deriving class `" ++ className0 ++ "`"
+    ProgramDerivingRequiresNullaryType typeName -> "deriving currently requires a nullary type, but `" ++ typeName ++ "` has parameters"
+    ProgramDerivingMissingFieldInstance className0 ty -> "cannot derive `" ++ className0 ++ "` because field type `" ++ show ty ++ "` has no matching instance or constraint"
+    ProgramMissingInstanceMethod className0 methodName0 -> "instance for `" ++ className0 ++ "` is missing method `" ++ methodName0 ++ "`"
+    ProgramUnexpectedInstanceMethod className0 methodName0 -> "instance for `" ++ className0 ++ "` defines unexpected method `" ++ methodName0 ++ "`"
+    ProgramNoMatchingInstance className0 ty -> "no matching instance for `" ++ className0 ++ " " ++ show ty ++ "`"
+    ProgramAmbiguousMethodUse methodName0 -> "ambiguous overloaded method use `" ++ methodName0 ++ "`"
+    ProgramAmbiguousConstrainedValueUse valueName -> "ambiguous constrained value use `" ++ valueName ++ "`"
+    ProgramAmbiguousConstructorUse ctor -> "ambiguous constructor use `" ++ ctor ++ "`"
+    ProgramExpectedFunction ty -> "expected a function, got `" ++ show ty ++ "`"
+    ProgramTypeMismatch actual expected -> "type mismatch: expected `" ++ show expected ++ "`, got `" ++ show actual ++ "`"
+    ProgramCaseOnNonDataType ty -> "case scrutinee is not a data type: `" ++ show ty ++ "`"
+    ProgramNonExhaustiveCase ctors -> "non-exhaustive case; missing constructors " ++ show ctors
+    ProgramDuplicateCaseBranch ctor -> "unreachable or duplicate case branch for constructor `" ++ ctor ++ "`"
+    ProgramPatternConstructorMismatch ctor ty -> "pattern for constructor `" ++ ctor ++ "` does not match expected type `" ++ show ty ++ "`"
+    ProgramPipelineError msg -> "pipeline error: " ++ msg
+    ProgramMainNotFound -> "main is not defined"
+    ProgramMultipleMainDefinitions names -> "multiple main definitions: " ++ show names
+
+programErrorHints :: ProgramError -> [String]
+programErrorHints err =
+  case err of
+    ProgramAmbiguousConstructorUse ctor ->
+      ["add an explicit result type annotation, for example `" ++ ctor ++ " : <Type>`"]
+    ProgramAmbiguousMethodUse methodName0 ->
+      ["apply `" ++ methodName0 ++ "` to enough arguments or add an annotation that fixes the instance type"]
+    ProgramAmbiguousConstrainedValueUse valueName ->
+      ["use `" ++ valueName ++ "` at a concrete instance type; generic constrained value aliases are not supported yet"]
+    ProgramNoMatchingInstance className0 ty ->
+      ["define or import an instance for `" ++ className0 ++ " " ++ show ty ++ "`"]
+    ProgramDerivingMissingFieldInstance className0 ty ->
+      ["add a `" ++ className0 ++ " " ++ show ty ++ "` instance or add a type parameter constraint through deriving"]
+    ProgramTypeMismatch {} ->
+      ["check the nearest annotation; `.mlfp` uses eMLF inference before resolving program obligations"]
+    ProgramPatternConstructorMismatch {} ->
+      ["check the constructor arity and the data type being matched"]
+    ProgramNonExhaustiveCase {} ->
+      ["add missing constructor branches or a final wildcard branch"]
+    ProgramImportNotExported {} ->
+      ["export the name from the source module or remove it from the import exposing list"]
+    _ -> []
+
+data EvidenceInfo = EvidenceInfo
+  { evidenceClassName :: P.ClassName,
+    evidenceType :: SrcType,
+    evidenceMethods :: Map P.MethodName (String, SrcType)
+  }
   deriving (Eq, Show)
 
 data ConstructorInfo = ConstructorInfo
@@ -92,9 +266,11 @@ data DataInfo = DataInfo
 
 data MethodInfo = MethodInfo
   { methodClassName :: P.ClassName,
+    methodClassModule :: P.ModuleName,
     methodName :: P.MethodName,
     methodRuntimeBase :: String,
     methodType :: SrcType,
+    methodConstraints :: [P.ClassConstraint],
     methodParamName :: String
   }
   deriving (Eq, Show)
@@ -112,6 +288,7 @@ data ValueInfo
       { valueDisplayName :: String,
         valueRuntimeName :: String,
         valueType :: SrcType,
+        valueConstraints :: [P.ClassConstraint],
         valueOriginModule :: P.ModuleName
       }
   | ConstructorValue
@@ -130,6 +307,9 @@ data ValueInfo
 
 data InstanceInfo = InstanceInfo
   { instanceClassName :: P.ClassName,
+    instanceClassModule :: P.ModuleName,
+    instanceOriginModule :: P.ModuleName,
+    instanceConstraints :: [P.ClassConstraint],
     instanceHeadType :: SrcType,
     instanceMethods :: Map P.MethodName ValueInfo
   }
@@ -191,6 +371,7 @@ data ModuleExports = ModuleExports
 
 data LoweredBinding = LoweredBinding
   { loweredBindingName :: String,
+    loweredBindingSourceType :: SrcType,
     loweredBindingExpectedType :: SrcType,
     loweredBindingSurfaceExpr :: SurfaceExpr,
     loweredBindingDeferredObligations :: Map String DeferredProgramObligation,
@@ -262,3 +443,28 @@ specializeMethodType methodTy paramName headTy =
   let (foralls, body) = splitForalls methodTy
       rebuilt = foldr (\(name, mb) acc -> STForall name (fmap SrcBound mb) acc) (substituteTypeVar paramName headTy body) foralls
    in rebuilt
+
+constrainedVisibleType :: P.ConstrainedType -> SrcType
+constrainedVisibleType constrained
+  | null (P.constrainedConstraints constrained) = P.constrainedBody constrained
+  | otherwise =
+      quantifyFreeVars
+        (P.constrainedBody constrained)
+        (foldMap constraintFreeVars (P.constrainedConstraints constrained) `mappend` freeVars (P.constrainedBody constrained))
+  where
+    quantifyFreeVars ty vars =
+      foldr forallNoBound ty (Map.keys (Map.fromList [(var, ()) | var <- vars]))
+
+    forallNoBound name acc = STForall name Nothing acc
+
+    constraintFreeVars constraint = freeVars (P.constraintType constraint)
+
+    freeVars ty = case ty of
+      STVar name -> [name]
+      STArrow dom cod -> freeVars dom ++ freeVars cod
+      STBase {} -> []
+      STCon _ args -> concatMap freeVars (toList args)
+      STForall name mb body ->
+        filter (/= name) (maybe [] (freeVars . unSrcBound) mb ++ freeVars body)
+      STMu name body -> filter (/= name) (freeVars body)
+      STBottom -> []

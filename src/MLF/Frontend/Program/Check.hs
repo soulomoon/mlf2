@@ -3,6 +3,7 @@
 
 module MLF.Frontend.Program.Check
   ( ProgramError (..),
+    ProgramDiagnostic (..),
     CheckedProgram (..),
     CheckedModule (..),
     CheckedBinding (..),
@@ -15,6 +16,7 @@ module MLF.Frontend.Program.Check
     ExportedTypeInfo (..),
     ModuleExports (..),
     checkProgram,
+    checkLocatedProgram,
   )
 where
 
@@ -25,12 +27,14 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     lowerConstructorBinding,
-    lowerExprBinding,
+    lowerConstrainedExprBinding,
     mkElaborateScope,
+    resolveInstanceInfoWithSubst,
   )
 import MLF.Frontend.Program.Finalize (finalizeBinding)
 import MLF.Frontend.Program.Types
@@ -44,9 +48,13 @@ import MLF.Frontend.Program.Types
     InstanceInfo (..),
     MethodInfo (..),
     ModuleExports (..),
+    ProgramDiagnostic (..),
     ProgramError (..),
     ValueInfo (..),
+    constrainedVisibleType,
+    diagnosticForProgramError,
     specializeMethodType,
+    substituteTypeVar,
     splitArrows,
     splitForalls,
   )
@@ -68,8 +76,22 @@ data Scope = Scope
   }
   deriving (Eq, Show)
 
+type ClassIdentity = (P.ModuleName, P.ClassName)
+
 emptyScope :: Scope
-emptyScope = Scope Map.empty Map.empty Map.empty []
+emptyScope = Scope builtinValues Map.empty Map.empty []
+
+builtinValues :: Map String ValueInfo
+builtinValues =
+  Map.singleton
+    "__mlfp_and"
+    OrdinaryValue
+      { valueDisplayName = "__mlfp_and",
+        valueRuntimeName = "__mlfp_and",
+        valueType = STArrow (STBase "Bool") (STArrow (STBase "Bool") (STBase "Bool")),
+        valueConstraints = [],
+        valueOriginModule = "<builtin>"
+      }
 
 addValues :: Map String ValueInfo -> Map String ValueInfo -> Either ProgramError (Map String ValueInfo)
 addValues base incoming =
@@ -138,6 +160,12 @@ checkProgram program = runTcM $ do
         checkedProgramMain = mainRuntime
       }
 
+checkLocatedProgram :: P.LocatedProgram -> Either ProgramDiagnostic CheckedProgram
+checkLocatedProgram located =
+  case checkProgram (P.locatedProgram located) of
+    Right checked -> Right checked
+    Left err -> Left (diagnosticForProgramError (Just located) err)
+
 checkModules :: P.Program -> TcM [CheckedModule]
 checkModules (P.Program modules0) = do
   ensureDistinctBy ProgramDuplicateModule P.moduleName modules0
@@ -179,7 +207,12 @@ topoSortModules modules0 = do
 checkModule :: [CheckedModule] -> P.Module -> TcM CheckedModule
 checkModule priorModules mod0 = do
   let priorExports = Map.fromList [(checkedModuleName checked, checkedModuleExports checked) | checked <- priorModules]
+      priorData = Map.fromList [(checkedModuleName checked, checkedModuleData checked) | checked <- priorModules]
       priorInstances = concatMap checkedModuleInstances priorModules
+      unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExports (P.moduleImports mod0)
+      visibleImportedInstances =
+        visibleInstancesForImports priorExports priorData priorInstances unqualifiedClassIdentities (P.moduleImports mod0)
+  ensureDistinctImportAliases (P.moduleImports mod0)
   importScope <- buildImportScope priorExports (P.moduleImports mod0)
   localData <- buildLocalDataInfo mod0
   localClasses <- buildLocalClassInfo mod0
@@ -196,11 +229,12 @@ checkModule priorModules mod0 = do
   valueScope <- liftEither =<< pure (addValues (scopeValues importScope) localValues)
   typeScope <- liftEither =<< pure (addTypes (scopeTypes importScope) localData)
   classScope <- liftEither =<< pure (addClasses (scopeClasses importScope) localClasses)
-  let scope0 = Scope valueScope typeScope classScope (scopeInstances importScope ++ priorInstances)
+  let scope0 = Scope valueScope typeScope classScope (scopeInstances importScope ++ visibleImportedInstances)
+  validateLocalClassMethodConstraints scope0 mod0
   derivedInstances <- synthesizeDerivedInstances scope0 mod0
   instanceSkeletons <- buildInstanceSkeletons scope0 mod0 derivedInstances
   let scope1 = scope0 {scopeInstances = scopeInstances scope0 ++ instanceSkeletons}
-  let elaborateScope = mkElaborateScope (scopeValues scope1) (scopeTypes scope1) (scopeInstances scope1)
+  let elaborateScope = mkElaborateScope (scopeValues scope1) (scopeTypes scope1) (scopeClasses scope1) (scopeInstances scope1)
   constructorBindings <-
     mapM
       (liftEither . (finalizeBinding elaborateScope . lowerConstructorBinding elaborateScope))
@@ -267,19 +301,526 @@ buildImportScope priorExports imports0 = foldM go emptyScope imports0
         case Map.lookup (P.importModuleName imp) priorExports of
           Nothing -> throwError (ProgramUnknownImportModule (P.importModuleName imp))
           Just ex -> pure ex
-      case P.importExposing imp of
+      case P.importAlias imp of
         Nothing ->
-          liftEither $ do
-            values <- addValues (scopeValues scope) (exportedValues exports)
-            types <- addTypes (scopeTypes scope) (Map.map exportedTypeData (exportedTypes exports))
-            classes <- addClasses (scopeClasses scope) (exportedClasses exports)
-            pure
-              scope
-                { scopeValues = values,
-                  scopeTypes = types,
-                  scopeClasses = classes
+          case P.importExposing imp of
+            Nothing -> addAllExports scope exports
+            Just items -> foldM (applyImportItem (P.importModuleName imp) exports) scope items
+        Just alias -> do
+          qualifiedScope <- addAllExports scope (qualifyModuleExports alias exports)
+          case P.importExposing imp of
+            Nothing -> pure qualifiedScope
+            Just items -> foldM (applyImportItem (P.importModuleName imp) exports) qualifiedScope items
+
+addAllExports :: Scope -> ModuleExports -> TcM Scope
+addAllExports scope exports =
+  liftEither $ do
+    values <- addValues (scopeValues scope) (exportedValues exports)
+    types <- addTypes (scopeTypes scope) (Map.map exportedTypeData (exportedTypes exports))
+    classes <- addClasses (scopeClasses scope) (exportedClasses exports)
+    pure
+      scope
+        { scopeValues = values,
+          scopeTypes = types,
+          scopeClasses = classes
+        }
+
+qualifyModuleExports :: P.ModuleName -> ModuleExports -> ModuleExports
+qualifyModuleExports alias exports =
+  ModuleExports
+    { exportedValues = qualifiedValues,
+      exportedTypes = qualifiedTypes,
+      exportedClasses = qualifiedClasses
+    }
+  where
+    qualifiedName name = alias ++ "." ++ name
+    exportedTypeNames = Map.keysSet (exportedTypes exports)
+    exportedClassNames = Map.keysSet (exportedClasses exports)
+
+    qualifiedTypes =
+      Map.fromList
+        [ let qualifiedDataInfo = qualifyDataInfo dataInfo
+              visibleCtorNames = Set.fromList (Map.keys ctors)
+           in ( qualifiedName typeName,
+                ExportedTypeInfo
+                  { exportedTypeData = qualifiedDataInfo,
+                    exportedTypeConstructors =
+                      Map.fromList
+                        [ (ctorName ctor, ctor)
+                          | ctor <- dataConstructors qualifiedDataInfo,
+                            unqualifyQualifiedName alias (ctorName ctor) `Set.member` visibleCtorNames
+                        ]
+                  }
+              )
+          | (typeName, ExportedTypeInfo dataInfo ctors) <- Map.toList (exportedTypes exports)
+        ]
+
+    qualifiedClasses =
+      Map.fromList
+        [ (qualifiedName className0, qualifyClassInfo classInfo)
+          | (className0, classInfo) <- Map.toList (exportedClasses exports)
+        ]
+
+    qualifiedCtorValues =
+      Map.fromList
+        [ ( ctorName ctor,
+            ConstructorValue
+              { valueDisplayName = ctorName ctor,
+                valueRuntimeName = ctorRuntimeName ctor,
+                valueType = ctorType ctor,
+                valueCtorInfo = ctor,
+                valueOriginModule = dataModule dataInfo
+              }
+          )
+          | ExportedTypeInfo dataInfo ctors <- Map.elems qualifiedTypes,
+            ctor <- Map.elems ctors
+        ]
+
+    qualifiedExportedValues =
+      Map.fromList
+        [ ( qualifiedName name,
+            qualifyValueInfo name valueInfo
+          )
+          | (name, valueInfo) <- Map.toList (exportedValues exports)
+        ]
+
+    qualifiedValues = qualifiedCtorValues `Map.union` qualifiedExportedValues
+
+    qualifyDataInfo dataInfo =
+      let qualifyCtor ctor = qualifyConstructorInfo ctor
+       in dataInfo
+            { dataName = dataName dataInfo,
+              dataConstructors = map qualifyCtor (dataConstructors dataInfo)
+            }
+
+    qualifyConstructorInfo ctor =
+      ctor
+        { ctorName = qualifiedName (ctorName ctor),
+          ctorType = qualifySrcType (ctorType ctor),
+          ctorArgs = map qualifySrcType (ctorArgs ctor),
+          ctorResult = qualifySrcType (ctorResult ctor),
+          ctorOwningType = ctorOwningType ctor
+        }
+
+    qualifyClassInfo classInfo =
+      let qualifiedClassName = qualifiedName (className classInfo)
+          qualifyMethod methodInfo =
+            methodInfo
+              { methodClassName = qualifiedClassName,
+                methodType = qualifySrcType (methodType methodInfo),
+                methodConstraints = map qualifyConstraint (methodConstraints methodInfo)
+              }
+       in classInfo
+            { className = qualifiedClassName,
+              classMethods = Map.map qualifyMethod (classMethods classInfo)
+            }
+
+    qualifyValueInfo sourceName valueInfo =
+      case valueInfo of
+        OrdinaryValue {} ->
+          valueInfo
+            { valueDisplayName = qualifiedName sourceName,
+              valueType = qualifySrcType (valueType valueInfo),
+              valueConstraints = map qualifyConstraint (valueConstraints valueInfo)
+            }
+        OverloadedMethod {valueMethodInfo = methodInfo} ->
+          OverloadedMethod
+            { valueDisplayName = qualifiedName sourceName,
+              valueMethodInfo = qualifyMethodFromExport methodInfo,
+              valueOriginModule = valueOriginModule valueInfo
+            }
+        ConstructorValue {valueCtorInfo = ctorInfo} ->
+          let qualifiedCtorInfo = qualifyConstructorInfo ctorInfo
+           in ConstructorValue
+                { valueDisplayName = qualifiedName sourceName,
+                  valueRuntimeName = valueRuntimeName valueInfo,
+                  valueType = qualifySrcType (valueType valueInfo),
+                  valueCtorInfo = qualifiedCtorInfo,
+                  valueOriginModule = valueOriginModule valueInfo
                 }
-        Just items -> foldM (applyImportItem (P.importModuleName imp) exports) scope items
+
+    qualifyMethodFromExport methodInfo =
+      methodInfo
+        { methodClassName = qualifiedClassNameFor (methodClassName methodInfo),
+          methodType = qualifySrcType (methodType methodInfo),
+          methodConstraints = map qualifyConstraint (methodConstraints methodInfo)
+        }
+
+    qualifiedClassNameFor className0
+      | className0 `Set.member` exportedClassNames = qualifiedName className0
+      | otherwise = className0
+
+    qualifyConstraint constraint =
+      constraint
+        { P.constraintClassName =
+            if P.constraintClassName constraint `Set.member` exportedClassNames
+              then qualifiedName (P.constraintClassName constraint)
+              else P.constraintClassName constraint,
+          P.constraintType = qualifySrcType (P.constraintType constraint)
+        }
+
+    qualifySrcType ty =
+      case ty of
+        STVar {} -> ty
+        STBase name
+          | name `Set.member` exportedTypeNames -> STBase (qualifiedName name)
+          | otherwise -> ty
+        STCon name args
+          | name `Set.member` exportedTypeNames -> STCon (qualifiedName name) (fmap qualifySrcType args)
+          | otherwise -> STCon name (fmap qualifySrcType args)
+        STArrow dom cod -> STArrow (qualifySrcType dom) (qualifySrcType cod)
+        STForall name mb body -> STForall name (fmap (SrcBound . qualifySrcType . unSrcBound) mb) (qualifySrcType body)
+        STMu name body -> STMu name (qualifySrcType body)
+        STBottom -> STBottom
+
+unqualifyQualifiedName :: P.ModuleName -> String -> String
+unqualifyQualifiedName alias name =
+  case splitAt (length alias + 1) name of
+    (prefix, rest)
+      | prefix == alias ++ "." -> rest
+    _ -> name
+
+unqualifiedName :: String -> String
+unqualifiedName =
+  reverse . takeWhile (/= '.') . reverse
+
+classIdentity :: ClassInfo -> ClassIdentity
+classIdentity classInfo =
+  (classModule classInfo, unqualifiedName (className classInfo))
+
+methodClassIdentity :: ValueInfo -> Maybe ClassIdentity
+methodClassIdentity valueInfo =
+  case valueInfo of
+    OverloadedMethod {valueMethodInfo = methodInfo} ->
+      Just (methodClassModule methodInfo, unqualifiedName (methodClassName methodInfo))
+    _ -> Nothing
+
+instanceClassIdentity :: InstanceInfo -> ClassIdentity
+instanceClassIdentity instanceInfo =
+  (instanceClassModule instanceInfo, unqualifiedName (instanceClassName instanceInfo))
+
+visibleInstancesForImports ::
+  Map P.ModuleName ModuleExports ->
+  Map P.ModuleName (Map String DataInfo) ->
+  [InstanceInfo] ->
+  Set.Set ClassIdentity ->
+  [P.Import] ->
+  [InstanceInfo]
+visibleInstancesForImports priorExports priorData priorInstances unqualifiedClassIdentities =
+  distinctInstanceHeads . concatMap instancesForImport
+  where
+    instancesForImport imp =
+      unqualifiedInstancesForImport priorExports priorData priorInstances unqualifiedClassIdentities imp
+        ++ qualifiedInstancesForImport priorExports priorData priorInstances unqualifiedClassIdentities imp
+
+unqualifiedInstancesForImport ::
+  Map P.ModuleName ModuleExports ->
+  Map P.ModuleName (Map String DataInfo) ->
+  [InstanceInfo] ->
+  Set.Set ClassIdentity ->
+  P.Import ->
+  [InstanceInfo]
+unqualifiedInstancesForImport priorExports priorData priorInstances unqualifiedClassIdentities imp =
+  case Map.lookup (P.importModuleName imp) priorExports of
+    Nothing -> []
+    Just exports ->
+      let importClassIdentities = importUnqualifiedClassIdentitiesFor exports imp
+          unqualifiedTypeNames = importUnqualifiedTypeNames exports imp
+       in [ instanceInfo
+            | instanceInfo <- priorInstances,
+              instanceBelongsToModule (P.importModuleName imp) instanceInfo,
+              instanceVisibleForUnqualifiedImport priorData unqualifiedClassIdentities importClassIdentities unqualifiedTypeNames instanceInfo
+          ]
+
+qualifiedInstancesForImport ::
+  Map P.ModuleName ModuleExports ->
+  Map P.ModuleName (Map String DataInfo) ->
+  [InstanceInfo] ->
+  Set.Set ClassIdentity ->
+  P.Import ->
+  [InstanceInfo]
+qualifiedInstancesForImport priorExports priorData priorInstances unqualifiedClassIdentities imp =
+  case P.importAlias imp of
+    Nothing -> []
+    Just alias ->
+      case Map.lookup (P.importModuleName imp) priorExports of
+        Nothing -> []
+        Just exports ->
+          let importedInstances =
+                [ instanceInfo
+                  | instanceInfo <- priorInstances,
+                    instanceBelongsToModule (P.importModuleName imp) instanceInfo,
+                    instanceVisibleForQualifiedImport priorData exports instanceInfo
+                ]
+              unqualifiedTypeNames = importExposedTypeNames imp
+           in concatMap (qualifiedInstanceVariants alias exports unqualifiedTypeNames unqualifiedClassIdentities) importedInstances
+
+importedUnqualifiedClassIdentities ::
+  Map P.ModuleName ModuleExports ->
+  [P.Import] ->
+  Set.Set ClassIdentity
+importedUnqualifiedClassIdentities priorExports =
+  Set.unions . map importUnqualifiedClassIdentities
+  where
+    importUnqualifiedClassIdentities imp =
+      case Map.lookup (P.importModuleName imp) priorExports of
+        Nothing -> Set.empty
+        Just exports -> importUnqualifiedClassIdentitiesFor exports imp
+
+importUnqualifiedClassIdentitiesFor :: ModuleExports -> P.Import -> Set.Set ClassIdentity
+importUnqualifiedClassIdentitiesFor exports imp =
+  case (P.importAlias imp, P.importExposing imp) of
+    (Nothing, Nothing) ->
+      Set.fromList (map classIdentity (Map.elems (exportedClasses exports)))
+        `Set.union` overloadedMethodClassIdentities (Map.elems (exportedValues exports))
+    (_, Just items) -> Set.unions (map importItemClassIdentities items)
+    (Just _, Nothing) -> Set.empty
+  where
+    importItemClassIdentities item =
+      case item of
+        P.ExportType name
+          | Just classInfo <- Map.lookup name (exportedClasses exports) -> Set.singleton (classIdentity classInfo)
+        P.ExportValue name ->
+          case Map.lookup name (exportedValues exports) of
+            Just valueInfo -> maybe Set.empty Set.singleton (methodClassIdentity valueInfo)
+            _ -> Set.empty
+        _ -> Set.empty
+
+    overloadedMethodClassIdentities =
+      Set.fromList . mapMaybe methodClassIdentity
+
+importUnqualifiedTypeNames :: ModuleExports -> P.Import -> Set.Set String
+importUnqualifiedTypeNames exports imp =
+  case (P.importAlias imp, P.importExposing imp) of
+    (Nothing, Nothing) -> Map.keysSet (exportedTypes exports)
+    (_, Just _) -> importExposedTypeNames imp
+    (Just _, Nothing) -> Set.empty
+
+importExposedTypeNames :: P.Import -> Set.Set String
+importExposedTypeNames imp =
+  case P.importExposing imp of
+    Nothing -> Set.empty
+    Just items -> Set.fromList (concatMap exposedTypeName items)
+  where
+    exposedTypeName item =
+      case item of
+        P.ExportType name -> [name]
+        P.ExportTypeWithConstructors name -> [name]
+        P.ExportValue {} -> []
+
+instanceVisibleForUnqualifiedImport ::
+  Map P.ModuleName (Map String DataInfo) ->
+  Set.Set ClassIdentity ->
+  Set.Set ClassIdentity ->
+  Set.Set String ->
+  InstanceInfo ->
+  Bool
+instanceVisibleForUnqualifiedImport priorData unqualifiedClassIdentities importClassIdentities unqualifiedTypeNames instanceInfo =
+  (classVisibleGlobally && originDataVisible && not (Set.null originDataMentions))
+    || (classVisibleThroughImport && Set.null originDataMentions)
+  where
+    identity = instanceClassIdentity instanceInfo
+    classVisibleGlobally = identity `Set.member` unqualifiedClassIdentities
+    classVisibleThroughImport = identity `Set.member` importClassIdentities
+    originDataMentions = instanceOriginDataMentions priorData instanceInfo
+    originDataVisible = originDataMentions `Set.isSubsetOf` unqualifiedTypeNames
+
+instanceVisibleForQualifiedImport :: Map P.ModuleName (Map String DataInfo) -> ModuleExports -> InstanceInfo -> Bool
+instanceVisibleForQualifiedImport priorData exports instanceInfo =
+  originDataVisible
+    && ( instanceClassName instanceInfo `Map.member` exportedClasses exports
+           || srcTypeMentionsAny exportedTypeNames (instanceHeadType instanceInfo)
+       )
+  where
+    exportedTypeNames = Map.keysSet (exportedTypes exports)
+    originDataVisible = instanceOriginDataMentions priorData instanceInfo `Set.isSubsetOf` exportedTypeNames
+
+srcTypeMentionsAny :: Set.Set String -> SrcType -> Bool
+srcTypeMentionsAny names ty =
+  case ty of
+    STVar {} -> False
+    STBase name -> name `Set.member` names
+    STCon name args -> name `Set.member` names || any (srcTypeMentionsAny names) args
+    STArrow dom cod -> srcTypeMentionsAny names dom || srcTypeMentionsAny names cod
+    STForall _ mb body ->
+      maybe False (srcTypeMentionsAny names . unSrcBound) mb
+        || srcTypeMentionsAny names body
+    STMu _ body -> srcTypeMentionsAny names body
+    STBottom -> False
+
+qualifiedInstanceVariants :: P.ModuleName -> ModuleExports -> Set.Set String -> Set.Set ClassIdentity -> InstanceInfo -> [InstanceInfo]
+qualifiedInstanceVariants alias exports unqualifiedTypeNames unqualifiedClassIdentities instanceInfo =
+  distinctInstanceHeads
+    [ variant
+      | variant <- fullQualifiedVariants ++ aliasHeadVariants,
+        not (sameInstanceSurfaceHead instanceInfo variant)
+    ]
+  where
+    qualifiedInstance = qualifyInstance alias exports instanceInfo
+    aliasHeadNeeded =
+      instanceClassIdentity instanceInfo `Set.member` unqualifiedClassIdentities
+        && needsAliasHeadInstanceVariant exports unqualifiedTypeNames instanceInfo
+    fullQualifiedVariants =
+      [ qualifiedInstance
+        | shouldEmitQualifiedInstanceVariant
+      ]
+    aliasHeadVariants =
+      [ qualifyInstanceHeadOnly alias exports instanceInfo
+        | aliasHeadNeeded
+      ]
+    shouldEmitQualifiedInstanceVariant =
+      instanceClassName qualifiedInstance /= instanceClassName instanceInfo
+        || aliasHeadNeeded
+
+needsAliasHeadInstanceVariant :: ModuleExports -> Set.Set String -> InstanceInfo -> Bool
+needsAliasHeadInstanceVariant exports unqualifiedTypeNames instanceInfo =
+  not (Set.null mentionedTypeNames)
+    && not (mentionedTypeNames `Set.isSubsetOf` unqualifiedTypeNames)
+  where
+    exportedTypeNames = Map.keysSet (exportedTypes exports)
+    mentionedTypeNames =
+      instanceExportedTypeMentions exportedTypeNames instanceInfo
+
+distinctInstanceHeads :: [InstanceInfo] -> [InstanceInfo]
+distinctInstanceHeads = reverse . foldl' add []
+  where
+    add acc instanceInfo
+      | any (sameInstanceHead instanceInfo) acc = acc
+      | otherwise = instanceInfo : acc
+
+sameInstanceHead :: InstanceInfo -> InstanceInfo -> Bool
+sameInstanceHead left right =
+  instanceClassIdentity left == instanceClassIdentity right
+    && instanceHeadType left == instanceHeadType right
+
+sameInstanceSurfaceHead :: InstanceInfo -> InstanceInfo -> Bool
+sameInstanceSurfaceHead left right =
+  instanceClassName left == instanceClassName right
+    && instanceHeadType left == instanceHeadType right
+
+instanceExportedTypeMentions :: Set.Set String -> InstanceInfo -> Set.Set String
+instanceExportedTypeMentions exportedTypeNames instanceInfo =
+  Set.unions (headMentions : constraintMentions ++ methodMentions)
+  where
+    headMentions = srcTypeMentionedNames exportedTypeNames (instanceHeadType instanceInfo)
+    constraintMentions = map (srcTypeMentionedNames exportedTypeNames . P.constraintType) (instanceConstraints instanceInfo)
+    methodMentions = concatMap valueExportedTypeMentions (Map.elems (instanceMethods instanceInfo))
+
+    valueExportedTypeMentions valueInfo =
+      case valueInfo of
+        OrdinaryValue {} ->
+          srcTypeMentionedNames exportedTypeNames (valueType valueInfo)
+            : map (srcTypeMentionedNames exportedTypeNames . P.constraintType) (valueConstraints valueInfo)
+        _ -> []
+
+instanceOriginDataMentions :: Map P.ModuleName (Map String DataInfo) -> InstanceInfo -> Set.Set String
+instanceOriginDataMentions priorData instanceInfo =
+  case Map.lookup (instanceOriginModule instanceInfo) priorData of
+    Nothing -> Set.empty
+    Just dataInfos -> instanceExportedTypeMentions (Map.keysSet dataInfos) instanceInfo
+
+srcTypeMentionedNames :: Set.Set String -> SrcType -> Set.Set String
+srcTypeMentionedNames names ty =
+  case ty of
+    STVar {} -> Set.empty
+    STBase name
+      | name `Set.member` names -> Set.singleton name
+      | otherwise -> Set.empty
+    STCon name args ->
+      let headNames
+            | name `Set.member` names = Set.singleton name
+            | otherwise = Set.empty
+       in Set.unions (headNames : map (srcTypeMentionedNames names) (NE.toList args))
+    STArrow dom cod ->
+      srcTypeMentionedNames names dom `Set.union` srcTypeMentionedNames names cod
+    STForall _ mb body ->
+      maybe Set.empty (srcTypeMentionedNames names . unSrcBound) mb
+        `Set.union` srcTypeMentionedNames names body
+    STMu _ body -> srcTypeMentionedNames names body
+    STBottom -> Set.empty
+
+instanceBelongsToModule :: P.ModuleName -> InstanceInfo -> Bool
+instanceBelongsToModule moduleName0 instanceInfo =
+  instanceOriginModule instanceInfo == moduleName0
+
+qualifyInstance :: P.ModuleName -> ModuleExports -> InstanceInfo -> InstanceInfo
+qualifyInstance alias exports instanceInfo =
+  instanceInfo
+    { instanceClassName = qualifyClassName (instanceClassName instanceInfo),
+      instanceConstraints = map qualifyConstraint (instanceConstraints instanceInfo),
+      instanceHeadType = qualifySrcType (instanceHeadType instanceInfo),
+      instanceMethods = Map.map qualifyMethodValue (instanceMethods instanceInfo)
+    }
+  where
+    qualifiedName name = alias ++ "." ++ name
+    exportedTypeNames = Map.keysSet (exportedTypes exports)
+    exportedClassNames = Map.keysSet (exportedClasses exports)
+
+    qualifyClassName className0
+      | className0 `Set.member` exportedClassNames = qualifiedName className0
+      | otherwise = className0
+
+    qualifyConstraint constraint =
+      constraint
+        { P.constraintClassName = qualifyClassName (P.constraintClassName constraint),
+          P.constraintType = qualifySrcType (P.constraintType constraint)
+        }
+
+    qualifyMethodValue valueInfo@OrdinaryValue {} =
+      valueInfo
+        { valueType = qualifySrcType (valueType valueInfo),
+          valueConstraints = map qualifyConstraint (valueConstraints valueInfo)
+        }
+    qualifyMethodValue valueInfo = valueInfo
+
+    qualifySrcType ty =
+      case ty of
+        STVar {} -> ty
+        STBase name
+          | name `Set.member` exportedTypeNames -> STBase (qualifiedName name)
+          | otherwise -> ty
+        STCon name args
+          | name `Set.member` exportedTypeNames -> STCon (qualifiedName name) (fmap qualifySrcType args)
+          | otherwise -> STCon name (fmap qualifySrcType args)
+        STArrow dom cod -> STArrow (qualifySrcType dom) (qualifySrcType cod)
+        STForall name mb body -> STForall name (fmap (SrcBound . qualifySrcType . unSrcBound) mb) (qualifySrcType body)
+        STMu name body -> STMu name (qualifySrcType body)
+        STBottom -> STBottom
+
+qualifyInstanceHeadOnly :: P.ModuleName -> ModuleExports -> InstanceInfo -> InstanceInfo
+qualifyInstanceHeadOnly alias exports instanceInfo =
+  instanceInfo
+    { instanceConstraints = map qualifyConstraintType (instanceConstraints instanceInfo),
+      instanceHeadType = qualifySrcType (instanceHeadType instanceInfo),
+      instanceMethods = Map.map qualifyMethodValue (instanceMethods instanceInfo)
+    }
+  where
+    qualifiedName name = alias ++ "." ++ name
+    exportedTypeNames = Map.keysSet (exportedTypes exports)
+
+    qualifyConstraintType constraint =
+      constraint {P.constraintType = qualifySrcType (P.constraintType constraint)}
+
+    qualifyMethodValue valueInfo@OrdinaryValue {} =
+      valueInfo
+        { valueType = qualifySrcType (valueType valueInfo),
+          valueConstraints = map qualifyConstraintType (valueConstraints valueInfo)
+        }
+    qualifyMethodValue valueInfo = valueInfo
+
+    qualifySrcType ty =
+      case ty of
+        STVar {} -> ty
+        STBase name
+          | name `Set.member` exportedTypeNames -> STBase (qualifiedName name)
+          | otherwise -> ty
+        STCon name args
+          | name `Set.member` exportedTypeNames -> STCon (qualifiedName name) (fmap qualifySrcType args)
+          | otherwise -> STCon name (fmap qualifySrcType args)
+        STArrow dom cod -> STArrow (qualifySrcType dom) (qualifySrcType cod)
+        STForall name mb body -> STForall name (fmap (SrcBound . qualifySrcType . unSrcBound) mb) (qualifySrcType body)
+        STMu name body -> STMu name (qualifySrcType body)
+        STBottom -> STBottom
 
 applyImportItem :: P.ModuleName -> ModuleExports -> Scope -> P.ExportItem -> TcM Scope
 applyImportItem moduleName0 exports scope item =
@@ -391,9 +932,11 @@ buildLocalClassInfo mod0 = do
               [ ( P.methodSigName sig,
                   MethodInfo
                     { methodClassName = P.classDeclName classDecl,
+                      methodClassModule = P.moduleName mod0,
                       methodName = P.methodSigName sig,
                       methodRuntimeBase = qualify (P.moduleName mod0) (P.classDeclName classDecl ++ "__" ++ P.methodSigName sig),
-                      methodType = P.methodSigType sig,
+                      methodType = P.constrainedBody (P.methodSigType sig),
+                      methodConstraints = P.constrainedConstraints (P.methodSigType sig),
                       methodParamName = P.classDeclParam classDecl
                     }
                 )
@@ -409,6 +952,24 @@ buildLocalClassInfo mod0 = do
             }
         )
 
+validateLocalClassMethodConstraints :: Scope -> P.Module -> TcM ()
+validateLocalClassMethodConstraints scope mod0 =
+  mapM_ validateClassDecl (moduleClassDecls mod0)
+  where
+    validateClassDecl classDecl =
+      mapM_ validateMethodConstraints (P.classDeclMethods classDecl)
+
+    validateMethodConstraints =
+      validateClassConstraintClasses scope
+        . P.constrainedConstraints
+        . P.methodSigType
+
+validateClassConstraintClasses :: Scope -> [P.ClassConstraint] -> TcM ()
+validateClassConstraintClasses scope =
+  mapM_ $ \constraint -> do
+    _ <- lookupClassInfo scope (P.constraintClassName constraint)
+    pure ()
+
 buildLocalDefInfo :: P.Module -> TcM (Map String ValueInfo)
 buildLocalDefInfo mod0 = do
   let defs = moduleDefDecls mod0
@@ -419,7 +980,8 @@ buildLocalDefInfo mod0 = do
           OrdinaryValue
             { valueDisplayName = P.defDeclName defDecl,
               valueRuntimeName = qualify (P.moduleName mod0) (P.defDeclName defDecl),
-              valueType = P.defDeclType defDecl,
+              valueType = constrainedVisibleType (P.defDeclType defDecl),
+              valueConstraints = P.constrainedConstraints (P.defDeclType defDecl),
               valueOriginModule = P.moduleName mod0
             }
         )
@@ -461,38 +1023,146 @@ constructorRuntimeBindingRecoverable ctor =
         STBottom -> Set.empty
 
 synthesizeDerivedInstances :: Scope -> P.Module -> TcM [P.InstanceDecl]
-synthesizeDerivedInstances scope mod0 = concat <$> mapM deriveForData (moduleDataDecls mod0)
+synthesizeDerivedInstances scope mod0 = do
+  candidates <- concat <$> mapM deriveForData (moduleDataDecls mod0)
+  let pendingInstances = map (\(_, classInfo, instDecl) -> pendingDerivedInstance classInfo instDecl) candidates
+      validationScope = scope {scopeInstances = scopeInstances scope ++ pendingInstances}
+  mapM_
+    (\(dataDecl, _, instDecl) -> validateEqDerivingFields (P.instanceDeclClass instDecl) validationScope dataDecl)
+    candidates
+  pure [instDecl | (_, _, instDecl) <- candidates]
   where
     deriveForData dataDecl = do
-      forM (P.dataDeclDeriving dataDecl) $ \className0 ->
-        case className0 of
-          "Eq" -> do
-            when (not (null (P.dataDeclParams dataDecl))) (throwError (ProgramDerivingRequiresNullaryType (P.dataDeclName dataDecl)))
-            _ <- lookupClassInfo scope className0
-            pure (mkEqInstance dataDecl)
-          other -> throwError (ProgramUnsupportedDeriving other)
+      forM (P.dataDeclDeriving dataDecl) $ \className0 -> do
+        if unqualifiedName className0 == "Eq"
+          then do
+            classInfo <- lookupClassInfo scope className0
+            case eqMethodReference classInfo of
+              Just eqMethodName -> pure (dataDecl, classInfo, mkEqInstance classInfo eqMethodName dataDecl)
+              Nothing -> throwError (ProgramUnsupportedDeriving className0)
+          else throwError (ProgramUnsupportedDeriving className0)
 
-    mkEqInstance dataDecl =
-      let actualHead = case P.dataDeclParams dataDecl of
-            [] -> STBase (P.dataDeclName dataDecl)
-            (param0 : paramsRest) -> STCon (P.dataDeclName dataDecl) (STVar param0 :| map STVar paramsRest)
-          headTy = case P.dataDeclParams dataDecl of
-            [] -> STBase (P.dataDeclName dataDecl)
-            _ -> actualHead
+    eqMethodReference classInfo =
+      fst <$> find matchesEqMethod (Map.toList (scopeValues scope))
+      where
+        matchesEqMethod (_, OverloadedMethod {valueMethodInfo = methodInfo}) =
+          methodClassName methodInfo == className classInfo && methodName methodInfo == "eq"
+        matchesEqMethod _ = False
+
+    pendingDerivedInstance classInfo instDecl =
+      InstanceInfo
+        { instanceClassName = P.instanceDeclClass instDecl,
+          instanceClassModule = classModule classInfo,
+          instanceOriginModule = P.moduleName mod0,
+          instanceConstraints = P.instanceDeclConstraints instDecl,
+          instanceHeadType = P.instanceDeclType instDecl,
+          instanceMethods = Map.empty
+        }
+
+    constructorFieldTypes ctor =
+      fst (splitArrows (snd (splitForalls (P.constructorDeclType ctor))))
+
+    validateEqDerivingFields :: P.ClassName -> Scope -> P.DataDecl -> TcM ()
+    validateEqDerivingFields eqClassName validationScope dataDecl =
+      mapM_ (validateEqDerivingField eqClassName validationScope dataDecl) (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
+
+    validateEqDerivingField :: P.ClassName -> Scope -> P.DataDecl -> SrcType -> TcM ()
+    validateEqDerivingField eqClassName validationScope dataDecl fieldTy
+      | constraintTypeSatisfiable eqClassName validationScope dataDecl Set.empty eqClassName fieldTy = pure ()
+      | otherwise = throwError (ProgramDerivingMissingFieldInstance eqClassName fieldTy)
+
+    constraintTypeSatisfiable derivedClassName validationScope dataDecl seen className0 fieldTy
+      | className0 == derivedClassName && fieldCoveredByDerivedConstraints dataDecl fieldTy = True
+      | key `Set.member` seen = False
+      | otherwise =
+          case resolveInstanceInfoWithSubst (scopeToElaborateScope validationScope) className0 fieldTy of
+            Right (instanceInfo, subst) ->
+              let seen' = Set.insert key seen
+               in all
+                    (constraintSatisfiable derivedClassName validationScope dataDecl seen' . applyConstraintSubst subst)
+                    (instanceConstraints instanceInfo)
+            Left _ -> False
+      where
+        key = (className0, show fieldTy)
+
+    constraintSatisfiable derivedClassName validationScope dataDecl seen constraint =
+      constraintTypeSatisfiable
+        derivedClassName
+        validationScope
+        dataDecl
+        seen
+        (P.constraintClassName constraint)
+        (P.constraintType constraint)
+
+    applyConstraintSubst subst constraint =
+      constraint
+        { P.constraintType =
+            Map.foldrWithKey substituteTypeVar (P.constraintType constraint) subst
+        }
+
+    fieldCoveredByDerivedConstraints dataDecl fieldTy =
+      case fieldTy of
+        STVar name -> name `elem` P.dataDeclParams dataDecl
+        _ -> isRecursiveOwnerField dataDecl fieldTy
+
+    derivedConstraintParams dataDecl =
+      let params = Set.fromList (P.dataDeclParams dataDecl)
+          fieldTypes =
+            filter
+              (not . isRecursiveOwnerField dataDecl)
+              (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
+          usedParams = Set.intersection params (foldMap freeTypeVars fieldTypes)
+       in [paramName | paramName <- P.dataDeclParams dataDecl, paramName `Set.member` usedParams]
+
+    freeTypeVars ty =
+      case ty of
+        STVar name -> Set.singleton name
+        STArrow dom cod -> freeTypeVars dom `Set.union` freeTypeVars cod
+        STBase {} -> Set.empty
+        STCon _ args -> foldMap freeTypeVars args
+        STForall name mb body ->
+          maybe Set.empty (freeTypeVars . unSrcBound) mb
+            `Set.union` Set.delete name (freeTypeVars body)
+        STMu name body -> Set.delete name (freeTypeVars body)
+        STBottom -> Set.empty
+
+    scopeToElaborateScope scope0 =
+      mkElaborateScope (scopeValues scope0) (scopeTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
+
+    mkEqInstance classInfo eqMethodName dataDecl =
+      let headTy = dataDeclHeadType dataDecl
+          eqClassName = className classInfo
           left = P.Param "left" (Just headTy)
           right = P.Param "right" (Just headTy)
-          body = deriveEqBody dataDecl
+          selfName = "__derived_eq_" ++ P.dataDeclName dataDecl
+          methodBody =
+            if hasRecursiveOwnerFields dataDecl
+              then
+                P.ELet
+                  selfName
+                  (Just (STArrow headTy (STArrow headTy (STBase "Bool"))))
+                  (P.ELam left (P.ELam right (deriveEqBody eqClassName eqMethodName headTy dataDecl (Just selfName))))
+                  (P.EVar selfName)
+              else
+                P.ELam left (P.ELam right (deriveEqBody eqClassName eqMethodName headTy dataDecl Nothing))
        in P.InstanceDecl
-            { P.instanceDeclClass = "Eq",
+            { P.instanceDeclClass = eqClassName,
+              P.instanceDeclConstraints =
+                [ P.ClassConstraint eqClassName (STVar paramName)
+                  | paramName <- derivedConstraintParams dataDecl
+                ],
               P.instanceDeclType = headTy,
-              P.instanceDeclMethods = [P.MethodDef "eq" (P.ELam left (P.ELam right body))]
+              P.instanceDeclMethods = [P.MethodDef "eq" methodBody]
             }
 
-    deriveEqBody dataDecl =
+    hasRecursiveOwnerFields dataDecl =
+      any (isRecursiveOwnerField dataDecl) (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
+
+    deriveEqBody eqClassName eqMethodName headTy dataDecl mbSelfName =
       P.ECase
         (P.EVar "left")
         [ P.Alt
-            (P.PatCtor (P.constructorDeclName ctor) leftNames)
+            (P.PatCtor (P.constructorDeclName ctor) (map P.PatVar leftNames))
             (P.ECase (P.EVar "right") (matchingAlt ctor leftNames : mismatchAlts ctor))
           | ctor <- P.dataDeclConstructors dataDecl,
             let leftNames = ["l" ++ show i | i <- [1 .. length (ctorArgTypes ctor)]]
@@ -500,33 +1170,67 @@ synthesizeDerivedInstances scope mod0 = concat <$> mapM deriveForData (moduleDat
       where
         ctorArgTypes ctor = fst (splitArrows (snd (splitForalls (P.constructorDeclType ctor))))
 
+        recursiveEqName = qualify (P.moduleName mod0) (renderInstanceName eqClassName headTy "eq")
+
         matchingAlt ctor leftNames =
           let rightNames = ["r" ++ show i | i <- [1 .. length leftNames]]
-           in P.Alt (P.PatCtor (P.constructorDeclName ctor) rightNames) (foldEqCalls leftNames rightNames)
+              argTypes = ctorArgTypes ctor
+           in P.Alt (P.PatCtor (P.constructorDeclName ctor) (map P.PatVar rightNames)) (foldEqCalls (zip3 argTypes leftNames rightNames))
 
         mismatchAlts ctor =
-          [ P.Alt (P.PatCtor (P.constructorDeclName other) ["_" | _ <- fst (splitArrows (snd (splitForalls (P.constructorDeclType other))))]) (P.ELit (LBool False))
+          [ P.Alt (P.PatCtor (P.constructorDeclName other) [P.PatWildcard | _ <- fst (splitArrows (snd (splitForalls (P.constructorDeclType other))))]) (P.ELit (LBool False))
             | other <- P.dataDeclConstructors dataDecl,
               P.constructorDeclName other /= P.constructorDeclName ctor
           ]
 
-        foldEqCalls [] [] = P.ELit (LBool True)
-        foldEqCalls [l] [r] = P.EApp (P.EApp (P.EVar "eq") (P.EVar l)) (P.EVar r)
-        foldEqCalls (l : _) (r : _) =
-          -- The initial deriving target is nullary recursive ADTs like Nat,
-          -- so multiple-field conjunction is intentionally deferred.
-          P.EApp (P.EApp (P.EVar "eq") (P.EVar l)) (P.EVar r)
-        foldEqCalls _ _ = P.ELit (LBool False)
+        foldEqCalls [] = P.ELit (LBool True)
+        foldEqCalls [(argTy, l, r)] = eqCall argTy l r
+        foldEqCalls ((argTy, l, r) : rest) =
+          P.EApp
+            (P.EApp (P.EVar "__mlfp_and") (eqCall argTy l r))
+            (foldEqCalls rest)
+
+        eqCall argTy l r =
+          let eqName =
+                case mbSelfName of
+                  Just selfName | isRecursiveOwnerField dataDecl argTy -> selfName
+                  _ ->
+                    if isRecursiveOwnerField dataDecl argTy
+                      then recursiveEqName
+                      else eqMethodName
+           in P.EApp (P.EApp (P.EVar eqName) (P.EVar l)) (P.EVar r)
+
+    isRecursiveOwnerField dataDecl argTy =
+      argTy == dataDeclHeadType dataDecl
+
+    dataDeclHeadType dataDecl =
+      case P.dataDeclParams dataDecl of
+        [] -> STBase (P.dataDeclName dataDecl)
+        param0 : paramsRest -> STCon (P.dataDeclName dataDecl) (STVar param0 :| map STVar paramsRest)
 
 buildInstanceSkeletons :: Scope -> P.Module -> [P.InstanceDecl] -> TcM [InstanceInfo]
 buildInstanceSkeletons scope mod0 derived = do
   let instances0 = derived ++ explicitInstances mod0
   infos <- mapM toInstanceInfo instances0
-  ensureDistinctPlain (\(className0, ty) -> ProgramDuplicateInstance className0 ty) [(instanceClassName info, instanceHeadType info) | info <- infos]
+  case duplicateLocalInstances infos of
+    info : _ -> throwError (ProgramDuplicateInstance (instanceClassName info) (instanceHeadType info))
+    [] -> pure ()
+  case duplicateExistingInstances infos of
+    info : _ -> throwError (ProgramDuplicateInstance (instanceClassName info) (instanceHeadType info))
+    [] -> pure ()
+  case overlappingInstances infos of
+    (left, right) : _ ->
+      throwError (ProgramOverlappingInstance (instanceClassName left) (instanceHeadType left) (instanceHeadType right))
+    [] -> pure ()
+  case overlappingWithExistingInstances infos of
+    (left, right) : _ ->
+      throwError (ProgramOverlappingInstance (instanceClassName left) (instanceHeadType left) (instanceHeadType right))
+    [] -> pure ()
   pure infos
   where
     toInstanceInfo instDecl = do
       classInfo <- lookupClassInfo scope (P.instanceDeclClass instDecl)
+      validateClassConstraintClasses scope (P.instanceDeclConstraints instDecl)
       let methodMap = classMethods classInfo
           expected = Map.keysSet methodMap
           provided = Set.fromList (map P.methodDefName (P.instanceDeclMethods instDecl))
@@ -538,46 +1242,197 @@ buildInstanceSkeletons scope mod0 derived = do
         [] -> pure ()
       let instanceMethodInfos =
             Map.fromList
-              [ ( P.methodDefName methodDef,
-                  OrdinaryValue
-                    { valueDisplayName = P.methodDefName methodDef,
-                      valueRuntimeName = qualify (P.moduleName mod0) (renderInstanceName (P.instanceDeclClass instDecl) (P.instanceDeclType instDecl) (P.methodDefName methodDef)),
-                      valueType = specializeMethodType (methodType (methodMap Map.! P.methodDefName methodDef)) (classParamName classInfo) (P.instanceDeclType instDecl),
-                      valueOriginModule = P.moduleName mod0
-                    }
-                )
+              [ let methodInfo = methodMap Map.! P.methodDefName methodDef
+                    rawMethodType = specializeMethodType (methodType methodInfo) (classParamName classInfo) (P.instanceDeclType instDecl)
+                    methodValueConstraints =
+                      P.instanceDeclConstraints instDecl
+                        ++ map
+                          (substituteConstraint (classParamName classInfo) (P.instanceDeclType instDecl))
+                          (methodConstraints methodInfo)
+                 in ( P.methodDefName methodDef,
+                      OrdinaryValue
+                        { valueDisplayName = P.methodDefName methodDef,
+                          valueRuntimeName = qualify (P.moduleName mod0) (renderInstanceName (P.instanceDeclClass instDecl) (P.instanceDeclType instDecl) (P.methodDefName methodDef)),
+                          valueType = constrainedVisibleType (P.ConstrainedType methodValueConstraints rawMethodType),
+                          valueConstraints = methodValueConstraints,
+                          valueOriginModule = P.moduleName mod0
+                        }
+                    )
                 | methodDef <- P.instanceDeclMethods instDecl
               ]
       pure
         InstanceInfo
           { instanceClassName = P.instanceDeclClass instDecl,
+            instanceClassModule = classModule classInfo,
+            instanceOriginModule = P.moduleName mod0,
+            instanceConstraints = P.instanceDeclConstraints instDecl,
             instanceHeadType = P.instanceDeclType instDecl,
             instanceMethods = instanceMethodInfos
           }
+
+    overlappingInstances infos =
+      [ (left, right)
+        | (ix, left) <- zip [(0 :: Int) ..] infos,
+          right <- drop (ix + 1) infos,
+          sameInstanceClass left right,
+          instanceHeadType left /= instanceHeadType right,
+          instanceHeadsOverlap (instanceHeadType left) (instanceHeadType right)
+      ]
+
+    duplicateLocalInstances infos =
+      [ left
+        | (ix, left) <- zip [(0 :: Int) ..] infos,
+          right <- drop (ix + 1) infos,
+          sameInstanceHead left right
+      ]
+
+    duplicateExistingInstances infos =
+      [ local
+        | local <- infos,
+          existing <- scopeInstances scope,
+          sameInstanceHead local existing
+      ]
+
+    overlappingWithExistingInstances infos =
+      [ (local, existing)
+        | local <- infos,
+          existing <- scopeInstances scope,
+          sameInstanceClass local existing,
+          instanceHeadType local /= instanceHeadType existing,
+          instanceHeadsOverlap (instanceHeadType local) (instanceHeadType existing)
+      ]
+
+    sameInstanceClass left right =
+      instanceClassIdentity left == instanceClassIdentity right
+
+    instanceHeadsOverlap left right =
+      case
+        unifyOverlap
+          Map.empty
+          (tagTypeVars "__overlap_left__" (canonicalInstanceHead left))
+          (tagTypeVars "__overlap_right__" (canonicalInstanceHead right))
+        of
+        Just _ -> True
+        Nothing -> False
+
+    canonicalInstanceHead :: SrcType -> SrcType
+    canonicalInstanceHead = canonical
+      where
+        canonical ty =
+          case ty of
+            STVar {} -> ty
+            STArrow dom cod -> STArrow (canonical dom) (canonical cod)
+            STBase name -> STBase (canonicalTypeName name)
+            STCon name args -> STCon (canonicalTypeName name) (fmap canonical args)
+            STForall name mb body ->
+              STForall name (fmap (SrcBound . canonical . unSrcBound) mb) (canonical body)
+            STMu name body -> STMu name (canonical body)
+            STBottom -> STBottom
+
+        canonicalTypeName name =
+          case Map.lookup name (scopeTypes scope) of
+            Just info -> dataModule info ++ "." ++ dataName info
+            Nothing -> name
+
+    unifyOverlap subst left right =
+      case (applyOverlapSubst subst left, applyOverlapSubst subst right) of
+        (STVar name, ty) -> bindOverlap name ty subst
+        (ty, STVar name) -> bindOverlap name ty subst
+        (STBase leftName, STBase rightName)
+          | leftName == rightName -> Just subst
+        (STCon leftName leftArgs, STCon rightName rightArgs)
+          | leftName == rightName && NE.length leftArgs == NE.length rightArgs ->
+              foldM
+                (\acc (leftTy, rightTy) -> unifyOverlap acc leftTy rightTy)
+                subst
+                (zip (NE.toList leftArgs) (NE.toList rightArgs))
+        (STArrow leftDom leftCod, STArrow rightDom rightCod) -> do
+          subst' <- unifyOverlap subst leftDom rightDom
+          unifyOverlap subst' leftCod rightCod
+        _ -> Nothing
+
+    bindOverlap name ty subst =
+      case Map.lookup name subst of
+        Just existing -> unifyOverlap subst existing ty
+        Nothing
+          | ty == STVar name -> Just subst
+          | name `Set.member` freeTypeVarsInType ty -> Nothing
+          | otherwise -> Just (Map.insert name ty subst)
+
+    applyOverlapSubst subst ty =
+      case ty of
+        STVar name ->
+          case Map.lookup name subst of
+            Just replacement -> applyOverlapSubst subst replacement
+            Nothing -> ty
+        STArrow dom cod -> STArrow (applyOverlapSubst subst dom) (applyOverlapSubst subst cod)
+        STCon name args -> STCon name (fmap (applyOverlapSubst subst) args)
+        STForall name mb body ->
+          STForall name (fmap (SrcBound . applyOverlapSubst subst . unSrcBound) mb) (applyOverlapSubst subst body)
+        STMu name body -> STMu name (applyOverlapSubst subst body)
+        STBase {} -> ty
+        STBottom -> STBottom
+
+    tagTypeVars prefix = go Map.empty
+      where
+        go env ty =
+          case ty of
+            STVar name -> STVar (Map.findWithDefault (prefix ++ name) name env)
+            STArrow dom cod -> STArrow (go env dom) (go env cod)
+            STCon name args -> STCon name (fmap (go env) args)
+            STForall name mb body ->
+              let tagged = prefix ++ name
+                  env' = Map.insert name tagged env
+               in STForall tagged (fmap (SrcBound . go env . unSrcBound) mb) (go env' body)
+            STMu name body ->
+              let tagged = prefix ++ name
+               in STMu tagged (go (Map.insert name tagged env) body)
+            STBase {} -> ty
+            STBottom -> STBottom
+
+    freeTypeVarsInType ty =
+      case ty of
+        STVar name -> Set.singleton name
+        STArrow dom cod -> freeTypeVarsInType dom `Set.union` freeTypeVarsInType cod
+        STCon _ args -> foldMap freeTypeVarsInType args
+        STForall name mb body ->
+          maybe Set.empty (freeTypeVarsInType . unSrcBound) mb
+            `Set.union` Set.delete name (freeTypeVarsInType body)
+        STMu name body -> Set.delete name (freeTypeVarsInType body)
+        STBase {} -> Set.empty
+        STBottom -> Set.empty
+
+    substituteConstraint paramName headTy constraint =
+      constraint
+        { P.constraintType = substituteTypeVar paramName headTy (P.constraintType constraint)
+        }
 
 renderInstanceName :: P.ClassName -> SrcType -> P.MethodName -> String
 renderInstanceName className0 headTy methodName0 = className0 ++ "__" ++ sanitizeType headTy ++ "__" ++ methodName0
 
 sanitizeType :: SrcType -> String
 sanitizeType = \case
-  STVar v -> map sanitizeChar v
+  STVar v -> sanitizeName v
   STArrow dom cod -> "arr_" ++ sanitizeType dom ++ "_" ++ sanitizeType cod
-  STBase base -> map sanitizeChar base
-  STCon con args -> intercalate "_" (map sanitizeChar con : map sanitizeType (NE.toList args))
-  STForall v _ body -> "forall_" ++ map sanitizeChar v ++ "_" ++ sanitizeType body
-  STMu v body -> "mu_" ++ map sanitizeChar v ++ "_" ++ sanitizeType body
+  STBase base -> sanitizeName base
+  STCon con args -> intercalate "_" (sanitizeName con : map sanitizeType (NE.toList args))
+  STForall v _ body -> "forall_" ++ sanitizeName v ++ "_" ++ sanitizeType body
+  STMu v body -> "mu_" ++ sanitizeName v ++ "_" ++ sanitizeType body
   STBottom -> "bottom"
   where
+    sanitizeName = concatMap sanitizeChar
+
     sanitizeChar c
-      | c `elem` ['a' .. 'z'] = c
-      | c `elem` ['A' .. 'Z'] = c
-      | c `elem` ['0' .. '9'] = c
-      | otherwise = '_'
+      | c `elem` ['a' .. 'z'] = [c]
+      | c `elem` ['A' .. 'Z'] = [c]
+      | c `elem` ['0' .. '9'] = [c]
+      | otherwise = "_u" ++ show (fromEnum c) ++ "_"
 
 checkInstance :: ElaborateScope -> Scope -> P.InstanceDecl -> TcM [CheckedBinding]
 checkInstance elaborateScope scope instDecl = do
+  classInfo <- lookupClassInfo scope (P.instanceDeclClass instDecl)
   instanceInfo <-
-    case findInstance scope (P.instanceDeclClass instDecl) (P.instanceDeclType instDecl) of
+    case findInstance scope classInfo (P.instanceDeclType instDecl) of
       Just info -> pure info
       Nothing -> throwError (ProgramNoMatchingInstance (P.instanceDeclClass instDecl) (P.instanceDeclType instDecl))
   forM (P.instanceDeclMethods instDecl) $ \methodDef -> do
@@ -586,14 +1441,14 @@ checkInstance elaborateScope scope instDecl = do
         let methodRuntimeName = valueRuntimeName valueInfo
             methodSourceType = valueType valueInfo
         liftEither
-          ( lowerExprBinding elaborateScope methodRuntimeName methodSourceType False (P.methodDefExpr methodDef)
+          ( lowerConstrainedExprBinding elaborateScope methodRuntimeName (valueConstraints valueInfo) methodSourceType False (P.methodDefExpr methodDef)
               >>= finalizeBinding elaborateScope
           )
       _ -> throwError (ProgramUnexpectedInstanceMethod (P.instanceDeclClass instDecl) (P.methodDefName methodDef))
   where
-    findInstance scope0 className0 headTy =
+    findInstance scope0 classInfo headTy =
       find
-        (\info -> instanceClassName info == className0 && instanceHeadType info == headTy)
+        (\info -> instanceClassIdentity info == classIdentity classInfo && instanceHeadType info == headTy)
         (scopeInstances scope0)
 
 checkDef :: ElaborateScope -> Scope -> P.DefDecl -> TcM CheckedBinding
@@ -602,7 +1457,7 @@ checkDef elaborateScope scope defDecl = do
   case valueInfo of
     ordinary@OrdinaryValue {} -> do
       liftEither
-        ( lowerExprBinding elaborateScope (valueRuntimeName ordinary) (valueType ordinary) (P.defDeclName defDecl == "main") (P.defDeclExpr defDecl)
+        ( lowerConstrainedExprBinding elaborateScope (valueRuntimeName ordinary) (valueConstraints ordinary) (valueType ordinary) (P.defDeclName defDecl == "main") (P.defDeclExpr defDecl)
             >>= finalizeBinding elaborateScope
         )
     _ -> throwError (ProgramDuplicateValue (P.defDeclName defDecl))
@@ -686,6 +1541,10 @@ qualify moduleName0 name = moduleName0 ++ "__" ++ name
 
 ensureDistinctBy :: (Eq a) => (a -> ProgramError) -> (b -> a) -> [b] -> TcM ()
 ensureDistinctBy mkErr project values = ensureDistinctPlain mkErr (map project values)
+
+ensureDistinctImportAliases :: [P.Import] -> TcM ()
+ensureDistinctImportAliases imports0 =
+  ensureDistinctPlain ProgramDuplicateImportAlias [alias | Just alias <- map P.importAlias imports0]
 
 ensureDistinctPlain :: (Eq a) => (a -> ProgramError) -> [a] -> TcM ()
 ensureDistinctPlain mkErr values =

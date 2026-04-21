@@ -12,6 +12,7 @@ import qualified Data.Set as Set
 import MLF.Elab.Inst (applyInstantiation, renameInstBound, schemeToType)
 import MLF.Elab.TypeCheck (typeCheck)
 import MLF.Elab.Types
+import MLF.Frontend.Syntax (Lit (..))
 import MLF.Reify.TypeOps (freeTypeVarsType, freshTypeName, substTypeCapture)
 import MLF.Util.RecursionSchemes (cataMaybe, foldElabTerm, foldInstantiation)
 
@@ -25,9 +26,19 @@ isValue term = case term of
 
 step :: ElabTerm -> Maybe ElabTerm
 step term = case term of
+  EApp (EApp (EVar "__mlfp_and") (ELit (LBool left))) (ELit (LBool right)) ->
+    Just (ELit (LBool (left && right)))
+  EApp (EApp (EVar "__mlfp_and") left) right
+    | not (isValue left) ->
+        (\left' -> EApp (EApp (EVar "__mlfp_and") left') right) <$> step left
+    | not (isValue right) ->
+        EApp (EApp (EVar "__mlfp_and") left) <$> step right
+  EApp (ETyAbs v _ body) a
+    | v `Set.notMember` freeTypeVarsTerm body ->
+        Just (EApp body a)
   EApp f a
     | not (isValue f) -> (`EApp` a) <$> step f
-    | not (isValue a) -> EApp f <$> step a
+    | not (isValue a || isNeutralValue a) -> EApp f <$> step a
     | otherwise ->
         case f of
           ELam v _ body -> Just (substTermVar v a body)
@@ -93,6 +104,11 @@ step term = case term of
               Right _ -> Just e
               Left _ -> Nothing
   _ -> Nothing
+
+isNeutralValue :: ElabTerm -> Bool
+isNeutralValue term = case term of
+  EVar {} -> True
+  _ -> False
 
 normalize :: ElabTerm -> ElabTerm
 normalize term = case step term of

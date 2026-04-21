@@ -27,6 +27,8 @@ module MLF.API
     parseRawEmlfExpr,
     parseRawEmlfType,
     parseRawProgram,
+    parseLocatedProgram,
+    parseLocatedProgramWithFile,
 
     -- * Normalized parser entrypoints
     parseNormEmlfExpr,
@@ -41,6 +43,10 @@ module MLF.API
     prettyEmlfExpr,
     prettyEmlfType,
     Program,
+    LocatedProgram,
+    ProgramSpanIndex,
+    SourceSpan,
+    SourcePosition,
     prettyProgram,
 
     -- * Constraint graph introspection
@@ -93,6 +99,8 @@ import MLF.Frontend.Parse
   )
 import MLF.Frontend.Parse.Program
   ( ProgramParseError,
+    parseLocatedProgram,
+    parseLocatedProgramWithFile,
     parseRawProgram,
     renderProgramParseError,
   )
@@ -102,7 +110,7 @@ import MLF.Frontend.Pretty
   )
 import MLF.Frontend.Pretty.Program (prettyProgram)
 import MLF.Frontend.Syntax
-import MLF.Frontend.Syntax.Program (Program)
+import MLF.Frontend.Syntax.Program (LocatedProgram, Program, ProgramSpanIndex, SourcePosition, SourceSpan)
 
 -- | Number of type nodes in a constraint graph.
 constraintNodeCount :: Constraint -> Int

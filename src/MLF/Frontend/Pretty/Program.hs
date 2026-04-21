@@ -31,6 +31,7 @@ prettyImport :: Import -> String
 prettyImport imp =
     "import "
         ++ importModuleName imp
+        ++ maybe "" (" as " ++) (importAlias imp)
         ++ maybe "" (\items -> " exposing (" ++ intercalate ", " (map prettyExportItem items) ++ ")") (importExposing imp)
         ++ ";"
 
@@ -50,12 +51,12 @@ prettyClassDecl classDecl =
         ]
 
 prettyMethodSig :: MethodSig -> String
-prettyMethodSig methodSig = methodSigName methodSig ++ " : " ++ prettyEmlfType (methodSigType methodSig) ++ ";\n"
+prettyMethodSig methodSig = methodSigName methodSig ++ " : " ++ prettyConstrainedType (methodSigType methodSig) ++ ";\n"
 
 prettyInstanceDecl :: InstanceDecl -> String
 prettyInstanceDecl instanceDecl =
     unlines
-        [ "instance " ++ instanceDeclClass instanceDecl ++ " " ++ prettyEmlfType (instanceDeclType instanceDecl) ++ " {"
+        [ "instance " ++ prettyConstraintsPrefix (instanceDeclConstraints instanceDecl) ++ instanceDeclClass instanceDecl ++ " " ++ prettyEmlfType (instanceDeclType instanceDecl) ++ " {"
         , indent (concatMap prettyMethodDef (instanceDeclMethods instanceDecl))
         , "}"
         ]
@@ -84,10 +85,24 @@ prettyDefDecl defDecl =
     "def "
         ++ defDeclName defDecl
         ++ " : "
-        ++ prettyEmlfType (defDeclType defDecl)
+        ++ prettyConstrainedType (defDeclType defDecl)
         ++ " = "
         ++ prettyExpr (defDeclExpr defDecl)
         ++ ";"
+
+prettyConstrainedType :: ConstrainedType -> String
+prettyConstrainedType (ConstrainedType constraints ty) =
+    prettyConstraintsPrefix constraints ++ prettyEmlfType ty
+
+prettyConstraintsPrefix :: [ClassConstraint] -> String
+prettyConstraintsPrefix [] = ""
+prettyConstraintsPrefix [constraint] = prettyClassConstraint constraint ++ " => "
+prettyConstraintsPrefix constraints =
+    "(" ++ intercalate ", " (map prettyClassConstraint constraints) ++ ") => "
+
+prettyClassConstraint :: ClassConstraint -> String
+prettyClassConstraint constraint =
+    constraintClassName constraint ++ " " ++ prettyEmlfType (constraintType constraint)
 
 prettyExpr :: Expr -> String
 prettyExpr expr = go 0 expr
@@ -134,9 +149,17 @@ prettyAlt alt = prettyPattern (altPattern alt) ++ " -> " ++ prettyExpr (altExpr 
 
 prettyPattern :: Pattern -> String
 prettyPattern pat = case pat of
-    PatCtor ctor binders -> unwords (ctor : binders)
+    PatCtor ctor patterns -> unwords (ctor : map prettyPatternArg patterns)
     PatVar name -> name
     PatWildcard -> "_"
+    PatAnn inner ty -> "(" ++ prettyPattern inner ++ " : " ++ prettyEmlfType ty ++ ")"
+
+prettyPatternArg :: Pattern -> String
+prettyPatternArg pat = case pat of
+    PatVar {} -> prettyPattern pat
+    PatWildcard -> prettyPattern pat
+    PatCtor _ [] -> prettyPattern pat
+    _ -> "(" ++ prettyPattern pat ++ ")"
 
 prettyLit :: Lit -> String
 prettyLit lit = case lit of
