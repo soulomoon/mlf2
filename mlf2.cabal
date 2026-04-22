@@ -73,6 +73,7 @@ library mlf2-internal
                       MLF.Frontend.Syntax,
                       MLF.Frontend.Syntax.Program,
                       MLF.Program.CLI,
+                      MLF.Program.LSP,
                       MLF.Frontend.Program.Syntax,
                       MLF.Frontend.Program.Parse,
                       MLF.Frontend.Program.Pretty,
@@ -256,12 +257,15 @@ library mlf2-internal
                       MLF.Frontend.ConstraintGen.Translate
 
     -- Other library packages from which modules are imported.
-    build-depends:    base ^>=4.22.0.0,
+    build-depends:    aeson,
+                      base ^>=4.22.0.0,
+                      bytestring,
                       containers,
                       directory,
                       filepath,
                       megaparsec,
-                      mtl
+                      mtl,
+                      text
 
     -- Directories containing source files.
     hs-source-dirs:   src
@@ -392,6 +396,7 @@ test-suite mlf2-test
                       SolveSpec,
                       ScopeSpec,
                       ProgramSpec,
+                      ProgramLspSpec,
                       PipelineSpec,
                       ThesisFixDirectionSpec,
                       TypeCheckSpec,
@@ -454,7 +459,9 @@ test-suite mlf2-test
 
     -- Test dependencies.
     build-depends:
+        aeson,
         base ^>=4.22.0.0,
+        bytestring,
         containers,
         directory,
         filepath,

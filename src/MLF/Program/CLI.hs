@@ -22,9 +22,11 @@ programCliUsage =
     unlines
         [ "Usage:"
         , "  mlf2 run-program <file.mlfp>"
+        , "  mlf2 lsp"
+        , "  mlf2 language-server"
         , ""
         , "Runs a .mlfp program file through the unified MLF frontend/pipeline path and"
-        , "prints the resulting value."
+        , "prints the resulting value, or starts the minimal stdio .mlfp LSP server."
         ]
 
 runProgramFile :: FilePath -> IO (Either String String)
