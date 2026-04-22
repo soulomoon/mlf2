@@ -1266,7 +1266,7 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramOverlappingInstance \"Eq\"")
     , ProgramMatrixCase
-        "rejects alias-equivalent overlapping instance heads"
+        "rejects alias-equivalent duplicate type instance heads"
         ( InlineProgram $
             unlines
                 [ "module Core export (Nat(..)) {"
@@ -1293,7 +1293,7 @@ emlfBoundaryMatrix =
                 , "}"
                 ]
         )
-        (ExpectCheckFailureContaining "ProgramOverlappingInstance \"Eq\"")
+        (ExpectCheckFailureContaining "ProgramDuplicateInstance \"Eq\"")
     , ProgramMatrixCase
         "rejects alias-equivalent duplicate class instance heads"
         ( InlineProgram $
@@ -1627,6 +1627,113 @@ emlfBoundaryMatrix =
                 ]
         )
         (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "deduplicates constrained imported instances from mixed unqualified and aliased imports"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Box(..), eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  instance Eq a => Eq (Box a) {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (Eq, Box(..), eq);"
+                , "  import Core as C;"
+                , "  def main : Bool = eq (C.Box true) (C.Box false);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "rejects same-shape qualified ADTs with distinct source identities"
+        ( InlineProgram $
+            unlines
+                [ "module A export (Token(..), accept) {"
+                , "  data Token ="
+                , "      Token : Token;"
+                , ""
+                , "  def accept : Token -> Bool = \\x true;"
+                , "}"
+                , ""
+                , "module B export (Token(..)) {"
+                , "  data Token ="
+                , "      Token : Token;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import A as A;"
+                , "  import B as B;"
+                , "  def main : Bool = A.accept B.Token;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramTypeMismatch")
+    , ProgramMatrixCase
+        "rejects same-shape qualified constructor arguments after result specialization"
+        ( InlineProgram $
+            unlines
+                [ "module A export (Box(..)) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , "}"
+                , ""
+                , "module B export (Box(..)) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , "}"
+                , ""
+                , "module Main export (Use(..), main) {"
+                , "  import A as A;"
+                , "  import B as B;"
+                , ""
+                , "  data Use a ="
+                , "      Use : A.Box a -> Use a;"
+                , ""
+                , "  def bad : Use Bool = Use (B.Box true);"
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramTypeMismatch")
+    , ProgramMatrixCase
+        "rejects same-shape polymorphic constructor values after result specialization"
+        ( InlineProgram $
+            unlines
+                [ "module A export (Box(..)) {"
+                , "  data Box a ="
+                , "      Empty : Box a;"
+                , "}"
+                , ""
+                , "module B export (Box(..)) {"
+                , "  data Box a ="
+                , "      Empty : Box a;"
+                , "}"
+                , ""
+                , "module Main export (Use(..), main) {"
+                , "  import A as A;"
+                , "  import B as B;"
+                , ""
+                , "  data Use a ="
+                , "      Use : A.Box a -> Use a;"
+                , ""
+                , "  def bad : Use Bool = Use B.Empty;"
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramTypeMismatch")
     , ProgramMatrixCase
         "runs local class instance for alias-only imported type"
         ( InlineProgram $
@@ -2390,6 +2497,76 @@ spec = do
                     symbolDisplayName (resolvedSymbolSpelling qualified) `shouldBe` "C.answer"
                 Left err -> expectationFailure ("expected check success, got " ++ show err)
 
+        it "records one resolved identity for mixed spellings across values, types, constructors, classes, and methods" $ do
+            let programText =
+                    unlines
+                        [ "module Core export (Eq, Token(..), answer, eq) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  data Token ="
+                        , "      Token : Token;"
+                        , "  instance Eq Token {"
+                        , "    eq = \\x \\y true;"
+                        , "  }"
+                        , "  def answer : Token = Token;"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  import Core as C exposing (Eq, Token(..), answer, eq);"
+                        , "  def left : Token = answer;"
+                        , "  def right : C.Token = C.answer;"
+                        , "  def sameCtor : C.Token = C.Token;"
+                        , "  def usesClass : Eq Token => Bool = true;"
+                        , "  def usesQualifiedClass : C.Eq C.Token => Bool = true;"
+                        , "  def also : Bool = eq Token Token;"
+                        , "  def main : Bool = C.eq Token C.Token;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case checkProgram program of
+                Right checked -> do
+                    let references =
+                            [ ref
+                            | resolvedModule <- resolvedProgramModules (checkedProgramResolved checked)
+                            , resolvedModuleName resolvedModule == "Main"
+                            , ref <- resolvedModuleReferences resolvedModule
+                            ]
+                        symbolFor kind name =
+                            case [resolvedReferenceSymbol ref | ref <- references, resolvedReferenceKind ref == kind, resolvedReferenceName ref == name] of
+                                symbol : _ -> symbol
+                                [] -> error ("missing resolved reference " ++ show (kind, name))
+                    sameResolvedSymbol (symbolFor ResolvedValueReference "answer") (symbolFor ResolvedValueReference "C.answer") `shouldBe` True
+                    sameResolvedSymbol (symbolFor ResolvedTypeReference "Token") (symbolFor ResolvedTypeReference "C.Token") `shouldBe` True
+                    sameResolvedSymbol (symbolFor ResolvedConstructorReference "Token") (symbolFor ResolvedConstructorReference "C.Token") `shouldBe` True
+                    sameResolvedSymbol (symbolFor ResolvedClassReference "Eq") (symbolFor ResolvedClassReference "C.Eq") `shouldBe` True
+                    sameResolvedSymbol (symbolFor ResolvedMethodReference "eq") (symbolFor ResolvedMethodReference "C.eq") `shouldBe` True
+                Left err -> expectationFailure ("expected check success, got " ++ show err)
+
+        it "deduplicates mixed unqualified and aliased imports by semantic identity" $ do
+            let programText =
+                    unlines
+                        [ "module Core export (Eq, Token(..), answer, eq) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  data Token ="
+                        , "      Token : Token;"
+                        , "  instance Eq Token {"
+                        , "    eq = \\x \\y true;"
+                        , "  }"
+                        , "  def answer : Token = Token;"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  import Core;"
+                        , "  import Core as C exposing (Eq, Token(..), answer, eq);"
+                        , "  def main : Bool = eq answer C.answer;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            (prettyValue <$> runProgram program) `shouldBe` Right "true"
+
         it "rejects unknown value references at the resolver boundary" $ do
             let programText =
                     unlines
@@ -2457,6 +2634,49 @@ spec = do
                         ]
             program <- requireParsed programText
             checkProgram program `shouldBe` Left (ProgramAmbiguousUnqualifiedReference "value")
+
+        it "rejects duplicate case branches across mixed constructor spellings" $ do
+            let programText =
+                    unlines
+                        [ "module Core export (Nat(..)) {"
+                        , "  data Nat ="
+                        , "      Zero : Nat"
+                        , "    | Succ : Nat -> Nat;"
+                        , "}"
+                        , "module Main export (main) {"
+                        , "  import Core as C exposing (Nat(..));"
+                        , "  def main : Bool = case Zero of {"
+                        , "    Zero -> true;"
+                        , "    C.Zero -> false"
+                        , "  };"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramDuplicateCaseBranch "C.Zero")
+
+        it "rejects duplicate instance heads across mixed class and type spellings" $ do
+            let programText =
+                    unlines
+                        [ "module Core export (Eq, Token(..), eq) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  data Token ="
+                        , "      Token : Token;"
+                        , "}"
+                        , "module Main export (main) {"
+                        , "  import Core as C exposing (Eq, Token(..), eq);"
+                        , "  instance Eq Token {"
+                        , "    eq = \\x \\y true;"
+                        , "  }"
+                        , "  instance C.Eq C.Token {"
+                        , "    eq = \\x \\y true;"
+                        , "  }"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramDuplicateInstance "Eq" (STBase "Token"))
 
         it "keeps alias-only access valid through the resolver pass" $ do
             let programText =

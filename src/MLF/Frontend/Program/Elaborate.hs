@@ -75,7 +75,7 @@ data ElaborateResult a = ElaborateResult
     elaborateResultExternalTypes :: Map String SrcType
   }
 
-type ClassIdentity = (P.ModuleName, P.ClassName)
+type ClassIdentity = SymbolIdentity
 
 runElaborateM :: ElaborateM a -> Either ProgramError (ElaborateResult a)
 runElaborateM action =
@@ -170,7 +170,9 @@ canonicalSourceType scope = canonical
         STMu name body -> STMu name (canonical body)
         STBottom -> STBottom
 
-    qualifiedDataName info = dataModule info ++ "." ++ dataName info
+    qualifiedDataName info =
+      let identity = dataInfoSymbolIdentity info
+       in symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
 
 constrainedRuntimeType :: ElaborateScope -> [P.ClassConstraint] -> SrcType -> SrcType
 constrainedRuntimeType scope =
@@ -302,7 +304,9 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
             Just info -> dataIdentity info == ownerIdentity
             Nothing -> name == ownerIdentity
 
-    dataIdentity info = dataModule info ++ "." ++ dataName info
+    dataIdentity info =
+      let identity = dataInfoSymbolIdentity info
+       in symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
 
 toListNE :: NonEmpty a -> [a]
 toListNE (x :| xs) = x : xs
@@ -492,7 +496,7 @@ explicitExprAnnotation expr =
 
 compileValueApp :: ElaborateScope -> Maybe SrcType -> ValueInfo -> [P.Expr] -> ElaborateM SurfaceExpr
 compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} args = do
-  let expectedArgTys = constructorExpectedArgTypes scope ctorInfo args
+  let expectedArgTys = constructorExpectedArgTypes scope ctorInfo mbExpected args
   argSurfaces <-
     zipWithM compileConstructorArg expectedArgTys args
   placeholder <- deferConstructorCall scope ctorInfo (length args) mbExpected
@@ -500,11 +504,12 @@ compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} arg
   where
     compileConstructorArg expectedTy arg = do
       case inferKnownExprType scope arg of
-        Just knownTy
-          | Set.null (freeTypeVarsSrcType knownTy) ->
-              compileExpr scope (Just knownTy) arg
-          | otherwise ->
-              compileExpr scope (Just expectedTy) arg
+        Just knownTy -> do
+          let specializedKnownTy = specializeKnownTypeForExpected scope expectedTy knownTy
+          ensureSourceTypeCompatible scope expectedTy specializedKnownTy
+          if Set.null (freeTypeVarsSrcType knownTy)
+            then compileExpr scope (Just knownTy) arg
+            else compileExpr scope (Just expectedTy) arg
         Nothing -> do
           argSurface <- compileExpr scope Nothing arg
           pure $
@@ -531,9 +536,17 @@ compileValueApp scope mbExpected valueInfo args = do
   where
     compileValueArg (Just expectedTy) arg
       | isPartialOverloadedMethodApp scope arg =
-          compileExpr scope (Just expectedTy) arg
+          compileKnownExpectedArg expectedTy arg
+    compileValueArg (Just expectedTy) arg =
+      compileKnownExpectedArg expectedTy arg
     compileValueArg _ arg =
       compileExpr scope Nothing arg
+
+    compileKnownExpectedArg expectedTy arg = do
+      case inferKnownExprType scope arg of
+        Just actualTy -> ensureSourceTypeCompatible scope expectedTy actualTy
+        Nothing -> pure ()
+      compileExpr scope (Just expectedTy) arg
 
 valueExpectedArgTypes :: ValueInfo -> [P.Expr] -> [Maybe SrcType]
 valueExpectedArgTypes valueInfo args =
@@ -556,14 +569,76 @@ isPartialOverloadedMethodApp scope expr =
           not (null args) && length args < methodFullArity methodInfo
     _ -> False
 
-constructorExpectedArgTypes :: ElaborateScope -> ConstructorInfo -> [P.Expr] -> [SrcType]
-constructorExpectedArgTypes scope ctorInfo args =
-  reverse (snd (foldl step (Map.empty, []) (zip (ctorArgs ctorInfo) args)))
+specializeKnownTypeForExpected :: ElaborateScope -> SrcType -> SrcType -> SrcType
+specializeKnownTypeForExpected scope expectedTy knownTy =
+  case matchTypesInScope scope Map.empty knownTy expectedTy of
+    Just subst -> specializeSrcType subst knownTy
+    Nothing ->
+      case matchTypesByShape Map.empty knownTy expectedTy of
+        Just subst -> specializeSrcType subst knownTy
+        Nothing -> knownTy
+
+matchTypesByShape :: Map String SrcType -> SrcType -> SrcType -> Maybe (Map String SrcType)
+matchTypesByShape subst template actual = case template of
+  STVar name ->
+    case Map.lookup name subst of
+      Nothing -> Just (Map.insert name actual subst)
+      Just existing
+        | existing == actual -> Just subst
+        | otherwise -> Nothing
+  STArrow dom cod ->
+    case actual of
+      STArrow dom' cod' -> do
+        subst' <- matchTypesByShape subst dom dom'
+        matchTypesByShape subst' cod cod'
+      _ -> Nothing
+  STBase {} ->
+    case actual of
+      STBase {} -> Just subst
+      _ -> Nothing
+  STCon _ args ->
+    case actual of
+      STCon _ args'
+        | length (toListNE args) == length (toListNE args') ->
+            foldM
+              (\acc (templateTy, actualTy) -> matchTypesByShape acc templateTy actualTy)
+              subst
+              (zip (toListNE args) (toListNE args'))
+      _ -> Nothing
+  STForall name mb body ->
+    case actual of
+      STForall name' mb' body'
+        | name == name' -> do
+            subst' <-
+              case (mb, mb') of
+                (Nothing, _) -> Just subst
+                (Just bound, Just bound') -> matchTypesByShape subst (unSrcBound bound) (unSrcBound bound')
+                (Just {}, Nothing) -> Nothing
+            matchTypesByShape subst' body body'
+      _ -> Nothing
+  STMu name body ->
+    case actual of
+      STMu name' body'
+        | name == name' -> matchTypesByShape subst body body'
+      _ -> Nothing
+  STBottom ->
+    case actual of
+      STBottom -> Just subst
+      _ -> Nothing
+
+constructorExpectedArgTypes :: ElaborateScope -> ConstructorInfo -> Maybe SrcType -> [P.Expr] -> [SrcType]
+constructorExpectedArgTypes scope ctorInfo mbExpected args =
+  reverse (snd (foldl step (initialSubst, []) (zip (ctorArgs ctorInfo) args)))
   where
+    initialSubst =
+      case mbExpected >>= matchTypesInScope scope Map.empty (constructorOccurrenceType ctorInfo (length args)) of
+        Just subst -> subst
+        Nothing -> Map.empty
+
     step (subst, acc) (templateTy, arg) =
       let expectedTy = specializeSrcType subst templateTy
           subst' =
-            case inferKnownExprType scope arg >>= matchTypes subst templateTy of
+            case inferKnownExprType scope arg >>= matchTypesInScope scope subst templateTy of
               Just matched -> matched
               Nothing -> subst
        in (subst', expectedTy : acc)
@@ -646,7 +721,7 @@ inferCallSubst scope visibleTy args = do
           | (templateTy, arg) <- zip argTys args,
             Just actualTy <- [inferKnownExprType scope arg]
         ]
-  foldM (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy) Map.empty knownPairs
+  foldM (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy) Map.empty knownPairs
 
 inlineImmediateLetUse :: String -> P.Expr -> P.Expr -> Maybe P.Expr
 inlineImmediateLetUse bindingName rhs body =
@@ -674,7 +749,7 @@ isLocalOrdinaryValue _ = False
 knownConstructorResultType :: ElaborateScope -> ConstructorInfo -> [P.Expr] -> Maybe SrcType
 knownConstructorResultType scope ctorInfo args = do
   argTypes <- traverse (inferKnownExprType scope) args
-  subst <- foldM (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy) Map.empty (zip (ctorArgs ctorInfo) argTypes)
+  subst <- foldM (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy) Map.empty (zip (ctorArgs ctorInfo) argTypes)
   pure (Map.foldrWithKey substituteTypeVar (ctorResult ctorInfo) subst)
 
 compileMethodApp :: ElaborateScope -> Maybe SrcType -> MethodInfo -> [P.Expr] -> ElaborateM SurfaceExpr
@@ -717,7 +792,10 @@ compileMethodApp scope mbExpected methodInfo args
       | otherwise = expanded
 
 compileExpectedMethodArg :: ElaborateScope -> SrcType -> P.Expr -> ElaborateM SurfaceExpr
-compileExpectedMethodArg scope expectedTy expr =
+compileExpectedMethodArg scope expectedTy expr = do
+  case inferKnownExprType scope expr of
+    Just actualTy -> ensureSourceTypeCompatible scope expectedTy actualTy
+    Nothing -> pure ()
   case expr of
     EAnn {} ->
       compileExpr scope (Just expectedTy) expr
@@ -742,6 +820,36 @@ compileExpectedMethodArg scope expectedTy expr =
     _ -> do
       argExpr <- compileExpr scope Nothing expr
       pure (surfaceAnn argExpr (lowerType scope expectedTy))
+
+ensureSourceTypeCompatible :: ElaborateScope -> SrcType -> SrcType -> ElaborateM ()
+ensureSourceTypeCompatible scope expectedTy actualTy =
+  when (sourceTypesNeedNominalRejection scope expectedTy actualTy) $
+    throwError (ProgramTypeMismatch actualTy expectedTy)
+
+sourceTypesNeedNominalRejection :: ElaborateScope -> SrcType -> SrcType -> Bool
+sourceTypesNeedNominalRejection scope expectedTy actualTy =
+  sourceTypeMentionsVisibleData scope expectedTy
+    && sourceTypeMentionsVisibleData scope actualTy
+    && lowerType scope expectedTy == lowerType scope actualTy
+    && matchTypesInScope scope Map.empty expectedTy actualTy == Nothing
+    && matchTypesInScope scope Map.empty actualTy expectedTy == Nothing
+
+sourceTypeMentionsVisibleData :: ElaborateScope -> SrcType -> Bool
+sourceTypeMentionsVisibleData scope ty =
+  case ty of
+    STVar {} -> False
+    STBase name -> Map.member name (esTypes scope)
+    STCon name args ->
+      Map.member name (esTypes scope)
+        || any (sourceTypeMentionsVisibleData scope) args
+    STArrow dom cod ->
+      sourceTypeMentionsVisibleData scope dom
+        || sourceTypeMentionsVisibleData scope cod
+    STForall _ mb body ->
+      maybe False (sourceTypeMentionsVisibleData scope . unSrcBound) mb
+        || sourceTypeMentionsVisibleData scope body
+    STMu _ body -> sourceTypeMentionsVisibleData scope body
+    STBottom -> False
 
 resolveMethodHeadExpr :: ElaborateScope -> Set (P.ClassName, String) -> MethodInfo -> SrcType -> ElaborateM SurfaceExpr
 resolveMethodHeadExpr scope seen methodInfo classArgTy =
@@ -796,7 +904,7 @@ inferMethodCallSubst scope methodInfo classArgTy args = do
           | (templateTy, arg) <- zip paramTys args,
             Just actualTy <- [inferKnownExprType scope arg]
         ]
-  foldM (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy) Map.empty knownPairs
+  foldM (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy) Map.empty knownPairs
 
 shouldResolveMethodBeforeInference :: ElaborateScope -> MethodInfo -> SrcType -> Bool
 shouldResolveMethodBeforeInference scope methodInfo classArgTy =
@@ -843,25 +951,35 @@ resolveZeroMethodEvidenceExpr scope seen constraint
 
 zeroMethodConstraintCoveredByEvidence :: ElaborateScope -> P.ClassConstraint -> Bool
 zeroMethodConstraintCoveredByEvidence scope constraint =
-  any
-    ( \evidence ->
-        evidenceClassName evidence == P.constraintClassName constraint
-          && lowerType scope (evidenceType evidence) == lowerType scope (P.constraintType constraint)
-    )
-    (esEvidence scope)
+  case constraintClassIdentity scope (P.constraintClassName constraint) of
+    Nothing -> False
+    Just classIdentity0 ->
+      any
+        ( \evidence ->
+            evidenceClassSymbol evidence == classIdentity0
+              && lowerType scope (evidenceType evidence) == lowerType scope (P.constraintType constraint)
+        )
+        (esEvidence scope)
 
 lookupEvidenceMethod :: ElaborateScope -> P.ClassName -> SrcType -> P.MethodName -> Maybe (String, SrcType)
 lookupEvidenceMethod scope className0 headTy methodName0 =
-  case
-    [ methodEvidence
-      | evidence <- esEvidence scope,
-        evidenceClassName evidence == className0,
-        lowerType scope (evidenceType evidence) == lowerType scope headTy,
-        Just methodEvidence <- [Map.lookup methodName0 (evidenceMethods evidence)]
-    ]
-  of
-    methodEvidence : _ -> Just methodEvidence
-    [] -> Nothing
+  case constraintClassIdentity scope className0 of
+    Nothing -> Nothing
+    Just classIdentity0 ->
+      case
+        [ methodEvidence
+          | evidence <- esEvidence scope,
+            evidenceClassSymbol evidence == classIdentity0,
+            lowerType scope (evidenceType evidence) == lowerType scope headTy,
+            Just methodEvidence <- [Map.lookup methodName0 (evidenceMethods evidence)]
+        ]
+      of
+        methodEvidence : _ -> Just methodEvidence
+        [] -> Nothing
+
+constraintClassIdentity :: ElaborateScope -> P.ClassName -> Maybe SymbolIdentity
+constraintClassIdentity scope className0 =
+  classInfoSymbolIdentity <$> Map.lookup className0 (esClasses scope)
 
 applyConstraintSubst :: Map String SrcType -> P.ClassConstraint -> P.ClassConstraint
 applyConstraintSubst subst constraint =
@@ -935,7 +1053,7 @@ deferConstructorCall scope ctorInfo argCount mbExpected = do
       occurrenceTy = constructorOccurrenceType ctorInfo argCount
       instBinders = map fst (fst (splitForalls quantifiedTy))
       initialSubst =
-        case mbExpected >>= matchTypes Map.empty occurrenceTy of
+        case mbExpected >>= matchTypesInScope scope Map.empty occurrenceTy of
           Just subst -> subst
           Nothing -> Map.empty
       placeholderSourceTy = specializeQuantifiedType initialSubst quantifiedTy
@@ -1033,7 +1151,7 @@ knownMethodClassArg scope methodInfo args = do
           | (templateTy, arg) <- zip paramTys args,
             Just actualTy <- [inferKnownExprType scope arg]
         ]
-  subst <- foldM (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy) Map.empty knownPairs
+  subst <- foldM (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy) Map.empty knownPairs
   Map.lookup (methodParamName methodInfo) subst
 
 quantifiedMethodType :: MethodInfo -> SrcType
@@ -1128,7 +1246,7 @@ compileCase scope mbExpected scrutinee alts = do
             case inferKnownExprType scope scrutinee of
               Just knownTy -> knownTy
               Nothing -> headTy
-      validateOrderedPatterns alts
+      validateOrderedPatterns scope alts
       mapM_ (validatePatternType scope scrutineeTy . P.altPattern) alts
       (resultTy, _quantifyResult) <-
         case mbExpected of
@@ -1292,7 +1410,7 @@ compileHandler scope scrutineeExpr scrutineeTy resultTy dataInfo alts forceAnnot
               pure (surfaceAnn handlerBody handlerTy)
 
     specializeConstructorArgsForScrutinee actualScrutineeTy ctor =
-      case matchTypes Map.empty (ctorResult ctor) actualScrutineeTy of
+      case matchTypesInScope scope Map.empty (ctorResult ctor) actualScrutineeTy of
         Just subst -> map (specializeSrcType subst) (ctorArgs ctor)
         Nothing -> ctorArgs ctor
 
@@ -1343,10 +1461,10 @@ validatePatternType scope expectedTy pattern0 =
             (zip patterns (ctorArgs ctorInfo))
   where
     matchPatternTypes template actual =
-      case matchTypes Map.empty template actual of
+      case matchTypesInScope scope Map.empty template actual of
         Just subst -> Just subst
         Nothing ->
-          case matchTypes Map.empty actual template of
+          case matchTypesInScope scope Map.empty actual template of
             Just subst -> Just subst
             Nothing
               | lowerType scope template == lowerType scope actual -> Just Map.empty
@@ -1359,11 +1477,11 @@ validatePatternAnnotation scope expectedTy annTy =
   where
     patternAnnotationCompatible left right =
       lowerType scope left == lowerType scope right
-        || matchTypes Map.empty left right /= Nothing
-        || matchTypes Map.empty right left /= Nothing
+        || matchTypesInScope scope Map.empty left right /= Nothing
+        || matchTypesInScope scope Map.empty right left /= Nothing
 
-validateOrderedPatterns :: [P.Alt] -> ElaborateM ()
-validateOrderedPatterns = go Set.empty False
+validateOrderedPatterns :: ElaborateScope -> [P.Alt] -> ElaborateM ()
+validateOrderedPatterns scope = go Set.empty False
   where
     go _ _ [] = pure ()
     go seen catchAllSeen (P.Alt pattern0 _ : rest)
@@ -1371,12 +1489,19 @@ validateOrderedPatterns = go Set.empty False
           throwError (ProgramDuplicateCaseBranch (maybe "_" id (topConstructorName pattern0)))
       | isCatchAllPattern pattern0 =
           go seen True rest
-      | Just ctorName0 <- topConstructorName pattern0,
-        ctorName0 `Set.member` seen =
+      | Just (ctorName0, ctorIdentity) <- topConstructorIdentity pattern0,
+        ctorIdentity `Set.member` seen =
           throwError (ProgramDuplicateCaseBranch ctorName0)
-      | Just ctorName0 <- flatCatchAllConstructor pattern0 =
-          go (Set.insert ctorName0 seen) False rest
+      | Just (_, ctorIdentity) <- flatCatchAllConstructor scope pattern0 =
+          go (Set.insert ctorIdentity seen) False rest
       | otherwise = go seen False rest
+
+    topConstructorIdentity pattern0 =
+      case topConstructorName pattern0 of
+        Just ctorName0
+          | Just ctorInfo <- lookupConstructorInfoMaybe scope ctorName0 ->
+              Just (ctorName0, ctorInfoSymbol ctorInfo)
+        _ -> Nothing
 
 topConstructorName :: P.Pattern -> Maybe String
 topConstructorName pattern0 =
@@ -1384,11 +1509,13 @@ topConstructorName pattern0 =
     P.PatCtor ctorName0 _ -> Just ctorName0
     _ -> Nothing
 
-flatCatchAllConstructor :: P.Pattern -> Maybe String
-flatCatchAllConstructor pattern0 =
+flatCatchAllConstructor :: ElaborateScope -> P.Pattern -> Maybe (String, SymbolIdentity)
+flatCatchAllConstructor scope pattern0 =
   case stripPatternAnn pattern0 of
     P.PatCtor ctorName0 patterns
-      | all isCatchAllPattern patterns -> Just ctorName0
+      | all isCatchAllPattern patterns,
+        Just ctorInfo <- lookupConstructorInfoMaybe scope ctorName0 ->
+          Just (ctorName0, ctorInfoSymbol ctorInfo)
     _ -> Nothing
 
 isCatchAllPattern :: P.Pattern -> Bool
@@ -1461,7 +1588,7 @@ visibleDataInfo (visibleName, info) =
 
 sameDataInfo :: (String, DataInfo) -> (String, DataInfo) -> Bool
 sameDataInfo (_, left) (_, right) =
-  dataModule left == dataModule right && dataName left == dataName right
+  dataInfoSymbolIdentity left == dataInfoSymbolIdentity right
 
 constructorBelongsToDataInfo :: ConstructorInfo -> DataInfo -> Bool
 constructorBelongsToDataInfo ctorInfo =
@@ -1475,7 +1602,7 @@ constructorNameMatches scope ctorName0 ctorInfo =
 
 sameConstructorInfo :: ConstructorInfo -> ConstructorInfo -> Bool
 sameConstructorInfo left right =
-  ctorRuntimeName left == ctorRuntimeName right
+  ctorInfoSymbol left == ctorInfoSymbol right
 
 handlerSurfaceType :: ElaborateScope -> ConstructorInfo -> SrcType -> SrcType
 handlerSurfaceType scope ctorInfo resultTy =
@@ -1534,16 +1661,10 @@ resolveMethodInstanceInfoWithSubst scope methodInfo =
   resolveInstanceInfoWithIdentity scope (methodClassName methodInfo) (Just (methodInfoClassIdentity methodInfo))
 
 classInfoIdentity :: ClassInfo -> ClassIdentity
-classInfoIdentity classInfo =
-  (classModule classInfo, unqualifiedName (className classInfo))
+classInfoIdentity = classInfoSymbolIdentity
 
 methodInfoClassIdentity :: MethodInfo -> ClassIdentity
-methodInfoClassIdentity methodInfo =
-  (methodClassModule methodInfo, unqualifiedName (methodClassName methodInfo))
-
-unqualifiedName :: String -> String
-unqualifiedName =
-  reverse . takeWhile (/= '.') . reverse
+methodInfoClassIdentity = methodInfoOwnerClassSymbolIdentity
 
 resolveInstanceInfoWithIdentity ::
   ElaborateScope ->
@@ -1572,15 +1693,12 @@ resolveInstanceInfoWithIdentity scope className0 expectedClassIdentity headTy =
         Nothing -> False
 
     instanceInfoClassIdentity info =
-      (instanceClassModule info, unqualifiedName (instanceClassName info))
+      instanceInfoClassSymbolIdentity info
 
     matchInstanceHead info =
-      case matchTypes Map.empty (instanceHeadType info) headTy of
+      case matchTypesInScope scope Map.empty (instanceHeadType info) headTy of
         Just subst -> Just (subst, True)
-        Nothing ->
-          if lowerType scope (instanceHeadType info) == lowerType scope headTy
-            then Just (Map.empty, False)
-            else Nothing
+        Nothing -> Nothing
 
     deduplicateEquivalentMatches [] = []
     deduplicateEquivalentMatches (match : rest) =
@@ -1590,12 +1708,19 @@ resolveInstanceInfoWithIdentity scope className0 expectedClassIdentity headTy =
     equivalentInstanceMatch (left, _, _) (right, _, _) =
       instanceOriginModule left == instanceOriginModule right
         && instanceInfoClassIdentity left == instanceInfoClassIdentity right
-        && lowerType scope (instanceHeadType left) == lowerType scope (instanceHeadType right)
-        && map lowerConstraint (instanceConstraints left) == map lowerConstraint (instanceConstraints right)
+        && canonicalSourceType scope (instanceHeadType left) == canonicalSourceType scope (instanceHeadType right)
+        && map canonicalConstraint (instanceConstraints left) == map canonicalConstraint (instanceConstraints right)
         && fmap methodRuntimeIdentity (instanceMethods left) == fmap methodRuntimeIdentity (instanceMethods right)
 
-    lowerConstraint constraint =
-      constraint {P.constraintType = lowerType scope (P.constraintType constraint)}
+    canonicalConstraint constraint =
+      ( canonicalConstraintClassKey (P.constraintClassName constraint),
+        canonicalSourceType scope (P.constraintType constraint)
+      )
+
+    canonicalConstraintClassKey classKeyName =
+      case constraintClassIdentity scope classKeyName of
+        Just identity -> Right identity
+        Nothing -> Left classKeyName
 
     methodRuntimeIdentity valueInfo =
       case valueInfo of
@@ -1616,44 +1741,76 @@ inferClassArgument methodTy classParam args =
         =<< foldM (\subst (templateTy, actualTy) -> matchTypes subst templateTy actualTy) Map.empty (zip paramTys args)
 
 matchTypes :: Map String SrcType -> SrcType -> SrcType -> Maybe (Map String SrcType)
-matchTypes subst template actual = case template of
+matchTypes = matchTypesWith (==) (==)
+
+matchTypesInScope :: ElaborateScope -> Map String SrcType -> SrcType -> SrcType -> Maybe (Map String SrcType)
+matchTypesInScope scope =
+  matchTypesWith (semanticTypeEqual scope) (sameTypeHeadInScope scope)
+
+matchTypesWith ::
+  (SrcType -> SrcType -> Bool) ->
+  (String -> String -> Bool) ->
+  Map String SrcType ->
+  SrcType ->
+  SrcType ->
+  Maybe (Map String SrcType)
+matchTypesWith sameType sameTypeHead subst template actual = case template of
   STVar name ->
     case Map.lookup name subst of
       Nothing -> Just (Map.insert name actual subst)
       Just existing
-        | existing == actual -> Just subst
+        | sameType existing actual -> Just subst
         | otherwise -> Nothing
   STArrow dom cod ->
     case actual of
       STArrow dom' cod' -> do
-        subst' <- matchTypes subst dom dom'
-        matchTypes subst' cod cod'
+        subst' <- matchTypesWith sameType sameTypeHead subst dom dom'
+        matchTypesWith sameType sameTypeHead subst' cod cod'
       _ -> Nothing
-  STBase name ->
+  STBase {} ->
     case actual of
-      STBase name' | name == name' -> Just subst
+      STBase {} | sameType template actual -> Just subst
       _ -> Nothing
   STCon name args ->
     case actual of
       STCon name' args'
-        | name == name' && length (toListNE args) == length (toListNE args') ->
-            foldM (\acc (leftTy, rightTy) -> matchTypes acc leftTy rightTy) subst (zip (toListNE args) (toListNE args'))
+        | sameTypeHead name name' && length (toListNE args) == length (toListNE args') ->
+            foldM
+              (\acc (leftTy, rightTy) -> matchTypesWith sameType sameTypeHead acc leftTy rightTy)
+              subst
+              (zip (toListNE args) (toListNE args'))
       _ -> Nothing
   STForall name mb body ->
     case actual of
       STForall name' mb' body'
-        | maybe True (\bound -> fmap unSrcBound mb' == Just (unSrcBound bound)) mb && name == name' ->
-            matchTypes subst body body'
+        | maybe True (\bound -> maybe False (sameType (unSrcBound bound) . unSrcBound) mb') mb && name == name' ->
+            matchTypesWith sameType sameTypeHead subst body body'
       _ -> Nothing
   STMu name body ->
     case actual of
       STMu name' body'
-        | name == name' -> matchTypes subst body body'
+        | name == name' -> matchTypesWith sameType sameTypeHead subst body body'
       _ -> Nothing
   STBottom ->
     case actual of
       STBottom -> Just subst
       _ -> Nothing
+
+semanticTypeEqual :: ElaborateScope -> SrcType -> SrcType -> Bool
+semanticTypeEqual scope left right =
+  canonicalSourceType scope left == canonicalSourceType scope right
+
+sameTypeHeadInScope :: ElaborateScope -> String -> String -> Bool
+sameTypeHeadInScope scope left right =
+  canonicalTypeHeadName scope left == canonicalTypeHeadName scope right
+
+canonicalTypeHeadName :: ElaborateScope -> String -> String
+canonicalTypeHeadName scope name =
+  case Map.lookup name (esTypes scope) of
+    Just info ->
+      let identity = dataInfoSymbolIdentity info
+       in symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+    Nothing -> name
 
 -- | Strip leading STForall binders that do not appear in the body.
 stripVacuousSrcForalls :: SrcType -> SrcType
@@ -1712,6 +1869,7 @@ extendConstraintEvidence scope constraints = do
       let evidenceInfo =
             EvidenceInfo
               { evidenceClassName = P.constraintClassName constraint,
+                evidenceClassSymbol = classInfoSymbolIdentity classInfo,
                 evidenceType = P.constraintType constraint,
                 evidenceMethods = Map.fromList methodEntries
               }
@@ -1738,6 +1896,7 @@ extendLocalLoweredPure scope sourceName runtimeName loweredTy =
           sourceName
           OrdinaryValue
             { valueDisplayName = sourceName,
+              valueInfoSymbol = localValueSymbol runtimeName,
               valueRuntimeName = runtimeName,
               valueType = loweredTy,
               valueConstraints = [],
@@ -1755,6 +1914,7 @@ extendLocalSourceTypePure scope sourceName runtimeName sourceTy =
           sourceName
           OrdinaryValue
             { valueDisplayName = sourceName,
+              valueInfoSymbol = localValueSymbol runtimeName,
               valueRuntimeName = runtimeName,
               valueType = sourceTy,
               valueConstraints = [],
@@ -1762,6 +1922,15 @@ extendLocalSourceTypePure scope sourceName runtimeName sourceTy =
             }
           (esValues scope),
       esRuntimeTypes = Map.insert runtimeName (lowerType scope sourceTy) (esRuntimeTypes scope)
+    }
+
+localValueSymbol :: String -> SymbolIdentity
+localValueSymbol runtimeName =
+  SymbolIdentity
+    { symbolNamespace = SymbolValue,
+      symbolDefiningModule = "<local>",
+      symbolDefiningName = runtimeName,
+      symbolOwnerIdentity = Nothing
     }
 
 expectedCodomain :: Maybe SrcType -> Maybe SrcType

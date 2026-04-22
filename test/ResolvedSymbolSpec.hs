@@ -63,6 +63,7 @@ valueInfo :: ValueInfo
 valueInfo =
   OrdinaryValue
     { valueDisplayName = "answer",
+      valueInfoSymbol = SymbolIdentity SymbolValue "Lib" "answer" Nothing,
       valueRuntimeName = "Lib__answer",
       valueType = STBase "Int",
       valueConstraints = [],
@@ -73,6 +74,7 @@ mainValueInfo :: ValueInfo
 mainValueInfo =
   OrdinaryValue
     { valueDisplayName = "main",
+      valueInfoSymbol = SymbolIdentity SymbolValue "Main" "main" Nothing,
       valueRuntimeName = "Main__main",
       valueType = STBase "Int",
       valueConstraints = [],
@@ -83,6 +85,12 @@ someCtor :: ConstructorInfo
 someCtor =
   ConstructorInfo
     { ctorName = "Some",
+      ctorInfoSymbol =
+        SymbolIdentity
+          SymbolConstructor
+          "Lib"
+          "Some"
+          (Just (SymbolOwnerType "Lib" "Token")),
       ctorRuntimeName = "Lib__Some",
       ctorType = STBase "Token",
       ctorForalls = [],
@@ -96,6 +104,7 @@ tokenDataInfo :: DataInfo
 tokenDataInfo =
   DataInfo
     { dataName = "Token",
+      dataInfoSymbol = SymbolIdentity SymbolType "Lib" "Token" Nothing,
       dataModule = "Lib",
       dataParams = [],
       dataConstructors = [someCtor]
@@ -105,6 +114,12 @@ eqMethodInfo :: MethodInfo
 eqMethodInfo =
   MethodInfo
     { methodClassName = "Eq",
+      methodInfoSymbol =
+        SymbolIdentity
+          SymbolMethod
+          "Lib"
+          "eq"
+          (Just (SymbolOwnerClass "Lib" "Eq")),
       methodClassModule = "Lib",
       methodName = "eq",
       methodRuntimeBase = "Lib__Eq__eq",
@@ -121,6 +136,7 @@ eqClassInfo :: ClassInfo
 eqClassInfo =
   ClassInfo
     { className = "Eq",
+      classInfoSymbol = SymbolIdentity SymbolClass "Lib" "Eq" Nothing,
       classModule = "Lib",
       classParamName = "a",
       classMethods = Map.singleton "eq" eqMethodInfo
@@ -130,6 +146,7 @@ qualifiedEqClassInfo :: ClassInfo
 qualifiedEqClassInfo =
   ClassInfo
     { className = "L.Eq",
+      classInfoSymbol = SymbolIdentity SymbolClass "Lib" "Eq" Nothing,
       classModule = "Lib",
       classParamName = "a",
       classMethods = Map.singleton "eq" qualifiedEqMethodInfo
@@ -139,6 +156,7 @@ eqMethodValue :: ValueInfo
 eqMethodValue =
   OverloadedMethod
     { valueDisplayName = "eq",
+      valueInfoSymbol = methodInfoSymbolIdentity eqMethodInfo,
       valueMethodInfo = eqMethodInfo,
       valueOriginModule = "Lib"
     }
@@ -147,6 +165,7 @@ qualifiedEqMethodValue :: ValueInfo
 qualifiedEqMethodValue =
   OverloadedMethod
     { valueDisplayName = "L.eq",
+      valueInfoSymbol = methodInfoSymbolIdentity qualifiedEqMethodInfo,
       valueMethodInfo = qualifiedEqMethodInfo,
       valueOriginModule = "Lib"
     }

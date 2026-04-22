@@ -26,6 +26,7 @@ module MLF.Frontend.Program.Types
     constructorInfoSymbolIdentity,
     classInfoSymbolIdentity,
     methodInfoSymbolIdentity,
+    methodInfoOwnerClassSymbolIdentity,
     instanceInfoClassSymbolIdentity,
     resolvedValueInfoSymbol,
     resolvedDataInfoSymbol,
@@ -346,20 +347,17 @@ newtype ResolvedProgram = ResolvedProgram
   deriving (Eq, Show)
 
 {- Note [Resolved .mlfp symbol identities]
-The current checker still accepts qualified spellings by materializing qualified
-copies of imported `ValueInfo`, `DataInfo`, and `ClassInfo` records. That keeps
-surface lookup working, but later phases need a stable model that does not
-confuse the spelling used at a reference site with the semantic declaration it
-resolved to.
-
 `SymbolIdentity` is the semantic key. It uses the defining module plus the
 unqualified declaration name, and method/constructor identities carry their
 owning class/type identity. `SymbolSpelling` is the reference-side surface data:
 the source name, display name, and whether it came from a local declaration,
 unqualified import, qualified/aliased import, or builtin.
 
-This is intentionally only a model/boundary contract for now. It should be used
-by the resolver migration before changing checker visibility semantics.
+The checker and elaborator keep visible maps keyed by surface spelling because
+source lookup and diagnostics need those names. Downstream metadata stores
+`SymbolIdentity` separately, and semantic checks compare that identity instead
+of inferring declaration equality from qualified/unqualified strings. Runtime
+names remain explicit generated names, not semantic identities.
 -}
 
 mkResolvedSymbol :: SymbolIdentity -> String -> String -> SymbolOrigin -> ResolvedSymbol
@@ -384,6 +382,7 @@ unqualifiedSymbolName =
 
 data EvidenceInfo = EvidenceInfo
   { evidenceClassName :: P.ClassName,
+    evidenceClassSymbol :: SymbolIdentity,
     evidenceType :: SrcType,
     evidenceMethods :: Map P.MethodName (String, SrcType)
   }
@@ -391,6 +390,7 @@ data EvidenceInfo = EvidenceInfo
 
 data ConstructorInfo = ConstructorInfo
   { ctorName :: P.ConstructorName,
+    ctorInfoSymbol :: SymbolIdentity,
     ctorRuntimeName :: String,
     ctorType :: SrcType,
     ctorForalls :: [(String, Maybe SrcType)],
@@ -403,6 +403,7 @@ data ConstructorInfo = ConstructorInfo
 
 data DataInfo = DataInfo
   { dataName :: P.TypeName,
+    dataInfoSymbol :: SymbolIdentity,
     dataModule :: P.ModuleName,
     dataParams :: [String],
     dataConstructors :: [ConstructorInfo]
@@ -411,6 +412,7 @@ data DataInfo = DataInfo
 
 data MethodInfo = MethodInfo
   { methodClassName :: P.ClassName,
+    methodInfoSymbol :: SymbolIdentity,
     methodClassModule :: P.ModuleName,
     methodName :: P.MethodName,
     methodRuntimeBase :: String,
@@ -422,6 +424,7 @@ data MethodInfo = MethodInfo
 
 data ClassInfo = ClassInfo
   { className :: P.ClassName,
+    classInfoSymbol :: SymbolIdentity,
     classModule :: P.ModuleName,
     classParamName :: String,
     classMethods :: Map P.MethodName MethodInfo
@@ -431,6 +434,7 @@ data ClassInfo = ClassInfo
 data ValueInfo
   = OrdinaryValue
       { valueDisplayName :: String,
+        valueInfoSymbol :: SymbolIdentity,
         valueRuntimeName :: String,
         valueType :: SrcType,
         valueConstraints :: [P.ClassConstraint],
@@ -438,6 +442,7 @@ data ValueInfo
       }
   | ConstructorValue
       { valueDisplayName :: String,
+        valueInfoSymbol :: SymbolIdentity,
         valueRuntimeName :: String,
         valueType :: SrcType,
         valueCtorInfo :: ConstructorInfo,
@@ -445,6 +450,7 @@ data ValueInfo
       }
   | OverloadedMethod
       { valueDisplayName :: String,
+        valueInfoSymbol :: SymbolIdentity,
         valueMethodInfo :: MethodInfo,
         valueOriginModule :: P.ModuleName
       }
@@ -452,6 +458,7 @@ data ValueInfo
 
 data InstanceInfo = InstanceInfo
   { instanceClassName :: P.ClassName,
+    instanceClassSymbol :: SymbolIdentity,
     instanceClassModule :: P.ModuleName,
     instanceOriginModule :: P.ModuleName,
     instanceConstraints :: [P.ClassConstraint],
@@ -553,74 +560,40 @@ data CheckedProgram = CheckedProgram
   deriving (Eq, Show)
 
 valueInfoSymbolIdentity :: ValueInfo -> SymbolIdentity
-valueInfoSymbolIdentity valueInfo =
-  case valueInfo of
-    OrdinaryValue {} ->
-      SymbolIdentity
-        { symbolNamespace = SymbolValue,
-          symbolDefiningModule = valueOriginModule valueInfo,
-          symbolDefiningName = unqualifiedSymbolName (valueDisplayName valueInfo),
-          symbolOwnerIdentity = Nothing
-        }
-    ConstructorValue {valueCtorInfo = ctorInfo} ->
-      SymbolIdentity
-        { symbolNamespace = SymbolConstructor,
-          symbolDefiningModule = valueOriginModule valueInfo,
-          symbolDefiningName = unqualifiedSymbolName (ctorName ctorInfo),
-          symbolOwnerIdentity = Just (SymbolOwnerType (valueOriginModule valueInfo) (ctorOwningType ctorInfo))
-        }
-    OverloadedMethod {valueMethodInfo = methodInfo} ->
-      methodInfoSymbolIdentity methodInfo
+valueInfoSymbolIdentity = valueInfoSymbol
 
 dataInfoSymbolIdentity :: DataInfo -> SymbolIdentity
-dataInfoSymbolIdentity dataInfo =
-  SymbolIdentity
-    { symbolNamespace = SymbolType,
-      symbolDefiningModule = dataModule dataInfo,
-      symbolDefiningName = dataName dataInfo,
-      symbolOwnerIdentity = Nothing
-    }
+dataInfoSymbolIdentity = dataInfoSymbol
 
 constructorInfoSymbolIdentity :: DataInfo -> ConstructorInfo -> SymbolIdentity
-constructorInfoSymbolIdentity dataInfo ctorInfo =
-  SymbolIdentity
-    { symbolNamespace = SymbolConstructor,
-      symbolDefiningModule = dataModule dataInfo,
-      symbolDefiningName = unqualifiedSymbolName (ctorName ctorInfo),
-      symbolOwnerIdentity = Just (SymbolOwnerType (dataModule dataInfo) (ctorOwningType ctorInfo))
-    }
+constructorInfoSymbolIdentity _ = ctorInfoSymbol
 
 classInfoSymbolIdentity :: ClassInfo -> SymbolIdentity
-classInfoSymbolIdentity classInfo =
-  SymbolIdentity
-    { symbolNamespace = SymbolClass,
-      symbolDefiningModule = classModule classInfo,
-      symbolDefiningName = unqualifiedSymbolName (className classInfo),
-      symbolOwnerIdentity = Nothing
-    }
+classInfoSymbolIdentity = classInfoSymbol
 
 methodInfoSymbolIdentity :: MethodInfo -> SymbolIdentity
-methodInfoSymbolIdentity methodInfo =
-  SymbolIdentity
-    { symbolNamespace = SymbolMethod,
-      symbolDefiningModule = methodClassModule methodInfo,
-      symbolDefiningName = methodName methodInfo,
-      symbolOwnerIdentity =
-        Just
-          ( SymbolOwnerClass
-              (methodClassModule methodInfo)
-              (unqualifiedSymbolName (methodClassName methodInfo))
-          )
-    }
+methodInfoSymbolIdentity = methodInfoSymbol
+
+methodInfoOwnerClassSymbolIdentity :: MethodInfo -> SymbolIdentity
+methodInfoOwnerClassSymbolIdentity methodInfo =
+  case symbolOwnerIdentity (methodInfoSymbolIdentity methodInfo) of
+    Just (SymbolOwnerClass moduleName className0) ->
+      SymbolIdentity
+        { symbolNamespace = SymbolClass,
+          symbolDefiningModule = moduleName,
+          symbolDefiningName = className0,
+          symbolOwnerIdentity = Nothing
+        }
+    _ ->
+      SymbolIdentity
+        { symbolNamespace = SymbolClass,
+          symbolDefiningModule = methodClassModule methodInfo,
+          symbolDefiningName = unqualifiedSymbolName (methodClassName methodInfo),
+          symbolOwnerIdentity = Nothing
+        }
 
 instanceInfoClassSymbolIdentity :: InstanceInfo -> SymbolIdentity
-instanceInfoClassSymbolIdentity instanceInfo =
-  SymbolIdentity
-    { symbolNamespace = SymbolClass,
-      symbolDefiningModule = instanceClassModule instanceInfo,
-      symbolDefiningName = unqualifiedSymbolName (instanceClassName instanceInfo),
-      symbolOwnerIdentity = Nothing
-    }
+instanceInfoClassSymbolIdentity = instanceClassSymbol
 
 resolvedValueInfoSymbol :: SymbolOrigin -> ValueInfo -> ResolvedSymbol
 resolvedValueInfoSymbol origin valueInfo =

@@ -22,6 +22,7 @@ import MLF.Frontend.Program.Types
     DataInfo (..),
     ProgramDiagnostic,
     ProgramError (..),
+    SymbolIdentity (..),
   )
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
@@ -197,13 +198,14 @@ dataTypeHeadMatches :: DataInfo -> String -> Bool
 dataTypeHeadMatches dataInfo name =
   if isQualifiedSourceHead name
     then qualifiedDataName dataInfo == name
-    else dataName dataInfo == name
+    else symbolDefiningName (dataInfoSymbol dataInfo) == name
 
 isQualifiedSourceHead :: String -> Bool
 isQualifiedSourceHead = elem '.'
 
 qualifiedDataName :: DataInfo -> String
-qualifiedDataName dataInfo = dataModule dataInfo ++ "." ++ dataName dataInfo
+qualifiedDataName dataInfo =
+  symbolDefiningModule (dataInfoSymbol dataInfo) ++ "." ++ symbolDefiningName (dataInfoSymbol dataInfo)
 
 allDataInfos :: CheckedProgram -> [DataInfo]
 allDataInfos checked =
@@ -288,8 +290,8 @@ lookupDataInfoInModule checked moduleName0 name =
   case
     [ dataInfo
       | dataInfo <- allDataInfos checked,
-        dataModule dataInfo == moduleName0,
-        dataName dataInfo == name
+        symbolDefiningModule (dataInfoSymbol dataInfo) == moduleName0,
+        symbolDefiningName (dataInfoSymbol dataInfo) == name
     ]
   of
     dataInfo : _ -> Just dataInfo
