@@ -77,6 +77,7 @@ library mlf2-internal
                       MLF.Frontend.Program.Parse,
                       MLF.Frontend.Program.Pretty,
                       MLF.Frontend.Program.Types,
+                      MLF.Frontend.Program.Resolve,
                       MLF.Frontend.Program.Surface,
                       MLF.Frontend.Program.Prelude,
                       MLF.Frontend.Program.Elaborate,
