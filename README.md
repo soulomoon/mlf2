@@ -115,6 +115,12 @@ Run a program file directly from the executable:
 cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp
 ```
 
+Start the minimal `.mlfp` language server over stdio:
+
+```bash
+cabal run mlf2 -- lsp
+```
+
 ## Syntax and paper alignment
 
 - Canonical syntax spec: `docs/syntax.md`

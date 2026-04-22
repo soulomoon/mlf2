@@ -7,6 +7,7 @@ import MLF.Program.CLI
     ( programCliUsage
     , runProgramFile
     )
+import MLF.Program.LSP (runLanguageServer)
 import MLF.Research.URI.R2.C1.Prototype.Entrypoint
     ( AppRun(..)
     , runAppFromCurrentDirectory
@@ -21,6 +22,10 @@ main = do
             runProgramFile path >>= either die putStrLn
         ["run-program"] ->
             die programCliUsage
+        ["lsp"] ->
+            runLanguageServer
+        ["language-server"] ->
+            runLanguageServer
         ["--help"] ->
             putStrLn programCliUsage
         _ ->

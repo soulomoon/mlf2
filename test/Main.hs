@@ -25,6 +25,7 @@ import Phi.AlignmentSpec qualified
 import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
 import PipelineSpec qualified
+import ProgramLspSpec qualified
 import ProgramSpec qualified
 import Presolution.UnificationClosureSpec qualified
 import PresolutionFacadeSpec qualified
@@ -73,6 +74,7 @@ main = do
     SolveSpec.spec
     ScopeSpec.spec
     ProgramSpec.spec
+    ProgramLspSpec.spec
     PipelineSpec.spec
     PublicSurfaceSpec.spec
     RepoGuardSpec.spec
