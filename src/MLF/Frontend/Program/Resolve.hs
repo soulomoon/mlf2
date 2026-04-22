@@ -93,7 +93,7 @@ resolveModule (priorExports, resolvedRev) mod0 = do
   locals <- buildLocalSymbols mod0
   let fullCandidates = addLocalSymbols importScope locals
   references <- resolveModuleReferences fullCandidates mod0
-  fullScope <- resolvedScopeFromCandidates ProgramDuplicateVisibleName fullCandidates
+  fullScope <- resolvedModuleScopeFromCandidates (P.moduleName mod0) fullCandidates
   exports <- buildExports mod0 locals
   let resolved =
         ResolvedModule
@@ -294,7 +294,12 @@ buildExports mod0 locals =
       Map.unionWith
         (++)
         values0
-        (Map.filter (any (isMethodOf className0)) (localValues locals))
+        (Map.mapMaybe (onlyMethodsOf className0) (localValues locals))
+
+    onlyMethodsOf className0 symbols =
+      case filter (isMethodOf className0) symbols of
+        [] -> Nothing
+        matchingSymbols -> Just matchingSymbols
 
     exportConstructors typeName values0 =
       Map.unionWith
@@ -468,6 +473,30 @@ resolvedScopeFromCandidates duplicateErr scope =
     <*> uniqueMap duplicateErr (candidateTypes scope)
     <*> uniqueMap duplicateErr (candidateClasses scope)
     <*> uniqueMap duplicateErr (candidateModules scope)
+
+{- Note [Local method candidates in resolved module scope]
+`resolveModuleReferences` reads the full candidate map, so a bare use of a
+same-named method from multiple local classes is still ambiguous. The exported
+module-scope snapshot is a unique-symbol map, though, and same-named local
+methods have no unique value entry until an export selects the owning class.
+-}
+resolvedModuleScopeFromCandidates :: P.ModuleName -> CandidateScope -> ResolveM ResolvedScope
+resolvedModuleScopeFromCandidates moduleName0 scope =
+  resolvedScopeFromCandidates
+    ProgramDuplicateVisibleName
+    scope {candidateValues = Map.mapMaybe moduleScopeValue (candidateValues scope)}
+  where
+    moduleScopeValue symbols =
+      case distinctByIdentity symbols of
+        [] -> Just symbols
+        [_] -> Just symbols
+        distinct
+          | all (isLocalMethod moduleName0) distinct -> Nothing
+          | otherwise -> Just symbols
+
+    isLocalMethod currentModule symbol =
+      symbolNamespace (resolvedSymbolIdentity symbol) == SymbolMethod
+        && symbolSpellingOrigin (resolvedSymbolSpelling symbol) == SymbolLocal currentModule
 
 uniqueMap :: (String -> ProgramError) -> Map String [ResolvedSymbol] -> ResolveM (Map String ResolvedSymbol)
 uniqueMap duplicateErr =

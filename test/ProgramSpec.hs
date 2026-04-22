@@ -2418,6 +2418,28 @@ spec = do
             program <- requireParsed programText
             checkProgram program `shouldBe` Left (ProgramDuplicateVisibleName "value")
 
+        it "exports only methods owned by the selected class" $ do
+            let programText =
+                    unlines
+                        [ "module A export (C) {"
+                        , "  class C a {"
+                        , "    method : a -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  class D a {"
+                        , "    method : a -> Bool;"
+                        , "  }"
+                        , "}"
+                        , "module Main export (main) {"
+                        , "  import A;"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case checkProgram program of
+                Left (ProgramDuplicateVisibleName "method") -> expectationFailure "exported a sibling class method"
+                result -> result `shouldSatisfy` isRight
+
         it "rejects ambiguous unqualified references at the resolver boundary" $ do
             let programText =
                     unlines
