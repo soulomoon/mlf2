@@ -504,12 +504,12 @@ compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} arg
   where
     compileConstructorArg expectedTy arg = do
       case inferKnownExprType scope arg of
-        Just knownTy
-          | Set.null (freeTypeVarsSrcType knownTy) ->
-              ensureSourceTypeCompatible scope expectedTy knownTy >>
-              compileExpr scope (Just knownTy) arg
-          | otherwise ->
-              compileExpr scope (Just expectedTy) arg
+        Just knownTy -> do
+          let specializedKnownTy = specializeKnownTypeForExpected scope expectedTy knownTy
+          ensureSourceTypeCompatible scope expectedTy specializedKnownTy
+          if Set.null (freeTypeVarsSrcType knownTy)
+            then compileExpr scope (Just knownTy) arg
+            else compileExpr scope (Just expectedTy) arg
         Nothing -> do
           argSurface <- compileExpr scope Nothing arg
           pure $
@@ -568,6 +568,63 @@ isPartialOverloadedMethodApp scope expr =
       | Just OverloadedMethod {valueMethodInfo = methodInfo} <- Map.lookup name (esValues scope) ->
           not (null args) && length args < methodFullArity methodInfo
     _ -> False
+
+specializeKnownTypeForExpected :: ElaborateScope -> SrcType -> SrcType -> SrcType
+specializeKnownTypeForExpected scope expectedTy knownTy =
+  case matchTypesInScope scope Map.empty knownTy expectedTy of
+    Just subst -> specializeSrcType subst knownTy
+    Nothing ->
+      case matchTypesByShape Map.empty knownTy expectedTy of
+        Just subst -> specializeSrcType subst knownTy
+        Nothing -> knownTy
+
+matchTypesByShape :: Map String SrcType -> SrcType -> SrcType -> Maybe (Map String SrcType)
+matchTypesByShape subst template actual = case template of
+  STVar name ->
+    case Map.lookup name subst of
+      Nothing -> Just (Map.insert name actual subst)
+      Just existing
+        | existing == actual -> Just subst
+        | otherwise -> Nothing
+  STArrow dom cod ->
+    case actual of
+      STArrow dom' cod' -> do
+        subst' <- matchTypesByShape subst dom dom'
+        matchTypesByShape subst' cod cod'
+      _ -> Nothing
+  STBase {} ->
+    case actual of
+      STBase {} -> Just subst
+      _ -> Nothing
+  STCon _ args ->
+    case actual of
+      STCon _ args'
+        | length (toListNE args) == length (toListNE args') ->
+            foldM
+              (\acc (templateTy, actualTy) -> matchTypesByShape acc templateTy actualTy)
+              subst
+              (zip (toListNE args) (toListNE args'))
+      _ -> Nothing
+  STForall name mb body ->
+    case actual of
+      STForall name' mb' body'
+        | name == name' -> do
+            subst' <-
+              case (mb, mb') of
+                (Nothing, _) -> Just subst
+                (Just bound, Just bound') -> matchTypesByShape subst (unSrcBound bound) (unSrcBound bound')
+                (Just {}, Nothing) -> Nothing
+            matchTypesByShape subst' body body'
+      _ -> Nothing
+  STMu name body ->
+    case actual of
+      STMu name' body'
+        | name == name' -> matchTypesByShape subst body body'
+      _ -> Nothing
+  STBottom ->
+    case actual of
+      STBottom -> Just subst
+      _ -> Nothing
 
 constructorExpectedArgTypes :: ElaborateScope -> ConstructorInfo -> Maybe SrcType -> [P.Expr] -> [SrcType]
 constructorExpectedArgTypes scope ctorInfo mbExpected args =
