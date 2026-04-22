@@ -1681,6 +1681,33 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramTypeMismatch")
     , ProgramMatrixCase
+        "rejects same-shape qualified constructor arguments after result specialization"
+        ( InlineProgram $
+            unlines
+                [ "module A export (Box(..)) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , "}"
+                , ""
+                , "module B export (Box(..)) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , "}"
+                , ""
+                , "module Main export (Use(..), main) {"
+                , "  import A as A;"
+                , "  import B as B;"
+                , ""
+                , "  data Use a ="
+                , "      Use : A.Box a -> Use a;"
+                , ""
+                , "  def bad : Use Bool = Use (B.Box true);"
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramTypeMismatch")
+    , ProgramMatrixCase
         "runs local class instance for alias-only imported type"
         ( InlineProgram $
             unlines

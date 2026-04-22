@@ -496,7 +496,7 @@ explicitExprAnnotation expr =
 
 compileValueApp :: ElaborateScope -> Maybe SrcType -> ValueInfo -> [P.Expr] -> ElaborateM SurfaceExpr
 compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} args = do
-  let expectedArgTys = constructorExpectedArgTypes scope ctorInfo args
+  let expectedArgTys = constructorExpectedArgTypes scope ctorInfo mbExpected args
   argSurfaces <-
     zipWithM compileConstructorArg expectedArgTys args
   placeholder <- deferConstructorCall scope ctorInfo (length args) mbExpected
@@ -569,10 +569,15 @@ isPartialOverloadedMethodApp scope expr =
           not (null args) && length args < methodFullArity methodInfo
     _ -> False
 
-constructorExpectedArgTypes :: ElaborateScope -> ConstructorInfo -> [P.Expr] -> [SrcType]
-constructorExpectedArgTypes scope ctorInfo args =
-  reverse (snd (foldl step (Map.empty, []) (zip (ctorArgs ctorInfo) args)))
+constructorExpectedArgTypes :: ElaborateScope -> ConstructorInfo -> Maybe SrcType -> [P.Expr] -> [SrcType]
+constructorExpectedArgTypes scope ctorInfo mbExpected args =
+  reverse (snd (foldl step (initialSubst, []) (zip (ctorArgs ctorInfo) args)))
   where
+    initialSubst =
+      case mbExpected >>= matchTypesInScope scope Map.empty (constructorOccurrenceType ctorInfo (length args)) of
+        Just subst -> subst
+        Nothing -> Map.empty
+
     step (subst, acc) (templateTy, arg) =
       let expectedTy = specializeSrcType subst templateTy
           subst' =
