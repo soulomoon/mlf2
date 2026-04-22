@@ -36,6 +36,7 @@ import Reify.CoreSpec qualified
 import Reify.NamedSpec qualified
 import Reify.TypeOpsSpec qualified
 import Reify.TypeSpec qualified
+import ResolvedSymbolSpec qualified
 import RepoGuardSpec qualified
 import Research.C1AuthoritativeSurfaceSpec qualified
 import Research.P2RepresentativeSupportSpec qualified
@@ -73,6 +74,7 @@ main = do
     SolveSpec.spec
     ScopeSpec.spec
     ProgramSpec.spec
+    ResolvedSymbolSpec.spec
     PipelineSpec.spec
     PublicSurfaceSpec.spec
     RepoGuardSpec.spec
