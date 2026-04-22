@@ -392,7 +392,6 @@ test-suite mlf2-test
                       SolveSpec,
                       ScopeSpec,
                       ProgramSpec,
-                      ResolvedSymbolSpec,
                       PipelineSpec,
                       ThesisFixDirectionSpec,
                       TypeCheckSpec,
