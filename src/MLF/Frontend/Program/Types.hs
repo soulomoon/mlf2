@@ -7,6 +7,27 @@ module MLF.Frontend.Program.Types
     diagnosticForProgramError,
     renderProgramDiagnostic,
     EvidenceInfo (..),
+    SymbolNamespace (..),
+    SymbolOwnerIdentity (..),
+    SymbolIdentity (..),
+    SymbolOrigin (..),
+    SymbolSpelling (..),
+    ResolvedSymbol (..),
+    mkResolvedSymbol,
+    sameResolvedSymbol,
+    unqualifiedSymbolName,
+    valueInfoSymbolIdentity,
+    dataInfoSymbolIdentity,
+    constructorInfoSymbolIdentity,
+    classInfoSymbolIdentity,
+    methodInfoSymbolIdentity,
+    instanceInfoClassSymbolIdentity,
+    resolvedValueInfoSymbol,
+    resolvedDataInfoSymbol,
+    resolvedConstructorInfoSymbol,
+    resolvedClassInfoSymbol,
+    resolvedMethodInfoSymbol,
+    resolvedModuleSymbol,
     ConstructorInfo (..),
     DataInfo (..),
     MethodInfo (..),
@@ -237,6 +258,85 @@ programErrorHints err =
       ["export the name from the source module or remove it from the import exposing list"]
     _ -> []
 
+data SymbolNamespace
+  = SymbolValue
+  | SymbolConstructor
+  | SymbolType
+  | SymbolClass
+  | SymbolMethod
+  | SymbolModule
+  deriving (Eq, Ord, Show)
+
+data SymbolOwnerIdentity
+  = SymbolOwnerType P.ModuleName P.TypeName
+  | SymbolOwnerClass P.ModuleName P.ClassName
+  deriving (Eq, Ord, Show)
+
+data SymbolIdentity = SymbolIdentity
+  { symbolNamespace :: SymbolNamespace,
+    symbolDefiningModule :: P.ModuleName,
+    symbolDefiningName :: String,
+    symbolOwnerIdentity :: Maybe SymbolOwnerIdentity
+  }
+  deriving (Eq, Ord, Show)
+
+data SymbolOrigin
+  = SymbolLocal P.ModuleName
+  | SymbolUnqualifiedImport P.ModuleName
+  | SymbolQualifiedImport P.ModuleName P.ModuleName
+  | SymbolBuiltin
+  deriving (Eq, Ord, Show)
+
+data SymbolSpelling = SymbolSpelling
+  { symbolSourceName :: String,
+    symbolDisplayName :: String,
+    symbolSpellingOrigin :: SymbolOrigin
+  }
+  deriving (Eq, Ord, Show)
+
+data ResolvedSymbol = ResolvedSymbol
+  { resolvedSymbolIdentity :: SymbolIdentity,
+    resolvedSymbolSpelling :: SymbolSpelling
+  }
+  deriving (Eq, Ord, Show)
+
+{- Note [Resolved .mlfp symbol identities]
+The current checker still accepts qualified spellings by materializing qualified
+copies of imported `ValueInfo`, `DataInfo`, and `ClassInfo` records. That keeps
+surface lookup working, but later phases need a stable model that does not
+confuse the spelling used at a reference site with the semantic declaration it
+resolved to.
+
+`SymbolIdentity` is the semantic key. It uses the defining module plus the
+unqualified declaration name, and method/constructor identities carry their
+owning class/type identity. `SymbolSpelling` is the reference-side surface data:
+the source name, display name, and whether it came from a local declaration,
+unqualified import, qualified/aliased import, or builtin.
+
+This is intentionally only a model/boundary contract for now. It should be used
+by the resolver migration before changing checker visibility semantics.
+-}
+
+mkResolvedSymbol :: SymbolIdentity -> String -> String -> SymbolOrigin -> ResolvedSymbol
+mkResolvedSymbol identity sourceName displayName origin =
+  ResolvedSymbol
+    { resolvedSymbolIdentity = identity,
+      resolvedSymbolSpelling =
+        SymbolSpelling
+          { symbolSourceName = sourceName,
+            symbolDisplayName = displayName,
+            symbolSpellingOrigin = origin
+          }
+    }
+
+sameResolvedSymbol :: ResolvedSymbol -> ResolvedSymbol -> Bool
+sameResolvedSymbol left right =
+  resolvedSymbolIdentity left == resolvedSymbolIdentity right
+
+unqualifiedSymbolName :: String -> String
+unqualifiedSymbolName =
+  reverse . takeWhile (/= '.') . reverse
+
 data EvidenceInfo = EvidenceInfo
   { evidenceClassName :: P.ClassName,
     evidenceType :: SrcType,
@@ -405,6 +505,130 @@ data CheckedProgram = CheckedProgram
     checkedProgramMain :: String
   }
   deriving (Eq, Show)
+
+valueInfoSymbolIdentity :: ValueInfo -> SymbolIdentity
+valueInfoSymbolIdentity valueInfo =
+  case valueInfo of
+    OrdinaryValue {} ->
+      SymbolIdentity
+        { symbolNamespace = SymbolValue,
+          symbolDefiningModule = valueOriginModule valueInfo,
+          symbolDefiningName = unqualifiedSymbolName (valueDisplayName valueInfo),
+          symbolOwnerIdentity = Nothing
+        }
+    ConstructorValue {valueCtorInfo = ctorInfo} ->
+      SymbolIdentity
+        { symbolNamespace = SymbolConstructor,
+          symbolDefiningModule = valueOriginModule valueInfo,
+          symbolDefiningName = unqualifiedSymbolName (ctorName ctorInfo),
+          symbolOwnerIdentity = Just (SymbolOwnerType (valueOriginModule valueInfo) (ctorOwningType ctorInfo))
+        }
+    OverloadedMethod {valueMethodInfo = methodInfo} ->
+      methodInfoSymbolIdentity methodInfo
+
+dataInfoSymbolIdentity :: DataInfo -> SymbolIdentity
+dataInfoSymbolIdentity dataInfo =
+  SymbolIdentity
+    { symbolNamespace = SymbolType,
+      symbolDefiningModule = dataModule dataInfo,
+      symbolDefiningName = dataName dataInfo,
+      symbolOwnerIdentity = Nothing
+    }
+
+constructorInfoSymbolIdentity :: DataInfo -> ConstructorInfo -> SymbolIdentity
+constructorInfoSymbolIdentity dataInfo ctorInfo =
+  SymbolIdentity
+    { symbolNamespace = SymbolConstructor,
+      symbolDefiningModule = dataModule dataInfo,
+      symbolDefiningName = unqualifiedSymbolName (ctorName ctorInfo),
+      symbolOwnerIdentity = Just (SymbolOwnerType (dataModule dataInfo) (ctorOwningType ctorInfo))
+    }
+
+classInfoSymbolIdentity :: ClassInfo -> SymbolIdentity
+classInfoSymbolIdentity classInfo =
+  SymbolIdentity
+    { symbolNamespace = SymbolClass,
+      symbolDefiningModule = classModule classInfo,
+      symbolDefiningName = unqualifiedSymbolName (className classInfo),
+      symbolOwnerIdentity = Nothing
+    }
+
+methodInfoSymbolIdentity :: MethodInfo -> SymbolIdentity
+methodInfoSymbolIdentity methodInfo =
+  SymbolIdentity
+    { symbolNamespace = SymbolMethod,
+      symbolDefiningModule = methodClassModule methodInfo,
+      symbolDefiningName = methodName methodInfo,
+      symbolOwnerIdentity =
+        Just
+          ( SymbolOwnerClass
+              (methodClassModule methodInfo)
+              (unqualifiedSymbolName (methodClassName methodInfo))
+          )
+    }
+
+instanceInfoClassSymbolIdentity :: InstanceInfo -> SymbolIdentity
+instanceInfoClassSymbolIdentity instanceInfo =
+  SymbolIdentity
+    { symbolNamespace = SymbolClass,
+      symbolDefiningModule = instanceClassModule instanceInfo,
+      symbolDefiningName = unqualifiedSymbolName (instanceClassName instanceInfo),
+      symbolOwnerIdentity = Nothing
+    }
+
+resolvedValueInfoSymbol :: SymbolOrigin -> ValueInfo -> ResolvedSymbol
+resolvedValueInfoSymbol origin valueInfo =
+  mkResolvedSymbol
+    (valueInfoSymbolIdentity valueInfo)
+    (unqualifiedSymbolName (valueDisplayName valueInfo))
+    (valueDisplayName valueInfo)
+    origin
+
+resolvedDataInfoSymbol :: SymbolOrigin -> String -> DataInfo -> ResolvedSymbol
+resolvedDataInfoSymbol origin displayName dataInfo =
+  mkResolvedSymbol
+    (dataInfoSymbolIdentity dataInfo)
+    (dataName dataInfo)
+    displayName
+    origin
+
+resolvedConstructorInfoSymbol :: SymbolOrigin -> String -> DataInfo -> ConstructorInfo -> ResolvedSymbol
+resolvedConstructorInfoSymbol origin displayName dataInfo ctorInfo =
+  mkResolvedSymbol
+    (constructorInfoSymbolIdentity dataInfo ctorInfo)
+    (unqualifiedSymbolName (ctorName ctorInfo))
+    displayName
+    origin
+
+resolvedClassInfoSymbol :: SymbolOrigin -> ClassInfo -> ResolvedSymbol
+resolvedClassInfoSymbol origin classInfo =
+  mkResolvedSymbol
+    (classInfoSymbolIdentity classInfo)
+    (unqualifiedSymbolName (className classInfo))
+    (className classInfo)
+    origin
+
+resolvedMethodInfoSymbol :: SymbolOrigin -> String -> MethodInfo -> ResolvedSymbol
+resolvedMethodInfoSymbol origin displayName methodInfo =
+  mkResolvedSymbol
+    (methodInfoSymbolIdentity methodInfo)
+    (methodName methodInfo)
+    displayName
+    origin
+
+resolvedModuleSymbol :: SymbolOrigin -> P.ModuleName -> P.ModuleName -> ResolvedSymbol
+resolvedModuleSymbol origin definingModule displayName =
+  mkResolvedSymbol
+    ( SymbolIdentity
+        { symbolNamespace = SymbolModule,
+          symbolDefiningModule = definingModule,
+          symbolDefiningName = definingModule,
+          symbolOwnerIdentity = Nothing
+        }
+    )
+    definingModule
+    displayName
+    origin
 
 splitForalls :: SrcType -> ([(String, Maybe SrcType)], SrcType)
 splitForalls = go []
