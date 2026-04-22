@@ -13,11 +13,6 @@ module MLF.Frontend.Program.Types
     SymbolOrigin (..),
     SymbolSpelling (..),
     ResolvedSymbol (..),
-    ResolvedReferenceKind (..),
-    ResolvedReference (..),
-    ResolvedScope (..),
-    ResolvedModule (..),
-    ResolvedProgram (..),
     mkResolvedSymbol,
     sameResolvedSymbol,
     unqualifiedSymbolName,
@@ -87,7 +82,6 @@ data ProgramError
   | ProgramUnknownType String
   | ProgramUnknownClass String
   | ProgramUnknownMethod String
-  | ProgramAmbiguousUnqualifiedReference String
   | ProgramInvalidConstructorResult P.ConstructorName SrcType P.TypeName
   | ProgramUnsupportedDeriving P.ClassName
   | ProgramDerivingRequiresNullaryType P.TypeName
@@ -168,7 +162,6 @@ spanForError err index =
     ProgramUnknownType name -> firstSpan name (P.spanTypes index)
     ProgramUnknownClass name -> firstSpan name (P.spanClasses index)
     ProgramUnknownMethod name -> firstSpan name (P.spanValues index)
-    ProgramAmbiguousUnqualifiedReference name -> lookupAnyName name index
     ProgramInvalidConstructorResult ctor _ _ -> firstSpan ctor (P.spanConstructors index)
     ProgramUnsupportedDeriving className0 -> firstSpan className0 (P.spanClasses index)
     ProgramDerivingRequiresNullaryType typeName -> firstSpan typeName (P.spanTypes index)
@@ -222,7 +215,6 @@ programErrorMessage err =
     ProgramUnknownType name -> "unknown type `" ++ name ++ "`"
     ProgramUnknownClass name -> "unknown class `" ++ name ++ "`"
     ProgramUnknownMethod name -> "unknown method `" ++ name ++ "`"
-    ProgramAmbiguousUnqualifiedReference name -> "ambiguous unqualified reference `" ++ name ++ "`"
     ProgramInvalidConstructorResult ctor resultTy owner -> "constructor `" ++ ctor ++ "` returns `" ++ show resultTy ++ "` instead of owning type `" ++ owner ++ "`"
     ProgramUnsupportedDeriving className0 -> "unsupported deriving class `" ++ className0 ++ "`"
     ProgramDerivingRequiresNullaryType typeName -> "deriving currently requires a nullary type, but `" ++ typeName ++ "` has parameters"
@@ -307,43 +299,6 @@ data ResolvedSymbol = ResolvedSymbol
     resolvedSymbolSpelling :: SymbolSpelling
   }
   deriving (Eq, Ord, Show)
-
-data ResolvedReferenceKind
-  = ResolvedValueReference
-  | ResolvedConstructorReference
-  | ResolvedTypeReference
-  | ResolvedClassReference
-  | ResolvedMethodReference
-  | ResolvedModuleReference
-  deriving (Eq, Ord, Show)
-
-data ResolvedReference = ResolvedReference
-  { resolvedReferenceKind :: ResolvedReferenceKind,
-    resolvedReferenceName :: String,
-    resolvedReferenceSymbol :: ResolvedSymbol
-  }
-  deriving (Eq, Ord, Show)
-
-data ResolvedScope = ResolvedScope
-  { resolvedScopeValues :: Map String ResolvedSymbol,
-    resolvedScopeTypes :: Map String ResolvedSymbol,
-    resolvedScopeClasses :: Map String ResolvedSymbol,
-    resolvedScopeModules :: Map P.ModuleName ResolvedSymbol
-  }
-  deriving (Eq, Show)
-
-data ResolvedModule = ResolvedModule
-  { resolvedModuleName :: P.ModuleName,
-    resolvedModuleScope :: ResolvedScope,
-    resolvedModuleExports :: ResolvedScope,
-    resolvedModuleReferences :: [ResolvedReference]
-  }
-  deriving (Eq, Show)
-
-newtype ResolvedProgram = ResolvedProgram
-  { resolvedProgramModules :: [ResolvedModule]
-  }
-  deriving (Eq, Show)
 
 {- Note [Resolved .mlfp symbol identities]
 The current checker still accepts qualified spellings by materializing qualified
@@ -547,8 +502,7 @@ data CheckedModule = CheckedModule
 
 data CheckedProgram = CheckedProgram
   { checkedProgramModules :: [CheckedModule],
-    checkedProgramMain :: String,
-    checkedProgramResolved :: ResolvedProgram
+    checkedProgramMain :: String
   }
   deriving (Eq, Show)
 

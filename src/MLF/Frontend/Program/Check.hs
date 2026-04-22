@@ -37,7 +37,6 @@ import MLF.Frontend.Program.Elaborate
     resolveInstanceInfoWithSubst,
   )
 import MLF.Frontend.Program.Finalize (finalizeBinding)
-import MLF.Frontend.Program.Resolve (resolveProgram)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
@@ -143,7 +142,6 @@ lookupClassInfo scope name =
 
 checkProgram :: P.Program -> Either ProgramError CheckedProgram
 checkProgram program = runTcM $ do
-  resolved <- resolveProgram program
   modulesChecked <- checkModules program
   let mainNames =
         [ checkedBindingName binding
@@ -159,8 +157,7 @@ checkProgram program = runTcM $ do
   pure
     CheckedProgram
       { checkedProgramModules = modulesChecked,
-        checkedProgramMain = mainRuntime,
-        checkedProgramResolved = resolved
+        checkedProgramMain = mainRuntime
       }
 
 checkLocatedProgram :: P.LocatedProgram -> Either ProgramDiagnostic CheckedProgram

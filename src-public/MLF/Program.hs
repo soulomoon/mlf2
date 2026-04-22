@@ -13,18 +13,6 @@ module MLF.Program
     , CheckedProgram (..)
     , CheckedModule (..)
     , CheckedBinding (..)
-    , SymbolNamespace (..)
-    , SymbolOwnerIdentity (..)
-    , SymbolIdentity (..)
-    , SymbolOrigin (..)
-    , SymbolSpelling (..)
-    , ResolvedSymbol (..)
-    , ResolvedReferenceKind (..)
-    , ResolvedReference (..)
-    , ResolvedScope (..)
-    , ResolvedModule (..)
-    , ResolvedProgram (..)
-    , sameResolvedSymbol
     , Value (..)
     , renderProgramParseError
     , renderProgramDiagnostic
@@ -66,18 +54,6 @@ import MLF.Pipeline
     , CheckedProgram (..)
     , ProgramDiagnostic (..)
     , ProgramError (..)
-    , ResolvedModule (..)
-    , ResolvedProgram (..)
-    , ResolvedReference (..)
-    , ResolvedReferenceKind (..)
-    , ResolvedScope (..)
-    , ResolvedSymbol (..)
-    , sameResolvedSymbol
-    , SymbolIdentity (..)
-    , SymbolNamespace (..)
-    , SymbolOrigin (..)
-    , SymbolOwnerIdentity (..)
-    , SymbolSpelling (..)
     , Value (..)
     , checkLocatedProgram
     , checkProgram

@@ -448,7 +448,7 @@ pLocatedDataDecl = do
     params <- many (lowerIdent reservedWords)
     void (symbol "=")
     ctors <- pLocatedConstructorDecl `sepBy1` symbol "|"
-    derivingClause <- optional pLocatedDerivingClause
+    derivingClasses <- maybe [] id <$> optional pDerivingClause
     void semi
     end <- getSourcePos
     let dataSpan = sourceSpanFromPositions start end
@@ -457,12 +457,11 @@ pLocatedDataDecl = do
                 { dataDeclName = dataName
                 , dataDeclParams = params
                 , dataDeclConstructors = map fst ctors
-                , dataDeclDeriving = maybe [] fst derivingClause
+                , dataDeclDeriving = derivingClasses
                 }
         spans =
             singletonTypeSpan dataName dataSpan
                 `appendProgramSpanIndex` mergeSpanIndexes (map snd ctors)
-                `appendProgramSpanIndex` maybe emptyProgramSpanIndex snd derivingClause
     pure (decl, spans)
 
 pConstructorDecl :: Parser ConstructorDecl
@@ -480,17 +479,10 @@ pLocatedConstructorDecl = do
     (ctor, span0) <- withSpan pConstructorDecl
     pure (ctor, singletonConstructorSpan (constructorDeclName ctor) span0)
 
-pLocatedDerivingClause :: Parser ([ClassName], ProgramSpanIndex)
-pLocatedDerivingClause = do
+pDerivingClause :: Parser [ClassName]
+pDerivingClause = do
     void (symbol "deriving")
-    classes <- commaSep (withSpan qualifiedUpperIdent)
-    pure
-        ( map fst classes
-        , mergeSpanIndexes
-            [ singletonClassSpan className classSpan
-            | (className, classSpan) <- classes
-            ]
-        )
+    commaSep qualifiedUpperIdent
 
 pLocatedDefDecl :: Parser (DefDecl, ProgramSpanIndex)
 pLocatedDefDecl = do
