@@ -1628,6 +1628,59 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "deduplicates constrained imported instances from mixed unqualified and aliased imports"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Box(..), eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  instance Eq Bool {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  instance Eq a => Eq (Box a) {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (Eq, Box(..), eq);"
+                , "  import Core as C;"
+                , "  def main : Bool = eq (C.Box true) (C.Box false);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "rejects same-shape qualified ADTs with distinct source identities"
+        ( InlineProgram $
+            unlines
+                [ "module A export (Token(..), accept) {"
+                , "  data Token ="
+                , "      Token : Token;"
+                , ""
+                , "  def accept : Token -> Bool = \\x true;"
+                , "}"
+                , ""
+                , "module B export (Token(..)) {"
+                , "  data Token ="
+                , "      Token : Token;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import A as A;"
+                , "  import B as B;"
+                , "  def main : Bool = A.accept B.Token;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramTypeMismatch")
+    , ProgramMatrixCase
         "runs local class instance for alias-only imported type"
         ( InlineProgram $
             unlines

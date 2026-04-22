@@ -506,6 +506,7 @@ compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} arg
       case inferKnownExprType scope arg of
         Just knownTy
           | Set.null (freeTypeVarsSrcType knownTy) ->
+              ensureSourceTypeCompatible scope expectedTy knownTy >>
               compileExpr scope (Just knownTy) arg
           | otherwise ->
               compileExpr scope (Just expectedTy) arg
@@ -535,9 +536,17 @@ compileValueApp scope mbExpected valueInfo args = do
   where
     compileValueArg (Just expectedTy) arg
       | isPartialOverloadedMethodApp scope arg =
-          compileExpr scope (Just expectedTy) arg
+          compileKnownExpectedArg expectedTy arg
+    compileValueArg (Just expectedTy) arg =
+      compileKnownExpectedArg expectedTy arg
     compileValueArg _ arg =
       compileExpr scope Nothing arg
+
+    compileKnownExpectedArg expectedTy arg = do
+      case inferKnownExprType scope arg of
+        Just actualTy -> ensureSourceTypeCompatible scope expectedTy actualTy
+        Nothing -> pure ()
+      compileExpr scope (Just expectedTy) arg
 
 valueExpectedArgTypes :: ValueInfo -> [P.Expr] -> [Maybe SrcType]
 valueExpectedArgTypes valueInfo args =
@@ -721,7 +730,10 @@ compileMethodApp scope mbExpected methodInfo args
       | otherwise = expanded
 
 compileExpectedMethodArg :: ElaborateScope -> SrcType -> P.Expr -> ElaborateM SurfaceExpr
-compileExpectedMethodArg scope expectedTy expr =
+compileExpectedMethodArg scope expectedTy expr = do
+  case inferKnownExprType scope expr of
+    Just actualTy -> ensureSourceTypeCompatible scope expectedTy actualTy
+    Nothing -> pure ()
   case expr of
     EAnn {} ->
       compileExpr scope (Just expectedTy) expr
@@ -746,6 +758,36 @@ compileExpectedMethodArg scope expectedTy expr =
     _ -> do
       argExpr <- compileExpr scope Nothing expr
       pure (surfaceAnn argExpr (lowerType scope expectedTy))
+
+ensureSourceTypeCompatible :: ElaborateScope -> SrcType -> SrcType -> ElaborateM ()
+ensureSourceTypeCompatible scope expectedTy actualTy =
+  when (sourceTypesNeedNominalRejection scope expectedTy actualTy) $
+    throwError (ProgramTypeMismatch actualTy expectedTy)
+
+sourceTypesNeedNominalRejection :: ElaborateScope -> SrcType -> SrcType -> Bool
+sourceTypesNeedNominalRejection scope expectedTy actualTy =
+  sourceTypeMentionsVisibleData scope expectedTy
+    && sourceTypeMentionsVisibleData scope actualTy
+    && lowerType scope expectedTy == lowerType scope actualTy
+    && matchTypesInScope scope Map.empty expectedTy actualTy == Nothing
+    && matchTypesInScope scope Map.empty actualTy expectedTy == Nothing
+
+sourceTypeMentionsVisibleData :: ElaborateScope -> SrcType -> Bool
+sourceTypeMentionsVisibleData scope ty =
+  case ty of
+    STVar {} -> False
+    STBase name -> Map.member name (esTypes scope)
+    STCon name args ->
+      Map.member name (esTypes scope)
+        || any (sourceTypeMentionsVisibleData scope) args
+    STArrow dom cod ->
+      sourceTypeMentionsVisibleData scope dom
+        || sourceTypeMentionsVisibleData scope cod
+    STForall _ mb body ->
+      maybe False (sourceTypeMentionsVisibleData scope . unSrcBound) mb
+        || sourceTypeMentionsVisibleData scope body
+    STMu _ body -> sourceTypeMentionsVisibleData scope body
+    STBottom -> False
 
 resolveMethodHeadExpr :: ElaborateScope -> Set (P.ClassName, String) -> MethodInfo -> SrcType -> ElaborateM SurfaceExpr
 resolveMethodHeadExpr scope seen methodInfo classArgTy =
@@ -1594,10 +1636,7 @@ resolveInstanceInfoWithIdentity scope className0 expectedClassIdentity headTy =
     matchInstanceHead info =
       case matchTypesInScope scope Map.empty (instanceHeadType info) headTy of
         Just subst -> Just (subst, True)
-        Nothing ->
-          if lowerType scope (instanceHeadType info) == lowerType scope headTy
-            then Just (Map.empty, False)
-            else Nothing
+        Nothing -> Nothing
 
     deduplicateEquivalentMatches [] = []
     deduplicateEquivalentMatches (match : rest) =
@@ -1607,12 +1646,19 @@ resolveInstanceInfoWithIdentity scope className0 expectedClassIdentity headTy =
     equivalentInstanceMatch (left, _, _) (right, _, _) =
       instanceOriginModule left == instanceOriginModule right
         && instanceInfoClassIdentity left == instanceInfoClassIdentity right
-        && lowerType scope (instanceHeadType left) == lowerType scope (instanceHeadType right)
-        && map lowerConstraint (instanceConstraints left) == map lowerConstraint (instanceConstraints right)
+        && canonicalSourceType scope (instanceHeadType left) == canonicalSourceType scope (instanceHeadType right)
+        && map canonicalConstraint (instanceConstraints left) == map canonicalConstraint (instanceConstraints right)
         && fmap methodRuntimeIdentity (instanceMethods left) == fmap methodRuntimeIdentity (instanceMethods right)
 
-    lowerConstraint constraint =
-      constraint {P.constraintType = lowerType scope (P.constraintType constraint)}
+    canonicalConstraint constraint =
+      ( canonicalConstraintClassKey (P.constraintClassName constraint),
+        canonicalSourceType scope (P.constraintType constraint)
+      )
+
+    canonicalConstraintClassKey classKeyName =
+      case constraintClassIdentity scope classKeyName of
+        Just identity -> Right identity
+        Nothing -> Left classKeyName
 
     methodRuntimeIdentity valueInfo =
       case valueInfo of
@@ -1691,7 +1737,6 @@ matchTypesWith sameType sameTypeHead subst template actual = case template of
 semanticTypeEqual :: ElaborateScope -> SrcType -> SrcType -> Bool
 semanticTypeEqual scope left right =
   canonicalSourceType scope left == canonicalSourceType scope right
-    || lowerType scope left == lowerType scope right
 
 sameTypeHeadInScope :: ElaborateScope -> String -> String -> Bool
 sameTypeHeadInScope scope left right =
