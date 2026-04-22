@@ -60,6 +60,20 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 Tests and executables that need `MLF.Research.*` must add `mlf2:mlf2-research`
 to `build-depends`.
 
+### `.mlfp` resolved-symbol boundary
+
+`MLF.Frontend.Program.Resolve` owns semantic identity for `.mlfp` names. A
+`SymbolIdentity` records namespace, defining module/name, and constructor or
+method owner identity; `SymbolSpelling` records the source spelling that reached
+that identity.
+
+`MLF.Frontend.Program.Check`, `Elaborate`, `Finalize`, and `Run` may keep maps
+keyed by surface spelling for lookup, diagnostics, source rendering, and
+runtime-name construction. They must compare values, types, classes,
+constructors, methods, and instance heads through stored semantic identities or
+identity-aware type canonicalization, not by stripping or interpreting qualified
+strings.
+
 ## Key graph and witness types
 
 - `Expr` (`MLF.Frontend.Syntax`) — surface eMLF terms

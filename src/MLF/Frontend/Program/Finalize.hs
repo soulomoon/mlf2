@@ -875,8 +875,7 @@ dataInfoHeadNames scope info =
       ]
   where
     sameDataIdentity left right =
-      dataModule left == dataModule right
-        && dataName left == dataName right
+      dataInfoSymbol left == dataInfoSymbol right
 
 {- Note [recoverSourceType]
 
