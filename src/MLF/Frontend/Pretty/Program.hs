@@ -81,6 +81,7 @@ prettyTypeParam param
 prettyKind :: SrcKind -> String
 prettyKind = go 0
   where
+    go :: Int -> SrcKind -> String
     go prec kind0 =
         case kind0 of
             KType -> "*"

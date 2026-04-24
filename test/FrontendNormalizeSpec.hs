@@ -112,6 +112,14 @@ substSpec = describe "substSrcType" $ do
         substSrcType "f" (STVar "g") (STVarApp "f" (STVar "a" :| []))
             `shouldBe` STVarApp "g" (STVar "a" :| [])
 
+    it "composes variable-headed type application heads when substituted by a partially applied constructor" $
+        substSrcType "f" (STCon "Either" (STBase "Int" :| [])) (STVarApp "f" (STVar "a" :| []))
+            `shouldBe` STCon "Either" (STBase "Int" :| [STVar "a"])
+
+    it "composes variable-headed type application heads when substituted by a partially applied variable head" $
+        substSrcType "f" (STVarApp "g" (STBase "Int" :| [])) (STVarApp "f" (STVar "a" :| []))
+            `shouldBe` STVarApp "g" (STBase "Int" :| [STVar "a"])
+
 -- -----------------------------------------------------------------------
 -- Type normalization
 -- -----------------------------------------------------------------------

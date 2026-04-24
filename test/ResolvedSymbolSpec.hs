@@ -1,12 +1,13 @@
 module ResolvedSymbolSpec (spec) where
 
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax (SrcTy (..), firstOrderTypeParam)
 import Test.Hspec
 
 spec :: Spec
-spec =
+spec = do
   describe "MLF.Program resolved symbol identities" $ do
     it "keeps imported value identity stable across unqualified and aliased spellings" $ do
       let unqualified = resolvedValueInfoSymbol (SymbolUnqualifiedImport "Lib") valueInfo
@@ -58,6 +59,15 @@ spec =
       resolvedSymbolIdentity importedModule
         `shouldBe` SymbolIdentity SymbolModule "Lib" "Lib" Nothing
       symbolDisplayName (resolvedSymbolSpelling importedModule) `shouldBe` "L"
+
+  describe "substituteTypeVar" $ do
+    it "composes variable-headed type application heads with partially applied constructors" $
+      substituteTypeVar "f" (STCon "Either" (STBase "Int" :| [])) (STVarApp "f" (STVar "a" :| []))
+        `shouldBe` STCon "Either" (STBase "Int" :| [STVar "a"])
+
+    it "composes variable-headed type application heads with partially applied variable heads" $
+      substituteTypeVar "f" (STVarApp "g" (STBase "Int" :| [])) (STVarApp "f" (STVar "a" :| []))
+        `shouldBe` STVarApp "g" (STBase "Int" :| [STVar "a"])
 
 valueInfo :: ValueInfo
 valueInfo =

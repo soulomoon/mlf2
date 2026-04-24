@@ -705,6 +705,8 @@ substituteTypeVar needle replacement = go
           case replacement of
             STVar replacementName -> Just (STVarApp replacementName args)
             STBase replacementName -> Just (STCon replacementName args)
+            STCon replacementName replacementArgs -> Just (STCon replacementName (replacementArgs <> args))
+            STVarApp replacementName replacementArgs -> Just (STVarApp replacementName (replacementArgs <> args))
             _ -> Nothing
 
 freeTypeVarsSrcType :: SrcType -> Set String
