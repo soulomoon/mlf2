@@ -537,6 +537,9 @@ resolveType scope = \case
     headRef <- resolveTypeName scope name
     (args', argRefs) <- mapAndRefs (resolveType scope) (toListNE args)
     pure (RSTCon (resolvedReferenceSymbol headRef) (toNonEmpty args'), headRef : argRefs)
+  STVarApp name args -> do
+    (args', argRefs) <- mapAndRefs (resolveType scope) (toListNE args)
+    pure (RSTVarApp name (toNonEmpty args'), argRefs)
   STArrow dom cod -> do
     (dom', domRefs) <- resolveType scope dom
     (cod', codRefs) <- resolveType scope cod

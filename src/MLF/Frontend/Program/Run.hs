@@ -257,6 +257,12 @@ substDataParams subst ty =
     STArrow dom cod -> STArrow (substDataParams subst dom) (substDataParams subst cod)
     STBase {} -> ty
     STCon name args -> STCon name (fmap (substDataParams subst) args)
+    STVarApp name args ->
+      let args' = fmap (substDataParams subst) args
+       in case Map.lookup name subst of
+            Just (STVar replacementName) -> STVarApp replacementName args'
+            Just (STBase replacementName) -> STCon replacementName args'
+            _ -> STVarApp name args'
     STForall name mb body ->
       let subst' = Map.delete name subst
        in STForall name (fmap (SrcBound . substDataParams subst' . unSrcBound) mb) (substDataParams subst' body)
@@ -279,6 +285,7 @@ canonicalFieldType checked ownerInfo = canonical
            in case lookupDataInfoInModule checked (dataModule ownerInfo) name of
                 Just info -> STCon (qualifiedDataName info) args'
                 Nothing -> STCon name args'
+        STVarApp name args -> STVarApp name (fmap canonical args)
         STArrow dom cod -> STArrow (canonical dom) (canonical cod)
         STForall name mb body ->
           STForall name (fmap (SrcBound . canonical . unSrcBound) mb) (canonical body)

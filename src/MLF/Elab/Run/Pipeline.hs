@@ -142,6 +142,8 @@ validateDirectRecursiveAnnotations = goExpr
             Surface.STArrow dom cod -> bodyType True shadowed dom && bodyType True shadowed cod
             Surface.STBase _ -> True
             Surface.STCon _ args -> all (bodyType True shadowed) args
+            Surface.STVarApp v args ->
+              (shadowed || v /= needle || guarded) && all (bodyType True shadowed) args
             Surface.STForall v mb body ->
               let shadowed' = shadowed || v == needle
                   boundOk = maybe True (bodyBound guarded shadowed' . Surface.unNormBound) mb
@@ -156,6 +158,8 @@ validateDirectRecursiveAnnotations = goExpr
             Surface.STArrow dom cod -> bodyType True shadowed dom && bodyType True shadowed cod
             Surface.STBase _ -> True
             Surface.STCon _ args -> all (bodyType True shadowed) args
+            Surface.STVarApp v args ->
+              (shadowed || v /= needle || guarded) && all (bodyType True shadowed) args
             Surface.STForall v mb body ->
               let shadowed' = shadowed || v == needle
                   boundOk = maybe True (bodyBound guarded shadowed' . Surface.unNormBound) mb
@@ -639,6 +643,8 @@ srcTypeToElabType ty = case ty of
   Surface.STArrow dom cod -> TArrow (srcTypeToElabType dom) (srcTypeToElabType cod)
   Surface.STBase name -> TBase (BaseTy name)
   Surface.STCon name args -> TCon (BaseTy name) (fmap srcTypeToElabType args)
+  Surface.STVarApp name _ ->
+    error ("variable-headed source type application `" ++ name ++ "` cannot be lowered before higher-kinded elaboration is implemented")
   Surface.STForall name mb body ->
     TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body)
   Surface.STMu name body -> TMu name (srcTypeToElabType body)
@@ -652,6 +658,8 @@ srcTypeToElabType ty = case ty of
       Surface.STArrow dom cod -> Just (TArrow (srcTypeToElabType dom) (srcTypeToElabType cod))
       Surface.STBase name -> Just (TBase (BaseTy name))
       Surface.STCon name args -> Just (TCon (BaseTy name) (fmap srcTypeToElabType args))
+      Surface.STVarApp name _ ->
+        error ("variable-headed source type application `" ++ name ++ "` cannot be lowered before higher-kinded elaboration is implemented")
       Surface.STForall name mb body ->
         Just (TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body))
       Surface.STMu name body -> Just (TMu name (srcTypeToElabType body))

@@ -7,6 +7,7 @@ import MLF.API
     ( Expr (..)
     , NormSrcType
     , SrcTy (..)
+    , SrcType
     , mkSrcBound
     , prettyEmlfExpr
     , prettyEmlfType
@@ -44,6 +45,14 @@ spec = describe "Frontend eMLF pretty printer" $ do
     it "prints canonical recursive annotation syntax" $ do
         let expr = EAnn (EVar "x") (STMu "a" (STCon "List" (STVar "a" :| [])))
         prettyEmlfExpr expr `shouldBe` "(x : μa. List a)"
+
+    it "pretty-prints variable-headed type application ASTs" $ do
+        let unary :: SrcType
+            unary = STVarApp "f" (STVar "a" :| [])
+            binary :: SrcType
+            binary = STVarApp "p" (STVar "a" :| [STVar "b"])
+        prettyEmlfType unary `shouldBe` "f a"
+        prettyEmlfType binary `shouldBe` "p a b"
 
     it "roundtrips expression parse(pretty(expr))" $ do
         let expr =

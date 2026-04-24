@@ -359,7 +359,7 @@ pLocatedClassDecl = do
     start <- getSourcePos
     void (symbol "class")
     className <- qualifiedUpperIdent
-    classParam <- lowerIdent reservedWords
+    classParam <- pTypeParam
     methods <- braces (many pLocatedMethodSig)
     end <- getSourcePos
     let classSpan = sourceSpanFromPositions start end
@@ -438,7 +438,7 @@ pLocatedDataDecl = do
     start <- getSourcePos
     void (symbol "data")
     dataName <- upperIdent reservedWords
-    params <- many (lowerIdent reservedWords)
+    params <- many pTypeParam
     void (symbol "=")
     ctors <- pLocatedConstructorDecl `sepBy1` symbol "|"
     derivingClause <- optional pLocatedDerivingClause
@@ -457,6 +457,28 @@ pLocatedDataDecl = do
                 `appendProgramSpanIndex` mergeSpanIndexes (map snd ctors)
                 `appendProgramSpanIndex` maybe emptyProgramSpanIndex snd derivingClause
     pure (decl, spans)
+
+pTypeParam :: Parser TypeParam
+pTypeParam =
+    try pKindedTypeParam
+        <|> (firstOrderTypeParam <$> lowerIdent reservedWords)
+  where
+    pKindedTypeParam =
+        parens $ do
+            name <- lowerIdent reservedWords
+            void (symbol "::")
+            TypeParam name <$> pKind
+
+pKind :: Parser SrcKind
+pKind = do
+    lhs <- pKindAtom
+    rhs <- optional (symbol "->" *> pKind)
+    pure $ maybe lhs (KArrow lhs) rhs
+
+pKindAtom :: Parser SrcKind
+pKindAtom =
+    (KType <$ symbol "*")
+        <|> parens pKind
 
 pConstructorDecl :: Parser ConstructorDecl
 pConstructorDecl = do

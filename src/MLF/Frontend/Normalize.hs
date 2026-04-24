@@ -63,6 +63,12 @@ freeVarsSrcType = go Set.empty
       STArrow a b -> Set.union (go bound a) (go bound b)
       STBase _ -> Set.empty
       STCon _ args -> foldMap (go bound) args
+      STVarApp name args ->
+        let headVars =
+              if Set.member name bound
+                then Set.empty
+                else Set.singleton name
+         in headVars `Set.union` foldMap (go bound) args
       STForall v mb body ->
         let bound' = Set.insert v bound
             freeBound = maybe Set.empty (go bound . unSrcBound) mb
@@ -90,6 +96,11 @@ substSrcType x s = goSub
       STArrow a b -> STArrow (goSub a) (goSub b)
       STBase b -> STBase b
       STCon c args -> STCon c (fmap goSub args)
+      STVarApp name args ->
+        let args' = fmap goSub args
+         in case replacementHead name args' of
+              Just ty -> ty
+              Nothing -> STVarApp name args'
       STBottom -> STBottom
       STForall v mb body
         | v == x ->
@@ -125,6 +136,14 @@ substSrcType x s = goSub
         | otherwise ->
             STMu v (goSub body)
 
+    replacementHead name args
+      | name /= x = Nothing
+      | otherwise =
+          case s of
+            STVar replacementName -> Just (STVarApp replacementName args)
+            STBase replacementName -> Just (STCon replacementName args)
+            _ -> Nothing
+
 -- ---------------------------------------------------------------------------
 -- Fresh name generation
 -- ---------------------------------------------------------------------------
@@ -148,6 +167,7 @@ normalizeType = go
       STArrow a b -> STArrow <$> go a <*> go b
       STBase b -> Right (STBase b)
       STCon c args -> STCon c <$> traverse go args
+      STVarApp v args -> STVarApp v <$> traverse go args
       STBottom -> Right STBottom
       STForall v Nothing body ->
         STForall v Nothing <$> go body
@@ -173,6 +193,7 @@ normalizeType = go
       STArrow a b -> STArrow <$> go a <*> go b
       STBase b -> Right (STBase b)
       STCon c args -> STCon c <$> traverse go args
+      STVarApp v args -> STVarApp v <$> traverse go args
       STBottom -> Right STBottom
       STForall v Nothing body ->
         STForall v Nothing <$> go body

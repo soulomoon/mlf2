@@ -2,7 +2,7 @@ module ResolvedSymbolSpec (spec) where
 
 import qualified Data.Map.Strict as Map
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Syntax (SrcTy (..))
+import MLF.Frontend.Syntax (SrcTy (..), firstOrderTypeParam)
 import Test.Hspec
 
 spec :: Spec
@@ -111,6 +111,7 @@ tokenDataInfo =
     { dataName = "Token",
       dataInfoSymbol = SymbolIdentity SymbolType "Lib" "Token" Nothing,
       dataModule = "Lib",
+      dataTypeParams = [],
       dataParams = [],
       dataConstructors = [someCtor]
     }
@@ -132,6 +133,7 @@ eqMethodInfo =
       methodTypeIdentity = STArrow (STVar "a") (STArrow (STVar "a") (STBase "Bool")),
       methodConstraints = [],
       methodConstraintInfos = [],
+      methodTypeParam = firstOrderTypeParam "a",
       methodParamName = "a"
     }
 
@@ -145,6 +147,7 @@ eqClassInfo =
     { className = "Eq",
       classInfoSymbol = SymbolIdentity SymbolClass "Lib" "Eq" Nothing,
       classModule = "Lib",
+      classTypeParam = firstOrderTypeParam "a",
       classParamName = "a",
       classMethods = Map.singleton "eq" eqMethodInfo
     }
@@ -155,6 +158,7 @@ qualifiedEqClassInfo =
     { className = "L.Eq",
       classInfoSymbol = SymbolIdentity SymbolClass "Lib" "Eq" Nothing,
       classModule = "Lib",
+      classTypeParam = firstOrderTypeParam "a",
       classParamName = "a",
       classMethods = Map.singleton "eq" qualifiedEqMethodInfo
     }

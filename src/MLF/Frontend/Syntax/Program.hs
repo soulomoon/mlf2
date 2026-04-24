@@ -13,6 +13,11 @@ module MLF.Frontend.Syntax.Program
     ( ProgramPhase (..)
     , ModuleName
     , TypeName
+    , SrcKind (..)
+    , TypeParam (..)
+    , firstOrderTypeParam
+    , typeParamNames
+    , typeParamIsFirstOrder
     , ConstructorName
     , ClassName
     , MethodName
@@ -119,9 +124,14 @@ import MLF.Frontend.Symbol
 import MLF.Frontend.Syntax
     ( Lit (..)
     , ResolvedSrcType
+    , SrcKind (..)
     , SrcType
+    , TypeParam (..)
+    , firstOrderTypeParam
     , resolvedSrcTypeIdentityType
     , resolvedSrcTypeToSrcType
+    , typeParamIsFirstOrder
+    , typeParamNames
     )
 
 data ProgramPhase = Parsed | Resolved
@@ -420,7 +430,7 @@ type ResolvedDecl = DeclF 'Resolved
 
 data ClassDeclF (p :: ProgramPhase) = ClassDecl
     { classDeclName :: ClassName
-    , classDeclParam :: String
+    , classDeclParam :: TypeParam
     , classDeclMethods :: [MethodSigF p]
     }
 
@@ -479,7 +489,7 @@ type ResolvedMethodDef = MethodDefF 'Resolved
 
 data DataDeclF (p :: ProgramPhase) = DataDecl
     { dataDeclName :: TypeName
-    , dataDeclParams :: [String]
+    , dataDeclParams :: [TypeParam]
     , dataDeclConstructors :: [ConstructorDeclF p]
     , dataDeclDeriving :: [ClassRef p]
     }

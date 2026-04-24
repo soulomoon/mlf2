@@ -2205,6 +2205,43 @@ spec = do
     describe "MLF.Program parse/pretty" $ do
         mapM_ roundtripFixture fixturePaths
 
+        it "roundtrips first-order declaration parameters unchanged" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Eq, Box(..)) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            parseRawProgram (prettyProgram program) `shouldBe` Right program
+
+        it "roundtrips higher-kinded declaration parameter annotations" $ do
+            let hk = KArrow KType KType
+                hk2 = KArrow KType (KArrow KType KType)
+                programText =
+                    unlines
+                        [ "module Main export (Functor, Higher(..)) {"
+                        , "  class Functor (f :: * -> *) {"
+                        , "    identity : forall a. a -> a;"
+                        , "  }"
+                        , ""
+                        , "  data Higher (p :: * -> * -> *) a ="
+                        , "      Higher : a -> Higher p a;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case program of
+                Program [Module {moduleDecls = [DeclClass classDecl, DeclData dataDecl]}] -> do
+                    classDeclParam classDecl `shouldBe` TypeParam "f" hk
+                    dataDeclParams dataDecl `shouldBe` [TypeParam "p" hk2, firstOrderTypeParam "a"]
+                other -> expectationFailure ("unexpected program shape: " ++ show other)
+            parseRawProgram (prettyProgram program) `shouldBe` Right program
+
     describe "MLF.Program execution corpus" $ do
         mapM_ runFixture fixturePaths
 
@@ -2240,6 +2277,17 @@ spec = do
                 (const False)
 
     describe "MLF.Program diagnostics" $ do
+        it "rejects duplicate data type parameter names" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Bad(..)) {"
+                        , "  data Bad a a ="
+                        , "      Bad : Bad a a;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramDuplicateTypeParameter "a")
+
         it "rejects importing constructors from an abstract type export" $ do
             let programText =
                     unlines

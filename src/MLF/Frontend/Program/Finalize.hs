@@ -251,6 +251,12 @@ runSurfacePipeline scope forceUnchecked deferredObligations externalTypes surfac
             STArrow dom cod -> go boundVars dom `Set.union` go boundVars cod
             STBase {} -> Set.empty
             STCon _ args -> foldMap (go boundVars) args
+            STVarApp name args ->
+              let headVars =
+                    if name `Set.member` boundVars
+                      then Set.empty
+                      else Set.singleton name
+               in headVars `Set.union` foldMap (go boundVars) args
             STForall name mb body ->
               maybe Set.empty (go boundVars . unSrcBound) mb
                 `Set.union` go (Set.insert name boundVars) body
@@ -385,6 +391,15 @@ sourceForallMatches expected actual =
                     subst
                     (zip (toListNE args) (toListNE actualArgs))
             _ -> Nothing
+        STVarApp name args ->
+          case actualTy of
+            STVarApp actualName actualArgs
+              | actualName == name && length (toListNE args) == length (toListNE actualArgs) ->
+                  foldM
+                    (\acc (leftTy, rightTy) -> match bound acc leftTy rightTy)
+                    subst
+                    (zip (toListNE args) (toListNE actualArgs))
+            _ -> Nothing
         STMu _ body -> match bound subst body actualTy
         STBottom ->
           case actualTy of
@@ -401,6 +416,12 @@ sourceForallMatches expected actual =
             STArrow dom cod -> go boundVars dom `Set.union` go boundVars cod
             STBase {} -> Set.empty
             STCon _ args -> foldMap (go boundVars) args
+            STVarApp name args ->
+              let headVars =
+                    if name `Set.member` boundVars
+                      then Set.empty
+                      else Set.singleton name
+               in headVars `Set.union` foldMap (go boundVars) args
             STForall name mb body ->
               maybe Set.empty (go boundVars . unSrcBound) mb
                 `Set.union` go (Set.insert name boundVars) body
@@ -921,6 +942,7 @@ recoverSourceType scope = recover
         STForall name (fmap (SrcBound . recover . unSrcBound) mb) (recover body)
       STMu name body -> STMu name (recover body)
       STCon name args -> STCon name (fmap recover args)
+      STVarApp name args -> STVarApp name (fmap recover args)
 
 matchDataInfoEncoding :: ElaborateScope -> DataInfo -> SrcType -> Maybe (SrcType, Map String SrcType)
 matchDataInfoEncoding = matchDataInfoEncodingWith id
@@ -995,6 +1017,15 @@ matchRecoverType params subst renames template actual =
     STCon name args ->
       case actual of
         STCon name' args'
+          | name == name' && length (toListNE args) == length (toListNE args') ->
+              foldM
+                (\acc (leftTy, rightTy) -> matchRecoverType params acc renames leftTy rightTy)
+                subst
+                (zip (toListNE args) (toListNE args'))
+        _ -> Nothing
+    STVarApp name args ->
+      case actual of
+        STVarApp name' args'
           | name == name' && length (toListNE args) == length (toListNE args') ->
               foldM
                 (\acc (leftTy, rightTy) -> matchRecoverType params acc renames leftTy rightTy)
@@ -1076,6 +1107,8 @@ srcTypeToElabType ty = case ty of
   STArrow dom cod -> X.TArrow (srcTypeToElabType dom) (srcTypeToElabType cod)
   STBase name -> X.TBase (Graph.BaseTy name)
   STCon name args -> X.TCon (Graph.BaseTy name) (fmap srcTypeToElabType args)
+  STVarApp name _ ->
+    error ("variable-headed source type application `" ++ name ++ "` cannot be lowered before higher-kinded elaboration is implemented")
   STForall name mb body -> X.TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body)
   STMu name body -> X.TMu name (srcTypeToElabType body)
   STBottom -> X.TBottom

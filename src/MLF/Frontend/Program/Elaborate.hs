@@ -189,6 +189,9 @@ visibleTypeForIdentity dataTypes = go
           STCon
             (visibleHeadName identityName displayName)
             (zipWithNE go displayArgs identityArgs)
+        (STVarApp displayName displayArgs, STVarApp identityName identityArgs)
+          | displayName == identityName ->
+              STVarApp displayName (zipWithNE go displayArgs identityArgs)
         (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
           STArrow (go displayDom identityDom) (go displayCod identityCod)
         (STForall name displayBound displayBody, STForall _ identityBound identityBody) ->
@@ -245,6 +248,7 @@ sourceTypeIdentityInScope scope = canonical
                 Nothing
                   | name `Set.member` builtinTypeNames -> STCon ("<builtin>." ++ name) args'
                   | otherwise -> STCon name args'
+        STVarApp name args -> STVarApp name (fmap canonical args)
         STArrow dom cod -> STArrow (canonical dom) (canonical cod)
         STForall name mb body ->
           STForall name (fmap (SrcBound . canonical . unSrcBound) mb) (canonical body)
@@ -343,6 +347,12 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
         case Map.lookup name dataTypes of
           Just info -> encodeDataType subst info (map (lower subst currentData) (toListNE args))
           Nothing -> STCon name (fmap (lower subst currentData) args)
+      STVarApp name args ->
+        let args' = fmap (lower subst currentData) args
+         in case Map.lookup name subst of
+              Just (STVar replacementName) -> STVarApp replacementName args'
+              Just (STBase replacementName) -> STCon replacementName args'
+              _ -> STVarApp name args'
       STForall name mb body ->
         let subst' = Map.delete name subst
          in STForall name (fmap (SrcBound . lower subst' currentData . unSrcBound) mb) (lower subst' currentData body)
@@ -388,6 +398,12 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
             case Map.lookup name dataTypes of
               Just info -> encodeDataType subst info (map (lowerCtorArg subst currentData selfTy) (toListNE args))
               Nothing -> STCon name (fmap (lowerCtorArg subst currentData selfTy) args)
+      STVarApp name args ->
+        let args' = fmap (lowerCtorArg subst currentData selfTy) args
+         in case Map.lookup name subst of
+              Just (STVar replacementName) -> STVarApp replacementName args'
+              Just (STBase replacementName) -> STCon replacementName args'
+              _ -> STVarApp name args'
       STForall name mb body ->
         let subst' = Map.delete name subst
          in STForall name (fmap (SrcBound . lowerCtorArg subst' currentData selfTy . unSrcBound) mb) (lowerCtorArg subst' currentData selfTy body)
@@ -545,6 +561,7 @@ displaySrcTypeForResolved scope = \case
   RSTArrow dom cod -> STArrow <$> displaySrcTypeForResolved scope dom <*> displaySrcTypeForResolved scope cod
   RSTBase symbol -> STBase <$> displayTypeHeadNameForResolved scope symbol
   RSTCon symbol args -> STCon <$> displayTypeHeadNameForResolved scope symbol <*> traverse (displaySrcTypeForResolved scope) args
+  RSTVarApp name args -> STVarApp name <$> traverse (displaySrcTypeForResolved scope) args
   RSTForall name mb body ->
     STForall name
       <$> traverse (fmap SrcBound . displaySrcTypeForResolved scope . unResolvedSrcBound) mb
@@ -1023,6 +1040,15 @@ matchTypesByShape subst template actual = case template of
               subst
               (zip (toListNE args) (toListNE args'))
       _ -> Nothing
+  STVarApp name args ->
+    case actual of
+      STVarApp name' args'
+        | name == name' && length (toListNE args) == length (toListNE args') ->
+            foldM
+              (\acc (templateTy, actualTy) -> matchTypesByShape acc templateTy actualTy)
+              subst
+              (zip (toListNE args) (toListNE args'))
+      _ -> Nothing
   STForall name mb body ->
     case actual of
       STForall name' mb' body'
@@ -1411,6 +1437,7 @@ sourceTypeMentionsVisibleData scope ty =
     STCon name args ->
       Map.member name (esTypes scope)
         || any (sourceTypeMentionsVisibleData scope) args
+    STVarApp _ args -> any (sourceTypeMentionsVisibleData scope) args
     STArrow dom cod ->
       sourceTypeMentionsVisibleData scope dom
         || sourceTypeMentionsVisibleData scope cod
@@ -1699,6 +1726,12 @@ specializeSrcType subst ty = case ty of
   STArrow dom cod -> STArrow (specializeSrcType subst dom) (specializeSrcType subst cod)
   STBase {} -> ty
   STCon name args -> STCon name (fmap (specializeSrcType subst) args)
+  STVarApp name args ->
+    let args' = fmap (specializeSrcType subst) args
+     in case Map.lookup name subst of
+          Just (STVar replacementName) -> STVarApp replacementName args'
+          Just (STBase replacementName) -> STCon replacementName args'
+          _ -> STVarApp name args'
   STForall name mb body
     | Map.member name subst -> STForall name mb body
     | otherwise ->
@@ -2782,6 +2815,16 @@ matchTypeViewAgainstIdentity scope subst template actual =
                 subst
                 (zip (map sameView (toListNE args)) (zipWithActual actualArgs))
         _ -> Nothing
+    STVarApp expectedName args ->
+      case typeViewIdentity actual of
+        STVarApp actualName actualArgs
+          | expectedName == actualName,
+            length (toListNE args) == length (toListNE actualArgs) ->
+              foldM
+                (\acc (templateTy, actualTy) -> matchTypeViewAgainstIdentity scope acc templateTy actualTy)
+                subst
+                (zip (map sameView (toListNE args)) (zipWithActual actualArgs))
+        _ -> Nothing
     STForall name mb body ->
       case typeViewIdentity actual of
         STForall name' mb' body'
@@ -2820,6 +2863,7 @@ matchTypeViewAgainstIdentity scope subst template actual =
     zipWithActual actualArgs =
       case typeViewDisplay actual of
         STCon _ displayArgs -> zipWith childView (toListNE displayArgs) (toListNE actualArgs)
+        STVarApp _ displayArgs -> zipWith childView (toListNE displayArgs) (toListNE actualArgs)
         _ -> map sameView (toListNE actualArgs)
 
 preferVisibleSourceType :: ElaborateScope -> SrcType -> SrcType
@@ -2830,6 +2874,7 @@ preferVisibleSourceType scope = go
         STVar {} -> ty
         STBase name -> STBase (preferVisibleTypeHeadName scope name)
         STCon name args -> STCon (preferVisibleTypeHeadName scope name) (fmap go args)
+        STVarApp name args -> STVarApp name (fmap go args)
         STArrow dom cod -> STArrow (go dom) (go cod)
         STForall name mb body -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
         STMu name body -> STMu name (go body)
@@ -2858,6 +2903,7 @@ rewriteSrcTypeOccurrences needle replacement = go
             STVar {} -> ty
             STBase {} -> ty
             STCon name args -> STCon name (fmap go args)
+            STVarApp name args -> STVarApp name (fmap go args)
             STArrow dom cod -> STArrow (go dom) (go cod)
             STForall name mb body -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
             STMu name body -> STMu name (go body)
@@ -2905,6 +2951,15 @@ matchTypesWith sameType sameTypeHead subst template actual = case template of
     case actual of
       STCon name' args'
         | sameTypeHead name name' && length (toListNE args) == length (toListNE args') ->
+            foldM
+              (\acc (leftTy, rightTy) -> matchTypesWith sameType sameTypeHead acc leftTy rightTy)
+              subst
+              (zip (toListNE args) (toListNE args'))
+      _ -> Nothing
+  STVarApp name args ->
+    case actual of
+      STVarApp name' args'
+        | name == name' && length (toListNE args) == length (toListNE args') ->
             foldM
               (\acc (leftTy, rightTy) -> matchTypesWith sameType sameTypeHead acc leftTy rightTy)
               subst
@@ -2967,6 +3022,12 @@ freeTypeVarsSrcType = go Set.empty
     go _ STBottom = Set.empty
     go bound (STArrow dom cod) = go bound dom `Set.union` go bound cod
     go bound (STCon _ args) = foldMap (go bound) args
+    go bound (STVarApp name args) =
+      let headVars =
+            if name `Set.member` bound
+              then Set.empty
+              else Set.singleton name
+       in headVars `Set.union` foldMap (go bound) args
     go bound (STForall name mb body) =
       let bound' = Set.insert name bound
           mbFvs = maybe Set.empty (go bound . unSrcBound) mb

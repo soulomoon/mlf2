@@ -807,6 +807,8 @@ srcTypeToElabType ty = case ty of
   STVar name -> TVar name
   STArrow dom cod -> TArrow (srcTypeToElabType dom) (srcTypeToElabType cod)
   STCon name args -> TCon (BaseTy name) (fmap srcTypeToElabType args)
+  STVarApp name _ ->
+    error ("variable-headed source type application `" ++ name ++ "` cannot be lowered before higher-kinded elaboration is implemented")
   STForall name mb body -> TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body)
   STMu name body -> TMu name (srcTypeToElabType body)
   STBase name -> TBase (BaseTy name)
@@ -821,6 +823,8 @@ structBoundToElabBound bTy = case bTy of
   STArrow dom cod -> Just (TArrow (srcTypeToElabType dom) (srcTypeToElabType cod))
   STBase name -> Just (TBase (BaseTy name))
   STCon name args -> Just (TCon (BaseTy name) (fmap srcTypeToElabType args))
+  STVarApp name _ ->
+    error ("variable-headed source type application `" ++ name ++ "` cannot be lowered before higher-kinded elaboration is implemented")
   STForall name mb body -> Just (TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body))
   STMu name body -> Just (TMu name (srcTypeToElabType body))
   STBottom -> Nothing
