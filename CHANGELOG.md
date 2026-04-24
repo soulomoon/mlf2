@@ -3,6 +3,19 @@
 ## Unreleased
 
 ### Changed
+- Enforced the `.mlfp` resolved-symbol phase boundary. Program syntax is now
+  phase-indexed, the resolver produces a resolved AST with semantic symbols at
+  global reference sites and resolved type heads, `checkProgram` routes through
+  `checkResolvedProgram`, constructor result validation compares resolved type
+  identity, imported instance deduplication uses a semantic head shape instead
+  of surface spelling, and elaboration now lowers resolved global references
+  through identity-indexed scopes. Deferred method finalization now carries
+  paired display/identity type views for method constraints and instance method
+  types, so evidence lookup no longer depends on recovered display spelling.
+  Validation:
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program" --match "MLF.ResolvedSymbol" --match "Repository guardrails"'`
+  (`188 examples, 0 failures`) and `cabal build all && cabal test`
+  (`1836 examples, 0 failures`).
 - Converted the thesis-obligations ledger to property-first evidence: all 107
   obligations now point at QuickCheck anchors keyed by obligation ID with
   `kind: quickcheck` and `min_success: 100`. The obligations gate now rejects

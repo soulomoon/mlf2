@@ -345,13 +345,6 @@ pLocatedExportItem = do
     (item, span0) <- pLocatedExportItemSpan
     pure (item, singletonImportItemSpan (exportItemName item) span0)
 
-exportItemName :: ExportItem -> String
-exportItemName item =
-    case item of
-        ExportValue name -> name
-        ExportType name -> name
-        ExportTypeWithConstructors name -> name
-
 pLocatedDecl :: Parser (Decl, ProgramSpanIndex)
 pLocatedDecl =
     choice

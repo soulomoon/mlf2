@@ -71,6 +71,7 @@ library mlf2-internal
                       MLF.Constraint.Canonicalizer,
                       MLF.Constraint.Finalize,
                       MLF.Frontend.Syntax,
+                      MLF.Frontend.Symbol,
                       MLF.Frontend.Syntax.Program,
                       MLF.Program.CLI,
                       MLF.Frontend.Program.Syntax,

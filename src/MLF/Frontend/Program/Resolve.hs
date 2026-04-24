@@ -12,7 +12,14 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType)
+import MLF.Frontend.Syntax
+  ( ResolvedSrcType,
+    ResolvedSrcTy (..),
+    SrcBound (..),
+    SrcTy (..),
+    SrcType,
+    mkResolvedSrcBound,
+  )
 import qualified MLF.Frontend.Syntax.Program as P
 
 type ResolveM a = Either ProgramError a
@@ -92,12 +99,16 @@ resolveModule (priorExports, resolvedRev) mod0 = do
   importScope <- buildImportScope priorExports (P.moduleImports mod0)
   locals <- buildLocalSymbols mod0
   let fullCandidates = addLocalSymbols importScope locals
-  references <- resolveModuleReferences fullCandidates mod0
+  (resolvedSyntax, references) <- resolveModuleSyntax priorExports locals fullCandidates mod0
   fullScope <- resolvedModuleScopeFromCandidates (P.moduleName mod0) fullCandidates
   exports <- buildExports mod0 locals
   let resolved =
         ResolvedModule
           { resolvedModuleName = P.moduleName mod0,
+            resolvedModuleSyntax = resolvedSyntax,
+            resolvedModuleLocalValues = localValues locals,
+            resolvedModuleLocalTypes = localTypes locals,
+            resolvedModuleLocalClasses = localClasses locals,
             resolvedModuleScope = fullScope,
             resolvedModuleExports = exports,
             resolvedModuleReferences = references
@@ -313,71 +324,241 @@ buildExports mod0 locals =
     isConstructorOf typeName symbol =
       symbolOwnerIdentity (resolvedSymbolIdentity symbol) == Just (SymbolOwnerType (P.moduleName mod0) typeName)
 
-resolveModuleReferences :: CandidateScope -> P.Module -> ResolveM [ResolvedReference]
-resolveModuleReferences scope mod0 = concat <$> mapM resolveDecl (P.moduleDecls mod0)
+resolveModuleSyntax ::
+  Map P.ModuleName ResolvedScope ->
+  LocalSymbols ->
+  CandidateScope ->
+  P.Module ->
+  ResolveM (P.ResolvedModuleSyntax, [ResolvedReference])
+resolveModuleSyntax priorExports locals scope mod0 = do
+  imports0 <- mapM (resolveImport priorExports) (P.moduleImports mod0)
+  exports0 <- mapM (mapM (resolveExportItem locals)) (P.moduleExports mod0)
+  (decls0, refs) <- mapAndRefs resolveDecl (P.moduleDecls mod0)
+  pure
+    ( P.Module
+        { P.moduleName = P.moduleName mod0,
+          P.moduleExports = exports0,
+          P.moduleImports = imports0,
+          P.moduleDecls = decls0
+        },
+      refs
+    )
   where
     resolveDecl = \case
-      P.DeclData decl -> resolveDataDecl scope decl
-      P.DeclClass decl -> resolveClassDecl scope decl
-      P.DeclInstance decl -> resolveInstanceDecl scope decl
-      P.DeclDef decl -> resolveDefDecl scope decl
+      P.DeclData decl -> firstWithRefs P.DeclData <$> resolveDataDecl scope decl
+      P.DeclClass decl -> firstWithRefs P.DeclClass <$> resolveClassDecl scope decl
+      P.DeclInstance decl -> firstWithRefs P.DeclInstance <$> resolveInstanceDecl scope decl
+      P.DeclDef decl -> firstWithRefs P.DeclDef <$> resolveDefDecl scope decl
 
-resolveDataDecl :: CandidateScope -> P.DataDecl -> ResolveM [ResolvedReference]
+resolveImport :: Map P.ModuleName ResolvedScope -> P.Import -> ResolveM P.ResolvedImport
+resolveImport priorExports imp = do
+  let moduleName0 = P.importModuleName imp
+  case Map.lookup moduleName0 priorExports of
+    Nothing -> Left (ProgramUnknownImportModule moduleName0)
+    Just exports -> do
+      exposing0 <- mapM (mapM (resolveImportItem moduleName0 exports)) (P.importExposing imp)
+      pure
+        P.Import
+          { P.importModuleName = resolvedModuleSymbol (SymbolUnqualifiedImport moduleName0) moduleName0 moduleName0,
+            P.importAlias = P.importAlias imp,
+            P.importExposing = exposing0
+          }
+
+resolveImportItem :: P.ModuleName -> ResolvedScope -> P.ExportItem -> ResolveM P.ResolvedExportItem
+resolveImportItem moduleName0 exports item =
+  case item of
+    P.ExportValue name ->
+      case Map.lookup name (resolvedScopeValues exports) of
+        Just symbol -> pure (P.ExportValue (respell (SymbolUnqualifiedImport moduleName0) name name symbol))
+        Nothing -> Left (ProgramImportNotExported moduleName0 name)
+    P.ExportType typeName ->
+      case resolvedExportTypeRef typeName exports of
+        Just ref -> pure (P.ExportType ref)
+        Nothing -> Left (ProgramImportNotExported moduleName0 typeName)
+    P.ExportTypeWithConstructors typeName ->
+      case Map.lookup typeName (resolvedScopeTypes exports) of
+        Nothing -> Left (ProgramImportNotExported moduleName0 typeName)
+        Just _ ->
+          case resolvedExportTypeRef typeName exports of
+            Just ref -> pure (P.ExportTypeWithConstructors ref)
+            Nothing -> Left (ProgramImportNotExported moduleName0 typeName)
+
+resolveExportItem :: LocalSymbols -> P.ExportItem -> ResolveM P.ResolvedExportItem
+resolveExportItem locals item =
+  case item of
+    P.ExportValue name ->
+      P.ExportValue <$> uniqueLocalSymbol ProgramExportNotLocal name (localValues locals)
+    P.ExportType typeName ->
+      case resolvedLocalExportTypeRef locals typeName of
+        Just ref -> pure (P.ExportType ref)
+        Nothing -> Left (ProgramExportNotLocal typeName)
+    P.ExportTypeWithConstructors typeName ->
+      case Map.lookup typeName (localTypes locals) of
+        Nothing -> Left (ProgramExportNotLocal typeName)
+        Just _ ->
+          case resolvedLocalExportTypeRef locals typeName of
+            Just ref -> pure (P.ExportTypeWithConstructors ref)
+            Nothing -> Left (ProgramExportNotLocal typeName)
+
+resolvedLocalExportTypeRef :: LocalSymbols -> String -> Maybe P.ResolvedExportTypeRef
+resolvedLocalExportTypeRef locals name =
+  let symbols =
+        Map.findWithDefault [] name (localTypes locals)
+          ++ Map.findWithDefault [] name (localClasses locals)
+   in case distinctByIdentity symbols of
+        [] -> Nothing
+        distinct -> Just (P.ResolvedExportTypeRef name distinct)
+
+resolvedExportTypeRef :: String -> ResolvedScope -> Maybe P.ResolvedExportTypeRef
+resolvedExportTypeRef name exports =
+  let symbols =
+        maybe [] (: []) (Map.lookup name (resolvedScopeTypes exports))
+          ++ maybe [] (: []) (Map.lookup name (resolvedScopeClasses exports))
+   in case distinctByIdentity symbols of
+        [] -> Nothing
+        distinct -> Just (P.ResolvedExportTypeRef name distinct)
+
+uniqueLocalSymbol :: (String -> ProgramError) -> String -> Map String [ResolvedSymbol] -> ResolveM ResolvedSymbol
+uniqueLocalSymbol err name symbolsByName =
+  case Map.lookup name symbolsByName of
+    Just symbols ->
+      case distinctByIdentity symbols of
+        [symbol] -> pure symbol
+        _ -> Left (err name)
+    Nothing -> Left (err name)
+
+resolveDataDecl :: CandidateScope -> P.DataDecl -> ResolveM (P.ResolvedDataDecl, [ResolvedReference])
 resolveDataDecl scope decl = do
-  ctorRefs <- concat <$> mapM (resolveType scope . P.constructorDeclType) (P.dataDeclConstructors decl)
+  (ctors, ctorRefs) <- mapAndRefs (resolveConstructorDecl scope) (P.dataDeclConstructors decl)
   derivingRefs <- mapM (resolveClassRef scope) (P.dataDeclDeriving decl)
-  pure (ctorRefs ++ derivingRefs)
+  pure
+    ( P.DataDecl
+        { P.dataDeclName = P.dataDeclName decl,
+          P.dataDeclParams = P.dataDeclParams decl,
+          P.dataDeclConstructors = ctors,
+          P.dataDeclDeriving = map resolvedReferenceSymbol derivingRefs
+        },
+      ctorRefs ++ derivingRefs
+    )
 
-resolveClassDecl :: CandidateScope -> P.ClassDecl -> ResolveM [ResolvedReference]
-resolveClassDecl scope decl =
-  concat <$> mapM (resolveConstrainedType scope . P.methodSigType) (P.classDeclMethods decl)
+resolveConstructorDecl :: CandidateScope -> P.ConstructorDecl -> ResolveM (P.ResolvedConstructorDecl, [ResolvedReference])
+resolveConstructorDecl scope decl = do
+  (ty, refs) <- resolveType scope (P.constructorDeclType decl)
+  pure
+    ( P.ConstructorDecl
+        { P.constructorDeclName = P.constructorDeclName decl,
+          P.constructorDeclType = ty
+        },
+      refs
+    )
 
-resolveInstanceDecl :: CandidateScope -> P.InstanceDecl -> ResolveM [ResolvedReference]
+resolveClassDecl :: CandidateScope -> P.ClassDecl -> ResolveM (P.ResolvedClassDecl, [ResolvedReference])
+resolveClassDecl scope decl = do
+  (methods, refs) <- mapAndRefs (resolveMethodSig scope) (P.classDeclMethods decl)
+  pure
+    ( P.ClassDecl
+        { P.classDeclName = P.classDeclName decl,
+          P.classDeclParam = P.classDeclParam decl,
+          P.classDeclMethods = methods
+        },
+      refs
+    )
+
+resolveMethodSig :: CandidateScope -> P.MethodSig -> ResolveM (P.ResolvedMethodSig, [ResolvedReference])
+resolveMethodSig scope sig = do
+  (ty, refs) <- resolveConstrainedType scope (P.methodSigType sig)
+  pure (P.MethodSig {P.methodSigName = P.methodSigName sig, P.methodSigType = ty}, refs)
+
+resolveInstanceDecl :: CandidateScope -> P.InstanceDecl -> ResolveM (P.ResolvedInstanceDecl, [ResolvedReference])
 resolveInstanceDecl scope decl = do
   classRef <- resolveClassRef scope (P.instanceDeclClass decl)
-  constraintRefs <- concat <$> mapM (resolveConstraint scope) (P.instanceDeclConstraints decl)
-  typeRefs <- resolveType scope (P.instanceDeclType decl)
-  methodRefs <- concat <$> mapM (resolveExpr scope Set.empty . P.methodDefExpr) (P.instanceDeclMethods decl)
-  pure (classRef : constraintRefs ++ typeRefs ++ methodRefs)
+  (constraints, constraintRefs) <- mapAndRefs (resolveConstraint scope) (P.instanceDeclConstraints decl)
+  (headTy, typeRefs) <- resolveType scope (P.instanceDeclType decl)
+  (methods, methodRefs) <- mapAndRefs (resolveMethodDef scope) (P.instanceDeclMethods decl)
+  pure
+    ( P.InstanceDecl
+        { P.instanceDeclConstraints = constraints,
+          P.instanceDeclClass = resolvedReferenceSymbol classRef,
+          P.instanceDeclType = headTy,
+          P.instanceDeclMethods = methods
+        },
+      classRef : constraintRefs ++ typeRefs ++ methodRefs
+    )
 
-resolveDefDecl :: CandidateScope -> P.DefDecl -> ResolveM [ResolvedReference]
+resolveMethodDef :: CandidateScope -> P.MethodDef -> ResolveM (P.ResolvedMethodDef, [ResolvedReference])
+resolveMethodDef scope def = do
+  (expr, refs) <- resolveExpr scope Set.empty (P.methodDefExpr def)
+  pure (P.MethodDef {P.methodDefName = P.methodDefName def, P.methodDefExpr = expr}, refs)
+
+resolveDefDecl :: CandidateScope -> P.DefDecl -> ResolveM (P.ResolvedDefDecl, [ResolvedReference])
 resolveDefDecl scope decl = do
-  typeRefs <- resolveConstrainedType scope (P.defDeclType decl)
-  exprRefs <- resolveExpr scope Set.empty (P.defDeclExpr decl)
-  pure (typeRefs ++ exprRefs)
+  (ty, typeRefs) <- resolveConstrainedType scope (P.defDeclType decl)
+  (expr, exprRefs) <- resolveExpr scope Set.empty (P.defDeclExpr decl)
+  pure
+    ( P.DefDecl
+        { P.defDeclName = P.defDeclName decl,
+          P.defDeclType = ty,
+          P.defDeclExpr = expr
+        },
+      typeRefs ++ exprRefs
+    )
 
-resolveConstrainedType :: CandidateScope -> P.ConstrainedType -> ResolveM [ResolvedReference]
+resolveConstrainedType :: CandidateScope -> P.ConstrainedType -> ResolveM (P.ResolvedConstrainedType, [ResolvedReference])
 resolveConstrainedType scope ty = do
-  constraintRefs <- concat <$> mapM (resolveConstraint scope) (P.constrainedConstraints ty)
-  bodyRefs <- resolveType scope (P.constrainedBody ty)
-  pure (constraintRefs ++ bodyRefs)
+  (constraints, constraintRefs) <- mapAndRefs (resolveConstraint scope) (P.constrainedConstraints ty)
+  (body, bodyRefs) <- resolveType scope (P.constrainedBody ty)
+  pure
+    ( P.ConstrainedType
+        { P.constrainedConstraints = constraints,
+          P.constrainedBody = body
+        },
+      constraintRefs ++ bodyRefs
+    )
 
-resolveConstraint :: CandidateScope -> P.ClassConstraint -> ResolveM [ResolvedReference]
+resolveConstraint :: CandidateScope -> P.ClassConstraint -> ResolveM (P.ResolvedClassConstraint, [ResolvedReference])
 resolveConstraint scope constraint = do
   classRef <- resolveClassRef scope (P.constraintClassName constraint)
-  typeRefs <- resolveType scope (P.constraintType constraint)
-  pure (classRef : typeRefs)
+  (ty, typeRefs) <- resolveType scope (P.constraintType constraint)
+  pure
+    ( P.ClassConstraint
+        { P.constraintClassName = resolvedReferenceSymbol classRef,
+          P.constraintType = ty
+        },
+      classRef : typeRefs
+    )
 
-resolveType :: CandidateScope -> SrcType -> ResolveM [ResolvedReference]
+resolveType :: CandidateScope -> SrcType -> ResolveM (ResolvedSrcType, [ResolvedReference])
 resolveType scope = \case
-  STVar {} -> pure []
-  STBase name -> resolveTypeName scope name
+  STVar name -> pure (RSTVar name, [])
+  STBase name -> do
+    ref <- resolveTypeName scope name
+    pure (RSTBase (resolvedReferenceSymbol ref), [ref])
   STCon name args -> do
     headRef <- resolveTypeName scope name
-    argRefs <- concat <$> mapM (resolveType scope) (toListNE args)
-    pure (headRef ++ argRefs)
-  STArrow dom cod -> (++) <$> resolveType scope dom <*> resolveType scope cod
-  STForall _ mb body -> do
-    boundRefs <- maybe (pure []) (resolveType scope . unSrcBound) mb
-    bodyRefs <- resolveType scope body
-    pure (boundRefs ++ bodyRefs)
-  STMu _ body -> resolveType scope body
-  STBottom -> pure []
+    (args', argRefs) <- mapAndRefs (resolveType scope) (toListNE args)
+    pure (RSTCon (resolvedReferenceSymbol headRef) (toNonEmpty args'), headRef : argRefs)
+  STArrow dom cod -> do
+    (dom', domRefs) <- resolveType scope dom
+    (cod', codRefs) <- resolveType scope cod
+    pure (RSTArrow dom' cod', domRefs ++ codRefs)
+  STForall name mb body -> do
+    (mb', boundRefs) <-
+      case mb of
+        Nothing -> pure (Nothing, [])
+        Just bound -> do
+          (bound', refs) <- resolveType scope (unSrcBound bound)
+          pure (Just (mkResolvedSrcBound bound'), refs)
+    (body', bodyRefs) <- resolveType scope body
+    pure (RSTForall name mb' body', boundRefs ++ bodyRefs)
+  STMu name body -> do
+    (body', refs) <- resolveType scope body
+    pure (RSTMu name body', refs)
+  STBottom -> pure (RSTBottom, [])
 
-resolveTypeName :: CandidateScope -> String -> ResolveM [ResolvedReference]
+resolveTypeName :: CandidateScope -> String -> ResolveM ResolvedReference
 resolveTypeName scope name
-  | name `Set.member` builtinTypeNames = pure [ResolvedReference ResolvedTypeReference name (builtinSymbol SymbolType name)]
-  | otherwise = (: []) <$> resolveReference ResolvedTypeReference ProgramUnknownType candidateTypes scope name
+  | name `Set.member` builtinTypeNames = pure (ResolvedReference ResolvedTypeReference name (builtinSymbol SymbolType name))
+  | otherwise = resolveReference ResolvedTypeReference ProgramUnknownType candidateTypes scope name
 
 resolveClassRef :: CandidateScope -> P.ClassName -> ResolveM ResolvedReference
 resolveClassRef scope name =
@@ -422,49 +603,70 @@ resolveSymbol unknownErr candidates name =
         [symbol] -> pure symbol
         _ -> Left (ProgramAmbiguousUnqualifiedReference name)
 
-resolveExpr :: CandidateScope -> Set.Set String -> P.Expr -> ResolveM [ResolvedReference]
+resolveExpr :: CandidateScope -> Set.Set String -> P.Expr -> ResolveM (P.ResolvedExpr, [ResolvedReference])
 resolveExpr scope locals = \case
   P.EVar name
-    | name `Set.member` locals -> pure []
-    | otherwise -> (: []) <$> resolveValueRef scope name
-  P.ELit {} -> pure []
+    | name `Set.member` locals -> pure (P.EVar (P.ResolvedLocalValue name), [])
+    | otherwise -> do
+        ref <- resolveValueRef scope name
+        pure (P.EVar (P.ResolvedGlobalValue (resolvedReferenceSymbol ref)), [ref])
+  P.ELit lit -> pure (P.ELit lit, [])
   P.ELam param body -> do
-    paramTypeRefs <- maybe (pure []) (resolveType scope) (P.paramType param)
-    bodyRefs <- resolveExpr scope (Set.insert (P.paramName param) locals) body
-    pure (paramTypeRefs ++ bodyRefs)
-  P.EApp fun arg -> (++) <$> resolveExpr scope locals fun <*> resolveExpr scope locals arg
+    (param', paramTypeRefs) <- resolveParam scope param
+    (body', bodyRefs) <- resolveExpr scope (Set.insert (P.paramName param) locals) body
+    pure (P.ELam param' body', paramTypeRefs ++ bodyRefs)
+  P.EApp fun arg -> do
+    (fun', funRefs) <- resolveExpr scope locals fun
+    (arg', argRefs) <- resolveExpr scope locals arg
+    pure (P.EApp fun' arg', funRefs ++ argRefs)
   P.ELet name mbTy rhs body -> do
     let locals' = Set.insert name locals
-    typeRefs <- maybe (pure []) (resolveType scope) mbTy
-    rhsRefs <- resolveExpr scope locals' rhs
-    bodyRefs <- resolveExpr scope locals' body
-    pure (typeRefs ++ rhsRefs ++ bodyRefs)
-  P.EAnn expr ty -> (++) <$> resolveExpr scope locals expr <*> resolveType scope ty
+    (mbTy', typeRefs) <-
+      case mbTy of
+        Nothing -> pure (Nothing, [])
+        Just ty -> firstWithRefs Just <$> resolveType scope ty
+    (rhs', rhsRefs) <- resolveExpr scope locals' rhs
+    (body', bodyRefs) <- resolveExpr scope locals' body
+    pure (P.ELet name mbTy' rhs' body', typeRefs ++ rhsRefs ++ bodyRefs)
+  P.EAnn expr ty -> do
+    (expr', exprRefs) <- resolveExpr scope locals expr
+    (ty', typeRefs) <- resolveType scope ty
+    pure (P.EAnn expr' ty', exprRefs ++ typeRefs)
   P.ECase scrutinee alts -> do
-    scrutineeRefs <- resolveExpr scope locals scrutinee
-    altRefs <- concat <$> mapM (resolveAlt scope locals) alts
-    pure (scrutineeRefs ++ altRefs)
+    (scrutinee', scrutineeRefs) <- resolveExpr scope locals scrutinee
+    (alts', altRefs) <- mapAndRefs (resolveAlt scope locals) alts
+    pure (P.ECase scrutinee' alts', scrutineeRefs ++ altRefs)
 
-resolveAlt :: CandidateScope -> Set.Set String -> P.Alt -> ResolveM [ResolvedReference]
+resolveParam :: CandidateScope -> P.Param -> ResolveM (P.ResolvedParam, [ResolvedReference])
+resolveParam scope param =
+  case P.paramType param of
+    Nothing ->
+      pure (P.Param {P.paramName = P.paramName param, P.paramType = Nothing}, [])
+    Just ty -> do
+      (ty', refs) <- resolveType scope ty
+      pure (P.Param {P.paramName = P.paramName param, P.paramType = Just ty'}, refs)
+
+resolveAlt :: CandidateScope -> Set.Set String -> P.Alt -> ResolveM (P.ResolvedAlt, [ResolvedReference])
 resolveAlt scope locals alt = do
-  (patternLocals, patternRefs) <- resolvePattern scope (P.altPattern alt)
-  bodyRefs <- resolveExpr scope (patternLocals `Set.union` locals) (P.altExpr alt)
-  pure (patternRefs ++ bodyRefs)
+  (pattern', patternLocals, patternRefs) <- resolvePattern scope (P.altPattern alt)
+  (body', bodyRefs) <- resolveExpr scope (patternLocals `Set.union` locals) (P.altExpr alt)
+  pure (P.Alt {P.altPattern = pattern', P.altExpr = body'}, patternRefs ++ bodyRefs)
 
-resolvePattern :: CandidateScope -> P.Pattern -> ResolveM (Set.Set String, [ResolvedReference])
+resolvePattern :: CandidateScope -> P.Pattern -> ResolveM (P.ResolvedPattern, Set.Set String, [ResolvedReference])
 resolvePattern scope = \case
   P.PatCtor name args -> do
     ctorRef <- resolveConstructorRef scope name
     resolvedArgs <- mapM (resolvePattern scope) args
-    let locals = Set.unions (map fst resolvedArgs)
-        refs = ctorRef : concatMap snd resolvedArgs
-    pure (locals, refs)
-  P.PatVar name -> pure (Set.singleton name, [])
-  P.PatWildcard -> pure (Set.empty, [])
+    let locals = Set.unions [localNames | (_, localNames, _) <- resolvedArgs]
+        refs = ctorRef : concat [refs0 | (_, _, refs0) <- resolvedArgs]
+        args' = [pattern0 | (pattern0, _, _) <- resolvedArgs]
+    pure (P.PatCtor (resolvedReferenceSymbol ctorRef) args', locals, refs)
+  P.PatVar name -> pure (P.PatVar name, Set.singleton name, [])
+  P.PatWildcard -> pure (P.PatWildcard, Set.empty, [])
   P.PatAnn pattern0 ty -> do
-    (locals, patternRefs) <- resolvePattern scope pattern0
-    typeRefs <- resolveType scope ty
-    pure (locals, patternRefs ++ typeRefs)
+    (pattern', locals, patternRefs) <- resolvePattern scope pattern0
+    (ty', typeRefs) <- resolveType scope ty
+    pure (P.PatAnn pattern' ty', locals, patternRefs ++ typeRefs)
 
 resolvedScopeFromCandidates :: (String -> ProgramError) -> CandidateScope -> ResolveM ResolvedScope
 resolvedScopeFromCandidates duplicateErr scope =
@@ -663,3 +865,17 @@ builtinTypeNames = Set.fromList ["Int", "Bool", "String"]
 
 toListNE :: NonEmpty a -> [a]
 toListNE (x :| xs) = x : xs
+
+toNonEmpty :: [a] -> NonEmpty a
+toNonEmpty values =
+  case values of
+    x : xs -> x :| xs
+    [] -> error "internal resolver invariant: STCon has at least one argument"
+
+firstWithRefs :: (a -> b) -> (a, [ResolvedReference]) -> (b, [ResolvedReference])
+firstWithRefs f (value, refs) = (f value, refs)
+
+mapAndRefs :: (a -> ResolveM (b, [ResolvedReference])) -> [a] -> ResolveM ([b], [ResolvedReference])
+mapAndRefs f values = do
+  resolved <- mapM f values
+  pure ([value | (value, _) <- resolved], concat [refs | (_, refs) <- resolved])

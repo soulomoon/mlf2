@@ -6,6 +6,13 @@ module MLF.Frontend.Program.Types
     ProgramDiagnostic (..),
     diagnosticForProgramError,
     renderProgramDiagnostic,
+    TypeView (..),
+    ConstraintInfo (..),
+    typeViewFromResolved,
+    displayConstraint,
+    applyTypeViewSubst,
+    applyConstraintInfoSubst,
+    freeTypeVarsTypeView,
     EvidenceInfo (..),
     SymbolNamespace (..),
     SymbolOwnerIdentity (..),
@@ -63,8 +70,31 @@ import Control.Applicative ((<|>))
 import Data.Foldable (toList)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
 import MLF.Elab.Types (ElabTerm, ElabType)
-import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
+import MLF.Frontend.Symbol
+  ( ResolvedReference (..),
+    ResolvedReferenceKind (..),
+    ResolvedSymbol (..),
+    SymbolIdentity (..),
+    SymbolNamespace (..),
+    SymbolOrigin (..),
+    SymbolOwnerIdentity (..),
+    SymbolSpelling (..),
+    mkResolvedSymbol,
+    sameResolvedSymbol,
+    unqualifiedSymbolName,
+  )
+import MLF.Frontend.Syntax
+  ( ResolvedSrcType,
+    SrcBound (..),
+    SrcTy (..),
+    SrcType,
+    SurfaceExpr,
+    resolvedSrcTypeIdentityType,
+    resolvedSrcTypeToSrcType,
+  )
 import qualified MLF.Frontend.Syntax.Program as P
 
 data ProgramError
@@ -267,64 +297,6 @@ programErrorHints err =
       ["export the name from the source module or remove it from the import exposing list"]
     _ -> []
 
-data SymbolNamespace
-  = SymbolValue
-  | SymbolConstructor
-  | SymbolType
-  | SymbolClass
-  | SymbolMethod
-  | SymbolModule
-  deriving (Eq, Ord, Show)
-
-data SymbolOwnerIdentity
-  = SymbolOwnerType P.ModuleName P.TypeName
-  | SymbolOwnerClass P.ModuleName P.ClassName
-  deriving (Eq, Ord, Show)
-
-data SymbolIdentity = SymbolIdentity
-  { symbolNamespace :: SymbolNamespace,
-    symbolDefiningModule :: P.ModuleName,
-    symbolDefiningName :: String,
-    symbolOwnerIdentity :: Maybe SymbolOwnerIdentity
-  }
-  deriving (Eq, Ord, Show)
-
-data SymbolOrigin
-  = SymbolLocal P.ModuleName
-  | SymbolUnqualifiedImport P.ModuleName
-  | SymbolQualifiedImport P.ModuleName P.ModuleName
-  | SymbolBuiltin
-  deriving (Eq, Ord, Show)
-
-data SymbolSpelling = SymbolSpelling
-  { symbolSourceName :: String,
-    symbolDisplayName :: String,
-    symbolSpellingOrigin :: SymbolOrigin
-  }
-  deriving (Eq, Ord, Show)
-
-data ResolvedSymbol = ResolvedSymbol
-  { resolvedSymbolIdentity :: SymbolIdentity,
-    resolvedSymbolSpelling :: SymbolSpelling
-  }
-  deriving (Eq, Ord, Show)
-
-data ResolvedReferenceKind
-  = ResolvedValueReference
-  | ResolvedConstructorReference
-  | ResolvedTypeReference
-  | ResolvedClassReference
-  | ResolvedMethodReference
-  | ResolvedModuleReference
-  deriving (Eq, Ord, Show)
-
-data ResolvedReference = ResolvedReference
-  { resolvedReferenceKind :: ResolvedReferenceKind,
-    resolvedReferenceName :: String,
-    resolvedReferenceSymbol :: ResolvedSymbol
-  }
-  deriving (Eq, Ord, Show)
-
 data ResolvedScope = ResolvedScope
   { resolvedScopeValues :: Map String ResolvedSymbol,
     resolvedScopeTypes :: Map String ResolvedSymbol,
@@ -335,6 +307,10 @@ data ResolvedScope = ResolvedScope
 
 data ResolvedModule = ResolvedModule
   { resolvedModuleName :: P.ModuleName,
+    resolvedModuleSyntax :: P.ResolvedModuleSyntax,
+    resolvedModuleLocalValues :: Map String [ResolvedSymbol],
+    resolvedModuleLocalTypes :: Map String [ResolvedSymbol],
+    resolvedModuleLocalClasses :: Map String [ResolvedSymbol],
     resolvedModuleScope :: ResolvedScope,
     resolvedModuleExports :: ResolvedScope,
     resolvedModuleReferences :: [ResolvedReference]
@@ -360,30 +336,54 @@ of inferring declaration equality from qualified/unqualified strings. Runtime
 names remain explicit generated names, not semantic identities.
 -}
 
-mkResolvedSymbol :: SymbolIdentity -> String -> String -> SymbolOrigin -> ResolvedSymbol
-mkResolvedSymbol identity sourceName displayName origin =
-  ResolvedSymbol
-    { resolvedSymbolIdentity = identity,
-      resolvedSymbolSpelling =
-        SymbolSpelling
-          { symbolSourceName = sourceName,
-            symbolDisplayName = displayName,
-            symbolSpellingOrigin = origin
-          }
+data TypeView = TypeView
+  { typeViewDisplay :: SrcType,
+    typeViewIdentity :: SrcType
+  }
+  deriving (Eq, Show)
+
+data ConstraintInfo = ConstraintInfo
+  { constraintDisplayClass :: P.ClassName,
+    constraintClassSymbol :: SymbolIdentity,
+    constraintTypeView :: TypeView
+  }
+  deriving (Eq, Show)
+
+typeViewFromResolved :: ResolvedSrcType -> TypeView
+typeViewFromResolved ty =
+  TypeView
+    { typeViewDisplay = resolvedSrcTypeToSrcType ty,
+      typeViewIdentity = resolvedSrcTypeIdentityType ty
     }
 
-sameResolvedSymbol :: ResolvedSymbol -> ResolvedSymbol -> Bool
-sameResolvedSymbol left right =
-  resolvedSymbolIdentity left == resolvedSymbolIdentity right
+displayConstraint :: ConstraintInfo -> P.ClassConstraint
+displayConstraint constraint =
+  P.ClassConstraint
+    (constraintDisplayClass constraint)
+    (typeViewDisplay (constraintTypeView constraint))
 
-unqualifiedSymbolName :: String -> String
-unqualifiedSymbolName =
-  reverse . takeWhile (/= '.') . reverse
+applyTypeViewSubst :: Map String TypeView -> TypeView -> TypeView
+applyTypeViewSubst subst view =
+  TypeView
+    { typeViewDisplay = Map.foldrWithKey substituteTypeVar (typeViewDisplay view) displaySubst,
+      typeViewIdentity = Map.foldrWithKey substituteTypeVar (typeViewIdentity view) identitySubst
+    }
+  where
+    displaySubst = fmap typeViewDisplay subst
+    identitySubst = fmap typeViewIdentity subst
+
+applyConstraintInfoSubst :: Map String TypeView -> ConstraintInfo -> ConstraintInfo
+applyConstraintInfoSubst subst constraint =
+  constraint {constraintTypeView = applyTypeViewSubst subst (constraintTypeView constraint)}
+
+freeTypeVarsTypeView :: TypeView -> Set String
+freeTypeVarsTypeView = freeTypeVarsSrcType . typeViewIdentity
 
 data EvidenceInfo = EvidenceInfo
   { evidenceClassName :: P.ClassName,
     evidenceClassSymbol :: SymbolIdentity,
     evidenceType :: SrcType,
+    evidenceTypeIdentity :: SrcType,
     evidenceMethods :: Map P.MethodName (String, SrcType)
   }
   deriving (Eq, Show)
@@ -397,6 +397,7 @@ data ConstructorInfo = ConstructorInfo
     ctorArgs :: [SrcType],
     ctorResult :: SrcType,
     ctorOwningType :: P.TypeName,
+    ctorOwningTypeIdentity :: SymbolIdentity,
     ctorIndex :: Int
   }
   deriving (Eq, Show)
@@ -417,7 +418,9 @@ data MethodInfo = MethodInfo
     methodName :: P.MethodName,
     methodRuntimeBase :: String,
     methodType :: SrcType,
+    methodTypeIdentity :: SrcType,
     methodConstraints :: [P.ClassConstraint],
+    methodConstraintInfos :: [ConstraintInfo],
     methodParamName :: String
   }
   deriving (Eq, Show)
@@ -437,7 +440,9 @@ data ValueInfo
         valueInfoSymbol :: SymbolIdentity,
         valueRuntimeName :: String,
         valueType :: SrcType,
+        valueIdentityType :: SrcType,
         valueConstraints :: [P.ClassConstraint],
+        valueConstraintInfos :: [ConstraintInfo],
         valueOriginModule :: P.ModuleName
       }
   | ConstructorValue
@@ -462,7 +467,9 @@ data InstanceInfo = InstanceInfo
     instanceClassModule :: P.ModuleName,
     instanceOriginModule :: P.ModuleName,
     instanceConstraints :: [P.ClassConstraint],
+    instanceConstraintInfos :: [ConstraintInfo],
     instanceHeadType :: SrcType,
+    instanceHeadIdentityType :: SrcType,
     instanceMethods :: Map P.MethodName ValueInfo
   }
   deriving (Eq, Show)
@@ -680,6 +687,21 @@ substituteTypeVar needle replacement = go
         | name == needle -> STMu name body
         | otherwise -> STMu name (go body)
       STBottom -> STBottom
+
+freeTypeVarsSrcType :: SrcType -> Set String
+freeTypeVarsSrcType = go Set.empty
+  where
+    go bound ty = case ty of
+      STVar name
+        | name `Set.member` bound -> Set.empty
+        | otherwise -> Set.singleton name
+      STArrow dom cod -> go bound dom `Set.union` go bound cod
+      STBase {} -> Set.empty
+      STCon _ args -> foldMap (go bound) args
+      STForall name mb body ->
+        maybe Set.empty (go bound . unSrcBound) mb `Set.union` go (Set.insert name bound) body
+      STMu name body -> go (Set.insert name bound) body
+      STBottom -> Set.empty
 
 specializeMethodType :: SrcType -> String -> SrcType -> SrcType
 specializeMethodType methodTy paramName headTy =

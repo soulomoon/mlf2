@@ -2,7 +2,11 @@ module ProgramSpec (spec) where
 
 import Data.Either (isRight)
 import Data.List (isInfixOf)
+import qualified Data.Map.Strict as Map
 import MLF.API (SrcTy (..))
+import MLF.Frontend.Program.Check (checkResolvedProgram)
+import MLF.Frontend.Program.Types (mkResolvedSymbol)
+import MLF.Frontend.Syntax (ResolvedSrcTy (..))
 import MLF.Program
 import MLF.Program.CLI (runProgramFile)
 import Test.Hspec
@@ -2543,6 +2547,297 @@ spec = do
                     sameResolvedSymbol (symbolFor ResolvedMethodReference "eq") (symbolFor ResolvedMethodReference "C.eq") `shouldBe` True
                 Left err -> expectationFailure ("expected check success, got " ++ show err)
 
+        it "stores resolved AST global references as symbols and local references as local refs" $ do
+            let programText =
+                    unlines
+                        [ "module Core export (Token(..), answer) {"
+                        , "  data Token ="
+                        , "      Token : Token;"
+                        , "  def answer : Token = Token;"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  import Core as C exposing (Token(..), answer);"
+                        , "  def main : C.Token = let local = C.answer in case local of {"
+                        , "    C.Token -> local"
+                        , "  };"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case checkProgram program of
+                Right checked -> do
+                    let mainModules =
+                            [ resolvedModuleSyntax resolvedModule
+                            | resolvedModule <- resolvedProgramModules (checkedProgramResolved checked)
+                            , resolvedModuleName resolvedModule == "Main"
+                            ]
+                    case mainModules of
+                        [mainModule] ->
+                            case [defDecl | DeclDef defDecl <- moduleDecls mainModule, defDeclName defDecl == "main"] of
+                                [mainDef] -> do
+                                    case constrainedBody (defDeclType mainDef) of
+                                        RSTBase typeSymbol -> do
+                                            symbolDisplayName (resolvedSymbolSpelling typeSymbol) `shouldBe` "C.Token"
+                                            symbolDefiningModule (resolvedSymbolIdentity typeSymbol) `shouldBe` "Core"
+                                        other -> expectationFailure ("expected resolved type symbol, got " ++ show other)
+                                    case defDeclExpr mainDef of
+                                        ELet "local" Nothing (EVar (ResolvedGlobalValue answerSymbol)) (ECase (EVar (ResolvedLocalValue "local")) [Alt (PatCtor ctorSymbol []) (EVar (ResolvedLocalValue "local"))]) -> do
+                                            symbolDisplayName (resolvedSymbolSpelling answerSymbol) `shouldBe` "C.answer"
+                                            symbolDefiningModule (resolvedSymbolIdentity answerSymbol) `shouldBe` "Core"
+                                            symbolDisplayName (resolvedSymbolSpelling ctorSymbol) `shouldBe` "C.Token"
+                                            symbolDefiningModule (resolvedSymbolIdentity ctorSymbol) `shouldBe` "Core"
+                                        other -> expectationFailure ("expected resolved local/global expression shape, got " ++ show other)
+                                other -> expectationFailure ("expected one main def, got " ++ show (length other))
+                        other -> expectationFailure ("expected one Main module, got " ++ show (length other))
+                Left err -> expectationFailure ("expected check success, got " ++ show err)
+
+        it "rejects constructor result heads with matching display but different resolved identity" $ do
+            let localBox =
+                    mkResolvedSymbol
+                        ( SymbolIdentity
+                            { symbolNamespace = SymbolType
+                            , symbolDefiningModule = "Main"
+                            , symbolDefiningName = "Box"
+                            , symbolOwnerIdentity = Nothing
+                            }
+                        )
+                        "Box"
+                        "Box"
+                        (SymbolLocal "Main")
+                foreignBox =
+                    mkResolvedSymbol
+                        ( SymbolIdentity
+                            { symbolNamespace = SymbolType
+                            , symbolDefiningModule = "Other"
+                            , symbolDefiningName = "Box"
+                            , symbolOwnerIdentity = Nothing
+                            }
+                        )
+                        "Box"
+                        "Box"
+                        (SymbolQualifiedImport "Other" "Other")
+                badCtor =
+                    mkResolvedSymbol
+                        ( SymbolIdentity
+                            { symbolNamespace = SymbolConstructor
+                            , symbolDefiningModule = "Main"
+                            , symbolDefiningName = "Bad"
+                            , symbolOwnerIdentity = Just (SymbolOwnerType "Main" "Box")
+                            }
+                        )
+                        "Bad"
+                        "Bad"
+                        (SymbolLocal "Main")
+                resolvedScope =
+                    ResolvedScope
+                        { resolvedScopeValues = Map.singleton "Bad" badCtor
+                        , resolvedScopeTypes = Map.singleton "Box" localBox
+                        , resolvedScopeClasses = Map.empty
+                        , resolvedScopeModules = Map.empty
+                        }
+                resolvedModule =
+                    ResolvedModule
+                        { resolvedModuleName = "Main"
+                        , resolvedModuleSyntax =
+                            Module
+                                { moduleName = "Main"
+                                , moduleExports = Nothing
+                                , moduleImports = []
+                                , moduleDecls =
+                                    [ DeclData
+                                        DataDecl
+                                            { dataDeclName = "Box"
+                                            , dataDeclParams = []
+                                            , dataDeclConstructors =
+                                                [ ConstructorDecl
+                                                    { constructorDeclName = "Bad"
+                                                    , constructorDeclType = RSTBase foreignBox
+                                                    }
+                                                ]
+                                            , dataDeclDeriving = []
+                                            }
+                                    ]
+                                }
+                        , resolvedModuleLocalValues = Map.singleton "Bad" [badCtor]
+                        , resolvedModuleLocalTypes = Map.singleton "Box" [localBox]
+                        , resolvedModuleLocalClasses = Map.empty
+                        , resolvedModuleScope = resolvedScope
+                        , resolvedModuleExports = resolvedScope
+                        , resolvedModuleReferences = []
+                        }
+            checkResolvedProgram (ResolvedProgram [resolvedModule])
+                `shouldBe` Left (ProgramInvalidConstructorResult "Bad" (STBase "Box") "Box")
+
+        it "checks resolved syntax by identity when display spellings are stale" $ do
+            let boxType =
+                    mkResolvedSymbol
+                        ( SymbolIdentity
+                            { symbolNamespace = SymbolType
+                            , symbolDefiningModule = "Main"
+                            , symbolDefiningName = "Box"
+                            , symbolOwnerIdentity = Nothing
+                            }
+                        )
+                        "stale.Box"
+                        "stale.Box"
+                        (SymbolLocal "Main")
+                boxCtor =
+                    mkResolvedSymbol
+                        ( SymbolIdentity
+                            { symbolNamespace = SymbolConstructor
+                            , symbolDefiningModule = "Main"
+                            , symbolDefiningName = "Box"
+                            , symbolOwnerIdentity = Just (SymbolOwnerType "Main" "Box")
+                            }
+                        )
+                        "stale.Box"
+                        "stale.Box"
+                        (SymbolLocal "Main")
+                mainValue =
+                    mkResolvedSymbol
+                        ( SymbolIdentity
+                            { symbolNamespace = SymbolValue
+                            , symbolDefiningModule = "Main"
+                            , symbolDefiningName = "main"
+                            , symbolOwnerIdentity = Nothing
+                            }
+                        )
+                        "stale.main"
+                        "stale.main"
+                        (SymbolLocal "Main")
+                resolvedScope =
+                    ResolvedScope
+                        { resolvedScopeValues = Map.fromList [("Box", boxCtor), ("main", mainValue)]
+                        , resolvedScopeTypes = Map.singleton "Box" boxType
+                        , resolvedScopeClasses = Map.empty
+                        , resolvedScopeModules = Map.empty
+                        }
+                resolvedModule =
+                    ResolvedModule
+                        { resolvedModuleName = "Main"
+                        , resolvedModuleSyntax =
+                            Module
+                                { moduleName = "Main"
+                                , moduleExports = Nothing
+                                , moduleImports = []
+                                , moduleDecls =
+                                    [ DeclData
+                                        DataDecl
+                                            { dataDeclName = "Box"
+                                            , dataDeclParams = []
+                                            , dataDeclConstructors =
+                                                [ ConstructorDecl
+                                                    { constructorDeclName = "Box"
+                                                    , constructorDeclType = RSTBase boxType
+                                                    }
+                                                ]
+                                            , dataDeclDeriving = []
+                                            }
+                                    , DeclDef
+                                        DefDecl
+                                            { defDeclName = "main"
+                                            , defDeclType = ConstrainedType [] (RSTBase boxType)
+                                            , defDeclExpr = EVar (ResolvedGlobalValue boxCtor)
+                                            }
+                                    ]
+                                }
+                        , resolvedModuleLocalValues = Map.fromList [("Box", [boxCtor]), ("main", [mainValue])]
+                        , resolvedModuleLocalTypes = Map.singleton "Box" [boxType]
+                        , resolvedModuleLocalClasses = Map.empty
+                        , resolvedModuleScope = resolvedScope
+                        , resolvedModuleExports = resolvedScope
+                        , resolvedModuleReferences = []
+                        }
+            checkResolvedProgram (ResolvedProgram [resolvedModule]) `shouldSatisfy` isRight
+
+        it "elaborates resolved annotations and patterns by identity with stale spellings" $ do
+            let boxType =
+                    mkResolvedSymbol
+                        ( SymbolIdentity
+                            { symbolNamespace = SymbolType
+                            , symbolDefiningModule = "Main"
+                            , symbolDefiningName = "Box"
+                            , symbolOwnerIdentity = Nothing
+                            }
+                        )
+                        "wrong.Box"
+                        "wrong.Box"
+                        (SymbolLocal "Main")
+                boxCtor =
+                    mkResolvedSymbol
+                        ( SymbolIdentity
+                            { symbolNamespace = SymbolConstructor
+                            , symbolDefiningModule = "Main"
+                            , symbolDefiningName = "Box"
+                            , symbolOwnerIdentity = Just (SymbolOwnerType "Main" "Box")
+                            }
+                        )
+                        "wrong.Box"
+                        "wrong.Box"
+                        (SymbolLocal "Main")
+                mainValue =
+                    mkResolvedSymbol
+                        ( SymbolIdentity
+                            { symbolNamespace = SymbolValue
+                            , symbolDefiningModule = "Main"
+                            , symbolDefiningName = "main"
+                            , symbolOwnerIdentity = Nothing
+                            }
+                        )
+                        "wrong.main"
+                        "wrong.main"
+                        (SymbolLocal "Main")
+                resolvedScope =
+                    ResolvedScope
+                        { resolvedScopeValues = Map.fromList [("Box", boxCtor), ("main", mainValue)]
+                        , resolvedScopeTypes = Map.singleton "Box" boxType
+                        , resolvedScopeClasses = Map.empty
+                        , resolvedScopeModules = Map.empty
+                        }
+                resolvedModule =
+                    ResolvedModule
+                        { resolvedModuleName = "Main"
+                        , resolvedModuleSyntax =
+                            Module
+                                { moduleName = "Main"
+                                , moduleExports = Nothing
+                                , moduleImports = []
+                                , moduleDecls =
+                                    [ DeclData
+                                        DataDecl
+                                            { dataDeclName = "Box"
+                                            , dataDeclParams = []
+                                            , dataDeclConstructors =
+                                                [ ConstructorDecl
+                                                    { constructorDeclName = "Box"
+                                                    , constructorDeclType = RSTBase boxType
+                                                    }
+                                                ]
+                                            , dataDeclDeriving = []
+                                            }
+                                    , DeclDef
+                                        DefDecl
+                                            { defDeclName = "main"
+                                            , defDeclType = ConstrainedType [] (RSTBase boxType)
+                                            , defDeclExpr =
+                                                ECase
+                                                    (EAnn (EVar (ResolvedGlobalValue boxCtor)) (RSTBase boxType))
+                                                    [ Alt
+                                                        (PatAnn (PatCtor boxCtor []) (RSTBase boxType))
+                                                        (EVar (ResolvedGlobalValue boxCtor))
+                                                    ]
+                                            }
+                                    ]
+                                }
+                        , resolvedModuleLocalValues = Map.fromList [("Box", [boxCtor]), ("main", [mainValue])]
+                        , resolvedModuleLocalTypes = Map.singleton "Box" [boxType]
+                        , resolvedModuleLocalClasses = Map.empty
+                        , resolvedModuleScope = resolvedScope
+                        , resolvedModuleExports = resolvedScope
+                        , resolvedModuleReferences = []
+                        }
+            checkResolvedProgram (ResolvedProgram [resolvedModule]) `shouldSatisfy` isRight
+
         it "deduplicates mixed unqualified and aliased imports by semantic identity" $ do
             let programText =
                     unlines
@@ -2562,6 +2857,28 @@ spec = do
                         , "  import Core;"
                         , "  import Core as C exposing (Eq, Token(..), answer, eq);"
                         , "  def main : Bool = eq answer C.answer;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            (prettyValue <$> runProgram program) `shouldBe` Right "true"
+
+        it "resolves alias-only imported instances by semantic head identity" $ do
+            let programText =
+                    unlines
+                        [ "module Core export (Eq, Token(..), eq) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  data Token ="
+                        , "      Token : Token;"
+                        , "  instance Eq Token {"
+                        , "    eq = \\x \\y true;"
+                        , "  }"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  import Core as C;"
+                        , "  def main : Bool = C.eq C.Token C.Token;"
                         , "}"
                         ]
             program <- requireParsed programText

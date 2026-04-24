@@ -66,7 +66,9 @@ valueInfo =
       valueInfoSymbol = SymbolIdentity SymbolValue "Lib" "answer" Nothing,
       valueRuntimeName = "Lib__answer",
       valueType = STBase "Int",
+      valueIdentityType = STBase "Int",
       valueConstraints = [],
+      valueConstraintInfos = [],
       valueOriginModule = "Lib"
     }
 
@@ -77,7 +79,9 @@ mainValueInfo =
       valueInfoSymbol = SymbolIdentity SymbolValue "Main" "main" Nothing,
       valueRuntimeName = "Main__main",
       valueType = STBase "Int",
+      valueIdentityType = STBase "Int",
       valueConstraints = [],
+      valueConstraintInfos = [],
       valueOriginModule = "Main"
     }
 
@@ -97,6 +101,7 @@ someCtor =
       ctorArgs = [],
       ctorResult = STBase "Token",
       ctorOwningType = "Token",
+      ctorOwningTypeIdentity = SymbolIdentity SymbolType "Lib" "Token" Nothing,
       ctorIndex = 0
     }
 
@@ -124,7 +129,9 @@ eqMethodInfo =
       methodName = "eq",
       methodRuntimeBase = "Lib__Eq__eq",
       methodType = STArrow (STVar "a") (STArrow (STVar "a") (STBase "Bool")),
+      methodTypeIdentity = STArrow (STVar "a") (STArrow (STVar "a") (STBase "Bool")),
       methodConstraints = [],
+      methodConstraintInfos = [],
       methodParamName = "a"
     }
 

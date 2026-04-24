@@ -1,80 +1,57 @@
-# `.mlfp` Resolved Symbol Identity Audit
+# `.mlfp` Resolved Symbol Identities
 
-This note records the issue #26 audit and the minimal frontend/program boundary
-model added in `MLF.Frontend.Program.Types`.
+This note describes the enforced `.mlfp` resolve boundary. It replaces the
+older audit-only model: global symbols are now represented in resolved syntax,
+not only in a `resolvedModuleReferences` side table.
 
-## Boundary model
+## Boundary
 
-`ResolvedSymbol` separates two facts that the current checker often stores in
-the same string:
+`MLF.Frontend.Syntax.Program` is phase-indexed:
 
-- `SymbolIdentity` is the stable semantic key. It contains a namespace, defining
-  module, defining name, and optional owner identity for constructors and class
-  methods.
-- `SymbolSpelling` is reference-side surface data. It retains the source name,
-  display name, and whether the spelling is local, unqualified import,
-  qualified/aliased import, or builtin.
+- `Program 'Parsed` is parser output and may contain surface `String` names.
+- `Program 'Resolved` is resolver output and stores `ResolvedSymbol` values at
+  global reference sites.
+- `SrcTy` has a resolved counterpart for `.mlfp` source types, so resolved type
+  heads are symbols rather than `STBase`/`STCon` strings.
+- Local term binders remain source names; resolved term references distinguish
+  `ResolvedLocalValue` from `ResolvedGlobalValue`.
 
-The model covers value, constructor, type, class, method, and module/import
-identities. Constructors are owned by a type identity; methods are owned by a
-class identity. Two visible spellings such as `answer` and `L.answer` therefore
-compare equal through `sameResolvedSymbol` when they name the same declaration
-from the same defining module.
+`ResolvedModule.resolvedModuleSyntax` is the syntax consumed by the checker and
+elaborator. `resolvedModuleReferences` remains useful for audits, diagnostics,
+and tests, but it is no longer the production carrier of resolved references.
 
-This is a model-level contract only. It deliberately does not migrate checker
-visibility behavior, parser grammar, or import/export semantics.
+## Identity Vs. Spelling
 
-## Current qualified/unqualified branch sites
+`ResolvedSymbol` separates semantic identity from source spelling:
 
-- `MLF.Frontend.Parse.Program`: `qualifiedUpperIdent` and
-  `qualifiedLowerIdent` accept at most one uppercase module qualifier and then
-  flatten the spelling into a `String`. The type parser reuses
-  `qualifiedUpperIdent`, so source types carry qualified spellings as plain
-  `STBase` or `STCon` names.
-- `MLF.Frontend.Syntax.Program`: `ProgramSpanIndex` stores spans by visible
-  strings for values, constructors, types, classes, import items, export items,
-  modules, and import aliases. Diagnostics currently recover locations by
-  visible spelling rather than semantic identity.
-- `MLF.Frontend.Program.Check`: `buildImportScope` branches on `importAlias`
-  and `importExposing`. Unaliased imports add exported names directly; aliased
-  imports first call `qualifyModuleExports` and optionally add explicitly
-  exposed unqualified names.
-- `MLF.Frontend.Program.Check`: `qualifyModuleExports`, `qualifyInstance`, and
-  `qualifyInstanceHeadOnly` manufacture qualified copies of exported values,
-  data/type names, constructors, classes, methods, constraints, and source
-  types by rewriting display strings and `SrcType` heads.
-- `MLF.Frontend.Program.Check`: `unqualifiedName`, `classIdentity`,
-  `methodClassIdentity`, `instanceClassIdentity`, `sameInstanceHead`, and
-  duplicate/overlap checks already reconstruct semantic identity from module
-  fields plus unqualified names.
-- `MLF.Frontend.Program.Check`: instance visibility is split between
-  `importedUnqualifiedClassIdentities`, `unqualifiedInstancesForImport`,
-  `qualifiedInstancesForImport`, `instanceVisibleForUnqualifiedImport`, and
-  `instanceVisibleForQualifiedImport`. These paths decide whether instances are
-  visible via class imports, method-only imports, qualified aliases, and exposed
-  data mentions.
-- `MLF.Frontend.Program.Check`: export assembly in `buildExports`,
-  `collectExportValue`, `collectExportType`, and `collectExportClass` preserves
-  local exported values, abstract types, constructor-bearing types, and class
-  methods with maps keyed by visible names.
-- `MLF.Frontend.Program.Elaborate`: `canonicalSourceType`, `lowerTypeRaw`,
-  `lookupConstructorInfoMaybe`, `constructorNameMatches`,
-  `resolveInstanceInfoWithSubst`, and `resolveMethodInstanceInfoWithSubst`
-  compare qualified and unqualified source type/class spellings by consulting
-  checker-built scope maps and module/name pairs.
-- `MLF.Frontend.Program.Finalize`: source type recovery and deferred obligation
-  resolution revisit the same names through `recoverSourceType`,
-  `matchDataInfoEncoding`, constructor ambiguity handling, and
-  `resolveInstanceInfoWithSubst`.
-- `MLF.Frontend.Program.Run`: runtime decoding uses `lookupDataInfosForType`,
-  `lookupDataInfosByName`, `qualifiedDataName`, and `canonicalFieldType` to
-  match qualified type names against source data declarations while rendering
-  user-facing constructor names.
+- `SymbolIdentity` is the stable key: namespace, defining module/name, and an
+  optional owning type/class identity for constructors and methods.
+- `SymbolSpelling` records how this reference was written: local, unqualified
+  import, qualified/aliased import, or builtin.
 
-## Minimal next-step contract
+Two spellings such as `answer` and `C.answer` compare equal with
+`sameResolvedSymbol` when they name the same declaration. Diagnostics and
+rendering may use spelling; semantic checks must use identity.
 
-Later resolver work should replace ad hoc string splitting at the program
-boundary with `SymbolIdentity` lookups, while keeping `SymbolSpelling` available
-for diagnostics and display. The checker can then stop encoding identity in
-qualified copies of surface names, but that behavioral migration belongs to the
-resolver and downstream-migration issues, not this audit/model issue.
+## Checker Rules
+
+The checker may keep visible maps keyed by surface spelling because source
+lookup, diagnostics, and runtime rendering need those names. Once a name has
+been resolved, semantic decisions compare identities:
+
+- constructor result validation compares the resolved result type head identity
+  against the enclosing data declaration identity, with arity checked
+  separately;
+- imported instance deduplication compares `(class identity, resolved head
+  identity shape)`, so unqualified and aliased spellings do not create distinct
+  semantic instances;
+- elaboration compiles resolved expressions and patterns through
+  `SymbolIdentity` indexes before lowering to eMLF surface syntax;
+- deferred method finalization carries `TypeView`/`ConstraintInfo` metadata so
+  method-local evidence and instance lookup use class/type identities rather
+  than recovered display names;
+- duplicate case branches and mixed qualified/unqualified references compare
+  constructor/method/type/value identities, not display strings.
+
+This keeps qualification as presentation and visibility data rather than a
+semantic identity mechanism.

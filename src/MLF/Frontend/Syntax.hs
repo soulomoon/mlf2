@@ -25,15 +25,21 @@ module MLF.Frontend.Syntax
 
     -- * Raw source types (parser output)
     SrcTy (..),
+    ResolvedSrcTy (..),
     SrcType,
+    ResolvedSrcType,
     SrcTypeF (..),
 
     -- * Staged frontend types
     SrcNorm (..),
     SrcTopVar (..),
     SrcBound (..),
+    ResolvedSrcBound (..),
     BoundTopVar,
     mkSrcBound,
+    mkResolvedSrcBound,
+    resolvedSrcTypeToSrcType,
+    resolvedSrcTypeIdentityType,
     mkNormBound,
     unNormBound,
     NormSrcType,
@@ -63,6 +69,16 @@ where
 
 import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..))
 import Data.List.NonEmpty (NonEmpty)
+import MLF.Frontend.Symbol
+  ( ResolvedSymbol (..),
+    SymbolIdentity (..),
+    SymbolNamespace (..),
+    resolvedSymbolSpelling,
+    symbolDefiningModule,
+    symbolDefiningName,
+    symbolDisplayName,
+    symbolNamespace,
+  )
 
 {- Note [Surface syntax and paper alignment]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -182,12 +198,78 @@ deriving instance Show (SrcTy n v)
 
 type SrcType = SrcTy 'RawN 'TopVarAllowed
 
+-- | Wrapper for forall bounds after `.mlfp` symbol resolution.
+newtype ResolvedSrcBound (n :: SrcNorm) = ResolvedSrcBound
+  { unResolvedSrcBound :: ResolvedSrcTy n (BoundTopVar n)
+  }
+  deriving (Eq, Show)
+
+mkResolvedSrcBound :: ResolvedSrcTy n (BoundTopVar n) -> ResolvedSrcBound n
+mkResolvedSrcBound = ResolvedSrcBound
+
+-- | Source-level type syntax after `.mlfp` symbol resolution.
+data ResolvedSrcTy (n :: SrcNorm) (v :: SrcTopVar) where
+  RSTVar :: String -> ResolvedSrcTy n 'TopVarAllowed
+  RSTArrow :: ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
+  RSTBase :: ResolvedSymbol -> ResolvedSrcTy n v
+  RSTCon :: ResolvedSymbol -> NonEmpty (ResolvedSrcTy n 'TopVarAllowed) -> ResolvedSrcTy n v
+  RSTForall :: String -> Maybe (ResolvedSrcBound n) -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
+  RSTMu :: String -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
+  RSTBottom :: ResolvedSrcTy n v
+
+deriving instance Eq (ResolvedSrcTy n v)
+
+deriving instance Show (ResolvedSrcTy n v)
+
+type ResolvedSrcType = ResolvedSrcTy 'RawN 'TopVarAllowed
+
 type NormSrcType = SrcTy 'NormN 'TopVarAllowed
 
 type StructBound = SrcTy 'NormN 'TopVarDisallowed
 
 -- | Backward-compatible alias: 'RawSrcType' = 'SrcType'.
 type RawSrcType = SrcType
+
+resolvedSrcTypeToSrcType :: ResolvedSrcTy n v -> SrcTy n v
+resolvedSrcTypeToSrcType ty =
+  case ty of
+    RSTVar name -> STVar name
+    RSTArrow dom cod -> STArrow (resolvedSrcTypeToSrcType dom) (resolvedSrcTypeToSrcType cod)
+    RSTBase symbol -> STBase (resolvedTypeHeadDisplay symbol)
+    RSTCon symbol args -> STCon (resolvedTypeHeadDisplay symbol) (fmap resolvedSrcTypeToSrcType args)
+    RSTForall name mb body ->
+      STForall
+        name
+        (fmap (SrcBound . resolvedSrcTypeToSrcType . unResolvedSrcBound) mb)
+        (resolvedSrcTypeToSrcType body)
+    RSTMu name body -> STMu name (resolvedSrcTypeToSrcType body)
+    RSTBottom -> STBottom
+
+resolvedSrcTypeIdentityType :: ResolvedSrcTy n v -> SrcTy n v
+resolvedSrcTypeIdentityType ty =
+  case ty of
+    RSTVar name -> STVar name
+    RSTArrow dom cod -> STArrow (resolvedSrcTypeIdentityType dom) (resolvedSrcTypeIdentityType cod)
+    RSTBase symbol -> STBase (resolvedTypeHeadIdentityName symbol)
+    RSTCon symbol args -> STCon (resolvedTypeHeadIdentityName symbol) (fmap resolvedSrcTypeIdentityType args)
+    RSTForall name mb body ->
+      STForall
+        name
+        (fmap (SrcBound . resolvedSrcTypeIdentityType . unResolvedSrcBound) mb)
+        (resolvedSrcTypeIdentityType body)
+    RSTMu name body -> STMu name (resolvedSrcTypeIdentityType body)
+    RSTBottom -> STBottom
+
+resolvedTypeHeadDisplay :: ResolvedSymbol -> String
+resolvedTypeHeadDisplay =
+  symbolDisplayName . resolvedSymbolSpelling
+
+resolvedTypeHeadIdentityName :: ResolvedSymbol -> String
+resolvedTypeHeadIdentityName symbol =
+  let identity = resolvedSymbolIdentity symbol
+   in case symbolNamespace identity of
+        SymbolType -> symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+        _ -> symbolDisplayName (resolvedSymbolSpelling symbol)
 
 mkNormBound :: StructBound -> SrcBound 'NormN
 mkNormBound = SrcBound
