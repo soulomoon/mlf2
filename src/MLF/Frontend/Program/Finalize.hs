@@ -3,6 +3,7 @@
 module MLF.Frontend.Program.Finalize
   ( finalizeBinding,
     recoverSourceType,
+    sourceForallMatches,
   )
 where
 
@@ -357,14 +358,18 @@ sourceForallMatches expected actual =
   where
     match bound subst template actualTy =
       case template of
-        STForall name _ body -> match (Set.insert name bound) subst body actualTy
+        STForall name _ body ->
+          case actualTy of
+            STForall actualName _ actualBody ->
+              match
+                (Set.insert name bound)
+                (Map.insert name (STVar actualName) (Map.delete name subst))
+                body
+                actualBody
+            _ -> match (Set.insert name bound) (Map.delete name subst) body actualTy
         STVar name
           | name `Set.member` bound ->
-              case Map.lookup name subst of
-                Nothing -> Just (Map.insert name actualTy subst)
-                Just existing
-                  | alphaEqType (srcTypeToElabType existing) (srcTypeToElabType actualTy) -> Just subst
-                  | otherwise -> Nothing
+              matchBoundVar subst name actualTy
           | otherwise ->
               case actualTy of
                 STVar actualName | actualName == name -> Just subst
@@ -394,10 +399,11 @@ sourceForallMatches expected actual =
         STVarApp name args ->
           case actualTy of
             STVarApp actualName actualArgs
-              | actualName == name && length (toListNE args) == length (toListNE actualArgs) ->
+              | length (toListNE args) == length (toListNE actualArgs) -> do
+                  subst' <- matchVarAppHead bound subst name actualName
                   foldM
                     (\acc (leftTy, rightTy) -> match bound acc leftTy rightTy)
-                    subst
+                    subst'
                     (zip (toListNE args) (toListNE actualArgs))
             _ -> Nothing
         STMu _ body -> match bound subst body actualTy
@@ -427,6 +433,18 @@ sourceForallMatches expected actual =
                 `Set.union` go (Set.insert name boundVars) body
             STMu name body -> go (Set.insert name boundVars) body
             STBottom -> Set.empty
+
+    matchVarAppHead bound subst expectedName actualName
+      | expectedName `Set.member` bound = matchBoundVar subst expectedName (STVar actualName)
+      | actualName == expectedName = Just subst
+      | otherwise = Nothing
+
+    matchBoundVar subst name actualTy =
+      case Map.lookup name subst of
+        Nothing -> Just (Map.insert name actualTy subst)
+        Just existing
+          | alphaEqType (srcTypeToElabType existing) (srcTypeToElabType actualTy) -> Just subst
+          | otherwise -> Nothing
 
 refreshLetSchemes :: Env -> ElabTerm -> Either ProgramError ElabTerm
 refreshLetSchemes = go

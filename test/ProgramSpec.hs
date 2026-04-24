@@ -2,9 +2,11 @@ module ProgramSpec (spec) where
 
 import Data.Either (isRight)
 import Data.List (isInfixOf)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import MLF.API (SrcTy (..))
 import MLF.Frontend.Program.Check (checkResolvedProgram)
+import MLF.Frontend.Program.Finalize (sourceForallMatches)
 import MLF.Frontend.Program.Types (mkResolvedSymbol)
 import MLF.Frontend.Syntax (ResolvedSrcTy (..))
 import MLF.Program
@@ -2202,6 +2204,41 @@ emlfBoundaryMatrix =
 
 spec :: Spec
 spec = do
+    describe "MLF.Program source type finalization" $ do
+        it "matches variable-headed applications through forall alpha-renaming" $ do
+            let expected =
+                    STForall
+                        "f"
+                        Nothing
+                        ( STArrow
+                            (STVarApp "f" (STVar "a" :| []))
+                            (STVarApp "f" (STVar "a" :| []))
+                        )
+                actual =
+                    STForall
+                        "g"
+                        Nothing
+                        ( STArrow
+                            (STVarApp "g" (STVar "a" :| []))
+                            (STVarApp "g" (STVar "a" :| []))
+                        )
+            sourceForallMatches expected actual `shouldBe` True
+
+        it "rejects inconsistent variable-headed application alpha-renaming" $ do
+            let expected =
+                    STForall
+                        "f"
+                        Nothing
+                        ( STArrow
+                            (STVarApp "f" (STVar "a" :| []))
+                            (STVarApp "f" (STVar "a" :| []))
+                        )
+                actual =
+                    STArrow
+                        (STVarApp "g" (STVar "a" :| []))
+                        (STVarApp "h" (STVar "a" :| []))
+            sourceForallMatches expected actual `shouldBe` False
+
     describe "MLF.Program parse/pretty" $ do
         mapM_ roundtripFixture fixturePaths
 
