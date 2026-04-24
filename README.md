@@ -91,6 +91,12 @@ The unified `.mlfp` surface includes:
 - single-parameter typeclasses, class constraints, and schema instances
 - `deriving Eq` for nullary, recursive, and parameterized ADTs whose fields have Eq evidence
 
+`.mlfp` modules are same-compilation-unit modules today: imports resolve among
+modules in the parsed program, with the CLI runner adding the built-in Prelude
+as an explicit module. Separate module compilation and interface files are not
+supported yet; see `docs/mlfp-language-reference.md` for the user-facing module
+contract.
+
 Internally, `.mlfp` now reuses the old MLF ownership boundary:
 
 - `MLF.Frontend.Program.Check` assembles module/import/class/data environments

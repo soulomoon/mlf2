@@ -2311,6 +2311,17 @@ spec = do
             program <- requireParsed programText
             (prettyValue <$> runProgram program) `shouldBe` Right "true"
 
+        it "rejects imports outside the same compilation unit" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import ExternalCore;"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramUnknownImportModule "ExternalCore")
+
         it "rejects non-exhaustive case analysis for semantic reasons" $ do
             let programText =
                     unlines

@@ -25,9 +25,13 @@ module User export (main) {
 }
 ```
 
-Imports may refer to modules declared later in the same file. Hidden
-constructors remain hidden: importing `Nat(..)` from a module that exported only
-`Nat` is a visibility error.
+Imports may refer to modules declared later in the same file. A parsed `.mlfp`
+`Program` is one compilation unit: imports resolve only against modules in that
+same program. The CLI runner parses one source file and prepends the built-in
+`Prelude` as an explicit module before checking. There is no filesystem module
+discovery, persisted interface file, stable `.mlfp` ABI, linker, or separate
+module compilation mode yet. Hidden constructors remain hidden: importing
+`Nat(..)` from a module that exported only `Nat` is a visibility error.
 
 Imports can be qualified and aliased:
 

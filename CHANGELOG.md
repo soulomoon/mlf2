@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Documented the `.mlfp` module compilation contract: modules are checked as
+  one parsed `Program` compilation unit, the CLI Prelude is added explicitly,
+  and separate compilation/interface files remain future work. Added regression
+  coverage for imports that name modules outside the current program.
 - Enforced the `.mlfp` resolved-symbol phase boundary. Program syntax is now
   phase-indexed, the resolver produces a resolved AST with semantic symbols at
   global reference sites and resolved type heads, `checkProgram` routes through
