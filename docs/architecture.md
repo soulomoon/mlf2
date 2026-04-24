@@ -57,6 +57,17 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Types.*` — elaborated/runtime term and type representations
 - `MLF.Util.*` — shared utilities (order keys, union-find, etc.)
 
+The `.mlfp` module boundary is a same-compilation-unit boundary. `Resolve` and
+`Check` receive the full `Program`, topologically sort its module graph, and can
+therefore accept imports of modules declared later in that program. `Finalize`
+consumes the assembled program scope, and `Run` evaluates all checked module
+bindings together. There is no persisted interface artifact, import loader,
+stable `.mlfp` ABI, or linker today. Future separate compilation should be
+introduced only through an explicit compiler-owned interface artifact carrying
+exported principal schemes, visible type/class/instance summaries, and checked
+xMLF/runtime payloads rather than by peeking at source outside the current
+`Program`.
+
 Tests and executables that need `MLF.Research.*` must add `mlf2:mlf2-research`
 to `build-depends`.
 
