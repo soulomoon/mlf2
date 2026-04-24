@@ -1800,6 +1800,8 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
            in case Map.lookup name subst of
                 Just (STVar replacementName) -> STVarApp replacementName args'
                 Just (STBase replacementName) -> STCon replacementName args'
+                Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
+                Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
                 _ -> STVarApp name args'
         STForall name mb body ->
           STForall name (fmap (SrcBound . applyOverlapSubst subst . unSrcBound) mb) (applyOverlapSubst subst body)

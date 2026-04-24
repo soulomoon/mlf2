@@ -352,6 +352,8 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
          in case Map.lookup name subst of
               Just (STVar replacementName) -> STVarApp replacementName args'
               Just (STBase replacementName) -> STCon replacementName args'
+              Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
+              Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
               _ -> STVarApp name args'
       STForall name mb body ->
         let subst' = Map.delete name subst
@@ -403,6 +405,8 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
          in case Map.lookup name subst of
               Just (STVar replacementName) -> STVarApp replacementName args'
               Just (STBase replacementName) -> STCon replacementName args'
+              Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
+              Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
               _ -> STVarApp name args'
       STForall name mb body ->
         let subst' = Map.delete name subst
@@ -1731,6 +1735,8 @@ specializeSrcType subst ty = case ty of
      in case Map.lookup name subst of
           Just (STVar replacementName) -> STVarApp replacementName args'
           Just (STBase replacementName) -> STCon replacementName args'
+          Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
+          Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
           _ -> STVarApp name args'
   STForall name mb body
     | Map.member name subst -> STForall name mb body
