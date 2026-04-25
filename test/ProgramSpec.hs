@@ -755,6 +755,32 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs value-imported nonzero-index constructor from mixed higher-kinded data type"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), MaybeF, JustF, accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingF -> false;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (Box(..), JustF, accept);"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = accept (id (JustF (Box true)));"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "rejects first-order parameters in higher-kinded data fields"
         ( InlineProgram $
             unlines
@@ -2483,6 +2509,7 @@ spec = do
                         , ctorOwningType = "Apply"
                         , ctorOwningTypeIdentity = typeIdentity
                         , ctorIndex = 0
+                        , ctorOwnerConstructors = []
                         }
                 applyInfo =
                     DataInfo

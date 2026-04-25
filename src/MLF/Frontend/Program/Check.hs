@@ -8,6 +8,7 @@ module MLF.Frontend.Program.Check
     CheckedModule (..),
     CheckedBinding (..),
     DataInfo (..),
+    ConstructorShape (..),
     ConstructorInfo (..),
     ClassInfo (..),
     MethodInfo (..),
@@ -46,6 +47,7 @@ import MLF.Frontend.Program.Types
     CheckedModule (..),
     CheckedProgram (..),
     ClassInfo (..),
+    ConstructorShape (..),
     ConstructorInfo (..),
     DataInfo (..),
     ExportedTypeInfo (..),
@@ -69,6 +71,7 @@ import MLF.Frontend.Program.Types
     classInfoSymbolIdentity,
     constrainedVisibleType,
     constructorInfoSymbolIdentity,
+    constructorShapeFromInfo,
     dataInfoSymbolIdentity,
     diagnosticForProgramError,
     instanceInfoClassSymbolIdentity,
@@ -663,7 +666,19 @@ qualifyModuleExports alias exports =
           ctorArgs = map qualifySrcType (ctorArgs ctor),
           ctorResult = qualifySrcType (ctorResult ctor),
           ctorOwningType = ctorOwningType ctor,
-          ctorOwningTypeIdentity = ctorOwningTypeIdentity ctor
+          ctorOwningTypeIdentity = ctorOwningTypeIdentity ctor,
+          ctorOwnerConstructors = map qualifyConstructorShape (ctorOwnerConstructors ctor)
+        }
+
+    qualifyConstructorShape shape =
+      shape
+        { constructorShapeName = qualifiedName (constructorShapeName shape),
+          constructorShapeForalls =
+            [ (name, fmap qualifySrcType mbBound)
+              | (name, mbBound) <- constructorShapeForalls shape
+            ],
+          constructorShapeArgs = map qualifySrcType (constructorShapeArgs shape),
+          constructorShapeResult = qualifySrcType (constructorShapeResult shape)
         }
 
     qualifyClassInfo classInfo =
@@ -1013,7 +1028,8 @@ applyResolvedImportItem moduleName0 exports scope item =
       case exportedValueByIdentity (resolvedSymbolIdentity symbol) exports of
         Just (name, info) -> do
           values <- liftEither (addValues (scopeValues scope) (Map.singleton name info))
-          pure (withScopeValues values scope)
+          let scopeWithValue = withScopeValues values scope
+          importConstructorOwnerType moduleName0 exports scopeWithValue info
         Nothing -> throwError (ProgramImportNotExported moduleName0 (resolvedSymbolDisplayName symbol))
     P.ExportType ref ->
       case exportedTypeByRef ref exports of
@@ -1056,6 +1072,27 @@ applyResolvedImportItem moduleName0 exports scope item =
           types <- liftEither (addTypes (scopeTypes scope) (Map.singleton typeName dataInfo))
           pure (mkScope values types (scopeClasses scope) (scopeInstances scope))
         Nothing -> throwError (ProgramImportNotExported moduleName0 (P.resolvedExportTypeName ref))
+
+importConstructorOwnerType :: P.ModuleName -> ModuleExports -> Scope -> ValueInfo -> TcM Scope
+importConstructorOwnerType _moduleName0 exports scope = \case
+  ConstructorValue {valueCtorInfo = ctorInfo} ->
+    case exportedConstructorOwnerType ctorInfo exports of
+      Just dataInfo -> do
+        let hiddenName = ctorOwningType ctorInfo
+        types <- liftEither (addTypes (scopeTypes scope) (Map.singleton hiddenName dataInfo))
+        pure (withScopeTypes types scope)
+      Nothing -> pure scope
+  _ -> pure scope
+
+exportedConstructorOwnerType :: ConstructorInfo -> ModuleExports -> Maybe DataInfo
+exportedConstructorOwnerType ctorInfo exports =
+  case
+    [ dataInfo
+      | ExportedTypeInfo dataInfo _ <- Map.elems (exportedTypes exports),
+        dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctorInfo
+    ] of
+    dataInfo : _ -> Just dataInfo
+    [] -> Nothing
 
 exportedValueByIdentity :: SymbolIdentity -> ModuleExports -> Maybe (String, ValueInfo)
 exportedValueByIdentity identity exports =
@@ -1467,7 +1504,12 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
           paramNames = P.typeParamNames params
       ensureDistinctPlain ProgramDuplicateTypeParameter paramNames
       dataIdentity <- lookupResolvedLocalTypeIdentity resolvedModule (P.dataDeclName dataDecl)
-      constructors <- zipWithM (toCtorInfo dataDecl dataIdentity) [0 ..] (P.dataDeclConstructors dataDecl)
+      constructors0 <- zipWithM (toCtorInfo dataDecl dataIdentity) [0 ..] (P.dataDeclConstructors dataDecl)
+      let ownerShapes = map constructorShapeFromInfo constructors0
+          constructors =
+            [ ctor {ctorOwnerConstructors = ownerShapes}
+              | ctor <- constructors0
+            ]
       pure
         ( P.dataDeclName dataDecl,
           DataInfo
@@ -1502,7 +1544,8 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
             ctorResult = result0,
             ctorOwningType = P.dataDeclName dataDecl,
             ctorOwningTypeIdentity = dataIdentity,
-            ctorIndex = index
+            ctorIndex = index,
+            ctorOwnerConstructors = []
           }
 
     validateConstructorResult :: SymbolIdentity -> P.ResolvedDataDecl -> P.ResolvedConstructorDecl -> ResolvedSrcType -> TcM ()

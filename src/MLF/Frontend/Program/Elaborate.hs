@@ -148,7 +148,13 @@ mkElaborateScope values0 dataTypes classes0 instances0 =
 
     valueTypeFor OrdinaryValue {valueType = ty, valueIdentityType = identityTy, valueConstraints = constraints} =
       lowerTypeViewRaw dataTypes (TypeView (constrainedRuntimeTypeRaw dataTypes classes0 constraints ty) identityTy)
-    valueTypeFor ConstructorValue {valueType = ty} = quantifyFreeTypeVars ty
+    valueTypeFor ConstructorValue {valueType = ty, valueCtorInfo = ctorInfo} =
+      let quantifiedTy = quantifyFreeTypeVars ty
+          loweredTy = lowerTypeRaw dataTypes quantifiedTy
+       in if constructorOwnerHasVariableHeadApplication dataTypes ctorInfo
+            && srcTypeHasVariableHeadApplication loweredTy
+            then constructorStructuralPlaceholderTypeFor dataTypes ctorInfo
+            else quantifiedTy
     valueTypeFor OverloadedMethod {} = error "overloaded methods do not have concrete runtime types"
 
     instanceRuntimeValues =
@@ -663,7 +669,7 @@ constructorSurfaceExprRaw scope ctorInfo =
           else ctorArgs ctorInfo
       handlerTypes =
         if useStructuralTypes
-          then map (constructorStructuralHandlerType resultVar) handlerCtorOrder
+          then map (constructorStructuralHandlerType resultVar . constructorShapeFromInfo) handlerCtorOrder
           else map (\ctor -> handlerSurfaceType scope ctor (STVar resultVar)) handlerCtorOrder
       selectedHandler =
         foldl
@@ -1844,29 +1850,41 @@ deferConstructorCall scope ctorInfo argCount initialSubst = do
 
 constructorStructuralPlaceholderType :: ElaborateScope -> ConstructorInfo -> SrcType
 constructorStructuralPlaceholderType scope ctorInfo =
+  constructorStructuralPlaceholderTypeFor (elaborateScopeDataTypes scope) ctorInfo
+
+constructorStructuralPlaceholderTypeFor :: Map String DataInfo -> ConstructorInfo -> SrcType
+constructorStructuralPlaceholderTypeFor dataTypes ctorInfo =
   foldr
     STArrow
     (STVar resultVar)
-    (constructorStructuralArgs ctorInfo ++ map handlerType ownerConstructors)
+    (constructorStructuralArgs ctorInfo ++ map handlerType ownerShapes)
   where
-    ownerConstructors =
-      case resolveConstructorDataInfo scope ctorInfo of
-        Just dataInfo -> dataConstructors (visibleDataInfo dataInfo)
-        Nothing -> [ctorInfo]
+    ownerShapes =
+      case [dataInfo | dataInfo <- Map.elems dataTypes, dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctorInfo] of
+        dataInfo : _ -> map constructorShapeFromInfo (dataConstructors dataInfo)
+        [] -> constructorOwnerShapes ctorInfo
 
     resultVar = "$" ++ ctorOwningType ctorInfo ++ "_result"
 
-    handlerType ctor =
-      constructorStructuralHandlerType resultVar ctor
+    handlerType shape =
+      constructorStructuralHandlerType resultVar shape
 
-constructorStructuralHandlerType :: String -> ConstructorInfo -> SrcType
-constructorStructuralHandlerType resultVar ctor =
-  foldr STArrow (STVar resultVar) (constructorStructuralArgs ctor)
+constructorStructuralHandlerType :: String -> ConstructorShape -> SrcType
+constructorStructuralHandlerType resultVar shape =
+  foldr STArrow (STVar resultVar) (constructorStructuralShapeArgs shape)
 
 constructorStructuralArgs :: ConstructorInfo -> [SrcType]
 constructorStructuralArgs ctor =
-  [ STVar ("$" ++ ctorName ctor ++ "_arg" ++ show ix ++ "_type")
-    | ix <- [1 .. length (ctorArgs ctor)]
+  constructorStructuralArgsFor (ctorName ctor) (length (ctorArgs ctor))
+
+constructorStructuralShapeArgs :: ConstructorShape -> [SrcType]
+constructorStructuralShapeArgs shape =
+  constructorStructuralArgsFor (constructorShapeName shape) (length (constructorShapeArgs shape))
+
+constructorStructuralArgsFor :: String -> Int -> [SrcType]
+constructorStructuralArgsFor name arity =
+  [ STVar ("$" ++ name ++ "_arg" ++ show ix ++ "_type")
+    | ix <- [1 .. arity]
   ]
 
 constructorOccurrenceType :: ConstructorInfo -> Int -> SrcType

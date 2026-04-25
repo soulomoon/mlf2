@@ -46,6 +46,7 @@ import MLF.Frontend.Program.Elaborate
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     ConstructorInfo (..),
+    ConstructorShape (..),
     DataInfo (..),
     DeferredCaseCall (..),
     DeferredBindingMode (..),
@@ -61,6 +62,8 @@ import MLF.Frontend.Program.Types
     ValueInfo (..),
     applyConstraintInfoSubst,
     constructorOwnerRuntimeTypeTrackable,
+    constructorOwnerShapes,
+    constructorShapeFromInfo,
     freeTypeVarsTypeView,
     SymbolIdentity,
     splitArrows,
@@ -701,21 +704,27 @@ inlineConstructorHead scope ctorInfo subst = do
       argSrcTys = map (applyConstructorSubst subst) (ctorArgs ctorInfo)
       resultVar = "$" ++ ctorOwningType ctorInfo ++ "_result"
       argNames = ["$" ++ ctorName ctorInfo ++ "_arg" ++ show ix | ix <- [1 .. length argSrcTys]]
-      ownerConstructors =
+      ownerShapes =
         case lookupConstructorRuntime scope (ctorRuntimeName ctorInfo) of
-          Just (dataInfo, _) -> dataConstructors dataInfo
-          Nothing -> [ctorInfo]
-      handlerConstructors = map specializeHandlerConstructor ownerConstructors
-      handlerNames = ["$" ++ ctorName ctorInfo ++ "_k" ++ show ix | ix <- [1 .. length handlerConstructors]]
-      selectedHandler = handlerNames !! ctorIndex ctorInfo
-      handlerSrcType ctor =
+          Just (dataInfo, _) -> map constructorShapeFromInfo (dataConstructors dataInfo)
+          Nothing -> constructorOwnerShapes ctorInfo
+      handlerShapes = map specializeHandlerShape ownerShapes
+      handlerNames =
+        [ "$" ++ constructorShapeName shape ++ "_k" ++ show ix
+          | (ix, shape) <- zip ([1 :: Int ..]) handlerShapes
+        ]
+      handlerSrcType shape =
         foldr
           (\(name, mbBound) acc -> STForall name (fmap SrcBound mbBound) acc)
-          (foldr STArrow (STVar resultVar) (ctorArgs ctor))
-          (ctorForalls ctor)
+          (foldr STArrow (STVar resultVar) (constructorShapeArgs shape))
+          (constructorShapeForalls shape)
+  selectedHandler <-
+    case drop (ctorIndex ctorInfo) handlerNames of
+      name : _ -> Right name
+      [] -> Left (ProgramPipelineError ("constructor handler order missing `" ++ ctorName ctorInfo ++ "`"))
   resultTy <- srcTypeToElabType (lowerType scope resultSrcTy)
   argTys <- mapM (srcTypeToElabType . lowerType scope) argSrcTys
-  handlerTys <- mapM (srcTypeToElabType . lowerType scope . handlerSrcType) handlerConstructors
+  handlerTys <- mapM (srcTypeToElabType . lowerType scope . handlerSrcType) handlerShapes
   let selectedBody = foldl X.EApp (X.EVar selectedHandler) (map X.EVar argNames)
       handlerBody =
         foldr
@@ -729,21 +738,21 @@ inlineConstructorHead scope ctorInfo subst = do
       rolled
       (zip argNames argTys)
   where
-    specializeHandlerConstructor ctor =
-      case matchTypes Map.empty (ctorResult ctor) (applyConstructorSubst subst (ctorResult ctorInfo)) of
-        Just handlerSubst -> applyConstructorInfoSubst handlerSubst ctor
-        Nothing -> ctor
+    specializeHandlerShape shape =
+      case matchTypes Map.empty (constructorShapeResult shape) (applyConstructorSubst subst (ctorResult ctorInfo)) of
+        Just handlerSubst -> applyConstructorShapeSubst handlerSubst shape
+        Nothing -> shape
 
-applyConstructorInfoSubst :: Map String SrcType -> ConstructorInfo -> ConstructorInfo
-applyConstructorInfoSubst subst ctorInfo =
-  ctorInfo
-    { ctorForalls =
+applyConstructorShapeSubst :: Map String SrcType -> ConstructorShape -> ConstructorShape
+applyConstructorShapeSubst subst shape =
+  shape
+    { constructorShapeForalls =
         [ (name, fmap (applyConstructorSubst subst) mbBound)
-          | (name, mbBound) <- ctorForalls ctorInfo,
+          | (name, mbBound) <- constructorShapeForalls shape,
             Map.notMember name subst
         ],
-      ctorArgs = map (applyConstructorSubst subst) (ctorArgs ctorInfo),
-      ctorResult = applyConstructorSubst subst (ctorResult ctorInfo)
+      constructorShapeArgs = map (applyConstructorSubst subst) (constructorShapeArgs shape),
+      constructorShapeResult = applyConstructorSubst subst (constructorShapeResult shape)
     }
 
 applyConstructorSubst :: Map String SrcType -> SrcType -> SrcType

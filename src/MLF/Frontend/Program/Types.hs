@@ -41,6 +41,7 @@ module MLF.Frontend.Program.Types
     resolvedClassInfoSymbol,
     resolvedMethodInfoSymbol,
     resolvedModuleSymbol,
+    ConstructorShape (..),
     ConstructorInfo (..),
     DataInfo (..),
     MethodInfo (..),
@@ -64,6 +65,8 @@ module MLF.Frontend.Program.Types
     substituteTypeVar,
     constructorOwnerRuntimeTypeTrackable,
     constructorOwnerHasVariableHeadApplication,
+    constructorOwnerShapes,
+    constructorShapeFromInfo,
     dataConstructorsRuntimeTypeTrackable,
     srcTypeHasVariableHeadApplication,
     specializeMethodType,
@@ -455,6 +458,15 @@ data EvidenceInfo = EvidenceInfo
   }
   deriving (Eq, Show)
 
+data ConstructorShape = ConstructorShape
+  { constructorShapeName :: P.ConstructorName,
+    constructorShapeForalls :: [(String, Maybe SrcType)],
+    constructorShapeArgs :: [SrcType],
+    constructorShapeResult :: SrcType,
+    constructorShapeIndex :: Int
+  }
+  deriving (Eq, Show)
+
 data ConstructorInfo = ConstructorInfo
   { ctorName :: P.ConstructorName,
     ctorInfoSymbol :: SymbolIdentity,
@@ -465,7 +477,8 @@ data ConstructorInfo = ConstructorInfo
     ctorResult :: SrcType,
     ctorOwningType :: P.TypeName,
     ctorOwningTypeIdentity :: SymbolIdentity,
-    ctorIndex :: Int
+    ctorIndex :: Int,
+    ctorOwnerConstructors :: [ConstructorShape]
   }
   deriving (Eq, Show)
 
@@ -650,13 +663,13 @@ constructorOwnerRuntimeTypeTrackable :: Map String DataInfo -> ConstructorInfo -
 constructorOwnerRuntimeTypeTrackable dataInfos ctor =
   case [dataInfo | dataInfo <- Map.elems dataInfos, dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctor] of
     dataInfo : _ -> dataConstructorsRuntimeTypeTrackable dataInfo
-    [] -> constructorRuntimeTypeShapeTrackable ctor
+    [] -> not (null (ctorOwnerConstructors ctor)) || constructorRuntimeTypeShapeTrackable ctor
 
 constructorOwnerHasVariableHeadApplication :: Map String DataInfo -> ConstructorInfo -> Bool
 constructorOwnerHasVariableHeadApplication dataInfos ctor =
   case [dataInfo | dataInfo <- Map.elems dataInfos, dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctor] of
     dataInfo : _ -> any constructorRuntimeTypeHasVariableHeadApplication (dataConstructors dataInfo)
-    [] -> constructorRuntimeTypeHasVariableHeadApplication ctor
+    [] -> any constructorShapeHasVariableHeadApplication (constructorOwnerShapes ctor)
 
 dataConstructorsRuntimeTypeTrackable :: DataInfo -> Bool
 dataConstructorsRuntimeTypeTrackable =
@@ -664,20 +677,44 @@ dataConstructorsRuntimeTypeTrackable =
 
 constructorRuntimeTypeShapeTrackable :: ConstructorInfo -> Bool
 constructorRuntimeTypeShapeTrackable ctor =
+  constructorShapeRuntimeTypeTrackable (constructorShapeFromInfo ctor)
+
+constructorShapeRuntimeTypeTrackable :: ConstructorShape -> Bool
+constructorShapeRuntimeTypeTrackable shape =
   let involvedTypes =
-        ctorArgs ctor
-          ++ [ctorResult ctor]
-          ++ [bound | (_, Just bound) <- ctorForalls ctor]
+        constructorShapeArgs shape
+          ++ [constructorShapeResult shape]
+          ++ [bound | (_, Just bound) <- constructorShapeForalls shape]
       evidenceVars = foldMap freeTypeVarsSrcType involvedTypes
    in not (any hasVariableHeadApplication involvedTypes)
-        && all (\(name, _) -> name `Set.member` evidenceVars) (ctorForalls ctor)
+        && all (\(name, _) -> name `Set.member` evidenceVars) (constructorShapeForalls shape)
 
 constructorRuntimeTypeHasVariableHeadApplication :: ConstructorInfo -> Bool
 constructorRuntimeTypeHasVariableHeadApplication ctor =
+  constructorShapeHasVariableHeadApplication (constructorShapeFromInfo ctor)
+
+constructorShapeHasVariableHeadApplication :: ConstructorShape -> Bool
+constructorShapeHasVariableHeadApplication shape =
   any hasVariableHeadApplication $
-    ctorArgs ctor
-      ++ [ctorResult ctor]
-      ++ [bound | (_, Just bound) <- ctorForalls ctor]
+    constructorShapeArgs shape
+      ++ [constructorShapeResult shape]
+      ++ [bound | (_, Just bound) <- constructorShapeForalls shape]
+
+constructorOwnerShapes :: ConstructorInfo -> [ConstructorShape]
+constructorOwnerShapes ctor =
+  case ctorOwnerConstructors ctor of
+    [] -> [constructorShapeFromInfo ctor]
+    shapes -> shapes
+
+constructorShapeFromInfo :: ConstructorInfo -> ConstructorShape
+constructorShapeFromInfo ctor =
+  ConstructorShape
+    { constructorShapeName = ctorName ctor,
+      constructorShapeForalls = ctorForalls ctor,
+      constructorShapeArgs = ctorArgs ctor,
+      constructorShapeResult = ctorResult ctor,
+      constructorShapeIndex = ctorIndex ctor
+    }
 
 srcTypeHasVariableHeadApplication :: SrcType -> Bool
 srcTypeHasVariableHeadApplication = hasVariableHeadApplication
