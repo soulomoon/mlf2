@@ -69,6 +69,15 @@ spec = describe "Frontend eMLF pretty printer" $ do
         let ty = STMu "a" (STCon "List" (STVar "a" :| []))
         parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty
 
+    it "roundtrips variable-headed type application parse(pretty(type))" $ do
+        let ty =
+                STVarApp
+                    "f"
+                    ( STVarApp "g" (STVar "a" :| [])
+                        :| [STArrow (STVar "a") (STVar "b")]
+                    )
+        parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty
+
     it "roundtrips recursive expression parse(pretty(expr))" $ do
         let expr = EAnn (EVar "x") (STMu "a" (STArrow (STVar "a") (STBase "Int")))
         parseRawEmlfExpr (prettyEmlfExpr expr) `shouldBe` Right expr

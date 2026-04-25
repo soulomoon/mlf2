@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Added syntax-level `.mlfp` parsing and pretty-printing for variable-headed
+  source type applications such as `f a`, including nested and parenthesized
+  argument round trips. Kind checking and higher-kinded elaboration still fail
+  closed until the follow-up semantic slices.
 - Added `.mlfp` declaration parameter kind metadata. Data and class parameters
   now carry default `*` or parenthesized higher-kinded annotations, the program
   pretty-printer preserves non-first-order declarations, variable-headed source

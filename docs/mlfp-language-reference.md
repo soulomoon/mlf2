@@ -106,10 +106,19 @@ data Higher (f :: * -> *) a =
     Higher : a -> Higher f a;
 ```
 
-This slice records and pretty-prints declaration parameter kinds while keeping
-existing first-order declarations unchanged. Full variable-headed type
-application parsing such as `f a`, source kind checking, and higher-kinded
-elaboration remain follow-up work for #16, #17, and #18.
+Variable-headed type applications such as `f a` are accepted in source types
+and pretty-print back to the same structure:
+
+```mlf
+data Applied (f :: * -> *) a =
+    Applied : f a -> Applied f a;
+```
+
+This syntax slice records and pretty-prints declaration parameter kinds and
+variable-headed type application structure while keeping existing first-order
+declarations unchanged. Source kind checking and higher-kinded elaboration
+remain follow-up work for #17 and #18, so checked programs still fail closed if
+they require those later semantics.
 
 ## Case Expressions And Patterns
 

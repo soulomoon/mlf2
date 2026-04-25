@@ -131,6 +131,7 @@ programTypeConfig =
         , tpcMkArrow = STArrow
         , tpcMkBase = STBase
         , tpcMkCon = STCon
+        , tpcMkVarApp = \v args -> Just (STVarApp v args)
         , tpcMkForall = \v mb body -> STForall v (fmap mkSrcBound mb) body
         , tpcMkBottom = STBottom
         , tpcBoundedBinder = \pTy ->

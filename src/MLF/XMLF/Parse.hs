@@ -105,6 +105,7 @@ xmlfTypeConfig =
         , tpcMkArrow = XTArrow
         , tpcMkBase = XTBase
         , tpcMkCon = XTCon
+        , tpcMkVarApp = \_ _ -> Nothing
         , tpcMkForall = XTForall
         , tpcMkBottom = XTBottom
         , tpcBoundedBinder = \pTy ->

@@ -60,6 +60,7 @@ Expr        ::= x
 SrcType     ::= α
               | SrcType "->" SrcType
               | C SrcType+
+              | α SrcType+
               | "∀" Binder+ "." SrcType
               | "⊥"
 Binder      ::= α | "(" α "⩾" SrcType ")"
@@ -146,17 +147,33 @@ Import       ::= "import" UIdent ["as" UIdent] ["exposing" "(" ExportItem ("," E
 ExportItem   ::= lIdent | UIdent | UIdent "(..)"
 
 Decl         ::= DataDecl | ClassDecl | InstanceDecl | DefDecl
-DataDecl     ::= "data" UIdent lIdent* "=" CtorDecl ("|" CtorDecl)* ["deriving" QName ("," QName)*] ";"
+DataDecl     ::= "data" UIdent TypeParam* "=" CtorDecl ("|" CtorDecl)* ["deriving" QName ("," QName)*] ";"
 CtorDecl     ::= UIdent ":" SrcType
-ClassDecl    ::= "class" UIdent lIdent "{" MethodSig* "}"
+ClassDecl    ::= "class" UIdent TypeParam "{" MethodSig* "}"
 MethodSig    ::= lIdent ":" ConstrainedType ";"
 InstanceDecl ::= "instance" [ConstraintPrefix "=>"] QName SrcType "{" MethodDef* "}"
 MethodDef    ::= lIdent "=" Expr ";"
 DefDecl      ::= "def" lIdent ":" ConstrainedType "=" Expr ";"
 
+TypeParam    ::= lIdent | "(" lIdent "::" Kind ")"
+Kind         ::= KindAtom ["->" Kind]
+KindAtom     ::= "*" | "(" Kind ")"
+
 ConstrainedType ::= [ConstraintPrefix "=>"] SrcType
 ConstraintPrefix ::= ClassConstraint | "(" ClassConstraint ("," ClassConstraint)* ")"
 ClassConstraint ::= QName SrcType
+
+SrcType      ::= lIdent
+               | UIdent SrcTypeAtom*
+               | lIdent SrcTypeAtom+
+               | SrcType "->" SrcType
+               | "forall" Binder+ "." SrcType
+               | "∀" Binder+ "." SrcType
+               | "mu" lIdent "." SrcType
+               | "μ" lIdent "." SrcType
+               | "⊥"
+SrcTypeAtom  ::= lIdent | UIdent | "⊥" | "(" SrcType ")"
+Binder       ::= lIdent | "(" lIdent "⩾" SrcType ")" | "(" lIdent ">=" SrcType ")"
 
 Expr         ::= QName | Literal
                | "\" Param Expr
