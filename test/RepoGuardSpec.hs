@@ -161,6 +161,38 @@ spec = describe "Repository guardrails" $ do
         notesSrc `shouldSatisfy` (not . isInfixOf marker)
     runSrc `shouldSatisfy` isInfixOf "normalize"
 
+  it "`.mlfp` checking consumes resolved syntax without unresolving whole programs" $ do
+    checkSrc <- readFile "src/MLF/Frontend/Program/Check.hs"
+    forM_
+      [ "P.unresolveModule",
+        "P.unresolveProgram",
+        "resolvedExprForEnv",
+        "qualifyInstanceHeadOnly",
+        "qualifyInstance ::",
+        "qualifyInstance alias"
+      ]
+      $ \marker ->
+        checkSrc `shouldSatisfy` (not . isInfixOf marker)
+    finalizeSrc <- readFile "src/MLF/Frontend/Program/Finalize.hs"
+    elaborateSrc <- readFile "src/MLF/Frontend/Program/Elaborate.hs"
+    forM_
+      [ "resolveInstanceInfoWithSubst",
+        "resolveMethodInstanceInfoWithSubst"
+      ]
+      $ \marker ->
+        finalizeSrc `shouldSatisfy` (not . isInfixOf marker)
+    forM_
+      [ "(P.constraintClassName constraint, show (P.constraintType constraint))",
+        "Set (P.ClassName, String) -> [P.ClassConstraint]",
+        "resolvedExprForScope",
+        "resolvedPatternForScope",
+        "resolvedTypeForScope",
+        "resolvedConstrainedTypeForScope",
+        "resolvedClassConstraintForScope"
+      ]
+      $ \marker ->
+        elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
+
   it "split facades stay thin and child-owned" $ do
     forM_ splitFacadeGuards $ \(path, maxLines, requiredMarkers) -> do
       src <- readFile path

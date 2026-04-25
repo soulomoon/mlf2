@@ -679,6 +679,8 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
       conNode <- allocCon (BaseTy name) argNodes
       rebindChildrenIfRigid bindFlag conNode (genRef currentGen) (NE.toList argNodes)
       withWrappedNode bindFlag wrap currentGen conNode sharedFinal
+    STVarApp name _ ->
+      throwError (InternalConstraintError ("variable-headed source type application `" ++ name ++ "` is not supported before higher-kinded elaboration"))
     STForall var mBound body -> do
       -- Note: Alias bounds (∀(b ⩾ a). body where the bound is a bare
       -- variable) are unreachable here — normalization inlines them via
@@ -774,6 +776,7 @@ structBoundToNormSrcType sb = case sb of
   STArrow dom cod -> STArrow dom cod
   STBase name -> STBase name
   STCon name args -> STCon name args
+  STVarApp name args -> STVarApp name args
   STForall v mb body -> STForall v mb body
   STMu v body -> STMu v body
   STBottom -> STBottom
@@ -786,6 +789,12 @@ structBoundFreeVars = go Set.empty
       STArrow dom cod -> normFreeVars bound dom <> normFreeVars bound cod
       STBase _ -> Set.empty
       STCon _ args -> foldMap (normFreeVars bound) args
+      STVarApp name args ->
+        let headVars =
+              if Set.member name bound
+                then Set.empty
+                else Set.singleton name
+         in headVars <> foldMap (normFreeVars bound) args
       STForall v mb body ->
         let bound' = Set.insert v bound
          in maybe Set.empty (go bound . unNormBound) mb <> normFreeVars bound' body
@@ -798,6 +807,12 @@ structBoundFreeVars = go Set.empty
       STArrow dom cod -> normFreeVars bound dom <> normFreeVars bound cod
       STBase _ -> Set.empty
       STCon _ args -> foldMap (normFreeVars bound) args
+      STVarApp name args ->
+        let headVars =
+              if Set.member name bound
+                then Set.empty
+                else Set.singleton name
+         in headVars <> foldMap (normFreeVars bound) args
       STForall v mb body ->
         let bound' = Set.insert v bound
          in maybe Set.empty (go bound . unNormBound) mb <> normFreeVars bound' body

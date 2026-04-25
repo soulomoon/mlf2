@@ -10,6 +10,7 @@ import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
 import Data.List (isInfixOf, isPrefixOf, nub, sort)
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.Map.Strict qualified as Map
 import Data.Maybe (catMaybes, isJust, listToMaybe)
 import Data.Set qualified as Set
 import MLF.Binding.Tree qualified as Binding
@@ -353,8 +354,35 @@ resultTypeInputsForArtifacts
             defaultTraceConfig
      in (inputs, annCanon, ann0)
 
+expectUnsupportedVarApp :: Either Elab.PipelineError a -> Expectation
+expectUnsupportedVarApp result =
+  case result of
+    Left (Elab.PipelineConstraintError (InternalConstraintError msg)) ->
+      msg `shouldSatisfy` isInfixOf "variable-headed source type application `f` is not supported"
+    Left (Elab.PipelineElabError (Elab.InstantiationError msg)) ->
+      msg `shouldSatisfy` isInfixOf "variable-headed source type application `f` is not supported"
+    Left err ->
+      expectationFailure ("expected typed variable-headed source type error, got " ++ renderPipelineError err)
+    Right _ ->
+      expectationFailure "expected unsupported variable-headed source type application error"
+
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
+  describe "External binding validation" $ do
+    it "fails closed for variable-headed external env types" $ do
+      let extEnv = Map.singleton "x" (STVarApp "f" (STVar "a" :| []))
+          result = Elab.runPipelineElabWithEnv Set.empty extEnv (EVar "x")
+      expectUnsupportedVarApp result
+
+  describe "Source annotation validation" $ do
+    it "fails closed for variable-headed term annotations" $ do
+      let expr = EAnn (ELit (LInt 1)) (STVarApp "f" (STBase "Int" :| []))
+      expectUnsupportedVarApp (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+
+    it "fails closed for variable-headed annotated lambda parameters" $ do
+      let expr = ELamAnn "x" (STVarApp "f" (STBase "Int" :| [])) (EVar "x")
+      expectUnsupportedVarApp (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+
   describe "Shared candidate selection" $ do
     it "deduplicates repeated equal candidates instead of treating repeats as ambiguity" $ do
       selectUniqueCandidate [1 :: Int, 1, 1]

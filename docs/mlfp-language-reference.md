@@ -25,9 +25,13 @@ module User export (main) {
 }
 ```
 
-Imports may refer to modules declared later in the same file. Hidden
-constructors remain hidden: importing `Nat(..)` from a module that exported only
-`Nat` is a visibility error.
+Imports may refer to modules declared later in the same file. A parsed `.mlfp`
+`Program` is one compilation unit: imports resolve only against modules in that
+same program. The CLI runner parses one source file and prepends the built-in
+`Prelude` as an explicit module before checking. There is no filesystem module
+discovery, persisted interface file, stable `.mlfp` ABI, linker, or separate
+module compilation mode yet. Hidden constructors remain hidden: importing
+`Nat(..)` from a module that exported only `Nat` is a visibility error.
 
 Imports can be qualified and aliased:
 
@@ -75,6 +79,48 @@ Runtime representation is Church-encoded. Constructor definitions are emitted
 as real runtime bindings, but source constructor uses lower to deferred
 obligations so eMLF inference can choose the necessary type evidence before the
 constructor is rewritten to the concrete Church binding.
+
+## Type Parameter Kinds
+
+Data and class type parameters default to kind `*`:
+
+```mlf
+class Eq a {
+  eq : a -> a -> Bool;
+}
+
+data Option a =
+    None : Option a
+  | Some : a -> Option a;
+```
+
+Higher-kinded parameters can be declared with a parenthesized kind annotation.
+Kind arrows associate to the right, so `* -> * -> *` means `* -> (* -> *)`.
+
+```mlf
+class Functor (f :: * -> *) {
+  identity : forall a. a -> a;
+}
+
+data Higher (f :: * -> *) a =
+    Higher : a -> Higher f a;
+```
+
+Variable-headed type applications such as `f a` are accepted in source types
+and pretty-print back to the same structure:
+
+```mlf
+data Applied (f :: * -> *) a =
+    Applied : f a -> Applied f a;
+```
+
+The checker validates declaration parameter kinds, ordinary and
+variable-headed type applications, class method constraints, instance heads,
+and constructor signatures before lowering. Kind errors are reported as
+`ProgramKindMismatch` or `ProgramTypeArityMismatch`. Higher-kinded
+elaboration and runtime semantics remain follow-up work for #18, so checked
+programs still fail closed if they require lowering a variable-headed source
+type application such as a constructor field of type `f a`.
 
 ## Case Expressions And Patterns
 

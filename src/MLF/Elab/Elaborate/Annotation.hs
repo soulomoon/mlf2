@@ -200,11 +200,11 @@ elaborateAnnotationTerm annotationContext namedSetReify env exprAnn annNodeId ei
           Left (PhiTranslatabilityError _)
             | canReuseSourceScheme -> pure InstId
           Left err -> Left err
-  let expectedSourceScheme =
-        case IntMap.lookup (getNodeId annNodeId) (acAnnSourceTypes annotationContext) of
-          Just srcTy -> Just (schemeFromType (srcTypeToElabType srcTy))
-          Nothing -> Nothing
-      expectedSchemeInfoForClose =
+  expectedSourceScheme <-
+    case IntMap.lookup (getNodeId annNodeId) (acAnnSourceTypes annotationContext) of
+      Just srcTy -> Just . schemeFromType <$> srcTypeToElabType srcTy
+      Nothing -> pure Nothing
+  let expectedSchemeInfoForClose =
         case expectedSourceScheme of
           Just schemeExpected -> Just (schemeExpected, IntMap.empty)
           Nothing -> expectedSchemeInfo
@@ -450,9 +450,9 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
           () of
           () -> Right InstId
       Just edgeWitness -> do
+        mSchemeInfo <- schemeInfoForInst funAnn
         let mTrace = IntMap.lookup eid edgeTraces
             mExpansion = IntMap.lookup eid edgeExpansions
-            mSchemeInfo = schemeInfoForInst funAnn
         case debugGeneralize
           ( "reifyInst scheme edge="
               ++ show eid
@@ -604,38 +604,59 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
     debugGeneralize = traceGeneralize traceCfg
 
     schemeInfoForInst annExpr =
-      case annExpr of
-        _ | Just schemeInfo <- syntheticLetSchemeInfo annExpr -> Just schemeInfo
-        AVar v _ -> Map.lookup v env
-        AAnn inner _ _ -> schemeInfoForInst inner
-        AUnfold inner _ _ -> schemeInfoForInst inner
-        _ -> Nothing
+      do
+        synthetic <- syntheticLetSchemeInfo annExpr
+        case synthetic of
+          Just schemeInfo -> pure (Just schemeInfo)
+          Nothing ->
+            case annExpr of
+              AVar v _ -> pure (Map.lookup v env)
+              AAnn inner _ _ -> schemeInfoForInst inner
+              AUnfold inner _ _ -> schemeInfoForInst inner
+              _ -> pure Nothing
 
     syntheticLetSchemeInfo annExpr =
       case annExpr of
         ALet letName _ schemeRootId _ _ rhsAnn bodyAnn _
           | annRefersToVar letName bodyAnn ->
-              explicitSourceAnnotatedScheme rhsAnn
-                <|> explicitSourceAnnotatedScheme annExpr
-                <|> ( case generalizeAtNode scopeContext schemeRootId of
-                        Right (scheme, subst) -> Just SchemeInfo {siScheme = scheme, siSubst = subst}
-                        Left _ -> Nothing
+              firstJustE
+                (explicitSourceAnnotatedScheme rhsAnn)
+                ( firstJustE
+                    (explicitSourceAnnotatedScheme annExpr)
+                    ( pure
+                        ( case generalizeAtNode scopeContext schemeRootId of
+                            Right (scheme, subst) -> Just SchemeInfo {siScheme = scheme, siSubst = subst}
+                            Left _ -> Nothing
+                        )
                     )
+                )
         AAnn inner _ _ -> syntheticLetSchemeInfo inner
         AUnfold inner _ _ -> syntheticLetSchemeInfo inner
-        _ -> Nothing
+        _ -> pure Nothing
 
     explicitSourceAnnotatedScheme annExpr =
       case annExpr of
         AAnn inner annNodeId _ ->
           case IntMap.lookup (getNodeId annNodeId) (acAnnSourceTypes annotationContext) of
-            Just srcTy -> Just SchemeInfo {siScheme = schemeFromType (srcTypeToElabType srcTy), siSubst = IntMap.empty}
+            Just srcTy -> Just <$> sourceSchemeInfoFromType srcTy
             Nothing -> explicitSourceAnnotatedScheme inner
         ALam _ _ _ body _ -> explicitSourceAnnotatedScheme body
-        AApp fun arg _ _ _ -> explicitSourceAnnotatedScheme fun <|> explicitSourceAnnotatedScheme arg
-        ALet _ _ _ _ _ rhs body _ -> explicitSourceAnnotatedScheme rhs <|> explicitSourceAnnotatedScheme body
+        AApp fun arg _ _ _ ->
+          firstJustE (explicitSourceAnnotatedScheme fun) (explicitSourceAnnotatedScheme arg)
+        ALet _ _ _ _ _ rhs body _ ->
+          firstJustE (explicitSourceAnnotatedScheme rhs) (explicitSourceAnnotatedScheme body)
         AUnfold inner _ _ -> explicitSourceAnnotatedScheme inner
-        _ -> Nothing
+        _ -> pure Nothing
+
+    sourceSchemeInfoFromType srcTy = do
+      ty <- srcTypeToElabType srcTy
+      pure SchemeInfo {siScheme = schemeFromType ty, siSubst = IntMap.empty}
+
+    firstJustE left right = do
+      result <- left
+      case result of
+        Just _ -> pure result
+        Nothing -> right
 
     inferAuthoritativeInstArgs namedSet schemeInfoWitness schemeInfo =
       case inferFromNode (ewRight schemeInfoWitness) of
@@ -802,25 +823,42 @@ renameTypeVarInTerm old new term =
         ERoll ty body -> ERoll (renameTy ty) (renameTypeVarInTerm old new body)
         EUnroll body -> EUnroll (renameTypeVarInTerm old new body)
 
-srcTypeToElabType :: NormSrcType -> ElabType
+srcTypeToElabType :: NormSrcType -> Either ElabError ElabType
 srcTypeToElabType ty = case ty of
-  STVar name -> TVar name
-  STArrow dom cod -> TArrow (srcTypeToElabType dom) (srcTypeToElabType cod)
-  STCon name args -> TCon (BaseTy name) (fmap srcTypeToElabType args)
-  STForall name mb body -> TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body)
-  STMu name body -> TMu name (srcTypeToElabType body)
-  STBase name -> TBase (BaseTy name)
-  STBottom -> TBottom
+  STVar name -> Right (TVar name)
+  STArrow dom cod -> TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod
+  STCon name args -> TCon (BaseTy name) <$> traverse srcTypeToElabType args
+  STVarApp name _ ->
+    Left (unsupportedVariableHeadType name)
+  STForall name mb body ->
+    TForall name
+      <$> maybe (Right Nothing) srcBoundToElabBound mb
+      <*> srcTypeToElabType body
+  STMu name body -> TMu name <$> srcTypeToElabType body
+  STBase name -> Right (TBase (BaseTy name))
+  STBottom -> Right TBottom
 
-srcBoundToElabBound :: SrcBound 'NormN -> Maybe BoundType
+unsupportedVariableHeadType :: String -> ElabError
+unsupportedVariableHeadType name =
+  InstantiationError
+    ("variable-headed source type application `" ++ name ++ "` is not supported before higher-kinded elaboration")
+
+srcBoundToElabBound :: SrcBound 'NormN -> Either ElabError (Maybe BoundType)
 srcBoundToElabBound bound = case bound of
   SrcBound ty -> structBoundToElabBound ty
 
-structBoundToElabBound :: StructBound -> Maybe BoundType
+structBoundToElabBound :: StructBound -> Either ElabError (Maybe BoundType)
 structBoundToElabBound bTy = case bTy of
-  STArrow dom cod -> Just (TArrow (srcTypeToElabType dom) (srcTypeToElabType cod))
-  STBase name -> Just (TBase (BaseTy name))
-  STCon name args -> Just (TCon (BaseTy name) (fmap srcTypeToElabType args))
-  STForall name mb body -> Just (TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body))
-  STMu name body -> Just (TMu name (srcTypeToElabType body))
-  STBottom -> Nothing
+  STArrow dom cod -> Just <$> (TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod)
+  STBase name -> Right (Just (TBase (BaseTy name)))
+  STCon name args -> Just . TCon (BaseTy name) <$> traverse srcTypeToElabType args
+  STVarApp name _ ->
+    Left (unsupportedVariableHeadType name)
+  STForall name mb body ->
+    Just
+      <$> ( TForall name
+              <$> maybe (Right Nothing) srcBoundToElabBound mb
+              <*> srcTypeToElabType body
+          )
+  STMu name body -> Just . TMu name <$> srcTypeToElabType body
+  STBottom -> Right Nothing

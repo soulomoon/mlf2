@@ -3,6 +3,39 @@
 ## Unreleased
 
 ### Changed
+- Added `.mlfp` source kind checking for declaration parameter annotations,
+  ordinary type constructor application, variable-headed type application,
+  class constraints, method signatures, and instance heads. Ill-kinded source
+  types now fail before lowering with `ProgramKindMismatch` or
+  `ProgramTypeArityMismatch`, while higher-kinded elaboration and runtime
+  semantics remain fail-closed for the later semantic slice.
+- Added syntax-level `.mlfp` parsing and pretty-printing for variable-headed
+  source type applications such as `f a`, including nested and parenthesized
+  argument round trips. Higher-kinded elaboration still fails closed until the
+  follow-up semantic slice.
+- Added `.mlfp` declaration parameter kind metadata. Data and class parameters
+  now carry default `*` or parenthesized higher-kinded annotations, the program
+  pretty-printer preserves non-first-order declarations, variable-headed source
+  type applications have an explicit AST representation for source kind
+  checking, and duplicate data type parameters are rejected during program
+  checks.
+- Documented the `.mlfp` module compilation contract: modules are checked as
+  one parsed `Program` compilation unit, the CLI Prelude is added explicitly,
+  and separate compilation/interface files remain future work. Added regression
+  coverage for imports that name modules outside the current program.
+- Enforced the `.mlfp` resolved-symbol phase boundary. Program syntax is now
+  phase-indexed, the resolver produces a resolved AST with semantic symbols at
+  global reference sites and resolved type heads, `checkProgram` routes through
+  `checkResolvedProgram`, constructor result validation compares resolved type
+  identity, imported instance deduplication uses a semantic head shape instead
+  of surface spelling, and elaboration now lowers resolved global references
+  through identity-indexed scopes. Deferred method finalization now carries
+  paired display/identity type views for method constraints and instance method
+  types, so evidence lookup no longer depends on recovered display spelling.
+  Validation:
+  `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program" --match "MLF.ResolvedSymbol" --match "Repository guardrails"'`
+  (`188 examples, 0 failures`) and `cabal build all && cabal test`
+  (`1836 examples, 0 failures`).
 - Converted the thesis-obligations ledger to property-first evidence: all 107
   obligations now point at QuickCheck anchors keyed by obligation ID with
   `kind: quickcheck` and `min_success: 100`. The obligations gate now rejects

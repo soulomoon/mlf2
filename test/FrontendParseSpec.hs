@@ -107,12 +107,42 @@ spec = describe "Frontend eMLF parser" $ do
         it "parses constructor application" $
             parseRawEmlfType "List Int" `shouldBe` Right (STCon "List" (STBase "Int" :| []))
 
+        it "parses variable-headed type application" $ do
+            parseRawEmlfType "f a"
+                `shouldBe` Right (STVarApp "f" (STVar "a" :| []))
+            parseRawEmlfType "p a b"
+                `shouldBe` Right (STVarApp "p" (STVar "a" :| [STVar "b"]))
+
+        it "parses nested variable-headed type application arguments" $
+            parseRawEmlfType "f (g a)"
+                `shouldBe` Right (STVarApp "f" (STVarApp "g" (STVar "a" :| []) :| []))
+
+        it "parses arrow and forall arguments to variable-headed applications when parenthesized" $ do
+            parseRawEmlfType "f (a -> b)"
+                `shouldBe` Right (STVarApp "f" (STArrow (STVar "a") (STVar "b") :| []))
+            parseRawEmlfType "f (forall a. a -> a)"
+                `shouldBe` Right
+                    ( STVarApp
+                        "f"
+                        (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")) :| [])
+                    )
+
         it "parses unicode mu recursive types" $
             parseRawEmlfType "μa. List a"
                 `shouldBe` Right (STMu "a" (STCon "List" (STVar "a" :| [])))
 
         it "rejects malformed forall binders" $
             parseRawEmlfType "∀(a) a" `shouldSatisfy` isLeft
+
+        it "rejects malformed variable-headed type applications with diagnostics" $
+            case parseRawEmlfType "f ()" of
+                Left err -> renderEmlfParseError err `shouldSatisfy` (not . null)
+                Right ty -> expectationFailure ("expected parse error, got: " ++ show ty)
+
+        it "rejects unparenthesized forall arguments to variable-headed applications" $
+            case parseRawEmlfType "f forall a. a" of
+                Left err -> renderEmlfParseError err `shouldSatisfy` (not . null)
+                Right ty -> expectationFailure ("expected parse error, got: " ++ show ty)
 
     describe "normalized types" $ do
         it "normalizes simple variable type" $

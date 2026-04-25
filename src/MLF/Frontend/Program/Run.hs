@@ -22,6 +22,7 @@ import MLF.Frontend.Program.Types
     DataInfo (..),
     ProgramDiagnostic,
     ProgramError (..),
+    SymbolIdentity (..),
   )
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
@@ -197,13 +198,14 @@ dataTypeHeadMatches :: DataInfo -> String -> Bool
 dataTypeHeadMatches dataInfo name =
   if isQualifiedSourceHead name
     then qualifiedDataName dataInfo == name
-    else dataName dataInfo == name
+    else symbolDefiningName (dataInfoSymbol dataInfo) == name
 
 isQualifiedSourceHead :: String -> Bool
 isQualifiedSourceHead = elem '.'
 
 qualifiedDataName :: DataInfo -> String
-qualifiedDataName dataInfo = dataModule dataInfo ++ "." ++ dataName dataInfo
+qualifiedDataName dataInfo =
+  symbolDefiningModule (dataInfoSymbol dataInfo) ++ "." ++ symbolDefiningName (dataInfoSymbol dataInfo)
 
 allDataInfos :: CheckedProgram -> [DataInfo]
 allDataInfos checked =
@@ -255,6 +257,14 @@ substDataParams subst ty =
     STArrow dom cod -> STArrow (substDataParams subst dom) (substDataParams subst cod)
     STBase {} -> ty
     STCon name args -> STCon name (fmap (substDataParams subst) args)
+    STVarApp name args ->
+      let args' = fmap (substDataParams subst) args
+       in case Map.lookup name subst of
+            Just (STVar replacementName) -> STVarApp replacementName args'
+            Just (STBase replacementName) -> STCon replacementName args'
+            Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
+            Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
+            _ -> STVarApp name args'
     STForall name mb body ->
       let subst' = Map.delete name subst
        in STForall name (fmap (SrcBound . substDataParams subst' . unSrcBound) mb) (substDataParams subst' body)
@@ -277,6 +287,7 @@ canonicalFieldType checked ownerInfo = canonical
            in case lookupDataInfoInModule checked (dataModule ownerInfo) name of
                 Just info -> STCon (qualifiedDataName info) args'
                 Nothing -> STCon name args'
+        STVarApp name args -> STVarApp name (fmap canonical args)
         STArrow dom cod -> STArrow (canonical dom) (canonical cod)
         STForall name mb body ->
           STForall name (fmap (SrcBound . canonical . unSrcBound) mb) (canonical body)
@@ -288,8 +299,8 @@ lookupDataInfoInModule checked moduleName0 name =
   case
     [ dataInfo
       | dataInfo <- allDataInfos checked,
-        dataModule dataInfo == moduleName0,
-        dataName dataInfo == name
+        symbolDefiningModule (dataInfoSymbol dataInfo) == moduleName0,
+        symbolDefiningName (dataInfoSymbol dataInfo) == name
     ]
   of
     dataInfo : _ -> Just dataInfo

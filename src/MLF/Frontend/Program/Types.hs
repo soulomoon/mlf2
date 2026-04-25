@@ -6,7 +6,41 @@ module MLF.Frontend.Program.Types
     ProgramDiagnostic (..),
     diagnosticForProgramError,
     renderProgramDiagnostic,
+    TypeView (..),
+    ConstraintInfo (..),
+    typeViewFromResolved,
+    displayConstraint,
+    applyTypeViewSubst,
+    applyConstraintInfoSubst,
+    freeTypeVarsTypeView,
     EvidenceInfo (..),
+    SymbolNamespace (..),
+    SymbolOwnerIdentity (..),
+    SymbolIdentity (..),
+    SymbolOrigin (..),
+    SymbolSpelling (..),
+    ResolvedSymbol (..),
+    ResolvedReferenceKind (..),
+    ResolvedReference (..),
+    ResolvedScope (..),
+    ResolvedModule (..),
+    ResolvedProgram (..),
+    mkResolvedSymbol,
+    sameResolvedSymbol,
+    unqualifiedSymbolName,
+    valueInfoSymbolIdentity,
+    dataInfoSymbolIdentity,
+    constructorInfoSymbolIdentity,
+    classInfoSymbolIdentity,
+    methodInfoSymbolIdentity,
+    methodInfoOwnerClassSymbolIdentity,
+    instanceInfoClassSymbolIdentity,
+    resolvedValueInfoSymbol,
+    resolvedDataInfoSymbol,
+    resolvedConstructorInfoSymbol,
+    resolvedClassInfoSymbol,
+    resolvedMethodInfoSymbol,
+    resolvedModuleSymbol,
     ConstructorInfo (..),
     DataInfo (..),
     MethodInfo (..),
@@ -36,8 +70,31 @@ import Control.Applicative ((<|>))
 import Data.Foldable (toList)
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
 import MLF.Elab.Types (ElabTerm, ElabType)
-import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
+import MLF.Frontend.Symbol
+  ( ResolvedReference (..),
+    ResolvedReferenceKind (..),
+    ResolvedSymbol (..),
+    SymbolIdentity (..),
+    SymbolNamespace (..),
+    SymbolOrigin (..),
+    SymbolOwnerIdentity (..),
+    SymbolSpelling (..),
+    mkResolvedSymbol,
+    sameResolvedSymbol,
+    unqualifiedSymbolName,
+  )
+import MLF.Frontend.Syntax
+  ( ResolvedSrcType,
+    SrcBound (..),
+    SrcTy (..),
+    SrcType,
+    SurfaceExpr,
+    resolvedSrcTypeIdentityType,
+    resolvedSrcTypeToSrcType,
+  )
 import qualified MLF.Frontend.Syntax.Program as P
 
 data ProgramError
@@ -49,6 +106,7 @@ data ProgramError
   | ProgramExportNotLocal String
   | ProgramDuplicateVisibleName String
   | ProgramDuplicateType String
+  | ProgramDuplicateTypeParameter String
   | ProgramDuplicateConstructor String
   | ProgramDuplicateClass String
   | ProgramDuplicateValue String
@@ -61,6 +119,9 @@ data ProgramError
   | ProgramUnknownType String
   | ProgramUnknownClass String
   | ProgramUnknownMethod String
+  | ProgramAmbiguousUnqualifiedReference String
+  | ProgramKindMismatch SrcType P.SrcKind P.SrcKind
+  | ProgramTypeArityMismatch String Int Int
   | ProgramInvalidConstructorResult P.ConstructorName SrcType P.TypeName
   | ProgramUnsupportedDeriving P.ClassName
   | ProgramDerivingRequiresNullaryType P.TypeName
@@ -129,6 +190,7 @@ spanForError err index =
     ProgramExportNotLocal name -> firstSpan name (P.spanExportItems index) <|> lookupAnyName name index
     ProgramDuplicateVisibleName name -> lookupAnyName name index
     ProgramDuplicateType name -> firstSpan name (P.spanTypes index)
+    ProgramDuplicateTypeParameter name -> lookupAnyName name index
     ProgramDuplicateConstructor name -> firstSpan name (P.spanConstructors index)
     ProgramDuplicateClass name -> firstSpan name (P.spanClasses index)
     ProgramDuplicateValue name -> firstSpan name (P.spanValues index)
@@ -141,6 +203,9 @@ spanForError err index =
     ProgramUnknownType name -> firstSpan name (P.spanTypes index)
     ProgramUnknownClass name -> firstSpan name (P.spanClasses index)
     ProgramUnknownMethod name -> firstSpan name (P.spanValues index)
+    ProgramAmbiguousUnqualifiedReference name -> lookupAnyName name index
+    ProgramKindMismatch ty _ _ -> sourceTypeHeadSpan ty index
+    ProgramTypeArityMismatch name _ _ -> lookupAnyName name index
     ProgramInvalidConstructorResult ctor _ _ -> firstSpan ctor (P.spanConstructors index)
     ProgramUnsupportedDeriving className0 -> firstSpan className0 (P.spanClasses index)
     ProgramDerivingRequiresNullaryType typeName -> firstSpan typeName (P.spanTypes index)
@@ -182,6 +247,7 @@ programErrorMessage err =
     ProgramExportNotLocal name -> "export is not local: `" ++ name ++ "`"
     ProgramDuplicateVisibleName name -> "duplicate visible name `" ++ name ++ "`"
     ProgramDuplicateType name -> "duplicate type `" ++ name ++ "`"
+    ProgramDuplicateTypeParameter name -> "duplicate type parameter `" ++ name ++ "`"
     ProgramDuplicateConstructor name -> "duplicate constructor `" ++ name ++ "`"
     ProgramDuplicateClass name -> "duplicate class `" ++ name ++ "`"
     ProgramDuplicateValue name -> "duplicate value `" ++ name ++ "`"
@@ -194,6 +260,24 @@ programErrorMessage err =
     ProgramUnknownType name -> "unknown type `" ++ name ++ "`"
     ProgramUnknownClass name -> "unknown class `" ++ name ++ "`"
     ProgramUnknownMethod name -> "unknown method `" ++ name ++ "`"
+    ProgramAmbiguousUnqualifiedReference name -> "ambiguous unqualified reference `" ++ name ++ "`"
+    ProgramKindMismatch ty expected actual ->
+      "kind mismatch in `"
+        ++ show ty
+        ++ "`: expected `"
+        ++ renderSrcKind expected
+        ++ "`, got `"
+        ++ renderSrcKind actual
+        ++ "`"
+    ProgramTypeArityMismatch name expected actual ->
+      "type constructor `"
+        ++ name
+        ++ "` expects "
+        ++ show expected
+        ++ " type argument"
+        ++ plural expected
+        ++ ", but got "
+        ++ show actual
     ProgramInvalidConstructorResult ctor resultTy owner -> "constructor `" ++ ctor ++ "` returns `" ++ show resultTy ++ "` instead of owning type `" ++ owner ++ "`"
     ProgramUnsupportedDeriving className0 -> "unsupported deriving class `" ++ className0 ++ "`"
     ProgramDerivingRequiresNullaryType typeName -> "deriving currently requires a nullary type, but `" ++ typeName ++ "` has parameters"
@@ -235,30 +319,155 @@ programErrorHints err =
       ["add missing constructor branches or a final wildcard branch"]
     ProgramImportNotExported {} ->
       ["export the name from the source module or remove it from the import exposing list"]
+    ProgramKindMismatch {} ->
+      ["check higher-kinded parameter annotations and type constructor application arguments"]
+    ProgramTypeArityMismatch {} ->
+      ["apply the type constructor to exactly the number of arguments required by its kind"]
     _ -> []
+
+renderSrcKind :: P.SrcKind -> String
+renderSrcKind = go 0
+  where
+    go :: Int -> P.SrcKind -> String
+    go prec kind0 =
+      case kind0 of
+        P.KType -> "*"
+        P.KArrow left right ->
+          let rendered = go 1 left ++ " -> " ++ go 0 right
+           in if prec > 0 then "(" ++ rendered ++ ")" else rendered
+
+plural :: Int -> String
+plural 1 = ""
+plural _ = "s"
+
+sourceTypeHeadSpan :: SrcType -> P.ProgramSpanIndex -> Maybe P.SourceSpan
+sourceTypeHeadSpan ty index =
+  case sourceTypeHeadName ty of
+    Just name -> lookupAnyName name index
+    Nothing -> Nothing
+
+sourceTypeHeadName :: SrcType -> Maybe String
+sourceTypeHeadName ty =
+  case ty of
+    STVar name -> Just name
+    STBase name -> Just name
+    STCon name _ -> Just name
+    STVarApp name _ -> Just name
+    STArrow dom _ -> sourceTypeHeadName dom
+    STForall _ _ body -> sourceTypeHeadName body
+    STMu _ body -> sourceTypeHeadName body
+    STBottom -> Nothing
+
+data ResolvedScope = ResolvedScope
+  { resolvedScopeValues :: Map String ResolvedSymbol,
+    resolvedScopeTypes :: Map String ResolvedSymbol,
+    resolvedScopeClasses :: Map String ResolvedSymbol,
+    resolvedScopeModules :: Map P.ModuleName ResolvedSymbol
+  }
+  deriving (Eq, Show)
+
+data ResolvedModule = ResolvedModule
+  { resolvedModuleName :: P.ModuleName,
+    resolvedModuleSyntax :: P.ResolvedModuleSyntax,
+    resolvedModuleLocalValues :: Map String [ResolvedSymbol],
+    resolvedModuleLocalTypes :: Map String [ResolvedSymbol],
+    resolvedModuleLocalClasses :: Map String [ResolvedSymbol],
+    resolvedModuleScope :: ResolvedScope,
+    resolvedModuleExports :: ResolvedScope,
+    resolvedModuleReferences :: [ResolvedReference]
+  }
+  deriving (Eq, Show)
+
+newtype ResolvedProgram = ResolvedProgram
+  { resolvedProgramModules :: [ResolvedModule]
+  }
+  deriving (Eq, Show)
+
+{- Note [Resolved .mlfp symbol identities]
+`SymbolIdentity` is the semantic key. It uses the defining module plus the
+unqualified declaration name, and method/constructor identities carry their
+owning class/type identity. `SymbolSpelling` is the reference-side surface data:
+the source name, display name, and whether it came from a local declaration,
+unqualified import, qualified/aliased import, or builtin.
+
+The checker and elaborator keep visible maps keyed by surface spelling because
+source lookup and diagnostics need those names. Downstream metadata stores
+`SymbolIdentity` separately, and semantic checks compare that identity instead
+of inferring declaration equality from qualified/unqualified strings. Runtime
+names remain explicit generated names, not semantic identities.
+-}
+
+data TypeView = TypeView
+  { typeViewDisplay :: SrcType,
+    typeViewIdentity :: SrcType
+  }
+  deriving (Eq, Show)
+
+data ConstraintInfo = ConstraintInfo
+  { constraintDisplayClass :: P.ClassName,
+    constraintClassSymbol :: SymbolIdentity,
+    constraintTypeView :: TypeView
+  }
+  deriving (Eq, Show)
+
+typeViewFromResolved :: ResolvedSrcType -> TypeView
+typeViewFromResolved ty =
+  TypeView
+    { typeViewDisplay = resolvedSrcTypeToSrcType ty,
+      typeViewIdentity = resolvedSrcTypeIdentityType ty
+    }
+
+displayConstraint :: ConstraintInfo -> P.ClassConstraint
+displayConstraint constraint =
+  P.ClassConstraint
+    (constraintDisplayClass constraint)
+    (typeViewDisplay (constraintTypeView constraint))
+
+applyTypeViewSubst :: Map String TypeView -> TypeView -> TypeView
+applyTypeViewSubst subst view =
+  TypeView
+    { typeViewDisplay = Map.foldrWithKey substituteTypeVar (typeViewDisplay view) displaySubst,
+      typeViewIdentity = Map.foldrWithKey substituteTypeVar (typeViewIdentity view) identitySubst
+    }
+  where
+    displaySubst = fmap typeViewDisplay subst
+    identitySubst = fmap typeViewIdentity subst
+
+applyConstraintInfoSubst :: Map String TypeView -> ConstraintInfo -> ConstraintInfo
+applyConstraintInfoSubst subst constraint =
+  constraint {constraintTypeView = applyTypeViewSubst subst (constraintTypeView constraint)}
+
+freeTypeVarsTypeView :: TypeView -> Set String
+freeTypeVarsTypeView = freeTypeVarsSrcType . typeViewIdentity
 
 data EvidenceInfo = EvidenceInfo
   { evidenceClassName :: P.ClassName,
+    evidenceClassSymbol :: SymbolIdentity,
     evidenceType :: SrcType,
+    evidenceTypeIdentity :: SrcType,
     evidenceMethods :: Map P.MethodName (String, SrcType)
   }
   deriving (Eq, Show)
 
 data ConstructorInfo = ConstructorInfo
   { ctorName :: P.ConstructorName,
+    ctorInfoSymbol :: SymbolIdentity,
     ctorRuntimeName :: String,
     ctorType :: SrcType,
     ctorForalls :: [(String, Maybe SrcType)],
     ctorArgs :: [SrcType],
     ctorResult :: SrcType,
     ctorOwningType :: P.TypeName,
+    ctorOwningTypeIdentity :: SymbolIdentity,
     ctorIndex :: Int
   }
   deriving (Eq, Show)
 
 data DataInfo = DataInfo
   { dataName :: P.TypeName,
+    dataInfoSymbol :: SymbolIdentity,
     dataModule :: P.ModuleName,
+    dataTypeParams :: [P.TypeParam],
     dataParams :: [String],
     dataConstructors :: [ConstructorInfo]
   }
@@ -266,18 +475,24 @@ data DataInfo = DataInfo
 
 data MethodInfo = MethodInfo
   { methodClassName :: P.ClassName,
+    methodInfoSymbol :: SymbolIdentity,
     methodClassModule :: P.ModuleName,
     methodName :: P.MethodName,
     methodRuntimeBase :: String,
     methodType :: SrcType,
+    methodTypeIdentity :: SrcType,
     methodConstraints :: [P.ClassConstraint],
+    methodConstraintInfos :: [ConstraintInfo],
+    methodTypeParam :: P.TypeParam,
     methodParamName :: String
   }
   deriving (Eq, Show)
 
 data ClassInfo = ClassInfo
   { className :: P.ClassName,
+    classInfoSymbol :: SymbolIdentity,
     classModule :: P.ModuleName,
+    classTypeParam :: P.TypeParam,
     classParamName :: String,
     classMethods :: Map P.MethodName MethodInfo
   }
@@ -286,13 +501,17 @@ data ClassInfo = ClassInfo
 data ValueInfo
   = OrdinaryValue
       { valueDisplayName :: String,
+        valueInfoSymbol :: SymbolIdentity,
         valueRuntimeName :: String,
         valueType :: SrcType,
+        valueIdentityType :: SrcType,
         valueConstraints :: [P.ClassConstraint],
+        valueConstraintInfos :: [ConstraintInfo],
         valueOriginModule :: P.ModuleName
       }
   | ConstructorValue
       { valueDisplayName :: String,
+        valueInfoSymbol :: SymbolIdentity,
         valueRuntimeName :: String,
         valueType :: SrcType,
         valueCtorInfo :: ConstructorInfo,
@@ -300,6 +519,7 @@ data ValueInfo
       }
   | OverloadedMethod
       { valueDisplayName :: String,
+        valueInfoSymbol :: SymbolIdentity,
         valueMethodInfo :: MethodInfo,
         valueOriginModule :: P.ModuleName
       }
@@ -307,10 +527,13 @@ data ValueInfo
 
 data InstanceInfo = InstanceInfo
   { instanceClassName :: P.ClassName,
+    instanceClassSymbol :: SymbolIdentity,
     instanceClassModule :: P.ModuleName,
     instanceOriginModule :: P.ModuleName,
     instanceConstraints :: [P.ClassConstraint],
+    instanceConstraintInfos :: [ConstraintInfo],
     instanceHeadType :: SrcType,
+    instanceHeadIdentityType :: SrcType,
     instanceMethods :: Map P.MethodName ValueInfo
   }
   deriving (Eq, Show)
@@ -402,9 +625,100 @@ data CheckedModule = CheckedModule
 
 data CheckedProgram = CheckedProgram
   { checkedProgramModules :: [CheckedModule],
-    checkedProgramMain :: String
+    checkedProgramMain :: String,
+    checkedProgramResolved :: ResolvedProgram
   }
   deriving (Eq, Show)
+
+valueInfoSymbolIdentity :: ValueInfo -> SymbolIdentity
+valueInfoSymbolIdentity = valueInfoSymbol
+
+dataInfoSymbolIdentity :: DataInfo -> SymbolIdentity
+dataInfoSymbolIdentity = dataInfoSymbol
+
+constructorInfoSymbolIdentity :: DataInfo -> ConstructorInfo -> SymbolIdentity
+constructorInfoSymbolIdentity _ = ctorInfoSymbol
+
+classInfoSymbolIdentity :: ClassInfo -> SymbolIdentity
+classInfoSymbolIdentity = classInfoSymbol
+
+methodInfoSymbolIdentity :: MethodInfo -> SymbolIdentity
+methodInfoSymbolIdentity = methodInfoSymbol
+
+methodInfoOwnerClassSymbolIdentity :: MethodInfo -> SymbolIdentity
+methodInfoOwnerClassSymbolIdentity methodInfo =
+  case symbolOwnerIdentity (methodInfoSymbolIdentity methodInfo) of
+    Just (SymbolOwnerClass moduleName className0) ->
+      SymbolIdentity
+        { symbolNamespace = SymbolClass,
+          symbolDefiningModule = moduleName,
+          symbolDefiningName = className0,
+          symbolOwnerIdentity = Nothing
+        }
+    _ ->
+      SymbolIdentity
+        { symbolNamespace = SymbolClass,
+          symbolDefiningModule = methodClassModule methodInfo,
+          symbolDefiningName = unqualifiedSymbolName (methodClassName methodInfo),
+          symbolOwnerIdentity = Nothing
+        }
+
+instanceInfoClassSymbolIdentity :: InstanceInfo -> SymbolIdentity
+instanceInfoClassSymbolIdentity = instanceClassSymbol
+
+resolvedValueInfoSymbol :: SymbolOrigin -> ValueInfo -> ResolvedSymbol
+resolvedValueInfoSymbol origin valueInfo =
+  mkResolvedSymbol
+    (valueInfoSymbolIdentity valueInfo)
+    (unqualifiedSymbolName (valueDisplayName valueInfo))
+    (valueDisplayName valueInfo)
+    origin
+
+resolvedDataInfoSymbol :: SymbolOrigin -> String -> DataInfo -> ResolvedSymbol
+resolvedDataInfoSymbol origin displayName dataInfo =
+  mkResolvedSymbol
+    (dataInfoSymbolIdentity dataInfo)
+    (dataName dataInfo)
+    displayName
+    origin
+
+resolvedConstructorInfoSymbol :: SymbolOrigin -> String -> DataInfo -> ConstructorInfo -> ResolvedSymbol
+resolvedConstructorInfoSymbol origin displayName dataInfo ctorInfo =
+  mkResolvedSymbol
+    (constructorInfoSymbolIdentity dataInfo ctorInfo)
+    (unqualifiedSymbolName (ctorName ctorInfo))
+    displayName
+    origin
+
+resolvedClassInfoSymbol :: SymbolOrigin -> ClassInfo -> ResolvedSymbol
+resolvedClassInfoSymbol origin classInfo =
+  mkResolvedSymbol
+    (classInfoSymbolIdentity classInfo)
+    (unqualifiedSymbolName (className classInfo))
+    (className classInfo)
+    origin
+
+resolvedMethodInfoSymbol :: SymbolOrigin -> String -> MethodInfo -> ResolvedSymbol
+resolvedMethodInfoSymbol origin displayName methodInfo =
+  mkResolvedSymbol
+    (methodInfoSymbolIdentity methodInfo)
+    (methodName methodInfo)
+    displayName
+    origin
+
+resolvedModuleSymbol :: SymbolOrigin -> P.ModuleName -> P.ModuleName -> ResolvedSymbol
+resolvedModuleSymbol origin definingModule displayName =
+  mkResolvedSymbol
+    ( SymbolIdentity
+        { symbolNamespace = SymbolModule,
+          symbolDefiningModule = definingModule,
+          symbolDefiningName = definingModule,
+          symbolOwnerIdentity = Nothing
+        }
+    )
+    definingModule
+    displayName
+    origin
 
 splitForalls :: SrcType -> ([(String, Maybe SrcType)], SrcType)
 splitForalls = go []
@@ -430,6 +744,11 @@ substituteTypeVar needle replacement = go
       STArrow dom cod -> STArrow (go dom) (go cod)
       STBase _ -> ty
       STCon name args -> STCon name (fmap go args)
+      STVarApp name args ->
+        let args' = fmap go args
+         in case replacementHead name args' of
+              Just ty' -> ty'
+              Nothing -> STVarApp name args'
       STForall name mb body
         | name == needle -> STForall name mb body
         | otherwise -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
@@ -437,6 +756,37 @@ substituteTypeVar needle replacement = go
         | name == needle -> STMu name body
         | otherwise -> STMu name (go body)
       STBottom -> STBottom
+
+    replacementHead name args
+      | name /= needle = Nothing
+      | otherwise =
+          case replacement of
+            STVar replacementName -> Just (STVarApp replacementName args)
+            STBase replacementName -> Just (STCon replacementName args)
+            STCon replacementName replacementArgs -> Just (STCon replacementName (replacementArgs <> args))
+            STVarApp replacementName replacementArgs -> Just (STVarApp replacementName (replacementArgs <> args))
+            _ -> Nothing
+
+freeTypeVarsSrcType :: SrcType -> Set String
+freeTypeVarsSrcType = go Set.empty
+  where
+    go bound ty = case ty of
+      STVar name
+        | name `Set.member` bound -> Set.empty
+        | otherwise -> Set.singleton name
+      STArrow dom cod -> go bound dom `Set.union` go bound cod
+      STBase {} -> Set.empty
+      STCon _ args -> foldMap (go bound) args
+      STVarApp name args ->
+        let headVars =
+              if name `Set.member` bound
+                then Set.empty
+                else Set.singleton name
+         in headVars `Set.union` foldMap (go bound) args
+      STForall name mb body ->
+        maybe Set.empty (go bound . unSrcBound) mb `Set.union` go (Set.insert name bound) body
+      STMu name body -> go (Set.insert name bound) body
+      STBottom -> Set.empty
 
 specializeMethodType :: SrcType -> String -> SrcType -> SrcType
 specializeMethodType methodTy paramName headTy =
@@ -464,6 +814,7 @@ constrainedVisibleType constrained
       STArrow dom cod -> freeVars dom ++ freeVars cod
       STBase {} -> []
       STCon _ args -> concatMap freeVars (toList args)
+      STVarApp name args -> name : concatMap freeVars (toList args)
       STForall name mb body ->
         filter (/= name) (maybe [] (freeVars . unSrcBound) mb ++ freeVars body)
       STMu name body -> filter (/= name) (freeVars body)

@@ -57,8 +57,40 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Types.*` — elaborated/runtime term and type representations
 - `MLF.Util.*` — shared utilities (order keys, union-find, etc.)
 
+The `.mlfp` module boundary is a same-compilation-unit boundary. `Resolve` and
+`Check` receive the full `Program`, topologically sort its module graph, and can
+therefore accept imports of modules declared later in that program. `Finalize`
+consumes the assembled program scope, and `Run` evaluates all checked module
+bindings together. There is no persisted interface artifact, import loader,
+stable `.mlfp` ABI, or linker today. Future separate compilation should be
+introduced only through an explicit compiler-owned interface artifact carrying
+exported principal schemes, visible type/class/instance summaries, and checked
+xMLF/runtime payloads rather than by peeking at source outside the current
+`Program`.
+
 Tests and executables that need `MLF.Research.*` must add `mlf2:mlf2-research`
 to `build-depends`.
+
+### `.mlfp` resolved-symbol boundary
+
+`MLF.Frontend.Program.Resolve` owns semantic identity for `.mlfp` global names.
+Parsed program syntax is `Program 'Parsed`; the resolver produces
+`Program 'Resolved` inside `ResolvedModule.resolvedModuleSyntax`. Resolved
+syntax stores semantic symbols at global reference sites, including value,
+constructor, type, class, method, import/export, and source-type heads. Local
+term binders remain local names and resolved term references distinguish
+`ResolvedLocalValue` from `ResolvedGlobalValue`.
+
+A `SymbolIdentity` records namespace, defining module/name, and constructor or
+method owner identity; `SymbolSpelling` records the source spelling that reached
+that identity. `MLF.Frontend.Program.Check` consumes the resolved program, and
+`MLF.Frontend.Program.Elaborate` compiles resolved expressions and patterns
+through identity indexes beside its visible string maps. Surface-spelling maps
+are for lookup, diagnostics, source rendering, and runtime-name construction;
+semantic decisions compare stored identities or identity-aware source-type
+shapes, not qualified strings. Deferred method finalization carries paired
+display/identity type views so instance and evidence lookup stay semantic even
+after eMLF type recovery.
 
 ## Key graph and witness types
 

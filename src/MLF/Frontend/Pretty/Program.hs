@@ -45,7 +45,7 @@ prettyDecl decl = case decl of
 prettyClassDecl :: ClassDecl -> String
 prettyClassDecl classDecl =
     unlines
-        [ "class " ++ classDeclName classDecl ++ " " ++ classDeclParam classDecl ++ " {"
+        [ "class " ++ classDeclName classDecl ++ " " ++ prettyTypeParam (classDeclParam classDecl) ++ " {"
         , indent (concatMap prettyMethodSig (classDeclMethods classDecl))
         , "}"
         ]
@@ -67,11 +67,26 @@ prettyMethodDef methodDef = methodDefName methodDef ++ " = " ++ prettyExpr (meth
 prettyDataDecl :: DataDecl -> String
 prettyDataDecl dataDecl =
     unlines
-        [ "data " ++ unwords (dataDeclName dataDecl : dataDeclParams dataDecl) ++ " ="
+        [ "data " ++ unwords (dataDeclName dataDecl : map prettyTypeParam (dataDeclParams dataDecl)) ++ " ="
         , indent (intercalate "\n| " (map prettyConstructorDecl (dataDeclConstructors dataDecl)))
               ++ prettyDeriving (dataDeclDeriving dataDecl)
               ++ ";"
         ]
+
+prettyTypeParam :: TypeParam -> String
+prettyTypeParam param
+    | typeParamIsFirstOrder param = typeParamName param
+    | otherwise = "(" ++ typeParamName param ++ " :: " ++ prettyKind (typeParamKind param) ++ ")"
+
+prettyKind :: SrcKind -> String
+prettyKind = go 0
+  where
+    go :: Int -> SrcKind -> String
+    go prec kind0 =
+        case kind0 of
+            KType -> "*"
+            KArrow dom cod ->
+                paren (prec > 0) (go 1 dom ++ " -> " ++ go 0 cod)
 
 prettyConstructorDecl :: ConstructorDecl -> String
 prettyConstructorDecl ctor = constructorDeclName ctor ++ " : " ++ prettyEmlfType (constructorDeclType ctor)

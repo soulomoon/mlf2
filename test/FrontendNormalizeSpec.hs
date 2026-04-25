@@ -60,6 +60,10 @@ freeVarsSpec = describe "freeVarsSrcType" $ do
             (STMu "a" (STArrow (STVar "a") (STVar "b")))
             `shouldBe` Set.fromList ["b"]
 
+    it "variable-headed type application keeps head and argument variables free" $
+        freeVarsSrcType (STVarApp "f" (STVar "a" :| [STVar "b"]))
+            `shouldBe` Set.fromList ["f", "a", "b"]
+
 -- -----------------------------------------------------------------------
 -- Capture-avoiding substitution
 -- -----------------------------------------------------------------------
@@ -103,6 +107,18 @@ substSpec = describe "substSrcType" $ do
         substSrcType "a" (STBase "Int")
             (STMu "a" (STArrow (STVar "a") (STVar "b")))
             `shouldBe` STMu "a" (STArrow (STVar "a") (STVar "b"))
+
+    it "renames variable-headed type application heads when substituted by a variable" $
+        substSrcType "f" (STVar "g") (STVarApp "f" (STVar "a" :| []))
+            `shouldBe` STVarApp "g" (STVar "a" :| [])
+
+    it "composes variable-headed type application heads when substituted by a partially applied constructor" $
+        substSrcType "f" (STCon "Either" (STBase "Int" :| [])) (STVarApp "f" (STVar "a" :| []))
+            `shouldBe` STCon "Either" (STBase "Int" :| [STVar "a"])
+
+    it "composes variable-headed type application heads when substituted by a partially applied variable head" $
+        substSrcType "f" (STVarApp "g" (STBase "Int" :| [])) (STVarApp "f" (STVar "a" :| []))
+            `shouldBe` STVarApp "g" (STBase "Int" :| [STVar "a"])
 
 -- -----------------------------------------------------------------------
 -- Type normalization
@@ -177,6 +193,10 @@ normalizeTypeSpec = describe "normalizeType" $ do
     it "normalizes constructor types" $
         normalizeType (STCon "List" (STVar "a" :| []))
             `shouldBe` Right (STCon "List" (STVar "a" :| []))
+
+    it "normalizes variable-headed type applications without lowering the head" $
+        normalizeType (STVarApp "f" (STVar "a" :| [STVar "b"]))
+            `shouldBe` Right (STVarApp "f" (STVar "a" :| [STVar "b"]))
 
     it "preserves recursive wrappers while normalizing nested alias bounds" $
         let input =
