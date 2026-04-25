@@ -3152,6 +3152,53 @@ spec = do
             program <- requireParsed programText
             checkProgram program `shouldSatisfy` isRight
 
+        it "accepts the higher-kinded language-reference examples" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Functor, Monad, Profunctor, Box(..), Wrap(..), WrappedP(..), MaybeF(..), main) {"
+                        , "  class Functor (f :: * -> *) {"
+                        , "    map : forall a b. (a -> b) -> f a -> f b;"
+                        , "  }"
+                        , ""
+                        , "  class Monad (m :: * -> *) {"
+                        , "    bind : forall a b. m a -> (a -> m b) -> m b;"
+                        , "  }"
+                        , ""
+                        , "  class Profunctor (p :: * -> * -> *) {"
+                        , "    dimap : forall a b c d. (a -> b) -> (c -> d) -> p b c -> p a d;"
+                        , "  }"
+                        , ""
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , ""
+                        , "  data Wrap (f :: * -> *) a ="
+                        , "      Wrap : f a -> Wrap f a;"
+                        , ""
+                        , "  data WrappedP (p :: * -> * -> *) a b ="
+                        , "      WrappedP : p a b -> WrappedP p a b;"
+                        , ""
+                        , "  data MaybeF (f :: * -> *) a ="
+                        , "      NothingF : MaybeF f a"
+                        , "    | JustF : f a -> MaybeF f a;"
+                        , ""
+                        , "  class Boxed (f :: * -> *) {"
+                        , "    truthy : f Bool -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  instance Boxed Box {"
+                        , "    truthy = \\box true;"
+                        , "  }"
+                        , ""
+                        , "  class Uses marker {"
+                        , "    use : (Boxed f, Functor f) => marker -> marker;"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
+
         it "accepts method constraints whose unknown kinds are solved out of order" $ do
             let programText =
                     unlines

@@ -7,12 +7,13 @@
   ordinary type constructor application, variable-headed type application,
   class constraints, method signatures, and instance heads. Ill-kinded source
   types now fail before lowering with `ProgramKindMismatch` or
-  `ProgramTypeArityMismatch`, while higher-kinded elaboration and runtime
-  semantics remain fail-closed for the later semantic slice.
+  `ProgramTypeArityMismatch`, while the lower raw eMLF pipeline still fails
+  closed for unresolved variable-headed source types that bypass the `.mlfp`
+  program checker.
 - Added syntax-level `.mlfp` parsing and pretty-printing for variable-headed
   source type applications such as `f a`, including nested and parenthesized
-  argument round trips. Higher-kinded elaboration still fails closed until the
-  follow-up semantic slice.
+  argument round trips. The language reference now documents the supported
+  higher-kinded `.mlfp` subset and remaining unsupported forms.
 - Added `.mlfp` declaration parameter kind metadata. Data and class parameters
   now carry default `*` or parenthesized higher-kinded annotations, the program
   pretty-printer preserves non-first-order declarations, variable-headed source

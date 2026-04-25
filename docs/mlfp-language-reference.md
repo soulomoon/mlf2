@@ -96,31 +96,72 @@ data Option a =
 
 Higher-kinded parameters can be declared with a parenthesized kind annotation.
 Kind arrows associate to the right, so `* -> * -> *` means `* -> (* -> *)`.
+The supported kind language is `*` plus arrows between kinds.
 
 ```mlf
 class Functor (f :: * -> *) {
-  identity : forall a. a -> a;
+  map : forall a b. (a -> b) -> f a -> f b;
 }
 
-data Higher (f :: * -> *) a =
-    Higher : a -> Higher f a;
+class Monad (m :: * -> *) {
+  bind : forall a b. m a -> (a -> m b) -> m b;
+}
+
+class Profunctor (p :: * -> * -> *) {
+  dimap : forall a b c d. (a -> b) -> (c -> d) -> p b c -> p a d;
+}
+
+data Wrap (f :: * -> *) a =
+    Wrap : f a -> Wrap f a;
+
+data WrappedP (p :: * -> * -> *) a b =
+    WrappedP : p a b -> WrappedP p a b;
 ```
 
-Variable-headed type applications such as `f a` are accepted in source types
-and pretty-print back to the same structure:
+These are still single-parameter classes: `Profunctor` takes one class
+parameter `p`, but that parameter itself has kind `* -> * -> *`. The checker
+does not enforce class laws.
+
+Variable-headed type applications such as `f a` and `p a b` are accepted in
+source types and pretty-print back to the same structure:
 
 ```mlf
-data Applied (f :: * -> *) a =
-    Applied : f a -> Applied f a;
+data Box a =
+    Box : a -> Box a;
+
+data MaybeF (f :: * -> *) a =
+    NothingF : MaybeF f a
+  | JustF : f a -> MaybeF f a;
+
+class Boxed (f :: * -> *) {
+  truthy : f Bool -> Bool;
+}
+
+instance Boxed Box {
+  truthy = \box true;
+}
+
+class Uses marker {
+  use : (Boxed f, Functor f) => marker -> marker;
+}
 ```
 
 The checker validates declaration parameter kinds, ordinary and
 variable-headed type applications, class method constraints, instance heads,
 and constructor signatures before lowering. Kind errors are reported as
-`ProgramKindMismatch` or `ProgramTypeArityMismatch`. Higher-kinded
-elaboration and runtime semantics remain follow-up work for #18, so checked
-programs still fail closed if they require lowering a variable-headed source
-type application such as a constructor field of type `f a`.
+`ProgramKindMismatch` or `ProgramTypeArityMismatch`.
+
+Well-kinded higher-kinded classes and data declarations elaborate through the
+`.mlfp` program layer, including representative runtime cases where a
+higher-kinded parameter is instantiated with a concrete constructor head such
+as `Box` in `MaybeF Box Bool`. Direct raw eMLF pipeline inputs that bypass the
+program checker and still contain an unresolved variable-headed type
+application remain fail-closed.
+
+Unsupported forms include using a first-order parameter as a type function,
+unsaturated or over-applied type constructors, mismatched higher-kinded
+arguments such as passing `Bool` where `* -> *` is required, kind polymorphism,
+type lambdas, and type-level computation.
 
 ## Case Expressions And Patterns
 
