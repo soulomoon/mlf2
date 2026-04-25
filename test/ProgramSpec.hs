@@ -2246,6 +2246,16 @@ spec = do
                         (bounded "b")
             sourceForallMatches expected actual `shouldBe` True
 
+        it "rejects alpha-renamed foralls with incompatible bounds" $ do
+            let bounded name bound =
+                    STForall
+                        name
+                        (Just (mkSrcBound bound))
+                        (STArrow (STVar name) (STVar name))
+                expected = bounded "f" (STBase "Int")
+                actual = bounded "g" (STBase "Bool")
+            sourceForallMatches expected actual `shouldBe` False
+
         it "matches bound variable-headed applications against instantiated constructor heads" $ do
             let expected =
                     STForall

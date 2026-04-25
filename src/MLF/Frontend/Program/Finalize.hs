@@ -361,12 +361,15 @@ sourceForallMatches expected actual =
   where
     match bound subst template actualTy =
       case template of
-        STForall name _ body ->
+        STForall name mb body ->
           case actualTy of
-            STForall actualName _ actualBody ->
+            STForall actualName actualMb actualBody -> do
+              let bound' = Set.insert name bound
+                  subst' = Map.insert name (STVar actualName) (Map.delete name subst)
+              subst'' <- matchForallBounds bound' subst' mb actualMb
               match
-                (Set.insert name bound)
-                (Map.insert name (STVar actualName) (Map.delete name subst))
+                bound'
+                subst''
                 body
                 actualBody
             _ -> match (Set.insert name bound) (Map.delete name subst) body actualTy
@@ -406,6 +409,13 @@ sourceForallMatches expected actual =
           case actualTy of
             STBottom -> Just subst
             _ -> Nothing
+
+    matchForallBounds bound subst expectedMb actualMb =
+      case (expectedMb, actualMb) of
+        (Nothing, Nothing) -> Just subst
+        (Just (SrcBound expectedBound), Just (SrcBound actualBound)) ->
+          match bound subst expectedBound actualBound
+        _ -> Nothing
 
     freeTypeVarsSrcTypeLocal = go Set.empty
       where
