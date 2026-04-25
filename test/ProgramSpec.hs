@@ -783,6 +783,32 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs value-exported GADT constructor when owner type is not exported"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), NothingBool, accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingBool : MaybeF f Bool"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingBool -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (NothingBool, accept);"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = accept (id NothingBool);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs value-imported nonzero-index constructor from mixed higher-kinded data type"
         ( InlineProgram $
             unlines
@@ -2620,6 +2646,7 @@ spec = do
                         , symbolOwnerIdentity = Just (SymbolOwnerType "Core" "MaybeF")
                         }
                 resultTy = STCon "MaybeF" (STVar "f" :| [STVar "a"])
+                ownerTypeParams = [TypeParam "f" (KArrow KType KType), firstOrderTypeParam "a"]
                 nothingShape =
                     ConstructorShape
                         { constructorShapeName = "NothingF"
@@ -2627,6 +2654,7 @@ spec = do
                         , constructorShapeArgs = []
                         , constructorShapeResult = resultTy
                         , constructorShapeIndex = 0
+                        , constructorShapeOwnerTypeParams = ownerTypeParams
                         }
                 justShape =
                     ConstructorShape
@@ -2635,6 +2663,7 @@ spec = do
                         , constructorShapeArgs = [STVarApp "f" (STVar "a" :| [])]
                         , constructorShapeResult = resultTy
                         , constructorShapeIndex = 1
+                        , constructorShapeOwnerTypeParams = ownerTypeParams
                         }
                 nothingCtor =
                     ConstructorInfo

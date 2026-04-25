@@ -463,7 +463,8 @@ data ConstructorShape = ConstructorShape
     constructorShapeForalls :: [(String, Maybe SrcType)],
     constructorShapeArgs :: [SrcType],
     constructorShapeResult :: SrcType,
-    constructorShapeIndex :: Int
+    constructorShapeIndex :: Int,
+    constructorShapeOwnerTypeParams :: [P.TypeParam]
   }
   deriving (Eq, Show)
 
@@ -713,7 +714,8 @@ constructorShapeFromInfo ctor =
       constructorShapeForalls = ctorForalls ctor,
       constructorShapeArgs = ctorArgs ctor,
       constructorShapeResult = ctorResult ctor,
-      constructorShapeIndex = ctorIndex ctor
+      constructorShapeIndex = ctorIndex ctor,
+      constructorShapeOwnerTypeParams = []
     }
 
 srcTypeHasVariableHeadApplication :: SrcType -> Bool

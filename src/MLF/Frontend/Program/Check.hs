@@ -24,7 +24,7 @@ where
 
 import Control.Monad (foldM, forM, when, zipWithM)
 import Control.Monad.Except (MonadError (throwError))
-import Data.List (find, intercalate, nub)
+import Data.List (find, intercalate, nub, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -1203,12 +1203,11 @@ constructorOwnerDataInfoFromShapes ctorInfo =
   where
     ownerIdentity = ctorOwningTypeIdentity ctorInfo
     ownerShapes = constructorOwnerShapes ctorInfo
-    paramNames = constructorOwnerParamNames ctorInfo
+    paramNames = P.typeParamNames typeParams
     typeParams =
-      [ P.TypeParam name (kindFromMaxApplicationArity (Map.findWithDefault 0 name paramArities))
-        | name <- paramNames
-      ]
-    paramArities = foldMap constructorShapeVariableHeadArities ownerShapes
+      case [params | shape <- ownerShapes, let params = constructorShapeOwnerTypeParams shape, not (null params)] of
+        params : _ -> params
+        [] -> inferredConstructorOwnerTypeParams ctorInfo ownerShapes
     constructors = map constructorInfoFromShape ownerShapes
 
     constructorInfoFromShape shape =
@@ -1257,16 +1256,36 @@ constructorShapeType shape =
     (foldr STArrow (constructorShapeResult shape) (constructorShapeArgs shape))
     (constructorShapeForalls shape)
 
-constructorOwnerParamNames :: ConstructorInfo -> [String]
-constructorOwnerParamNames ctorInfo =
-  case ctorResult ctorInfo of
+inferredConstructorOwnerTypeParams :: ConstructorInfo -> [ConstructorShape] -> [P.TypeParam]
+inferredConstructorOwnerTypeParams ctorInfo ownerShapes =
+  [ P.TypeParam name (kindFromMaxApplicationArity (Map.findWithDefault 0 name paramArities))
+    | name <- inferredConstructorOwnerParamNames ctorInfo ownerShapes
+  ]
+  where
+    paramArities = foldMap constructorShapeVariableHeadArities ownerShapes
+
+inferredConstructorOwnerParamNames :: ConstructorInfo -> [ConstructorShape] -> [String]
+inferredConstructorOwnerParamNames ctorInfo ownerShapes =
+  case transpose (mapMaybe (fmap NE.toList . constructorOwnerResultArgs ctorInfo . constructorShapeResult) ownerShapes) of
+    [] -> maybe [] (mapMaybe srcTypeVarName . NE.toList) (constructorOwnerResultArgs ctorInfo (ctorResult ctorInfo))
+    columns -> mapMaybe firstSrcTypeVarName columns
+
+constructorOwnerResultArgs :: ConstructorInfo -> SrcType -> Maybe (NonEmpty SrcType)
+constructorOwnerResultArgs ctorInfo ty =
+  case ty of
     STBase name
       | name == ctorOwningType ctorInfo || name == symbolDefiningName (ctorOwningTypeIdentity ctorInfo) ->
-          []
+          Nothing
     STCon name args
       | name == ctorOwningType ctorInfo || name == symbolDefiningName (ctorOwningTypeIdentity ctorInfo) ->
-          mapMaybe srcTypeVarName (NE.toList args)
-    _ -> []
+          Just args
+    _ -> Nothing
+
+firstSrcTypeVarName :: [SrcType] -> Maybe String
+firstSrcTypeVarName tys =
+  case mapMaybe srcTypeVarName tys of
+    name : _ -> Just name
+    [] -> Nothing
 
 srcTypeVarName :: SrcType -> Maybe String
 srcTypeVarName ty =
@@ -1714,7 +1733,10 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
       ensureDistinctPlain ProgramDuplicateTypeParameter paramNames
       dataIdentity <- lookupResolvedLocalTypeIdentity resolvedModule (P.dataDeclName dataDecl)
       constructors0 <- zipWithM (toCtorInfo dataDecl dataIdentity) [0 ..] (P.dataDeclConstructors dataDecl)
-      let ownerShapes = map constructorShapeFromInfo constructors0
+      let ownerShapes =
+            [ (constructorShapeFromInfo ctor) {constructorShapeOwnerTypeParams = params}
+              | ctor <- constructors0
+            ]
           constructors =
             [ ctor {ctorOwnerConstructors = ownerShapes}
               | ctor <- constructors0
