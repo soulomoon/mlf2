@@ -39,6 +39,7 @@ import MLF.Frontend.Program.Elaborate
     lowerType,
     lowerTypeView,
     matchTypes,
+    matchTypesInScope,
     resolveInstanceInfoByConstraint,
     resolveMethodInstanceInfoByTypeView,
     sourceTypeViewInScope,
@@ -46,6 +47,7 @@ import MLF.Frontend.Program.Elaborate
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     ConstructorInfo (..),
+    ConstructorShape (..),
     DataInfo (..),
     DeferredCaseCall (..),
     DeferredBindingMode (..),
@@ -60,11 +62,15 @@ import MLF.Frontend.Program.Types
     TypeView (..),
     ValueInfo (..),
     applyConstraintInfoSubst,
+    constructorOwnerRuntimeTypeTrackable,
+    constructorOwnerShapes,
+    constructorShapeFromInfo,
     freeTypeVarsTypeView,
     SymbolIdentity,
     splitArrows,
     splitForalls,
     specializeMethodType,
+    substituteTypeVar,
   )
 import MLF.Frontend.Syntax (Expr (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarsType)
@@ -634,7 +640,7 @@ resolveDeferredConstructors scope env deferredConstructors = go env
         Right $
           case
             foldM
-              (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy)
+              (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy)
               (fst substFromHead)
               (zip visibleArgTemplates argTypes)
           of
@@ -642,29 +648,32 @@ resolveDeferredConstructors scope env deferredConstructors = go env
             Nothing ->
               case
                 foldM
-                  (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy)
+                  (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy)
                   (deferredConstructorInitialSubst deferred)
                   (zip visibleArgTemplates argTypes)
               of
                 Just subst -> subst
                 Nothing -> fst substFromHead
       let substFinal =
-            case matchTypes substFromArgs (deferredConstructorOccurrenceType deferred) occurrenceTy of
+            case matchTypesInScope scope substFromArgs (deferredConstructorOccurrenceType deferred) occurrenceTy of
               Just subst -> subst
               Nothing -> substFromArgs
       case filter (`Map.notMember` substFinal) instBinders of
         [] -> do
           ctorHead <-
-            foldM
-              ( \headAcc varName ->
-                  case Map.lookup varName substFinal of
-                    Just ty -> do
-                      instTy <- srcTypeToElabType (lowerType scope ty)
-                      Right (X.ETyInst headAcc (X.InstApp instTy))
-                    Nothing -> Right headAcc
-              )
-              (X.EVar runtimeName)
-              instBinders
+            if constructorOwnerRuntimeTypeTrackable (elaborateScopeDataTypes scope) ctorInfo
+              then
+                foldM
+                  ( \headAcc varName ->
+                      case Map.lookup varName substFinal of
+                        Just ty -> do
+                          instTy <- srcTypeToElabType (lowerType scope ty)
+                          Right (X.ETyInst headAcc (X.InstApp instTy))
+                        Nothing -> Right headAcc
+                  )
+                  (X.EVar runtimeName)
+                  instBinders
+              else inlineConstructorHead scope ctorInfo substFinal
           Right (foldl X.EApp ctorHead args)
         _ -> Left (ProgramAmbiguousConstructorUse (ctorName ctorInfo))
 
@@ -689,6 +698,67 @@ resolveDeferredConstructors scope env deferredConstructors = go env
             alphaEqType existingTy actualTy || churchAwareEqType existingTy actualTy ->
               Just subst
           | otherwise -> Nothing
+
+inlineConstructorHead :: ElaborateScope -> ConstructorInfo -> Map String SrcType -> Either ProgramError ElabTerm
+inlineConstructorHead scope ctorInfo subst = do
+  let resultSrcTy = applyConstructorSubst subst (ctorResult ctorInfo)
+      argSrcTys = map (applyConstructorSubst subst) (ctorArgs ctorInfo)
+      resultVar = "$" ++ ctorOwningType ctorInfo ++ "_result"
+      argNames = ["$" ++ ctorName ctorInfo ++ "_arg" ++ show ix | ix <- [1 .. length argSrcTys]]
+      ownerShapes =
+        case lookupConstructorRuntime scope (ctorRuntimeName ctorInfo) of
+          Just (dataInfo, _) -> map constructorShapeFromInfo (dataConstructors dataInfo)
+          Nothing -> constructorOwnerShapes ctorInfo
+      handlerShapes = map specializeHandlerShape ownerShapes
+      handlerNames =
+        [ "$" ++ constructorShapeName shape ++ "_k" ++ show ix
+          | (ix, shape) <- zip ([1 :: Int ..]) handlerShapes
+        ]
+      handlerSrcType shape =
+        foldr
+          (\(name, mbBound) acc -> STForall name (fmap SrcBound mbBound) acc)
+          (foldr STArrow (STVar resultVar) (constructorShapeArgs shape))
+          (constructorShapeForalls shape)
+  selectedHandler <-
+    case drop (ctorIndex ctorInfo) handlerNames of
+      name : _ -> Right name
+      [] -> Left (ProgramPipelineError ("constructor handler order missing `" ++ ctorName ctorInfo ++ "`"))
+  resultTy <- srcTypeToElabType (lowerType scope resultSrcTy)
+  argTys <- mapM (srcTypeToElabType . lowerType scope) argSrcTys
+  handlerTys <- mapM (srcTypeToElabType . lowerType scope . handlerSrcType) handlerShapes
+  let selectedBody = foldl X.EApp (X.EVar selectedHandler) (map X.EVar argNames)
+      handlerBody =
+        foldr
+          (\(handlerName, handlerTy) acc -> X.ELam handlerName handlerTy acc)
+          selectedBody
+          (zip handlerNames handlerTys)
+      rolled = X.ERoll resultTy (X.ETyAbs resultVar Nothing handlerBody)
+  pure $
+    foldr
+      (\(argName, argTy) acc -> X.ELam argName argTy acc)
+      rolled
+      (zip argNames argTys)
+  where
+    specializeHandlerShape shape =
+      case matchTypesInScope scope Map.empty (constructorShapeResult shape) (applyConstructorSubst subst (ctorResult ctorInfo)) of
+        Just handlerSubst -> applyConstructorShapeSubst handlerSubst shape
+        Nothing -> shape
+
+applyConstructorShapeSubst :: Map String SrcType -> ConstructorShape -> ConstructorShape
+applyConstructorShapeSubst subst shape =
+  shape
+    { constructorShapeForalls =
+        [ (name, fmap (applyConstructorSubst subst) mbBound)
+          | (name, mbBound) <- constructorShapeForalls shape,
+            Map.notMember name subst
+        ],
+      constructorShapeArgs = map (applyConstructorSubst subst) (constructorShapeArgs shape),
+      constructorShapeResult = applyConstructorSubst subst (constructorShapeResult shape)
+    }
+
+applyConstructorSubst :: Map String SrcType -> SrcType -> SrcType
+applyConstructorSubst subst ty =
+  Map.foldrWithKey substituteTypeVar ty subst
 
 resolveDeferredCases :: ElaborateScope -> Map String DeferredCaseCall -> Env -> ElabTerm -> Either ProgramError (Env, ElabTerm)
 resolveDeferredCases scope deferredCases = go
@@ -745,21 +815,31 @@ resolveDeferredCases scope deferredCases = go
         scrutinee : handlers
           | length args == deferredCaseExpectedArgCount deferred -> do
               (_scrutineeElabTy, scrutineeRawTy, scrutineeRecoveredTy) <- inferDeferredArgType env scrutinee
-              validateCaseScrutineeType (deferredCaseDataInfo deferred) scrutineeRecoveredTy
+              validateCaseScrutineeType
+                (deferredCaseDataInfo deferred)
+                (deferredCaseScrutineeType deferred)
+                scrutineeRawTy
+                scrutineeRecoveredTy
               resultTy <- srcTypeToElabType (lowerType scope (deferredCaseResultType deferred))
               env' <- extendCaseResultEnv (deferredCaseDataInfo deferred) scrutineeRawTy resultTy env
               let caseHead = caseEliminator resultTy scrutinee
               Right (env', foldl X.EApp caseHead handlers)
         _ -> Left (ProgramCaseOnNonDataType STBottom)
 
-    validateCaseScrutineeType dataInfo scrutineeTy =
-      let validHeadNames = Set.fromList (dataInfoHeadNames scope dataInfo)
-       in case scrutineeTy of
-            STBase name
-              | name `Set.member` validHeadNames -> Right ()
-            STCon name _
-              | name `Set.member` validHeadNames -> Right ()
-            other -> Left (ProgramCaseOnNonDataType other)
+    validateCaseScrutineeType dataInfo expectedScrutineeTy scrutineeRawTy scrutineeTy
+      | Just expectedTy <- srcTypeToElabTypeMaybe (lowerType scope expectedScrutineeTy),
+        Just actualTy <- srcTypeToElabTypeMaybe scrutineeRawTy,
+        alphaEqType actualTy expectedTy || churchAwareEqType actualTy expectedTy =
+          Right ()
+      | Just _ <- matchDataInfoEncoding scope dataInfo scrutineeRawTy = Right ()
+      | otherwise =
+          let validHeadNames = Set.fromList (dataInfoHeadNames scope dataInfo)
+           in case scrutineeTy of
+                STBase name
+                  | name `Set.member` validHeadNames -> Right ()
+                STCon name _
+                  | name `Set.member` validHeadNames -> Right ()
+                other -> Left (ProgramCaseOnNonDataType other)
 
     inferDeferredArgType env arg =
       case typeCheckWithEnv env arg of

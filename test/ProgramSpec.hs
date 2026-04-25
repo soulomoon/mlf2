@@ -10,7 +10,9 @@ import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope)
 import MLF.Frontend.Program.Finalize (recoverSourceType, sourceForallMatches)
 import MLF.Frontend.Program.Types
     ( ConstructorInfo (..)
+    , ConstructorShape (..)
     , DataInfo (..)
+    , constructorOwnerRuntimeTypeTrackable
     , mkResolvedSymbol
     )
 import MLF.Frontend.Syntax (ResolvedSrcTy (..), mkSrcBound)
@@ -629,6 +631,344 @@ emlfBoundaryMatrix =
                 ]
         )
         (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs higher-kinded class method over a parameterized data constructor"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Boxed, Box(..), truthy, main) {"
+                , "  class Boxed (f :: * -> *) {"
+                , "    truthy : f Bool -> Bool;"
+                , "  }"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  instance Boxed Box {"
+                , "    truthy = \\box true;"
+                , "  }"
+                , ""
+                , "  def main : Bool = truthy (Box false);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs higher-kinded data field over a concrete constructor head"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Box(..), Wrap(..), main) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data Wrap (f :: * -> *) a ="
+                , "      Wrap : f a -> Wrap f a;"
+                , ""
+                , "  def main : Bool = case Wrap (Box false) of {"
+                , "    Wrap box -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs swapped type parameters through recursive data lowering"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Pair(..), FlipPair(..), main) {"
+                , "  data Pair a b ="
+                , "      Pair : a -> b -> Pair a b;"
+                , ""
+                , "  data FlipPair a b ="
+                , "      FlipPair : Pair b a -> FlipPair a b;"
+                , ""
+                , "  def main : Bool = case (FlipPair (Pair false 1) : FlipPair Int Bool) of {"
+                , "    FlipPair pair -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs nullary constructor from mixed higher-kinded data type"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Box(..), MaybeF(..), main) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def main : Bool = case (NothingF : MaybeF Box Bool) of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs first-class nullary constructor from mixed higher-kinded data type"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Box(..), MaybeF(..), mainValue, main) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def mainValue : MaybeF Box Bool = id NothingF;"
+                , "  def main : Bool = case mainValue of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs value-imported constructor from mixed higher-kinded data type"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), MaybeF, NothingF, accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (NothingF, accept);"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = accept (id NothingF);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs value-exported constructor when owner type is not exported"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), NothingF, accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (NothingF, accept);"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = accept (id NothingF);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs value-exported constructor from bulk import when owner type is not exported"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), NothingF, accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core;"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = accept (id NothingF);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs value-exported constructor from aliased bulk import when owner type is not exported"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), NothingF, accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = C.accept (id C.NothingF);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs aliased bulk-imported hidden-owner constructors in one case"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), NothingF, JustF) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , "  def main : Bool = case C.JustF (C.Box true) of {"
+                , "    C.NothingF -> false;"
+                , "    C.JustF box -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs value-exported GADT constructor when owner type is not exported"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), NothingBool, accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingBool : MaybeF f Bool"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingBool -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (NothingBool, accept);"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = accept (id NothingBool);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs value-imported nonzero-index constructor from mixed higher-kinded data type"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), MaybeF, JustF, accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingF -> false;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (Box(..), JustF, accept);"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = accept (id (JustF (Box true)));"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "allows local owner type name after value-only mixed constructor import"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), MaybeF, NothingF) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , "}"
+                , ""
+                , "module Main export (MaybeF(..), main) {"
+                , "  import Core exposing (NothingF);"
+                , ""
+                , "  data MaybeF a ="
+                , "      LocalMaybeF : a -> MaybeF a;"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
+    , ProgramMatrixCase
+        "allows constructor imports whose hidden owners share a short type name"
+        ( InlineProgram $
+            unlines
+                [ "module LeftCore export (MaybeF, NothingLeft) {"
+                , "  data MaybeF ="
+                , "      NothingLeft : MaybeF;"
+                , "}"
+                , ""
+                , "module RightCore export (MaybeF, NothingRight) {"
+                , "  data MaybeF ="
+                , "      NothingRight : MaybeF;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import LeftCore exposing (NothingLeft);"
+                , "  import RightCore exposing (NothingRight);"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
+    , ProgramMatrixCase
+        "rejects first-order parameters in higher-kinded data fields"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Bad, main) {"
+                , "  data Bad (f :: *) ="
+                , "      Bad : f Bool -> Bad f;"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramTypeArityMismatch")
     , ProgramMatrixCase
         "GADT indexed constructor application should run through recursive case"
         (ProgramFile "test/programs/recursive-adt/recursive-gadt.mlfp")
@@ -2345,13 +2685,14 @@ spec = do
                         , ctorOwningType = "Apply"
                         , ctorOwningTypeIdentity = typeIdentity
                         , ctorIndex = 0
+                        , ctorOwnerConstructors = []
                         }
                 applyInfo =
                     DataInfo
                         { dataName = "Apply"
                         , dataInfoSymbol = typeIdentity
                         , dataModule = "Main"
-                        , dataTypeParams = []
+                        , dataTypeParams = [TypeParam "f" (KArrow KType KType), firstOrderTypeParam "a"]
                         , dataParams = ["f", "a"]
                         , dataConstructors = [applyCtor]
                         }
@@ -2363,6 +2704,61 @@ spec = do
                             :| [STBase "String"]
                         )
             recoverSourceType scope (lowerType scope visible) `shouldBe` visible
+
+        it "treats owner-shaped variable-headed constructor imports as non-trackable" $ do
+            let typeIdentity =
+                    SymbolIdentity
+                        { symbolNamespace = SymbolType
+                        , symbolDefiningModule = "Core"
+                        , symbolDefiningName = "MaybeF"
+                        , symbolOwnerIdentity = Nothing
+                        }
+                ctorIdentity name =
+                    SymbolIdentity
+                        { symbolNamespace = SymbolConstructor
+                        , symbolDefiningModule = "Core"
+                        , symbolDefiningName = name
+                        , symbolOwnerIdentity = Just (SymbolOwnerType "Core" "MaybeF")
+                        }
+                resultTy = STCon "MaybeF" (STVar "f" :| [STVar "a"])
+                ownerTypeParams = [TypeParam "f" (KArrow KType KType), firstOrderTypeParam "a"]
+                nothingShape =
+                    ConstructorShape
+                        { constructorShapeName = "NothingF"
+                        , constructorShapeSymbol = ctorIdentity "NothingF"
+                        , constructorShapeRuntimeName = "Core__NothingF"
+                        , constructorShapeForalls = []
+                        , constructorShapeArgs = []
+                        , constructorShapeResult = resultTy
+                        , constructorShapeIndex = 0
+                        , constructorShapeOwnerTypeParams = ownerTypeParams
+                        }
+                justShape =
+                    ConstructorShape
+                        { constructorShapeName = "JustF"
+                        , constructorShapeSymbol = ctorIdentity "JustF"
+                        , constructorShapeRuntimeName = "Core__JustF"
+                        , constructorShapeForalls = []
+                        , constructorShapeArgs = [STVarApp "f" (STVar "a" :| [])]
+                        , constructorShapeResult = resultTy
+                        , constructorShapeIndex = 1
+                        , constructorShapeOwnerTypeParams = ownerTypeParams
+                        }
+                nothingCtor =
+                    ConstructorInfo
+                        { ctorName = "NothingF"
+                        , ctorInfoSymbol = ctorIdentity "NothingF"
+                        , ctorRuntimeName = "Core__NothingF"
+                        , ctorType = resultTy
+                        , ctorForalls = []
+                        , ctorArgs = []
+                        , ctorResult = resultTy
+                        , ctorOwningType = "MaybeF"
+                        , ctorOwningTypeIdentity = typeIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = [nothingShape, justShape]
+                        }
+            constructorOwnerRuntimeTypeTrackable Map.empty nothingCtor `shouldBe` False
 
     describe "MLF.Program parse/pretty" $ do
         mapM_ roundtripFixture fixturePaths

@@ -152,7 +152,8 @@ someCtor =
       ctorResult = STBase "Token",
       ctorOwningType = "Token",
       ctorOwningTypeIdentity = SymbolIdentity SymbolType "Lib" "Token" Nothing,
-      ctorIndex = 0
+      ctorIndex = 0,
+      ctorOwnerConstructors = []
     }
 
 tokenDataInfo :: DataInfo
@@ -186,7 +187,8 @@ higherCtor =
       ctorResult = STCon "Higher" (STVar "f" :| [STVar "a"]),
       ctorOwningType = "Higher",
       ctorOwningTypeIdentity = SymbolIdentity SymbolType "Lib" "Higher" Nothing,
-      ctorIndex = 0
+      ctorIndex = 0,
+      ctorOwnerConstructors = []
     }
 
 higherDataInfo :: DataInfo

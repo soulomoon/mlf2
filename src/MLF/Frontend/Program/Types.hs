@@ -41,6 +41,7 @@ module MLF.Frontend.Program.Types
     resolvedClassInfoSymbol,
     resolvedMethodInfoSymbol,
     resolvedModuleSymbol,
+    ConstructorShape (..),
     ConstructorInfo (..),
     DataInfo (..),
     MethodInfo (..),
@@ -60,7 +61,14 @@ module MLF.Frontend.Program.Types
     CheckedProgram (..),
     splitForalls,
     splitArrows,
+    applyTypeHead,
     substituteTypeVar,
+    constructorOwnerRuntimeTypeTrackable,
+    constructorOwnerHasVariableHeadApplication,
+    constructorOwnerShapes,
+    constructorShapeFromInfo,
+    dataConstructorsRuntimeTypeTrackable,
+    srcTypeHasVariableHeadApplication,
     specializeMethodType,
     constrainedVisibleType,
   )
@@ -68,6 +76,7 @@ where
 
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -449,6 +458,18 @@ data EvidenceInfo = EvidenceInfo
   }
   deriving (Eq, Show)
 
+data ConstructorShape = ConstructorShape
+  { constructorShapeName :: P.ConstructorName,
+    constructorShapeSymbol :: SymbolIdentity,
+    constructorShapeRuntimeName :: String,
+    constructorShapeForalls :: [(String, Maybe SrcType)],
+    constructorShapeArgs :: [SrcType],
+    constructorShapeResult :: SrcType,
+    constructorShapeIndex :: Int,
+    constructorShapeOwnerTypeParams :: [P.TypeParam]
+  }
+  deriving (Eq, Show)
+
 data ConstructorInfo = ConstructorInfo
   { ctorName :: P.ConstructorName,
     ctorInfoSymbol :: SymbolIdentity,
@@ -459,7 +480,8 @@ data ConstructorInfo = ConstructorInfo
     ctorResult :: SrcType,
     ctorOwningType :: P.TypeName,
     ctorOwningTypeIdentity :: SymbolIdentity,
-    ctorIndex :: Int
+    ctorIndex :: Int,
+    ctorOwnerConstructors :: [ConstructorShape]
   }
   deriving (Eq, Show)
 
@@ -567,6 +589,7 @@ data DeferredConstructorCall = DeferredConstructorCall
 data DeferredCaseCall = DeferredCaseCall
   { deferredCasePlaceholder :: String,
     deferredCaseDataInfo :: DataInfo,
+    deferredCaseScrutineeType :: SrcType,
     deferredCaseResultType :: SrcType,
     deferredCaseHandlerNames :: [String],
     deferredCaseExpectedArgCount :: Int
@@ -638,6 +661,83 @@ dataInfoSymbolIdentity = dataInfoSymbol
 
 constructorInfoSymbolIdentity :: DataInfo -> ConstructorInfo -> SymbolIdentity
 constructorInfoSymbolIdentity _ = ctorInfoSymbol
+
+constructorOwnerRuntimeTypeTrackable :: Map String DataInfo -> ConstructorInfo -> Bool
+constructorOwnerRuntimeTypeTrackable dataInfos ctor =
+  case [dataInfo | dataInfo <- Map.elems dataInfos, dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctor] of
+    dataInfo : _ -> dataConstructorsRuntimeTypeTrackable dataInfo
+    [] -> all constructorShapeRuntimeTypeTrackable (constructorOwnerShapes ctor)
+
+constructorOwnerHasVariableHeadApplication :: Map String DataInfo -> ConstructorInfo -> Bool
+constructorOwnerHasVariableHeadApplication dataInfos ctor =
+  case [dataInfo | dataInfo <- Map.elems dataInfos, dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctor] of
+    dataInfo : _ -> any constructorRuntimeTypeHasVariableHeadApplication (dataConstructors dataInfo)
+    [] -> any constructorShapeHasVariableHeadApplication (constructorOwnerShapes ctor)
+
+dataConstructorsRuntimeTypeTrackable :: DataInfo -> Bool
+dataConstructorsRuntimeTypeTrackable =
+  all constructorRuntimeTypeShapeTrackable . dataConstructors
+
+constructorRuntimeTypeShapeTrackable :: ConstructorInfo -> Bool
+constructorRuntimeTypeShapeTrackable ctor =
+  constructorShapeRuntimeTypeTrackable (constructorShapeFromInfo ctor)
+
+constructorShapeRuntimeTypeTrackable :: ConstructorShape -> Bool
+constructorShapeRuntimeTypeTrackable shape =
+  let involvedTypes =
+        constructorShapeArgs shape
+          ++ [constructorShapeResult shape]
+          ++ [bound | (_, Just bound) <- constructorShapeForalls shape]
+      evidenceVars = foldMap freeTypeVarsSrcType involvedTypes
+   in not (any hasVariableHeadApplication involvedTypes)
+        && all (\(name, _) -> name `Set.member` evidenceVars) (constructorShapeForalls shape)
+
+constructorRuntimeTypeHasVariableHeadApplication :: ConstructorInfo -> Bool
+constructorRuntimeTypeHasVariableHeadApplication ctor =
+  constructorShapeHasVariableHeadApplication (constructorShapeFromInfo ctor)
+
+constructorShapeHasVariableHeadApplication :: ConstructorShape -> Bool
+constructorShapeHasVariableHeadApplication shape =
+  any hasVariableHeadApplication $
+    constructorShapeArgs shape
+      ++ [constructorShapeResult shape]
+      ++ [bound | (_, Just bound) <- constructorShapeForalls shape]
+
+constructorOwnerShapes :: ConstructorInfo -> [ConstructorShape]
+constructorOwnerShapes ctor =
+  case ctorOwnerConstructors ctor of
+    [] -> [constructorShapeFromInfo ctor]
+    shapes -> shapes
+
+constructorShapeFromInfo :: ConstructorInfo -> ConstructorShape
+constructorShapeFromInfo ctor =
+  ConstructorShape
+    { constructorShapeName = ctorName ctor,
+      constructorShapeSymbol = ctorInfoSymbol ctor,
+      constructorShapeRuntimeName = ctorRuntimeName ctor,
+      constructorShapeForalls = ctorForalls ctor,
+      constructorShapeArgs = ctorArgs ctor,
+      constructorShapeResult = ctorResult ctor,
+      constructorShapeIndex = ctorIndex ctor,
+      constructorShapeOwnerTypeParams = []
+    }
+
+srcTypeHasVariableHeadApplication :: SrcType -> Bool
+srcTypeHasVariableHeadApplication = hasVariableHeadApplication
+
+hasVariableHeadApplication :: SrcType -> Bool
+hasVariableHeadApplication ty =
+  case ty of
+    STVar {} -> False
+    STArrow dom cod -> hasVariableHeadApplication dom || hasVariableHeadApplication cod
+    STBase {} -> False
+    STCon _ args -> any hasVariableHeadApplication args
+    STVarApp {} -> True
+    STForall _ mb body ->
+      maybe False (hasVariableHeadApplication . unSrcBound) mb
+        || hasVariableHeadApplication body
+    STMu _ body -> hasVariableHeadApplication body
+    STBottom -> False
 
 classInfoSymbolIdentity :: ClassInfo -> SymbolIdentity
 classInfoSymbolIdentity = classInfoSymbol
@@ -734,6 +834,23 @@ splitArrows = go []
       STArrow dom cod -> go (acc ++ [dom]) cod
       ty -> (acc, ty)
 
+applyTypeHead :: SrcType -> [SrcType] -> Maybe SrcType
+applyTypeHead headTy args =
+  case headTy of
+    STVar name -> Just (mkVarHead name args)
+    STBase name -> Just (mkConHead name args)
+    STCon name existingArgs -> Just (mkConHead name (toList existingArgs ++ args))
+    STVarApp name existingArgs -> Just (mkVarHead name (toList existingArgs ++ args))
+    _ -> Nothing
+  where
+    mkVarHead name = \case
+      [] -> STVar name
+      arg : rest -> STVarApp name (arg :| rest)
+
+    mkConHead name = \case
+      [] -> STBase name
+      arg : rest -> STCon name (arg :| rest)
+
 substituteTypeVar :: String -> SrcType -> SrcType -> SrcType
 substituteTypeVar needle replacement = go
   where
@@ -746,7 +863,7 @@ substituteTypeVar needle replacement = go
       STCon name args -> STCon name (fmap go args)
       STVarApp name args ->
         let args' = fmap go args
-         in case replacementHead name args' of
+         in case replacementHead name (toList args') of
               Just ty' -> ty'
               Nothing -> STVarApp name args'
       STForall name mb body
@@ -759,13 +876,7 @@ substituteTypeVar needle replacement = go
 
     replacementHead name args
       | name /= needle = Nothing
-      | otherwise =
-          case replacement of
-            STVar replacementName -> Just (STVarApp replacementName args)
-            STBase replacementName -> Just (STCon replacementName args)
-            STCon replacementName replacementArgs -> Just (STCon replacementName (replacementArgs <> args))
-            STVarApp replacementName replacementArgs -> Just (STVarApp replacementName (replacementArgs <> args))
-            _ -> Nothing
+      | otherwise = applyTypeHead replacement args
 
 freeTypeVarsSrcType :: SrcType -> Set String
 freeTypeVarsSrcType = go Set.empty

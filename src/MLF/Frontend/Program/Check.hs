@@ -8,6 +8,7 @@ module MLF.Frontend.Program.Check
     CheckedModule (..),
     CheckedBinding (..),
     DataInfo (..),
+    ConstructorShape (..),
     ConstructorInfo (..),
     ClassInfo (..),
     MethodInfo (..),
@@ -23,7 +24,7 @@ where
 
 import Control.Monad (foldM, forM, when, zipWithM)
 import Control.Monad.Except (MonadError (throwError))
-import Data.List (find, intercalate, nub)
+import Data.List (find, intercalate, nub, transpose)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -46,6 +47,7 @@ import MLF.Frontend.Program.Types
     CheckedModule (..),
     CheckedProgram (..),
     ClassInfo (..),
+    ConstructorShape (..),
     ConstructorInfo (..),
     DataInfo (..),
     ExportedTypeInfo (..),
@@ -64,10 +66,13 @@ import MLF.Frontend.Program.Types
     ConstraintInfo (..),
     TypeView (..),
     ValueInfo (..),
+    applyTypeHead,
     applyConstraintInfoSubst,
     classInfoSymbolIdentity,
     constrainedVisibleType,
     constructorInfoSymbolIdentity,
+    constructorOwnerShapes,
+    constructorShapeFromInfo,
     dataInfoSymbolIdentity,
     diagnosticForProgramError,
     instanceInfoClassSymbolIdentity,
@@ -106,6 +111,7 @@ data Scope = Scope
     scopeValuesByIdentity :: Map SymbolIdentity [(String, ValueInfo)],
     scopeTypes :: Map String DataInfo,
     scopeTypesByIdentity :: Map SymbolIdentity [(String, DataInfo)],
+    scopeHiddenTypes :: Map String DataInfo,
     scopeClasses :: Map String ClassInfo,
     scopeClassesByIdentity :: Map SymbolIdentity [(String, ClassInfo)],
     scopeInstances :: [InstanceInfo]
@@ -140,11 +146,22 @@ emptyScope = mkScope builtinValues Map.empty Map.empty []
 
 mkScope :: Map String ValueInfo -> Map String DataInfo -> Map String ClassInfo -> [InstanceInfo] -> Scope
 mkScope values0 types0 classes0 instances0 =
+  mkScopeWithHidden values0 types0 Map.empty classes0 instances0
+
+mkScopeWithHidden ::
+  Map String ValueInfo ->
+  Map String DataInfo ->
+  Map String DataInfo ->
+  Map String ClassInfo ->
+  [InstanceInfo] ->
+  Scope
+mkScopeWithHidden values0 types0 hiddenTypes0 classes0 instances0 =
   Scope
     { scopeValues = values0,
       scopeValuesByIdentity = indexByIdentity valueInfoSymbolIdentity values0,
       scopeTypes = types0,
       scopeTypesByIdentity = indexByIdentity dataInfoSymbolIdentity types0,
+      scopeHiddenTypes = hiddenTypes0,
       scopeClasses = classes0,
       scopeClassesByIdentity = indexByIdentity classInfoSymbolIdentity classes0,
       scopeInstances = instances0
@@ -152,19 +169,27 @@ mkScope values0 types0 classes0 instances0 =
 
 withScopeValues :: Map String ValueInfo -> Scope -> Scope
 withScopeValues values0 scope =
-  mkScope values0 (scopeTypes scope) (scopeClasses scope) (scopeInstances scope)
+  mkScopeWithHidden values0 (scopeTypes scope) (scopeHiddenTypes scope) (scopeClasses scope) (scopeInstances scope)
 
 withScopeTypes :: Map String DataInfo -> Scope -> Scope
 withScopeTypes types0 scope =
-  mkScope (scopeValues scope) types0 (scopeClasses scope) (scopeInstances scope)
+  mkScopeWithHidden (scopeValues scope) types0 (scopeHiddenTypes scope) (scopeClasses scope) (scopeInstances scope)
+
+withScopeHiddenTypes :: Map String DataInfo -> Scope -> Scope
+withScopeHiddenTypes hiddenTypes0 scope =
+  mkScopeWithHidden (scopeValues scope) (scopeTypes scope) hiddenTypes0 (scopeClasses scope) (scopeInstances scope)
 
 withScopeClasses :: Map String ClassInfo -> Scope -> Scope
 withScopeClasses classes0 scope =
-  mkScope (scopeValues scope) (scopeTypes scope) classes0 (scopeInstances scope)
+  mkScopeWithHidden (scopeValues scope) (scopeTypes scope) (scopeHiddenTypes scope) classes0 (scopeInstances scope)
 
 withScopeInstances :: [InstanceInfo] -> Scope -> Scope
 withScopeInstances instances0 scope =
-  mkScope (scopeValues scope) (scopeTypes scope) (scopeClasses scope) instances0
+  mkScopeWithHidden (scopeValues scope) (scopeTypes scope) (scopeHiddenTypes scope) (scopeClasses scope) instances0
+
+scopeElaborateTypes :: Scope -> Map String DataInfo
+scopeElaborateTypes scope =
+  scopeTypes scope `Map.union` scopeHiddenTypes scope
 
 indexByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity [(String, a)]
 indexByIdentity identityOf =
@@ -489,21 +514,20 @@ checkModule resolvedModule priorModules = do
   valueScope <- liftEither =<< pure (addValues (scopeValues importScope) localValues)
   typeScope <- liftEither =<< pure (addTypes (scopeTypes importScope) localData)
   classScope <- liftEither =<< pure (addClasses (scopeClasses importScope) localClasses)
-  let scope0 = mkScope valueScope typeScope classScope (scopeInstances importScope ++ visibleImportedInstances)
+  let scope0 = mkScopeWithHidden valueScope typeScope (scopeHiddenTypes importScope) classScope (scopeInstances importScope ++ visibleImportedInstances)
       fullNameEnv = valueNameEnv `preferDisplayNames` displayNameEnvFromScope scope0
   validateModuleKinds scope0 resolvedSyntax
   validateLocalClassMethodConstraints scope0 resolvedSyntax
   derivedInstances <- synthesizeDerivedInstances fullNameEnv scope0 resolvedModule resolvedSyntax
   instanceSkeletons <- buildInstanceSkeletons fullNameEnv scope0 resolvedSyntax derivedInstances
   let scope1 = withScopeInstances (scopeInstances scope0 ++ instanceSkeletons) scope0
-  let elaborateScope = mkElaborateScope (scopeValues scope1) (scopeTypes scope1) (scopeClasses scope1) (scopeInstances scope1)
+  let elaborateScope = mkElaborateScope (scopeValues scope1) (scopeElaborateTypes scope1) (scopeClasses scope1) (scopeInstances scope1)
   constructorBindings <-
     mapM
       (liftEither . (finalizeBinding elaborateScope . lowerConstructorBinding elaborateScope))
       [ ctor
         | dataInfo <- Map.elems localData,
-          ctor <- dataConstructors dataInfo,
-          constructorRuntimeBindingRecoverable ctor
+          ctor <- dataConstructors dataInfo
       ]
   instanceBindings <- concat <$> mapM (checkInstance elaborateScope scope1) (derivedInstances ++ explicitInstances resolvedSyntax)
   defBindings <- mapM (checkDef elaborateScope scope1) (moduleDefDecls resolvedSyntax)
@@ -580,12 +604,29 @@ resolvedImportDefiningModule =
   symbolDefiningModule . resolvedSymbolIdentity . P.importModuleName
 
 addAllExports :: Scope -> ModuleExports -> TcM Scope
-addAllExports scope exports =
+addAllExports scope exports = do
+  let (scopeWithOwners, importedValues) = prepareBulkImportedValues exports scope (exportedValues exports)
   liftEither $ do
-    values <- addValues (scopeValues scope) (exportedValues exports)
-    types <- addTypes (scopeTypes scope) (Map.map exportedTypeData (exportedTypes exports))
-    classes <- addClasses (scopeClasses scope) (exportedClasses exports)
-    pure (mkScope values types classes (scopeInstances scope))
+    values <- addValues (scopeValues scopeWithOwners) importedValues
+    types <- addTypes (scopeTypes scopeWithOwners) (Map.map exportedTypeData (exportedTypes exports))
+    classes <- addClasses (scopeClasses scopeWithOwners) (exportedClasses exports)
+    pure (mkScopeWithHidden values types (scopeHiddenTypes scopeWithOwners) classes (scopeInstances scopeWithOwners))
+
+prepareBulkImportedValues :: ModuleExports -> Scope -> Map String ValueInfo -> (Scope, Map String ValueInfo)
+prepareBulkImportedValues exports =
+  Map.mapAccumWithKey (\scope0 _ valueInfo -> prepareBulkImportedValue exports scope0 valueInfo)
+
+prepareBulkImportedValue :: ModuleExports -> Scope -> ValueInfo -> (Scope, ValueInfo)
+prepareBulkImportedValue exports scope valueInfo@ConstructorValue {valueCtorInfo = ctorInfo}
+  | constructorOwnerVisibleInExports ctorInfo exports = (scope, valueInfo)
+  | otherwise = prepareImportedValue exports scope valueInfo
+prepareBulkImportedValue _ scope valueInfo = (scope, valueInfo)
+
+constructorOwnerVisibleInExports :: ConstructorInfo -> ModuleExports -> Bool
+constructorOwnerVisibleInExports ctorInfo exports =
+  any
+    ((== ctorOwningTypeIdentity ctorInfo) . dataInfoSymbolIdentity . exportedTypeData)
+    (Map.elems (exportedTypes exports))
 
 qualifyModuleExports :: P.ModuleName -> ModuleExports -> ModuleExports
 qualifyModuleExports alias exports =
@@ -663,7 +704,19 @@ qualifyModuleExports alias exports =
           ctorArgs = map qualifySrcType (ctorArgs ctor),
           ctorResult = qualifySrcType (ctorResult ctor),
           ctorOwningType = ctorOwningType ctor,
-          ctorOwningTypeIdentity = ctorOwningTypeIdentity ctor
+          ctorOwningTypeIdentity = ctorOwningTypeIdentity ctor,
+          ctorOwnerConstructors = map qualifyConstructorShape (ctorOwnerConstructors ctor)
+        }
+
+    qualifyConstructorShape shape =
+      shape
+        { constructorShapeName = qualifiedName (constructorShapeName shape),
+          constructorShapeForalls =
+            [ (name, fmap qualifySrcType mbBound)
+              | (name, mbBound) <- constructorShapeForalls shape
+            ],
+          constructorShapeArgs = map qualifySrcType (constructorShapeArgs shape),
+          constructorShapeResult = qualifySrcType (constructorShapeResult shape)
         }
 
     qualifyClassInfo classInfo =
@@ -1012,8 +1065,9 @@ applyResolvedImportItem moduleName0 exports scope item =
     P.ExportValue symbol ->
       case exportedValueByIdentity (resolvedSymbolIdentity symbol) exports of
         Just (name, info) -> do
-          values <- liftEither (addValues (scopeValues scope) (Map.singleton name info))
-          pure (withScopeValues values scope)
+          let (scopeWithOwner, importedInfo) = prepareImportedValue exports scope info
+          values <- liftEither (addValues (scopeValues scopeWithOwner) (Map.singleton name importedInfo))
+          pure (withScopeValues values scopeWithOwner)
         Nothing -> throwError (ProgramImportNotExported moduleName0 (resolvedSymbolDisplayName symbol))
     P.ExportType ref ->
       case exportedTypeByRef ref exports of
@@ -1054,8 +1108,212 @@ applyResolvedImportItem moduleName0 exports scope item =
                   ]
           values <- liftEither (addValues (scopeValues scope) ctorValues)
           types <- liftEither (addTypes (scopeTypes scope) (Map.singleton typeName dataInfo))
-          pure (mkScope values types (scopeClasses scope) (scopeInstances scope))
+          pure (mkScopeWithHidden values types (scopeHiddenTypes scope) (scopeClasses scope) (scopeInstances scope))
         Nothing -> throwError (ProgramImportNotExported moduleName0 (P.resolvedExportTypeName ref))
+
+prepareImportedValue :: ModuleExports -> Scope -> ValueInfo -> (Scope, ValueInfo)
+prepareImportedValue exports scope valueInfo =
+  case valueInfo of
+    ConstructorValue {valueCtorInfo = ctorInfo} ->
+      case exportedConstructorOwnerType ctorInfo exports of
+        Just dataInfo ->
+          let hiddenDataInfo = hiddenOwnerDataInfo dataInfo
+              hiddenTypes = Map.insert (dataName hiddenDataInfo) hiddenDataInfo (scopeHiddenTypes scope)
+              hiddenCtorInfo = importedHiddenConstructorInfo ctorInfo hiddenDataInfo
+              importedInfo =
+                valueInfo
+                  { valueType = ctorType hiddenCtorInfo,
+                    valueCtorInfo = hiddenCtorInfo
+                  }
+           in (withScopeHiddenTypes hiddenTypes scope, importedInfo)
+        Nothing -> (scope, valueInfo)
+    _ -> (scope, valueInfo)
+
+hiddenOwnerDataInfo :: DataInfo -> DataInfo
+hiddenOwnerDataInfo dataInfo =
+  let hiddenName = hiddenOwnerTypeName dataInfo
+      ownerNames =
+        Set.fromList
+          [ dataName dataInfo,
+            symbolDefiningName (dataInfoSymbolIdentity dataInfo)
+          ]
+      rewrite = rewriteOwnerTypeHeads ownerNames hiddenName
+      rewriteShape shape =
+        shape
+          { constructorShapeForalls =
+              [ (name, fmap rewrite mbBound)
+                | (name, mbBound) <- constructorShapeForalls shape
+              ],
+            constructorShapeArgs = map rewrite (constructorShapeArgs shape),
+            constructorShapeResult = rewrite (constructorShapeResult shape)
+          }
+      rewriteCtor ctor =
+        ctor
+          { ctorType = rewrite (ctorType ctor),
+            ctorForalls =
+              [ (name, fmap rewrite mbBound)
+                | (name, mbBound) <- ctorForalls ctor
+              ],
+            ctorArgs = map rewrite (ctorArgs ctor),
+            ctorResult = rewrite (ctorResult ctor),
+            ctorOwningType = hiddenName,
+            ctorOwnerConstructors = map rewriteShape (ctorOwnerConstructors ctor)
+          }
+   in dataInfo
+        { dataName = hiddenName,
+          dataConstructors = map rewriteCtor (dataConstructors dataInfo)
+        }
+
+hiddenOwnerTypeName :: DataInfo -> String
+hiddenOwnerTypeName dataInfo =
+  let identity = dataInfoSymbolIdentity dataInfo
+   in "$" ++ symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+
+rewriteOwnerTypeHeads :: Set.Set String -> String -> SrcType -> SrcType
+rewriteOwnerTypeHeads ownerNames hiddenName = go
+  where
+    rewriteHead name
+      | name `Set.member` ownerNames = hiddenName
+      | otherwise = name
+
+    go ty =
+      case ty of
+        STVar {} -> ty
+        STArrow dom cod -> STArrow (go dom) (go cod)
+        STBase name -> STBase (rewriteHead name)
+        STCon name args -> STCon (rewriteHead name) (fmap go args)
+        STVarApp name args -> STVarApp name (fmap go args)
+        STForall name mb body -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
+        STMu name body -> STMu name (go body)
+        STBottom -> STBottom
+
+importedHiddenConstructorInfo :: ConstructorInfo -> DataInfo -> ConstructorInfo
+importedHiddenConstructorInfo ctorInfo hiddenDataInfo =
+  case find ((== ctorInfoSymbol ctorInfo) . ctorInfoSymbol) (dataConstructors hiddenDataInfo) of
+    Just hiddenCtorInfo ->
+      hiddenCtorInfo
+        { ctorName = ctorName ctorInfo,
+          ctorRuntimeName = ctorRuntimeName ctorInfo
+        }
+    Nothing -> ctorInfo
+
+exportedConstructorOwnerType :: ConstructorInfo -> ModuleExports -> Maybe DataInfo
+exportedConstructorOwnerType ctorInfo exports =
+  case
+    [ dataInfo
+      | ExportedTypeInfo dataInfo _ <- Map.elems (exportedTypes exports),
+        dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctorInfo
+    ] of
+    dataInfo : _ -> Just dataInfo
+    [] -> Just (constructorOwnerDataInfoFromShapes ctorInfo)
+
+constructorOwnerDataInfoFromShapes :: ConstructorInfo -> DataInfo
+constructorOwnerDataInfoFromShapes ctorInfo =
+  DataInfo
+    { dataName = ctorOwningType ctorInfo,
+      dataInfoSymbol = ownerIdentity,
+      dataModule = symbolDefiningModule ownerIdentity,
+      dataTypeParams = typeParams,
+      dataParams = paramNames,
+      dataConstructors = constructors
+    }
+  where
+    ownerIdentity = ctorOwningTypeIdentity ctorInfo
+    ownerShapes = constructorOwnerShapes ctorInfo
+    paramNames = P.typeParamNames typeParams
+    typeParams =
+      case [params | shape <- ownerShapes, let params = constructorShapeOwnerTypeParams shape, not (null params)] of
+        params : _ -> params
+        [] -> inferredConstructorOwnerTypeParams ctorInfo ownerShapes
+    constructors = map constructorInfoFromShape ownerShapes
+
+    constructorInfoFromShape shape =
+      ConstructorInfo
+        { ctorName = constructorShapeName shape,
+          ctorInfoSymbol = constructorShapeSymbol shape,
+          ctorRuntimeName = constructorShapeRuntimeName shape,
+          ctorType = constructorShapeType shape,
+          ctorForalls = constructorShapeForalls shape,
+          ctorArgs = constructorShapeArgs shape,
+          ctorResult = constructorShapeResult shape,
+          ctorOwningType = ctorOwningType ctorInfo,
+          ctorOwningTypeIdentity = ownerIdentity,
+          ctorIndex = constructorShapeIndex shape,
+          ctorOwnerConstructors = ownerShapes
+        }
+
+constructorShapeType :: ConstructorShape -> SrcType
+constructorShapeType shape =
+  foldr
+    (\(name, mbBound) body -> STForall name (fmap SrcBound mbBound) body)
+    (foldr STArrow (constructorShapeResult shape) (constructorShapeArgs shape))
+    (constructorShapeForalls shape)
+
+inferredConstructorOwnerTypeParams :: ConstructorInfo -> [ConstructorShape] -> [P.TypeParam]
+inferredConstructorOwnerTypeParams ctorInfo ownerShapes =
+  [ P.TypeParam name (kindFromMaxApplicationArity (Map.findWithDefault 0 name paramArities))
+    | name <- inferredConstructorOwnerParamNames ctorInfo ownerShapes
+  ]
+  where
+    paramArities = foldMap constructorShapeVariableHeadArities ownerShapes
+
+inferredConstructorOwnerParamNames :: ConstructorInfo -> [ConstructorShape] -> [String]
+inferredConstructorOwnerParamNames ctorInfo ownerShapes =
+  case transpose (mapMaybe (fmap NE.toList . constructorOwnerResultArgs ctorInfo . constructorShapeResult) ownerShapes) of
+    [] -> maybe [] (mapMaybe srcTypeVarName . NE.toList) (constructorOwnerResultArgs ctorInfo (ctorResult ctorInfo))
+    columns -> mapMaybe firstSrcTypeVarName columns
+
+constructorOwnerResultArgs :: ConstructorInfo -> SrcType -> Maybe (NonEmpty SrcType)
+constructorOwnerResultArgs ctorInfo ty =
+  case ty of
+    STBase name
+      | name == ctorOwningType ctorInfo || name == symbolDefiningName (ctorOwningTypeIdentity ctorInfo) ->
+          Nothing
+    STCon name args
+      | name == ctorOwningType ctorInfo || name == symbolDefiningName (ctorOwningTypeIdentity ctorInfo) ->
+          Just args
+    _ -> Nothing
+
+firstSrcTypeVarName :: [SrcType] -> Maybe String
+firstSrcTypeVarName tys =
+  case mapMaybe srcTypeVarName tys of
+    name : _ -> Just name
+    [] -> Nothing
+
+srcTypeVarName :: SrcType -> Maybe String
+srcTypeVarName ty =
+  case ty of
+    STVar name -> Just name
+    _ -> Nothing
+
+constructorShapeVariableHeadArities :: ConstructorShape -> Map String Int
+constructorShapeVariableHeadArities shape =
+  foldMap
+    srcTypeVariableHeadArities
+    ( constructorShapeArgs shape
+        ++ [constructorShapeResult shape]
+        ++ [bound | (_, Just bound) <- constructorShapeForalls shape]
+    )
+
+srcTypeVariableHeadArities :: SrcType -> Map String Int
+srcTypeVariableHeadArities ty =
+  case ty of
+    STVar {} -> Map.empty
+    STArrow dom cod -> srcTypeVariableHeadArities dom <> srcTypeVariableHeadArities cod
+    STBase {} -> Map.empty
+    STCon _ args -> foldMap srcTypeVariableHeadArities (NE.toList args)
+    STVarApp name args ->
+      Map.singleton name (NE.length args)
+        <> foldMap srcTypeVariableHeadArities (NE.toList args)
+    STForall _ mb body ->
+      maybe Map.empty (srcTypeVariableHeadArities . unSrcBound) mb
+        <> srcTypeVariableHeadArities body
+    STMu _ body -> srcTypeVariableHeadArities body
+    STBottom -> Map.empty
+
+kindFromMaxApplicationArity :: Int -> P.SrcKind
+kindFromMaxApplicationArity arity =
+  foldr P.KArrow P.KType (replicate arity P.KType)
 
 exportedValueByIdentity :: SymbolIdentity -> ModuleExports -> Maybe (String, ValueInfo)
 exportedValueByIdentity identity exports =
@@ -1467,7 +1725,15 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
           paramNames = P.typeParamNames params
       ensureDistinctPlain ProgramDuplicateTypeParameter paramNames
       dataIdentity <- lookupResolvedLocalTypeIdentity resolvedModule (P.dataDeclName dataDecl)
-      constructors <- zipWithM (toCtorInfo dataDecl dataIdentity) [0 ..] (P.dataDeclConstructors dataDecl)
+      constructors0 <- zipWithM (toCtorInfo dataDecl dataIdentity) [0 ..] (P.dataDeclConstructors dataDecl)
+      let ownerShapes =
+            [ (constructorShapeFromInfo ctor) {constructorShapeOwnerTypeParams = params}
+              | ctor <- constructors0
+            ]
+          constructors =
+            [ ctor {ctorOwnerConstructors = ownerShapes}
+              | ctor <- constructors0
+            ]
       pure
         ( P.dataDeclName dataDecl,
           DataInfo
@@ -1502,7 +1768,8 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
             ctorResult = result0,
             ctorOwningType = P.dataDeclName dataDecl,
             ctorOwningTypeIdentity = dataIdentity,
-            ctorIndex = index
+            ctorIndex = index,
+            ctorOwnerConstructors = []
           }
 
     validateConstructorResult :: SymbolIdentity -> P.ResolvedDataDecl -> P.ResolvedConstructorDecl -> ResolvedSrcType -> TcM ()
@@ -1658,24 +1925,6 @@ addConstructorValues moduleName0 dataInfos =
           ctor <- dataConstructors dataInfo
       ]
 
-constructorRuntimeBindingRecoverable :: ConstructorInfo -> Bool
-constructorRuntimeBindingRecoverable ctor =
-  let evidenceVars = foldMap freeTypeVars (ctorArgs ctor ++ [ctorResult ctor])
-   in all (\(name, _) -> name `Set.member` evidenceVars) (ctorForalls ctor)
-  where
-    freeTypeVars ty =
-      case ty of
-        STVar name -> Set.singleton name
-        STArrow dom cod -> freeTypeVars dom `Set.union` freeTypeVars cod
-        STBase {} -> Set.empty
-        STCon _ args -> foldMap freeTypeVars args
-        STVarApp name args -> Set.insert name (foldMap freeTypeVars args)
-        STForall name mb body ->
-          maybe Set.empty (freeTypeVars . unSrcBound) mb
-            `Set.union` Set.delete name (freeTypeVars body)
-        STMu name body -> Set.delete name (freeTypeVars body)
-        STBottom -> Set.empty
-
 synthesizeDerivedInstances :: DisplayNameEnv -> Scope -> ResolvedModule -> P.ResolvedModuleSyntax -> TcM [P.ResolvedInstanceDecl]
 synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
   candidates <- concat <$> mapM deriveForData (moduleDataDecls mod0)
@@ -1830,7 +2079,7 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
         STBottom -> Set.empty
 
     scopeToElaborateScope scope0 =
-      mkElaborateScope (scopeValues scope0) (scopeTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
+      mkElaborateScope (scopeValues scope0) (scopeElaborateTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
 
     mkEqInstance classSymbol classInfo eqMethodSymbol resolvedDataDecl displayDataDecl = do
       dataSymbol <- uniqueResolvedLocalSymbol ProgramDuplicateType (P.dataDeclName resolvedDataDecl) (resolvedModuleLocalTypes resolvedModule)
@@ -2103,16 +2352,35 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
                 (\acc (leftTy, rightTy) -> unifyOverlap acc leftTy rightTy)
                 subst
                 (zip (NE.toList leftArgs) (NE.toList rightArgs))
-        (STVarApp leftName leftArgs, STVarApp rightName rightArgs)
-          | leftName == rightName && NE.length leftArgs == NE.length rightArgs ->
-              foldM
-                (\acc (leftTy, rightTy) -> unifyOverlap acc leftTy rightTy)
-                subst
-                (zip (NE.toList leftArgs) (NE.toList rightArgs))
+        (STVarApp leftName leftArgs, rightTy) ->
+          unifyOverlapTypeHead subst leftName (NE.toList leftArgs) rightTy
+        (leftTy, STVarApp rightName rightArgs) ->
+          unifyOverlapTypeHead subst rightName (NE.toList rightArgs) leftTy
         (STArrow leftDom leftCod, STArrow rightDom rightCod) -> do
           subst' <- unifyOverlap subst leftDom rightDom
           unifyOverlap subst' leftCod rightCod
         _ -> Nothing
+
+    unifyOverlapTypeHead subst name templateArgs actual =
+      case actual of
+        STCon actualName actualArgs ->
+          matchAppliedHead (STBase actualName) (NE.toList actualArgs)
+        STVarApp actualName actualArgs ->
+          matchAppliedHead (STVar actualName) (NE.toList actualArgs)
+        _ -> Nothing
+      where
+        templateArgCount = length templateArgs
+
+        matchAppliedHead headTy actualArgs
+          | length actualArgs < templateArgCount = Nothing
+          | otherwise = do
+              let (headArgs, matchedArgs) = splitAt (length actualArgs - templateArgCount) actualArgs
+              appliedHead <- applyTypeHead headTy headArgs
+              subst' <- bindOverlap name appliedHead subst
+              foldM
+                (\acc (templateTy, actualTy) -> unifyOverlap acc templateTy actualTy)
+                subst'
+                (zip templateArgs matchedArgs)
 
     bindOverlap name ty subst =
       case Map.lookup name subst of
@@ -2132,12 +2400,9 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
         STCon name args -> STCon name (fmap (applyOverlapSubst subst) args)
         STVarApp name args ->
           let args' = fmap (applyOverlapSubst subst) args
-           in case Map.lookup name subst of
-                Just (STVar replacementName) -> STVarApp replacementName args'
-                Just (STBase replacementName) -> STCon replacementName args'
-                Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
-                Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
-                _ -> STVarApp name args'
+           in case Map.lookup name subst >>= \replacement -> applyTypeHead replacement (NE.toList args') of
+                Just replacementTy -> replacementTy
+                Nothing -> STVarApp name args'
         STForall name mb body ->
           STForall name (fmap (SrcBound . applyOverlapSubst subst . unSrcBound) mb) (applyOverlapSubst subst body)
         STMu name body -> STMu name (applyOverlapSubst subst body)
