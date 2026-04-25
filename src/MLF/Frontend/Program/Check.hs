@@ -71,6 +71,7 @@ import MLF.Frontend.Program.Types
     classInfoSymbolIdentity,
     constrainedVisibleType,
     constructorInfoSymbolIdentity,
+    constructorOwnerShapes,
     constructorShapeFromInfo,
     dataInfoSymbolIdentity,
     diagnosticForProgramError,
@@ -1187,7 +1188,120 @@ exportedConstructorOwnerType ctorInfo exports =
         dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctorInfo
     ] of
     dataInfo : _ -> Just dataInfo
-    [] -> Nothing
+    [] -> Just (constructorOwnerDataInfoFromShapes ctorInfo)
+
+constructorOwnerDataInfoFromShapes :: ConstructorInfo -> DataInfo
+constructorOwnerDataInfoFromShapes ctorInfo =
+  DataInfo
+    { dataName = ctorOwningType ctorInfo,
+      dataInfoSymbol = ownerIdentity,
+      dataModule = symbolDefiningModule ownerIdentity,
+      dataTypeParams = typeParams,
+      dataParams = paramNames,
+      dataConstructors = constructors
+    }
+  where
+    ownerIdentity = ctorOwningTypeIdentity ctorInfo
+    ownerShapes = constructorOwnerShapes ctorInfo
+    paramNames = constructorOwnerParamNames ctorInfo
+    typeParams =
+      [ P.TypeParam name (kindFromMaxApplicationArity (Map.findWithDefault 0 name paramArities))
+        | name <- paramNames
+      ]
+    paramArities = foldMap constructorShapeVariableHeadArities ownerShapes
+    constructors = map constructorInfoFromShape ownerShapes
+
+    constructorInfoFromShape shape =
+      ConstructorInfo
+        { ctorName = constructorShapeName shape,
+          ctorInfoSymbol = constructorShapeSymbol shape,
+          ctorRuntimeName = constructorShapeRuntimeName shape,
+          ctorType = constructorShapeType shape,
+          ctorForalls = constructorShapeForalls shape,
+          ctorArgs = constructorShapeArgs shape,
+          ctorResult = constructorShapeResult shape,
+          ctorOwningType = ctorOwningType ctorInfo,
+          ctorOwningTypeIdentity = ownerIdentity,
+          ctorIndex = constructorShapeIndex shape,
+          ctorOwnerConstructors = ownerShapes
+        }
+
+    constructorShapeSymbol shape
+      | sameShapeAsCtor shape ctorInfo = ctorInfoSymbol ctorInfo
+      | otherwise =
+          SymbolIdentity
+            { symbolNamespace = SymbolConstructor,
+              symbolDefiningModule = symbolDefiningModule ownerIdentity,
+              symbolDefiningName = constructorShapeName shape,
+              symbolOwnerIdentity =
+                Just
+                  ( SymbolOwnerType
+                      (symbolDefiningModule ownerIdentity)
+                      (symbolDefiningName ownerIdentity)
+                  )
+            }
+
+    constructorShapeRuntimeName shape
+      | sameShapeAsCtor shape ctorInfo = ctorRuntimeName ctorInfo
+      | otherwise = qualify (symbolDefiningModule ownerIdentity) (constructorShapeName shape)
+
+sameShapeAsCtor :: ConstructorShape -> ConstructorInfo -> Bool
+sameShapeAsCtor shape ctorInfo =
+  constructorShapeIndex shape == ctorIndex ctorInfo
+    && constructorShapeName shape == ctorName ctorInfo
+
+constructorShapeType :: ConstructorShape -> SrcType
+constructorShapeType shape =
+  foldr
+    (\(name, mbBound) body -> STForall name (fmap SrcBound mbBound) body)
+    (foldr STArrow (constructorShapeResult shape) (constructorShapeArgs shape))
+    (constructorShapeForalls shape)
+
+constructorOwnerParamNames :: ConstructorInfo -> [String]
+constructorOwnerParamNames ctorInfo =
+  case ctorResult ctorInfo of
+    STBase name
+      | name == ctorOwningType ctorInfo || name == symbolDefiningName (ctorOwningTypeIdentity ctorInfo) ->
+          []
+    STCon name args
+      | name == ctorOwningType ctorInfo || name == symbolDefiningName (ctorOwningTypeIdentity ctorInfo) ->
+          mapMaybe srcTypeVarName (NE.toList args)
+    _ -> []
+
+srcTypeVarName :: SrcType -> Maybe String
+srcTypeVarName ty =
+  case ty of
+    STVar name -> Just name
+    _ -> Nothing
+
+constructorShapeVariableHeadArities :: ConstructorShape -> Map String Int
+constructorShapeVariableHeadArities shape =
+  foldMap
+    srcTypeVariableHeadArities
+    ( constructorShapeArgs shape
+        ++ [constructorShapeResult shape]
+        ++ [bound | (_, Just bound) <- constructorShapeForalls shape]
+    )
+
+srcTypeVariableHeadArities :: SrcType -> Map String Int
+srcTypeVariableHeadArities ty =
+  case ty of
+    STVar {} -> Map.empty
+    STArrow dom cod -> srcTypeVariableHeadArities dom <> srcTypeVariableHeadArities cod
+    STBase {} -> Map.empty
+    STCon _ args -> foldMap srcTypeVariableHeadArities (NE.toList args)
+    STVarApp name args ->
+      Map.singleton name (NE.length args)
+        <> foldMap srcTypeVariableHeadArities (NE.toList args)
+    STForall _ mb body ->
+      maybe Map.empty (srcTypeVariableHeadArities . unSrcBound) mb
+        <> srcTypeVariableHeadArities body
+    STMu _ body -> srcTypeVariableHeadArities body
+    STBottom -> Map.empty
+
+kindFromMaxApplicationArity :: Int -> P.SrcKind
+kindFromMaxApplicationArity arity =
+  foldr P.KArrow P.KType (replicate arity P.KType)
 
 exportedValueByIdentity :: SymbolIdentity -> ModuleExports -> Maybe (String, ValueInfo)
 exportedValueByIdentity identity exports =

@@ -757,6 +757,32 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs value-exported constructor when owner type is not exported"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), NothingF, accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (NothingF, accept);"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = accept (id NothingF);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs value-imported nonzero-index constructor from mixed higher-kinded data type"
         ( InlineProgram $
             unlines
