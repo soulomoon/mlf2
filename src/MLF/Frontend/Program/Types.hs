@@ -106,6 +106,7 @@ data ProgramError
   | ProgramExportNotLocal String
   | ProgramDuplicateVisibleName String
   | ProgramDuplicateType String
+  | ProgramDuplicateTypeParameter String
   | ProgramDuplicateConstructor String
   | ProgramDuplicateClass String
   | ProgramDuplicateValue String
@@ -187,6 +188,7 @@ spanForError err index =
     ProgramExportNotLocal name -> firstSpan name (P.spanExportItems index) <|> lookupAnyName name index
     ProgramDuplicateVisibleName name -> lookupAnyName name index
     ProgramDuplicateType name -> firstSpan name (P.spanTypes index)
+    ProgramDuplicateTypeParameter name -> lookupAnyName name index
     ProgramDuplicateConstructor name -> firstSpan name (P.spanConstructors index)
     ProgramDuplicateClass name -> firstSpan name (P.spanClasses index)
     ProgramDuplicateValue name -> firstSpan name (P.spanValues index)
@@ -241,6 +243,7 @@ programErrorMessage err =
     ProgramExportNotLocal name -> "export is not local: `" ++ name ++ "`"
     ProgramDuplicateVisibleName name -> "duplicate visible name `" ++ name ++ "`"
     ProgramDuplicateType name -> "duplicate type `" ++ name ++ "`"
+    ProgramDuplicateTypeParameter name -> "duplicate type parameter `" ++ name ++ "`"
     ProgramDuplicateConstructor name -> "duplicate constructor `" ++ name ++ "`"
     ProgramDuplicateClass name -> "duplicate class `" ++ name ++ "`"
     ProgramDuplicateValue name -> "duplicate value `" ++ name ++ "`"
@@ -406,6 +409,7 @@ data DataInfo = DataInfo
   { dataName :: P.TypeName,
     dataInfoSymbol :: SymbolIdentity,
     dataModule :: P.ModuleName,
+    dataTypeParams :: [P.TypeParam],
     dataParams :: [String],
     dataConstructors :: [ConstructorInfo]
   }
@@ -421,6 +425,7 @@ data MethodInfo = MethodInfo
     methodTypeIdentity :: SrcType,
     methodConstraints :: [P.ClassConstraint],
     methodConstraintInfos :: [ConstraintInfo],
+    methodTypeParam :: P.TypeParam,
     methodParamName :: String
   }
   deriving (Eq, Show)
@@ -429,6 +434,7 @@ data ClassInfo = ClassInfo
   { className :: P.ClassName,
     classInfoSymbol :: SymbolIdentity,
     classModule :: P.ModuleName,
+    classTypeParam :: P.TypeParam,
     classParamName :: String,
     classMethods :: Map P.MethodName MethodInfo
   }
@@ -680,6 +686,11 @@ substituteTypeVar needle replacement = go
       STArrow dom cod -> STArrow (go dom) (go cod)
       STBase _ -> ty
       STCon name args -> STCon name (fmap go args)
+      STVarApp name args ->
+        let args' = fmap go args
+         in case replacementHead name args' of
+              Just ty' -> ty'
+              Nothing -> STVarApp name args'
       STForall name mb body
         | name == needle -> STForall name mb body
         | otherwise -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
@@ -687,6 +698,16 @@ substituteTypeVar needle replacement = go
         | name == needle -> STMu name body
         | otherwise -> STMu name (go body)
       STBottom -> STBottom
+
+    replacementHead name args
+      | name /= needle = Nothing
+      | otherwise =
+          case replacement of
+            STVar replacementName -> Just (STVarApp replacementName args)
+            STBase replacementName -> Just (STCon replacementName args)
+            STCon replacementName replacementArgs -> Just (STCon replacementName (replacementArgs <> args))
+            STVarApp replacementName replacementArgs -> Just (STVarApp replacementName (replacementArgs <> args))
+            _ -> Nothing
 
 freeTypeVarsSrcType :: SrcType -> Set String
 freeTypeVarsSrcType = go Set.empty
@@ -698,6 +719,12 @@ freeTypeVarsSrcType = go Set.empty
       STArrow dom cod -> go bound dom `Set.union` go bound cod
       STBase {} -> Set.empty
       STCon _ args -> foldMap (go bound) args
+      STVarApp name args ->
+        let headVars =
+              if name `Set.member` bound
+                then Set.empty
+                else Set.singleton name
+         in headVars `Set.union` foldMap (go bound) args
       STForall name mb body ->
         maybe Set.empty (go bound . unSrcBound) mb `Set.union` go (Set.insert name bound) body
       STMu name body -> go (Set.insert name bound) body
@@ -729,6 +756,7 @@ constrainedVisibleType constrained
       STArrow dom cod -> freeVars dom ++ freeVars cod
       STBase {} -> []
       STCon _ args -> concatMap freeVars (toList args)
+      STVarApp name args -> name : concatMap freeVars (toList args)
       STForall name mb body ->
         filter (/= name) (maybe [] (freeVars . unSrcBound) mb ++ freeVars body)
       STMu name body -> filter (/= name) (freeVars body)

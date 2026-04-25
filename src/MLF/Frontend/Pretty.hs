@@ -27,6 +27,7 @@ prettyEmlfType = goType 0
       STBase b -> b
       STBottom -> "⊥"
       STCon c args -> c ++ " " ++ unwords (map (goArg 2) (toListNE args))
+      STVarApp v args -> v ++ " " ++ unwords (map (goArg 2) (toListNE args))
       STArrow a b ->
         paren (p > 1) (goType 2 a ++ " -> " ++ goType 1 b)
       STForall v mb body ->
@@ -42,6 +43,7 @@ prettyEmlfType = goType 0
       STVar {} -> goType p ty
       STBase {} -> goType p ty
       STBottom {} -> goType p ty
+      STVarApp {} -> "(" ++ goType 0 ty ++ ")"
       _ -> "(" ++ goType 0 ty ++ ")"
 
     prettyBind :: (String, Maybe (SrcTy n (BoundTopVar n))) -> String

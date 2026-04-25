@@ -80,6 +80,37 @@ as real runtime bindings, but source constructor uses lower to deferred
 obligations so eMLF inference can choose the necessary type evidence before the
 constructor is rewritten to the concrete Church binding.
 
+## Type Parameter Kinds
+
+Data and class type parameters default to kind `*`:
+
+```mlf
+class Eq a {
+  eq : a -> a -> Bool;
+}
+
+data Option a =
+    None : Option a
+  | Some : a -> Option a;
+```
+
+Higher-kinded parameters can be declared with a parenthesized kind annotation.
+Kind arrows associate to the right, so `* -> * -> *` means `* -> (* -> *)`.
+
+```mlf
+class Functor (f :: * -> *) {
+  identity : forall a. a -> a;
+}
+
+data Higher (f :: * -> *) a =
+    Higher : a -> Higher f a;
+```
+
+This slice records and pretty-prints declaration parameter kinds while keeping
+existing first-order declarations unchanged. Full variable-headed type
+application parsing such as `f a`, source kind checking, and higher-kinded
+elaboration remain follow-up work for #16, #17, and #18.
+
 ## Case Expressions And Patterns
 
 Cases are ordered:

@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Added `.mlfp` declaration parameter kind metadata. Data and class parameters
+  now carry default `*` or parenthesized higher-kinded annotations, the program
+  pretty-printer preserves non-first-order declarations, variable-headed source
+  type applications have an explicit AST representation for follow-up kinding
+  work, and duplicate data type parameters are rejected during program checks.
 - Documented the `.mlfp` module compilation contract: modules are checked as
   one parsed `Program` compilation unit, the CLI Prelude is added explicitly,
   and separate compilation/interface files remain future work. Added regression

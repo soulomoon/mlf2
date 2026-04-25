@@ -1,12 +1,16 @@
+{-# LANGUAGE GADTs #-}
+
 module ResolvedSymbolSpec (spec) where
 
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
+import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope)
 import MLF.Frontend.Program.Types
-import MLF.Frontend.Syntax (SrcTy (..))
+import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType, firstOrderTypeParam)
 import Test.Hspec
 
 spec :: Spec
-spec =
+spec = do
   describe "MLF.Program resolved symbol identities" $ do
     it "keeps imported value identity stable across unqualified and aliased spellings" $ do
       let unqualified = resolvedValueInfoSymbol (SymbolUnqualifiedImport "Lib") valueInfo
@@ -58,6 +62,52 @@ spec =
       resolvedSymbolIdentity importedModule
         `shouldBe` SymbolIdentity SymbolModule "Lib" "Lib" Nothing
       symbolDisplayName (resolvedSymbolSpelling importedModule) `shouldBe` "L"
+
+  describe "substituteTypeVar" $ do
+    it "composes variable-headed type application heads with partially applied constructors" $
+      substituteTypeVar "f" (STCon "Either" (STBase "Int" :| [])) (STVarApp "f" (STVar "a" :| []))
+        `shouldBe` STCon "Either" (STBase "Int" :| [STVar "a"])
+
+    it "composes variable-headed type application heads with partially applied variable heads" $
+      substituteTypeVar "f" (STVarApp "g" (STBase "Int" :| [])) (STVarApp "f" (STVar "a" :| []))
+        `shouldBe` STVarApp "g" (STBase "Int" :| [STVar "a"])
+
+  describe "higher-kinded source type lowering" $ do
+    it "composes variable-headed constructor fields with partially applied constructor arguments" $ do
+      let scope = mkElaborateScope Map.empty (Map.singleton "Higher" higherDataInfo) Map.empty []
+          lowered = lowerType scope (STCon "Higher" (STCon "Either" (STBase "Int" :| []) :| [STBase "Bool"]))
+          expectedField = STCon "Either" (STBase "Int" :| [STBase "Bool"])
+      lowered `shouldSatisfy` containsSrcType expectedField
+      lowered `shouldSatisfy` (not . containsVarAppHead "f")
+
+containsSrcType :: SrcType -> SrcType -> Bool
+containsSrcType needle ty
+  | needle == ty = True
+  | otherwise =
+      case ty of
+        STArrow dom cod -> containsSrcType needle dom || containsSrcType needle cod
+        STCon _ args -> any (containsSrcType needle) (toListNE args)
+        STVarApp _ args -> any (containsSrcType needle) (toListNE args)
+        STForall _ mb body -> maybe False (containsSrcType needle . unSrcBound) mb || containsSrcType needle body
+        STMu _ body -> containsSrcType needle body
+        STVar {} -> False
+        STBase {} -> False
+        STBottom -> False
+
+containsVarAppHead :: String -> SrcType -> Bool
+containsVarAppHead needle ty =
+  case ty of
+    STArrow dom cod -> containsVarAppHead needle dom || containsVarAppHead needle cod
+    STCon _ args -> any (containsVarAppHead needle) (toListNE args)
+    STVarApp name args -> name == needle || any (containsVarAppHead needle) (toListNE args)
+    STForall _ mb body -> maybe False (containsVarAppHead needle . unSrcBound) mb || containsVarAppHead needle body
+    STMu _ body -> containsVarAppHead needle body
+    STVar {} -> False
+    STBase {} -> False
+    STBottom -> False
+
+toListNE :: NonEmpty a -> [a]
+toListNE (x :| xs) = x : xs
 
 valueInfo :: ValueInfo
 valueInfo =
@@ -111,8 +161,43 @@ tokenDataInfo =
     { dataName = "Token",
       dataInfoSymbol = SymbolIdentity SymbolType "Lib" "Token" Nothing,
       dataModule = "Lib",
+      dataTypeParams = [],
       dataParams = [],
       dataConstructors = [someCtor]
+    }
+
+higherCtor :: ConstructorInfo
+higherCtor =
+  ConstructorInfo
+    { ctorName = "Higher",
+      ctorInfoSymbol =
+        SymbolIdentity
+          SymbolConstructor
+          "Lib"
+          "Higher"
+          (Just (SymbolOwnerType "Lib" "Higher")),
+      ctorRuntimeName = "Lib__Higher",
+      ctorType =
+        STArrow
+          (STVarApp "f" (STVar "a" :| []))
+          (STCon "Higher" (STVar "f" :| [STVar "a"])),
+      ctorForalls = [],
+      ctorArgs = [STVarApp "f" (STVar "a" :| [])],
+      ctorResult = STCon "Higher" (STVar "f" :| [STVar "a"]),
+      ctorOwningType = "Higher",
+      ctorOwningTypeIdentity = SymbolIdentity SymbolType "Lib" "Higher" Nothing,
+      ctorIndex = 0
+    }
+
+higherDataInfo :: DataInfo
+higherDataInfo =
+  DataInfo
+    { dataName = "Higher",
+      dataInfoSymbol = SymbolIdentity SymbolType "Lib" "Higher" Nothing,
+      dataModule = "Lib",
+      dataTypeParams = [firstOrderTypeParam "f", firstOrderTypeParam "a"],
+      dataParams = ["f", "a"],
+      dataConstructors = [higherCtor]
     }
 
 eqMethodInfo :: MethodInfo
@@ -132,6 +217,7 @@ eqMethodInfo =
       methodTypeIdentity = STArrow (STVar "a") (STArrow (STVar "a") (STBase "Bool")),
       methodConstraints = [],
       methodConstraintInfos = [],
+      methodTypeParam = firstOrderTypeParam "a",
       methodParamName = "a"
     }
 
@@ -145,6 +231,7 @@ eqClassInfo =
     { className = "Eq",
       classInfoSymbol = SymbolIdentity SymbolClass "Lib" "Eq" Nothing,
       classModule = "Lib",
+      classTypeParam = firstOrderTypeParam "a",
       classParamName = "a",
       classMethods = Map.singleton "eq" eqMethodInfo
     }
@@ -155,6 +242,7 @@ qualifiedEqClassInfo =
     { className = "L.Eq",
       classInfoSymbol = SymbolIdentity SymbolClass "Lib" "Eq" Nothing,
       classModule = "Lib",
+      classTypeParam = firstOrderTypeParam "a",
       classParamName = "a",
       classMethods = Map.singleton "eq" qualifiedEqMethodInfo
     }

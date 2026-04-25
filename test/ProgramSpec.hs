@@ -2,11 +2,18 @@ module ProgramSpec (spec) where
 
 import Data.Either (isRight)
 import Data.List (isInfixOf)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
-import MLF.API (SrcTy (..))
+import MLF.API (Lit (..), SrcTy (..))
 import MLF.Frontend.Program.Check (checkResolvedProgram)
-import MLF.Frontend.Program.Types (mkResolvedSymbol)
-import MLF.Frontend.Syntax (ResolvedSrcTy (..))
+import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope)
+import MLF.Frontend.Program.Finalize (recoverSourceType, sourceForallMatches)
+import MLF.Frontend.Program.Types
+    ( ConstructorInfo (..)
+    , DataInfo (..)
+    , mkResolvedSymbol
+    )
+import MLF.Frontend.Syntax (ResolvedSrcTy (..), mkSrcBound)
 import MLF.Program
 import MLF.Program.CLI (runProgramFile)
 import Test.Hspec
@@ -2202,8 +2209,200 @@ emlfBoundaryMatrix =
 
 spec :: Spec
 spec = do
+    describe "MLF.Program source type finalization" $ do
+        it "matches variable-headed applications through forall alpha-renaming" $ do
+            let expected =
+                    STForall
+                        "f"
+                        Nothing
+                        ( STArrow
+                            (STVarApp "f" (STVar "a" :| []))
+                            (STVarApp "f" (STVar "a" :| []))
+                        )
+                actual =
+                    STForall
+                        "g"
+                        Nothing
+                        ( STArrow
+                            (STVarApp "g" (STVar "a" :| []))
+                            (STVarApp "g" (STVar "a" :| []))
+                        )
+            sourceForallMatches expected actual `shouldBe` True
+
+        it "matches repeated substitutions whose forall bounds rename their own binder" $ do
+            let bounded name =
+                    STForall
+                        name
+                        (Just (mkSrcBound (STArrow (STVar name) (STBase "Int"))))
+                        (STVar name)
+                expected =
+                    STForall
+                        "f"
+                        Nothing
+                        (STArrow (STVar "f") (STVar "f"))
+                actual =
+                    STArrow
+                        (bounded "a")
+                        (bounded "b")
+            sourceForallMatches expected actual `shouldBe` True
+
+        it "rejects alpha-renamed foralls with incompatible bounds" $ do
+            let bounded name bound =
+                    STForall
+                        name
+                        (Just (mkSrcBound bound))
+                        (STArrow (STVar name) (STVar name))
+                expected = bounded "f" (STBase "Int")
+                actual = bounded "g" (STBase "Bool")
+            sourceForallMatches expected actual `shouldBe` False
+
+        it "matches bound variable-headed applications against instantiated constructor heads" $ do
+            let expected =
+                    STForall
+                        "f"
+                        Nothing
+                        ( STArrow
+                            (STVarApp "f" (STVar "a" :| []))
+                            (STVarApp "f" (STVar "a" :| []))
+                        )
+                actual =
+                    STArrow
+                        (STCon "Either" (STBase "Int" :| [STVar "a"]))
+                        (STCon "Either" (STBase "Int" :| [STVar "a"]))
+            sourceForallMatches expected actual `shouldBe` True
+
+        it "rejects inconsistent variable-headed application alpha-renaming" $ do
+            let expected =
+                    STForall
+                        "f"
+                        Nothing
+                        ( STArrow
+                            (STVarApp "f" (STVar "a" :| []))
+                            (STVarApp "f" (STVar "a" :| []))
+                        )
+                actual =
+                    STArrow
+                        (STVarApp "g" (STVar "a" :| []))
+                        (STVarApp "h" (STVar "a" :| []))
+            sourceForallMatches expected actual `shouldBe` False
+
+        it "rejects inconsistent instantiated constructor heads" $ do
+            let expected =
+                    STForall
+                        "f"
+                        Nothing
+                        ( STArrow
+                            (STVarApp "f" (STVar "a" :| []))
+                            (STVarApp "f" (STVar "a" :| []))
+                        )
+                actual =
+                    STArrow
+                        (STCon "Either" (STBase "Int" :| [STVar "a"]))
+                        (STCon "Maybe" (STVar "a" :| []))
+            sourceForallMatches expected actual `shouldBe` False
+
+        it "rejects bound variable applications without lowering STVarApp" $ do
+            let expected =
+                    STForall
+                        "f"
+                        Nothing
+                        (STArrow (STVar "f") (STVar "f"))
+                actual =
+                    STForall
+                        "g"
+                        Nothing
+                        ( STArrow
+                            (STVar "g")
+                            (STVarApp "g" (STVar "a" :| []))
+                        )
+            sourceForallMatches expected actual `shouldBe` False
+
+        it "recovers higher-kinded data heads with partially applied constructor parameters" $ do
+            let typeIdentity =
+                    SymbolIdentity
+                        { symbolNamespace = SymbolType
+                        , symbolDefiningModule = "Main"
+                        , symbolDefiningName = "Apply"
+                        , symbolOwnerIdentity = Nothing
+                        }
+                ctorIdentity =
+                    SymbolIdentity
+                        { symbolNamespace = SymbolConstructor
+                        , symbolDefiningModule = "Main"
+                        , symbolDefiningName = "Apply"
+                        , symbolOwnerIdentity = Just (SymbolOwnerType "Main" "Apply")
+                        }
+                applyResult = STCon "Apply" (STVar "f" :| [STVar "a"])
+                applyCtor =
+                    ConstructorInfo
+                        { ctorName = "Apply"
+                        , ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "$Apply"
+                        , ctorType = STArrow (STVarApp "f" (STVar "a" :| [])) applyResult
+                        , ctorForalls = []
+                        , ctorArgs = [STVarApp "f" (STVar "a" :| [])]
+                        , ctorResult = applyResult
+                        , ctorOwningType = "Apply"
+                        , ctorOwningTypeIdentity = typeIdentity
+                        , ctorIndex = 0
+                        }
+                applyInfo =
+                    DataInfo
+                        { dataName = "Apply"
+                        , dataInfoSymbol = typeIdentity
+                        , dataModule = "Main"
+                        , dataTypeParams = []
+                        , dataParams = ["f", "a"]
+                        , dataConstructors = [applyCtor]
+                        }
+                scope = mkElaborateScope Map.empty (Map.singleton "Apply" applyInfo) Map.empty []
+                visible =
+                    STCon
+                        "Apply"
+                        ( STCon "Either" (STBase "Int" :| [])
+                            :| [STBase "String"]
+                        )
+            recoverSourceType scope (lowerType scope visible) `shouldBe` visible
+
     describe "MLF.Program parse/pretty" $ do
         mapM_ roundtripFixture fixturePaths
+
+        it "roundtrips first-order declaration parameters unchanged" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Eq, Box(..)) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            parseRawProgram (prettyProgram program) `shouldBe` Right program
+
+        it "roundtrips higher-kinded declaration parameter annotations" $ do
+            let hk = KArrow KType KType
+                hk2 = KArrow KType (KArrow KType KType)
+                programText =
+                    unlines
+                        [ "module Main export (Functor, Higher(..)) {"
+                        , "  class Functor (f :: * -> *) {"
+                        , "    identity : forall a. a -> a;"
+                        , "  }"
+                        , ""
+                        , "  data Higher (p :: * -> * -> *) a ="
+                        , "      Higher : a -> Higher p a;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case program of
+                Program [Module {moduleDecls = [DeclClass classDecl, DeclData dataDecl]}] -> do
+                    classDeclParam classDecl `shouldBe` TypeParam "f" hk
+                    dataDeclParams dataDecl `shouldBe` [TypeParam "p" hk2, firstOrderTypeParam "a"]
+                other -> expectationFailure ("unexpected program shape: " ++ show other)
+            parseRawProgram (prettyProgram program) `shouldBe` Right program
 
     describe "MLF.Program execution corpus" $ do
         mapM_ runFixture fixturePaths
@@ -2240,6 +2439,43 @@ spec = do
                 (const False)
 
     describe "MLF.Program diagnostics" $ do
+        it "reports variable-headed direct AST types as program errors" $ do
+            let program =
+                    Program
+                        [ Module
+                            { moduleName = "Main"
+                            , moduleExports = Just [ExportValue "main"]
+                            , moduleImports = []
+                            , moduleDecls =
+                                [ DeclDef
+                                    DefDecl
+                                        { defDeclName = "main"
+                                        , defDeclType = ConstrainedType [] (STVarApp "f" (STBase "Int" :| []))
+                                        , defDeclExpr = ELit (LInt 1)
+                                        }
+                                ]
+                            }
+                        ]
+            checkProgram program `shouldSatisfy` either
+                ( \err ->
+                    case err of
+                        ProgramPipelineError msg ->
+                            "variable-headed source type application `f`" `isInfixOf` msg
+                        _ -> False
+                )
+                (const False)
+
+        it "rejects duplicate data type parameter names" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Bad(..)) {"
+                        , "  data Bad a a ="
+                        , "      Bad : Bad a a;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramDuplicateTypeParameter "a")
+
         it "rejects importing constructors from an abstract type export" $ do
             let programText =
                     unlines

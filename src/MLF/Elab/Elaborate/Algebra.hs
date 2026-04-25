@@ -37,7 +37,8 @@ import MLF.Elab.Elaborate.Annotation
     stripUnusedTopTyAbs,
   )
 import MLF.Elab.Elaborate.Scope
-  ( generalizeAtNode,
+  ( ScopeContext,
+    generalizeAtNode,
     normalizeSchemeSubstPair,
     normalizeSubstForScheme,
     reifyNodeTypeDirect,
@@ -57,6 +58,7 @@ import MLF.Elab.TermClosure (closeTermWithSchemeSubstIfNeeded)
 import qualified MLF.Elab.TypeCheck as TypeCheck (Env (..), typeCheckWithEnv)
 import MLF.Elab.Types
   ( BoundType,
+    ElabScheme,
     ElabError (..),
     ElabTerm (..),
     ElabType,
@@ -180,6 +182,67 @@ envSchemeInfos = Map.map ebSchemeInfo
 
 lookupSchemeInfo :: VarName -> Env -> Maybe SchemeInfo
 lookupSchemeInfo name env = ebSchemeInfo <$> Map.lookup name env
+
+sourceAnnotatedTypeFrom :: AlgebraContext -> Env -> AnnExpr -> Either ElabError (Maybe ElabType)
+sourceAnnotatedTypeFrom algebraContext env ann =
+  case ann of
+    AVar name _ -> pure (schemeToType . siScheme <$> lookupSchemeInfo name env)
+    AAnn inner annNodeId _ ->
+      case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
+        Just srcTy -> Just <$> srcTypeToElabType srcTy
+        Nothing -> sourceAnnotatedTypeFrom algebraContext env inner
+    AUnfold inner _ _ -> sourceAnnotatedTypeFrom algebraContext env inner
+    _ -> pure Nothing
+
+sourceSchemePairFromType :: NormSrcType -> Either ElabError (ElabScheme, IntMap.IntMap String)
+sourceSchemePairFromType srcTy = do
+  ty <- srcTypeToElabType srcTy
+  pure (schemeFromType ty, IntMap.empty)
+
+sourceSchemePairForNode :: AlgebraContext -> ScopeContext -> NodeId -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
+sourceSchemePairForNode algebraContext scopeContext nodeId =
+  case IntMap.lookup (getNodeId nodeId) (algAnnSourceTypes algebraContext) of
+    Just srcTy -> do
+      fallback <- sourceSchemePairFromType srcTy
+      pure $
+        case reifyNodeTypePreferringBound scopeContext nodeId of
+          Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
+          _ -> Just fallback
+    Nothing -> pure Nothing
+
+sourceSchemePairForOuterAnnotation :: AlgebraContext -> ScopeContext -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
+sourceSchemePairForOuterAnnotation algebraContext scopeContext annExpr =
+  case annExpr of
+    AAnn _ annNodeId _ -> sourceSchemePairForNode algebraContext scopeContext annNodeId
+    AUnfold (AAnn _ annNodeId _) _ _ -> sourceSchemePairForNode algebraContext scopeContext annNodeId
+    _ -> pure Nothing
+
+sourceSchemePairForAnnotation :: AlgebraContext -> ScopeContext -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
+sourceSchemePairForAnnotation algebraContext scopeContext annExpr =
+  case annExpr of
+    AAnn inner annNodeId _ -> do
+      current <- sourceSchemePairForNode algebraContext scopeContext annNodeId
+      case current of
+        Just _ -> pure current
+        Nothing -> sourceSchemePairForAnnotation algebraContext scopeContext inner
+    ALam _ _ _ body _ -> sourceSchemePairForAnnotation algebraContext scopeContext body
+    AApp fun arg _ _ _ ->
+      firstJustE
+        (sourceSchemePairForAnnotation algebraContext scopeContext fun)
+        (sourceSchemePairForAnnotation algebraContext scopeContext arg)
+    ALet _ _ _ _ _ rhs body _ ->
+      firstJustE
+        (sourceSchemePairForAnnotation algebraContext scopeContext rhs)
+        (sourceSchemePairForAnnotation algebraContext scopeContext body)
+    AUnfold inner _ _ -> sourceSchemePairForAnnotation algebraContext scopeContext inner
+    _ -> pure Nothing
+
+firstJustE :: Either ElabError (Maybe a) -> Either ElabError (Maybe a) -> Either ElabError (Maybe a)
+firstJustE left right = do
+  result <- left
+  case result of
+    Just _ -> pure result
+    Nothing -> right
 
 lookupAliasTarget :: VarName -> Env -> Maybe VarName
 lookupAliasTarget name env = Map.lookup name env >>= ebAliasTarget
@@ -492,15 +555,15 @@ elabAlg algebraContext layer =
                   -- the user wrote (after lowering), which presolution may have
                   -- corrupted (e.g. stripping TForall inside a μ body).
                   case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
-                    Just srcTy ->
-                      let preservedTy = srcTypeToElabType srcTy
-                       in pure
-                            ( preservedTy,
-                              SchemeInfo
-                                { siScheme = schemeFromType preservedTy,
-                                  siSubst = IntMap.empty
-                                }
-                            )
+                    Just srcTy -> do
+                      preservedTy <- srcTypeToElabType srcTy
+                      pure
+                        ( preservedTy,
+                          SchemeInfo
+                            { siScheme = schemeFromType preservedTy,
+                              siSubst = IntMap.empty
+                            }
+                        )
                     Nothing ->
                       case generalizeAtNode scopeContext annNodeId of
                         Right (paramScheme, _subst) ->
@@ -573,6 +636,7 @@ elabAlg algebraContext layer =
       let f env = do
             f' <- elabTerm fOut env
             a' <- elabTerm aOut env
+            argSourceSchemeTy <- sourceAnnotatedTypeFrom algebraContext env aAnn
             let schemeEnv = envSchemeInfos env
                 tcEnv = TypeCheck.Env (Map.map (schemeToType . siScheme) schemeEnv) Map.empty
                 appTargetTy =
@@ -600,17 +664,6 @@ elabAlg algebraContext layer =
                   case sourceVarName ann >>= (`Map.lookup` env) of
                     Just binding -> ebExplicitRecursiveParam binding
                     Nothing -> False
-                sourceAnnotatedType ann =
-                  case ann of
-                    AVar name _ -> schemeToType . siScheme <$> lookupSchemeInfo name env
-                    AAnn inner annNodeId _ ->
-                      case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
-                        Just srcTy -> Just (srcTypeToElabType srcTy)
-                        Nothing -> sourceAnnotatedType inner
-                    AUnfold inner _ _ -> sourceAnnotatedType inner
-                    _ -> Nothing
-                argSourceSchemeTy =
-                  sourceAnnotatedType aAnn
                 sourceMuMatchesActualType sourceTy actualTy =
                   alphaEqType sourceTy actualTy
                     || churchAwareEqType sourceTy actualTy
@@ -1131,59 +1184,6 @@ elabAlg algebraContext layer =
                     _ -> annExpr
                 aliasSourceName = transparentMediatorSourceName rhsAnn
                 aliasSourceSchemeInfo = aliasSourceName >>= (`lookupSchemeInfo` env)
-                letResultSourceScheme =
-                  case IntMap.lookup (getNodeId (canonical trivialRoot)) (algAnnSourceTypes algebraContext) of
-                    Just srcTy ->
-                      let fallback = (schemeFromType (srcTypeToElabType srcTy), IntMap.empty)
-                       in case reifyNodeTypePreferringBound scopeContext (canonical trivialRoot) of
-                            Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
-                            _ -> Just fallback
-                    Nothing -> Nothing
-                schemeRootSourceScheme =
-                  case IntMap.lookup (getNodeId schemeRootId) (algAnnSourceTypes algebraContext) of
-                    Just srcTy ->
-                      let fallback = (schemeFromType (srcTypeToElabType srcTy), IntMap.empty)
-                       in case reifyNodeTypePreferringBound scopeContext schemeRootId of
-                            Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
-                            _ -> Just fallback
-                    Nothing -> Nothing
-                rhsOuterSourceScheme =
-                  case rhsAnn of
-                    AAnn _ annNodeId _ ->
-                      case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
-                        Just srcTy ->
-                          let fallback = (schemeFromType (srcTypeToElabType srcTy), IntMap.empty)
-                           in case reifyNodeTypePreferringBound scopeContext annNodeId of
-                                Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
-                                _ -> Just fallback
-                        Nothing -> Nothing
-                    AUnfold inner _ _ ->
-                      case inner of
-                        AAnn _ annNodeId _ ->
-                          case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
-                            Just srcTy ->
-                              let fallback = (schemeFromType (srcTypeToElabType srcTy), IntMap.empty)
-                               in case reifyNodeTypePreferringBound scopeContext annNodeId of
-                                    Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
-                                    _ -> Just fallback
-                            Nothing -> Nothing
-                        _ -> Nothing
-                    _ -> Nothing
-                explicitSourceAnnotatedScheme annExpr =
-                  case annExpr of
-                    AAnn inner annNodeId _ ->
-                      case IntMap.lookup (getNodeId annNodeId) (algAnnSourceTypes algebraContext) of
-                        Just srcTy ->
-                          let fallback = (schemeFromType (srcTypeToElabType srcTy), IntMap.empty)
-                           in case reifyNodeTypePreferringBound scopeContext annNodeId of
-                                Right ty@TMu {} -> Just (schemeFromType ty, IntMap.empty)
-                                _ -> Just fallback
-                        Nothing -> explicitSourceAnnotatedScheme inner
-                    ALam _ _ _ body _ -> explicitSourceAnnotatedScheme body
-                    AApp fun arg _ _ _ -> explicitSourceAnnotatedScheme fun <|> explicitSourceAnnotatedScheme arg
-                    ALet _ _ _ _ _ rhs body _ -> explicitSourceAnnotatedScheme rhs <|> explicitSourceAnnotatedScheme body
-                    AUnfold inner _ _ -> explicitSourceAnnotatedScheme inner
-                    _ -> Nothing
                 containsRecursiveSelfAppToParam selfName paramName annExpr =
                   case annExpr of
                     AVar _ _ -> False
@@ -1259,7 +1259,11 @@ elabAlg algebraContext layer =
                     AAnn inner _ _ -> previewRecursiveCarrierTy selfName inner
                     AUnfold inner _ _ -> previewRecursiveCarrierTy selfName inner
                     _ -> Nothing
-                recoverGeneralizeAtNode err =
+            letResultSourceScheme <- sourceSchemePairForNode algebraContext scopeContext (canonical trivialRoot)
+            schemeRootSourceScheme <- sourceSchemePairForNode algebraContext scopeContext schemeRootId
+            rhsOuterSourceScheme <- sourceSchemePairForOuterAnnotation algebraContext scopeContext rhsAnn
+            explicitRhsSourceScheme <- sourceSchemePairForAnnotation algebraContext scopeContext rhsAnn
+            let recoverGeneralizeAtNode err =
                   case err of
                     SchemeFreeVars _ _
                       | Just schemePair <- rhsOuterSourceScheme ->
@@ -1268,7 +1272,7 @@ elabAlg algebraContext layer =
                           Right schemePair
                       | Just schemePair <- schemeRootSourceScheme ->
                           Right schemePair
-                      | Just schemePair <- explicitSourceAnnotatedScheme rhsAnn ->
+                      | Just schemePair <- explicitRhsSourceScheme ->
                           Right schemePair
                       | Just aliasInfo <- aliasSourceSchemeInfo ->
                           Right (siScheme aliasInfo, siSubst aliasInfo)
@@ -1288,7 +1292,7 @@ elabAlg algebraContext layer =
                   )
                   ()
             (scheme0Raw, subst0Raw) <-
-              case rhsOuterSourceScheme <|> explicitSourceAnnotatedScheme rhsAnn <|> letResultSourceScheme <|> schemeRootSourceScheme of
+              case rhsOuterSourceScheme <|> explicitRhsSourceScheme <|> letResultSourceScheme <|> schemeRootSourceScheme of
                 Just schemePair -> Right schemePair
                 Nothing ->
                   case generalizeAtNode scopeContext schemeRootId of
@@ -1605,7 +1609,7 @@ elabAlg algebraContext layer =
                     Nothing -> mkEnvBinding bindingSchemeInfo transparentMediator
                 tcEnvBase = TypeCheck.Env (Map.map (schemeToType . siScheme) (envSchemeInfos env)) Map.empty
                 authoritativeSourceSchemeInfo =
-                  case rhsOuterSourceScheme <|> explicitSourceAnnotatedScheme rhsAnn <|> letResultSourceScheme <|> schemeRootSourceScheme of
+                  case rhsOuterSourceScheme <|> explicitRhsSourceScheme <|> letResultSourceScheme <|> schemeRootSourceScheme of
                     Just (schemeSrc, substSrc) ->
                       Just
                         ( freshenSchemeInfoAgainstEnv
@@ -1834,7 +1838,7 @@ elabAlg algebraContext layer =
                 effectiveSubst = siSubst effectiveSchemeInfo
                 envSchemeInfoForBody =
                   if isJust rhsOuterSourceScheme
-                    || isJust (explicitSourceAnnotatedScheme rhsAnn)
+                    || isJust explicitRhsSourceScheme
                     || isJust letResultSourceScheme
                     || isJust schemeRootSourceScheme
                     then authoritativeEnvSchemeInfo
@@ -1986,7 +1990,7 @@ elabAlg algebraContext layer =
                       | sourceVarName bodyAnn == Just v,
                         lambdaAnn rhsAnn,
                         isNothing rhsOuterSourceScheme,
-                        isNothing (explicitSourceAnnotatedScheme rhsAnn),
+                        isNothing explicitRhsSourceScheme,
                         isNothing letResultSourceScheme,
                         isNothing schemeRootSourceScheme,
                         not (alphaEqType rhsTy (schemeToType effectiveScheme)) ->
@@ -2562,29 +2566,44 @@ internal consumer.
 -}
 
 -- | Convert a normalized source type to its elaboration-level equivalent.
-srcTypeToElabType :: NormSrcType -> ElabType
+srcTypeToElabType :: NormSrcType -> Either ElabError ElabType
 srcTypeToElabType ty = case ty of
-  STVar name -> TVar name
-  STArrow dom cod -> TArrow (srcTypeToElabType dom) (srcTypeToElabType cod)
-  STBase name -> TBase (BaseTy name)
-  STCon name args -> TCon (BaseTy name) (fmap srcTypeToElabType args)
+  STVar name -> Right (TVar name)
+  STArrow dom cod -> TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod
+  STBase name -> Right (TBase (BaseTy name))
+  STCon name args -> TCon (BaseTy name) <$> traverse srcTypeToElabType args
+  STVarApp name _ ->
+    Left (unsupportedVariableHeadType name)
   STForall name mb body ->
-    TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body)
-  STMu name body -> TMu name (srcTypeToElabType body)
-  STBottom -> TBottom
+    TForall name
+      <$> maybe (Right Nothing) srcBoundToElabBound mb
+      <*> srcTypeToElabType body
+  STMu name body -> TMu name <$> srcTypeToElabType body
+  STBottom -> Right TBottom
   where
-    srcBoundToElabBound :: SrcBound 'NormN -> Maybe BoundType
+    srcBoundToElabBound :: SrcBound 'NormN -> Either ElabError (Maybe BoundType)
     srcBoundToElabBound (SrcBound boundTy) = structBoundToElabBound boundTy
 
-    structBoundToElabBound :: StructBound -> Maybe BoundType
+    structBoundToElabBound :: StructBound -> Either ElabError (Maybe BoundType)
     structBoundToElabBound bTy = case bTy of
-      STArrow dom cod -> Just (TArrow (srcTypeToElabType dom) (srcTypeToElabType cod))
-      STBase name -> Just (TBase (BaseTy name))
-      STCon name args -> Just (TCon (BaseTy name) (fmap srcTypeToElabType args))
+      STArrow dom cod -> Just <$> (TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod)
+      STBase name -> Right (Just (TBase (BaseTy name)))
+      STCon name args -> Just . TCon (BaseTy name) <$> traverse srcTypeToElabType args
+      STVarApp name _ ->
+        Left (unsupportedVariableHeadType name)
       STForall name mb body ->
-        Just (TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body))
-      STMu name body -> Just (TMu name (srcTypeToElabType body))
-      STBottom -> Nothing
+        Just
+          <$> ( TForall name
+                  <$> maybe (Right Nothing) srcBoundToElabBound mb
+                  <*> srcTypeToElabType body
+              )
+      STMu name body -> Just . TMu name <$> srcTypeToElabType body
+      STBottom -> Right Nothing
+
+unsupportedVariableHeadType :: String -> ElabError
+unsupportedVariableHeadType name =
+  InstantiationError
+    ("variable-headed source type application `" ++ name ++ "` is not supported before higher-kinded elaboration")
 
 annNode :: AnnExpr -> NodeId
 annNode ann =

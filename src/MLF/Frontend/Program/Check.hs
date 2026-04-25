@@ -719,6 +719,7 @@ qualifyModuleExports alias exports =
         STCon name args
           | name `Set.member` exportedTypeNames -> STCon (qualifiedName name) (fmap qualifySrcType args)
           | otherwise -> STCon name (fmap qualifySrcType args)
+        STVarApp name args -> STVarApp name (fmap qualifySrcType args)
         STArrow dom cod -> STArrow (qualifySrcType dom) (qualifySrcType cod)
         STForall name mb body -> STForall name (fmap (SrcBound . qualifySrcType . unSrcBound) mb) (qualifySrcType body)
         STMu name body -> STMu name (qualifySrcType body)
@@ -921,6 +922,7 @@ srcTypeMentionsAny names ty =
     STVar {} -> False
     STBase name -> name `Set.member` names
     STCon name args -> name `Set.member` names || any (srcTypeMentionsAny names) args
+    STVarApp _ args -> any (srcTypeMentionsAny names) args
     STArrow dom cod -> srcTypeMentionsAny names dom || srcTypeMentionsAny names cod
     STForall _ mb body ->
       maybe False (srcTypeMentionsAny names . unSrcBound) mb
@@ -976,6 +978,7 @@ srcTypeMentionedNames names ty =
             | name `Set.member` names = Set.singleton name
             | otherwise = Set.empty
        in Set.unions (headNames : map (srcTypeMentionedNames names) (NE.toList args))
+    STVarApp _ args -> Set.unions (map (srcTypeMentionedNames names) (NE.toList args))
     STArrow dom cod ->
       srcTypeMentionedNames names dom `Set.union` srcTypeMentionedNames names cod
     STForall _ mb body ->
@@ -1061,6 +1064,7 @@ displaySrcTypeForResolved env = \case
   RSTArrow dom cod -> STArrow <$> displaySrcTypeForResolved env dom <*> displaySrcTypeForResolved env cod
   RSTBase symbol -> STBase <$> displayTypeHeadName env symbol
   RSTCon symbol args -> STCon <$> displayTypeHeadName env symbol <*> traverse (displaySrcTypeForResolved env) args
+  RSTVarApp name args -> STVarApp name <$> traverse (displaySrcTypeForResolved env) args
   RSTForall name mb body ->
     STForall name
       <$> traverse (fmap SrcBound . displaySrcTypeForResolved env . unResolvedSrcBound) mb
@@ -1124,6 +1128,9 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
   pure . Map.fromList =<< mapM toDataInfo dataDecls
   where
     toDataInfo dataDecl = do
+      let params = P.dataDeclParams dataDecl
+          paramNames = P.typeParamNames params
+      ensureDistinctPlain ProgramDuplicateTypeParameter paramNames
       dataIdentity <- lookupResolvedLocalTypeIdentity resolvedModule (P.dataDeclName dataDecl)
       constructors <- zipWithM (toCtorInfo dataDecl dataIdentity) [0 ..] (P.dataDeclConstructors dataDecl)
       pure
@@ -1132,7 +1139,8 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
             { dataName = P.dataDeclName dataDecl,
               dataInfoSymbol = dataIdentity,
               dataModule = P.moduleName mod0,
-              dataParams = P.dataDeclParams dataDecl,
+              dataTypeParams = params,
+              dataParams = paramNames,
               dataConstructors = constructors
             }
         )
@@ -1165,7 +1173,7 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
     validateConstructorResult :: SymbolIdentity -> P.ResolvedDataDecl -> P.ResolvedConstructorDecl -> ResolvedSrcType -> TcM ()
     validateConstructorResult dataIdentity dataDecl ctorDecl resultTy =
       let owner = P.dataDeclName dataDecl
-          params = P.dataDeclParams dataDecl
+          params = P.typeParamNames (P.dataDeclParams dataDecl)
           invalid = throwError (ProgramInvalidConstructorResult (P.constructorDeclName ctorDecl) (resolvedSrcTypeToSrcType resultTy) owner)
        in case constructorResultHead resultTy of
             Just (symbol, argCount)
@@ -1206,6 +1214,8 @@ buildLocalClassInfo displayEnv resolvedModule mod0 = do
     toClassInfo classDecl = do
       ensureDistinctBy ProgramDuplicateMethod P.methodSigName (P.classDeclMethods classDecl)
       resolvedClassIdentity <- lookupResolvedLocalClassIdentity resolvedModule (P.classDeclName classDecl)
+      let classParam = P.classDeclParam classDecl
+          classParamName0 = P.typeParamName classParam
       methods <-
         Map.fromList
           <$> forM
@@ -1231,7 +1241,8 @@ buildLocalClassInfo displayEnv resolvedModule mod0 = do
                         methodTypeIdentity = resolvedSrcTypeIdentityType (P.constrainedBody (P.methodSigType sig)),
                         methodConstraints = P.constrainedConstraints methodSigType0,
                         methodConstraintInfos = methodConstraintInfos0,
-                        methodParamName = P.classDeclParam classDecl
+                        methodTypeParam = classParam,
+                        methodParamName = classParamName0
                       }
                   )
             )
@@ -1241,7 +1252,8 @@ buildLocalClassInfo displayEnv resolvedModule mod0 = do
             { className = P.classDeclName classDecl,
               classInfoSymbol = resolvedClassIdentity,
               classModule = P.moduleName mod0,
-              classParamName = P.classDeclParam classDecl,
+              classTypeParam = classParam,
+              classParamName = classParamName0,
               classMethods = methods
             }
         )
@@ -1322,6 +1334,7 @@ constructorRuntimeBindingRecoverable ctor =
         STArrow dom cod -> freeTypeVars dom `Set.union` freeTypeVars cod
         STBase {} -> Set.empty
         STCon _ args -> foldMap freeTypeVars args
+        STVarApp name args -> Set.insert name (foldMap freeTypeVars args)
         STForall name mb body ->
           maybe Set.empty (freeTypeVars . unSrcBound) mb
             `Set.union` Set.delete name (freeTypeVars body)
@@ -1456,17 +1469,17 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
 
     fieldCoveredByDerivedConstraints dataDecl fieldTy =
       case fieldTy of
-        STVar name -> name `elem` P.dataDeclParams dataDecl
+        STVar name -> name `elem` P.typeParamNames (P.dataDeclParams dataDecl)
         _ -> isRecursiveOwnerField dataDecl fieldTy
 
     derivedConstraintParams dataDecl =
-      let params = Set.fromList (P.dataDeclParams dataDecl)
+      let params = Set.fromList (P.typeParamNames (P.dataDeclParams dataDecl))
           fieldTypes =
             filter
               (not . isRecursiveOwnerField dataDecl)
               (concatMap constructorFieldTypes (P.dataDeclConstructors dataDecl))
           usedParams = Set.intersection params (foldMap freeTypeVars fieldTypes)
-       in [paramName | paramName <- P.dataDeclParams dataDecl, paramName `Set.member` usedParams]
+       in [paramName | paramName <- P.typeParamNames (P.dataDeclParams dataDecl), paramName `Set.member` usedParams]
 
     freeTypeVars ty =
       case ty of
@@ -1474,6 +1487,7 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
         STArrow dom cod -> freeTypeVars dom `Set.union` freeTypeVars cod
         STBase {} -> Set.empty
         STCon _ args -> foldMap freeTypeVars args
+        STVarApp name args -> Set.insert name (foldMap freeTypeVars args)
         STForall name mb body ->
           maybe Set.empty (freeTypeVars . unSrcBound) mb
             `Set.union` Set.delete name (freeTypeVars body)
@@ -1571,12 +1585,12 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
       argTy == dataDeclHeadType dataDecl
 
     dataDeclHeadType dataDecl =
-      case P.dataDeclParams dataDecl of
+      case P.typeParamNames (P.dataDeclParams dataDecl) of
         [] -> STBase (P.dataDeclName dataDecl)
         param0 : paramsRest -> STCon (P.dataDeclName dataDecl) (STVar param0 :| map STVar paramsRest)
 
     dataDeclHeadResolvedType dataSymbol dataDecl =
-      case P.dataDeclParams dataDecl of
+      case P.typeParamNames (P.dataDeclParams dataDecl) of
         [] -> RSTBase dataSymbol
         param0 : paramsRest -> RSTCon dataSymbol (RSTVar param0 :| map RSTVar paramsRest)
 
@@ -1754,6 +1768,12 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
                 (\acc (leftTy, rightTy) -> unifyOverlap acc leftTy rightTy)
                 subst
                 (zip (NE.toList leftArgs) (NE.toList rightArgs))
+        (STVarApp leftName leftArgs, STVarApp rightName rightArgs)
+          | leftName == rightName && NE.length leftArgs == NE.length rightArgs ->
+              foldM
+                (\acc (leftTy, rightTy) -> unifyOverlap acc leftTy rightTy)
+                subst
+                (zip (NE.toList leftArgs) (NE.toList rightArgs))
         (STArrow leftDom leftCod, STArrow rightDom rightCod) -> do
           subst' <- unifyOverlap subst leftDom rightDom
           unifyOverlap subst' leftCod rightCod
@@ -1775,6 +1795,14 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
             Nothing -> ty
         STArrow dom cod -> STArrow (applyOverlapSubst subst dom) (applyOverlapSubst subst cod)
         STCon name args -> STCon name (fmap (applyOverlapSubst subst) args)
+        STVarApp name args ->
+          let args' = fmap (applyOverlapSubst subst) args
+           in case Map.lookup name subst of
+                Just (STVar replacementName) -> STVarApp replacementName args'
+                Just (STBase replacementName) -> STCon replacementName args'
+                Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
+                Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
+                _ -> STVarApp name args'
         STForall name mb body ->
           STForall name (fmap (SrcBound . applyOverlapSubst subst . unSrcBound) mb) (applyOverlapSubst subst body)
         STMu name body -> STMu name (applyOverlapSubst subst body)
@@ -1788,6 +1816,7 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
             STVar name -> STVar (Map.findWithDefault (prefix ++ name) name env)
             STArrow dom cod -> STArrow (go env dom) (go env cod)
             STCon name args -> STCon name (fmap (go env) args)
+            STVarApp name args -> STVarApp (Map.findWithDefault (prefix ++ name) name env) (fmap (go env) args)
             STForall name mb body ->
               let tagged = prefix ++ name
                   env' = Map.insert name tagged env
@@ -1803,6 +1832,7 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
         STVar name -> Set.singleton name
         STArrow dom cod -> freeTypeVarsInType dom `Set.union` freeTypeVarsInType cod
         STCon _ args -> foldMap freeTypeVarsInType args
+        STVarApp name args -> Set.insert name (foldMap freeTypeVarsInType args)
         STForall name mb body ->
           maybe Set.empty (freeTypeVarsInType . unSrcBound) mb
             `Set.union` Set.delete name (freeTypeVarsInType body)
@@ -1833,6 +1863,7 @@ sanitizeType = \case
   STArrow dom cod -> "arr_" ++ sanitizeType dom ++ "_" ++ sanitizeType cod
   STBase base -> sanitizeName base
   STCon con args -> intercalate "_" (sanitizeName con : map sanitizeType (NE.toList args))
+  STVarApp name args -> intercalate "_" (sanitizeName name : map sanitizeType (NE.toList args))
   STForall v _ body -> "forall_" ++ sanitizeName v ++ "_" ++ sanitizeType body
   STMu v body -> "mu_" ++ sanitizeName v ++ "_" ++ sanitizeType body
   STBottom -> "bottom"

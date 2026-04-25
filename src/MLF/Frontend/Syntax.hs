@@ -11,6 +11,11 @@
 module MLF.Frontend.Syntax
   ( VarName,
     Lit (..),
+    SrcKind (..),
+    TypeParam (..),
+    firstOrderTypeParam,
+    typeParamNames,
+    typeParamIsFirstOrder,
     ExprStage (..),
     Expr (..),
     SurfaceExprF (..),
@@ -51,12 +56,14 @@ module MLF.Frontend.Syntax
     pattern NSTArrow,
     pattern NSTBase,
     pattern NSTCon,
+    pattern NSTVarApp,
     pattern NSTForall,
     pattern NSTMu,
     pattern NSTBottom,
     pattern SBArrow,
     pattern SBBase,
     pattern SBCon,
+    pattern SBVarApp,
     pattern SBForall,
     pattern SBMu,
     pattern SBBottom,
@@ -139,6 +146,28 @@ data Lit
   | LString String
   deriving (Eq, Show)
 
+-- | Source-level kind syntax for `.mlfp` declaration parameters.
+data SrcKind
+  = KType
+  | KArrow SrcKind SrcKind
+  deriving (Eq, Show)
+
+-- | A source-level type parameter with its declared kind.
+data TypeParam = TypeParam
+  { typeParamName :: String,
+    typeParamKind :: SrcKind
+  }
+  deriving (Eq, Show)
+
+firstOrderTypeParam :: String -> TypeParam
+firstOrderTypeParam name = TypeParam name KType
+
+typeParamNames :: [TypeParam] -> [String]
+typeParamNames = map typeParamName
+
+typeParamIsFirstOrder :: TypeParam -> Bool
+typeParamIsFirstOrder param = typeParamKind param == KType
+
 {- Note [Staged frontend types]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Frontend types use one indexed AST ('SrcTy'), tracked by two indices:
@@ -188,6 +217,7 @@ data SrcTy (n :: SrcNorm) (v :: SrcTopVar) where
   STArrow :: SrcTy n 'TopVarAllowed -> SrcTy n 'TopVarAllowed -> SrcTy n v
   STBase :: String -> SrcTy n v
   STCon :: String -> NonEmpty (SrcTy n 'TopVarAllowed) -> SrcTy n v
+  STVarApp :: String -> NonEmpty (SrcTy n 'TopVarAllowed) -> SrcTy n v
   STForall :: String -> Maybe (SrcBound n) -> SrcTy n 'TopVarAllowed -> SrcTy n v
   STMu :: String -> SrcTy n 'TopVarAllowed -> SrcTy n v
   STBottom :: SrcTy n v
@@ -213,6 +243,7 @@ data ResolvedSrcTy (n :: SrcNorm) (v :: SrcTopVar) where
   RSTArrow :: ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
   RSTBase :: ResolvedSymbol -> ResolvedSrcTy n v
   RSTCon :: ResolvedSymbol -> NonEmpty (ResolvedSrcTy n 'TopVarAllowed) -> ResolvedSrcTy n v
+  RSTVarApp :: String -> NonEmpty (ResolvedSrcTy n 'TopVarAllowed) -> ResolvedSrcTy n v
   RSTForall :: String -> Maybe (ResolvedSrcBound n) -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
   RSTMu :: String -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
   RSTBottom :: ResolvedSrcTy n v
@@ -237,6 +268,7 @@ resolvedSrcTypeToSrcType ty =
     RSTArrow dom cod -> STArrow (resolvedSrcTypeToSrcType dom) (resolvedSrcTypeToSrcType cod)
     RSTBase symbol -> STBase (resolvedTypeHeadDisplay symbol)
     RSTCon symbol args -> STCon (resolvedTypeHeadDisplay symbol) (fmap resolvedSrcTypeToSrcType args)
+    RSTVarApp name args -> STVarApp name (fmap resolvedSrcTypeToSrcType args)
     RSTForall name mb body ->
       STForall
         name
@@ -252,6 +284,7 @@ resolvedSrcTypeIdentityType ty =
     RSTArrow dom cod -> STArrow (resolvedSrcTypeIdentityType dom) (resolvedSrcTypeIdentityType cod)
     RSTBase symbol -> STBase (resolvedTypeHeadIdentityName symbol)
     RSTCon symbol args -> STCon (resolvedTypeHeadIdentityName symbol) (fmap resolvedSrcTypeIdentityType args)
+    RSTVarApp name args -> STVarApp name (fmap resolvedSrcTypeIdentityType args)
     RSTForall name mb body ->
       STForall
         name
@@ -289,6 +322,9 @@ pattern NSTBase b = STBase b
 pattern NSTCon :: String -> NonEmpty NormSrcType -> NormSrcType
 pattern NSTCon c args = STCon c args
 
+pattern NSTVarApp :: String -> NonEmpty NormSrcType -> NormSrcType
+pattern NSTVarApp v args = STVarApp v args
+
 pattern NSTForall :: String -> Maybe StructBound -> NormSrcType -> NormSrcType
 pattern NSTForall v mb body <- STForall v (fmap unNormBound -> mb) body
   where
@@ -309,6 +345,9 @@ pattern SBBase b = STBase b
 pattern SBCon :: String -> NonEmpty NormSrcType -> StructBound
 pattern SBCon c args = STCon c args
 
+pattern SBVarApp :: String -> NonEmpty NormSrcType -> StructBound
+pattern SBVarApp v args = STVarApp v args
+
 pattern SBForall :: String -> Maybe StructBound -> NormSrcType -> StructBound
 pattern SBForall v mb body <- STForall v (fmap unNormBound -> mb) body
   where
@@ -320,15 +359,16 @@ pattern SBMu v body = STMu v body
 pattern SBBottom :: StructBound
 pattern SBBottom = STBottom
 
-{-# COMPLETE NSTVar, NSTArrow, NSTBase, NSTCon, NSTForall, NSTMu, NSTBottom #-}
+{-# COMPLETE NSTVar, NSTArrow, NSTBase, NSTCon, NSTVarApp, NSTForall, NSTMu, NSTBottom #-}
 
-{-# COMPLETE SBArrow, SBBase, SBCon, SBForall, SBMu, SBBottom #-}
+{-# COMPLETE SBArrow, SBBase, SBCon, SBVarApp, SBForall, SBMu, SBBottom #-}
 
 data SrcTypeF a
   = STVarF String
   | STArrowF a a
   | STBaseF String
   | STConF String (NonEmpty a)
+  | STVarAppF String (NonEmpty a)
   | STForallF String (Maybe a) a
   | STMuF String a
   | STBottomF
@@ -342,6 +382,7 @@ instance Recursive (SrcTy 'RawN 'TopVarAllowed) where
     STArrow a b -> STArrowF a b
     STBase b -> STBaseF b
     STCon c args -> STConF c args
+    STVarApp v args -> STVarAppF v args
     STForall v mb body -> STForallF v (fmap unSrcBound mb) body
     STMu v body -> STMuF v body
     STBottom -> STBottomF
@@ -352,6 +393,7 @@ instance Corecursive (SrcTy 'RawN 'TopVarAllowed) where
     STArrowF a b -> STArrow a b
     STBaseF b -> STBase b
     STConF c args -> STCon c args
+    STVarAppF v args -> STVarApp v args
     STForallF v mb body -> STForall v (fmap mkSrcBound mb) body
     STMuF v body -> STMu v body
     STBottomF -> STBottom

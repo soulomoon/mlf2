@@ -142,6 +142,8 @@ validateDirectRecursiveAnnotations = goExpr
             Surface.STArrow dom cod -> bodyType True shadowed dom && bodyType True shadowed cod
             Surface.STBase _ -> True
             Surface.STCon _ args -> all (bodyType True shadowed) args
+            Surface.STVarApp v args ->
+              (shadowed || v /= needle || guarded) && all (bodyType True shadowed) args
             Surface.STForall v mb body ->
               let shadowed' = shadowed || v == needle
                   boundOk = maybe True (bodyBound guarded shadowed' . Surface.unNormBound) mb
@@ -156,6 +158,8 @@ validateDirectRecursiveAnnotations = goExpr
             Surface.STArrow dom cod -> bodyType True shadowed dom && bodyType True shadowed cod
             Surface.STBase _ -> True
             Surface.STCon _ args -> all (bodyType True shadowed) args
+            Surface.STVarApp v args ->
+              (shadowed || v /= needle || guarded) && all (bodyType True shadowed) args
             Surface.STForall v mb body ->
               let shadowed' = shadowed || v == needle
                   boundOk = maybe True (bodyBound guarded shadowed' . Surface.unNormBound) mb
@@ -224,6 +228,7 @@ runPipelineElabWith ::
   Either PipelineError PipelineElabDetailedResult
 runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints expr = do
   () <- fromConstraintError (validateDirectRecursiveAnnotations expr)
+  initialSchemeInfos <- fromConstraintError (traverse externalBindingSchemeInfo extBindings)
   ConstraintResult {crConstraint = c0, crAnnotated = ann, crAnnSourceTypes = annSourceTypes, crInitialEnv = _initialBindings} <- fromConstraintError (genConstraints expr)
   let c1 = normalize c0
   (c1Broken, acyc) <- fromCycleError (breakCyclesAndCheckAcyclicity c1)
@@ -253,10 +258,6 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
   -- NormSrcType values (which preserve lowerType naming) instead of
   -- re-generalizing through the constraint graph, which would produce
   -- graph-internal variable names that conflict with constructor types.
-  let initialSchemeInfos =
-        Map.map
-          (\ExternalBinding {externalBindingType = srcTy} -> SchemeInfo {siScheme = schemeFromType (srcTypeToElabType srcTy), siSubst = IntMap.empty})
-          extBindings
   let initialTcEnv =
         TypeCheck.Env
           { TypeCheck.termEnv = Map.map (schemeToType . siScheme) initialSchemeInfos,
@@ -633,26 +634,44 @@ stripLeadingTyAbs term =
    MLF.Frontend.Program.Elaborate (also internal, not exported).
    We keep this local to avoid widening production facades. -}
 
-srcTypeToElabType :: NormSrcType -> ElabType
+externalBindingSchemeInfo :: ExternalBinding -> Either ConstraintError SchemeInfo
+externalBindingSchemeInfo ExternalBinding {externalBindingType = srcTy} = do
+  ty <- srcTypeToElabType srcTy
+  pure SchemeInfo {siScheme = schemeFromType ty, siSubst = IntMap.empty}
+
+srcTypeToElabType :: NormSrcType -> Either ConstraintError ElabType
 srcTypeToElabType ty = case ty of
-  Surface.STVar name -> TVar name
-  Surface.STArrow dom cod -> TArrow (srcTypeToElabType dom) (srcTypeToElabType cod)
-  Surface.STBase name -> TBase (BaseTy name)
-  Surface.STCon name args -> TCon (BaseTy name) (fmap srcTypeToElabType args)
+  Surface.STVar name -> Right (TVar name)
+  Surface.STArrow dom cod -> TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod
+  Surface.STBase name -> Right (TBase (BaseTy name))
+  Surface.STCon name args -> TCon (BaseTy name) <$> traverse srcTypeToElabType args
+  Surface.STVarApp name _ ->
+    unsupportedVariableHead name
   Surface.STForall name mb body ->
-    TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body)
-  Surface.STMu name body -> TMu name (srcTypeToElabType body)
-  Surface.STBottom -> TBottom
+    TForall name
+      <$> maybe (Right Nothing) srcBoundToElabBound mb
+      <*> srcTypeToElabType body
+  Surface.STMu name body -> TMu name <$> srcTypeToElabType body
+  Surface.STBottom -> Right TBottom
   where
-    srcBoundToElabBound :: Surface.SrcBound 'Surface.NormN -> Maybe BoundType
+    srcBoundToElabBound :: Surface.SrcBound 'Surface.NormN -> Either ConstraintError (Maybe BoundType)
     srcBoundToElabBound (Surface.SrcBound boundTy) = structBoundToElabBound boundTy
 
-    structBoundToElabBound :: StructBound -> Maybe BoundType
+    structBoundToElabBound :: StructBound -> Either ConstraintError (Maybe BoundType)
     structBoundToElabBound bTy = case bTy of
-      Surface.STArrow dom cod -> Just (TArrow (srcTypeToElabType dom) (srcTypeToElabType cod))
-      Surface.STBase name -> Just (TBase (BaseTy name))
-      Surface.STCon name args -> Just (TCon (BaseTy name) (fmap srcTypeToElabType args))
+      Surface.STArrow dom cod -> Just <$> (TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod)
+      Surface.STBase name -> Right (Just (TBase (BaseTy name)))
+      Surface.STCon name args -> Just . TCon (BaseTy name) <$> traverse srcTypeToElabType args
+      Surface.STVarApp name _ ->
+        unsupportedVariableHead name
       Surface.STForall name mb body ->
-        Just (TForall name (mb >>= srcBoundToElabBound) (srcTypeToElabType body))
-      Surface.STMu name body -> Just (TMu name (srcTypeToElabType body))
-      Surface.STBottom -> Nothing
+        Just
+          <$> ( TForall name
+                  <$> maybe (Right Nothing) srcBoundToElabBound mb
+                  <*> srcTypeToElabType body
+              )
+      Surface.STMu name body -> Just . TMu name <$> srcTypeToElabType body
+      Surface.STBottom -> Right Nothing
+
+    unsupportedVariableHead name =
+      Left (InternalConstraintError ("variable-headed source type application `" ++ name ++ "` is not supported before higher-kinded elaboration"))
