@@ -443,8 +443,54 @@ sourceForallMatches expected actual =
       case Map.lookup name subst of
         Nothing -> Just (Map.insert name actualTy subst)
         Just existing
-          | alphaEqType (srcTypeToElabType existing) (srcTypeToElabType actualTy) -> Just subst
+          | alphaEqSrcType existing actualTy -> Just subst
           | otherwise -> Nothing
+
+alphaEqSrcType :: SrcType -> SrcType -> Bool
+alphaEqSrcType = go Map.empty Map.empty
+  where
+    go leftNames rightNames left right =
+      case (left, right) of
+        (STVar leftName, STVar rightName) ->
+          sameTypeVar leftNames rightNames leftName rightName
+        (STArrow leftDom leftCod, STArrow rightDom rightCod) ->
+          go leftNames rightNames leftDom rightDom
+            && go leftNames rightNames leftCod rightCod
+        (STBase leftName, STBase rightName) -> leftName == rightName
+        (STCon leftName leftArgs, STCon rightName rightArgs) ->
+          leftName == rightName
+            && length (toListNE leftArgs) == length (toListNE rightArgs)
+            && and (zipWith (go leftNames rightNames) (toListNE leftArgs) (toListNE rightArgs))
+        (STVarApp leftName leftArgs, STVarApp rightName rightArgs) ->
+          sameTypeVar leftNames rightNames leftName rightName
+            && length (toListNE leftArgs) == length (toListNE rightArgs)
+            && and (zipWith (go leftNames rightNames) (toListNE leftArgs) (toListNE rightArgs))
+        (STForall leftName leftMb leftBody, STForall rightName rightMb rightBody) ->
+          sameBounds leftMb rightMb
+            && go
+              (Map.insert leftName rightName leftNames)
+              (Map.insert rightName leftName rightNames)
+              leftBody
+              rightBody
+        (STMu leftName leftBody, STMu rightName rightBody) ->
+          go
+            (Map.insert leftName rightName leftNames)
+            (Map.insert rightName leftName rightNames)
+            leftBody
+            rightBody
+        (STBottom, STBottom) -> True
+        _ -> False
+      where
+        sameBounds Nothing Nothing = True
+        sameBounds (Just (SrcBound leftBound)) (Just (SrcBound rightBound)) =
+          go leftNames rightNames leftBound rightBound
+        sameBounds _ _ = False
+
+    sameTypeVar leftNames rightNames leftName rightName =
+      case (Map.lookup leftName leftNames, Map.lookup rightName rightNames) of
+        (Just mappedRight, Just mappedLeft) -> mappedRight == rightName && mappedLeft == leftName
+        (Nothing, Nothing) -> leftName == rightName
+        _ -> False
 
 refreshLetSchemes :: Env -> ElabTerm -> Either ProgramError ElabTerm
 refreshLetSchemes = go
@@ -1042,14 +1088,7 @@ matchRecoverType params subst renames template actual =
                 (zip (toListNE args) (toListNE args'))
         _ -> Nothing
     STVarApp name args ->
-      case actual of
-        STVarApp name' args'
-          | name == name' && length (toListNE args) == length (toListNE args') ->
-              foldM
-                (\acc (leftTy, rightTy) -> matchRecoverType params acc renames leftTy rightTy)
-                subst
-                (zip (toListNE args) (toListNE args'))
-        _ -> Nothing
+      matchRecoverVarApp params subst renames name args actual
     STForall name _mb body ->
       case actual of
         STForall name' _mb' body' ->
@@ -1066,13 +1105,66 @@ matchRecoverType params subst renames template actual =
         STBottom -> Just subst
         _ -> Nothing
 
+matchRecoverVarApp ::
+  Set String ->
+  Map String SrcType ->
+  Map String String ->
+  String ->
+  NonEmpty SrcType ->
+  SrcType ->
+  Maybe (Map String SrcType)
+matchRecoverVarApp params subst renames name args actual
+  | name `Set.member` params =
+      case actual of
+        STCon actualName actualArgs ->
+          matchAppliedHead actualName toConHead (toListNE actualArgs)
+        STVarApp actualName actualArgs ->
+          matchAppliedHead actualName toVarHead (toListNE actualArgs)
+        _ -> Nothing
+  | Just actualName <- Map.lookup name renames =
+      matchRigidVarAppHead actualName
+  | otherwise =
+      matchRigidVarAppHead name
+  where
+    expectedArgs = toListNE args
+    expectedArgCount = length expectedArgs
+
+    matchAppliedHead actualName headFromPrefix actualArgs
+      | length actualArgs < expectedArgCount = Nothing
+      | otherwise = do
+          let (headArgs, appliedArgs) = splitAt (length actualArgs - expectedArgCount) actualArgs
+          subst' <- bindRecoverParam name (headFromPrefix actualName headArgs) subst
+          foldM
+            (\acc (leftTy, rightTy) -> matchRecoverType params acc renames leftTy rightTy)
+            subst'
+            (zip expectedArgs appliedArgs)
+
+    matchRigidVarAppHead expectedName =
+      case actual of
+        STVarApp actualName actualArgs
+          | expectedName == actualName && expectedArgCount == length (toListNE actualArgs) ->
+              foldM
+                (\acc (leftTy, rightTy) -> matchRecoverType params acc renames leftTy rightTy)
+                subst
+                (zip expectedArgs (toListNE actualArgs))
+        _ -> Nothing
+
+    toConHead actualName [] = STBase actualName
+    toConHead actualName (arg : rest) = STCon actualName (arg :| rest)
+
+    toVarHead actualName [] = STVar actualName
+    toVarHead actualName (arg : rest) = STVarApp actualName (arg :| rest)
+
 bindRecoverParam :: String -> SrcType -> Map String SrcType -> Maybe (Map String SrcType)
 bindRecoverParam name actual subst =
   case Map.lookup name subst of
     Nothing -> Just (Map.insert name actual subst)
     Just existing
-      | alphaEqType (srcTypeToElabType existing) (srcTypeToElabType actual)
-          || churchAwareEqType (srcTypeToElabType existing) (srcTypeToElabType actual) ->
+      | alphaEqSrcType existing actual ->
+          Just subst
+      | Just existingTy <- srcTypeToElabTypeMaybe existing,
+        Just actualTy <- srcTypeToElabTypeMaybe actual,
+        alphaEqType existingTy actualTy || churchAwareEqType existingTy actualTy ->
           Just subst
       | otherwise -> Nothing
 
@@ -1131,6 +1223,20 @@ srcTypeToElabType ty = case ty of
   STMu name body -> X.TMu name (srcTypeToElabType body)
   STBottom -> X.TBottom
 
+srcTypeToElabTypeMaybe :: SrcTy n v -> Maybe ElabType
+srcTypeToElabTypeMaybe ty = case ty of
+  STVar name -> Just (X.TVar name)
+  STArrow dom cod -> X.TArrow <$> srcTypeToElabTypeMaybe dom <*> srcTypeToElabTypeMaybe cod
+  STBase name -> Just (X.TBase (Graph.BaseTy name))
+  STCon name args -> X.TCon (Graph.BaseTy name) <$> traverse srcTypeToElabTypeMaybe args
+  STVarApp {} -> Nothing
+  STForall name mb body ->
+    X.TForall name
+      <$> maybe (Just Nothing) srcBoundToElabBoundMaybe mb
+      <*> srcTypeToElabTypeMaybe body
+  STMu name body -> X.TMu name <$> srcTypeToElabTypeMaybe body
+  STBottom -> Just X.TBottom
+
 srcBoundToElabBound :: SrcBound n -> Maybe X.BoundType
 srcBoundToElabBound (SrcBound boundTy) =
   case srcTypeToElabType boundTy of
@@ -1141,3 +1247,15 @@ srcBoundToElabBound (SrcBound boundTy) =
     X.TCon con args -> Just (X.TCon con args)
     X.TForall name mb body -> Just (X.TForall name mb body)
     X.TMu name body -> Just (X.TMu name body)
+
+srcBoundToElabBoundMaybe :: SrcBound n -> Maybe (Maybe X.BoundType)
+srcBoundToElabBoundMaybe (SrcBound boundTy) =
+  case srcTypeToElabTypeMaybe boundTy of
+    Just (X.TVar {}) -> Just Nothing
+    Just X.TBottom -> Just Nothing
+    Just (X.TArrow dom cod) -> Just (Just (X.TArrow dom cod))
+    Just (X.TBase base) -> Just (Just (X.TBase base))
+    Just (X.TCon con args) -> Just (Just (X.TCon con args))
+    Just (X.TForall name mb body) -> Just (Just (X.TForall name mb body))
+    Just (X.TMu name body) -> Just (Just (X.TMu name body))
+    Nothing -> Nothing

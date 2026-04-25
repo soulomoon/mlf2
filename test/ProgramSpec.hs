@@ -6,8 +6,13 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import MLF.API (SrcTy (..))
 import MLF.Frontend.Program.Check (checkResolvedProgram)
-import MLF.Frontend.Program.Finalize (sourceForallMatches)
-import MLF.Frontend.Program.Types (mkResolvedSymbol)
+import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope)
+import MLF.Frontend.Program.Finalize (recoverSourceType, sourceForallMatches)
+import MLF.Frontend.Program.Types
+    ( ConstructorInfo (..)
+    , DataInfo (..)
+    , mkResolvedSymbol
+    )
 import MLF.Frontend.Syntax (ResolvedSrcTy (..))
 import MLF.Program
 import MLF.Program.CLI (runProgramFile)
@@ -2238,6 +2243,69 @@ spec = do
                         (STVarApp "g" (STVar "a" :| []))
                         (STVarApp "h" (STVar "a" :| []))
             sourceForallMatches expected actual `shouldBe` False
+
+        it "rejects bound variable applications without lowering STVarApp" $ do
+            let expected =
+                    STForall
+                        "f"
+                        Nothing
+                        (STArrow (STVar "f") (STVar "f"))
+                actual =
+                    STForall
+                        "g"
+                        Nothing
+                        ( STArrow
+                            (STVar "g")
+                            (STVarApp "g" (STVar "a" :| []))
+                        )
+            sourceForallMatches expected actual `shouldBe` False
+
+        it "recovers higher-kinded data heads with partially applied constructor parameters" $ do
+            let typeIdentity =
+                    SymbolIdentity
+                        { symbolNamespace = SymbolType
+                        , symbolDefiningModule = "Main"
+                        , symbolDefiningName = "Apply"
+                        , symbolOwnerIdentity = Nothing
+                        }
+                ctorIdentity =
+                    SymbolIdentity
+                        { symbolNamespace = SymbolConstructor
+                        , symbolDefiningModule = "Main"
+                        , symbolDefiningName = "Apply"
+                        , symbolOwnerIdentity = Just (SymbolOwnerType "Main" "Apply")
+                        }
+                applyResult = STCon "Apply" (STVar "f" :| [STVar "a"])
+                applyCtor =
+                    ConstructorInfo
+                        { ctorName = "Apply"
+                        , ctorInfoSymbol = ctorIdentity
+                        , ctorRuntimeName = "$Apply"
+                        , ctorType = STArrow (STVarApp "f" (STVar "a" :| [])) applyResult
+                        , ctorForalls = []
+                        , ctorArgs = [STVarApp "f" (STVar "a" :| [])]
+                        , ctorResult = applyResult
+                        , ctorOwningType = "Apply"
+                        , ctorOwningTypeIdentity = typeIdentity
+                        , ctorIndex = 0
+                        }
+                applyInfo =
+                    DataInfo
+                        { dataName = "Apply"
+                        , dataInfoSymbol = typeIdentity
+                        , dataModule = "Main"
+                        , dataTypeParams = []
+                        , dataParams = ["f", "a"]
+                        , dataConstructors = [applyCtor]
+                        }
+                scope = mkElaborateScope Map.empty (Map.singleton "Apply" applyInfo) Map.empty []
+                visible =
+                    STCon
+                        "Apply"
+                        ( STCon "Either" (STBase "Int" :| [])
+                            :| [STBase "String"]
+                        )
+            recoverSourceType scope (lowerType scope visible) `shouldBe` visible
 
     describe "MLF.Program parse/pretty" $ do
         mapM_ roundtripFixture fixturePaths
