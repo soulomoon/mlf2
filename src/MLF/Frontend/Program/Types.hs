@@ -663,7 +663,7 @@ constructorOwnerRuntimeTypeTrackable :: Map String DataInfo -> ConstructorInfo -
 constructorOwnerRuntimeTypeTrackable dataInfos ctor =
   case [dataInfo | dataInfo <- Map.elems dataInfos, dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctor] of
     dataInfo : _ -> dataConstructorsRuntimeTypeTrackable dataInfo
-    [] -> not (null (ctorOwnerConstructors ctor)) || constructorRuntimeTypeShapeTrackable ctor
+    [] -> all constructorShapeRuntimeTypeTrackable (constructorOwnerShapes ctor)
 
 constructorOwnerHasVariableHeadApplication :: Map String DataInfo -> ConstructorInfo -> Bool
 constructorOwnerHasVariableHeadApplication dataInfos ctor =

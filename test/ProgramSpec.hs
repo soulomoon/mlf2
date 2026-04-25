@@ -10,7 +10,9 @@ import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope)
 import MLF.Frontend.Program.Finalize (recoverSourceType, sourceForallMatches)
 import MLF.Frontend.Program.Types
     ( ConstructorInfo (..)
+    , ConstructorShape (..)
     , DataInfo (..)
+    , constructorOwnerRuntimeTypeTrackable
     , mkResolvedSymbol
     )
 import MLF.Frontend.Syntax (ResolvedSrcTy (..), mkSrcBound)
@@ -780,6 +782,53 @@ emlfBoundaryMatrix =
                 ]
         )
         (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "allows local owner type name after value-only mixed constructor import"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), MaybeF, NothingF) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , "}"
+                , ""
+                , "module Main export (MaybeF(..), main) {"
+                , "  import Core exposing (NothingF);"
+                , ""
+                , "  data MaybeF a ="
+                , "      LocalMaybeF : a -> MaybeF a;"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
+    , ProgramMatrixCase
+        "allows constructor imports whose hidden owners share a short type name"
+        ( InlineProgram $
+            unlines
+                [ "module LeftCore export (MaybeF, NothingLeft) {"
+                , "  data MaybeF ="
+                , "      NothingLeft : MaybeF;"
+                , "}"
+                , ""
+                , "module RightCore export (MaybeF, NothingRight) {"
+                , "  data MaybeF ="
+                , "      NothingRight : MaybeF;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import LeftCore exposing (NothingLeft);"
+                , "  import RightCore exposing (NothingRight);"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
     , ProgramMatrixCase
         "rejects first-order parameters in higher-kinded data fields"
         ( InlineProgram $
@@ -2528,6 +2577,54 @@ spec = do
                             :| [STBase "String"]
                         )
             recoverSourceType scope (lowerType scope visible) `shouldBe` visible
+
+        it "treats owner-shaped variable-headed constructor imports as non-trackable" $ do
+            let typeIdentity =
+                    SymbolIdentity
+                        { symbolNamespace = SymbolType
+                        , symbolDefiningModule = "Core"
+                        , symbolDefiningName = "MaybeF"
+                        , symbolOwnerIdentity = Nothing
+                        }
+                ctorIdentity name =
+                    SymbolIdentity
+                        { symbolNamespace = SymbolConstructor
+                        , symbolDefiningModule = "Core"
+                        , symbolDefiningName = name
+                        , symbolOwnerIdentity = Just (SymbolOwnerType "Core" "MaybeF")
+                        }
+                resultTy = STCon "MaybeF" (STVar "f" :| [STVar "a"])
+                nothingShape =
+                    ConstructorShape
+                        { constructorShapeName = "NothingF"
+                        , constructorShapeForalls = []
+                        , constructorShapeArgs = []
+                        , constructorShapeResult = resultTy
+                        , constructorShapeIndex = 0
+                        }
+                justShape =
+                    ConstructorShape
+                        { constructorShapeName = "JustF"
+                        , constructorShapeForalls = []
+                        , constructorShapeArgs = [STVarApp "f" (STVar "a" :| [])]
+                        , constructorShapeResult = resultTy
+                        , constructorShapeIndex = 1
+                        }
+                nothingCtor =
+                    ConstructorInfo
+                        { ctorName = "NothingF"
+                        , ctorInfoSymbol = ctorIdentity "NothingF"
+                        , ctorRuntimeName = "Core__NothingF"
+                        , ctorType = resultTy
+                        , ctorForalls = []
+                        , ctorArgs = []
+                        , ctorResult = resultTy
+                        , ctorOwningType = "MaybeF"
+                        , ctorOwningTypeIdentity = typeIdentity
+                        , ctorIndex = 0
+                        , ctorOwnerConstructors = [nothingShape, justShape]
+                        }
+            constructorOwnerRuntimeTypeTrackable Map.empty nothingCtor `shouldBe` False
 
     describe "MLF.Program parse/pretty" $ do
         mapM_ roundtripFixture fixturePaths

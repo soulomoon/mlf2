@@ -110,6 +110,7 @@ data Scope = Scope
     scopeValuesByIdentity :: Map SymbolIdentity [(String, ValueInfo)],
     scopeTypes :: Map String DataInfo,
     scopeTypesByIdentity :: Map SymbolIdentity [(String, DataInfo)],
+    scopeHiddenTypes :: Map String DataInfo,
     scopeClasses :: Map String ClassInfo,
     scopeClassesByIdentity :: Map SymbolIdentity [(String, ClassInfo)],
     scopeInstances :: [InstanceInfo]
@@ -144,11 +145,22 @@ emptyScope = mkScope builtinValues Map.empty Map.empty []
 
 mkScope :: Map String ValueInfo -> Map String DataInfo -> Map String ClassInfo -> [InstanceInfo] -> Scope
 mkScope values0 types0 classes0 instances0 =
+  mkScopeWithHidden values0 types0 Map.empty classes0 instances0
+
+mkScopeWithHidden ::
+  Map String ValueInfo ->
+  Map String DataInfo ->
+  Map String DataInfo ->
+  Map String ClassInfo ->
+  [InstanceInfo] ->
+  Scope
+mkScopeWithHidden values0 types0 hiddenTypes0 classes0 instances0 =
   Scope
     { scopeValues = values0,
       scopeValuesByIdentity = indexByIdentity valueInfoSymbolIdentity values0,
       scopeTypes = types0,
       scopeTypesByIdentity = indexByIdentity dataInfoSymbolIdentity types0,
+      scopeHiddenTypes = hiddenTypes0,
       scopeClasses = classes0,
       scopeClassesByIdentity = indexByIdentity classInfoSymbolIdentity classes0,
       scopeInstances = instances0
@@ -156,19 +168,27 @@ mkScope values0 types0 classes0 instances0 =
 
 withScopeValues :: Map String ValueInfo -> Scope -> Scope
 withScopeValues values0 scope =
-  mkScope values0 (scopeTypes scope) (scopeClasses scope) (scopeInstances scope)
+  mkScopeWithHidden values0 (scopeTypes scope) (scopeHiddenTypes scope) (scopeClasses scope) (scopeInstances scope)
 
 withScopeTypes :: Map String DataInfo -> Scope -> Scope
 withScopeTypes types0 scope =
-  mkScope (scopeValues scope) types0 (scopeClasses scope) (scopeInstances scope)
+  mkScopeWithHidden (scopeValues scope) types0 (scopeHiddenTypes scope) (scopeClasses scope) (scopeInstances scope)
+
+withScopeHiddenTypes :: Map String DataInfo -> Scope -> Scope
+withScopeHiddenTypes hiddenTypes0 scope =
+  mkScopeWithHidden (scopeValues scope) (scopeTypes scope) hiddenTypes0 (scopeClasses scope) (scopeInstances scope)
 
 withScopeClasses :: Map String ClassInfo -> Scope -> Scope
 withScopeClasses classes0 scope =
-  mkScope (scopeValues scope) (scopeTypes scope) classes0 (scopeInstances scope)
+  mkScopeWithHidden (scopeValues scope) (scopeTypes scope) (scopeHiddenTypes scope) classes0 (scopeInstances scope)
 
 withScopeInstances :: [InstanceInfo] -> Scope -> Scope
 withScopeInstances instances0 scope =
-  mkScope (scopeValues scope) (scopeTypes scope) (scopeClasses scope) instances0
+  mkScopeWithHidden (scopeValues scope) (scopeTypes scope) (scopeHiddenTypes scope) (scopeClasses scope) instances0
+
+scopeElaborateTypes :: Scope -> Map String DataInfo
+scopeElaborateTypes scope =
+  scopeTypes scope `Map.union` scopeHiddenTypes scope
 
 indexByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity [(String, a)]
 indexByIdentity identityOf =
@@ -493,14 +513,14 @@ checkModule resolvedModule priorModules = do
   valueScope <- liftEither =<< pure (addValues (scopeValues importScope) localValues)
   typeScope <- liftEither =<< pure (addTypes (scopeTypes importScope) localData)
   classScope <- liftEither =<< pure (addClasses (scopeClasses importScope) localClasses)
-  let scope0 = mkScope valueScope typeScope classScope (scopeInstances importScope ++ visibleImportedInstances)
+  let scope0 = mkScopeWithHidden valueScope typeScope (scopeHiddenTypes importScope) classScope (scopeInstances importScope ++ visibleImportedInstances)
       fullNameEnv = valueNameEnv `preferDisplayNames` displayNameEnvFromScope scope0
   validateModuleKinds scope0 resolvedSyntax
   validateLocalClassMethodConstraints scope0 resolvedSyntax
   derivedInstances <- synthesizeDerivedInstances fullNameEnv scope0 resolvedModule resolvedSyntax
   instanceSkeletons <- buildInstanceSkeletons fullNameEnv scope0 resolvedSyntax derivedInstances
   let scope1 = withScopeInstances (scopeInstances scope0 ++ instanceSkeletons) scope0
-  let elaborateScope = mkElaborateScope (scopeValues scope1) (scopeTypes scope1) (scopeClasses scope1) (scopeInstances scope1)
+  let elaborateScope = mkElaborateScope (scopeValues scope1) (scopeElaborateTypes scope1) (scopeClasses scope1) (scopeInstances scope1)
   constructorBindings <-
     mapM
       (liftEither . (finalizeBinding elaborateScope . lowerConstructorBinding elaborateScope))
@@ -588,7 +608,7 @@ addAllExports scope exports =
     values <- addValues (scopeValues scope) (exportedValues exports)
     types <- addTypes (scopeTypes scope) (Map.map exportedTypeData (exportedTypes exports))
     classes <- addClasses (scopeClasses scope) (exportedClasses exports)
-    pure (mkScope values types classes (scopeInstances scope))
+    pure (mkScopeWithHidden values types (scopeHiddenTypes scope) classes (scopeInstances scope))
 
 qualifyModuleExports :: P.ModuleName -> ModuleExports -> ModuleExports
 qualifyModuleExports alias exports =
@@ -1027,9 +1047,9 @@ applyResolvedImportItem moduleName0 exports scope item =
     P.ExportValue symbol ->
       case exportedValueByIdentity (resolvedSymbolIdentity symbol) exports of
         Just (name, info) -> do
-          values <- liftEither (addValues (scopeValues scope) (Map.singleton name info))
-          let scopeWithValue = withScopeValues values scope
-          importConstructorOwnerType moduleName0 exports scopeWithValue info
+          let (scopeWithOwner, importedInfo) = prepareImportedValue exports scope info
+          values <- liftEither (addValues (scopeValues scopeWithOwner) (Map.singleton name importedInfo))
+          pure (withScopeValues values scopeWithOwner)
         Nothing -> throwError (ProgramImportNotExported moduleName0 (resolvedSymbolDisplayName symbol))
     P.ExportType ref ->
       case exportedTypeByRef ref exports of
@@ -1070,19 +1090,94 @@ applyResolvedImportItem moduleName0 exports scope item =
                   ]
           values <- liftEither (addValues (scopeValues scope) ctorValues)
           types <- liftEither (addTypes (scopeTypes scope) (Map.singleton typeName dataInfo))
-          pure (mkScope values types (scopeClasses scope) (scopeInstances scope))
+          pure (mkScopeWithHidden values types (scopeHiddenTypes scope) (scopeClasses scope) (scopeInstances scope))
         Nothing -> throwError (ProgramImportNotExported moduleName0 (P.resolvedExportTypeName ref))
 
-importConstructorOwnerType :: P.ModuleName -> ModuleExports -> Scope -> ValueInfo -> TcM Scope
-importConstructorOwnerType _moduleName0 exports scope = \case
-  ConstructorValue {valueCtorInfo = ctorInfo} ->
-    case exportedConstructorOwnerType ctorInfo exports of
-      Just dataInfo -> do
-        let hiddenName = ctorOwningType ctorInfo
-        types <- liftEither (addTypes (scopeTypes scope) (Map.singleton hiddenName dataInfo))
-        pure (withScopeTypes types scope)
-      Nothing -> pure scope
-  _ -> pure scope
+prepareImportedValue :: ModuleExports -> Scope -> ValueInfo -> (Scope, ValueInfo)
+prepareImportedValue exports scope valueInfo =
+  case valueInfo of
+    ConstructorValue {valueCtorInfo = ctorInfo} ->
+      case exportedConstructorOwnerType ctorInfo exports of
+        Just dataInfo ->
+          let hiddenDataInfo = hiddenOwnerDataInfo dataInfo
+              hiddenTypes = Map.insert (dataName hiddenDataInfo) hiddenDataInfo (scopeHiddenTypes scope)
+              hiddenCtorInfo = importedHiddenConstructorInfo ctorInfo hiddenDataInfo
+              importedInfo =
+                valueInfo
+                  { valueType = ctorType hiddenCtorInfo,
+                    valueCtorInfo = hiddenCtorInfo
+                  }
+           in (withScopeHiddenTypes hiddenTypes scope, importedInfo)
+        Nothing -> (scope, valueInfo)
+    _ -> (scope, valueInfo)
+
+hiddenOwnerDataInfo :: DataInfo -> DataInfo
+hiddenOwnerDataInfo dataInfo =
+  let hiddenName = hiddenOwnerTypeName dataInfo
+      ownerNames =
+        Set.fromList
+          [ dataName dataInfo,
+            symbolDefiningName (dataInfoSymbolIdentity dataInfo)
+          ]
+      rewrite = rewriteOwnerTypeHeads ownerNames hiddenName
+      rewriteShape shape =
+        shape
+          { constructorShapeForalls =
+              [ (name, fmap rewrite mbBound)
+                | (name, mbBound) <- constructorShapeForalls shape
+              ],
+            constructorShapeArgs = map rewrite (constructorShapeArgs shape),
+            constructorShapeResult = rewrite (constructorShapeResult shape)
+          }
+      rewriteCtor ctor =
+        ctor
+          { ctorType = rewrite (ctorType ctor),
+            ctorForalls =
+              [ (name, fmap rewrite mbBound)
+                | (name, mbBound) <- ctorForalls ctor
+              ],
+            ctorArgs = map rewrite (ctorArgs ctor),
+            ctorResult = rewrite (ctorResult ctor),
+            ctorOwningType = hiddenName,
+            ctorOwnerConstructors = map rewriteShape (ctorOwnerConstructors ctor)
+          }
+   in dataInfo
+        { dataName = hiddenName,
+          dataConstructors = map rewriteCtor (dataConstructors dataInfo)
+        }
+
+hiddenOwnerTypeName :: DataInfo -> String
+hiddenOwnerTypeName dataInfo =
+  let identity = dataInfoSymbolIdentity dataInfo
+   in "$" ++ symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+
+rewriteOwnerTypeHeads :: Set.Set String -> String -> SrcType -> SrcType
+rewriteOwnerTypeHeads ownerNames hiddenName = go
+  where
+    rewriteHead name
+      | name `Set.member` ownerNames = hiddenName
+      | otherwise = name
+
+    go ty =
+      case ty of
+        STVar {} -> ty
+        STArrow dom cod -> STArrow (go dom) (go cod)
+        STBase name -> STBase (rewriteHead name)
+        STCon name args -> STCon (rewriteHead name) (fmap go args)
+        STVarApp name args -> STVarApp name (fmap go args)
+        STForall name mb body -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
+        STMu name body -> STMu name (go body)
+        STBottom -> STBottom
+
+importedHiddenConstructorInfo :: ConstructorInfo -> DataInfo -> ConstructorInfo
+importedHiddenConstructorInfo ctorInfo hiddenDataInfo =
+  case find ((== ctorInfoSymbol ctorInfo) . ctorInfoSymbol) (dataConstructors hiddenDataInfo) of
+    Just hiddenCtorInfo ->
+      hiddenCtorInfo
+        { ctorName = ctorName ctorInfo,
+          ctorRuntimeName = ctorRuntimeName ctorInfo
+        }
+    Nothing -> ctorInfo
 
 exportedConstructorOwnerType :: ConstructorInfo -> ModuleExports -> Maybe DataInfo
 exportedConstructorOwnerType ctorInfo exports =
@@ -1855,7 +1950,7 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
         STBottom -> Set.empty
 
     scopeToElaborateScope scope0 =
-      mkElaborateScope (scopeValues scope0) (scopeTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
+      mkElaborateScope (scopeValues scope0) (scopeElaborateTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
 
     mkEqInstance classSymbol classInfo eqMethodSymbol resolvedDataDecl displayDataDecl = do
       dataSymbol <- uniqueResolvedLocalSymbol ProgramDuplicateType (P.dataDeclName resolvedDataDecl) (resolvedModuleLocalTypes resolvedModule)

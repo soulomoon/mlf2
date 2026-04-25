@@ -39,6 +39,7 @@ import MLF.Frontend.Program.Elaborate
     lowerType,
     lowerTypeView,
     matchTypes,
+    matchTypesInScope,
     resolveInstanceInfoByConstraint,
     resolveMethodInstanceInfoByTypeView,
     sourceTypeViewInScope,
@@ -639,7 +640,7 @@ resolveDeferredConstructors scope env deferredConstructors = go env
         Right $
           case
             foldM
-              (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy)
+              (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy)
               (fst substFromHead)
               (zip visibleArgTemplates argTypes)
           of
@@ -647,14 +648,14 @@ resolveDeferredConstructors scope env deferredConstructors = go env
             Nothing ->
               case
                 foldM
-                  (\acc (templateTy, actualTy) -> matchTypes acc templateTy actualTy)
+                  (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy)
                   (deferredConstructorInitialSubst deferred)
                   (zip visibleArgTemplates argTypes)
               of
                 Just subst -> subst
                 Nothing -> fst substFromHead
       let substFinal =
-            case matchTypes substFromArgs (deferredConstructorOccurrenceType deferred) occurrenceTy of
+            case matchTypesInScope scope substFromArgs (deferredConstructorOccurrenceType deferred) occurrenceTy of
               Just subst -> subst
               Nothing -> substFromArgs
       case filter (`Map.notMember` substFinal) instBinders of
@@ -739,7 +740,7 @@ inlineConstructorHead scope ctorInfo subst = do
       (zip argNames argTys)
   where
     specializeHandlerShape shape =
-      case matchTypes Map.empty (constructorShapeResult shape) (applyConstructorSubst subst (ctorResult ctorInfo)) of
+      case matchTypesInScope scope Map.empty (constructorShapeResult shape) (applyConstructorSubst subst (ctorResult ctorInfo)) of
         Just handlerSubst -> applyConstructorShapeSubst handlerSubst shape
         Nothing -> shape
 

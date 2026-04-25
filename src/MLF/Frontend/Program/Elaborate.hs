@@ -18,6 +18,7 @@ module MLF.Frontend.Program.Elaborate
     lowerType,
     sourceTypeViewInScope,
     matchTypes,
+    matchTypesInScope,
     freeTypeVarsSrcType,
     resolveInstanceInfo,
     resolveInstanceInfoWithSubst,
@@ -1066,12 +1067,18 @@ specializeConstructorInfo subst ctorInfo =
           ctorResult = result'
         }
 
+ordinaryValueTypeInScope :: ElaborateScope -> ValueInfo -> SrcType
+ordinaryValueTypeInScope scope OrdinaryValue {valueType = ty, valueIdentityType = identityTy} =
+  visibleTypeForIdentity (esTypes scope) ty identityTy
+ordinaryValueTypeInScope _ _ =
+  STBottom
+
 valueExpectedArgTypes :: ElaborateScope -> ValueInfo -> Maybe SrcType -> [expr] -> [Maybe SrcType]
 valueExpectedArgTypes scope valueInfo mbExpected args =
   let (argTys0, resultTy0) =
         case valueInfo of
-          OrdinaryValue {valueType = ty} ->
-            splitArrows (snd (splitForalls ty))
+          OrdinaryValue {} ->
+            splitArrows (snd (splitForalls (ordinaryValueTypeInScope scope valueInfo)))
           _ -> ([], STBottom)
       resultTyForArity =
         foldr STArrow resultTy0 (drop (length args) argTys0)
@@ -2011,7 +2018,7 @@ inferKnownExprType scope expr =
     ELit lit -> Just (litSrcType lit)
     EVar name ->
       case Map.lookup name (esValues scope) of
-        Just OrdinaryValue {valueType = ty} -> Just ty
+        Just valueInfo@OrdinaryValue {} -> Just (ordinaryValueTypeInScope scope valueInfo)
         Just ConstructorValue {valueCtorInfo = ctorInfo} -> Just (constructorVisibleType scope ctorInfo)
         _ -> Nothing
     EAnn _ annTy -> Just annTy
@@ -2020,8 +2027,11 @@ inferKnownExprType scope expr =
         (EVar name, args)
           | Just valueInfo <- Map.lookup name (esValues scope) ->
               case valueInfo of
-                OrdinaryValue {valueType = ty}
-                  | not (null args), hasLeadingForall ty -> Nothing
+                OrdinaryValue {}
+                  | let ty = ordinaryValueTypeInScope scope valueInfo,
+                    not (null args),
+                    hasLeadingForall ty ->
+                      Nothing
                 ConstructorValue {valueCtorInfo = ctorInfo}
                   | length args == length (ctorArgs ctorInfo) ->
                       knownConstructorResultType scope ctorInfo args
@@ -2035,7 +2045,7 @@ inferKnownResolvedExprType scope expr =
     ELit lit -> Just (litSrcType lit)
     EVar ref ->
       case runElaborateLookup (lookupResolvedValueInfo scope ref) of
-        Right OrdinaryValue {valueType = ty} -> Just ty
+        Right valueInfo@OrdinaryValue {} -> Just (ordinaryValueTypeInScope scope valueInfo)
         Right ConstructorValue {valueCtorInfo = ctorInfo} -> Just (constructorVisibleType scope ctorInfo)
         _ -> Nothing
     EAnn _ annTy -> either (const Nothing) Just (displaySrcTypeForResolved scope annTy)
@@ -2044,8 +2054,11 @@ inferKnownResolvedExprType scope expr =
         (EVar ref, args)
           | Right valueInfo <- runElaborateLookup (lookupResolvedValueInfo scope ref) ->
               case valueInfo of
-                OrdinaryValue {valueType = ty}
-                  | not (null args), hasLeadingForall ty -> Nothing
+                OrdinaryValue {}
+                  | let ty = ordinaryValueTypeInScope scope valueInfo,
+                    not (null args),
+                    hasLeadingForall ty ->
+                      Nothing
                 ConstructorValue {valueCtorInfo = ctorInfo}
                   | length args == length (ctorArgs ctorInfo) ->
                       knownResolvedConstructorResultType scope ctorInfo args
@@ -2069,7 +2082,7 @@ litSrcType lit =
 appliedValueResultType :: ElaborateScope -> ValueInfo -> Int -> Maybe SrcType
 appliedValueResultType scope valueInfo argCount =
   case valueInfo of
-    OrdinaryValue {valueType = ty} -> peelAppliedType ty argCount
+    OrdinaryValue {} -> peelAppliedType (ordinaryValueTypeInScope scope valueInfo) argCount
     ConstructorValue {valueCtorInfo = ctorInfo} ->
       if argCount > length (ctorArgs ctorInfo)
         then Nothing
