@@ -137,6 +137,8 @@ mkElaborateScope values0 dataTypes classes0 instances0 =
           esInstances = instances0
         }
   where
+    shouldTrackRuntimeType ConstructorValue {valueCtorInfo = ctorInfo} =
+      constructorRuntimeTypeTrackable ctorInfo
     shouldTrackRuntimeType OverloadedMethod {} = False
     shouldTrackRuntimeType _ = True
 
@@ -155,6 +157,29 @@ mkElaborateScope values0 dataTypes classes0 instances0 =
           | instanceInfo <- instances0,
             methodValue@OrdinaryValue {valueRuntimeName = runtimeName} <- Map.elems (instanceMethods instanceInfo)
         ]
+
+constructorRuntimeTypeTrackable :: ConstructorInfo -> Bool
+constructorRuntimeTypeTrackable ctor =
+  let involvedTypes =
+        ctorArgs ctor
+          ++ [ctorResult ctor]
+          ++ [bound | (_, Just bound) <- ctorForalls ctor]
+      evidenceVars = foldMap freeTypeVarsSrcType involvedTypes
+   in not (any hasVariableHeadApplication involvedTypes)
+        && all (\(name, _) -> name `Set.member` evidenceVars) (ctorForalls ctor)
+  where
+    hasVariableHeadApplication ty =
+      case ty of
+        STVar {} -> False
+        STArrow dom cod -> hasVariableHeadApplication dom || hasVariableHeadApplication cod
+        STBase {} -> False
+        STCon _ args -> any hasVariableHeadApplication args
+        STVarApp {} -> True
+        STForall _ mb body ->
+          maybe False (hasVariableHeadApplication . unSrcBound) mb
+            || hasVariableHeadApplication body
+        STMu _ body -> hasVariableHeadApplication body
+        STBottom -> False
 
 indexByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity [(String, a)]
 indexByIdentity identityOf =
@@ -337,7 +362,11 @@ lowerTypeRaw :: Map String DataInfo -> SrcType -> SrcType
 lowerTypeRaw dataTypes = lower Map.empty Nothing
   where
     lower subst currentData ty = case ty of
-      STVar name -> Map.findWithDefault ty name subst
+      STVar name ->
+        case Map.lookup name subst of
+          Just replacement
+            | replacement /= ty -> lower subst currentData replacement
+          _ -> ty
       STArrow dom cod -> STArrow (lower subst currentData dom) (lower subst currentData cod)
       STBase name ->
         case Map.lookup name dataTypes of
@@ -345,16 +374,11 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
           Nothing -> STBase name
       STCon name args ->
         case Map.lookup name dataTypes of
-          Just info -> encodeDataType subst info (map (lower subst currentData) (toListNE args))
+          Just info -> encodeDataType subst info (actualArgsForData (lower subst currentData) info (toListNE args))
           Nothing -> STCon name (fmap (lower subst currentData) args)
       STVarApp name args ->
         let args' = fmap (lower subst currentData) args
-         in case Map.lookup name subst of
-              Just (STVar replacementName) -> STVarApp replacementName args'
-              Just (STBase replacementName) -> STCon replacementName args'
-              Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
-              Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
-              _ -> STVarApp name args'
+         in lowerAppliedTypeHead (lower subst currentData) subst name args'
       STForall name mb body ->
         let subst' = Map.delete name subst
          in STForall name (fmap (SrcBound . lower subst' currentData . unSrcBound) mb) (lower subst' currentData body)
@@ -386,7 +410,11 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
         ]
 
     lowerCtorArg subst currentData selfTy ty = case ty of
-      STVar name -> Map.findWithDefault ty name subst
+      STVar name ->
+        case Map.lookup name subst of
+          Just replacement
+            | replacement /= ty -> lowerCtorArg subst currentData selfTy replacement
+          _ -> ty
       STArrow dom cod -> STArrow (lowerCtorArg subst currentData selfTy dom) (lowerCtorArg subst currentData selfTy cod)
       STBase name
         | isCurrentDataAlias currentData name -> selfTy
@@ -398,16 +426,11 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
         | isCurrentDataAlias currentData name -> selfTy
         | otherwise ->
             case Map.lookup name dataTypes of
-              Just info -> encodeDataType subst info (map (lowerCtorArg subst currentData selfTy) (toListNE args))
+              Just info -> encodeDataType subst info (actualArgsForData (lowerCtorArg subst currentData selfTy) info (toListNE args))
               Nothing -> STCon name (fmap (lowerCtorArg subst currentData selfTy) args)
       STVarApp name args ->
         let args' = fmap (lowerCtorArg subst currentData selfTy) args
-         in case Map.lookup name subst of
-              Just (STVar replacementName) -> STVarApp replacementName args'
-              Just (STBase replacementName) -> STCon replacementName args'
-              Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
-              Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
-              _ -> STVarApp name args'
+         in lowerAppliedTypeHead (lowerCtorArg subst currentData selfTy) subst name args'
       STForall name mb body ->
         let subst' = Map.delete name subst
          in STForall name (fmap (SrcBound . lowerCtorArg subst' currentData selfTy . unSrcBound) mb) (lowerCtorArg subst' currentData selfTy body)
@@ -425,6 +448,22 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
     dataIdentity info =
       let identity = dataInfoSymbolIdentity info
        in symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
+
+    actualArgsForData lowerArg info =
+      zipWith
+        ( \param arg ->
+            if P.typeParamIsFirstOrder param
+              then lowerArg arg
+              else arg
+        )
+        (dataTypeParams info)
+
+    lowerAppliedTypeHead continue subst name args =
+      case Map.lookup name subst >>= \replacement -> applyTypeHead replacement (toListNE args) of
+        Just replacementTy
+          | replacementTy == STVarApp name args -> replacementTy
+          | otherwise -> continue replacementTy
+        Nothing -> STVarApp name args
 
 toListNE :: NonEmpty a -> [a]
 toListNE (x :| xs) = x : xs
@@ -606,12 +645,12 @@ constructorSurfaceExpr scope ctorInfo =
 constructorSurfaceExprRaw :: ElaborateScope -> ConstructorInfo -> SurfaceExpr
 constructorSurfaceExprRaw scope ctorInfo =
   let argNames = ["$" ++ ctorName ctorInfo ++ "_arg" ++ show ix | ix <- [1 .. length (ctorArgs ctorInfo)]]
-      handlerNames = ["$" ++ ctorName ctorInfo ++ "_k" ++ show ix | ix <- [1 .. length ctorOrder]]
+      handlerNames = ["$" ++ ctorName ctorInfo ++ "_k" ++ show ix | ix <- [1 .. length handlerCtorOrder]]
       resultVar =
-        if any (not . null . ctorForalls) ctorOrder || constructorOwnerHasParams
+        if any (not . null . ctorForalls) handlerCtorOrder || constructorOwnerHasParams
           then "$" ++ ctorOwningType ctorInfo ++ "_result"
           else "a"
-      handlerTypes = map (\ctor -> handlerSurfaceType scope ctor (STVar resultVar)) ctorOrder
+      handlerTypes = map (\ctor -> handlerSurfaceType scope ctor (STVar resultVar)) handlerCtorOrder
       selectedHandler =
         foldl
           surfaceApp
@@ -629,8 +668,14 @@ constructorSurfaceExprRaw scope ctorInfo =
       visibleDataInfo <$> resolveConstructorDataInfo scope ctorInfo
     ctorOrder =
       maybe [] dataConstructors ownerInfo
+    handlerCtorOrder =
+      map specializeHandlerConstructor ctorOrder
     constructorOwnerHasParams =
       maybe False (not . null . dataParams) ownerInfo
+    specializeHandlerConstructor ctor =
+      case matchTypes Map.empty (ctorResult ctor) (ctorResult ctorInfo) of
+        Just subst -> specializeConstructorInfo subst ctor
+        Nothing -> ctor
 
 compileExpr :: ElaborateScope -> Maybe SrcType -> P.Expr -> ElaborateM SurfaceExpr
 compileExpr scope mbExpected expr = case expr of
@@ -641,8 +686,7 @@ compileExpr scope mbExpected expr = case expr of
         evidenceSurfaces <- valueEvidenceArgs scope valueInfo []
         pure (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces)
       Just ConstructorValue {valueCtorInfo = ctorInfo} -> do
-        placeholder <- deferConstructorCall scope ctorInfo 0 mbExpected
-        pure (surfaceVar placeholder)
+        compileConstructorHead scope ctorInfo 0 (constructorInitialSubst scope ctorInfo 0 mbExpected)
       Nothing -> throwError (ProgramUnknownValue name)
   ELit lit -> pure (surfaceLit lit)
   ELam param body -> do
@@ -712,8 +756,7 @@ compileResolvedExpr scope mbExpected expr = case expr of
         evidenceSurfaces <- valueResolvedEvidenceArgs scope valueInfo []
         pure (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces)
       ConstructorValue {valueCtorInfo = ctorInfo} -> do
-        placeholder <- deferConstructorCall scope ctorInfo 0 mbExpected
-        pure (surfaceVar placeholder)
+        compileConstructorHead scope ctorInfo 0 (constructorInitialSubst scope ctorInfo 0 mbExpected)
   ELit lit -> pure (surfaceLit lit)
   ELam param body -> do
     runtimeName <- freshRuntimeName (P.paramName param)
@@ -870,11 +913,11 @@ resolvedValueRefDisplayName = P.refDisplayName
 
 compileValueApp :: ElaborateScope -> Maybe SrcType -> ValueInfo -> [P.Expr] -> ElaborateM SurfaceExpr
 compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} args = do
-  let expectedArgTys = constructorExpectedArgTypes scope ctorInfo mbExpected args
+  let (constructorSubst, expectedArgTys) = constructorArgPlan scope ctorInfo mbExpected args
   argSurfaces <-
     zipWithM compileConstructorArg expectedArgTys args
-  placeholder <- deferConstructorCall scope ctorInfo (length args) mbExpected
-  pure (foldl surfaceApp (surfaceVar placeholder) argSurfaces)
+  constructorHead <- compileConstructorHead scope ctorInfo (length args) constructorSubst
+  pure (foldl surfaceApp constructorHead argSurfaces)
   where
     compileConstructorArg expectedTy arg = do
       case inferKnownExprType scope arg of
@@ -924,11 +967,11 @@ compileValueApp scope mbExpected valueInfo args = do
 
 compileResolvedValueApp :: ElaborateScope -> Maybe SrcType -> ValueInfo -> [P.ResolvedExpr] -> ElaborateM SurfaceExpr
 compileResolvedValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} args = do
-  let expectedArgTys = constructorExpectedResolvedArgTypes scope ctorInfo mbExpected args
+  let (constructorSubst, expectedArgTys) = constructorResolvedArgPlan scope ctorInfo mbExpected args
   argSurfaces <-
     zipWithM compileConstructorArg expectedArgTys args
-  placeholder <- deferConstructorCall scope ctorInfo (length args) mbExpected
-  pure (foldl surfaceApp (surfaceVar placeholder) argSurfaces)
+  constructorHead <- compileConstructorHead scope ctorInfo (length args) constructorSubst
+  pure (foldl surfaceApp constructorHead argSurfaces)
   where
     compileConstructorArg expectedTy arg = do
       case inferKnownResolvedExprType scope arg of
@@ -975,6 +1018,33 @@ compileResolvedValueApp scope mbExpected valueInfo args = do
         Just actualTy -> ensureSourceTypeCompatible scope expectedTy actualTy
         Nothing -> pure ()
       compileResolvedExpr scope (Just expectedTy) arg
+
+compileConstructorHead :: ElaborateScope -> ConstructorInfo -> Int -> Map String SrcType -> ElaborateM SurfaceExpr
+compileConstructorHead scope ctorInfo argCount constructorSubst = do
+  placeholder <- deferConstructorCall scope ctorInfo argCount constructorSubst
+  pure (surfaceVar placeholder)
+
+specializeConstructorInfo :: Map String SrcType -> ConstructorInfo -> ConstructorInfo
+specializeConstructorInfo subst ctorInfo =
+  let foralls' =
+        [ (name, fmap (specializeSrcType subst) mbBound)
+          | (name, mbBound) <- ctorForalls ctorInfo,
+            Map.notMember name subst
+        ]
+      args' = map (specializeSrcType subst) (ctorArgs ctorInfo)
+      result' = specializeSrcType subst (ctorResult ctorInfo)
+      bodyTy = foldr STArrow result' args'
+      type' =
+        foldr
+          (\(name, mbBound) acc -> STForall name (fmap SrcBound mbBound) acc)
+          bodyTy
+          foralls'
+   in ctorInfo
+        { ctorType = type',
+          ctorForalls = foralls',
+          ctorArgs = args',
+          ctorResult = result'
+        }
 
 valueExpectedArgTypes :: ValueInfo -> [expr] -> [Maybe SrcType]
 valueExpectedArgTypes valueInfo args =
@@ -1045,14 +1115,7 @@ matchTypesByShape subst template actual = case template of
               (zip (toListNE args) (toListNE args'))
       _ -> Nothing
   STVarApp name args ->
-    case actual of
-      STVarApp name' args'
-        | name == name' && length (toListNE args) == length (toListNE args') ->
-            foldM
-              (\acc (templateTy, actualTy) -> matchTypesByShape acc templateTy actualTy)
-              subst
-              (zip (toListNE args) (toListNE args'))
-      _ -> Nothing
+    matchTypeHeadApplicationWith matchTypesByShape (==) subst name args actual
   STForall name mb body ->
     case actual of
       STForall name' mb' body'
@@ -1074,39 +1137,89 @@ matchTypesByShape subst template actual = case template of
       STBottom -> Just subst
       _ -> Nothing
 
-constructorExpectedArgTypes :: ElaborateScope -> ConstructorInfo -> Maybe SrcType -> [P.Expr] -> [SrcType]
-constructorExpectedArgTypes scope ctorInfo mbExpected args =
-  reverse (snd (foldl step (initialSubst, []) (zip (ctorArgs ctorInfo) args)))
+matchTypeHeadApplicationWith ::
+  (Map String SrcType -> SrcType -> SrcType -> Maybe (Map String SrcType)) ->
+  (SrcType -> SrcType -> Bool) ->
+  Map String SrcType ->
+  String ->
+  NonEmpty SrcType ->
+  SrcType ->
+  Maybe (Map String SrcType)
+matchTypeHeadApplicationWith matchChild sameType subst expectedName expectedArgs actual =
+  case actual of
+    STCon actualName actualArgs ->
+      matchAppliedHead (STBase actualName) (toListNE actualArgs)
+    STVarApp actualName actualArgs ->
+      matchAppliedHead (STVar actualName) (toListNE actualArgs)
+    _ -> Nothing
+  where
+    expectedArgsList = toListNE expectedArgs
+    expectedArgCount = length expectedArgsList
+
+    matchAppliedHead headTy actualArgsList
+      | length actualArgsList < expectedArgCount = Nothing
+      | otherwise = do
+          let (headArgs, matchedArgs) = splitAt (length actualArgsList - expectedArgCount) actualArgsList
+          appliedHead <- applyTypeHead headTy headArgs
+          subst' <- bindTypeHeadVariable sameType subst expectedName appliedHead
+          foldM
+            (\acc (templateTy, actualTy) -> matchChild acc templateTy actualTy)
+            subst'
+            (zip expectedArgsList matchedArgs)
+
+bindTypeHeadVariable ::
+  (SrcType -> SrcType -> Bool) ->
+  Map String SrcType ->
+  String ->
+  SrcType ->
+  Maybe (Map String SrcType)
+bindTypeHeadVariable sameType subst name ty =
+  case Map.lookup name subst of
+    Just existing
+      | sameType existing ty -> Just subst
+      | otherwise -> Nothing
+    Nothing
+      | ty == STVar name -> Just subst
+      | name `Set.member` freeTypeVarsSrcType ty -> Nothing
+      | otherwise -> Just (Map.insert name ty subst)
+
+constructorArgPlan :: ElaborateScope -> ConstructorInfo -> Maybe SrcType -> [P.Expr] -> (Map String SrcType, [SrcType])
+constructorArgPlan scope ctorInfo mbExpected args =
+  let (subst, argTys) = foldl step (initialSubst, []) (zip (ctorArgs ctorInfo) args)
+   in (subst, reverse argTys)
   where
     initialSubst =
-      case mbExpected >>= matchTypesInScope scope Map.empty (constructorOccurrenceType ctorInfo (length args)) of
-        Just subst -> subst
-        Nothing -> Map.empty
+      constructorInitialSubst scope ctorInfo (length args) mbExpected
 
     step (subst, acc) (templateTy, arg) =
-      let expectedTy = specializeSrcType subst templateTy
-          subst' =
+      let subst' =
             case inferKnownExprType scope arg >>= matchTypesInScope scope subst templateTy of
               Just matched -> matched
               Nothing -> subst
+          expectedTy = specializeSrcType subst' templateTy
        in (subst', expectedTy : acc)
 
-constructorExpectedResolvedArgTypes :: ElaborateScope -> ConstructorInfo -> Maybe SrcType -> [P.ResolvedExpr] -> [SrcType]
-constructorExpectedResolvedArgTypes scope ctorInfo mbExpected args =
-  reverse (snd (foldl step (initialSubst, []) (zip (ctorArgs ctorInfo) args)))
+constructorResolvedArgPlan :: ElaborateScope -> ConstructorInfo -> Maybe SrcType -> [P.ResolvedExpr] -> (Map String SrcType, [SrcType])
+constructorResolvedArgPlan scope ctorInfo mbExpected args =
+  let (subst, argTys) = foldl step (initialSubst, []) (zip (ctorArgs ctorInfo) args)
+   in (subst, reverse argTys)
   where
     initialSubst =
-      case mbExpected >>= matchTypesInScope scope Map.empty (constructorOccurrenceType ctorInfo (length args)) of
-        Just subst -> subst
-        Nothing -> Map.empty
+      constructorInitialSubst scope ctorInfo (length args) mbExpected
 
     step (subst, acc) (templateTy, arg) =
-      let expectedTy = specializeSrcType subst templateTy
-          subst' =
+      let subst' =
             case inferKnownResolvedExprType scope arg >>= matchTypesInScope scope subst templateTy of
               Just matched -> matched
               Nothing -> subst
+          expectedTy = specializeSrcType subst' templateTy
        in (subst', expectedTy : acc)
+
+constructorInitialSubst :: ElaborateScope -> ConstructorInfo -> Int -> Maybe SrcType -> Map String SrcType
+constructorInitialSubst scope ctorInfo argCount mbExpected =
+  case mbExpected >>= matchTypesInScope scope Map.empty (constructorOccurrenceType ctorInfo argCount) of
+    Just subst -> subst
+    Nothing -> Map.empty
 
 valueEvidenceArgs :: ElaborateScope -> ValueInfo -> [P.Expr] -> ElaborateM [SurfaceExpr]
 valueEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, valueType = visibleTy, valueConstraints = displayConstraints, valueConstraintInfos = constraints} args
@@ -1680,16 +1793,12 @@ deferMethodCall scope methodInfo fullArity placeholderSourceTy = do
   registerDeferredObligation placeholder placeholderTy (DeferredMethod deferred)
   pure placeholder
 
-deferConstructorCall :: ElaborateScope -> ConstructorInfo -> Int -> Maybe SrcType -> ElaborateM String
-deferConstructorCall scope ctorInfo argCount mbExpected = do
+deferConstructorCall :: ElaborateScope -> ConstructorInfo -> Int -> Map String SrcType -> ElaborateM String
+deferConstructorCall scope ctorInfo argCount initialSubst = do
   placeholder <- freshDeferredConstructorName (ctorName ctorInfo)
   let quantifiedTy = quantifyFreeTypeVars (ctorType ctorInfo)
       occurrenceTy = constructorOccurrenceType ctorInfo argCount
       instBinders = map fst (fst (splitForalls quantifiedTy))
-      initialSubst =
-        case mbExpected >>= matchTypesInScope scope Map.empty occurrenceTy of
-          Just subst -> subst
-          Nothing -> Map.empty
       placeholderSourceTy = specializeQuantifiedType initialSubst quantifiedTy
       placeholderTy = lowerType scope placeholderSourceTy
       bindingMode = DeferredBindingMonomorphic
@@ -1732,12 +1841,9 @@ specializeSrcType subst ty = case ty of
   STCon name args -> STCon name (fmap (specializeSrcType subst) args)
   STVarApp name args ->
     let args' = fmap (specializeSrcType subst) args
-     in case Map.lookup name subst of
-          Just (STVar replacementName) -> STVarApp replacementName args'
-          Just (STBase replacementName) -> STCon replacementName args'
-          Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
-          Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
-          _ -> STVarApp name args'
+     in case Map.lookup name subst >>= \replacement -> applyTypeHead replacement (toListNE args') of
+          Just replacementTy -> replacementTy
+          Nothing -> STVarApp name args'
   STForall name mb body
     | Map.member name subst -> STForall name mb body
     | otherwise ->
@@ -1757,6 +1863,7 @@ deferCaseCall scope dataInfo scrutineeTy resultTy = do
         DeferredCaseCall
           { deferredCasePlaceholder = placeholder,
             deferredCaseDataInfo = dataInfo,
+            deferredCaseScrutineeType = scrutineeTy,
             deferredCaseResultType = resultTy,
             deferredCaseHandlerNames = [],
             deferredCaseExpectedArgCount = 1 + length handlerTys
@@ -2822,15 +2929,7 @@ matchTypeViewAgainstIdentity scope subst template actual =
                 (zip (map sameView (toListNE args)) (zipWithActual actualArgs))
         _ -> Nothing
     STVarApp expectedName args ->
-      case typeViewIdentity actual of
-        STVarApp actualName actualArgs
-          | expectedName == actualName,
-            length (toListNE args) == length (toListNE actualArgs) ->
-              foldM
-                (\acc (templateTy, actualTy) -> matchTypeViewAgainstIdentity scope acc templateTy actualTy)
-                subst
-                (zip (map sameView (toListNE args)) (zipWithActual actualArgs))
-        _ -> Nothing
+      matchTypeViewHeadApplication scope subst expectedName args actual
     STForall name mb body ->
       case typeViewIdentity actual of
         STForall name' mb' body'
@@ -2871,6 +2970,73 @@ matchTypeViewAgainstIdentity scope subst template actual =
         STCon _ displayArgs -> zipWith childView (toListNE displayArgs) (toListNE actualArgs)
         STVarApp _ displayArgs -> zipWith childView (toListNE displayArgs) (toListNE actualArgs)
         _ -> map sameView (toListNE actualArgs)
+
+matchTypeViewHeadApplication ::
+  ElaborateScope ->
+  Map String TypeView ->
+  String ->
+  NonEmpty SrcType ->
+  TypeView ->
+  Maybe (Map String TypeView)
+matchTypeViewHeadApplication scope subst expectedName expectedArgs actual =
+  case typeViewIdentity actual of
+    STCon actualName actualArgs ->
+      matchAppliedHead (STBase actualName) (displayApplicationHead (STBase actualName) actualArgs) (toListNE actualArgs)
+    STVarApp actualName actualArgs ->
+      matchAppliedHead (STVar actualName) (displayApplicationHead (STVar actualName) actualArgs) (toListNE actualArgs)
+    _ -> Nothing
+  where
+    expectedArgsList = toListNE expectedArgs
+    expectedArgCount = length expectedArgsList
+
+    matchAppliedHead identityHead (displayHead, displayArgs) identityArgs
+      | length identityArgs < expectedArgCount = Nothing
+      | length displayArgs /= length identityArgs = Nothing
+      | otherwise = do
+          let prefixLength = length identityArgs - expectedArgCount
+              (identityHeadArgs, matchedIdentityArgs) = splitAt prefixLength identityArgs
+              (displayHeadArgs, matchedDisplayArgs) = splitAt prefixLength displayArgs
+          headIdentity <- applyTypeHead identityHead identityHeadArgs
+          headDisplay <- applyTypeHead displayHead displayHeadArgs
+          subst' <-
+            bindTypeViewHeadVariable
+              scope
+              subst
+              expectedName
+              TypeView
+                { typeViewDisplay = headDisplay,
+                  typeViewIdentity = headIdentity
+                }
+          foldM
+            (\acc (templateTy, actualTy) -> matchTypeViewAgainstIdentity scope acc templateTy actualTy)
+            subst'
+            (zip (map sameView expectedArgsList) (zipWith childView matchedDisplayArgs matchedIdentityArgs))
+
+    displayApplicationHead fallbackHead fallbackArgs =
+      case typeViewDisplay actual of
+        STCon displayName displayArgs -> (STBase displayName, toListNE displayArgs)
+        STVarApp displayName displayArgs -> (STVar displayName, toListNE displayArgs)
+        _ -> (fallbackHead, toListNE fallbackArgs)
+
+    sameView ty = TypeView ty ty
+
+    childView display identityTy = TypeView display identityTy
+
+bindTypeViewHeadVariable ::
+  ElaborateScope ->
+  Map String TypeView ->
+  String ->
+  TypeView ->
+  Maybe (Map String TypeView)
+bindTypeViewHeadVariable scope subst name view =
+  case Map.lookup name subst of
+    Just existing
+      | semanticTypeEqual scope (typeViewIdentity existing) (typeViewIdentity view) -> Just subst
+      | otherwise -> Nothing
+    Nothing
+      | typeViewIdentity view == STVar name -> Just subst
+      | name `Set.member` freeTypeVarsTypeView view -> Nothing
+      | otherwise -> Just (Map.insert name view subst)
 
 preferVisibleSourceType :: ElaborateScope -> SrcType -> SrcType
 preferVisibleSourceType scope = go
@@ -2963,14 +3129,13 @@ matchTypesWith sameType sameTypeHead subst template actual = case template of
               (zip (toListNE args) (toListNE args'))
       _ -> Nothing
   STVarApp name args ->
-    case actual of
-      STVarApp name' args'
-        | name == name' && length (toListNE args) == length (toListNE args') ->
-            foldM
-              (\acc (leftTy, rightTy) -> matchTypesWith sameType sameTypeHead acc leftTy rightTy)
-              subst
-              (zip (toListNE args) (toListNE args'))
-      _ -> Nothing
+    matchTypeHeadApplicationWith
+      (matchTypesWith sameType sameTypeHead)
+      sameType
+      subst
+      name
+      args
+      actual
   STForall name mb body ->
     case actual of
       STForall name' mb' body'

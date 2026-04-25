@@ -60,6 +60,7 @@ module MLF.Frontend.Program.Types
     CheckedProgram (..),
     splitForalls,
     splitArrows,
+    applyTypeHead,
     substituteTypeVar,
     specializeMethodType,
     constrainedVisibleType,
@@ -68,6 +69,7 @@ where
 
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
+import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -567,6 +569,7 @@ data DeferredConstructorCall = DeferredConstructorCall
 data DeferredCaseCall = DeferredCaseCall
   { deferredCasePlaceholder :: String,
     deferredCaseDataInfo :: DataInfo,
+    deferredCaseScrutineeType :: SrcType,
     deferredCaseResultType :: SrcType,
     deferredCaseHandlerNames :: [String],
     deferredCaseExpectedArgCount :: Int
@@ -734,6 +737,23 @@ splitArrows = go []
       STArrow dom cod -> go (acc ++ [dom]) cod
       ty -> (acc, ty)
 
+applyTypeHead :: SrcType -> [SrcType] -> Maybe SrcType
+applyTypeHead headTy args =
+  case headTy of
+    STVar name -> Just (mkVarHead name args)
+    STBase name -> Just (mkConHead name args)
+    STCon name existingArgs -> Just (mkConHead name (toList existingArgs ++ args))
+    STVarApp name existingArgs -> Just (mkVarHead name (toList existingArgs ++ args))
+    _ -> Nothing
+  where
+    mkVarHead name = \case
+      [] -> STVar name
+      arg : rest -> STVarApp name (arg :| rest)
+
+    mkConHead name = \case
+      [] -> STBase name
+      arg : rest -> STCon name (arg :| rest)
+
 substituteTypeVar :: String -> SrcType -> SrcType -> SrcType
 substituteTypeVar needle replacement = go
   where
@@ -746,7 +766,7 @@ substituteTypeVar needle replacement = go
       STCon name args -> STCon name (fmap go args)
       STVarApp name args ->
         let args' = fmap go args
-         in case replacementHead name args' of
+         in case replacementHead name (toList args') of
               Just ty' -> ty'
               Nothing -> STVarApp name args'
       STForall name mb body
@@ -759,13 +779,7 @@ substituteTypeVar needle replacement = go
 
     replacementHead name args
       | name /= needle = Nothing
-      | otherwise =
-          case replacement of
-            STVar replacementName -> Just (STVarApp replacementName args)
-            STBase replacementName -> Just (STCon replacementName args)
-            STCon replacementName replacementArgs -> Just (STCon replacementName (replacementArgs <> args))
-            STVarApp replacementName replacementArgs -> Just (STVarApp replacementName (replacementArgs <> args))
-            _ -> Nothing
+      | otherwise = applyTypeHead replacement args
 
 freeTypeVarsSrcType :: SrcType -> Set String
 freeTypeVarsSrcType = go Set.empty

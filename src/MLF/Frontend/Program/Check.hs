@@ -64,6 +64,7 @@ import MLF.Frontend.Program.Types
     ConstraintInfo (..),
     TypeView (..),
     ValueInfo (..),
+    applyTypeHead,
     applyConstraintInfoSubst,
     classInfoSymbolIdentity,
     constrainedVisibleType,
@@ -1660,9 +1661,27 @@ addConstructorValues moduleName0 dataInfos =
 
 constructorRuntimeBindingRecoverable :: ConstructorInfo -> Bool
 constructorRuntimeBindingRecoverable ctor =
-  let evidenceVars = foldMap freeTypeVars (ctorArgs ctor ++ [ctorResult ctor])
-   in all (\(name, _) -> name `Set.member` evidenceVars) (ctorForalls ctor)
+  let involvedTypes =
+        ctorArgs ctor
+          ++ [ctorResult ctor]
+          ++ mapMaybe snd (ctorForalls ctor)
+      evidenceVars = foldMap freeTypeVars involvedTypes
+   in not (any hasVariableHeadApplication involvedTypes)
+        && all (\(name, _) -> name `Set.member` evidenceVars) (ctorForalls ctor)
   where
+    hasVariableHeadApplication ty =
+      case ty of
+        STVar {} -> False
+        STArrow dom cod -> hasVariableHeadApplication dom || hasVariableHeadApplication cod
+        STBase {} -> False
+        STCon _ args -> any hasVariableHeadApplication args
+        STVarApp {} -> True
+        STForall _ mb body ->
+          maybe False (hasVariableHeadApplication . unSrcBound) mb
+            || hasVariableHeadApplication body
+        STMu _ body -> hasVariableHeadApplication body
+        STBottom -> False
+
     freeTypeVars ty =
       case ty of
         STVar name -> Set.singleton name
@@ -2103,16 +2122,35 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
                 (\acc (leftTy, rightTy) -> unifyOverlap acc leftTy rightTy)
                 subst
                 (zip (NE.toList leftArgs) (NE.toList rightArgs))
-        (STVarApp leftName leftArgs, STVarApp rightName rightArgs)
-          | leftName == rightName && NE.length leftArgs == NE.length rightArgs ->
-              foldM
-                (\acc (leftTy, rightTy) -> unifyOverlap acc leftTy rightTy)
-                subst
-                (zip (NE.toList leftArgs) (NE.toList rightArgs))
+        (STVarApp leftName leftArgs, rightTy) ->
+          unifyOverlapTypeHead subst leftName (NE.toList leftArgs) rightTy
+        (leftTy, STVarApp rightName rightArgs) ->
+          unifyOverlapTypeHead subst rightName (NE.toList rightArgs) leftTy
         (STArrow leftDom leftCod, STArrow rightDom rightCod) -> do
           subst' <- unifyOverlap subst leftDom rightDom
           unifyOverlap subst' leftCod rightCod
         _ -> Nothing
+
+    unifyOverlapTypeHead subst name templateArgs actual =
+      case actual of
+        STCon actualName actualArgs ->
+          matchAppliedHead (STBase actualName) (NE.toList actualArgs)
+        STVarApp actualName actualArgs ->
+          matchAppliedHead (STVar actualName) (NE.toList actualArgs)
+        _ -> Nothing
+      where
+        templateArgCount = length templateArgs
+
+        matchAppliedHead headTy actualArgs
+          | length actualArgs < templateArgCount = Nothing
+          | otherwise = do
+              let (headArgs, matchedArgs) = splitAt (length actualArgs - templateArgCount) actualArgs
+              appliedHead <- applyTypeHead headTy headArgs
+              subst' <- bindOverlap name appliedHead subst
+              foldM
+                (\acc (templateTy, actualTy) -> unifyOverlap acc templateTy actualTy)
+                subst'
+                (zip templateArgs matchedArgs)
 
     bindOverlap name ty subst =
       case Map.lookup name subst of
@@ -2132,12 +2170,9 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
         STCon name args -> STCon name (fmap (applyOverlapSubst subst) args)
         STVarApp name args ->
           let args' = fmap (applyOverlapSubst subst) args
-           in case Map.lookup name subst of
-                Just (STVar replacementName) -> STVarApp replacementName args'
-                Just (STBase replacementName) -> STCon replacementName args'
-                Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
-                Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
-                _ -> STVarApp name args'
+           in case Map.lookup name subst >>= \replacement -> applyTypeHead replacement (NE.toList args') of
+                Just replacementTy -> replacementTy
+                Nothing -> STVarApp name args'
         STForall name mb body ->
           STForall name (fmap (SrcBound . applyOverlapSubst subst . unSrcBound) mb) (applyOverlapSubst subst body)
         STMu name body -> STMu name (applyOverlapSubst subst body)

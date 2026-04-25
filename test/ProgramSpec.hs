@@ -630,6 +630,58 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs higher-kinded class method over a parameterized data constructor"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Boxed, Box(..), truthy, main) {"
+                , "  class Boxed (f :: * -> *) {"
+                , "    truthy : f Bool -> Bool;"
+                , "  }"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  instance Boxed Box {"
+                , "    truthy = \\box true;"
+                , "  }"
+                , ""
+                , "  def main : Bool = truthy (Box false);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs higher-kinded data field over a concrete constructor head"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Box(..), Wrap(..), main) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data Wrap (f :: * -> *) a ="
+                , "      Wrap : f a -> Wrap f a;"
+                , ""
+                , "  def main : Bool = case Wrap (Box false) of {"
+                , "    Wrap box -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "rejects first-order parameters in higher-kinded data fields"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Bad, main) {"
+                , "  data Bad (f :: *) ="
+                , "      Bad : f Bool -> Bad f;"
+                , ""
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramTypeArityMismatch")
+    , ProgramMatrixCase
         "GADT indexed constructor application should run through recursive case"
         (ProgramFile "test/programs/recursive-adt/recursive-gadt.mlfp")
         (ExpectRunValue "true")
@@ -2351,7 +2403,7 @@ spec = do
                         { dataName = "Apply"
                         , dataInfoSymbol = typeIdentity
                         , dataModule = "Main"
-                        , dataTypeParams = []
+                        , dataTypeParams = [TypeParam "f" (KArrow KType KType), firstOrderTypeParam "a"]
                         , dataParams = ["f", "a"]
                         , dataConstructors = [applyCtor]
                         }
