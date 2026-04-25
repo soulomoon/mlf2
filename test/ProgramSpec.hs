@@ -4,7 +4,7 @@ import Data.Either (isRight)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
-import MLF.API (SrcTy (..))
+import MLF.API (Lit (..), SrcTy (..))
 import MLF.Frontend.Program.Check (checkResolvedProgram)
 import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope)
 import MLF.Frontend.Program.Finalize (recoverSourceType, sourceForallMatches)
@@ -2412,6 +2412,32 @@ spec = do
                 (const False)
 
     describe "MLF.Program diagnostics" $ do
+        it "reports variable-headed direct AST types as program errors" $ do
+            let program =
+                    Program
+                        [ Module
+                            { moduleName = "Main"
+                            , moduleExports = Just [ExportValue "main"]
+                            , moduleImports = []
+                            , moduleDecls =
+                                [ DeclDef
+                                    DefDecl
+                                        { defDeclName = "main"
+                                        , defDeclType = ConstrainedType [] (STVarApp "f" (STBase "Int" :| []))
+                                        , defDeclExpr = ELit (LInt 1)
+                                        }
+                                ]
+                            }
+                        ]
+            checkProgram program `shouldSatisfy` either
+                ( \err ->
+                    case err of
+                        ProgramPipelineError msg ->
+                            "variable-headed source type application `f`" `isInfixOf` msg
+                        _ -> False
+                )
+                (const False)
+
         it "rejects duplicate data type parameter names" $ do
             let programText =
                     unlines
