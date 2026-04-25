@@ -60,6 +60,7 @@ import MLF.Frontend.Program.Types
     TypeView (..),
     ValueInfo (..),
     applyConstraintInfoSubst,
+    constructorOwnerRuntimeTypeTrackable,
     freeTypeVarsTypeView,
     SymbolIdentity,
     splitArrows,
@@ -656,7 +657,7 @@ resolveDeferredConstructors scope env deferredConstructors = go env
       case filter (`Map.notMember` substFinal) instBinders of
         [] -> do
           ctorHead <-
-            if constructorRuntimeTypeTrackable ctorInfo
+            if constructorOwnerRuntimeTypeTrackable (elaborateScopeDataTypes scope) ctorInfo
               then
                 foldM
                   ( \headAcc varName ->
@@ -748,42 +749,6 @@ applyConstructorInfoSubst subst ctorInfo =
 applyConstructorSubst :: Map String SrcType -> SrcType -> SrcType
 applyConstructorSubst subst ty =
   Map.foldrWithKey substituteTypeVar ty subst
-
-constructorRuntimeTypeTrackable :: ConstructorInfo -> Bool
-constructorRuntimeTypeTrackable ctor =
-  let involvedTypes =
-        ctorArgs ctor
-          ++ [ctorResult ctor]
-          ++ [bound | (_, Just bound) <- ctorForalls ctor]
-      evidenceVars = foldMap freeTypeVars involvedTypes
-   in not (any hasVariableHeadApplication involvedTypes)
-        && all (\(name, _) -> name `Set.member` evidenceVars) (ctorForalls ctor)
-  where
-    hasVariableHeadApplication ty =
-      case ty of
-        STVar {} -> False
-        STArrow dom cod -> hasVariableHeadApplication dom || hasVariableHeadApplication cod
-        STBase {} -> False
-        STCon _ args -> any hasVariableHeadApplication args
-        STVarApp {} -> True
-        STForall _ mb body ->
-          maybe False (hasVariableHeadApplication . unSrcBound) mb
-            || hasVariableHeadApplication body
-        STMu _ body -> hasVariableHeadApplication body
-        STBottom -> False
-
-    freeTypeVars ty =
-      case ty of
-        STVar name -> Set.singleton name
-        STArrow dom cod -> freeTypeVars dom `Set.union` freeTypeVars cod
-        STBase {} -> Set.empty
-        STCon _ args -> foldMap freeTypeVars args
-        STVarApp name args -> Set.insert name (foldMap freeTypeVars args)
-        STForall name mb body ->
-          maybe Set.empty (freeTypeVars . unSrcBound) mb
-            `Set.union` Set.delete name (freeTypeVars body)
-        STMu name body -> Set.delete name (freeTypeVars body)
-        STBottom -> Set.empty
 
 resolveDeferredCases :: ElaborateScope -> Map String DeferredCaseCall -> Env -> ElabTerm -> Either ProgramError (Env, ElabTerm)
 resolveDeferredCases scope deferredCases = go

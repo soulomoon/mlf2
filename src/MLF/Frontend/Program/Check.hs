@@ -69,6 +69,7 @@ import MLF.Frontend.Program.Types
     classInfoSymbolIdentity,
     constrainedVisibleType,
     constructorInfoSymbolIdentity,
+    dataConstructorsRuntimeTypeTrackable,
     dataInfoSymbolIdentity,
     diagnosticForProgramError,
     instanceInfoClassSymbolIdentity,
@@ -503,8 +504,8 @@ checkModule resolvedModule priorModules = do
       (liftEither . (finalizeBinding elaborateScope . lowerConstructorBinding elaborateScope))
       [ ctor
         | dataInfo <- Map.elems localData,
-          ctor <- dataConstructors dataInfo,
-          constructorRuntimeBindingRecoverable ctor
+          dataConstructorsRuntimeTypeTrackable dataInfo,
+          ctor <- dataConstructors dataInfo
       ]
   instanceBindings <- concat <$> mapM (checkInstance elaborateScope scope1) (derivedInstances ++ explicitInstances resolvedSyntax)
   defBindings <- mapM (checkDef elaborateScope scope1) (moduleDefDecls resolvedSyntax)
@@ -1658,42 +1659,6 @@ addConstructorValues moduleName0 dataInfos =
         | dataInfo <- Map.elems dataInfos,
           ctor <- dataConstructors dataInfo
       ]
-
-constructorRuntimeBindingRecoverable :: ConstructorInfo -> Bool
-constructorRuntimeBindingRecoverable ctor =
-  let involvedTypes =
-        ctorArgs ctor
-          ++ [ctorResult ctor]
-          ++ mapMaybe snd (ctorForalls ctor)
-      evidenceVars = foldMap freeTypeVars involvedTypes
-   in not (any hasVariableHeadApplication involvedTypes)
-        && all (\(name, _) -> name `Set.member` evidenceVars) (ctorForalls ctor)
-  where
-    hasVariableHeadApplication ty =
-      case ty of
-        STVar {} -> False
-        STArrow dom cod -> hasVariableHeadApplication dom || hasVariableHeadApplication cod
-        STBase {} -> False
-        STCon _ args -> any hasVariableHeadApplication args
-        STVarApp {} -> True
-        STForall _ mb body ->
-          maybe False (hasVariableHeadApplication . unSrcBound) mb
-            || hasVariableHeadApplication body
-        STMu _ body -> hasVariableHeadApplication body
-        STBottom -> False
-
-    freeTypeVars ty =
-      case ty of
-        STVar name -> Set.singleton name
-        STArrow dom cod -> freeTypeVars dom `Set.union` freeTypeVars cod
-        STBase {} -> Set.empty
-        STCon _ args -> foldMap freeTypeVars args
-        STVarApp name args -> Set.insert name (foldMap freeTypeVars args)
-        STForall name mb body ->
-          maybe Set.empty (freeTypeVars . unSrcBound) mb
-            `Set.union` Set.delete name (freeTypeVars body)
-        STMu name body -> Set.delete name (freeTypeVars body)
-        STBottom -> Set.empty
 
 synthesizeDerivedInstances :: DisplayNameEnv -> Scope -> ResolvedModule -> P.ResolvedModuleSyntax -> TcM [P.ResolvedInstanceDecl]
 synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do

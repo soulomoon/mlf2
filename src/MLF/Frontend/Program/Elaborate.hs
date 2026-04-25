@@ -138,7 +138,7 @@ mkElaborateScope values0 dataTypes classes0 instances0 =
         }
   where
     shouldTrackRuntimeType ConstructorValue {valueCtorInfo = ctorInfo} =
-      constructorRuntimeTypeTrackable ctorInfo
+      constructorOwnerRuntimeTypeTrackable dataTypes ctorInfo
     shouldTrackRuntimeType OverloadedMethod {} = False
     shouldTrackRuntimeType _ = True
 
@@ -157,29 +157,6 @@ mkElaborateScope values0 dataTypes classes0 instances0 =
           | instanceInfo <- instances0,
             methodValue@OrdinaryValue {valueRuntimeName = runtimeName} <- Map.elems (instanceMethods instanceInfo)
         ]
-
-constructorRuntimeTypeTrackable :: ConstructorInfo -> Bool
-constructorRuntimeTypeTrackable ctor =
-  let involvedTypes =
-        ctorArgs ctor
-          ++ [ctorResult ctor]
-          ++ [bound | (_, Just bound) <- ctorForalls ctor]
-      evidenceVars = foldMap freeTypeVarsSrcType involvedTypes
-   in not (any hasVariableHeadApplication involvedTypes)
-        && all (\(name, _) -> name `Set.member` evidenceVars) (ctorForalls ctor)
-  where
-    hasVariableHeadApplication ty =
-      case ty of
-        STVar {} -> False
-        STArrow dom cod -> hasVariableHeadApplication dom || hasVariableHeadApplication cod
-        STBase {} -> False
-        STCon _ args -> any hasVariableHeadApplication args
-        STVarApp {} -> True
-        STForall _ mb body ->
-          maybe False (hasVariableHeadApplication . unSrcBound) mb
-            || hasVariableHeadApplication body
-        STMu _ body -> hasVariableHeadApplication body
-        STBottom -> False
 
 indexByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity [(String, a)]
 indexByIdentity identityOf =
@@ -361,28 +338,32 @@ quantifyMethodLocalVars headVars constraints ty =
 lowerTypeRaw :: Map String DataInfo -> SrcType -> SrcType
 lowerTypeRaw dataTypes = lower Map.empty Nothing
   where
-    lower subst currentData ty = case ty of
+    lower subst currentData = lowerWith Set.empty subst currentData
+
+    lowerWith seen subst currentData ty = case ty of
       STVar name ->
         case Map.lookup name subst of
           Just replacement
-            | replacement /= ty -> lower subst currentData replacement
+            | replacement /= ty && not (substitutionCycle name seen replacement) ->
+                lowerWith (Set.insert name seen) subst currentData replacement
           _ -> ty
-      STArrow dom cod -> STArrow (lower subst currentData dom) (lower subst currentData cod)
+      STArrow dom cod -> STArrow (lowerWith seen subst currentData dom) (lowerWith seen subst currentData cod)
       STBase name ->
         case Map.lookup name dataTypes of
           Just info -> encodeDataType subst info []
           Nothing -> STBase name
       STCon name args ->
         case Map.lookup name dataTypes of
-          Just info -> encodeDataType subst info (actualArgsForData (lower subst currentData) info (toListNE args))
-          Nothing -> STCon name (fmap (lower subst currentData) args)
+          Just info -> encodeDataType subst info (actualArgsForData (lowerWith seen subst currentData) info (toListNE args))
+          Nothing -> STCon name (fmap (lowerWith seen subst currentData) args)
       STVarApp name args ->
-        let args' = fmap (lower subst currentData) args
-         in lowerAppliedTypeHead (lower subst currentData) subst name args'
+        let args' = fmap (lowerWith seen subst currentData) args
+         in lowerAppliedTypeHead (\seen' -> lowerWith seen' subst currentData) subst seen name args'
       STForall name mb body ->
         let subst' = Map.delete name subst
-         in STForall name (fmap (SrcBound . lower subst' currentData . unSrcBound) mb) (lower subst' currentData body)
-      STMu name body -> STMu name (lower (Map.delete name subst) currentData body)
+            seen' = Set.delete name seen
+         in STForall name (fmap (SrcBound . lowerWith seen' subst' currentData . unSrcBound) mb) (lowerWith seen' subst' currentData body)
+      STMu name body -> STMu name (lowerWith (Set.delete name seen) (Map.delete name subst) currentData body)
       STBottom -> STBottom
 
     encodeDataType subst info actualArgs =
@@ -400,8 +381,8 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
         STArrow
         resultTy
         [ foldr
-            (\(name, mbBound) acc ->
-               STForall name (fmap (SrcBound . lowerCtorArg subst ownerIdentity selfTy) mbBound) acc
+            ( \(name, mbBound) acc ->
+                STForall name (fmap (SrcBound . lowerCtorArg subst ownerIdentity selfTy) mbBound) acc
             )
             (foldr STArrow resultTy (map (lowerCtorArg subst ownerIdentity selfTy) (ctorArgs ctor)))
             (ctorForalls ctor)
@@ -409,13 +390,16 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
           , let ownerIdentity = Just (dataIdentity info)
         ]
 
-    lowerCtorArg subst currentData selfTy ty = case ty of
+    lowerCtorArg subst currentData selfTy = lowerCtorArgWith Set.empty subst currentData selfTy
+
+    lowerCtorArgWith seen subst currentData selfTy ty = case ty of
       STVar name ->
         case Map.lookup name subst of
           Just replacement
-            | replacement /= ty -> lowerCtorArg subst currentData selfTy replacement
+            | replacement /= ty && not (substitutionCycle name seen replacement) ->
+                lowerCtorArgWith (Set.insert name seen) subst currentData selfTy replacement
           _ -> ty
-      STArrow dom cod -> STArrow (lowerCtorArg subst currentData selfTy dom) (lowerCtorArg subst currentData selfTy cod)
+      STArrow dom cod -> STArrow (lowerCtorArgWith seen subst currentData selfTy dom) (lowerCtorArgWith seen subst currentData selfTy cod)
       STBase name
         | isCurrentDataAlias currentData name -> selfTy
         | otherwise ->
@@ -426,15 +410,16 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
         | isCurrentDataAlias currentData name -> selfTy
         | otherwise ->
             case Map.lookup name dataTypes of
-              Just info -> encodeDataType subst info (actualArgsForData (lowerCtorArg subst currentData selfTy) info (toListNE args))
-              Nothing -> STCon name (fmap (lowerCtorArg subst currentData selfTy) args)
+              Just info -> encodeDataType subst info (actualArgsForData (lowerCtorArgWith seen subst currentData selfTy) info (toListNE args))
+              Nothing -> STCon name (fmap (lowerCtorArgWith seen subst currentData selfTy) args)
       STVarApp name args ->
-        let args' = fmap (lowerCtorArg subst currentData selfTy) args
-         in lowerAppliedTypeHead (lowerCtorArg subst currentData selfTy) subst name args'
+        let args' = fmap (lowerCtorArgWith seen subst currentData selfTy) args
+         in lowerAppliedTypeHead (\seen' -> lowerCtorArgWith seen' subst currentData selfTy) subst seen name args'
       STForall name mb body ->
         let subst' = Map.delete name subst
-         in STForall name (fmap (SrcBound . lowerCtorArg subst' currentData selfTy . unSrcBound) mb) (lowerCtorArg subst' currentData selfTy body)
-      STMu name body -> STMu name (lowerCtorArg (Map.delete name subst) currentData selfTy body)
+            seen' = Set.delete name seen
+         in STForall name (fmap (SrcBound . lowerCtorArgWith seen' subst' currentData selfTy . unSrcBound) mb) (lowerCtorArgWith seen' subst' currentData selfTy body)
+      STMu name body -> STMu name (lowerCtorArgWith (Set.delete name seen) (Map.delete name subst) currentData selfTy body)
       STBottom -> STBottom
 
     isCurrentDataAlias currentData name =
@@ -458,11 +443,22 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
         )
         (dataTypeParams info)
 
-    lowerAppliedTypeHead continue subst name args =
+    substitutionCycle name seen replacement =
+      name `Set.member` seen
+        || maybe False (\replacementName -> replacementName == name || replacementName `Set.member` seen) (variableHeadName replacement)
+
+    variableHeadName ty =
+      case ty of
+        STVar replacementName -> Just replacementName
+        STVarApp replacementName _ -> Just replacementName
+        _ -> Nothing
+
+    lowerAppliedTypeHead continue subst seen name args =
       case Map.lookup name subst >>= \replacement -> applyTypeHead replacement (toListNE args) of
         Just replacementTy
           | replacementTy == STVarApp name args -> replacementTy
-          | otherwise -> continue replacementTy
+          | substitutionCycle name seen replacementTy -> STVarApp name args
+          | otherwise -> continue (Set.insert name seen) replacementTy
         Nothing -> STVarApp name args
 
 toListNE :: NonEmpty a -> [a]

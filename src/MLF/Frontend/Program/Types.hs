@@ -62,6 +62,8 @@ module MLF.Frontend.Program.Types
     splitArrows,
     applyTypeHead,
     substituteTypeVar,
+    constructorOwnerRuntimeTypeTrackable,
+    dataConstructorsRuntimeTypeTrackable,
     specializeMethodType,
     constrainedVisibleType,
   )
@@ -641,6 +643,39 @@ dataInfoSymbolIdentity = dataInfoSymbol
 
 constructorInfoSymbolIdentity :: DataInfo -> ConstructorInfo -> SymbolIdentity
 constructorInfoSymbolIdentity _ = ctorInfoSymbol
+
+constructorOwnerRuntimeTypeTrackable :: Map String DataInfo -> ConstructorInfo -> Bool
+constructorOwnerRuntimeTypeTrackable dataInfos ctor =
+  case [dataInfo | dataInfo <- Map.elems dataInfos, dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctor] of
+    dataInfo : _ -> dataConstructorsRuntimeTypeTrackable dataInfo
+    [] -> constructorRuntimeTypeShapeTrackable ctor
+
+dataConstructorsRuntimeTypeTrackable :: DataInfo -> Bool
+dataConstructorsRuntimeTypeTrackable =
+  all constructorRuntimeTypeShapeTrackable . dataConstructors
+
+constructorRuntimeTypeShapeTrackable :: ConstructorInfo -> Bool
+constructorRuntimeTypeShapeTrackable ctor =
+  let involvedTypes =
+        ctorArgs ctor
+          ++ [ctorResult ctor]
+          ++ [bound | (_, Just bound) <- ctorForalls ctor]
+      evidenceVars = foldMap freeTypeVarsSrcType involvedTypes
+   in not (any hasVariableHeadApplication involvedTypes)
+        && all (\(name, _) -> name `Set.member` evidenceVars) (ctorForalls ctor)
+  where
+    hasVariableHeadApplication ty =
+      case ty of
+        STVar {} -> False
+        STArrow dom cod -> hasVariableHeadApplication dom || hasVariableHeadApplication cod
+        STBase {} -> False
+        STCon _ args -> any hasVariableHeadApplication args
+        STVarApp {} -> True
+        STForall _ mb body ->
+          maybe False (hasVariableHeadApplication . unSrcBound) mb
+            || hasVariableHeadApplication body
+        STMu _ body -> hasVariableHeadApplication body
+        STBottom -> False
 
 classInfoSymbolIdentity :: ClassInfo -> SymbolIdentity
 classInfoSymbolIdentity = classInfoSymbol

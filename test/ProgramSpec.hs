@@ -669,6 +669,44 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs swapped type parameters through recursive data lowering"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Pair(..), FlipPair(..), main) {"
+                , "  data Pair a b ="
+                , "      Pair : a -> b -> Pair a b;"
+                , ""
+                , "  data FlipPair a b ="
+                , "      FlipPair : Pair b a -> FlipPair a b;"
+                , ""
+                , "  def main : Bool = case (FlipPair (Pair false 1) : FlipPair Int Bool) of {"
+                , "    FlipPair pair -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs nullary constructor from mixed higher-kinded data type"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Box(..), MaybeF(..), main) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def main : Bool = case (NothingF : MaybeF Box Bool) of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "rejects first-order parameters in higher-kinded data fields"
         ( InlineProgram $
             unlines
