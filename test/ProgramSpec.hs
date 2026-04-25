@@ -2229,6 +2229,21 @@ spec = do
                         )
             sourceForallMatches expected actual `shouldBe` True
 
+        it "matches bound variable-headed applications against instantiated constructor heads" $ do
+            let expected =
+                    STForall
+                        "f"
+                        Nothing
+                        ( STArrow
+                            (STVarApp "f" (STVar "a" :| []))
+                            (STVarApp "f" (STVar "a" :| []))
+                        )
+                actual =
+                    STArrow
+                        (STCon "Either" (STBase "Int" :| [STVar "a"]))
+                        (STCon "Either" (STBase "Int" :| [STVar "a"]))
+            sourceForallMatches expected actual `shouldBe` True
+
         it "rejects inconsistent variable-headed application alpha-renaming" $ do
             let expected =
                     STForall
@@ -2242,6 +2257,21 @@ spec = do
                     STArrow
                         (STVarApp "g" (STVar "a" :| []))
                         (STVarApp "h" (STVar "a" :| []))
+            sourceForallMatches expected actual `shouldBe` False
+
+        it "rejects inconsistent instantiated constructor heads" $ do
+            let expected =
+                    STForall
+                        "f"
+                        Nothing
+                        ( STArrow
+                            (STVarApp "f" (STVar "a" :| []))
+                            (STVarApp "f" (STVar "a" :| []))
+                        )
+                actual =
+                    STArrow
+                        (STCon "Either" (STBase "Int" :| [STVar "a"]))
+                        (STCon "Maybe" (STVar "a" :| []))
             sourceForallMatches expected actual `shouldBe` False
 
         it "rejects bound variable applications without lowering STVarApp" $ do

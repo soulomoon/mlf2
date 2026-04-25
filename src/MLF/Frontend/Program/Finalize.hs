@@ -397,15 +397,7 @@ sourceForallMatches expected actual =
                     (zip (toListNE args) (toListNE actualArgs))
             _ -> Nothing
         STVarApp name args ->
-          case actualTy of
-            STVarApp actualName actualArgs
-              | length (toListNE args) == length (toListNE actualArgs) -> do
-                  subst' <- matchVarAppHead bound subst name actualName
-                  foldM
-                    (\acc (leftTy, rightTy) -> match bound acc leftTy rightTy)
-                    subst'
-                    (zip (toListNE args) (toListNE actualArgs))
-            _ -> Nothing
+          matchVarApp bound subst name args actualTy
         STMu _ body -> match bound subst body actualTy
         STBottom ->
           case actualTy of
@@ -434,10 +426,45 @@ sourceForallMatches expected actual =
             STMu name body -> go (Set.insert name boundVars) body
             STBottom -> Set.empty
 
-    matchVarAppHead bound subst expectedName actualName
-      | expectedName `Set.member` bound = matchBoundVar subst expectedName (STVar actualName)
-      | actualName == expectedName = Just subst
-      | otherwise = Nothing
+    matchVarApp bound subst expectedName args actualTy
+      | expectedName `Set.member` bound =
+          case actualTy of
+            STCon actualName actualArgs ->
+              matchAppliedHead actualName toConHead (toListNE actualArgs)
+            STVarApp actualName actualArgs ->
+              matchAppliedHead actualName toVarHead (toListNE actualArgs)
+            _ -> Nothing
+      | otherwise =
+          matchRigidVarAppHead expectedName
+      where
+        expectedArgs = toListNE args
+        expectedArgCount = length expectedArgs
+
+        matchAppliedHead actualName headFromPrefix actualArgs
+          | length actualArgs < expectedArgCount = Nothing
+          | otherwise = do
+              let (headArgs, appliedArgs) = splitAt (length actualArgs - expectedArgCount) actualArgs
+              subst' <- matchBoundVar subst expectedName (headFromPrefix actualName headArgs)
+              foldM
+                (\acc (leftTy, rightTy) -> match bound acc leftTy rightTy)
+                subst'
+                (zip expectedArgs appliedArgs)
+
+        matchRigidVarAppHead rigidName =
+          case actualTy of
+            STVarApp actualName actualArgs
+              | rigidName == actualName && expectedArgCount == length (toListNE actualArgs) ->
+                  foldM
+                    (\acc (leftTy, rightTy) -> match bound acc leftTy rightTy)
+                    subst
+                    (zip expectedArgs (toListNE actualArgs))
+            _ -> Nothing
+
+        toConHead actualName [] = STBase actualName
+        toConHead actualName (arg : rest) = STCon actualName (arg :| rest)
+
+        toVarHead actualName [] = STVar actualName
+        toVarHead actualName (arg : rest) = STVarApp actualName (arg :| rest)
 
     matchBoundVar subst name actualTy =
       case Map.lookup name subst of
