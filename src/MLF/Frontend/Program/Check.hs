@@ -1242,30 +1242,6 @@ constructorOwnerDataInfoFromShapes ctorInfo =
           ctorOwnerConstructors = ownerShapes
         }
 
-    constructorShapeSymbol shape
-      | sameShapeAsCtor shape ctorInfo = ctorInfoSymbol ctorInfo
-      | otherwise =
-          SymbolIdentity
-            { symbolNamespace = SymbolConstructor,
-              symbolDefiningModule = symbolDefiningModule ownerIdentity,
-              symbolDefiningName = constructorShapeName shape,
-              symbolOwnerIdentity =
-                Just
-                  ( SymbolOwnerType
-                      (symbolDefiningModule ownerIdentity)
-                      (symbolDefiningName ownerIdentity)
-                  )
-            }
-
-    constructorShapeRuntimeName shape
-      | sameShapeAsCtor shape ctorInfo = ctorRuntimeName ctorInfo
-      | otherwise = qualify (symbolDefiningModule ownerIdentity) (constructorShapeName shape)
-
-sameShapeAsCtor :: ConstructorShape -> ConstructorInfo -> Bool
-sameShapeAsCtor shape ctorInfo =
-  constructorShapeIndex shape == ctorIndex ctorInfo
-    && constructorShapeName shape == ctorName ctorInfo
-
 constructorShapeType :: ConstructorShape -> SrcType
 constructorShapeType shape =
   foldr

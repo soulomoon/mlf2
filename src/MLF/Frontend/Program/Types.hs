@@ -460,6 +460,8 @@ data EvidenceInfo = EvidenceInfo
 
 data ConstructorShape = ConstructorShape
   { constructorShapeName :: P.ConstructorName,
+    constructorShapeSymbol :: SymbolIdentity,
+    constructorShapeRuntimeName :: String,
     constructorShapeForalls :: [(String, Maybe SrcType)],
     constructorShapeArgs :: [SrcType],
     constructorShapeResult :: SrcType,
@@ -711,6 +713,8 @@ constructorShapeFromInfo :: ConstructorInfo -> ConstructorShape
 constructorShapeFromInfo ctor =
   ConstructorShape
     { constructorShapeName = ctorName ctor,
+      constructorShapeSymbol = ctorInfoSymbol ctor,
+      constructorShapeRuntimeName = ctorRuntimeName ctor,
       constructorShapeForalls = ctorForalls ctor,
       constructorShapeArgs = ctorArgs ctor,
       constructorShapeResult = ctorResult ctor,

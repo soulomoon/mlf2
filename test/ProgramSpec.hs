@@ -835,6 +835,29 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs aliased bulk-imported hidden-owner constructors in one case"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), NothingF, JustF) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , "  def main : Bool = case C.JustF (C.Box true) of {"
+                , "    C.NothingF -> false;"
+                , "    C.JustF box -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs value-exported GADT constructor when owner type is not exported"
         ( InlineProgram $
             unlines
@@ -2702,6 +2725,8 @@ spec = do
                 nothingShape =
                     ConstructorShape
                         { constructorShapeName = "NothingF"
+                        , constructorShapeSymbol = ctorIdentity "NothingF"
+                        , constructorShapeRuntimeName = "Core__NothingF"
                         , constructorShapeForalls = []
                         , constructorShapeArgs = []
                         , constructorShapeResult = resultTy
@@ -2711,6 +2736,8 @@ spec = do
                 justShape =
                     ConstructorShape
                         { constructorShapeName = "JustF"
+                        , constructorShapeSymbol = ctorIdentity "JustF"
+                        , constructorShapeRuntimeName = "Core__JustF"
                         , constructorShapeForalls = []
                         , constructorShapeArgs = [STVarApp "f" (STVar "a" :| [])]
                         , constructorShapeResult = resultTy
