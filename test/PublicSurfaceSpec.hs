@@ -22,6 +22,10 @@ spec = describe "Public surface contracts" $ do
       let ty = STMu "a" (STCon "List" (STVar "a" :| []))
       parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty
 
+    it "roundtrips variable-headed surface types through parse(pretty(type))" $ do
+      let ty = STVarApp "f" (STVarApp "g" (STVar "a" :| []) :| [STVar "b"])
+      parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty
+
     it "normalizes raw surface types through the umbrella API" $ do
       expectRight (parseRawEmlfType "∀(b ⩾ a). b") $ \ty ->
         normalizeType ty `shouldBe` Right (STVar "a")

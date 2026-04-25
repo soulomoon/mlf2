@@ -2404,6 +2404,62 @@ spec = do
                 other -> expectationFailure ("unexpected program shape: " ++ show other)
             parseRawProgram (prettyProgram program) `shouldBe` Right program
 
+        it "parses and pretty-prints variable-headed higher-kinded field types" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Functor, Higher(..)) {"
+                        , "  class Functor (f :: * -> *) {"
+                        , "    map : forall a b. (a -> b) -> f a -> f b;"
+                        , "  }"
+                        , ""
+                        , "  data Higher (f :: * -> *) a ="
+                        , "      Higher : f a -> Higher f a;"
+                        , "}"
+                        ]
+                expectedMethodTy =
+                    STForall
+                        "a"
+                        Nothing
+                        ( STForall
+                            "b"
+                            Nothing
+                            ( STArrow
+                                (STArrow (STVar "a") (STVar "b"))
+                                ( STArrow
+                                    (STVarApp "f" (STVar "a" :| []))
+                                    (STVarApp "f" (STVar "b" :| []))
+                                )
+                            )
+                        )
+                expectedCtorTy =
+                    STArrow
+                        (STVarApp "f" (STVar "a" :| []))
+                        (STCon "Higher" (STVar "f" :| [STVar "a"]))
+            program <- requireParsed programText
+            case program of
+                Program [Module {moduleDecls = [DeclClass classDecl, DeclData dataDecl]}] -> do
+                    case classDeclMethods classDecl of
+                        [MethodSig {methodSigType = ConstrainedType [] methodTy}] ->
+                            methodTy `shouldBe` expectedMethodTy
+                        other -> expectationFailure ("unexpected method shape: " ++ show other)
+                    case dataDeclConstructors dataDecl of
+                        [ConstructorDecl {constructorDeclType = ctorTy}] ->
+                            ctorTy `shouldBe` expectedCtorTy
+                        other -> expectationFailure ("unexpected constructor shape: " ++ show other)
+                other -> expectationFailure ("unexpected program shape: " ++ show other)
+            parseRawProgram (prettyProgram program) `shouldBe` Right program
+
+        it "rejects malformed ascii recursive types before variable-headed application fallback" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : mu a = 1;"
+                        , "}"
+                        ]
+            case parseRawProgram programText of
+                Left err -> renderProgramParseError err `shouldSatisfy` (not . null)
+                Right program -> expectationFailure ("expected parse error, got: " ++ show program)
+
     describe "MLF.Program execution corpus" $ do
         mapM_ runFixture fixturePaths
 

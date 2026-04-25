@@ -9,6 +9,11 @@ import Data.List.NonEmpty (NonEmpty(..))
 import MLF.Parse.Common (Parser)
 import Text.Megaparsec (choice, many, optional, try, (<|>))
 
+data TypeAtom ty
+    = AtomCon String
+    | AtomVar String
+    | AtomOther ty
+
 data TypeParserConfig ty bound = TypeParserConfig
     { tpcForallTok :: Parser ()
     , tpcGeTok :: Parser ()
@@ -21,6 +26,7 @@ data TypeParserConfig ty bound = TypeParserConfig
     , tpcMkArrow :: ty -> ty -> ty
     , tpcMkBase :: String -> ty
     , tpcMkCon :: String -> NonEmpty ty -> ty
+    , tpcMkVarApp :: String -> NonEmpty ty -> Maybe ty
     , tpcMkForall :: String -> bound -> ty -> ty
     , tpcMkBottom :: ty
     , tpcBoundedBinder :: Parser ty -> Parser (String, bound)
@@ -50,21 +56,30 @@ parseArrowTypeWith cfg pType = do
     pTypeApp = do
         headTy <- pTypeAtom
         case headTy of
-            Left conName -> do
+            AtomCon conName -> do
                 args <- many pTypeArg
                 pure $ case args of
                     [] -> tpcMkBase cfg conName
                     (arg:rest) -> tpcMkCon cfg conName (arg :| rest)
-            Right ty -> pure ty
+            AtomVar varName -> do
+                args <- many pTypeArg
+                case args of
+                    [] -> pure (tpcMkVar cfg varName)
+                    (arg:rest) ->
+                        case tpcMkVarApp cfg varName (arg :| rest) of
+                            Just ty -> pure ty
+                            Nothing -> fail ("variable-headed type application `" ++ varName ++ "` is not supported")
+            AtomOther ty -> pure ty
 
     pTypeArg = pTypeAtom >>= \case
-        Left conName -> pure (tpcMkBase cfg conName)
-        Right ty -> pure ty
+        AtomCon conName -> pure (tpcMkBase cfg conName)
+        AtomVar varName -> pure (tpcMkVar cfg varName)
+        AtomOther ty -> pure ty
 
     pTypeAtom =
         choice
-            [ Left <$> tpcUpperIdent cfg
-            , Right . tpcMkVar cfg <$> tpcLowerIdent cfg
-            , Right (tpcMkBottom cfg) <$ tpcBottomTok cfg
-            , Right <$> tpcParens cfg pType
+            [ AtomCon <$> tpcUpperIdent cfg
+            , AtomVar <$> tpcLowerIdent cfg
+            , AtomOther (tpcMkBottom cfg) <$ tpcBottomTok cfg
+            , AtomOther <$> tpcParens cfg pType
             ]
