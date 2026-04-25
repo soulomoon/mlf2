@@ -469,7 +469,7 @@ lowerConstructorBinding scope ctorInfo =
   LoweredBinding
     { loweredBindingName = ctorRuntimeName ctorInfo,
       loweredBindingSourceType = canonicalSourceType scope (quantifyFreeTypeVars (ctorType ctorInfo)),
-      loweredBindingExpectedType = lowerType scope (quantifyFreeTypeVars (ctorType ctorInfo)),
+      loweredBindingExpectedType = constructorBindingExpectedType scope ctorInfo,
       loweredBindingSurfaceExpr = constructorSurfaceExpr scope ctorInfo,
       loweredBindingDeferredObligations = Map.empty,
       loweredBindingExternalTypes = Map.empty,
@@ -636,7 +636,15 @@ isBuiltinTypeSymbol symbol =
 
 constructorSurfaceExpr :: ElaborateScope -> ConstructorInfo -> SurfaceExpr
 constructorSurfaceExpr scope ctorInfo =
-  surfaceAnn (constructorSurfaceExprRaw scope ctorInfo) (lowerType scope (quantifyFreeTypeVars (ctorType ctorInfo)))
+  surfaceAnn (constructorSurfaceExprRaw scope ctorInfo) (constructorBindingExpectedType scope ctorInfo)
+
+constructorBindingExpectedType :: ElaborateScope -> ConstructorInfo -> SrcType
+constructorBindingExpectedType scope ctorInfo =
+  let loweredTy = lowerType scope (quantifyFreeTypeVars (ctorType ctorInfo))
+   in if constructorOwnerHasVariableHeadApplication (elaborateScopeDataTypes scope) ctorInfo
+        && srcTypeHasVariableHeadApplication loweredTy
+        then constructorStructuralPlaceholderType scope ctorInfo
+        else loweredTy
 
 constructorSurfaceExprRaw :: ElaborateScope -> ConstructorInfo -> SurfaceExpr
 constructorSurfaceExprRaw scope ctorInfo =
@@ -646,7 +654,17 @@ constructorSurfaceExprRaw scope ctorInfo =
         if any (not . null . ctorForalls) handlerCtorOrder || constructorOwnerHasParams
           then "$" ++ ctorOwningType ctorInfo ++ "_result"
           else "a"
-      handlerTypes = map (\ctor -> handlerSurfaceType scope ctor (STVar resultVar)) handlerCtorOrder
+      useStructuralTypes =
+        constructorOwnerHasVariableHeadApplication (elaborateScopeDataTypes scope) ctorInfo
+          && srcTypeHasVariableHeadApplication (lowerType scope (quantifyFreeTypeVars (ctorType ctorInfo)))
+      argTypes =
+        if useStructuralTypes
+          then constructorStructuralArgs ctorInfo
+          else ctorArgs ctorInfo
+      handlerTypes =
+        if useStructuralTypes
+          then map (constructorStructuralHandlerType resultVar) handlerCtorOrder
+          else map (\ctor -> handlerSurfaceType scope ctor (STVar resultVar)) handlerCtorOrder
       selectedHandler =
         foldl
           surfaceApp
@@ -657,7 +675,7 @@ constructorSurfaceExprRaw scope ctorInfo =
         foldr
           (\(argName, argTy) acc -> surfaceLamAnn argName (lowerType scope argTy) acc)
           body
-          (zip argNames (ctorArgs ctorInfo))
+          (zip argNames argTypes)
    in lifted
   where
     ownerInfo =
@@ -1839,12 +1857,17 @@ constructorStructuralPlaceholderType scope ctorInfo =
     resultVar = "$" ++ ctorOwningType ctorInfo ++ "_result"
 
     handlerType ctor =
-      foldr STArrow (STVar resultVar) (constructorStructuralArgs ctor)
+      constructorStructuralHandlerType resultVar ctor
 
-    constructorStructuralArgs ctor =
-      [ STVar ("$" ++ ctorName ctor ++ "_arg" ++ show ix ++ "_type")
-        | ix <- [1 .. length (ctorArgs ctor)]
-      ]
+constructorStructuralHandlerType :: String -> ConstructorInfo -> SrcType
+constructorStructuralHandlerType resultVar ctor =
+  foldr STArrow (STVar resultVar) (constructorStructuralArgs ctor)
+
+constructorStructuralArgs :: ConstructorInfo -> [SrcType]
+constructorStructuralArgs ctor =
+  [ STVar ("$" ++ ctorName ctor ++ "_arg" ++ show ix ++ "_type")
+    | ix <- [1 .. length (ctorArgs ctor)]
+  ]
 
 constructorOccurrenceType :: ConstructorInfo -> Int -> SrcType
 constructorOccurrenceType ctorInfo argCount =

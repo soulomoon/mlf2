@@ -69,7 +69,6 @@ import MLF.Frontend.Program.Types
     classInfoSymbolIdentity,
     constrainedVisibleType,
     constructorInfoSymbolIdentity,
-    dataConstructorsRuntimeTypeTrackable,
     dataInfoSymbolIdentity,
     diagnosticForProgramError,
     instanceInfoClassSymbolIdentity,
@@ -504,7 +503,6 @@ checkModule resolvedModule priorModules = do
       (liftEither . (finalizeBinding elaborateScope . lowerConstructorBinding elaborateScope))
       [ ctor
         | dataInfo <- Map.elems localData,
-          dataConstructorsRuntimeTypeTrackable dataInfo,
           ctor <- dataConstructors dataInfo
       ]
   instanceBindings <- concat <$> mapM (checkInstance elaborateScope scope1) (derivedInstances ++ explicitInstances resolvedSyntax)

@@ -729,10 +729,10 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
-        "runs imported constructor from mixed higher-kinded data type"
+        "runs value-imported constructor from mixed higher-kinded data type"
         ( InlineProgram $
             unlines
-                [ "module Core export (Box(..), MaybeF(..), accept) {"
+                [ "module Core export (Box(..), MaybeF, NothingF, accept) {"
                 , "  data Box a ="
                 , "      Box : a -> Box a;"
                 , ""
@@ -747,7 +747,7 @@ emlfBoundaryMatrix =
                 , "}"
                 , ""
                 , "module Main export (main) {"
-                , "  import Core exposing (MaybeF(..), accept);"
+                , "  import Core exposing (NothingF, accept);"
                 , "  def id : forall a. a -> a = \\x x;"
                 , "  def main : Bool = accept (id NothingF);"
                 , "}"

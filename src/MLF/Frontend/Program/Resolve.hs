@@ -198,7 +198,10 @@ applyImportItem moduleName0 exports scope = \case
         pure (addCandidateType typeName (respell (SymbolUnqualifiedImport moduleName0) typeName typeName typeSymbol) scope)
       (Nothing, Just classSymbol) ->
         pure (addCandidateClass typeName (respell (SymbolUnqualifiedImport moduleName0) typeName typeName classSymbol) scope)
-      (Nothing, Nothing) -> Left (ProgramImportNotExported moduleName0 typeName)
+      (Nothing, Nothing) ->
+        case Map.lookup typeName (resolvedScopeValues exports) of
+          Just symbol -> pure (addCandidateValue typeName (respell (SymbolUnqualifiedImport moduleName0) typeName typeName symbol) scope)
+          Nothing -> Left (ProgramImportNotExported moduleName0 typeName)
   P.ExportTypeWithConstructors typeName ->
     case Map.lookup typeName (resolvedScopeTypes exports) of
       Nothing -> Left (ProgramImportNotExported moduleName0 typeName)
@@ -279,7 +282,10 @@ buildExports mod0 locals =
           Nothing -> Left (ProgramExportNotLocal name)
       P.ExportType typeName ->
         case (Map.lookup typeName (localTypes locals), Map.lookup typeName (localClasses locals)) of
-          (Nothing, Nothing) -> Left (ProgramExportNotLocal typeName)
+          (Nothing, Nothing) ->
+            case Map.lookup typeName (localValues locals) of
+              Just symbols -> pure acc {candidateValues = Map.insertWith (++) typeName symbols (candidateValues acc)}
+              Nothing -> Left (ProgramExportNotLocal typeName)
           (mbTypes, mbClasses) ->
             pure
               acc
@@ -374,7 +380,10 @@ resolveImportItem moduleName0 exports item =
     P.ExportType typeName ->
       case resolvedExportTypeRef typeName exports of
         Just ref -> pure (P.ExportType ref)
-        Nothing -> Left (ProgramImportNotExported moduleName0 typeName)
+        Nothing ->
+          case Map.lookup typeName (resolvedScopeValues exports) of
+            Just symbol -> pure (P.ExportValue (respell (SymbolUnqualifiedImport moduleName0) typeName typeName symbol))
+            Nothing -> Left (ProgramImportNotExported moduleName0 typeName)
     P.ExportTypeWithConstructors typeName ->
       case Map.lookup typeName (resolvedScopeTypes exports) of
         Nothing -> Left (ProgramImportNotExported moduleName0 typeName)
@@ -391,7 +400,7 @@ resolveExportItem locals item =
     P.ExportType typeName ->
       case resolvedLocalExportTypeRef locals typeName of
         Just ref -> pure (P.ExportType ref)
-        Nothing -> Left (ProgramExportNotLocal typeName)
+        Nothing -> P.ExportValue <$> uniqueLocalSymbol ProgramExportNotLocal typeName (localValues locals)
     P.ExportTypeWithConstructors typeName ->
       case Map.lookup typeName (localTypes locals) of
         Nothing -> Left (ProgramExportNotLocal typeName)
