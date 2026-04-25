@@ -121,6 +121,12 @@ data DisplayNameEnv = DisplayNameEnv
   }
   deriving (Eq, Show)
 
+data KindEnv = KindEnv
+  { kindTypeConstructors :: Map SymbolIdentity P.SrcKind,
+    kindTypeVariables :: Map String P.SrcKind
+  }
+  deriving (Eq, Show)
+
 emptyScope :: Scope
 emptyScope = mkScope builtinValues Map.empty Map.empty []
 
@@ -477,6 +483,7 @@ checkModule resolvedModule priorModules = do
   classScope <- liftEither =<< pure (addClasses (scopeClasses importScope) localClasses)
   let scope0 = mkScope valueScope typeScope classScope (scopeInstances importScope ++ visibleImportedInstances)
       fullNameEnv = valueNameEnv `preferDisplayNames` displayNameEnvFromScope scope0
+  validateModuleKinds scope0 resolvedSyntax
   validateLocalClassMethodConstraints scope0 resolvedSyntax
   derivedInstances <- synthesizeDerivedInstances fullNameEnv scope0 resolvedModule resolvedSyntax
   instanceSkeletons <- buildInstanceSkeletons fullNameEnv scope0 resolvedSyntax derivedInstances
@@ -1118,6 +1125,253 @@ displayNameForSymbol namesByIdentity symbol =
       | resolvedSymbolDisplayName symbol `elem` names -> Just (resolvedSymbolDisplayName symbol)
       | name : _ <- names -> Just name
     _ -> Nothing
+
+-- Source kind checking -------------------------------------------------------
+
+validateModuleKinds :: Scope -> P.ResolvedModuleSyntax -> TcM ()
+validateModuleKinds scope mod0 = do
+  let baseEnv = kindEnvFromScope scope
+  mapM_ (validateDataDeclKinds baseEnv) (moduleDataDecls mod0)
+  mapM_ (validateClassDeclKinds scope baseEnv) (moduleClassDecls mod0)
+  mapM_ (validateDefDeclKinds scope baseEnv) (moduleDefDecls mod0)
+  mapM_ (validateInstanceDeclKinds scope baseEnv) (explicitInstances mod0)
+
+kindEnvFromScope :: Scope -> KindEnv
+kindEnvFromScope scope =
+  KindEnv
+    { kindTypeConstructors =
+        Map.fromList
+          [ (dataInfoSymbolIdentity dataInfo, dataKind (dataTypeParams dataInfo))
+            | dataInfo <- Map.elems (scopeTypes scope)
+          ],
+      kindTypeVariables = Map.empty
+    }
+
+dataKind :: [P.TypeParam] -> P.SrcKind
+dataKind params =
+  foldr P.KArrow P.KType (map P.typeParamKind params)
+
+validateDataDeclKinds :: KindEnv -> P.ResolvedDataDecl -> TcM ()
+validateDataDeclKinds baseEnv dataDecl = do
+  env <- extendKindParams (P.dataDeclParams dataDecl) baseEnv
+  mapM_ (validateConstructorDeclKind env) (P.dataDeclConstructors dataDecl)
+
+validateConstructorDeclKind :: KindEnv -> P.ResolvedConstructorDecl -> TcM ()
+validateConstructorDeclKind env ctorDecl = do
+  _ <- checkResolvedKind env (P.constructorDeclType ctorDecl) P.KType
+  pure ()
+
+validateClassDeclKinds :: Scope -> KindEnv -> P.ResolvedClassDecl -> TcM ()
+validateClassDeclKinds scope baseEnv classDecl = do
+  env <- extendKindParams [P.classDeclParam classDecl] baseEnv
+  mapM_ (validateMethodSigKind scope env) (P.classDeclMethods classDecl)
+
+validateMethodSigKind :: Scope -> KindEnv -> P.ResolvedMethodSig -> TcM ()
+validateMethodSigKind scope env methodSig = do
+  _ <- validateConstrainedTypeKinds scope env (P.methodSigType methodSig)
+  pure ()
+
+validateDefDeclKinds :: Scope -> KindEnv -> P.ResolvedDefDecl -> TcM ()
+validateDefDeclKinds scope env defDecl = do
+  _ <- validateConstrainedTypeKinds scope env (P.defDeclType defDecl)
+  pure ()
+
+validateInstanceDeclKinds :: Scope -> KindEnv -> P.ResolvedInstanceDecl -> TcM ()
+validateInstanceDeclKinds scope env0 instDecl = do
+  classInfo <- lookupClassInfoBySymbol scope (P.instanceDeclClass instDecl)
+  env1 <- foldM (validateClassConstraintKind scope) env0 (P.instanceDeclConstraints instDecl)
+  _ <- checkResolvedKind env1 (P.instanceDeclType instDecl) (P.typeParamKind (classTypeParam classInfo))
+  pure ()
+
+validateConstrainedTypeKinds :: Scope -> KindEnv -> P.ResolvedConstrainedType -> TcM KindEnv
+validateConstrainedTypeKinds scope env0 ty = do
+  env1 <- foldM (validateClassConstraintKind scope) env0 (P.constrainedConstraints ty)
+  checkResolvedKind env1 (P.constrainedBody ty) P.KType
+
+validateClassConstraintKind :: Scope -> KindEnv -> P.ResolvedClassConstraint -> TcM KindEnv
+validateClassConstraintKind scope env constraint = do
+  classInfo <- lookupClassInfoBySymbol scope (P.constraintClassName constraint)
+  checkResolvedKind env (P.constraintType constraint) (P.typeParamKind (classTypeParam classInfo))
+
+extendKindParams :: [P.TypeParam] -> KindEnv -> TcM KindEnv
+extendKindParams params env =
+  foldM
+    (\acc param -> bindKindVariable (P.typeParamName param) (P.typeParamKind param) acc)
+    env
+    params
+
+checkResolvedKind :: KindEnv -> ResolvedSrcType -> P.SrcKind -> TcM KindEnv
+checkResolvedKind env ty expected =
+  case ty of
+    RSTVar name -> bindKindVariable name expected env
+    RSTArrow dom cod
+      | expected == P.KType -> do
+          env1 <- checkResolvedKind env dom P.KType
+          checkResolvedKind env1 cod P.KType
+      | otherwise -> throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType ty) expected P.KType)
+    RSTForall name mb body
+      | expected == P.KType -> do
+          env1 <-
+            case mb of
+              Nothing -> pure env
+              Just bound -> checkResolvedKind env (unResolvedSrcBound bound) P.KType
+          withScopedKindVariable name P.KType env1 $ \env2 ->
+            checkResolvedKind env2 body P.KType
+      | otherwise -> throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType ty) expected P.KType)
+    RSTMu name body
+      | expected == P.KType ->
+          withScopedKindVariable name P.KType env $ \env1 ->
+            checkResolvedKind env1 body P.KType
+      | otherwise -> throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType ty) expected P.KType)
+    RSTVarApp name args -> checkVarAppKind env name args expected
+    _ -> do
+      (actual, env1) <- inferResolvedKind env ty
+      requireKind env1 ty expected actual
+
+inferResolvedKind :: KindEnv -> ResolvedSrcType -> TcM (P.SrcKind, KindEnv)
+inferResolvedKind env ty =
+  case ty of
+    RSTVar name ->
+      case Map.lookup name (kindTypeVariables env) of
+        Just kind0 -> pure (kind0, env)
+        Nothing -> pure (P.KType, env {kindTypeVariables = Map.insert name P.KType (kindTypeVariables env)})
+    RSTBase symbol -> do
+      kind0 <- resolvedTypeHeadKind env symbol
+      pure (kind0, env)
+    RSTCon symbol args -> do
+      headKind <- resolvedTypeHeadKind env symbol
+      applyKindArgs env (resolvedSymbolDisplayName symbol) headKind args
+    RSTVarApp name args ->
+      checkVarAppKind env name args P.KType >>= \env1 -> pure (P.KType, env1)
+    RSTArrow dom cod -> do
+      env1 <- checkResolvedKind env dom P.KType
+      env2 <- checkResolvedKind env1 cod P.KType
+      pure (P.KType, env2)
+    RSTForall name mb body -> do
+      env1 <-
+        case mb of
+          Nothing -> pure env
+          Just bound -> checkResolvedKind env (unResolvedSrcBound bound) P.KType
+      env2 <-
+        withScopedKindVariable name P.KType env1 $ \env3 ->
+          checkResolvedKind env3 body P.KType
+      pure (P.KType, env2)
+    RSTMu name body -> do
+      env1 <-
+        withScopedKindVariable name P.KType env $ \env2 ->
+          checkResolvedKind env2 body P.KType
+      pure (P.KType, env1)
+    RSTBottom -> pure (P.KType, env)
+
+checkVarAppKind :: KindEnv -> String -> NonEmpty ResolvedSrcType -> P.SrcKind -> TcM KindEnv
+checkVarAppKind env name args expected =
+  case Map.lookup name (kindTypeVariables env) of
+    Just headKind -> do
+      (actual, env1) <- applyKindArgs env name headKind args
+      requireKind env1 (RSTVarApp name args) expected actual
+    Nothing -> do
+      (argKinds, env1) <- inferArgumentKinds env (NE.toList args)
+      let headKind = foldr P.KArrow expected argKinds
+      bindKindVariable name headKind env1
+
+inferArgumentKinds :: KindEnv -> [ResolvedSrcType] -> TcM ([P.SrcKind], KindEnv)
+inferArgumentKinds env [] = pure ([], env)
+inferArgumentKinds env (arg : rest) = do
+  (argKind, env1) <- inferResolvedKind env arg
+  (argKinds, env2) <- inferArgumentKinds env1 rest
+  pure (argKind : argKinds, env2)
+
+applyKindArgs :: KindEnv -> String -> P.SrcKind -> NonEmpty ResolvedSrcType -> TcM (P.SrcKind, KindEnv)
+applyKindArgs env headName headKind args =
+  go 0 env headKind (NE.toList args)
+  where
+    go _ env0 kind0 [] = pure (kind0, env0)
+    go consumed env0 (P.KArrow expected result) (arg : rest) = do
+      env1 <- checkResolvedKind env0 arg expected
+      go (consumed + 1) env1 result rest
+    go consumed _ P.KType remaining =
+      throwError (ProgramTypeArityMismatch headName consumed (consumed + length remaining))
+
+requireKind :: KindEnv -> ResolvedSrcType -> P.SrcKind -> P.SrcKind -> TcM KindEnv
+requireKind env ty expected actual
+  | expected == actual = pure env
+  | otherwise =
+      case typeHeadArity env ty of
+        Just (headName, expectedArgs, actualArgs)
+          | expected == P.KType && isArrowKind actual ->
+              throwError (ProgramTypeArityMismatch headName expectedArgs actualArgs)
+        _ -> throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType ty) expected actual)
+
+typeHeadArity :: KindEnv -> ResolvedSrcType -> Maybe (String, Int, Int)
+typeHeadArity env ty =
+  case ty of
+    RSTVar name ->
+      withActualArity 0 <$> kindForVar name
+    RSTBase symbol ->
+      withActualArity 0 <$> kindForHead symbol
+    RSTVarApp name args ->
+      withActualArity (NE.length args) <$> kindForVar name
+    RSTCon symbol args ->
+      withActualArity (NE.length args) <$> kindForHead symbol
+    _ -> Nothing
+  where
+    withActualArity actualArgs (headName, expectedArgs) =
+      (headName, expectedArgs, actualArgs)
+
+    kindForVar name =
+      case Map.lookup name (kindTypeVariables env) of
+        Just kind0 -> Just (name, kindArity kind0)
+        Nothing -> Nothing
+
+    kindForHead symbol =
+      case resolvedTypeHeadKindMaybe env symbol of
+        Just kind0 -> Just (resolvedSymbolDisplayName symbol, kindArity kind0)
+        Nothing -> Nothing
+
+kindArity :: P.SrcKind -> Int
+kindArity kind0 =
+  case kind0 of
+    P.KType -> 0
+    P.KArrow _ result -> 1 + kindArity result
+
+isArrowKind :: P.SrcKind -> Bool
+isArrowKind kind0 =
+  case kind0 of
+    P.KArrow {} -> True
+    P.KType -> False
+
+bindKindVariable :: String -> P.SrcKind -> KindEnv -> TcM KindEnv
+bindKindVariable name expected env =
+  case Map.lookup name (kindTypeVariables env) of
+    Just actual
+      | actual == expected -> pure env
+      | otherwise -> throwError (ProgramKindMismatch (STVar name) expected actual)
+    Nothing ->
+      pure env {kindTypeVariables = Map.insert name expected (kindTypeVariables env)}
+
+withScopedKindVariable :: String -> P.SrcKind -> KindEnv -> (KindEnv -> TcM KindEnv) -> TcM KindEnv
+withScopedKindVariable name kind0 env action = do
+  let previous = Map.lookup name (kindTypeVariables env)
+      envWithBinder = env {kindTypeVariables = Map.insert name kind0 (kindTypeVariables env)}
+  envAfter <- action envWithBinder
+  pure
+    envAfter
+      { kindTypeVariables =
+          case previous of
+            Just previousKind -> Map.insert name previousKind (kindTypeVariables envAfter)
+            Nothing -> Map.delete name (kindTypeVariables envAfter)
+      }
+
+resolvedTypeHeadKind :: KindEnv -> ResolvedSymbol -> TcM P.SrcKind
+resolvedTypeHeadKind env symbol =
+  case resolvedTypeHeadKindMaybe env symbol of
+    Just kind0 -> pure kind0
+    Nothing -> throwError (ProgramUnknownType (resolvedSymbolDisplayName symbol))
+
+resolvedTypeHeadKindMaybe :: KindEnv -> ResolvedSymbol -> Maybe P.SrcKind
+resolvedTypeHeadKindMaybe env symbol
+  | isBuiltinTypeSymbol symbol = Just P.KType
+  | otherwise = Map.lookup (resolvedSymbolIdentity symbol) (kindTypeConstructors env)
 
 buildLocalDataInfo :: DisplayNameEnv -> ResolvedModule -> P.ResolvedModuleSyntax -> TcM (Map String DataInfo)
 buildLocalDataInfo displayEnv resolvedModule mod0 = do

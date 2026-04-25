@@ -3,15 +3,22 @@
 ## Unreleased
 
 ### Changed
+- Added `.mlfp` source kind checking for declaration parameter annotations,
+  ordinary type constructor application, variable-headed type application,
+  class constraints, method signatures, and instance heads. Ill-kinded source
+  types now fail before lowering with `ProgramKindMismatch` or
+  `ProgramTypeArityMismatch`, while higher-kinded elaboration and runtime
+  semantics remain fail-closed for the later semantic slice.
 - Added syntax-level `.mlfp` parsing and pretty-printing for variable-headed
   source type applications such as `f a`, including nested and parenthesized
-  argument round trips. Kind checking and higher-kinded elaboration still fail
-  closed until the follow-up semantic slices.
+  argument round trips. Higher-kinded elaboration still fails closed until the
+  follow-up semantic slice.
 - Added `.mlfp` declaration parameter kind metadata. Data and class parameters
   now carry default `*` or parenthesized higher-kinded annotations, the program
   pretty-printer preserves non-first-order declarations, variable-headed source
-  type applications have an explicit AST representation for follow-up kinding
-  work, and duplicate data type parameters are rejected during program checks.
+  type applications have an explicit AST representation for source kind
+  checking, and duplicate data type parameters are rejected during program
+  checks.
 - Documented the `.mlfp` module compilation contract: modules are checked as
   one parsed `Program` compilation unit, the CLI Prelude is added explicitly,
   and separate compilation/interface files remain future work. Added regression
