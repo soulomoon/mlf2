@@ -13,7 +13,7 @@ import MLF.Frontend.Program.Types
     , DataInfo (..)
     , mkResolvedSymbol
     )
-import MLF.Frontend.Syntax (ResolvedSrcTy (..))
+import MLF.Frontend.Syntax (ResolvedSrcTy (..), mkSrcBound)
 import MLF.Program
 import MLF.Program.CLI (runProgramFile)
 import Test.Hspec
@@ -2227,6 +2227,23 @@ spec = do
                             (STVarApp "g" (STVar "a" :| []))
                             (STVarApp "g" (STVar "a" :| []))
                         )
+            sourceForallMatches expected actual `shouldBe` True
+
+        it "matches repeated substitutions whose forall bounds rename their own binder" $ do
+            let bounded name =
+                    STForall
+                        name
+                        (Just (mkSrcBound (STArrow (STVar name) (STBase "Int"))))
+                        (STVar name)
+                expected =
+                    STForall
+                        "f"
+                        Nothing
+                        (STArrow (STVar "f") (STVar "f"))
+                actual =
+                    STArrow
+                        (bounded "a")
+                        (bounded "b")
             sourceForallMatches expected actual `shouldBe` True
 
         it "matches bound variable-headed applications against instantiated constructor heads" $ do

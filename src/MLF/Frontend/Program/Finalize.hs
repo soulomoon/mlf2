@@ -496,12 +496,10 @@ alphaEqSrcType = go Map.empty Map.empty
             && length (toListNE leftArgs) == length (toListNE rightArgs)
             && and (zipWith (go leftNames rightNames) (toListNE leftArgs) (toListNE rightArgs))
         (STForall leftName leftMb leftBody, STForall rightName rightMb rightBody) ->
-          sameBounds leftMb rightMb
-            && go
-              (Map.insert leftName rightName leftNames)
-              (Map.insert rightName leftName rightNames)
-              leftBody
-              rightBody
+          let leftNames' = Map.insert leftName rightName leftNames
+              rightNames' = Map.insert rightName leftName rightNames
+           in sameBounds leftNames' rightNames' leftMb rightMb
+                && go leftNames' rightNames' leftBody rightBody
         (STMu leftName leftBody, STMu rightName rightBody) ->
           go
             (Map.insert leftName rightName leftNames)
@@ -511,10 +509,10 @@ alphaEqSrcType = go Map.empty Map.empty
         (STBottom, STBottom) -> True
         _ -> False
       where
-        sameBounds Nothing Nothing = True
-        sameBounds (Just (SrcBound leftBound)) (Just (SrcBound rightBound)) =
-          go leftNames rightNames leftBound rightBound
-        sameBounds _ _ = False
+        sameBounds _ _ Nothing Nothing = True
+        sameBounds leftNames' rightNames' (Just (SrcBound leftBound)) (Just (SrcBound rightBound)) =
+          go leftNames' rightNames' leftBound rightBound
+        sameBounds _ _ _ _ = False
 
     sameTypeVar leftNames rightNames leftName rightName =
       case (Map.lookup leftName leftNames, Map.lookup rightName rightNames) of
