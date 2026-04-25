@@ -2449,6 +2449,17 @@ spec = do
                 other -> expectationFailure ("unexpected program shape: " ++ show other)
             parseRawProgram (prettyProgram program) `shouldBe` Right program
 
+        it "rejects malformed ascii recursive types before variable-headed application fallback" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : mu a = 1;"
+                        , "}"
+                        ]
+            case parseRawProgram programText of
+                Left err -> renderProgramParseError err `shouldSatisfy` (not . null)
+                Right program -> expectationFailure ("expected parse error, got: " ++ show program)
+
     describe "MLF.Program execution corpus" $ do
         mapM_ runFixture fixturePaths
 

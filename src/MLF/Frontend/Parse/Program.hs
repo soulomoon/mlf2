@@ -80,6 +80,7 @@ reservedWords =
         , "instance"
         , "let"
         , "module"
+        , "mu"
         , "of"
         , "as"
         , "true"
