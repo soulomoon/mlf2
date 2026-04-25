@@ -114,11 +114,13 @@ data Applied (f :: * -> *) a =
     Applied : f a -> Applied f a;
 ```
 
-This syntax slice records and pretty-prints declaration parameter kinds and
-variable-headed type application structure while keeping existing first-order
-declarations unchanged. Source kind checking and higher-kinded elaboration
-remain follow-up work for #17 and #18, so checked programs still fail closed if
-they require those later semantics.
+The checker validates declaration parameter kinds, ordinary and
+variable-headed type applications, class method constraints, instance heads,
+and constructor signatures before lowering. Kind errors are reported as
+`ProgramKindMismatch` or `ProgramTypeArityMismatch`. Higher-kinded
+elaboration and runtime semantics remain follow-up work for #18, so checked
+programs still fail closed if they require lowering a variable-headed source
+type application such as a constructor field of type `f a`.
 
 ## Case Expressions And Patterns
 

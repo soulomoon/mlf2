@@ -120,6 +120,8 @@ data ProgramError
   | ProgramUnknownClass String
   | ProgramUnknownMethod String
   | ProgramAmbiguousUnqualifiedReference String
+  | ProgramKindMismatch SrcType P.SrcKind P.SrcKind
+  | ProgramTypeArityMismatch String Int Int
   | ProgramInvalidConstructorResult P.ConstructorName SrcType P.TypeName
   | ProgramUnsupportedDeriving P.ClassName
   | ProgramDerivingRequiresNullaryType P.TypeName
@@ -202,6 +204,8 @@ spanForError err index =
     ProgramUnknownClass name -> firstSpan name (P.spanClasses index)
     ProgramUnknownMethod name -> firstSpan name (P.spanValues index)
     ProgramAmbiguousUnqualifiedReference name -> lookupAnyName name index
+    ProgramKindMismatch ty _ _ -> sourceTypeHeadSpan ty index
+    ProgramTypeArityMismatch name _ _ -> lookupAnyName name index
     ProgramInvalidConstructorResult ctor _ _ -> firstSpan ctor (P.spanConstructors index)
     ProgramUnsupportedDeriving className0 -> firstSpan className0 (P.spanClasses index)
     ProgramDerivingRequiresNullaryType typeName -> firstSpan typeName (P.spanTypes index)
@@ -257,6 +261,23 @@ programErrorMessage err =
     ProgramUnknownClass name -> "unknown class `" ++ name ++ "`"
     ProgramUnknownMethod name -> "unknown method `" ++ name ++ "`"
     ProgramAmbiguousUnqualifiedReference name -> "ambiguous unqualified reference `" ++ name ++ "`"
+    ProgramKindMismatch ty expected actual ->
+      "kind mismatch in `"
+        ++ show ty
+        ++ "`: expected `"
+        ++ renderSrcKind expected
+        ++ "`, got `"
+        ++ renderSrcKind actual
+        ++ "`"
+    ProgramTypeArityMismatch name expected actual ->
+      "type constructor `"
+        ++ name
+        ++ "` expects "
+        ++ show expected
+        ++ " type argument"
+        ++ plural expected
+        ++ ", but got "
+        ++ show actual
     ProgramInvalidConstructorResult ctor resultTy owner -> "constructor `" ++ ctor ++ "` returns `" ++ show resultTy ++ "` instead of owning type `" ++ owner ++ "`"
     ProgramUnsupportedDeriving className0 -> "unsupported deriving class `" ++ className0 ++ "`"
     ProgramDerivingRequiresNullaryType typeName -> "deriving currently requires a nullary type, but `" ++ typeName ++ "` has parameters"
@@ -298,7 +319,44 @@ programErrorHints err =
       ["add missing constructor branches or a final wildcard branch"]
     ProgramImportNotExported {} ->
       ["export the name from the source module or remove it from the import exposing list"]
+    ProgramKindMismatch {} ->
+      ["check higher-kinded parameter annotations and type constructor application arguments"]
+    ProgramTypeArityMismatch {} ->
+      ["apply the type constructor to exactly the number of arguments required by its kind"]
     _ -> []
+
+renderSrcKind :: P.SrcKind -> String
+renderSrcKind = go 0
+  where
+    go :: Int -> P.SrcKind -> String
+    go prec kind0 =
+      case kind0 of
+        P.KType -> "*"
+        P.KArrow left right ->
+          let rendered = go 1 left ++ " -> " ++ go 0 right
+           in if prec > 0 then "(" ++ rendered ++ ")" else rendered
+
+plural :: Int -> String
+plural 1 = ""
+plural _ = "s"
+
+sourceTypeHeadSpan :: SrcType -> P.ProgramSpanIndex -> Maybe P.SourceSpan
+sourceTypeHeadSpan ty index =
+  case sourceTypeHeadName ty of
+    Just name -> lookupAnyName name index
+    Nothing -> Nothing
+
+sourceTypeHeadName :: SrcType -> Maybe String
+sourceTypeHeadName ty =
+  case ty of
+    STVar name -> Just name
+    STBase name -> Just name
+    STCon name _ -> Just name
+    STVarApp name _ -> Just name
+    STArrow dom _ -> sourceTypeHeadName dom
+    STForall _ _ body -> sourceTypeHeadName body
+    STMu _ body -> sourceTypeHeadName body
+    STBottom -> Nothing
 
 data ResolvedScope = ResolvedScope
   { resolvedScopeValues :: Map String ResolvedSymbol,

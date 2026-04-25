@@ -2735,6 +2735,188 @@ spec = do
             program <- requireParsed programText
             checkProgram program `shouldSatisfy` isRight
 
+        it "accepts higher-kinded declarations when applications match declared kinds" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Functor, Lifted, Higher(..), main) {"
+                        , "  class Functor (f :: * -> *) {"
+                        , "    map : forall a b. (a -> b) -> f a -> f b;"
+                        , "  }"
+                        , ""
+                        , "  class Lifted (f :: * -> *) {"
+                        , "    lift : Functor f => forall a. f a -> f a;"
+                        , "  }"
+                        , ""
+                        , "  data Higher (f :: * -> *) a ="
+                        , "      Higher : a -> Higher f a;"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
+
+        it "accepts method constraints whose unknown kinds are solved out of order" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (C, Functor, Uses, main) {"
+                        , "  class C a {"
+                        , "  }"
+                        , ""
+                        , "  class Functor (f :: * -> *) {"
+                        , "  }"
+                        , ""
+                        , "  class Uses marker {"
+                        , "    use : (C (f a), Functor a) => marker -> marker;"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
+
+        it "accepts instance constraints whose unknown kinds are solved out of order" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (C, Functor, Higher, main) {"
+                        , "  class C a {"
+                        , "  }"
+                        , ""
+                        , "  class Functor (f :: * -> *) {"
+                        , "  }"
+                        , ""
+                        , "  class Higher (h :: * -> *) {"
+                        , "  }"
+                        , ""
+                        , "  instance (C (f a), Functor a) => Higher a {"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
+
+        it "rejects too many constructor type arguments before later lowering" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Bad, main) {"
+                        , "  data Option a ="
+                        , "      None : Option a"
+                        , "    | Some : a -> Option a;"
+                        , ""
+                        , "  data Bad ="
+                        , "      Bad : Option Int Bool -> Bad;"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramTypeArityMismatch "Option" 1 2)
+
+        it "rejects unsaturated type constructors in definition signatures" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Option, main) {"
+                        , "  data Option a ="
+                        , "      None : Option a"
+                        , "    | Some : a -> Option a;"
+                        , ""
+                        , "  def main : Option = None;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramTypeArityMismatch "Option" 1 0)
+
+        it "rejects variable-headed applications whose parameter is first-order" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Bad, main) {"
+                        , "  data Bad (f :: *) ="
+                        , "      Bad : f Int -> Bad f;"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramTypeArityMismatch "f" 0 1)
+
+        it "rejects higher-kinded arguments with first-order types" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Higher, main) {"
+                        , "  data Higher (f :: * -> *) a ="
+                        , "      Higher : a -> Higher Bool a;"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramKindMismatch (STBase "Bool") (KArrow KType KType) KType)
+
+        it "rejects instance constraints that do not match the class parameter kind" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Functor, Eq, main) {"
+                        , "  class Functor (f :: * -> *) {"
+                        , "    map : forall a. f a -> f a;"
+                        , "  }"
+                        , ""
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  instance Functor Bool => Eq Int {"
+                        , "    eq = \\x \\y true;"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramKindMismatch (STBase "Bool") (KArrow KType KType) KType)
+
+        it "rejects unsaturated type constructors in instance heads" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Eq, Option, main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , ""
+                        , "  data Option a ="
+                        , "      None : Option a"
+                        , "    | Some : a -> Option a;"
+                        , ""
+                        , "  instance Eq Option {"
+                        , "    eq = \\x \\y true;"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramTypeArityMismatch "Option" 1 0)
+
+        it "rejects instance heads that do not match the class parameter kind" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Functor, main) {"
+                        , "  class Functor (f :: * -> *) {"
+                        , "    map : forall a. f a -> f a;"
+                        , "  }"
+                        , ""
+                        , "  instance Functor Bool {"
+                        , "    map = \\x x;"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldBe` Left (ProgramKindMismatch (STBase "Bool") (KArrow KType KType) KType)
+
         it "renders located diagnostics with a mechanically justified hint" $ do
             let programText =
                     unlines
