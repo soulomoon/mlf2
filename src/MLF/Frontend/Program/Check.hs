@@ -604,12 +604,29 @@ resolvedImportDefiningModule =
   symbolDefiningModule . resolvedSymbolIdentity . P.importModuleName
 
 addAllExports :: Scope -> ModuleExports -> TcM Scope
-addAllExports scope exports =
+addAllExports scope exports = do
+  let (scopeWithOwners, importedValues) = prepareBulkImportedValues exports scope (exportedValues exports)
   liftEither $ do
-    values <- addValues (scopeValues scope) (exportedValues exports)
-    types <- addTypes (scopeTypes scope) (Map.map exportedTypeData (exportedTypes exports))
-    classes <- addClasses (scopeClasses scope) (exportedClasses exports)
-    pure (mkScopeWithHidden values types (scopeHiddenTypes scope) classes (scopeInstances scope))
+    values <- addValues (scopeValues scopeWithOwners) importedValues
+    types <- addTypes (scopeTypes scopeWithOwners) (Map.map exportedTypeData (exportedTypes exports))
+    classes <- addClasses (scopeClasses scopeWithOwners) (exportedClasses exports)
+    pure (mkScopeWithHidden values types (scopeHiddenTypes scopeWithOwners) classes (scopeInstances scopeWithOwners))
+
+prepareBulkImportedValues :: ModuleExports -> Scope -> Map String ValueInfo -> (Scope, Map String ValueInfo)
+prepareBulkImportedValues exports =
+  Map.mapAccumWithKey (\scope0 _ valueInfo -> prepareBulkImportedValue exports scope0 valueInfo)
+
+prepareBulkImportedValue :: ModuleExports -> Scope -> ValueInfo -> (Scope, ValueInfo)
+prepareBulkImportedValue exports scope valueInfo@ConstructorValue {valueCtorInfo = ctorInfo}
+  | constructorOwnerVisibleInExports ctorInfo exports = (scope, valueInfo)
+  | otherwise = prepareImportedValue exports scope valueInfo
+prepareBulkImportedValue _ scope valueInfo = (scope, valueInfo)
+
+constructorOwnerVisibleInExports :: ConstructorInfo -> ModuleExports -> Bool
+constructorOwnerVisibleInExports ctorInfo exports =
+  any
+    ((== ctorOwningTypeIdentity ctorInfo) . dataInfoSymbolIdentity . exportedTypeData)
+    (Map.elems (exportedTypes exports))
 
 qualifyModuleExports :: P.ModuleName -> ModuleExports -> ModuleExports
 qualifyModuleExports alias exports =

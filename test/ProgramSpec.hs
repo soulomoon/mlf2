@@ -783,6 +783,58 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs value-exported constructor from bulk import when owner type is not exported"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), NothingF, accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core;"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = accept (id NothingF);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs value-exported constructor from aliased bulk import when owner type is not exported"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), NothingF, accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = C.accept (id C.NothingF);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "runs value-exported GADT constructor when owner type is not exported"
         ( InlineProgram $
             unlines
