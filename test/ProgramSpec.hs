@@ -707,6 +707,54 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "true")
     , ProgramMatrixCase
+        "runs first-class nullary constructor from mixed higher-kinded data type"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Box(..), MaybeF(..), mainValue, main) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def mainValue : MaybeF Box Bool = id NothingF;"
+                , "  def main : Bool = case mainValue of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
+        "runs imported constructor from mixed higher-kinded data type"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Box(..), MaybeF(..), accept) {"
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  data MaybeF (f :: * -> *) a ="
+                , "      NothingF : MaybeF f a"
+                , "    | JustF : f a -> MaybeF f a;"
+                , ""
+                , "  def accept : MaybeF Box Bool -> Bool = \\value case value of {"
+                , "    NothingF -> true;"
+                , "    JustF box -> true"
+                , "  };"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core exposing (MaybeF(..), accept);"
+                , "  def id : forall a. a -> a = \\x x;"
+                , "  def main : Bool = accept (id NothingF);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "true")
+    , ProgramMatrixCase
         "rejects first-order parameters in higher-kinded data fields"
         ( InlineProgram $
             unlines

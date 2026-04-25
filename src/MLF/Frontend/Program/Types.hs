@@ -63,7 +63,9 @@ module MLF.Frontend.Program.Types
     applyTypeHead,
     substituteTypeVar,
     constructorOwnerRuntimeTypeTrackable,
+    constructorOwnerHasVariableHeadApplication,
     dataConstructorsRuntimeTypeTrackable,
+    srcTypeHasVariableHeadApplication,
     specializeMethodType,
     constrainedVisibleType,
   )
@@ -650,6 +652,12 @@ constructorOwnerRuntimeTypeTrackable dataInfos ctor =
     dataInfo : _ -> dataConstructorsRuntimeTypeTrackable dataInfo
     [] -> constructorRuntimeTypeShapeTrackable ctor
 
+constructorOwnerHasVariableHeadApplication :: Map String DataInfo -> ConstructorInfo -> Bool
+constructorOwnerHasVariableHeadApplication dataInfos ctor =
+  case [dataInfo | dataInfo <- Map.elems dataInfos, dataInfoSymbolIdentity dataInfo == ctorOwningTypeIdentity ctor] of
+    dataInfo : _ -> any constructorRuntimeTypeHasVariableHeadApplication (dataConstructors dataInfo)
+    [] -> constructorRuntimeTypeHasVariableHeadApplication ctor
+
 dataConstructorsRuntimeTypeTrackable :: DataInfo -> Bool
 dataConstructorsRuntimeTypeTrackable =
   all constructorRuntimeTypeShapeTrackable . dataConstructors
@@ -663,19 +671,30 @@ constructorRuntimeTypeShapeTrackable ctor =
       evidenceVars = foldMap freeTypeVarsSrcType involvedTypes
    in not (any hasVariableHeadApplication involvedTypes)
         && all (\(name, _) -> name `Set.member` evidenceVars) (ctorForalls ctor)
-  where
-    hasVariableHeadApplication ty =
-      case ty of
-        STVar {} -> False
-        STArrow dom cod -> hasVariableHeadApplication dom || hasVariableHeadApplication cod
-        STBase {} -> False
-        STCon _ args -> any hasVariableHeadApplication args
-        STVarApp {} -> True
-        STForall _ mb body ->
-          maybe False (hasVariableHeadApplication . unSrcBound) mb
-            || hasVariableHeadApplication body
-        STMu _ body -> hasVariableHeadApplication body
-        STBottom -> False
+
+constructorRuntimeTypeHasVariableHeadApplication :: ConstructorInfo -> Bool
+constructorRuntimeTypeHasVariableHeadApplication ctor =
+  any hasVariableHeadApplication $
+    ctorArgs ctor
+      ++ [ctorResult ctor]
+      ++ [bound | (_, Just bound) <- ctorForalls ctor]
+
+srcTypeHasVariableHeadApplication :: SrcType -> Bool
+srcTypeHasVariableHeadApplication = hasVariableHeadApplication
+
+hasVariableHeadApplication :: SrcType -> Bool
+hasVariableHeadApplication ty =
+  case ty of
+    STVar {} -> False
+    STArrow dom cod -> hasVariableHeadApplication dom || hasVariableHeadApplication cod
+    STBase {} -> False
+    STCon _ args -> any hasVariableHeadApplication args
+    STVarApp {} -> True
+    STForall _ mb body ->
+      maybe False (hasVariableHeadApplication . unSrcBound) mb
+        || hasVariableHeadApplication body
+    STMu _ body -> hasVariableHeadApplication body
+    STBottom -> False
 
 classInfoSymbolIdentity :: ClassInfo -> SymbolIdentity
 classInfoSymbolIdentity = classInfoSymbol

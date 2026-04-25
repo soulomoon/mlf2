@@ -931,7 +931,7 @@ compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} arg
               else argSurface
 
 compileValueApp scope mbExpected valueInfo args = do
-  let expectedArgTys = valueExpectedArgTypes valueInfo args
+  let expectedArgTys = valueExpectedArgTypes scope valueInfo mbExpected args
   argSurfaces <- zipWithM compileValueArg (expectedArgTys ++ repeat Nothing) args
   evidenceSurfaces <- valueEvidenceArgs scope valueInfo args
   let headSurface =
@@ -985,7 +985,7 @@ compileResolvedValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorI
               else argSurface
 
 compileResolvedValueApp scope mbExpected valueInfo args = do
-  let expectedArgTys = valueExpectedArgTypes valueInfo args
+  let expectedArgTys = valueExpectedArgTypes scope valueInfo mbExpected args
   argSurfaces <- zipWithM compileValueArg (expectedArgTys ++ repeat Nothing) args
   evidenceSurfaces <- valueResolvedEvidenceArgs scope valueInfo args
   let headSurface =
@@ -1042,13 +1042,20 @@ specializeConstructorInfo subst ctorInfo =
           ctorResult = result'
         }
 
-valueExpectedArgTypes :: ValueInfo -> [expr] -> [Maybe SrcType]
-valueExpectedArgTypes valueInfo args =
-  let argTys =
+valueExpectedArgTypes :: ElaborateScope -> ValueInfo -> Maybe SrcType -> [expr] -> [Maybe SrcType]
+valueExpectedArgTypes scope valueInfo mbExpected args =
+  let (argTys0, resultTy0) =
         case valueInfo of
           OrdinaryValue {valueType = ty} ->
-            fst (splitArrows (snd (splitForalls ty)))
-          _ -> []
+            splitArrows (snd (splitForalls ty))
+          _ -> ([], STBottom)
+      resultTyForArity =
+        foldr STArrow resultTy0 (drop (length args) argTys0)
+      subst =
+        case mbExpected >>= matchTypesInScope scope Map.empty resultTyForArity of
+          Just matched -> matched
+          Nothing -> Map.empty
+      argTys = map (specializeSrcType subst) argTys0
    in map concreteExpectedTy (take (length args) argTys)
   where
     concreteExpectedTy ty
@@ -1796,7 +1803,12 @@ deferConstructorCall scope ctorInfo argCount initialSubst = do
       occurrenceTy = constructorOccurrenceType ctorInfo argCount
       instBinders = map fst (fst (splitForalls quantifiedTy))
       placeholderSourceTy = specializeQuantifiedType initialSubst quantifiedTy
-      placeholderTy = lowerType scope placeholderSourceTy
+      loweredPlaceholderTy = lowerType scope placeholderSourceTy
+      placeholderTy =
+        if constructorOwnerHasVariableHeadApplication (elaborateScopeDataTypes scope) ctorInfo
+          && srcTypeHasVariableHeadApplication loweredPlaceholderTy
+          then constructorStructuralPlaceholderType scope ctorInfo
+          else loweredPlaceholderTy
       bindingMode = DeferredBindingMonomorphic
       deferred =
         DeferredConstructorCall
@@ -1811,6 +1823,28 @@ deferConstructorCall scope ctorInfo argCount initialSubst = do
           }
   registerDeferredObligation placeholder placeholderTy (DeferredConstructor deferred)
   pure placeholder
+
+constructorStructuralPlaceholderType :: ElaborateScope -> ConstructorInfo -> SrcType
+constructorStructuralPlaceholderType scope ctorInfo =
+  foldr
+    STArrow
+    (STVar resultVar)
+    (constructorStructuralArgs ctorInfo ++ map handlerType ownerConstructors)
+  where
+    ownerConstructors =
+      case resolveConstructorDataInfo scope ctorInfo of
+        Just dataInfo -> dataConstructors (visibleDataInfo dataInfo)
+        Nothing -> [ctorInfo]
+
+    resultVar = "$" ++ ctorOwningType ctorInfo ++ "_result"
+
+    handlerType ctor =
+      foldr STArrow (STVar resultVar) (constructorStructuralArgs ctor)
+
+    constructorStructuralArgs ctor =
+      [ STVar ("$" ++ ctorName ctor ++ "_arg" ++ show ix ++ "_type")
+        | ix <- [1 .. length (ctorArgs ctor)]
+      ]
 
 constructorOccurrenceType :: ConstructorInfo -> Int -> SrcType
 constructorOccurrenceType ctorInfo argCount =
