@@ -123,8 +123,16 @@ data DisplayNameEnv = DisplayNameEnv
 
 data KindEnv = KindEnv
   { kindTypeConstructors :: Map SymbolIdentity P.SrcKind,
-    kindTypeVariables :: Map String P.SrcKind
+    kindTypeVariables :: Map String KindTerm,
+    kindMetaSubst :: Map Int KindTerm,
+    kindNextMeta :: Int
   }
+  deriving (Eq, Show)
+
+data KindTerm
+  = KTType
+  | KTArrow KindTerm KindTerm
+  | KTMeta Int
   deriving (Eq, Show)
 
 emptyScope :: Scope
@@ -1144,7 +1152,9 @@ kindEnvFromScope scope =
           [ (dataInfoSymbolIdentity dataInfo, dataKind (dataTypeParams dataInfo))
             | dataInfo <- Map.elems (scopeTypes scope)
           ],
-      kindTypeVariables = Map.empty
+      kindTypeVariables = Map.empty,
+      kindMetaSubst = Map.empty,
+      kindNextMeta = 0
     }
 
 dataKind :: [P.TypeParam] -> P.SrcKind
@@ -1196,111 +1206,177 @@ validateClassConstraintKind scope env constraint = do
 extendKindParams :: [P.TypeParam] -> KindEnv -> TcM KindEnv
 extendKindParams params env =
   foldM
-    (\acc param -> bindKindVariable (P.typeParamName param) (P.typeParamKind param) acc)
+    (\acc param -> bindKindVariable (P.typeParamName param) (kindFromSrc (P.typeParamKind param)) acc)
     env
     params
 
 checkResolvedKind :: KindEnv -> ResolvedSrcType -> P.SrcKind -> TcM KindEnv
 checkResolvedKind env ty expected =
+  checkResolvedKindTerm env ty (kindFromSrc expected)
+
+checkResolvedKindTerm :: KindEnv -> ResolvedSrcType -> KindTerm -> TcM KindEnv
+checkResolvedKindTerm env ty expected =
   case ty of
     RSTVar name -> bindKindVariable name expected env
-    RSTArrow dom cod
-      | expected == P.KType -> do
-          env1 <- checkResolvedKind env dom P.KType
-          checkResolvedKind env1 cod P.KType
-      | otherwise -> throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType ty) expected P.KType)
-    RSTForall name mb body
-      | expected == P.KType -> do
-          env1 <-
-            case mb of
-              Nothing -> pure env
-              Just bound -> checkResolvedKind env (unResolvedSrcBound bound) P.KType
-          withScopedKindVariable name P.KType env1 $ \env2 ->
-            checkResolvedKind env2 body P.KType
-      | otherwise -> throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType ty) expected P.KType)
-    RSTMu name body
-      | expected == P.KType ->
-          withScopedKindVariable name P.KType env $ \env1 ->
-            checkResolvedKind env1 body P.KType
-      | otherwise -> throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType ty) expected P.KType)
+    RSTArrow dom cod -> do
+      env1 <- requireKindTerm env ty expected KTType
+      env2 <- checkResolvedKindTerm env1 dom KTType
+      checkResolvedKindTerm env2 cod KTType
+    RSTForall name mb body -> do
+      env1 <- requireKindTerm env ty expected KTType
+      env2 <-
+        case mb of
+          Nothing -> pure env1
+          Just bound -> checkResolvedKindTerm env1 (unResolvedSrcBound bound) KTType
+      withScopedKindVariable name KTType env2 $ \env3 ->
+        checkResolvedKindTerm env3 body KTType
+    RSTMu name body -> do
+      env1 <- requireKindTerm env ty expected KTType
+      withScopedKindVariable name KTType env1 $ \env2 ->
+        checkResolvedKindTerm env2 body KTType
     RSTVarApp name args -> checkVarAppKind env name args expected
     _ -> do
-      (actual, env1) <- inferResolvedKind env ty
-      requireKind env1 ty expected actual
+      (actual, env1) <- inferResolvedKindTerm env ty
+      requireKindTerm env1 ty expected actual
 
-inferResolvedKind :: KindEnv -> ResolvedSrcType -> TcM (P.SrcKind, KindEnv)
-inferResolvedKind env ty =
+inferResolvedKindTerm :: KindEnv -> ResolvedSrcType -> TcM (KindTerm, KindEnv)
+inferResolvedKindTerm env ty =
   case ty of
-    RSTVar name ->
-      case Map.lookup name (kindTypeVariables env) of
-        Just kind0 -> pure (kind0, env)
-        Nothing -> pure (P.KType, env {kindTypeVariables = Map.insert name P.KType (kindTypeVariables env)})
+    RSTVar name -> kindTermForVariable name env
     RSTBase symbol -> do
       kind0 <- resolvedTypeHeadKind env symbol
-      pure (kind0, env)
+      pure (kindFromSrc kind0, env)
     RSTCon symbol args -> do
-      headKind <- resolvedTypeHeadKind env symbol
+      headKind <- kindFromSrc <$> resolvedTypeHeadKind env symbol
       applyKindArgs env (resolvedSymbolDisplayName symbol) headKind args
-    RSTVarApp name args ->
-      checkVarAppKind env name args P.KType >>= \env1 -> pure (P.KType, env1)
+    RSTVarApp name args -> inferVarAppKind env name args
     RSTArrow dom cod -> do
-      env1 <- checkResolvedKind env dom P.KType
-      env2 <- checkResolvedKind env1 cod P.KType
-      pure (P.KType, env2)
+      env1 <- checkResolvedKindTerm env dom KTType
+      env2 <- checkResolvedKindTerm env1 cod KTType
+      pure (KTType, env2)
     RSTForall name mb body -> do
       env1 <-
         case mb of
           Nothing -> pure env
-          Just bound -> checkResolvedKind env (unResolvedSrcBound bound) P.KType
+          Just bound -> checkResolvedKindTerm env (unResolvedSrcBound bound) KTType
       env2 <-
-        withScopedKindVariable name P.KType env1 $ \env3 ->
-          checkResolvedKind env3 body P.KType
-      pure (P.KType, env2)
+        withScopedKindVariable name KTType env1 $ \env3 ->
+          checkResolvedKindTerm env3 body KTType
+      pure (KTType, env2)
     RSTMu name body -> do
       env1 <-
-        withScopedKindVariable name P.KType env $ \env2 ->
-          checkResolvedKind env2 body P.KType
-      pure (P.KType, env1)
-    RSTBottom -> pure (P.KType, env)
+        withScopedKindVariable name KTType env $ \env2 ->
+          checkResolvedKindTerm env2 body KTType
+      pure (KTType, env1)
+    RSTBottom -> pure (KTType, env)
 
-checkVarAppKind :: KindEnv -> String -> NonEmpty ResolvedSrcType -> P.SrcKind -> TcM KindEnv
-checkVarAppKind env name args expected =
-  case Map.lookup name (kindTypeVariables env) of
-    Just headKind -> do
-      (actual, env1) <- applyKindArgs env name headKind args
-      requireKind env1 (RSTVarApp name args) expected actual
-    Nothing -> do
-      (argKinds, env1) <- inferArgumentKinds env (NE.toList args)
-      let headKind = foldr P.KArrow expected argKinds
-      bindKindVariable name headKind env1
+checkVarAppKind :: KindEnv -> String -> NonEmpty ResolvedSrcType -> KindTerm -> TcM KindEnv
+checkVarAppKind env name args expected = do
+  (actual, env1) <- inferVarAppKind env name args
+  requireKindTerm env1 (RSTVarApp name args) expected actual
 
-inferArgumentKinds :: KindEnv -> [ResolvedSrcType] -> TcM ([P.SrcKind], KindEnv)
-inferArgumentKinds env [] = pure ([], env)
-inferArgumentKinds env (arg : rest) = do
-  (argKind, env1) <- inferResolvedKind env arg
-  (argKinds, env2) <- inferArgumentKinds env1 rest
-  pure (argKind : argKinds, env2)
+inferVarAppKind :: KindEnv -> String -> NonEmpty ResolvedSrcType -> TcM (KindTerm, KindEnv)
+inferVarAppKind env name args = do
+  (headKind, env1) <- kindTermForVariable name env
+  applyKindArgs env1 name headKind args
 
-applyKindArgs :: KindEnv -> String -> P.SrcKind -> NonEmpty ResolvedSrcType -> TcM (P.SrcKind, KindEnv)
+applyKindArgs :: KindEnv -> String -> KindTerm -> NonEmpty ResolvedSrcType -> TcM (KindTerm, KindEnv)
 applyKindArgs env headName headKind args =
   go 0 env headKind (NE.toList args)
   where
-    go _ env0 kind0 [] = pure (kind0, env0)
-    go consumed env0 (P.KArrow expected result) (arg : rest) = do
-      env1 <- checkResolvedKind env0 arg expected
-      go (consumed + 1) env1 result rest
-    go consumed _ P.KType remaining =
-      throwError (ProgramTypeArityMismatch headName consumed (consumed + length remaining))
+    go _ env0 kind0 [] = pure (zonkKindTerm env0 kind0, env0)
+    go consumed env0 kind0 (arg : rest) =
+      case zonkKindTerm env0 kind0 of
+        KTArrow expected result -> do
+          env1 <- checkResolvedKindTerm env0 arg expected
+          go (consumed + 1) env1 result rest
+        KTMeta meta -> do
+          (argKind, env1) <- inferResolvedKindTerm env0 arg
+          let (resultKind, env2) = freshKindMeta env1
+          env3 <- requireKindTerm env2 (RSTVar headName) (KTMeta meta) (KTArrow argKind resultKind)
+          go (consumed + 1) env3 resultKind rest
+        KTType ->
+          throwError (ProgramTypeArityMismatch headName consumed (consumed + length rest + 1))
 
-requireKind :: KindEnv -> ResolvedSrcType -> P.SrcKind -> P.SrcKind -> TcM KindEnv
-requireKind env ty expected actual
-  | expected == actual = pure env
-  | otherwise =
+requireKindTerm :: KindEnv -> ResolvedSrcType -> KindTerm -> KindTerm -> TcM KindEnv
+requireKindTerm env ty expected actual =
+  case unifyKindTerm env expected actual of
+    Right env1 -> pure env1
+    Left (KindUnifyMismatch expectedKind actualKind) ->
       case typeHeadArity env ty of
         Just (headName, expectedArgs, actualArgs)
-          | expected == P.KType && isArrowKind actual ->
+          | expectedKind == P.KType && isArrowKind actualKind ->
               throwError (ProgramTypeArityMismatch headName expectedArgs actualArgs)
-        _ -> throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType ty) expected actual)
+        _ -> throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType ty) expectedKind actualKind)
+
+data KindUnifyMismatch = KindUnifyMismatch P.SrcKind P.SrcKind
+  deriving (Eq, Show)
+
+unifyKindTerm :: KindEnv -> KindTerm -> KindTerm -> Either KindUnifyMismatch KindEnv
+unifyKindTerm env left right =
+  case (zonkKindTerm env left, zonkKindTerm env right) of
+    (KTType, KTType) -> Right env
+    (KTArrow leftDom leftCod, KTArrow rightDom rightCod) -> do
+      env1 <- unifyKindTerm env leftDom rightDom
+      unifyKindTerm env1 leftCod rightCod
+    (KTMeta meta, term) -> bindKindMeta meta term env
+    (term, KTMeta meta) -> bindKindMeta meta term env
+    (leftTerm, rightTerm) ->
+      Left (KindUnifyMismatch (kindTermToSrcKind env leftTerm) (kindTermToSrcKind env rightTerm))
+
+bindKindMeta :: Int -> KindTerm -> KindEnv -> Either KindUnifyMismatch KindEnv
+bindKindMeta meta term env =
+  let term0 = zonkKindTerm env term
+   in case term0 of
+        KTMeta other
+          | other == meta -> Right env
+        _
+          | kindMetaOccurs meta term0 env ->
+              Left (KindUnifyMismatch (kindTermToSrcKind env (KTMeta meta)) (kindTermToSrcKind env term0))
+          | otherwise ->
+              Right env {kindMetaSubst = Map.insert meta term0 (kindMetaSubst env)}
+
+kindMetaOccurs :: Int -> KindTerm -> KindEnv -> Bool
+kindMetaOccurs meta term env =
+  case zonkKindTerm env term of
+    KTType -> False
+    KTArrow dom cod -> kindMetaOccurs meta dom env || kindMetaOccurs meta cod env
+    KTMeta other -> meta == other
+
+kindTermForVariable :: String -> KindEnv -> TcM (KindTerm, KindEnv)
+kindTermForVariable name env =
+  case Map.lookup name (kindTypeVariables env) of
+    Just kind0 -> pure (zonkKindTerm env kind0, env)
+    Nothing ->
+      let (kind0, env1) = freshKindMeta env
+       in pure (kind0, env1 {kindTypeVariables = Map.insert name kind0 (kindTypeVariables env1)})
+
+freshKindMeta :: KindEnv -> (KindTerm, KindEnv)
+freshKindMeta env =
+  (KTMeta (kindNextMeta env), env {kindNextMeta = kindNextMeta env + 1})
+
+kindFromSrc :: P.SrcKind -> KindTerm
+kindFromSrc kind0 =
+  case kind0 of
+    P.KType -> KTType
+    P.KArrow dom cod -> KTArrow (kindFromSrc dom) (kindFromSrc cod)
+
+kindTermToSrcKind :: KindEnv -> KindTerm -> P.SrcKind
+kindTermToSrcKind env kind0 =
+  case zonkKindTerm env kind0 of
+    KTType -> P.KType
+    KTArrow dom cod -> P.KArrow (kindTermToSrcKind env dom) (kindTermToSrcKind env cod)
+    KTMeta _ -> P.KType
+
+zonkKindTerm :: KindEnv -> KindTerm -> KindTerm
+zonkKindTerm env kind0 =
+  case kind0 of
+    KTType -> KTType
+    KTArrow dom cod -> KTArrow (zonkKindTerm env dom) (zonkKindTerm env cod)
+    KTMeta meta ->
+      case Map.lookup meta (kindMetaSubst env) of
+        Just replacement -> zonkKindTerm env replacement
+        Nothing -> KTMeta meta
 
 typeHeadArity :: KindEnv -> ResolvedSrcType -> Maybe (String, Int, Int)
 typeHeadArity env ty =
@@ -1320,7 +1396,7 @@ typeHeadArity env ty =
 
     kindForVar name =
       case Map.lookup name (kindTypeVariables env) of
-        Just kind0 -> Just (name, kindArity kind0)
+        Just kind0 -> Just (name, kindTermArity env kind0)
         Nothing -> Nothing
 
     kindForHead symbol =
@@ -1334,22 +1410,27 @@ kindArity kind0 =
     P.KType -> 0
     P.KArrow _ result -> 1 + kindArity result
 
+kindTermArity :: KindEnv -> KindTerm -> Int
+kindTermArity env kind0 =
+  case zonkKindTerm env kind0 of
+    KTType -> 0
+    KTArrow _ result -> 1 + kindTermArity env result
+    KTMeta _ -> 0
+
 isArrowKind :: P.SrcKind -> Bool
 isArrowKind kind0 =
   case kind0 of
     P.KArrow {} -> True
     P.KType -> False
 
-bindKindVariable :: String -> P.SrcKind -> KindEnv -> TcM KindEnv
+bindKindVariable :: String -> KindTerm -> KindEnv -> TcM KindEnv
 bindKindVariable name expected env =
   case Map.lookup name (kindTypeVariables env) of
-    Just actual
-      | actual == expected -> pure env
-      | otherwise -> throwError (ProgramKindMismatch (STVar name) expected actual)
+    Just actual -> requireKindTerm env (RSTVar name) expected actual
     Nothing ->
-      pure env {kindTypeVariables = Map.insert name expected (kindTypeVariables env)}
+      pure env {kindTypeVariables = Map.insert name (zonkKindTerm env expected) (kindTypeVariables env)}
 
-withScopedKindVariable :: String -> P.SrcKind -> KindEnv -> (KindEnv -> TcM KindEnv) -> TcM KindEnv
+withScopedKindVariable :: String -> KindTerm -> KindEnv -> (KindEnv -> TcM KindEnv) -> TcM KindEnv
 withScopedKindVariable name kind0 env action = do
   let previous = Map.lookup name (kindTypeVariables env)
       envWithBinder = env {kindTypeVariables = Map.insert name kind0 (kindTypeVariables env)}

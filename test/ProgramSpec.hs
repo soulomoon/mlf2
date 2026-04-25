@@ -2756,6 +2756,48 @@ spec = do
             program <- requireParsed programText
             checkProgram program `shouldSatisfy` isRight
 
+        it "accepts method constraints whose unknown kinds are solved out of order" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (C, Functor, Uses, main) {"
+                        , "  class C a {"
+                        , "  }"
+                        , ""
+                        , "  class Functor (f :: * -> *) {"
+                        , "  }"
+                        , ""
+                        , "  class Uses marker {"
+                        , "    use : (C (f a), Functor a) => marker -> marker;"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
+
+        it "accepts instance constraints whose unknown kinds are solved out of order" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (C, Functor, Higher, main) {"
+                        , "  class C a {"
+                        , "  }"
+                        , ""
+                        , "  class Functor (f :: * -> *) {"
+                        , "  }"
+                        , ""
+                        , "  class Higher (h :: * -> *) {"
+                        , "  }"
+                        , ""
+                        , "  instance (C (f a), Functor a) => Higher a {"
+                        , "  }"
+                        , ""
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
+
         it "rejects too many constructor type arguments before later lowering" $ do
             let programText =
                     unlines
