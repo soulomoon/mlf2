@@ -2,9 +2,10 @@ module Main (main) where
 
 import AcyclicitySpec qualified
 import AlignmentInvariantSpec qualified
+import BackendConvertSpec qualified
+import BackendIRSpec qualified
 import BindingSharedAbstractionSpec qualified
 import BindingSpec qualified
-import BackendIRSpec qualified
 import CanonicalizerSpec qualified
 import Constraint.SolvedSpec qualified
 import ConstraintGenSpec qualified
@@ -74,6 +75,7 @@ main = do
         die "PresolutionSpec was not wired into the test harness."
     SolveSpec.spec
     ScopeSpec.spec
+    BackendConvertSpec.spec
     BackendIRSpec.spec
     ProgramSpec.spec
     ResolvedSymbolSpec.spec

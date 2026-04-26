@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Added a private `MLF.Backend.Convert` boundary from checked `.mlfp`
+  programs into the typed backend IR, including backend type conversion,
+  fail-closed unsupported-shape diagnostics, explicit ADT construct/case
+  recovery, and regression coverage.
 - Added `.mlfp` source kind checking for declaration parameter annotations,
   ordinary type constructor application, variable-headed type application,
   class constraints, method signatures, and instance heads. Ill-kinded source
