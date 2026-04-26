@@ -130,6 +130,37 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendTypeAppBoundMismatch intTy boolTy)
 
+  it "compares validator types modulo alpha-equivalence" $ do
+    let exprTy = BTForall "a" Nothing (BTArrow (BTVar "a") (BTVar "a"))
+        declaredTy = BTForall "b" Nothing (BTArrow (BTVar "b") (BTVar "b"))
+        alphaIdentityExpr =
+          BackendTyAbs
+            { backendExprType = exprTy,
+              backendTyParamName = "a",
+              backendTyParamBound = Nothing,
+              backendTyAbsBody =
+                BackendLam
+                  { backendExprType = BTArrow (BTVar "a") (BTVar "a"),
+                    backendParamName = "x",
+                    backendParamType = BTVar "a",
+                    backendBody = BackendVar (BTVar "a") "x"
+                  }
+            }
+        appExpectedTy = BTForall "z" Nothing (BTArrow intTy (BTVar "z"))
+        appFunctionTy = BTForall "a" Nothing (BTForall "b" Nothing (BTArrow (BTVar "a") (BTVar "b")))
+
+    validateBackendBinding (BackendBinding "poly" declaredTy alphaIdentityExpr False)
+      `shouldBe` Right ()
+
+    validateBackendExpr
+      ( BackendTyApp
+          { backendExprType = appExpectedTy,
+            backendTyFunction = BackendVar appFunctionTy "poly",
+            backendTyArgument = intTy
+          }
+      )
+      `shouldBe` Right ()
+
   it "rejects recursive roll and unroll type mismatches" $ do
     let recTy = BTMu "self" intTy
 
@@ -142,6 +173,16 @@ spec = describe "MLF.Backend.IR" $ do
   it "accepts ADT construction and case analysis through constructor metadata" $ do
     validateBackendProgram (programWithMainExpr boxCaseExpr)
       `shouldBe` Right ()
+
+  it "accepts parameterized constructor metadata at use and case sites" $ do
+    validateBackendProgram (programWithDataAndMainExpr [optionData] someIntExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [optionData] optionCaseExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [optionData] someBoolAsOptionIntExpr)
+      `shouldBe` Left (BackendConstructorArgumentMismatch "Some" 0 intTy boolTy)
 
   it "rejects unknown constructors and duplicate constructor metadata" $ do
     validateBackendProgram (programWithMainExpr (BackendConstruct boxTy "Missing" []))
@@ -197,10 +238,14 @@ simpleProgram =
 
 programWithMainExpr :: BackendExpr -> BackendProgram
 programWithMainExpr expr =
+  programWithDataAndMainExpr [boxData] expr
+
+programWithDataAndMainExpr :: [BackendData] -> BackendExpr -> BackendProgram
+programWithDataAndMainExpr dataDecls expr =
   BackendProgram
     [ BackendModule
         { backendModuleName = "Main",
-          backendModuleData = [boxData],
+          backendModuleData = dataDecls,
           backendModuleBindings = [mainBinding expr]
         }
     ]
@@ -261,11 +306,35 @@ boxData =
       backendDataConstructors = [BackendConstructor "Box" [intTy] boxTy]
     }
 
+optionData :: BackendData
+optionData =
+  BackendData
+    { backendDataName = "Option",
+      backendDataParameters = ["a"],
+      backendDataConstructors = [BackendConstructor "Some" [BTVar "a"] (optionTy (BTVar "a"))]
+    }
+
 boxCaseExpr :: BackendExpr
 boxCaseExpr =
   boxCaseExprWith
     (BackendConstruct boxTy "Box" [intLit 1])
     (BackendAlternative (BackendConstructorPattern "Box" ["n"]) (BackendVar intTy "n") :| [])
+
+someIntExpr :: BackendExpr
+someIntExpr =
+  BackendConstruct (optionTy intTy) "Some" [intLit 1]
+
+someBoolAsOptionIntExpr :: BackendExpr
+someBoolAsOptionIntExpr =
+  BackendConstruct (optionTy intTy) "Some" [boolLit True]
+
+optionCaseExpr :: BackendExpr
+optionCaseExpr =
+  BackendCase
+    { backendExprType = intTy,
+      backendScrutinee = someIntExpr,
+      backendAlternatives = BackendAlternative (BackendConstructorPattern "Some" ["n"]) (BackendVar intTy "n") :| []
+    }
 
 boxCaseWrongResultExpr :: BackendExpr
 boxCaseWrongResultExpr =
@@ -320,3 +389,7 @@ boolTy =
 boxTy :: BackendType
 boxTy =
   BTBase (BaseTy "Box")
+
+optionTy :: BackendType -> BackendType
+optionTy ty =
+  BTCon (BaseTy "Option") (ty :| [])
