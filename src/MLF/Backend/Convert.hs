@@ -55,6 +55,7 @@ import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType)
 data BackendConversionError
   = BackendUnsupportedSourceType SrcType
   | BackendUnsupportedInstantiation Instantiation
+  | BackendUnsupportedRecursiveLet String
   | BackendUnsupportedCaseShape String
   | BackendTypeCheckFailed ElabTerm TypeCheckError
   | BackendValidationFailed BackendValidationError
@@ -377,9 +378,10 @@ convertOrdinaryTerm context env term resultTy =
           }
     ELet name scheme rhs body -> do
       let schemeTy = schemeToType scheme
-          envForRhs = extendTermEnv name schemeTy env
+      when (termMentionsFreeVariable name rhs) $
+        Left (BackendUnsupportedRecursiveLet name)
       bindingTy <- convertElabType schemeTy
-      rhsExpr <- convertTermExpected context envForRhs (Just bindingTy) rhs
+      rhsExpr <- convertTermExpected context env (Just bindingTy) rhs
       bodyExpr <- convertTermExpected context (extendTermEnv name schemeTy env) (Just resultTy) body
       Right
         BackendLet
@@ -421,6 +423,33 @@ convertOrdinaryTerm context env term resultTy =
           { backendExprType = resultTy,
             backendUnrollPayload = bodyExpr
           }
+
+termMentionsFreeVariable :: String -> ElabTerm -> Bool
+termMentionsFreeVariable needle =
+  go
+  where
+    go term =
+      case term of
+        EVar name ->
+          name == needle
+        ELit {} ->
+          False
+        ELam name _ body
+          | name == needle -> False
+          | otherwise -> go body
+        EApp fun arg ->
+          go fun || go arg
+        ELet name _ rhs body
+          | name == needle -> False
+          | otherwise -> go rhs || go body
+        ETyAbs _ _ body ->
+          go body
+        ETyInst inner _ ->
+          go inner
+        ERoll _ body ->
+          go body
+        EUnroll body ->
+          go body
 
 convertTypeInstantiation ::
   ConvertContext ->

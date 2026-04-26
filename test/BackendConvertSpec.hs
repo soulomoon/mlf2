@@ -86,6 +86,11 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding `shouldBe` BackendLit intTy (LInt 1)
 
+  it "rejects recursive local lets before emitting invalid backend IR" $ do
+    checked <- requireChecked =<< readFile "test/programs/unified/authoritative-recursive-let.mlfp"
+
+    convertCheckedProgram checked `shouldBe` Left (BackendUnsupportedRecursiveLet "$peel#0")
+
   it "reports unsupported source type applications instead of weakening them" $ do
     convertSourceType unsupportedVariableHeadType
       `shouldBe` Left (BackendUnsupportedSourceType unsupportedVariableHeadType)
