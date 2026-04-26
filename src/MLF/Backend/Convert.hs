@@ -44,6 +44,10 @@ import MLF.Frontend.Program.Types
     CheckedProgram (..),
     ConstructorInfo (..),
     DataInfo (..),
+    ResolvedModule (..),
+    ResolvedProgram (..),
+    ResolvedScope (..),
+    ResolvedSymbol (..),
     SymbolIdentity (..),
   )
 import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType)
@@ -57,7 +61,7 @@ data BackendConversionError
   deriving (Eq, Show)
 
 data ConvertContext = ConvertContext
-  { ccElaborateScope :: ElaborateScope,
+  { ccModuleScopes :: Map String ElaborateScope,
     ccConstructors :: Map String ConstructorMeta,
     ccData :: [DataMeta]
   }
@@ -123,8 +127,9 @@ convertCheckedBinding context env binding = do
 buildConvertContext :: CheckedProgram -> Either BackendConversionError ConvertContext
 buildConvertContext checked = do
   let dataInfos = allDataInfos checked
-      scope = mkElaborateScope Map.empty (dataInfoMap dataInfos) Map.empty []
-  dataMetas <- mapM (buildDataMeta scope) dataInfos
+      dataByIdentity = dataInfoIdentityMap dataInfos
+      moduleScopes = moduleElaborateScopes checked dataByIdentity
+  dataMetas <- mapM (buildDataMetaForDataInfo moduleScopes dataInfos) dataInfos
   let constructorMetas =
         [ (backendConstructorName (cmBackend constructorMeta), constructorMeta)
           | dataMeta <- dataMetas,
@@ -132,7 +137,7 @@ buildConvertContext checked = do
         ]
   Right
     ConvertContext
-      { ccElaborateScope = scope,
+      { ccModuleScopes = moduleScopes,
         ccConstructors = Map.fromList constructorMetas,
         ccData = dataMetas
       }
@@ -144,15 +149,74 @@ allDataInfos checked =
       dataInfo <- Map.elems (checkedModuleData checkedModule)
   ]
 
-dataInfoMap :: [DataInfo] -> Map String DataInfo
-dataInfoMap dataInfos =
+dataInfoIdentityMap :: [DataInfo] -> Map SymbolIdentity DataInfo
+dataInfoIdentityMap dataInfos =
+  Map.fromList [(dataInfoSymbol info, info) | info <- dataInfos]
+
+moduleElaborateScopes :: CheckedProgram -> Map SymbolIdentity DataInfo -> Map String ElaborateScope
+moduleElaborateScopes checked dataByIdentity =
   Map.fromList
-    (concatMap entriesFor dataInfos)
+    [ (resolvedModuleName resolvedModule, elaborateScopeForResolvedModule dataByIdentity resolvedModule)
+      | resolvedModule <- resolvedProgramModules (checkedProgramResolved checked)
+    ]
+
+elaborateScopeForResolvedModule :: Map SymbolIdentity DataInfo -> ResolvedModule -> ElaborateScope
+elaborateScopeForResolvedModule dataByIdentity resolvedModule =
+  mkElaborateScope Map.empty dataTypes Map.empty []
   where
-    entriesFor info =
-      [ (dataName info, info),
-        (qualifiedDataName info, info)
-      ]
+    dataTypes =
+      visibleDataInfoMap dataByIdentity (resolvedScopeTypes (resolvedModuleScope resolvedModule))
+        `Map.union` qualifiedDataInfoMap (Map.elems dataByIdentity)
+
+visibleDataInfoMap :: Map SymbolIdentity DataInfo -> Map String ResolvedSymbol -> Map String DataInfo
+visibleDataInfoMap dataByIdentity =
+  Map.mapMaybe (\symbol -> Map.lookup (resolvedSymbolIdentity symbol) dataByIdentity)
+
+qualifiedDataInfoMap :: [DataInfo] -> Map String DataInfo
+qualifiedDataInfoMap dataInfos =
+  Map.fromList [(qualifiedDataName info, info) | info <- dataInfos]
+
+fallbackElaborateScopeForDataInfo :: [DataInfo] -> DataInfo -> ElaborateScope
+fallbackElaborateScopeForDataInfo dataInfos info =
+  mkElaborateScope Map.empty dataTypes Map.empty []
+  where
+    dataTypes =
+      localDataInfoMap dataInfos info
+        `Map.union` uniqueUnqualifiedDataInfoMap dataInfos
+        `Map.union` qualifiedDataInfoMap dataInfos
+
+localDataInfoMap :: [DataInfo] -> DataInfo -> Map String DataInfo
+localDataInfoMap dataInfos info =
+  Map.fromList
+    [ (dataName candidate, candidate)
+      | candidate <- dataInfos,
+        dataModule candidate == dataModule info
+    ]
+
+uniqueUnqualifiedDataInfoMap :: [DataInfo] -> Map String DataInfo
+uniqueUnqualifiedDataInfoMap dataInfos =
+  Map.fromList
+    [ (name, info)
+      | (name, infos) <- Map.toList grouped,
+        [info] <- [infos]
+    ]
+  where
+    grouped =
+      Map.fromListWith (++)
+        [ (dataName info, [info])
+          | info <- dataInfos
+        ]
+
+buildDataMetaForDataInfo :: Map String ElaborateScope -> [DataInfo] -> DataInfo -> Either BackendConversionError DataMeta
+buildDataMetaForDataInfo moduleScopes dataInfos info =
+  buildDataMeta (elaborateScopeForDataInfo moduleScopes dataInfos info) info
+
+elaborateScopeForDataInfo :: Map String ElaborateScope -> [DataInfo] -> DataInfo -> ElaborateScope
+elaborateScopeForDataInfo moduleScopes dataInfos info =
+  Map.findWithDefault
+    (fallbackElaborateScopeForDataInfo dataInfos info)
+    (dataModule info)
+    moduleScopes
 
 qualifiedDataName :: DataInfo -> String
 qualifiedDataName info =
@@ -186,7 +250,11 @@ convertDataInfo :: ConvertContext -> DataInfo -> Either BackendConversionError B
 convertDataInfo context info =
   case find ((== dataInfoSymbol info) . dataInfoSymbol . dmInfo) (ccData context) of
     Just dataMeta -> Right (dmBackend dataMeta)
-    Nothing -> buildDataMeta (ccElaborateScope context) info >>= Right . dmBackend
+    Nothing ->
+      buildDataMeta
+        (elaborateScopeForDataInfo (ccModuleScopes context) (map dmInfo (ccData context)) info)
+        info
+        >>= Right . dmBackend
 
 convertConstructorInfo :: ElaborateScope -> ConstructorInfo -> Either BackendConversionError BackendConstructor
 convertConstructorInfo scope info = do
@@ -381,7 +449,9 @@ convertTypeInstantiation context env resultTy inner inst =
                     backendTyFunction = innerExpr,
                     backendTyArgument = backendTyArg
                   }
-            _ -> Left (BackendUnsupportedInstantiation inst)
+            _
+              | backendExprType innerExpr == resultTy -> Right innerExpr
+              | otherwise -> Left (BackendUnsupportedInstantiation inst)
         Nothing -> Left (BackendUnsupportedInstantiation inst)
 
 appLikeInstantiationType :: Instantiation -> Maybe ElabType
@@ -439,12 +509,15 @@ convertCaseApplication ::
 convertCaseApplication context env term resultTy =
   case collectApps term of
     (headTerm, args) ->
-      case caseHead headTerm of
+      case caseScrutinee headTerm of
         Nothing -> Right Nothing
-        Just (scrutineeTerm, scrutineeTy) -> do
-          backendScrutineeTy <- convertElabType scrutineeTy
+        Just scrutineeTerm -> do
+          (backendScrutineeTy, mbScrutineeData) <- caseScrutineeInfo context env scrutineeTerm
           scrutineeExpr <- convertTermExpected context env (Just backendScrutineeTy) scrutineeTerm
-          dataMeta <- requireCaseData context (backendExprType scrutineeExpr)
+          dataMeta <-
+            case mbScrutineeData of
+              Just scrutineeData -> Right scrutineeData
+              Nothing -> requireCaseData context (backendExprType scrutineeExpr)
           let constructors = backendDataConstructors (dmBackend dataMeta)
           when (length args /= length constructors) $
             Left
@@ -461,12 +534,63 @@ convertCaseApplication context env term resultTy =
                   }
             )
 
-caseHead :: ElabTerm -> Maybe (ElabTerm, ElabType)
-caseHead term =
+caseScrutinee :: ElabTerm -> Maybe ElabTerm
+caseScrutinee term =
   case term of
     ETyInst (EUnroll scrutinee) inst
-      | Just scrutineeTy <- appLikeInstantiationType inst -> Just (scrutinee, scrutineeTy)
+      | Just _ <- appLikeInstantiationType inst -> Just scrutinee
     _ -> Nothing
+
+caseScrutineeInfo :: ConvertContext -> Env -> ElabTerm -> Either BackendConversionError (BackendType, Maybe DataMeta)
+caseScrutineeInfo context env scrutineeTerm =
+  constructorApplicationResultType context env scrutineeTerm
+    >>= \case
+      Just info -> Right info
+      Nothing -> do
+        scrutineeTy <- inferBackendType env scrutineeTerm
+        Right (scrutineeTy, Nothing)
+
+constructorApplicationResultType :: ConvertContext -> Env -> ElabTerm -> Either BackendConversionError (Maybe (BackendType, Maybe DataMeta))
+constructorApplicationResultType context env term =
+  case collectApps term of
+    (headTerm, args) ->
+      case constructorHeadName headTerm >>= (`Map.lookup` ccConstructors context) of
+        Just constructorMeta
+          | length args == length fields -> do
+              substitution <-
+                foldM
+                  (matchConstructorApplicationArgument env parameters constructor)
+                  Map.empty
+                  (zip fields args)
+              let resultTy = substituteBackendTypesLocal substitution (backendConstructorResult constructor)
+              Right (Just (resultTy, Just (cmData constructorMeta)))
+          | otherwise -> Right Nothing
+          where
+            constructor = cmBackend constructorMeta
+            fields = backendConstructorFields constructor
+            parameters = Set.fromList (backendDataParameters (dmBackend (cmData constructorMeta)))
+        Nothing -> Right Nothing
+
+matchConstructorApplicationArgument ::
+  Env ->
+  Set.Set String ->
+  BackendConstructor ->
+  Map String BackendType ->
+  (BackendType, ElabTerm) ->
+  Either BackendConversionError (Map String BackendType)
+matchConstructorApplicationArgument env parameters constructor substitution (expectedTy, arg) = do
+  actualTy <- inferBackendType env arg
+  case matchBackendTypeParameters parameters substitution expectedTy actualTy of
+    Just substitution' -> Right substitution'
+    Nothing ->
+      Left
+        ( BackendUnsupportedCaseShape
+            ("constructor argument type does not match case scrutinee constructor `" ++ backendConstructorName constructor ++ "`")
+        )
+
+substituteBackendTypesLocal :: Map String BackendType -> BackendType -> BackendType
+substituteBackendTypesLocal substitution ty =
+  Map.foldrWithKey substituteBackendType ty substitution
 
 requireCaseData :: ConvertContext -> BackendType -> Either BackendConversionError DataMeta
 requireCaseData context scrutineeTy =

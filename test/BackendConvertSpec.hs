@@ -1,11 +1,13 @@
 module BackendConvertSpec (spec) where
 
+import Control.Applicative ((<|>))
 import Data.Foldable (toList)
 import Data.List (find)
 import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Backend.Convert
 import MLF.Backend.IR
 import MLF.Constraint.Types.Graph (BaseTy (..))
+import qualified MLF.Elab.Types as Elab
 import MLF.Frontend.Syntax (Lit (..), SrcTy (..), SrcType)
 import MLF.Program
 import Test.Hspec
@@ -43,6 +45,47 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
     collectConstructNames (backendBindingExpr mainBinding) `shouldSatisfy` (not . null)
 
+  it "recovers backend cases when the result type differs from the scrutinee ADT" $ do
+    checked <- requireChecked intCaseProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    case findBackendCase (backendBindingExpr mainBinding) of
+      Just BackendCase {backendExprType = resultTy, backendScrutinee = scrutinee} -> do
+        resultTy `shouldBe` intTy
+        backendExprType scrutinee `shouldSatisfy` (/= intTy)
+      Just other -> expectationFailure ("expected backend case, got " ++ show other)
+      Nothing -> expectationFailure "expected backend case"
+
+  it "keeps same-name data declarations module-scoped during type lowering" $ do
+    checked <- requireChecked duplicateDataNameProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    backendDataNames backend `shouldContain` ["A.T", "B.T"]
+
+    aBinding <- requireBinding "A__A" backend
+    aConstructor <- requireConstructor "A__A" backend
+    backendConstructorResult aConstructor `shouldBe` backendBindingType aBinding
+
+  it "treats stale app-like instantiations on non-forall terms as no-ops" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingTerm = Elab.ETyInst (Elab.ELit (LInt 1)) (Elab.InstApp intElabTy),
+                    checkedBindingType = intElabTy
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldBe` BackendLit intTy (LInt 1)
+
   it "reports unsupported source type applications instead of weakening them" $ do
     convertSourceType unsupportedVariableHeadType
       `shouldBe` Left (BackendUnsupportedSourceType unsupportedVariableHeadType)
@@ -67,6 +110,45 @@ adtCaseProgram =
       "  def main : Nat = case Succ Zero of {",
       "    Zero -> Zero;",
       "    Succ n -> n",
+      "  };",
+      "}"
+    ]
+
+intCaseProgram :: String
+intCaseProgram =
+  unlines
+    [ "module Main export (Nat(..), main) {",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat;",
+      "",
+      "  def main : Int = case Succ Zero of {",
+      "    Zero -> 0;",
+      "    Succ n -> 1",
+      "  };",
+      "}"
+    ]
+
+duplicateDataNameProgram :: String
+duplicateDataNameProgram =
+  unlines
+    [ "module A export (T(..), make) {",
+      "  data T =",
+      "      A : T;",
+      "",
+      "  def make : T = A;",
+      "}",
+      "",
+      "module B export (T(..)) {",
+      "  data T =",
+      "      B : Int -> T;",
+      "}",
+      "",
+      "module Main export (main) {",
+      "  import A as A;",
+      "",
+      "  def main : Bool = case A.make of {",
+      "    A.A -> true",
       "  };",
       "}"
     ]
@@ -98,9 +180,19 @@ requireBinding name backend =
     Just binding -> pure binding
     Nothing -> expectationFailure ("missing backend binding " ++ show name) >> fail "missing binding"
 
+requireConstructor :: String -> BackendProgram -> IO BackendConstructor
+requireConstructor name backend =
+  case find ((== name) . backendConstructorName) (backendConstructors backend) of
+    Just constructor -> pure constructor
+    Nothing -> expectationFailure ("missing backend constructor " ++ show name) >> fail "missing constructor"
+
 backendBindings :: BackendProgram -> [BackendBinding]
 backendBindings =
   concatMap backendModuleBindings . backendProgramModules
+
+backendConstructors :: BackendProgram -> [BackendConstructor]
+backendConstructors =
+  concatMap (concatMap backendDataConstructors . backendModuleData) . backendProgramModules
 
 backendDataNames :: BackendProgram -> [String]
 backendDataNames =
@@ -124,6 +216,22 @@ containsBackendCase expr =
     BackendUnroll {backendUnrollPayload = body} -> containsBackendCase body
     _ -> False
 
+findBackendCase :: BackendExpr -> Maybe BackendExpr
+findBackendCase expr =
+  case expr of
+    BackendCase {} -> Just expr
+    BackendLam {backendBody = body} -> findBackendCase body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      findBackendCase fun <|> findBackendCase arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      findBackendCase rhs <|> findBackendCase body
+    BackendTyAbs {backendTyAbsBody = body} -> findBackendCase body
+    BackendTyApp {backendTyFunction = fun} -> findBackendCase fun
+    BackendConstruct {backendConstructArgs = args} -> firstJust (map findBackendCase args)
+    BackendRoll {backendRollPayload = body} -> findBackendCase body
+    BackendUnroll {backendUnrollPayload = body} -> findBackendCase body
+    _ -> Nothing
+
 collectConstructNames :: BackendExpr -> [String]
 collectConstructNames expr =
   case expr of
@@ -143,3 +251,32 @@ collectConstructNames expr =
 intTy :: BackendType
 intTy =
   BTBase (BaseTy "Int")
+
+intElabTy :: Elab.ElabType
+intElabTy =
+  Elab.TBase (BaseTy "Int")
+
+mapMainBinding :: (CheckedBinding -> CheckedBinding) -> CheckedProgram -> CheckedProgram
+mapMainBinding f checked =
+  checked
+    { checkedProgramModules =
+        map updateModule (checkedProgramModules checked)
+    }
+  where
+    updateModule checkedModule =
+      checkedModule
+        { checkedModuleBindings =
+            map updateBinding (checkedModuleBindings checkedModule)
+        }
+
+    updateBinding binding
+      | checkedBindingName binding == checkedProgramMain checked = f binding
+      | otherwise = binding
+
+firstJust :: [Maybe a] -> Maybe a
+firstJust [] =
+  Nothing
+firstJust (value : rest) =
+  case value of
+    Just _ -> value
+    Nothing -> firstJust rest
