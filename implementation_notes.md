@@ -1,3 +1,24 @@
+## 2026-04-22 - Typed backend IR boundary
+
+- Added `MLF.Backend.IR` as the private backend-owned representation after the
+  existing `.mlfp` checker and xMLF typecheck guard. The module defines
+  `BackendProgram`, modules, data/constructor metadata, typed expressions,
+  backend types, case alternatives, and validation errors.
+- The backend IR is intentionally not a second inference authority. Its
+  validator only enforces local invariants expected from a checked conversion:
+  globally unique runtime binding names, an existing `main` binding, expression
+  result types on every node, binding/body type agreement, lexical/global
+  variable reference resolution, and local type equalities for lambda,
+  application, let, type abstraction/application, and recursive roll/unroll
+  nodes.
+- ADT construction and case analysis now have explicit backend IR nodes. Future
+  lowering work should consume this boundary rather than reaching back into
+  source syntax or Church-encoded xMLF terms to rediscover backend control/data
+  structure. Program validation checks those nodes against constructor metadata:
+  constructor names are unique and known, construct arguments/results match the
+  constructor declaration, and case alternatives match the scrutinee and case
+  result types.
+
 ## 2026-04-20 - Constraint-aware typeclasses and qualified imports
 
 - `.mlfp` constrained types are now source-level program semantics. The parser

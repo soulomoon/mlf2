@@ -265,6 +265,16 @@ constraint, or an existing closed instance. For example, `Option a` derives
 If deriving cannot resolve the first required field instance, it fails with a
 field-specific deriving diagnostic.
 
+## Backend Boundary
+
+Successful `.mlfp` checking may be followed by conversion into the internal
+typed backend IR owned by `MLF.Backend.IR`. That IR is after the existing
+eMLF/xMLF checker boundary and before textual or LLVM-like lowering. It does
+not change source typing, inference, diagnostics, runtime value rendering, or
+the explicit-import Prelude contract documented here. Its validator is scoped to
+backend-local invariants such as typed expression nodes, lexical/global
+references, and constructor metadata consistency for construct/case nodes.
+
 ## Built-In Prelude
 
 There is a source-level `Prelude` module supplied by the program layer. It is

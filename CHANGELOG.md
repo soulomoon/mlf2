@@ -37,6 +37,13 @@
   `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program" --match "MLF.ResolvedSymbol" --match "Repository guardrails"'`
   (`188 examples, 0 failures`) and `cabal build all && cabal test`
   (`1836 examples, 0 failures`).
+- Added the initial private typed backend IR boundary in `MLF.Backend.IR`.
+  Checked `.mlfp` programs now have a documented backend-owned target shape
+  before textual or LLVM-like lowering: typed program/modules/bindings,
+  explicit data constructor metadata, typed expression nodes, ADT construct/case
+  nodes, and a local validator for binding uniqueness, `main` reachability, and
+  core type equalities. Program validation also checks lexical/global variable
+  references and constructor metadata boundaries for construct/case nodes.
 - Converted the thesis-obligations ledger to property-first evidence: all 107
   obligations now point at QuickCheck anchors keyed by obligation ID with
   `kind: quickcheck` and `min_success: 100`. The obligations gate now rejects
