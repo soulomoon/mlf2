@@ -74,6 +74,43 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
 
+  it "keeps type wrappers that belong to case handler bodies" $ do
+    checked0 <- requireChecked functionCaseProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding {checkedBindingTerm = replaceCaseHandlerBodiesAfterLams 1 instantiatedIntIdentity (checkedBindingTerm binding)}
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendTyApp
+
+  it "accepts alpha-equivalent case handler result types" $ do
+    checked0 <- requireChecked functionCaseProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = polymorphicIdentityElabTy,
+                    checkedBindingTerm = replaceCaseHandlerBodiesAfterLams 1 alphaEquivalentIdentityInstId (checkedBindingTerm binding)
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+  it "preserves expected checked binding types through ordinary fallback" $ do
+    checked <- requireChecked =<< readFile "test/programs/recursive-adt/abstract-module-use.mlfp"
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
   it "keeps same-name data declarations module-scoped during type lowering" $ do
     checked <- requireChecked duplicateDataNameProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -145,6 +182,19 @@ intCaseProgram =
       "  def main : Int = case Succ Zero of {",
       "    Zero -> 0;",
       "    Succ n -> 1",
+      "  };",
+      "}"
+    ]
+
+functionCaseProgram :: String
+functionCaseProgram =
+  unlines
+    [ "module Main export (Box(..), main) {",
+      "  data Box =",
+      "      Box : Int -> Box;",
+      "",
+      "  def main : Int -> Int = case Box 0 of {",
+      "    Box n -> \\x x",
       "  };",
       "}"
     ]
@@ -236,6 +286,23 @@ containsBackendCase expr =
     BackendUnroll {backendUnrollPayload = body} -> containsBackendCase body
     _ -> False
 
+containsBackendTyApp :: BackendExpr -> Bool
+containsBackendTyApp expr =
+  case expr of
+    BackendTyApp {} -> True
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendTyApp scrutinee || any (containsBackendTyApp . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsBackendTyApp body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsBackendTyApp fun || containsBackendTyApp arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsBackendTyApp rhs || containsBackendTyApp body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendTyApp body
+    BackendConstruct {backendConstructArgs = args} -> any containsBackendTyApp args
+    BackendRoll {backendRollPayload = body} -> containsBackendTyApp body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendTyApp body
+    _ -> False
+
 findBackendCase :: BackendExpr -> Maybe BackendExpr
 findBackendCase expr =
   case expr of
@@ -275,6 +342,10 @@ intTy =
 intElabTy :: Elab.ElabType
 intElabTy =
   Elab.TBase (BaseTy "Int")
+
+polymorphicIdentityElabTy :: Elab.ElabType
+polymorphicIdentityElabTy =
+  Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
 
 mapMainBinding :: (CheckedBinding -> CheckedBinding) -> CheckedProgram -> CheckedProgram
 mapMainBinding f checked =
@@ -319,6 +390,59 @@ wrapCaseHandlersWithTypeWrappers term =
   where
     wrapHandler handler =
       Elab.ETyAbs "$case_handler_a" Nothing (Elab.ETyInst handler (Elab.InstApp intElabTy))
+
+replaceCaseHandlerBodiesAfterLams :: Int -> Elab.ElabTerm -> Elab.ElabTerm -> Elab.ElabTerm
+replaceCaseHandlerBodiesAfterLams lamCount replacement term =
+  case collectAppsElab term of
+    (headTerm@(Elab.ETyInst (Elab.EUnroll _) _), handlers@(_ : _)) ->
+      rebuildAppsElab headTerm (map (replaceHandlerBody lamCount) handlers)
+    _ ->
+      case term of
+        Elab.ELam name ty body ->
+          Elab.ELam name ty (replaceCaseHandlerBodiesAfterLams lamCount replacement body)
+        Elab.EApp fun arg ->
+          Elab.EApp (replaceCaseHandlerBodiesAfterLams lamCount replacement fun) (replaceCaseHandlerBodiesAfterLams lamCount replacement arg)
+        Elab.ELet name scheme rhs body ->
+          Elab.ELet name scheme (replaceCaseHandlerBodiesAfterLams lamCount replacement rhs) (replaceCaseHandlerBodiesAfterLams lamCount replacement body)
+        Elab.ETyAbs name mbBound body ->
+          Elab.ETyAbs name mbBound (replaceCaseHandlerBodiesAfterLams lamCount replacement body)
+        Elab.ETyInst inner inst ->
+          Elab.ETyInst (replaceCaseHandlerBodiesAfterLams lamCount replacement inner) inst
+        Elab.ERoll ty body ->
+          Elab.ERoll ty (replaceCaseHandlerBodiesAfterLams lamCount replacement body)
+        Elab.EUnroll body ->
+          Elab.EUnroll (replaceCaseHandlerBodiesAfterLams lamCount replacement body)
+        _ ->
+          term
+  where
+    replaceHandlerBody remaining handler
+      | remaining <= 0 = replacement
+      | otherwise =
+          case handler of
+            Elab.ELam name ty body ->
+              Elab.ELam name ty (replaceHandlerBody (remaining - 1) body)
+            _ ->
+              handler
+
+instantiatedIntIdentity :: Elab.ElabTerm
+instantiatedIntIdentity =
+  Elab.ETyInst
+    ( Elab.ETyAbs
+        "$case_body_a"
+        Nothing
+        (Elab.ELam "$case_body_x" (Elab.TVar "$case_body_a") (Elab.EVar "$case_body_x"))
+    )
+    (Elab.InstApp intElabTy)
+
+alphaEquivalentIdentityInstId :: Elab.ElabTerm
+alphaEquivalentIdentityInstId =
+  Elab.ETyInst
+    ( Elab.ETyAbs
+        "$case_body_b"
+        Nothing
+        (Elab.ELam "$case_body_y" (Elab.TVar "$case_body_b") (Elab.EVar "$case_body_y"))
+    )
+    Elab.InstId
 
 collectAppsElab :: Elab.ElabTerm -> (Elab.ElabTerm, [Elab.ElabTerm])
 collectAppsElab =

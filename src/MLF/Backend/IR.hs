@@ -44,6 +44,7 @@ module MLF.Backend.IR
     BackendAlternative (..),
     BackendPattern (..),
     BackendValidationError (..),
+    alphaEqBackendType,
     literalBackendType,
     substituteBackendType,
     substituteBackendTypes,

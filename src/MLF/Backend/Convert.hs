@@ -18,7 +18,7 @@ module MLF.Backend.Convert
   )
 where
 
-import Control.Monad (foldM, when, zipWithM)
+import Control.Monad (foldM, unless, when, zipWithM)
 import Data.List (find)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -312,9 +312,7 @@ convertTermExpected context env mbExpectedTy term =
       convertSpecialTerm context env term resultTy
         >>= \case
           Just expr -> Right expr
-          Nothing -> do
-            inferredTy <- inferBackendType env term
-            convertOrdinaryTerm context env term inferredTy
+          Nothing -> convertOrdinaryTerm context env term resultTy
     Nothing -> do
       resultTy <- inferBackendType env term
       convertSpecialTerm context env term resultTy
@@ -462,7 +460,7 @@ convertTypeInstantiation context env resultTy inner inst =
   case inst of
     InstId -> do
       innerExpr <- convertTerm context env inner
-      if backendExprType innerExpr == resultTy
+      if alphaEqBackendType (backendExprType innerExpr) resultTy
         then Right innerExpr
         else Left (BackendUnsupportedInstantiation inst)
     _ ->
@@ -479,7 +477,7 @@ convertTypeInstantiation context env resultTy inner inst =
                     backendTyArgument = backendTyArg
                   }
             _
-              | backendExprType innerExpr == resultTy -> Right innerExpr
+              | alphaEqBackendType (backendExprType innerExpr) resultTy -> Right innerExpr
               | otherwise -> Left (BackendUnsupportedInstantiation inst)
         Nothing -> Left (BackendUnsupportedInstantiation inst)
 
@@ -646,8 +644,8 @@ convertCaseAlternative ::
   ElabTerm ->
   Either BackendConversionError BackendAlternative
 convertCaseAlternative context env resultTy constructor handler = do
-  let (params, body) = collectLeadingLams handler
-      fields = backendConstructorFields constructor
+  let fields = backendConstructorFields constructor
+      (params, body) = collectLeadingLams (length fields) handler
   when (length params /= length fields) $
     Left
       ( BackendUnsupportedCaseShape
@@ -659,7 +657,7 @@ convertCaseAlternative context env resultTy constructor handler = do
           env
           params
   bodyExpr <- convertTermExpected context env' (Just resultTy) body
-  when (backendExprType bodyExpr /= resultTy) $
+  unless (alphaEqBackendType (backendExprType bodyExpr) resultTy) $
     Left
       ( BackendUnsupportedCaseShape
           ("handler result type does not match case result for `" ++ backendConstructorName constructor ++ "`")
@@ -670,16 +668,24 @@ convertCaseAlternative context env resultTy constructor handler = do
         backendAltBody = bodyExpr
       }
 
-collectLeadingLams :: ElabTerm -> ([(String, ElabType)], ElabTerm)
-collectLeadingLams =
-  go []
+collectLeadingLams :: Int -> ElabTerm -> ([(String, ElabType)], ElabTerm)
+collectLeadingLams arity =
+  go [] arity . stripLeadingTypeWrappers
   where
-    go params term =
+    go params remaining term
+      | remaining <= 0 = (params, term)
+      | otherwise =
+          case term of
+            ETyAbs _ _ body -> go params remaining body
+            ETyInst inner _ -> go params remaining inner
+            ELam name ty body -> go (params ++ [(name, ty)]) (remaining - 1) body
+            other -> (params, other)
+
+    stripLeadingTypeWrappers term =
       case term of
-        ETyAbs _ _ body -> go params body
-        ETyInst inner _ -> go params inner
-        ELam name ty body -> go (params ++ [(name, ty)]) body
-        other -> (params, other)
+        ETyAbs _ _ body -> stripLeadingTypeWrappers body
+        ETyInst inner _ -> stripLeadingTypeWrappers inner
+        other -> other
 
 collectApps :: ElabTerm -> (ElabTerm, [ElabTerm])
 collectApps =
