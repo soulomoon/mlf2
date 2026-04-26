@@ -206,6 +206,7 @@ data BackendValidationError
   | BackendLetBodyTypeMismatch BackendType BackendType
   | BackendTypeAbsTypeMismatch String BackendType BackendType
   | BackendTypeAppExpectedForall BackendType
+  | BackendTypeAppBoundMismatch BackendType BackendType
   | BackendTypeAppResultMismatch BackendType BackendType
   | BackendRollExpectedRecursive BackendType
   | BackendRollPayloadMismatch BackendType BackendType
@@ -282,6 +283,7 @@ substituteBackendType needle replacement =
                       [ freeReplacement,
                         freeBackendTypeVars body,
                         maybe Set.empty freeBackendTypeVars mbBound,
+                        Set.singleton needle,
                         Set.singleton name
                       ]
                   name' = freshNameLike name used
@@ -297,6 +299,7 @@ substituteBackendType needle replacement =
                     Set.unions
                       [ freeReplacement,
                         freeBackendTypeVars body,
+                        Set.singleton needle,
                         Set.singleton name
                       ]
                   name' = freshNameLike name used
@@ -397,7 +400,8 @@ validateBackendExprWith mbContext expr =
     BackendTyApp resultTy fun tyArg -> do
       validateBackendExprWith mbContext fun
       case backendExprType fun of
-        BTForall name _ bodyTy -> do
+        BTForall name mbBound bodyTy -> do
+          validateBackendTypeArgumentBound mbBound tyArg
           let expected = substituteBackendType name tyArg bodyTy
           unless (resultTy == expected) $
             Left (BackendTypeAppResultMismatch resultTy expected)
@@ -436,6 +440,15 @@ validateBackendVariable (Just context0) name actualTy =
     Just expectedTy ->
       unless (actualTy == expectedTy) $
         Left (BackendVariableTypeMismatch name expectedTy actualTy)
+
+validateBackendTypeArgumentBound :: Maybe BackendType -> BackendType -> Either BackendValidationError ()
+validateBackendTypeArgumentBound Nothing _ =
+  pure ()
+validateBackendTypeArgumentBound (Just BTBottom) _ =
+  pure ()
+validateBackendTypeArgumentBound (Just boundTy) actualTy =
+  unless (actualTy == boundTy) $
+    Left (BackendTypeAppBoundMismatch boundTy actualTy)
 
 lookupBackendVariable :: BackendValidationContext -> String -> Maybe BackendType
 lookupBackendVariable context0 name =

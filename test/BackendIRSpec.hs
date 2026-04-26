@@ -101,6 +101,35 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendTypeAppResultMismatch capturedTy expectedTy)
 
+  it "does not choose the substituted variable while freshening binders" $ do
+    substituteBackendType "a1" (BTVar "a") (BTForall "a" Nothing (BTVar "a"))
+      `shouldBe` BTForall "a2" Nothing (BTVar "a2")
+
+    substituteBackendType "a1" (BTVar "a") (BTMu "a" (BTVar "a"))
+      `shouldBe` BTMu "a2" (BTVar "a2")
+
+  it "checks bounded type application arguments" $ do
+    let boundedIdTy = BTForall "a" (Just intTy) (BTArrow (BTVar "a") (BTVar "a"))
+        boolIdTy = BTArrow boolTy boolTy
+
+    validateBackendExpr
+      ( BackendTyApp
+          { backendExprType = idTy,
+            backendTyFunction = BackendVar boundedIdTy "boundedId",
+            backendTyArgument = intTy
+          }
+      )
+      `shouldBe` Right ()
+
+    validateBackendExpr
+      ( BackendTyApp
+          { backendExprType = boolIdTy,
+            backendTyFunction = BackendVar boundedIdTy "boundedId",
+            backendTyArgument = boolTy
+          }
+      )
+      `shouldBe` Left (BackendTypeAppBoundMismatch intTy boolTy)
+
   it "rejects recursive roll and unroll type mismatches" $ do
     let recTy = BTMu "self" intTy
 
