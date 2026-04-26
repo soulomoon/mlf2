@@ -646,20 +646,53 @@ convertCaseApplication context env term resultTy =
               Just scrutineeData -> Right scrutineeData
               Nothing -> requireCaseData context (backendExprType scrutineeExpr)
           let constructors = backendDataConstructors (dmBackend dataMeta)
-          when (length args /= length constructors) $
-            Left
-              ( BackendUnsupportedCaseShape
-                  ("handler count does not match constructor count for `" ++ backendDataName (dmBackend dataMeta) ++ "`")
-              )
-          alternatives <- zipWithMCase (convertCaseAlternative context env resultTy) constructors args
-          Right
-            ( Just
-                BackendCase
-                  { backendExprType = resultTy,
-                    backendScrutinee = scrutineeExpr,
-                    backendAlternatives = alternatives
-                  }
-            )
+          case compare (length args) (length constructors) of
+            EQ -> Just <$> convertCaseWithHandlers context env resultTy scrutineeExpr constructors args
+            GT -> do
+              let (handlers, extraArgs) = splitAt (length constructors) args
+              extraArgTys <- mapM (inferBackendType env) extraArgs
+              case scanr BTArrow resultTy extraArgTys of
+                caseResultTy : appliedResultTys -> do
+                  caseExpr <- convertCaseWithHandlers context env caseResultTy scrutineeExpr constructors handlers
+                  Just
+                    <$> foldM
+                      (applyCaseExtraArgument context env)
+                      caseExpr
+                      (zip3 extraArgs extraArgTys appliedResultTys)
+                [] -> Right Nothing
+            LT -> Right Nothing
+
+convertCaseWithHandlers ::
+  ConvertContext ->
+  Env ->
+  BackendType ->
+  BackendExpr ->
+  [BackendConstructor] ->
+  [ElabTerm] ->
+  Either BackendConversionError BackendExpr
+convertCaseWithHandlers context env resultTy scrutineeExpr constructors handlers = do
+  alternatives <- zipWithMCase (convertCaseAlternative context env resultTy) constructors handlers
+  Right
+    BackendCase
+      { backendExprType = resultTy,
+        backendScrutinee = scrutineeExpr,
+        backendAlternatives = alternatives
+      }
+
+applyCaseExtraArgument ::
+  ConvertContext ->
+  Env ->
+  BackendExpr ->
+  (ElabTerm, BackendType, BackendType) ->
+  Either BackendConversionError BackendExpr
+applyCaseExtraArgument context env funExpr (arg, argTy, resultTy) = do
+  argExpr <- convertTermExpected context env (Just argTy) arg
+  Right
+    BackendApp
+      { backendExprType = resultTy,
+        backendFunction = funExpr,
+        backendArgument = argExpr
+      }
 
 caseScrutinee :: ElabTerm -> Maybe ElabTerm
 caseScrutinee term =

@@ -59,6 +59,32 @@ spec = describe "MLF.Backend.Convert" $ do
       Just other -> expectationFailure ("expected backend case, got " ++ show other)
       Nothing -> expectationFailure "expected backend case"
 
+  it "falls back to ordinary application for over-applied case-shaped terms" $ do
+    checked0 <- requireChecked functionCaseProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = intElabTy,
+                    checkedBindingTerm = Elab.EApp (checkedBindingTerm binding) (Elab.ELit (LInt 1))
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    case backendBindingExpr mainBinding of
+      BackendApp
+        { backendExprType = resultTy,
+          backendFunction = fun,
+          backendArgument = BackendLit {backendLit = LInt 1}
+        } -> do
+          resultTy `shouldBe` intTy
+          fun `shouldSatisfy` containsBackendCase
+      other -> expectationFailure ("expected backend application of recovered case, got " ++ show other)
+
   it "recovers backend cases with type-wrapped handler lambdas" $ do
     checked0 <- requireChecked intCaseProgram
     let checked =
