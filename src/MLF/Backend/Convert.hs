@@ -78,6 +78,8 @@ data DataMeta = DataMeta
     dmBackend :: BackendData
   }
 
+data BackendTypeBinder = BackendTypeBinder String (Maybe BackendType)
+
 convertCheckedProgram :: CheckedProgram -> Either BackendConversionError BackendProgram
 convertCheckedProgram checked = do
   context <- buildConvertContext checked
@@ -116,7 +118,12 @@ convertCheckedModule context env checkedModule = do
 convertCheckedBinding :: ConvertContext -> Env -> CheckedBinding -> Either BackendConversionError BackendBinding
 convertCheckedBinding context env binding = do
   bindingTy <- convertElabType (checkedBindingType binding)
-  expr <- convertTermExpected context env (Just bindingTy) (checkedBindingTerm binding)
+  expr <-
+    case Map.lookup (checkedBindingName binding) (ccConstructors context) of
+      Just constructorMeta
+        | constructorBindingResultMatches bindingTy constructorMeta ->
+            synthesizeConstructorBinding bindingTy constructorMeta
+      _ -> convertTermExpected context env (Just bindingTy) (checkedBindingTerm binding)
   Right
     BackendBinding
       { backendBindingName = checkedBindingName binding,
@@ -124,6 +131,88 @@ convertCheckedBinding context env binding = do
         backendBindingExpr = expr,
         backendBindingExportedAsMain = checkedBindingExportedAsMain binding
       }
+
+constructorBindingResultMatches :: BackendType -> ConstructorMeta -> Bool
+constructorBindingResultMatches bindingTy constructorMeta =
+  case matchBackendTypeParameters parameters Map.empty (backendConstructorResult constructor) resultTy of
+    Just _ -> True
+    Nothing -> False
+  where
+    constructor = cmBackend constructorMeta
+    parameters = Set.fromList (backendDataParameters (dmBackend (cmData constructorMeta)))
+    (_, bodyTy) = splitBackendForalls bindingTy
+    (_, resultTy) = splitBackendArrows bodyTy
+
+synthesizeConstructorBinding :: BackendType -> ConstructorMeta -> Either BackendConversionError BackendExpr
+synthesizeConstructorBinding bindingTy constructorMeta = do
+  let constructor = cmBackend constructorMeta
+      (typeBinders, bodyTy) = splitBackendForalls bindingTy
+      (argTys, resultTy) = splitBackendArrows bodyTy
+      fields = backendConstructorFields constructor
+  unless (length argTys == length fields) $
+    Left
+      ( BackendUnsupportedCaseShape
+          ("constructor binding arity does not match metadata for `" ++ backendConstructorName constructor ++ "`")
+      )
+  let argNames = ["$" ++ backendConstructorName constructor ++ "_arg" ++ show ix | ix <- [1 .. length argTys]]
+      argExprs = zipWith BackendVar argTys argNames
+      constructExpr =
+        BackendConstruct
+          { backendExprType = resultTy,
+            backendConstructName = backendConstructorName constructor,
+            backendConstructArgs = argExprs
+          }
+      expr =
+        wrapBackendTypeAbs typeBinders $
+          wrapBackendLams (zip argNames argTys) constructExpr
+  unless (alphaEqBackendType (backendExprType expr) bindingTy) $
+    Left
+      ( BackendUnsupportedCaseShape
+          ("synthesized constructor binding type does not match checked binding type for `" ++ backendConstructorName constructor ++ "`")
+      )
+  Right expr
+
+splitBackendForalls :: BackendType -> ([BackendTypeBinder], BackendType)
+splitBackendForalls =
+  go []
+  where
+    go binders ty =
+      case ty of
+        BTForall name mbBound body -> go (binders ++ [BackendTypeBinder name mbBound]) body
+        _ -> (binders, ty)
+
+splitBackendArrows :: BackendType -> ([BackendType], BackendType)
+splitBackendArrows =
+  go []
+  where
+    go args ty =
+      case ty of
+        BTArrow arg result -> go (args ++ [arg]) result
+        _ -> (args, ty)
+
+wrapBackendTypeAbs :: [BackendTypeBinder] -> BackendExpr -> BackendExpr
+wrapBackendTypeAbs binders body =
+  foldr wrap body binders
+  where
+    wrap (BackendTypeBinder name mbBound) expr =
+      BackendTyAbs
+        { backendExprType = BTForall name mbBound (backendExprType expr),
+          backendTyParamName = name,
+          backendTyParamBound = mbBound,
+          backendTyAbsBody = expr
+        }
+
+wrapBackendLams :: [(String, BackendType)] -> BackendExpr -> BackendExpr
+wrapBackendLams params body =
+  foldr wrap body params
+  where
+    wrap (name, paramTy) expr =
+      BackendLam
+        { backendExprType = BTArrow paramTy (backendExprType expr),
+          backendParamName = name,
+          backendParamType = paramTy,
+          backendBody = expr
+        }
 
 buildConvertContext :: CheckedProgram -> Either BackendConversionError ConvertContext
 buildConvertContext checked = do
@@ -500,15 +589,26 @@ convertConstructorApplication context env term resultTy =
     (headTerm, args) ->
       case constructorHeadName headTerm >>= (`Map.lookup` ccConstructors context) of
         Just constructorMeta -> do
-          let fields = backendConstructorFields (cmBackend constructorMeta)
-          if length args == length fields
+          let constructor = cmBackend constructorMeta
+              parameters = Set.fromList (backendDataParameters (dmBackend (cmData constructorMeta)))
+              rawFields = backendConstructorFields constructor
+          if length args == length rawFields
             then do
+              substitution <-
+                case matchBackendTypeParameters parameters Map.empty (backendConstructorResult constructor) resultTy of
+                  Just substitution -> Right substitution
+                  Nothing ->
+                    Left
+                      ( BackendUnsupportedCaseShape
+                          ("constructor result type does not match expected result for `" ++ backendConstructorName constructor ++ "`")
+                      )
+              let fields = map (substituteBackendTypes substitution) rawFields
               argExprs <- zipWithM (convertTermExpected context env . Just) fields args
               Right
                 ( Just
                     BackendConstruct
                       { backendExprType = resultTy,
-                        backendConstructName = backendConstructorName (cmBackend constructorMeta),
+                        backendConstructName = backendConstructorName constructor,
                         backendConstructArgs = argExprs
                       }
                 )
@@ -791,5 +891,5 @@ matchBackendTypeParameters parameters =
       case Map.lookup name substitution of
         Nothing -> Just (Map.insert name actual substitution)
         Just previous
-          | previous == actual -> Just substitution
+          | alphaEqBackendType previous actual -> Just substitution
         _ -> Nothing

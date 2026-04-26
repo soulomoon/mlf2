@@ -111,6 +111,41 @@ spec = describe "MLF.Backend.Convert" $ do
 
     validateBackendProgram backend `shouldBe` Right ()
 
+  it "synthesizes constructor bindings for checked GADT and existential programs" $ do
+    mapM_
+      ( \path -> do
+          checked <- requireChecked =<< readFile path
+          backend <- requireRight (convertCheckedProgram checked)
+          validateBackendProgram backend `shouldBe` Right ()
+      )
+      [ "test/programs/recursive-adt/recursive-gadt.mlfp",
+        "test/programs/recursive-adt/recursive-existential.mlfp"
+      ]
+
+  it "instantiates parameterized constructor fields from the result type" $ do
+    checked <- requireChecked parameterizedConstructorProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Some"]
+
+  it "matches repeated constructor parameters modulo alpha-equivalence" $ do
+    checked0 <- requireChecked repeatedPolymorphicParameterProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = boolElabTy,
+                    checkedBindingTerm = repeatedPolymorphicParameterCaseTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
   it "keeps same-name data declarations module-scoped during type lowering" $ do
     checked <- requireChecked duplicateDataNameProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -196,6 +231,29 @@ functionCaseProgram =
       "  def main : Int -> Int = case Box 0 of {",
       "    Box n -> \\x x",
       "  };",
+      "}"
+    ]
+
+parameterizedConstructorProgram :: String
+parameterizedConstructorProgram =
+  unlines
+    [ "module Main export (Option(..), main) {",
+      "  data Option a =",
+      "      None : Option a",
+      "    | Some : a -> Option a;",
+      "",
+      "  def main : Option Int = Some 1;",
+      "}"
+    ]
+
+repeatedPolymorphicParameterProgram :: String
+repeatedPolymorphicParameterProgram =
+  unlines
+    [ "module Main export (Pair(..), main) {",
+      "  data Pair a =",
+      "      Pair : a -> a -> Pair a;",
+      "",
+      "  def main : Bool = true;",
       "}"
     ]
 
@@ -343,9 +401,46 @@ intElabTy :: Elab.ElabType
 intElabTy =
   Elab.TBase (BaseTy "Int")
 
+boolElabTy :: Elab.ElabType
+boolElabTy =
+  Elab.TBase (BaseTy "Bool")
+
 polymorphicIdentityElabTy :: Elab.ElabType
 polymorphicIdentityElabTy =
   Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
+
+alphaEquivalentIdentityElabTy :: Elab.ElabType
+alphaEquivalentIdentityElabTy =
+  Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "b") (Elab.TVar "b"))
+
+repeatedPolymorphicParameterCaseTerm :: Elab.ElabTerm
+repeatedPolymorphicParameterCaseTerm =
+  Elab.EApp
+    (Elab.ETyInst (Elab.EUnroll pairScrutinee) (Elab.InstApp boolElabTy))
+    ( Elab.ELam
+        "$pair_f"
+        polymorphicIdentityElabTy
+        (Elab.ELam "$pair_g" alphaEquivalentIdentityElabTy (Elab.ELit (LBool True)))
+    )
+  where
+    pairScrutinee =
+      Elab.EApp
+        (Elab.EApp (Elab.EVar "Main__Pair") polymorphicIdentityTerm)
+        (Elab.ETyInst alphaEquivalentIdentityTerm Elab.InstId)
+
+polymorphicIdentityTerm :: Elab.ElabTerm
+polymorphicIdentityTerm =
+  Elab.ETyAbs
+    "a"
+    Nothing
+    (Elab.ELam "$poly_id_a" (Elab.TVar "a") (Elab.EVar "$poly_id_a"))
+
+alphaEquivalentIdentityTerm :: Elab.ElabTerm
+alphaEquivalentIdentityTerm =
+  Elab.ETyAbs
+    "b"
+    Nothing
+    (Elab.ELam "$poly_id_b" (Elab.TVar "b") (Elab.EVar "$poly_id_b"))
 
 mapMainBinding :: (CheckedBinding -> CheckedBinding) -> CheckedProgram -> CheckedProgram
 mapMainBinding f checked =
