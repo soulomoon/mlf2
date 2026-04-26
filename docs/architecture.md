@@ -47,6 +47,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Finalize` — normalizes lowered surface eMLF, calls the internal detailed eMLF pipeline entrypoints with program-owned external binding modes, resolves `.mlfp` deferred obligations, and accepts rewritten terms only after the xMLF typecheck guard
 - `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI/file runner as an explicit import target
 - `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates checked `.mlfp` bindings through the existing xMLF runtime and renders recovered closed ADT values with source constructor syntax
+- `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before any textual or LLVM-like lowering
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
 - `MLF.Binding.*` — binding tree queries + executable χe ops + harmonization
 - `MLF.Witness.*` — ω execution helpers (base χe operations)
@@ -110,6 +111,33 @@ after eMLF type recovery.
 - Legacy expansion-to-instantiation translation lives in `MLF.Elab.Legacy` and is re-exported by `MLF.Elab.Elaborate` and `MLF.Elab.Pipeline`.
 - Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops` and `StateAccess`; edge processing is split across planner/interpreter passes with typed `EdgePlan`.
 - Elaboration entrypoints bundle inputs as `ElabConfig`/`ElabEnv`, and tracing is explicit via `TraceConfig`.
+
+## Typed backend IR boundary
+
+`MLF.Backend.IR` is the first backend-owned representation after a `.mlfp`
+program has already passed the existing checker and xMLF typecheck guard. It is
+not a second inference or typing authority.
+
+The boundary invariants are:
+
+- every backend expression node carries its result `BackendType`;
+- module-level binding names are runtime names and must be globally unique in a
+  `BackendProgram`;
+- `backendProgramMain` must name one of those bindings;
+- binding declarations must match the type carried by their expression body;
+- variable references must resolve either to lexical binders introduced by
+  lambda/let/case patterns or to globally unique program bindings, and the
+  carried variable type must match that binding;
+- lambda, application, let, type abstraction/application, recursive roll, and
+  recursive unroll nodes satisfy local type equalities checked by
+  `validateBackendProgram`;
+- ADT construction and case analysis are explicit backend nodes checked against
+  program constructor metadata for known constructors, constructor arity,
+  argument/result types, case scrutinee type, and alternative result type.
+
+This module intentionally lives in the private `mlf2-internal` library for now.
+Future conversion/lowering modules should depend on this IR rather than reaching
+back into `MLF.Frontend.Program.*` internals for backend decisions.
 
 ## `Solved` boundary and thesis-exact cleanup rule
 

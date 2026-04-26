@@ -104,6 +104,7 @@ Internally, `.mlfp` now reuses the old MLF ownership boundary:
 - `MLF.Frontend.Program.Finalize` normalizes those surface eMLF terms and calls the internal detailed eMLF pipeline entrypoint
 - `MLF.Elab.TypeCheck` remains the typing-judgment owner for checked `.mlfp` / xMLF terms
 - `MLF.Frontend.Program.Run` evaluates checked bindings through the existing xMLF reducer; static module/import/data/class validation may still fail before the eMLF pipeline
+- `MLF.Backend.IR` defines the private typed backend IR boundary and local invariant validator for checked `.mlfp` programs before textual or LLVM-like lowering
 
 Frozen examples live under `test/programs/recursive-adt/`, and the Phase-0
 syntax/corpus freeze is documented in
