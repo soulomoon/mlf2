@@ -58,8 +58,10 @@ import Data.List (sort)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Syntax (Lit (..))
+import MLF.Util.Names (freshNameLike)
 
 -- | A checked backend program. Module order is preserved from the source
 -- program for diagnostics/debug output, but backend binding names are global
@@ -231,10 +233,38 @@ literalBackendType = \case
   LBool _ -> BTBase (BaseTy "Bool")
   LString _ -> BTBase (BaseTy "String")
 
+freeBackendTypeVars :: BackendType -> Set.Set String
+freeBackendTypeVars =
+  go Set.empty
+  where
+    go bound ty =
+      case ty of
+        BTVar name
+          | Set.member name bound -> Set.empty
+          | otherwise -> Set.singleton name
+        BTArrow dom cod ->
+          Set.union (go bound dom) (go bound cod)
+        BTBase {} ->
+          Set.empty
+        BTCon _ args ->
+          foldMap (go bound) args
+        BTForall name mbBound body ->
+          let freeBound = maybe Set.empty (go bound) mbBound
+              freeBody = go (Set.insert name bound) body
+           in Set.union freeBound freeBody
+        BTMu name body ->
+          go (Set.insert name bound) body
+        BTBottom ->
+          Set.empty
+
+-- | Capture-avoiding substitution for backend types. Forall binders scope over
+-- their body but not their optional bound, matching the frontend type syntax.
 substituteBackendType :: String -> BackendType -> BackendType -> BackendType
 substituteBackendType needle replacement =
   go
   where
+    freeReplacement = freeBackendTypeVars replacement
+
     go ty =
       case ty of
         BTVar name
@@ -244,11 +274,36 @@ substituteBackendType needle replacement =
         BTBase {} -> ty
         BTCon con args -> BTCon con (fmap go args)
         BTForall name mbBound body
-          | name == needle -> BTForall name mbBound body
-          | otherwise -> BTForall name (fmap go mbBound) (go body)
+          | name == needle ->
+              BTForall name (fmap go mbBound) body
+          | Set.member name freeReplacement ->
+              let used =
+                    Set.unions
+                      [ freeReplacement,
+                        freeBackendTypeVars body,
+                        maybe Set.empty freeBackendTypeVars mbBound,
+                        Set.singleton name
+                      ]
+                  name' = freshNameLike name used
+                  body' = substituteBackendType name (BTVar name') body
+               in BTForall name' (fmap go mbBound) (go body')
+          | otherwise ->
+              BTForall name (fmap go mbBound) (go body)
         BTMu name body
-          | name == needle -> ty
-          | otherwise -> BTMu name (go body)
+          | name == needle ->
+              ty
+          | Set.member name freeReplacement ->
+              let used =
+                    Set.unions
+                      [ freeReplacement,
+                        freeBackendTypeVars body,
+                        Set.singleton name
+                      ]
+                  name' = freshNameLike name used
+                  body' = substituteBackendType name (BTVar name') body
+               in BTMu name' (go body')
+          | otherwise ->
+              BTMu name (go body)
         BTBottom -> BTBottom
 
 unfoldBackendRecursiveType :: BackendType -> Maybe BackendType

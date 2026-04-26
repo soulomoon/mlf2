@@ -74,6 +74,33 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendTypeAppExpectedForall intTy)
 
+  it "uses capture-avoiding substitution for type application" $ do
+    let sourceTy = BTForall "b" Nothing (BTArrow (BTVar "a") (BTVar "b"))
+        polyTy = BTForall "a" Nothing sourceTy
+        expectedTy = BTForall "b1" Nothing (BTArrow (BTVar "b") (BTVar "b1"))
+        capturedTy = BTForall "b" Nothing (BTArrow (BTVar "b") (BTVar "b"))
+
+    substituteBackendType "a" (BTVar "b") sourceTy
+      `shouldBe` expectedTy
+
+    validateBackendExpr
+      ( BackendTyApp
+          { backendExprType = expectedTy,
+            backendTyFunction = BackendVar polyTy "poly",
+            backendTyArgument = BTVar "b"
+          }
+      )
+      `shouldBe` Right ()
+
+    validateBackendExpr
+      ( BackendTyApp
+          { backendExprType = capturedTy,
+            backendTyFunction = BackendVar polyTy "poly",
+            backendTyArgument = BTVar "b"
+          }
+      )
+      `shouldBe` Left (BackendTypeAppResultMismatch capturedTy expectedTy)
+
   it "rejects recursive roll and unroll type mismatches" $ do
     let recTy = BTMu "self" intTy
 
