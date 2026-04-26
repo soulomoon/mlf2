@@ -591,7 +591,7 @@ constructorApplicationResultType context env term =
                   (matchConstructorApplicationArgument env parameters constructor)
                   Map.empty
                   (zip fields args)
-              let resultTy = substituteBackendTypesLocal substitution (backendConstructorResult constructor)
+              let resultTy = substituteBackendTypes substitution (backendConstructorResult constructor)
               Right (Just (resultTy, Just (cmData constructorMeta)))
           | otherwise -> Right Nothing
           where
@@ -616,10 +616,6 @@ matchConstructorApplicationArgument env parameters constructor substitution (exp
         ( BackendUnsupportedCaseShape
             ("constructor argument type does not match case scrutinee constructor `" ++ backendConstructorName constructor ++ "`")
         )
-
-substituteBackendTypesLocal :: Map String BackendType -> BackendType -> BackendType
-substituteBackendTypesLocal substitution ty =
-  Map.foldrWithKey substituteBackendType ty substitution
 
 requireCaseData :: ConvertContext -> BackendType -> Either BackendConversionError DataMeta
 requireCaseData context scrutineeTy =

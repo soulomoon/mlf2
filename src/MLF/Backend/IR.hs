@@ -46,6 +46,7 @@ module MLF.Backend.IR
     BackendValidationError (..),
     literalBackendType,
     substituteBackendType,
+    substituteBackendTypes,
     unfoldBackendRecursiveType,
     validateBackendProgram,
     validateBackendBinding,

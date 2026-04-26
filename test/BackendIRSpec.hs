@@ -1,6 +1,7 @@
 module BackendIRSpec (spec) where
 
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.Map.Strict as Map
 import MLF.Backend.IR
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Syntax (Lit (..))
@@ -107,6 +108,12 @@ spec = describe "MLF.Backend.IR" $ do
 
     substituteBackendType "a1" (BTVar "a") (BTMu "a" (BTVar "a"))
       `shouldBe` BTMu "a2" (BTVar "a2")
+
+  it "applies multiple backend type substitutions simultaneously" $ do
+    let sourceTy = pairTy (BTVar "a") (BTVar "b")
+        substitutions = Map.fromList [("a", BTVar "b"), ("b", BTVar "a")]
+
+    substituteBackendTypes substitutions sourceTy `shouldBe` pairTy (BTVar "b") (BTVar "a")
 
   it "checks bounded type application arguments" $ do
     let boundedIdTy = BTForall "a" (Just intTy) (BTArrow (BTVar "a") (BTVar "a"))
@@ -470,6 +477,10 @@ boxTy =
 optionTy :: BackendType -> BackendType
 optionTy ty =
   BTCon (BaseTy "Option") (ty :| [])
+
+pairTy :: BackendType -> BackendType -> BackendType
+pairTy left right =
+  BTCon (BaseTy "Pair") (left :| [right])
 
 captureTy :: String -> BackendType -> BackendType
 captureTy name ty =
