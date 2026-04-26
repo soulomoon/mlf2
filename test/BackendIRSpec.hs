@@ -184,6 +184,16 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithDataAndMainExpr [optionData] someBoolAsOptionIntExpr)
       `shouldBe` Left (BackendConstructorArgumentMismatch "Some" 0 intTy boolTy)
 
+  it "rejects matcher capture from inferred constructor parameters" $ do
+    validateBackendProgram captureForallConstructProgram
+      `shouldBe` Left (BackendConstructorArgumentMismatch "CaptureForall" 0 captureForallInstantiatedTy captureForallActualTy)
+
+    validateBackendProgram captureMuConstructProgram
+      `shouldBe` Left (BackendConstructorArgumentMismatch "CaptureMu" 0 captureMuInstantiatedTy captureMuActualTy)
+
+    validateBackendProgram captureCaseProgram
+      `shouldBe` Left (BackendCaseConstructorScrutineeMismatch "CaptureCase" captureCaseScrutineeTy captureCaseTemplateTy)
+
   it "rejects unknown constructors and duplicate constructor metadata" $ do
     validateBackendProgram (programWithMainExpr (BackendConstruct boxTy "Missing" []))
       `shouldBe` Left (BackendUnknownConstructor "Missing")
@@ -242,11 +252,15 @@ programWithMainExpr expr =
 
 programWithDataAndMainExpr :: [BackendData] -> BackendExpr -> BackendProgram
 programWithDataAndMainExpr dataDecls expr =
+  programWithDataAndBindings dataDecls [mainBinding expr]
+
+programWithDataAndBindings :: [BackendData] -> [BackendBinding] -> BackendProgram
+programWithDataAndBindings dataDecls bindings =
   BackendProgram
     [ BackendModule
         { backendModuleName = "Main",
           backendModuleData = dataDecls,
-          backendModuleBindings = [mainBinding expr]
+          backendModuleBindings = bindings
         }
     ]
     "main"
@@ -314,6 +328,40 @@ optionData =
       backendDataConstructors = [BackendConstructor "Some" [BTVar "a"] (optionTy (BTVar "a"))]
     }
 
+captureForallData :: BackendData
+captureForallData =
+  BackendData
+    { backendDataName = "CaptureForall",
+      backendDataParameters = ["p"],
+      backendDataConstructors =
+        [ BackendConstructor
+            "CaptureForall"
+            [BTForall "a" Nothing (BTVar "p")]
+            (captureTy "CaptureForall" (BTVar "p"))
+        ]
+    }
+
+captureMuData :: BackendData
+captureMuData =
+  BackendData
+    { backendDataName = "CaptureMu",
+      backendDataParameters = ["p"],
+      backendDataConstructors =
+        [ BackendConstructor
+            "CaptureMu"
+            [BTMu "a" (BTVar "p")]
+            (captureTy "CaptureMu" (BTVar "p"))
+        ]
+    }
+
+captureCaseData :: BackendData
+captureCaseData =
+  BackendData
+    { backendDataName = "CaptureCase",
+      backendDataParameters = ["p"],
+      backendDataConstructors = [BackendConstructor "CaptureCase" [] captureCaseTemplateTy]
+    }
+
 boxCaseExpr :: BackendExpr
 boxCaseExpr =
   boxCaseExprWith
@@ -327,6 +375,35 @@ someIntExpr =
 someBoolAsOptionIntExpr :: BackendExpr
 someBoolAsOptionIntExpr =
   BackendConstruct (optionTy intTy) "Some" [boolLit True]
+
+captureForallConstructProgram :: BackendProgram
+captureForallConstructProgram =
+  programWithDataAndBindings
+    [captureForallData]
+    [ mainBinding (BackendConstruct (captureTy "CaptureForall" (BTVar "a1")) "CaptureForall" [BackendVar captureForallActualTy "polyArg"]),
+      binding "polyArg" captureForallActualTy (BackendVar captureForallActualTy "polyArg")
+    ]
+
+captureMuConstructProgram :: BackendProgram
+captureMuConstructProgram =
+  programWithDataAndBindings
+    [captureMuData]
+    [ mainBinding (BackendConstruct (captureTy "CaptureMu" (BTVar "a1")) "CaptureMu" [BackendVar captureMuActualTy "muArg"]),
+      binding "muArg" captureMuActualTy (BackendVar captureMuActualTy "muArg")
+    ]
+
+captureCaseProgram :: BackendProgram
+captureCaseProgram =
+  programWithDataAndBindings
+    [captureCaseData]
+    [ mainBinding
+        BackendCase
+          { backendExprType = intTy,
+            backendScrutinee = BackendVar captureCaseScrutineeTy "captureCaseArg",
+            backendAlternatives = BackendAlternative (BackendConstructorPattern "CaptureCase" []) (intLit 1) :| []
+          },
+      binding "captureCaseArg" captureCaseScrutineeTy (BackendVar captureCaseScrutineeTy "captureCaseArg")
+    ]
 
 optionCaseExpr :: BackendExpr
 optionCaseExpr =
@@ -393,3 +470,31 @@ boxTy =
 optionTy :: BackendType -> BackendType
 optionTy ty =
   BTCon (BaseTy "Option") (ty :| [])
+
+captureTy :: String -> BackendType -> BackendType
+captureTy name ty =
+  BTCon (BaseTy name) (ty :| [])
+
+captureForallActualTy :: BackendType
+captureForallActualTy =
+  BTForall "x" Nothing (BTVar "x")
+
+captureForallInstantiatedTy :: BackendType
+captureForallInstantiatedTy =
+  BTForall "a" Nothing (BTVar "a1")
+
+captureMuActualTy :: BackendType
+captureMuActualTy =
+  BTMu "x" (BTVar "x")
+
+captureMuInstantiatedTy :: BackendType
+captureMuInstantiatedTy =
+  BTMu "a" (BTVar "a1")
+
+captureCaseTemplateTy :: BackendType
+captureCaseTemplateTy =
+  BTCon (BaseTy "CaptureCase") (BTVar "p" :| [BTForall "a" Nothing (BTVar "p")])
+
+captureCaseScrutineeTy :: BackendType
+captureCaseScrutineeTy =
+  BTCon (BaseTy "CaptureCase") (BTVar "a1" :| [captureForallActualTy])

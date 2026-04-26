@@ -263,6 +263,10 @@ freeBackendTypeVars =
         BTBottom ->
           Set.empty
 
+freeBackendTypeVarsIn :: Map.Map String BackendType -> Set.Set String
+freeBackendTypeVarsIn replacements =
+  Set.unions (map freeBackendTypeVars (Map.elems replacements))
+
 alphaEqBackendType :: BackendType -> BackendType -> Bool
 alphaEqBackendType =
   go Map.empty Map.empty
@@ -365,9 +369,6 @@ substituteBackendTypes replacements0 =
             bodyReplacements = Map.delete name replacements
             freeBodyReplacements = freeBackendTypeVarsIn bodyReplacements
         BTBottom -> BTBottom
-
-    freeBackendTypeVarsIn replacements =
-      Set.unions (map freeBackendTypeVars (Map.elems replacements))
 
 unfoldBackendRecursiveType :: BackendType -> Maybe BackendType
 unfoldBackendRecursiveType ty =
@@ -657,6 +658,7 @@ matchBackendTypeParameters parameters =
                     Set.unions
                       [ Set.fromList [expectedName, actualName],
                         Map.keysSet substitution',
+                        freeBackendTypeVarsIn substitution',
                         parameters,
                         freeBackendTypeVars expectedBody,
                         freeBackendTypeVars actualBody,
@@ -672,6 +674,7 @@ matchBackendTypeParameters parameters =
                     Set.unions
                       [ Set.fromList [expectedName, actualName],
                         Map.keysSet substitution,
+                        freeBackendTypeVarsIn substitution,
                         parameters,
                         freeBackendTypeVars expectedBody,
                         freeBackendTypeVars actualBody
