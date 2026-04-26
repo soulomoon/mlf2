@@ -680,6 +680,8 @@ collectLeadingLams =
   where
     go params term =
       case term of
+        ETyAbs _ _ body -> go params body
+        ETyInst inner _ -> go params inner
         ELam name ty body -> go (params ++ [(name, ty)]) body
         other -> (params, other)
 

@@ -59,6 +59,21 @@ spec = describe "MLF.Backend.Convert" $ do
       Just other -> expectationFailure ("expected backend case, got " ++ show other)
       Nothing -> expectationFailure "expected backend case"
 
+  it "recovers backend cases with type-wrapped handler lambdas" $ do
+    checked0 <- requireChecked intCaseProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding {checkedBindingTerm = wrapCaseHandlersWithTypeWrappers (checkedBindingTerm binding)}
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
+
   it "keeps same-name data declarations module-scoped during type lowering" $ do
     checked <- requireChecked duplicateDataNameProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -277,6 +292,46 @@ mapMainBinding f checked =
     updateBinding binding
       | checkedBindingName binding == checkedProgramMain checked = f binding
       | otherwise = binding
+
+wrapCaseHandlersWithTypeWrappers :: Elab.ElabTerm -> Elab.ElabTerm
+wrapCaseHandlersWithTypeWrappers term =
+  case collectAppsElab term of
+    (headTerm@(Elab.ETyInst (Elab.EUnroll _) _), handlers@(_ : _)) ->
+      rebuildAppsElab headTerm (map wrapHandler handlers)
+    _ ->
+      case term of
+        Elab.ELam name ty body ->
+          Elab.ELam name ty (wrapCaseHandlersWithTypeWrappers body)
+        Elab.EApp fun arg ->
+          Elab.EApp (wrapCaseHandlersWithTypeWrappers fun) (wrapCaseHandlersWithTypeWrappers arg)
+        Elab.ELet name scheme rhs body ->
+          Elab.ELet name scheme (wrapCaseHandlersWithTypeWrappers rhs) (wrapCaseHandlersWithTypeWrappers body)
+        Elab.ETyAbs name mbBound body ->
+          Elab.ETyAbs name mbBound (wrapCaseHandlersWithTypeWrappers body)
+        Elab.ETyInst inner inst ->
+          Elab.ETyInst (wrapCaseHandlersWithTypeWrappers inner) inst
+        Elab.ERoll ty body ->
+          Elab.ERoll ty (wrapCaseHandlersWithTypeWrappers body)
+        Elab.EUnroll body ->
+          Elab.EUnroll (wrapCaseHandlersWithTypeWrappers body)
+        _ ->
+          term
+  where
+    wrapHandler handler =
+      Elab.ETyAbs "$case_handler_a" Nothing (Elab.ETyInst handler (Elab.InstApp intElabTy))
+
+collectAppsElab :: Elab.ElabTerm -> (Elab.ElabTerm, [Elab.ElabTerm])
+collectAppsElab =
+  go []
+  where
+    go args term =
+      case term of
+        Elab.EApp fun arg -> go (arg : args) fun
+        other -> (other, args)
+
+rebuildAppsElab :: Elab.ElabTerm -> [Elab.ElabTerm] -> Elab.ElabTerm
+rebuildAppsElab =
+  foldl Elab.EApp
 
 firstJust :: [Maybe a] -> Maybe a
 firstJust [] =
