@@ -200,6 +200,25 @@ spec = describe "MLF.Backend.Convert" $ do
     validateBackendProgram corruptedBackend
       `shouldBe` Left (BackendConstructorArgumentMismatch "Main__Pack" 0 intTy boolTy)
 
+  it "matches bounded constructor foralls against type variables with equivalent bounds" $ do
+    checked0 <- requireChecked boundedConstructorForallProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = boundedWrapElabTy (checkedBindingType binding),
+                    checkedBindingTerm = boundedWrapTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding
+      `shouldSatisfy` containsConstructArgType "Main__Pack" (BTVar "b")
+
   it "converts nested constructor arguments under expected constructor field types" $ do
     checked <- requireChecked =<< readFile "test/programs/recursive-adt/typeclass-integration.mlfp"
     backend <- requireRight (convertCheckedProgram checked)
@@ -517,6 +536,26 @@ containsBackendTyApp expr =
     BackendUnroll {backendUnrollPayload = body} -> containsBackendTyApp body
     _ -> False
 
+containsConstructArgType :: String -> BackendType -> BackendExpr -> Bool
+containsConstructArgType constructorName argTy expr =
+  case expr of
+    BackendConstruct {backendConstructName = name, backendConstructArgs = args} ->
+      (name == constructorName && any (alphaEqBackendType argTy . backendExprType) args)
+        || any (containsConstructArgType constructorName argTy) args
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsConstructArgType constructorName argTy scrutinee
+        || any (containsConstructArgType constructorName argTy . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsConstructArgType constructorName argTy body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsConstructArgType constructorName argTy fun || containsConstructArgType constructorName argTy arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsConstructArgType constructorName argTy rhs || containsConstructArgType constructorName argTy body
+    BackendTyAbs {backendTyAbsBody = body} -> containsConstructArgType constructorName argTy body
+    BackendTyApp {backendTyFunction = fun} -> containsConstructArgType constructorName argTy fun
+    BackendRoll {backendRollPayload = body} -> containsConstructArgType constructorName argTy body
+    BackendUnroll {backendUnrollPayload = body} -> containsConstructArgType constructorName argTy body
+    _ -> False
+
 findBackendCase :: BackendExpr -> Maybe BackendExpr
 findBackendCase expr =
   case expr of
@@ -564,6 +603,25 @@ intElabTy =
 boolElabTy :: Elab.ElabType
 boolElabTy =
   Elab.TBase (BaseTy "Bool")
+
+intElabBoundTy :: Elab.BoundType
+intElabBoundTy =
+  Elab.TBase (BaseTy "Int")
+
+boundedWrapElabTy :: Elab.ElabType -> Elab.ElabType
+boundedWrapElabTy resultTy =
+  Elab.TForall "b" (Just intElabBoundTy) (Elab.TArrow (Elab.TVar "b") resultTy)
+
+boundedWrapTerm :: Elab.ElabTerm
+boundedWrapTerm =
+  Elab.ETyAbs
+    "b"
+    (Just intElabBoundTy)
+    ( Elab.ELam
+        "x"
+        (Elab.TVar "b")
+        (Elab.EApp (Elab.EVar "Main__Pack") (Elab.EVar "x"))
+    )
 
 polymorphicIdentityElabTy :: Elab.ElabType
 polymorphicIdentityElabTy =

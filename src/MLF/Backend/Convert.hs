@@ -82,6 +82,8 @@ data DataMeta = DataMeta
 
 type BackendParameterBounds = Map String (Maybe BackendType)
 
+type BackendTypeBounds = Map String (Maybe BackendType)
+
 data BackendTypeAbsBinder = BackendTypeAbsBinder String (Maybe BackendType)
 
 convertCheckedProgram :: CheckedProgram -> Either BackendConversionError BackendProgram
@@ -196,7 +198,7 @@ sourceBoundToElabBound (SrcBound boundTy) =
 
 constructorBindingResultMatches :: BackendType -> ConstructorMeta -> Bool
 constructorBindingResultMatches bindingTy constructorMeta =
-  case matchBackendTypeParameters parameters Map.empty (backendConstructorResult constructor) resultTy of
+  case matchBackendTypeParameters Map.empty parameters Map.empty (backendConstructorResult constructor) resultTy of
     Just _ -> True
     Nothing -> False
   where
@@ -712,9 +714,10 @@ convertConstructorApplication context env term resultTy =
                   rawFields = backendConstructorFields constructor
               if length args == length rawFields
                 then do
+                  typeBounds <- backendTypeBoundsFromEnv env
                   initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
                   resultSubstitution <-
-                    case matchBackendTypeParameters parameters initialSubstitution (backendConstructorResult constructor) resultTy of
+                    case matchBackendTypeParameters typeBounds parameters initialSubstitution (backendConstructorResult constructor) resultTy of
                       Just substitution -> Right substitution
                       Nothing ->
                         Left
@@ -723,7 +726,7 @@ convertConstructorApplication context env term resultTy =
                           )
                   substitution <-
                     foldM
-                      (matchConstructorApplicationArgument env parameters)
+                      (matchConstructorApplicationArgument env typeBounds parameters)
                       resultSubstitution
                       (zip rawFields args)
                   let completedSubstitution = completeBackendParameterSubstitution parameters substitution
@@ -836,7 +839,9 @@ convertCaseApplication context env term resultTy =
           dataMeta <-
             case mbScrutineeData of
               Just scrutineeData -> Right scrutineeData
-              Nothing -> requireCaseData context (backendExprType scrutineeExpr)
+              Nothing -> do
+                typeBounds <- backendTypeBoundsFromEnv env
+                requireCaseData context typeBounds (backendExprType scrutineeExpr)
           let constructors = backendDataConstructors (dmBackend dataMeta)
           case compare (length args) (length constructors) of
             EQ -> Just <$> convertCaseWithHandlers context env resultTy scrutineeExpr constructors args
@@ -917,10 +922,11 @@ constructorApplicationResultType context env term =
           case Map.lookup constructorName (ccConstructors context) of
             Just constructorMeta
               | length args == length fields -> do
+                  typeBounds <- backendTypeBoundsFromEnv env
                   initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
                   substitution <-
                     foldM
-                      (matchConstructorApplicationArgument env parameters)
+                      (matchConstructorApplicationArgument env typeBounds parameters)
                       initialSubstitution
                       (zip fields args)
                   let resultTy =
@@ -938,24 +944,25 @@ constructorApplicationResultType context env term =
 
 matchConstructorApplicationArgument ::
   Env ->
+  BackendTypeBounds ->
   BackendParameterBounds ->
   Map String BackendType ->
   (BackendType, ElabTerm) ->
   Either BackendConversionError (Map String BackendType)
-matchConstructorApplicationArgument env parameters substitution (expectedTy, arg) =
+matchConstructorApplicationArgument env typeBounds parameters substitution (expectedTy, arg) =
   -- This is only a best-effort way to recover constructor type parameters.
   -- Expected-type conversion of the argument remains authoritative because it
   -- can canonicalize nested constructor applications before validation.
   case inferBackendType env arg of
     Right actualTy ->
-      case matchBackendTypeParameters parameters substitution expectedTy actualTy of
+      case matchBackendTypeParameters typeBounds parameters substitution expectedTy actualTy of
         Just substitution' -> Right substitution'
         Nothing -> Right substitution
     Left _ -> Right substitution
 
-requireCaseData :: ConvertContext -> BackendType -> Either BackendConversionError DataMeta
-requireCaseData context scrutineeTy =
-  case filter (dataMatchesScrutinee scrutineeTy) (ccData context) of
+requireCaseData :: ConvertContext -> BackendTypeBounds -> BackendType -> Either BackendConversionError DataMeta
+requireCaseData context typeBounds scrutineeTy =
+  case filter (dataMatchesScrutinee typeBounds scrutineeTy) (ccData context) of
     [dataMeta] -> Right dataMeta
     [] -> Left (BackendUnsupportedCaseShape ("no backend data matches scrutinee type " ++ show scrutineeTy))
     matches ->
@@ -964,11 +971,11 @@ requireCaseData context scrutineeTy =
             ("ambiguous backend data matches scrutinee type " ++ show scrutineeTy ++ ": " ++ show (map (backendDataName . dmBackend) matches))
         )
 
-dataMatchesScrutinee :: BackendType -> DataMeta -> Bool
-dataMatchesScrutinee scrutineeTy dataMeta =
+dataMatchesScrutinee :: BackendTypeBounds -> BackendType -> DataMeta -> Bool
+dataMatchesScrutinee typeBounds scrutineeTy dataMeta =
   any
     ( \constructor ->
-        case matchBackendTypeParameters (constructorTypeParameterBoundsFor (dmBackend dataMeta) constructor) Map.empty (backendConstructorResult constructor) scrutineeTy of
+        case matchBackendTypeParameters typeBounds (constructorTypeParameterBoundsFor (dmBackend dataMeta) constructor) Map.empty (backendConstructorResult constructor) scrutineeTy of
           Just _ -> True
           Nothing -> False
     )
@@ -1048,6 +1055,13 @@ extendTypeEnv :: String -> ElabType -> Env -> Env
 extendTypeEnv name ty env =
   env {typeEnv = Map.insert name ty (typeEnv env)}
 
+backendTypeBoundsFromEnv :: Env -> Either BackendConversionError BackendTypeBounds
+backendTypeBoundsFromEnv env =
+  traverse convertTypeBound (typeEnv env)
+  where
+    convertTypeBound TBottom = Right Nothing
+    convertTypeBound boundTy = Just <$> convertElabType boundTy
+
 zipWithMCase ::
   (BackendConstructor -> ElabTerm -> Either BackendConversionError BackendAlternative) ->
   [BackendConstructor] ->
@@ -1061,12 +1075,13 @@ zipWithMCase f constructors handlers =
       Left (BackendUnsupportedCaseShape "case expression has no alternatives")
 
 matchBackendTypeParameters ::
+  BackendTypeBounds ->
   BackendParameterBounds ->
   Map String BackendType ->
   BackendType ->
   BackendType ->
   Maybe (Map String BackendType)
-matchBackendTypeParameters parameterBounds =
+matchBackendTypeParameters typeBounds parameterBounds =
   go Map.empty Map.empty
   where
     go leftEnv rightEnv substitution expected actual =
@@ -1143,9 +1158,21 @@ matchBackendTypeParameters parameterBounds =
               True
         Just (Just boundTy)
           | not (alphaEqBackendType boundTy BTBottom) ->
-              alphaEqBackendType actual (substituteBackendTypes (Map.delete name substitution) boundTy)
+              let expectedBound = substituteBackendTypes (Map.delete name substitution) boundTy
+               in alphaEqBackendType actual expectedBound || actualTypeVariableBoundMatches actual expectedBound
         _ ->
           True
+
+    actualTypeVariableBoundMatches actual expectedBound =
+      case actual of
+        BTVar actualName ->
+          case Map.lookup actualName typeBounds of
+            Just (Just actualBound) ->
+              alphaEqBackendType actualBound expectedBound
+            _ ->
+              False
+        _ ->
+          False
 
 completeBackendParameterSubstitution :: BackendParameterBounds -> Map String BackendType -> Map String BackendType
 completeBackendParameterSubstitution parameterBounds substitution0 =
