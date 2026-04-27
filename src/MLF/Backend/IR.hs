@@ -523,21 +523,68 @@ validateBackendVariable (Just context0) name actualTy =
 
 backendVariableTypeMatches :: Map.Map String (Maybe BackendType) -> BackendType -> BackendType -> Bool
 backendVariableTypeMatches typeBounds expectedTy actualTy =
-  alphaEqBackendType actualTy expectedTy
-    || typeVariableBoundMatches expectedTy actualTy
-    || typeVariableBoundMatches actualTy expectedTy
+  go Set.empty expectedTy actualTy
   where
-    typeVariableBoundMatches ty otherTy =
+    go bound expected actual =
+      alphaEqBackendType actual expected
+        || typeVariableBoundMatches bound expected actual
+        || typeVariableBoundMatches bound actual expected
+        || case (expected, actual) of
+          (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
+            go bound expectedDom actualDom && go bound expectedCod actualCod
+          (BTBase expectedBase, BTBase actualBase) ->
+            expectedBase == actualBase
+          (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs) ->
+            expectedCon == actualCon
+              && zipAllWith (go bound) (NE.toList expectedArgs) (NE.toList actualArgs)
+          (BTForall expectedName expectedBound expectedBody, BTForall actualName actualBound actualBody) ->
+            maybeBoundMatches bound expectedBound actualBound
+              && let freshName = freshBinderName expectedName actualName expectedBound actualBound expectedBody actualBody
+                     expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
+                     actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
+                  in go (Set.insert freshName bound) expectedBody' actualBody'
+          (BTMu expectedName expectedBody, BTMu actualName actualBody) ->
+            let freshName = freshBinderName expectedName actualName Nothing Nothing expectedBody actualBody
+                expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
+                actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
+             in go (Set.insert freshName bound) expectedBody' actualBody'
+          (BTBottom, BTBottom) ->
+            True
+          _ ->
+            False
+
+    maybeBoundMatches _ Nothing Nothing =
+      True
+    maybeBoundMatches bound (Just expectedBound) (Just actualBound) =
+      go bound expectedBound actualBound
+    maybeBoundMatches _ _ _ =
+      False
+
+    typeVariableBoundMatches bound ty otherTy =
       case ty of
-        BTVar name ->
-          case Map.lookup name typeBounds of
-            Just (Just boundTy)
-              | not (alphaEqBackendType boundTy BTBottom) ->
-                  alphaEqBackendType otherTy boundTy
-            _ ->
-              False
+        BTVar name
+          | Set.notMember name bound ->
+              case Map.lookup name typeBounds of
+                Just (Just boundTy)
+                  | not (alphaEqBackendType boundTy BTBottom) ->
+                      go bound boundTy otherTy
+                _ ->
+                  False
         _ ->
           False
+
+    freshBinderName leftName rightName leftBound rightBound leftBody rightBody =
+      freshNameLike
+        leftName
+        ( Set.unions
+            [ Set.fromList [leftName, rightName],
+              Map.keysSet typeBounds,
+              maybe Set.empty freeBackendTypeVars leftBound,
+              maybe Set.empty freeBackendTypeVars rightBound,
+              freeBackendTypeVars leftBody,
+              freeBackendTypeVars rightBody
+            ]
+        )
 
 validateBackendTypeArgumentBound :: Maybe BackendType -> BackendType -> Either BackendValidationError ()
 validateBackendTypeArgumentBound Nothing _ =

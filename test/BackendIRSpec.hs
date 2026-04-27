@@ -211,6 +211,12 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackWrongBoundUseCaseExpr)
       `shouldBe` Left (BackendVariableTypeMismatch "n" (BTVar "a") boolTy)
 
+    validateBackendProgram boundedListPackCaseProgram
+      `shouldBe` Right ()
+
+    validateBackendProgram boundedListPackWrongBoundUseCaseProgram
+      `shouldBe` Left (BackendVariableTypeMismatch "n" (listTy (BTVar "a")) (listTy boolTy))
+
   it "rejects matcher capture from inferred constructor parameters" $ do
     validateBackendProgram captureForallConstructProgram
       `shouldBe` Left (BackendConstructorArgumentMismatch "CaptureForall" 0 captureForallInstantiatedTy captureForallActualTy)
@@ -371,6 +377,14 @@ boundedPackData =
       backendDataConstructors = [BackendConstructor "BoundedPack" [BackendTypeBinder "a" (Just intTy)] [BTVar "a"] boundedPackTy]
     }
 
+boundedListPackData :: BackendData
+boundedListPackData =
+  BackendData
+    { backendDataName = "BoundedListPack",
+      backendDataParameters = [],
+      backendDataConstructors = [BackendConstructor "BoundedListPack" [BackendTypeBinder "a" (Just intTy)] [listTy (BTVar "a")] boundedListPackTy]
+    }
+
 captureForallData :: BackendData
 captureForallData =
   BackendData
@@ -464,6 +478,48 @@ boundedPackWrongBoundUseCaseExpr =
           (BackendVar boolTy "n")
           :| []
     }
+
+boundedListPackCaseProgram :: BackendProgram
+boundedListPackCaseProgram =
+  programWithDataAndBindings
+    [boundedListPackData]
+    [ mainBinding
+        BackendCase
+          { backendExprType = listTy intTy,
+            backendScrutinee = boundedListPackListIntExpr,
+            backendAlternatives =
+              BackendAlternative
+                (BackendConstructorPattern "BoundedListPack" ["n"])
+                (BackendVar (listTy intTy) "n")
+                :| []
+          },
+      listArgBinding
+    ]
+
+boundedListPackWrongBoundUseCaseProgram :: BackendProgram
+boundedListPackWrongBoundUseCaseProgram =
+  programWithDataAndBindings
+    [boundedListPackData]
+    [ mainBinding
+        BackendCase
+          { backendExprType = listTy boolTy,
+            backendScrutinee = boundedListPackListIntExpr,
+            backendAlternatives =
+              BackendAlternative
+                (BackendConstructorPattern "BoundedListPack" ["n"])
+                (BackendVar (listTy boolTy) "n")
+                :| []
+          },
+      listArgBinding
+    ]
+
+boundedListPackListIntExpr :: BackendExpr
+boundedListPackListIntExpr =
+  BackendConstruct boundedListPackTy "BoundedListPack" [BackendVar (listTy intTy) "listArg"]
+
+listArgBinding :: BackendBinding
+listArgBinding =
+  binding "listArg" (listTy intTy) (BackendVar (listTy intTy) "listArg")
 
 captureForallConstructProgram :: BackendProgram
 captureForallConstructProgram =
@@ -563,6 +619,14 @@ packTy =
 boundedPackTy :: BackendType
 boundedPackTy =
   BTBase (BaseTy "BoundedPack")
+
+boundedListPackTy :: BackendType
+boundedListPackTy =
+  BTBase (BaseTy "BoundedListPack")
+
+listTy :: BackendType -> BackendType
+listTy ty =
+  BTCon (BaseTy "List") (ty :| [])
 
 optionTy :: BackendType -> BackendType
 optionTy ty =
