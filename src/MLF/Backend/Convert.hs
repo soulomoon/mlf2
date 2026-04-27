@@ -591,7 +591,7 @@ convertOrdinaryTerm context env term resultTy =
       let boundTy = maybe TBottom tyToElab mbBound
           bodyExpected =
             case resultTy of
-              BTForall _ _ bodyTy -> Just bodyTy
+              BTForall expectedName _ bodyTy -> Just (substituteBackendType expectedName (BTVar name) bodyTy)
               _ -> Nothing
       bodyExpr <- convertTermExpected context (extendTypeEnv name boundTy env) bodyExpected body
       Right

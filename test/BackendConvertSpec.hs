@@ -137,6 +137,12 @@ spec = describe "MLF.Backend.Convert" $ do
 
     validateBackendProgram backend `shouldBe` Right ()
 
+  it "renames expected forall bodies to actual type abstraction binders" $ do
+    checked <- requireChecked =<< readFile "test/programs/unified/first-class-polymorphism.mlfp"
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
   it "synthesizes constructor bindings for checked GADT and existential programs" $ do
     mapM_
       ( \path -> do
