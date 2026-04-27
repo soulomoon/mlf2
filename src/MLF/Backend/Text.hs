@@ -54,6 +54,7 @@ data BackendTextError
 
 data RenderEnv = RenderEnv
     { renderGlobalNames :: Set.Set String
+    , renderLocalNames :: Set.Set String
     }
 
 renderCheckedProgramBackendText :: CheckedProgram -> Either BackendTextError String
@@ -82,6 +83,7 @@ renderBackendProgram program =
                     | backendModule <- backendProgramModules program
                     , binding <- backendModuleBindings backendModule
                     ]
+            , renderLocalNames = Set.empty
             }
 
 renderBackendModule :: BackendModule -> Either BackendTextError String
@@ -92,17 +94,22 @@ renderBackendModule backendModule =
         RenderEnv
             { renderGlobalNames =
                 Set.fromList (map backendBindingName (backendModuleBindings backendModule))
+            , renderLocalNames = Set.empty
             }
 
 renderBackendBinding :: BackendBinding -> Either BackendTextError String
 renderBackendBinding binding =
     unlines <$> renderBackendBindingLines env binding
   where
-    env = RenderEnv {renderGlobalNames = Set.singleton (backendBindingName binding)}
+    env =
+        RenderEnv
+            { renderGlobalNames = Set.singleton (backendBindingName binding)
+            , renderLocalNames = Set.empty
+            }
 
 renderBackendExpr :: BackendExpr -> Either BackendTextError String
 renderBackendExpr =
-    renderExpr RenderEnv {renderGlobalNames = Set.empty} "expression" 0
+    renderExpr RenderEnv {renderGlobalNames = Set.empty, renderLocalNames = Set.empty} "expression" 0
 
 renderBackendModuleLines :: RenderEnv -> BackendModule -> Either BackendTextError [String]
 renderBackendModuleLines env backendModule = do
@@ -139,7 +146,7 @@ renderConstructorLine constructor =
 
 renderBackendBindingLines :: RenderEnv -> BackendBinding -> Either BackendTextError [String]
 renderBackendBindingLines env binding = do
-    renderedBody <- renderExpr env context 0 bodyExpr
+    renderedBody <- renderExpr bodyEnv context 0 bodyExpr
     let typeParamsText = renderBackendTypeBinderPairs typeParams
         paramsText = intercalate ", " (map renderValueParam valueParams)
         returnTy = backendExprType bodyExpr
@@ -160,6 +167,7 @@ renderBackendBindingLines env binding = do
     context = "binding " ++ show (backendBindingName binding)
     (typeParams, afterTypeParams) = collectTypeParams (backendBindingExpr binding)
     (valueParams, bodyExpr) = collectValueParams afterTypeParams
+    bodyEnv = extendLocalNames (map fst valueParams) env
     bindingComment
         | backendBindingExportedAsMain binding = "; exported main"
         | otherwise = "; binding"
@@ -192,7 +200,7 @@ renderExpr env context prec =
         BackendLit _ lit ->
             Right (renderLiteral lit)
         BackendLam _ name paramTy body -> do
-            bodyText <- renderExpr env context 0 body
+            bodyText <- renderExpr (extendLocalName name env) context 0 body
             Right $
                 paren (prec > 0) $
                     "fn ("
@@ -213,7 +221,7 @@ renderExpr env context prec =
                         ++ ")"
         BackendLet _ name bindingTy rhs body -> do
             rhsText <- renderExpr env context 0 rhs
-            bodyText <- renderExpr env context 0 body
+            bodyText <- renderExpr (extendLocalName name env) context 0 body
             Right $
                 paren (prec > 0) $
                     "let "
@@ -252,8 +260,17 @@ renderExpr env context prec =
 
 renderVariable :: RenderEnv -> String -> String
 renderVariable env name
+    | Set.member name (renderLocalNames env) = renderLocal name
     | Set.member name (renderGlobalNames env) = renderGlobal name
     | otherwise = renderLocal name
+
+extendLocalName :: String -> RenderEnv -> RenderEnv
+extendLocalName name env =
+    env {renderLocalNames = Set.insert name (renderLocalNames env)}
+
+extendLocalNames :: [String] -> RenderEnv -> RenderEnv
+extendLocalNames names env =
+    env {renderLocalNames = Set.union (Set.fromList names) (renderLocalNames env)}
 
 renderBackendType :: BackendType -> String
 renderBackendType =

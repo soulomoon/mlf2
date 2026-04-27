@@ -26,6 +26,14 @@ spec = describe "MLF.Backend.Text" $ do
 
         goldenText "test/golden/backend-simple-function.golden" output
 
+    it "renders top-level references as globals while preserving local shadowing" $ do
+        output <- requireRight (renderBackendProgram globalReferenceProgram)
+
+        output `shouldSatisfy` isInfixOf "ret i64 call @\"helper\"(1)"
+        output
+            `shouldSatisfy` isInfixOf
+                "define @\"shadowHelper\"(%\"helper\" : i64) -> i64 {\n    ret i64 %\"helper\""
+
     it "renders explicit diagnostics for unsupported backend case nodes" $ do
         case renderBackendProgram unsupportedCaseProgram of
             Left err ->
@@ -47,6 +55,71 @@ simpleFunctionProgram =
         , "  def main : Int = id 1;"
         , "}"
         ]
+
+globalReferenceProgram :: BackendProgram
+globalReferenceProgram =
+    BackendProgram
+        { backendProgramModules =
+            [ BackendModule
+                { backendModuleName = "Main"
+                , backendModuleData = []
+                , backendModuleBindings =
+                    [ helperBinding
+                    , usesHelperBinding
+                    , shadowHelperBinding
+                    ]
+                }
+            ]
+        , backendProgramMain = "usesHelper"
+        }
+
+helperBinding :: BackendBinding
+helperBinding =
+    BackendBinding
+        { backendBindingName = "helper"
+        , backendBindingType = unaryIntTy
+        , backendBindingExpr =
+            BackendLam
+                { backendExprType = unaryIntTy
+                , backendParamName = "x"
+                , backendParamType = intTy
+                , backendBody = BackendVar intTy "x"
+                }
+        , backendBindingExportedAsMain = False
+        }
+
+usesHelperBinding :: BackendBinding
+usesHelperBinding =
+    BackendBinding
+        { backendBindingName = "usesHelper"
+        , backendBindingType = intTy
+        , backendBindingExpr =
+            BackendApp
+                { backendExprType = intTy
+                , backendFunction = BackendVar unaryIntTy "helper"
+                , backendArgument = BackendLit intTy (LInt 1)
+                }
+        , backendBindingExportedAsMain = True
+        }
+
+shadowHelperBinding :: BackendBinding
+shadowHelperBinding =
+    BackendBinding
+        { backendBindingName = "shadowHelper"
+        , backendBindingType = unaryIntTy
+        , backendBindingExpr =
+            BackendLam
+                { backendExprType = unaryIntTy
+                , backendParamName = "helper"
+                , backendParamType = intTy
+                , backendBody = BackendVar intTy "helper"
+                }
+        , backendBindingExportedAsMain = False
+        }
+
+unaryIntTy :: BackendType
+unaryIntTy =
+    BTArrow intTy intTy
 
 unsupportedCaseProgram :: BackendProgram
 unsupportedCaseProgram =
