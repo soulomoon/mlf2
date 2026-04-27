@@ -37,6 +37,13 @@ spec = describe "MLF.Backend.Text" $ do
             `shouldSatisfy` isInfixOf
                 "define @\"shadowHelper\"(%\"helper\" : i64) -> i64 {\n    ret i64 %\"helper\""
 
+    it "renders standalone module and binding free references as external globals" $ do
+        moduleOutput <- requireRight (renderBackendModule externalReferenceModule)
+        bindingOutput <- requireRight (renderBackendBinding externalReferenceBinding)
+
+        moduleOutput `shouldSatisfy` isInfixOf "ret i64 call @\"External__helper\"(1)"
+        bindingOutput `shouldSatisfy` isInfixOf "ret i64 call @\"External__helper\"(1)"
+
     it "renders explicit diagnostics for unsupported backend case nodes" $ do
         case renderBackendProgram unsupportedCaseProgram of
             Left err ->
@@ -140,6 +147,28 @@ shadowHelperBinding =
 unaryIntTy :: BackendType
 unaryIntTy =
     BTArrow intTy intTy
+
+externalReferenceModule :: BackendModule
+externalReferenceModule =
+    BackendModule
+        { backendModuleName = "Main"
+        , backendModuleData = []
+        , backendModuleBindings = [externalReferenceBinding]
+        }
+
+externalReferenceBinding :: BackendBinding
+externalReferenceBinding =
+    BackendBinding
+        { backendBindingName = "main"
+        , backendBindingType = intTy
+        , backendBindingExpr =
+            BackendApp
+                { backendExprType = intTy
+                , backendFunction = BackendVar unaryIntTy "External__helper"
+                , backendArgument = BackendLit intTy (LInt 1)
+                }
+        , backendBindingExportedAsMain = True
+        }
 
 unsupportedCaseProgram :: BackendProgram
 unsupportedCaseProgram =

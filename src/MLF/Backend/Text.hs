@@ -31,11 +31,13 @@ import MLF.Backend.Convert
     , convertCheckedProgram
     )
 import MLF.Backend.IR
-    ( BackendBinding (..)
+    ( BackendAlternative (..)
+    , BackendBinding (..)
     , BackendConstructor (..)
     , BackendData (..)
     , BackendExpr (..)
     , BackendModule (..)
+    , BackendPattern (..)
     , BackendProgram (..)
     , BackendType (..)
     , BackendTypeBinder (..)
@@ -92,8 +94,7 @@ renderBackendModule backendModule =
   where
     env =
         RenderEnv
-            { renderGlobalNames =
-                Set.fromList (map backendBindingName (backendModuleBindings backendModule))
+            { renderGlobalNames = renderBackendModuleGlobalNames backendModule
             , renderLocalNames = Set.empty
             }
 
@@ -103,13 +104,67 @@ renderBackendBinding binding =
   where
     env =
         RenderEnv
-            { renderGlobalNames = Set.singleton (backendBindingName binding)
+            { renderGlobalNames = renderBackendBindingGlobalNames binding
             , renderLocalNames = Set.empty
             }
 
 renderBackendExpr :: BackendExpr -> Either BackendTextError String
 renderBackendExpr =
     renderExpr RenderEnv {renderGlobalNames = Set.empty, renderLocalNames = Set.empty} "expression" 0
+
+renderBackendModuleGlobalNames :: BackendModule -> Set.Set String
+renderBackendModuleGlobalNames backendModule =
+    Set.fromList (map backendBindingName bindings)
+        `Set.union` Set.unions (map renderBackendBindingFreeVariables bindings)
+  where
+    bindings = backendModuleBindings backendModule
+
+renderBackendBindingGlobalNames :: BackendBinding -> Set.Set String
+renderBackendBindingGlobalNames binding =
+    Set.insert (backendBindingName binding) (renderBackendBindingFreeVariables binding)
+
+renderBackendBindingFreeVariables :: BackendBinding -> Set.Set String
+renderBackendBindingFreeVariables =
+    freeBackendExprVariables . backendBindingExpr
+
+freeBackendExprVariables :: BackendExpr -> Set.Set String
+freeBackendExprVariables =
+    go Set.empty
+  where
+    go bound =
+        \case
+            BackendVar _ name
+                | Set.member name bound -> Set.empty
+                | otherwise -> Set.singleton name
+            BackendLit {} ->
+                Set.empty
+            BackendLam _ name _ body ->
+                go (Set.insert name bound) body
+            BackendApp _ fun arg ->
+                go bound fun `Set.union` go bound arg
+            BackendLet _ name _ rhs body ->
+                go bound rhs `Set.union` go (Set.insert name bound) body
+            BackendTyAbs _ _ _ body ->
+                go bound body
+            BackendTyApp _ fun _ ->
+                go bound fun
+            BackendConstruct _ _ args ->
+                Set.unions (map (go bound) args)
+            BackendCase _ scrutinee alternatives ->
+                go bound scrutinee
+                    `Set.union` Set.unions (map (freeAlternativeVariables bound) (toListNE alternatives))
+            BackendRoll _ payload ->
+                go bound payload
+            BackendUnroll _ payload ->
+                go bound payload
+
+    freeAlternativeVariables bound (BackendAlternative pattern0 body) =
+        go (Set.union (Set.fromList (patternValueBinders pattern0)) bound) body
+
+    patternValueBinders =
+        \case
+            BackendDefaultPattern -> []
+            BackendConstructorPattern _ binders -> binders
 
 renderBackendModuleLines :: RenderEnv -> BackendModule -> Either BackendTextError [String]
 renderBackendModuleLines env backendModule = do
