@@ -80,7 +80,9 @@ data DataMeta = DataMeta
     dmBackend :: BackendData
   }
 
-data BackendTypeBinder = BackendTypeBinder String (Maybe BackendType)
+type BackendParameterBounds = Map String (Maybe BackendType)
+
+data BackendTypeAbsBinder = BackendTypeAbsBinder String (Maybe BackendType)
 
 convertCheckedProgram :: CheckedProgram -> Either BackendConversionError BackendProgram
 convertCheckedProgram checked = do
@@ -199,7 +201,7 @@ constructorBindingResultMatches bindingTy constructorMeta =
     Nothing -> False
   where
     constructor = cmBackend constructorMeta
-    parameters = Set.fromList (backendDataParameters (dmBackend (cmData constructorMeta)))
+    parameters = constructorTypeParameters constructorMeta
     (_, bodyTy) = splitBackendForalls bindingTy
     (_, resultTy) = splitBackendArrows bodyTy
 
@@ -232,13 +234,13 @@ synthesizeConstructorBinding bindingTy constructorMeta = do
       )
   Right expr
 
-splitBackendForalls :: BackendType -> ([BackendTypeBinder], BackendType)
+splitBackendForalls :: BackendType -> ([BackendTypeAbsBinder], BackendType)
 splitBackendForalls =
   go []
   where
     go binders ty =
       case ty of
-        BTForall name mbBound body -> go (binders ++ [BackendTypeBinder name mbBound]) body
+        BTForall name mbBound body -> go (binders ++ [BackendTypeAbsBinder name mbBound]) body
         _ -> (binders, ty)
 
 splitBackendArrows :: BackendType -> ([BackendType], BackendType)
@@ -250,11 +252,11 @@ splitBackendArrows =
         BTArrow arg result -> go (args ++ [arg]) result
         _ -> (args, ty)
 
-wrapBackendTypeAbs :: [BackendTypeBinder] -> BackendExpr -> BackendExpr
+wrapBackendTypeAbs :: [BackendTypeAbsBinder] -> BackendExpr -> BackendExpr
 wrapBackendTypeAbs binders body =
   foldr wrap body binders
   where
-    wrap (BackendTypeBinder name mbBound) expr =
+    wrap (BackendTypeAbsBinder name mbBound) expr =
       BackendTyAbs
         { backendExprType = BTForall name mbBound (backendExprType expr),
           backendTyParamName = name,
@@ -456,15 +458,20 @@ convertDataInfo context info =
 
 convertConstructorInfo :: ElaborateScope -> ConstructorInfo -> Either BackendConversionError BackendConstructor
 convertConstructorInfo scope info = do
+  foralls <- mapM (convertConstructorForall scope) (ctorForalls info)
   fields <- mapM (convertLoweredSourceType scope) (ctorArgs info)
   resultTy <- convertLoweredSourceType scope (ctorResult info)
   Right
     BackendConstructor
       { backendConstructorName = ctorRuntimeName info,
-        backendConstructorForalls = map fst (ctorForalls info),
+        backendConstructorForalls = foralls,
         backendConstructorFields = fields,
         backendConstructorResult = resultTy
       }
+
+convertConstructorForall :: ElaborateScope -> (String, Maybe SrcType) -> Either BackendConversionError BackendTypeBinder
+convertConstructorForall scope (name, mbBound) =
+  BackendTypeBinder name <$> traverse (convertLoweredSourceType scope) mbBound
 
 convertLoweredSourceType :: ElaborateScope -> SrcType -> Either BackendConversionError BackendType
 convertLoweredSourceType scope =
@@ -719,7 +726,8 @@ convertConstructorApplication context env term resultTy =
                       (matchConstructorApplicationArgument env parameters)
                       resultSubstitution
                       (zip rawFields args)
-                  let fields = map (substituteBackendTypes substitution) rawFields
+                  let completedSubstitution = completeBackendParameterSubstitution parameters substitution
+                      fields = map (substituteBackendTypes completedSubstitution) rawFields
                   argExprs <- zipWithM (convertTermExpected context env . Just) fields args
                   Right
                     ( Just
@@ -733,9 +741,17 @@ convertConstructorApplication context env term resultTy =
             Nothing -> Right Nothing
         Nothing -> Right Nothing
 
-constructorTypeParameters :: ConstructorMeta -> Set.Set String
+constructorTypeParameters :: ConstructorMeta -> BackendParameterBounds
 constructorTypeParameters constructorMeta =
-  Set.fromList (backendDataParameters (dmBackend (cmData constructorMeta)) ++ backendConstructorForalls (cmBackend constructorMeta))
+  constructorTypeParameterBoundsFor (dmBackend (cmData constructorMeta)) (cmBackend constructorMeta)
+
+constructorTypeParameterBoundsFor :: BackendData -> BackendConstructor -> BackendParameterBounds
+constructorTypeParameterBoundsFor dataDecl constructor =
+  Map.fromList $
+    [(name, Nothing) | name <- backendDataParameters dataDecl]
+      ++ [ (backendTypeBinderName binder, backendTypeBinderBound binder)
+           | binder <- backendConstructorForalls constructor
+         ]
 
 constructorTypeApplicationSubstitution ::
   ConstructorMeta ->
@@ -749,7 +765,7 @@ constructorTypeApplicationSubstitution constructorMeta typeArgs =
 constructorTypeApplicationParameterNames :: ConstructorMeta -> [String]
 constructorTypeApplicationParameterNames constructorMeta =
   sort (Set.toList (freeSourceTypeVars (ctorType (cmInfo constructorMeta))))
-    ++ map fst (ctorForalls (cmInfo constructorMeta))
+    ++ map backendTypeBinderName (backendConstructorForalls (cmBackend constructorMeta))
 
 freeSourceTypeVars :: SrcType -> Set.Set String
 freeSourceTypeVars =
@@ -907,7 +923,10 @@ constructorApplicationResultType context env term =
                       (matchConstructorApplicationArgument env parameters)
                       initialSubstitution
                       (zip fields args)
-                  let resultTy = substituteBackendTypes substitution (backendConstructorResult constructor)
+                  let resultTy =
+                        substituteBackendTypes
+                          (completeBackendParameterSubstitution parameters substitution)
+                          (backendConstructorResult constructor)
                   Right (Just (resultTy, Just (cmData constructorMeta)))
               | otherwise -> Right Nothing
               where
@@ -919,7 +938,7 @@ constructorApplicationResultType context env term =
 
 matchConstructorApplicationArgument ::
   Env ->
-  Set.Set String ->
+  BackendParameterBounds ->
   Map String BackendType ->
   (BackendType, ElabTerm) ->
   Either BackendConversionError (Map String BackendType)
@@ -949,7 +968,7 @@ dataMatchesScrutinee :: BackendType -> DataMeta -> Bool
 dataMatchesScrutinee scrutineeTy dataMeta =
   any
     ( \constructor ->
-        case matchBackendTypeParameters (Set.fromList (backendDataParameters (dmBackend dataMeta) ++ backendConstructorForalls constructor)) Map.empty (backendConstructorResult constructor) scrutineeTy of
+        case matchBackendTypeParameters (constructorTypeParameterBoundsFor (dmBackend dataMeta) constructor) Map.empty (backendConstructorResult constructor) scrutineeTy of
           Just _ -> True
           Nothing -> False
     )
@@ -1042,18 +1061,18 @@ zipWithMCase f constructors handlers =
       Left (BackendUnsupportedCaseShape "case expression has no alternatives")
 
 matchBackendTypeParameters ::
-  Set.Set String ->
+  BackendParameterBounds ->
   Map String BackendType ->
   BackendType ->
   BackendType ->
   Maybe (Map String BackendType)
-matchBackendTypeParameters parameters =
+matchBackendTypeParameters parameterBounds =
   go Map.empty Map.empty
   where
     go leftEnv rightEnv substitution expected actual =
       case expected of
         BTVar name
-          | Set.member name parameters,
+          | Map.member name parameterBounds,
             Map.notMember name leftEnv ->
               insertParameterSubstitution name actual substitution
         _ ->
@@ -1108,7 +1127,33 @@ matchBackendTypeParameters parameters =
 
     insertParameterSubstitution name actual substitution =
       case Map.lookup name substitution of
-        Nothing -> Just (Map.insert name actual substitution)
+        Nothing ->
+          if backendParameterBoundMatches name actual substitution
+            then Just (Map.insert name actual substitution)
+            else Nothing
         Just previous
-          | alphaEqBackendType previous actual -> Just substitution
+          | alphaEqBackendType previous actual && backendParameterBoundMatches name previous substitution -> Just substitution
         _ -> Nothing
+
+    backendParameterBoundMatches name actual substitution =
+      case Map.lookup name parameterBounds of
+        Just (Just _)
+          | BTVar actualName <- actual,
+            actualName == name ->
+              True
+        Just (Just boundTy)
+          | not (alphaEqBackendType boundTy BTBottom) ->
+              alphaEqBackendType actual (substituteBackendTypes (Map.delete name substitution) boundTy)
+        _ ->
+          True
+
+completeBackendParameterSubstitution :: BackendParameterBounds -> Map String BackendType -> Map String BackendType
+completeBackendParameterSubstitution parameterBounds substitution0 =
+  foldl insertBoundDefault substitution0 (Map.toList parameterBounds)
+  where
+    insertBoundDefault substitution (name, Just boundTy)
+      | Map.member name substitution = substitution
+      | alphaEqBackendType boundTy BTBottom = substitution
+      | otherwise = Map.insert name (substituteBackendTypes substitution boundTy) substitution
+    insertBoundDefault substitution _ =
+      substitution

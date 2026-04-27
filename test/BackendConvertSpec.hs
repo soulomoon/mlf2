@@ -172,6 +172,34 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Pack"]
 
+  it "preserves bounded constructor foralls in backend metadata" $ do
+    checked <- requireChecked boundedConstructorForallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    constructor <- requireConstructor "Main__Pack" backend
+    backendConstructorForalls constructor `shouldBe` [BackendTypeBinder "a" (Just intTy)]
+
+    let corruptedExpr =
+          BackendConstruct
+            { backendExprType = backendConstructorResult constructor,
+              backendConstructName = backendConstructorName constructor,
+              backendConstructArgs = [BackendLit boolTy (LBool True)]
+            }
+        corruptedBackend =
+          mapBackendMainBinding
+            ( \binding ->
+                binding
+                  { backendBindingExpr = corruptedExpr,
+                    backendBindingType = backendConstructorResult constructor
+                  }
+            )
+            backend
+
+    validateBackendProgram corruptedBackend
+      `shouldBe` Left (BackendConstructorArgumentMismatch "Main__Pack" 0 intTy boolTy)
+
   it "converts nested constructor arguments under expected constructor field types" $ do
     checked <- requireChecked =<< readFile "test/programs/recursive-adt/typeclass-integration.mlfp"
     backend <- requireRight (convertCheckedProgram checked)
@@ -334,6 +362,17 @@ constructorForallApplicationProgram =
     [ "module Main export (Pack(..), main) {",
       "  data Pack =",
       "      Pack : forall a. a -> Pack;",
+      "",
+      "  def main : Pack = Pack 1;",
+      "}"
+    ]
+
+boundedConstructorForallProgram :: String
+boundedConstructorForallProgram =
+  unlines
+    [ "module Main export (Pack(..), main) {",
+      "  data Pack =",
+      "      Pack : forall (a >= Int). a -> Pack;",
       "",
       "  def main : Pack = Pack 1;",
       "}"
@@ -514,6 +553,10 @@ intTy :: BackendType
 intTy =
   BTBase (BaseTy "Int")
 
+boolTy :: BackendType
+boolTy =
+  BTBase (BaseTy "Bool")
+
 intElabTy :: Elab.ElabType
 intElabTy =
   Elab.TBase (BaseTy "Int")
@@ -574,6 +617,23 @@ mapMainBinding f checked =
 
     updateBinding binding
       | checkedBindingName binding == checkedProgramMain checked = f binding
+      | otherwise = binding
+
+mapBackendMainBinding :: (BackendBinding -> BackendBinding) -> BackendProgram -> BackendProgram
+mapBackendMainBinding f backend =
+  backend
+    { backendProgramModules =
+        map updateModule (backendProgramModules backend)
+    }
+  where
+    updateModule backendModule =
+      backendModule
+        { backendModuleBindings =
+            map updateBinding (backendModuleBindings backendModule)
+        }
+
+    updateBinding binding
+      | backendBindingName binding == backendProgramMain backend = f binding
       | otherwise = binding
 
 addStaleConstructorHeadInstantiation :: String -> Elab.ElabType -> Elab.ElabTerm -> Elab.ElabTerm

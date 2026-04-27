@@ -195,6 +195,16 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithDataAndMainExpr [packData] packIntExpr)
       `shouldBe` Right ()
 
+  it "enforces constructor-level forall bounds at construct and case boundaries" $ do
+    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackIntExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackBoolExpr)
+      `shouldBe` Left (BackendConstructorArgumentMismatch "BoundedPack" 0 intTy boolTy)
+
+    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackCaseExpr)
+      `shouldBe` Right ()
+
   it "rejects matcher capture from inferred constructor parameters" $ do
     validateBackendProgram captureForallConstructProgram
       `shouldBe` Left (BackendConstructorArgumentMismatch "CaptureForall" 0 captureForallInstantiatedTy captureForallActualTy)
@@ -344,7 +354,15 @@ packData =
   BackendData
     { backendDataName = "Pack",
       backendDataParameters = [],
-      backendDataConstructors = [BackendConstructor "Pack" ["a"] [BTVar "a"] packTy]
+      backendDataConstructors = [BackendConstructor "Pack" [BackendTypeBinder "a" Nothing] [BTVar "a"] packTy]
+    }
+
+boundedPackData :: BackendData
+boundedPackData =
+  BackendData
+    { backendDataName = "BoundedPack",
+      backendDataParameters = [],
+      backendDataConstructors = [BackendConstructor "BoundedPack" [BackendTypeBinder "a" (Just intTy)] [BTVar "a"] boundedPackTy]
     }
 
 captureForallData :: BackendData
@@ -400,6 +418,22 @@ someBoolAsOptionIntExpr =
 packIntExpr :: BackendExpr
 packIntExpr =
   BackendConstruct packTy "Pack" [intLit 1]
+
+boundedPackIntExpr :: BackendExpr
+boundedPackIntExpr =
+  BackendConstruct boundedPackTy "BoundedPack" [intLit 1]
+
+boundedPackBoolExpr :: BackendExpr
+boundedPackBoolExpr =
+  BackendConstruct boundedPackTy "BoundedPack" [boolLit True]
+
+boundedPackCaseExpr :: BackendExpr
+boundedPackCaseExpr =
+  BackendCase
+    { backendExprType = intTy,
+      backendScrutinee = boundedPackIntExpr,
+      backendAlternatives = BackendAlternative (BackendConstructorPattern "BoundedPack" ["n"]) (BackendVar intTy "n") :| []
+    }
 
 captureForallConstructProgram :: BackendProgram
 captureForallConstructProgram =
@@ -495,6 +529,10 @@ boxTy =
 packTy :: BackendType
 packTy =
   BTBase (BaseTy "Pack")
+
+boundedPackTy :: BackendType
+boundedPackTy =
+  BTBase (BaseTy "BoundedPack")
 
 optionTy :: BackendType -> BackendType
 optionTy ty =
