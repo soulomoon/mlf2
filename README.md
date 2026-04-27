@@ -122,6 +122,12 @@ Run a program file directly from the executable:
 cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp
 ```
 
+Emit the first typed backend textual boundary for a checked program:
+
+```bash
+cabal run mlf2 -- emit-backend test/programs/unified/authoritative-let-polymorphism.mlfp
+```
+
 ## Syntax and paper alignment
 
 - Canonical syntax spec: `docs/syntax.md`

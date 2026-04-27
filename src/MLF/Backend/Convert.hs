@@ -114,9 +114,19 @@ buildInitialEnv context checked = do
       )
   Right
     Env
-      { termEnv = Map.fromList terms,
+      { termEnv = Map.fromList terms `Map.union` backendBuiltinTermTypes,
         typeEnv = Map.empty
       }
+
+backendBuiltinTermTypes :: Map String ElabType
+backendBuiltinTermTypes =
+  Map.fromList
+    [ ( "__mlfp_and",
+        TArrow
+          (TBase (BaseTy "Bool"))
+          (TArrow (TBase (BaseTy "Bool")) (TBase (BaseTy "Bool")))
+      )
+    ]
 
 convertCheckedModule :: ConvertContext -> Env -> CheckedModule -> Either BackendConversionError BackendModule
 convertCheckedModule context env checkedModule = do

@@ -408,11 +408,23 @@ validateBackendProgram program = do
       ]
     context0 =
       BackendValidationContext
-        { bvcGlobals = Map.fromList [(backendBindingName binding, backendBindingType binding) | binding <- bindings],
+        { bvcGlobals =
+            Map.fromList [(backendBindingName binding, backendBindingType binding) | binding <- bindings]
+              `Map.union` backendRuntimePrimitiveTypes,
           bvcConstructors = Map.fromList constructorInfos,
           bvcLocals = Map.empty,
           bvcTypeBounds = Map.empty
         }
+
+backendRuntimePrimitiveTypes :: Map.Map String BackendType
+backendRuntimePrimitiveTypes =
+  Map.fromList
+    [ ( "__mlfp_and",
+        BTArrow
+          (BTBase (BaseTy "Bool"))
+          (BTArrow (BTBase (BaseTy "Bool")) (BTBase (BaseTy "Bool")))
+      )
+    ]
 
 -- | Validate a binding without a program context. This checks local carried
 -- type equalities only; 'validateBackendProgram' adds global references,
