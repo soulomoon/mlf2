@@ -716,7 +716,7 @@ convertConstructorApplication context env term resultTy =
                           )
                   substitution <-
                     foldM
-                      (matchConstructorApplicationArgument env parameters constructor)
+                      (matchConstructorApplicationArgument env parameters)
                       resultSubstitution
                       (zip rawFields args)
                   let fields = map (substituteBackendTypes substitution) rawFields
@@ -741,15 +741,10 @@ constructorTypeApplicationSubstitution ::
   ConstructorMeta ->
   [BackendType] ->
   Either BackendConversionError (Map String BackendType)
-constructorTypeApplicationSubstitution constructorMeta typeArgs = do
-  let constructor = cmBackend constructorMeta
-      typeApplicationNames = constructorTypeApplicationParameterNames constructorMeta
-  when (length typeArgs > length typeApplicationNames) $
-    Left
-      ( BackendUnsupportedCaseShape
-          ("constructor type application arity does not match metadata for `" ++ backendConstructorName constructor ++ "`")
-      )
+constructorTypeApplicationSubstitution constructorMeta typeArgs =
   Right (Map.fromList (zip typeApplicationNames typeArgs))
+  where
+    typeApplicationNames = constructorTypeApplicationParameterNames constructorMeta
 
 constructorTypeApplicationParameterNames :: ConstructorMeta -> [String]
 constructorTypeApplicationParameterNames constructorMeta =
@@ -909,7 +904,7 @@ constructorApplicationResultType context env term =
                   initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
                   substitution <-
                     foldM
-                      (matchConstructorApplicationArgument env parameters constructor)
+                      (matchConstructorApplicationArgument env parameters)
                       initialSubstitution
                       (zip fields args)
                   let resultTy = substituteBackendTypes substitution (backendConstructorResult constructor)
@@ -925,19 +920,19 @@ constructorApplicationResultType context env term =
 matchConstructorApplicationArgument ::
   Env ->
   Set.Set String ->
-  BackendConstructor ->
   Map String BackendType ->
   (BackendType, ElabTerm) ->
   Either BackendConversionError (Map String BackendType)
-matchConstructorApplicationArgument env parameters constructor substitution (expectedTy, arg) = do
-  actualTy <- inferBackendType env arg
-  case matchBackendTypeParameters parameters substitution expectedTy actualTy of
-    Just substitution' -> Right substitution'
-    Nothing ->
-      Left
-        ( BackendUnsupportedCaseShape
-            ("constructor argument type does not match case scrutinee constructor `" ++ backendConstructorName constructor ++ "`")
-        )
+matchConstructorApplicationArgument env parameters substitution (expectedTy, arg) =
+  -- This is only a best-effort way to recover constructor type parameters.
+  -- Expected-type conversion of the argument remains authoritative because it
+  -- can canonicalize nested constructor applications before validation.
+  case inferBackendType env arg of
+    Right actualTy ->
+      case matchBackendTypeParameters parameters substitution expectedTy actualTy of
+        Just substitution' -> Right substitution'
+        Nothing -> Right substitution
+    Left _ -> Right substitution
 
 requireCaseData :: ConvertContext -> BackendType -> Either BackendConversionError DataMeta
 requireCaseData context scrutineeTy =

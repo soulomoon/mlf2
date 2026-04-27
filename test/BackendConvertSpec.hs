@@ -172,6 +172,33 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Pack"]
 
+  it "converts nested constructor arguments under expected constructor field types" $ do
+    checked <- requireChecked =<< readFile "test/programs/recursive-adt/typeclass-integration.mlfp"
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+  it "ignores stale constructor head type instantiations" $ do
+    checked0 <- requireChecked constructorForallApplicationProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingTerm =
+                      addStaleConstructorHeadInstantiation
+                        "Main__Pack"
+                        boolElabTy
+                        (checkedBindingTerm binding)
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Pack"]
+
   it "matches repeated constructor parameters modulo alpha-equivalence" $ do
     checked0 <- requireChecked repeatedPolymorphicParameterProgram
     let checked =
@@ -548,6 +575,45 @@ mapMainBinding f checked =
     updateBinding binding
       | checkedBindingName binding == checkedProgramMain checked = f binding
       | otherwise = binding
+
+addStaleConstructorHeadInstantiation :: String -> Elab.ElabType -> Elab.ElabTerm -> Elab.ElabTerm
+addStaleConstructorHeadInstantiation target staleTy =
+  go
+  where
+    go term =
+      case collectAppsElab term of
+        (headTerm, args)
+          | isTargetConstructorHead headTerm ->
+              rebuildAppsElab (Elab.ETyInst headTerm (Elab.InstApp staleTy)) args
+        _ ->
+          case term of
+            Elab.ELam name ty body ->
+              Elab.ELam name ty (go body)
+            Elab.EApp fun arg ->
+              Elab.EApp (go fun) (go arg)
+            Elab.ELet name scheme rhs body ->
+              Elab.ELet name scheme (go rhs) (go body)
+            Elab.ETyAbs name mbBound body ->
+              Elab.ETyAbs name mbBound (go body)
+            Elab.ETyInst inner inst ->
+              Elab.ETyInst (go inner) inst
+            Elab.ERoll ty body ->
+              Elab.ERoll ty (go body)
+            Elab.EUnroll body ->
+              Elab.EUnroll (go body)
+            _ ->
+              term
+
+    isTargetConstructorHead headTerm =
+      case stripElabTypeInsts headTerm of
+        Elab.EVar name -> name == target
+        _ -> False
+
+stripElabTypeInsts :: Elab.ElabTerm -> Elab.ElabTerm
+stripElabTypeInsts term =
+  case term of
+    Elab.ETyInst inner _ -> stripElabTypeInsts inner
+    other -> other
 
 wrapCaseHandlersWithTypeWrappers :: Elab.ElabTerm -> Elab.ElabTerm
 wrapCaseHandlersWithTypeWrappers term =
