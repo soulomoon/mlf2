@@ -18,7 +18,7 @@ module MLF.Backend.Convert
   )
 where
 
-import Control.Monad (foldM, unless, when, zipWithM)
+import Control.Monad (foldM, forM, unless, when, zipWithM)
 import Data.List (find)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -32,6 +32,7 @@ import MLF.Elab.TypeCheck (Env (..), typeCheckWithEnv)
 import MLF.Elab.Types
   ( ElabTerm (..),
     ElabType,
+    BoundType,
     Instantiation (..),
     Ty (..),
     TypeCheckError,
@@ -64,6 +65,7 @@ data BackendConversionError
 data ConvertContext = ConvertContext
   { ccModuleScopes :: Map String ElaborateScope,
     ccConstructors :: Map String ConstructorMeta,
+    ccBindingData :: Map String DataMeta,
     ccData :: [DataMeta]
   }
 
@@ -83,6 +85,7 @@ data BackendTypeBinder = BackendTypeBinder String (Maybe BackendType)
 convertCheckedProgram :: CheckedProgram -> Either BackendConversionError BackendProgram
 convertCheckedProgram checked = do
   context <- buildConvertContext checked
+  initialEnv <- buildInitialEnv context checked
   modules0 <- mapM (convertCheckedModule context initialEnv) (checkedProgramModules checked)
   let program =
         BackendProgram
@@ -92,22 +95,29 @@ convertCheckedProgram checked = do
   case validateBackendProgram program of
     Right () -> Right program
     Left err -> Left (BackendValidationFailed err)
-  where
-    initialEnv =
-      Env
-        { termEnv =
-            Map.fromList
-              [ (checkedBindingName binding, checkedBindingType binding)
-                | checkedModule <- checkedProgramModules checked,
-                  binding <- checkedModuleBindings checkedModule
-              ],
-          typeEnv = Map.empty
-        }
+
+buildInitialEnv :: ConvertContext -> CheckedProgram -> Either BackendConversionError Env
+buildInitialEnv context checked = do
+  terms <-
+    forM
+      [ (checkedModule, binding)
+        | checkedModule <- checkedProgramModules checked,
+          binding <- checkedModuleBindings checkedModule
+      ]
+      ( \(checkedModule, binding) -> do
+          bindingTy <- checkedBindingCanonicalType context checkedModule binding
+          Right (checkedBindingName binding, bindingTy)
+      )
+  Right
+    Env
+      { termEnv = Map.fromList terms,
+        typeEnv = Map.empty
+      }
 
 convertCheckedModule :: ConvertContext -> Env -> CheckedModule -> Either BackendConversionError BackendModule
 convertCheckedModule context env checkedModule = do
   dataDecls <- mapM (convertDataInfo context) (Map.elems (checkedModuleData checkedModule))
-  bindings <- mapM (convertCheckedBinding context env) (checkedModuleBindings checkedModule)
+  bindings <- mapM (convertCheckedBinding context env checkedModule) (checkedModuleBindings checkedModule)
   Right
     BackendModule
       { backendModuleName = checkedModuleName checkedModule,
@@ -115,9 +125,10 @@ convertCheckedModule context env checkedModule = do
         backendModuleBindings = bindings
       }
 
-convertCheckedBinding :: ConvertContext -> Env -> CheckedBinding -> Either BackendConversionError BackendBinding
-convertCheckedBinding context env binding = do
-  bindingTy <- convertElabType (checkedBindingType binding)
+convertCheckedBinding :: ConvertContext -> Env -> CheckedModule -> CheckedBinding -> Either BackendConversionError BackendBinding
+convertCheckedBinding context env checkedModule binding = do
+  canonicalElabTy <- checkedBindingCanonicalType context checkedModule binding
+  bindingTy <- convertElabType canonicalElabTy
   expr <-
     case Map.lookup (checkedBindingName binding) (ccConstructors context) of
       Just constructorMeta
@@ -131,6 +142,55 @@ convertCheckedBinding context env binding = do
         backendBindingExpr = expr,
         backendBindingExportedAsMain = checkedBindingExportedAsMain binding
       }
+
+checkedBindingCanonicalType :: ConvertContext -> CheckedModule -> CheckedBinding -> Either BackendConversionError ElabType
+checkedBindingCanonicalType context checkedModule binding = do
+  let checkedTy = checkedBindingType binding
+      scope = scopeForModule context (checkedModuleName checkedModule)
+  checkedBackendTy <- convertElabType checkedTy
+  canonicalTy <- sourceTypeToElabType (lowerType scope (checkedBindingSourceType binding))
+  canonicalBackendTy <- convertElabType canonicalTy
+  if alphaEqBackendType checkedBackendTy canonicalBackendTy
+    then Right canonicalTy
+    else Right checkedTy
+
+scopeForModule :: ConvertContext -> String -> ElaborateScope
+scopeForModule context moduleName =
+  Map.findWithDefault
+    (fallbackElaborateScope (map dmInfo (ccData context)))
+    moduleName
+    (ccModuleScopes context)
+
+fallbackElaborateScope :: [DataInfo] -> ElaborateScope
+fallbackElaborateScope dataInfos =
+  mkElaborateScope Map.empty (qualifiedDataInfoMap dataInfos) Map.empty []
+
+sourceTypeToElabType :: SrcTy n v -> Either BackendConversionError ElabType
+sourceTypeToElabType =
+  \case
+    STVar name -> Right (TVar name)
+    STArrow dom cod -> TArrow <$> sourceTypeToElabType dom <*> sourceTypeToElabType cod
+    STBase name -> Right (TBase (BaseTy name))
+    STCon name args -> TCon (BaseTy name) <$> traverse sourceTypeToElabType args
+    STVarApp name _ -> Left (BackendUnsupportedCaseShape ("unsupported variable-headed source type application `" ++ name ++ "`"))
+    STForall name mb body ->
+      TForall name
+        <$> maybe (Right Nothing) sourceBoundToElabBound mb
+        <*> sourceTypeToElabType body
+    STMu name body -> TMu name <$> sourceTypeToElabType body
+    STBottom -> Right TBottom
+
+sourceBoundToElabBound :: SrcBound n -> Either BackendConversionError (Maybe BoundType)
+sourceBoundToElabBound (SrcBound boundTy) =
+  case sourceTypeToElabType boundTy of
+    Right (TVar {}) -> Right Nothing
+    Right TBottom -> Right Nothing
+    Right (TArrow dom cod) -> Right (Just (TArrow dom cod))
+    Right (TBase base) -> Right (Just (TBase base))
+    Right (TCon con args) -> Right (Just (TCon con args))
+    Right (TForall name mb body) -> Right (Just (TForall name mb body))
+    Right (TMu name body) -> Right (Just (TMu name body))
+    Left err -> Left err
 
 constructorBindingResultMatches :: BackendType -> ConstructorMeta -> Bool
 constructorBindingResultMatches bindingTy constructorMeta =
@@ -225,10 +285,12 @@ buildConvertContext checked = do
           | dataMeta <- dataMetas,
             constructorMeta <- constructorMetasForData dataMeta
         ]
+      bindingData = bindingDataHints dataMetas checked
   Right
     ConvertContext
       { ccModuleScopes = moduleScopes,
         ccConstructors = Map.fromList constructorMetas,
+        ccBindingData = bindingData,
         ccData = dataMetas
       }
 
@@ -260,11 +322,11 @@ elaborateScopeForResolvedModule dataByIdentity resolvedModule =
 
 visibleDataInfoMap :: Map SymbolIdentity DataInfo -> Map String ResolvedSymbol -> Map String DataInfo
 visibleDataInfoMap dataByIdentity =
-  Map.mapMaybe (\symbol -> Map.lookup (resolvedSymbolIdentity symbol) dataByIdentity)
+  Map.mapMaybe (\symbol -> canonicalDataInfo <$> Map.lookup (resolvedSymbolIdentity symbol) dataByIdentity)
 
 qualifiedDataInfoMap :: [DataInfo] -> Map String DataInfo
 qualifiedDataInfoMap dataInfos =
-  Map.fromList [(qualifiedDataName info, info) | info <- dataInfos]
+  Map.fromList [(qualifiedDataName info, canonicalDataInfo info) | info <- dataInfos]
 
 fallbackElaborateScopeForDataInfo :: [DataInfo] -> DataInfo -> ElaborateScope
 fallbackElaborateScopeForDataInfo dataInfos info =
@@ -278,7 +340,7 @@ fallbackElaborateScopeForDataInfo dataInfos info =
 localDataInfoMap :: [DataInfo] -> DataInfo -> Map String DataInfo
 localDataInfoMap dataInfos info =
   Map.fromList
-    [ (dataName candidate, candidate)
+    [ (dataName candidate, canonicalDataInfo candidate)
       | candidate <- dataInfos,
         dataModule candidate == dataModule info
     ]
@@ -286,7 +348,7 @@ localDataInfoMap dataInfos info =
 uniqueUnqualifiedDataInfoMap :: [DataInfo] -> Map String DataInfo
 uniqueUnqualifiedDataInfoMap dataInfos =
   Map.fromList
-    [ (name, info)
+    [ (name, canonicalDataInfo info)
       | (name, infos) <- Map.toList grouped,
         [info] <- [infos]
     ]
@@ -296,6 +358,52 @@ uniqueUnqualifiedDataInfoMap dataInfos =
         [ (dataName info, [info])
           | info <- dataInfos
         ]
+
+canonicalDataInfo :: DataInfo -> DataInfo
+canonicalDataInfo info =
+  info {dataName = qualifiedDataName info}
+
+bindingDataHints :: [DataMeta] -> CheckedProgram -> Map String DataMeta
+bindingDataHints dataMetas checked =
+  Map.fromList
+    [ (checkedBindingName binding, dataMeta)
+      | checkedModule <- checkedProgramModules checked,
+        binding <- checkedModuleBindings checkedModule,
+        Just dataMeta <- [bindingDataHint dataMetas binding]
+    ]
+
+bindingDataHint :: [DataMeta] -> CheckedBinding -> Maybe DataMeta
+bindingDataHint dataMetas binding =
+  case splitSourceArrows (dropSourceForalls (checkedBindingSourceType binding)) of
+    ([], resultTy) -> sourceTypeDataMeta dataMetas resultTy
+    _ -> Nothing
+
+sourceTypeDataMeta :: [DataMeta] -> SrcType -> Maybe DataMeta
+sourceTypeDataMeta dataMetas ty =
+  sourceTypeDataHead ty >>= \name ->
+    find (\dataMeta -> backendDataName (dmBackend dataMeta) == name) dataMetas
+
+sourceTypeDataHead :: SrcType -> Maybe String
+sourceTypeDataHead =
+  \case
+    STBase name -> Just name
+    STCon name _ -> Just name
+    _ -> Nothing
+
+dropSourceForalls :: SrcType -> SrcType
+dropSourceForalls =
+  \case
+    STForall _ _ body -> dropSourceForalls body
+    ty -> ty
+
+splitSourceArrows :: SrcType -> ([SrcType], SrcType)
+splitSourceArrows =
+  go []
+  where
+    go args ty =
+      case ty of
+        STArrow arg result -> go (args ++ [arg]) result
+        _ -> (args, ty)
 
 buildDataMetaForDataInfo :: Map String ElaborateScope -> [DataInfo] -> DataInfo -> Either BackendConversionError DataMeta
 buildDataMetaForDataInfo moduleScopes dataInfos info =
@@ -708,7 +816,13 @@ caseScrutineeInfo context env scrutineeTerm =
       Just info -> Right info
       Nothing -> do
         scrutineeTy <- inferBackendType env scrutineeTerm
-        Right (scrutineeTy, Nothing)
+        Right (scrutineeTy, scrutineeDataHint context scrutineeTerm)
+
+scrutineeDataHint :: ConvertContext -> ElabTerm -> Maybe DataMeta
+scrutineeDataHint context term =
+  case stripTypeInsts term of
+    EVar name -> Map.lookup name (ccBindingData context)
+    _ -> Nothing
 
 constructorApplicationResultType :: ConvertContext -> Env -> ElabTerm -> Either BackendConversionError (Maybe (BackendType, Maybe DataMeta))
 constructorApplicationResultType context env term =

@@ -183,6 +183,20 @@ spec = describe "MLF.Backend.Convert" $ do
     aConstructor <- requireConstructor "A__A" backend
     backendConstructorResult aConstructor `shouldBe` backendBindingType aBinding
 
+  it "canonicalizes same-name data heads when module names sort after type names" $ do
+    checked <- requireChecked qualifiedAliasOrderingProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    backendDataNames backend `shouldContain` ["Y.T", "Z.T"]
+
+    yConstructor <- requireConstructor "Y__YValue" backend
+    zConstructor <- requireConstructor "Z__ZValue" backend
+    backendConstructorResult yConstructor `shouldSatisfy` (/= backendConstructorResult zConstructor)
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
+
   it "treats stale app-like instantiations on non-forall terms as no-ops" $ do
     checked0 <- requireChecked simpleFunctionProgram
     let checked =
@@ -303,6 +317,30 @@ duplicateDataNameProgram =
       "",
       "  def main : Bool = case A.make of {",
       "    A.A -> true",
+      "  };",
+      "}"
+    ]
+
+qualifiedAliasOrderingProgram :: String
+qualifiedAliasOrderingProgram =
+  unlines
+    [ "module Y export (T(..)) {",
+      "  data T =",
+      "      YValue : T;",
+      "}",
+      "",
+      "module Z export (T(..), make) {",
+      "  data T =",
+      "      ZValue : T;",
+      "",
+      "  def make : T = ZValue;",
+      "}",
+      "",
+      "module Main export (main) {",
+      "  import Z as Z;",
+      "",
+      "  def main : Bool = case Z.make of {",
+      "    Z.ZValue -> true",
       "  };",
       "}"
     ]
