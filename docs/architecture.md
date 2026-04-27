@@ -49,6 +49,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates checked `.mlfp` bindings through the existing xMLF runtime and renders recovered closed ADT values with source constructor syntax
 - `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before any textual or LLVM-like lowering
 - `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion and explicit ADT construct/case recovery where the checked xMLF shape is unambiguous
+- `MLF.Backend.Text` — deterministic LLVM-like textual rendering for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
 - `MLF.Binding.*` — binding tree queries + executable χe ops + harmonization
 - `MLF.Witness.*` — ω execution helpers (base χe operations)

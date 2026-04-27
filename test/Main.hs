@@ -4,6 +4,7 @@ import AcyclicitySpec qualified
 import AlignmentInvariantSpec qualified
 import BackendConvertSpec qualified
 import BackendIRSpec qualified
+import BackendTextSpec qualified
 import BindingSharedAbstractionSpec qualified
 import BindingSpec qualified
 import CanonicalizerSpec qualified
@@ -77,6 +78,7 @@ main = do
     ScopeSpec.spec
     BackendConvertSpec.spec
     BackendIRSpec.spec
+    BackendTextSpec.spec
     ProgramSpec.spec
     ResolvedSymbolSpec.spec
     PipelineSpec.spec

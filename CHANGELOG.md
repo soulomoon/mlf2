@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Added the first private LLVM-like backend text boundary in
+  `MLF.Backend.Text`, including checked-program conversion entrypoints,
+  deterministic golden output for a minimal function module, explicit
+  unsupported-node diagnostics, and CLI access through `mlf2 emit-backend`.
 - Added a private `MLF.Backend.Convert` boundary from checked `.mlfp`
   programs into the typed backend IR, including backend type conversion,
   fail-closed unsupported-shape diagnostics, explicit ADT construct/case

@@ -4,7 +4,8 @@ import System.Environment (getArgs)
 import System.Exit (die)
 
 import MLF.Program.CLI
-    ( programCliUsage
+    ( emitBackendFile
+    , programCliUsage
     , runProgramFile
     )
 import MLF.Research.URI.R2.C1.Prototype.Entrypoint
@@ -20,6 +21,10 @@ main = do
         ["run-program", path] ->
             runProgramFile path >>= either die putStrLn
         ["run-program"] ->
+            die programCliUsage
+        ["emit-backend", path] ->
+            emitBackendFile path >>= either die putStr
+        ["emit-backend"] ->
             die programCliUsage
         ["--help"] ->
             putStrLn programCliUsage
