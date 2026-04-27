@@ -205,6 +205,12 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackCaseExpr)
       `shouldBe` Right ()
 
+    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackRepackCaseExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackWrongBoundUseCaseExpr)
+      `shouldBe` Left (BackendVariableTypeMismatch "n" (BTVar "a") boolTy)
+
   it "rejects matcher capture from inferred constructor parameters" $ do
     validateBackendProgram captureForallConstructProgram
       `shouldBe` Left (BackendConstructorArgumentMismatch "CaptureForall" 0 captureForallInstantiatedTy captureForallActualTy)
@@ -433,6 +439,30 @@ boundedPackCaseExpr =
     { backendExprType = intTy,
       backendScrutinee = boundedPackIntExpr,
       backendAlternatives = BackendAlternative (BackendConstructorPattern "BoundedPack" ["n"]) (BackendVar intTy "n") :| []
+    }
+
+boundedPackRepackCaseExpr :: BackendExpr
+boundedPackRepackCaseExpr =
+  BackendCase
+    { backendExprType = boundedPackTy,
+      backendScrutinee = boundedPackIntExpr,
+      backendAlternatives =
+        BackendAlternative
+          (BackendConstructorPattern "BoundedPack" ["n"])
+          (BackendConstruct boundedPackTy "BoundedPack" [BackendVar (BTVar "a") "n"])
+          :| []
+    }
+
+boundedPackWrongBoundUseCaseExpr :: BackendExpr
+boundedPackWrongBoundUseCaseExpr =
+  BackendCase
+    { backendExprType = boolTy,
+      backendScrutinee = boundedPackIntExpr,
+      backendAlternatives =
+        BackendAlternative
+          (BackendConstructorPattern "BoundedPack" ["n"])
+          (BackendVar boolTy "n")
+          :| []
     }
 
 captureForallConstructProgram :: BackendProgram

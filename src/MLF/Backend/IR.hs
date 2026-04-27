@@ -518,8 +518,26 @@ validateBackendVariable (Just context0) name actualTy =
     Nothing ->
       Left (BackendUnknownVariable name)
     Just expectedTy ->
-      unless (alphaEqBackendType actualTy expectedTy) $
+      unless (backendVariableTypeMatches (bvcTypeBounds context0) expectedTy actualTy) $
         Left (BackendVariableTypeMismatch name expectedTy actualTy)
+
+backendVariableTypeMatches :: Map.Map String (Maybe BackendType) -> BackendType -> BackendType -> Bool
+backendVariableTypeMatches typeBounds expectedTy actualTy =
+  alphaEqBackendType actualTy expectedTy
+    || typeVariableBoundMatches expectedTy actualTy
+    || typeVariableBoundMatches actualTy expectedTy
+  where
+    typeVariableBoundMatches ty otherTy =
+      case ty of
+        BTVar name ->
+          case Map.lookup name typeBounds of
+            Just (Just boundTy)
+              | not (alphaEqBackendType boundTy BTBottom) ->
+                  alphaEqBackendType otherTy boundTy
+            _ ->
+              False
+        _ ->
+          False
 
 validateBackendTypeArgumentBound :: Maybe BackendType -> BackendType -> Either BackendValidationError ()
 validateBackendTypeArgumentBound Nothing _ =
@@ -551,6 +569,10 @@ extendLocals context0 bindings =
 extendTypeBoundMaybe :: Maybe BackendValidationContext -> String -> Maybe BackendType -> Maybe BackendValidationContext
 extendTypeBoundMaybe mbContext name mbBound =
   fmap (\context0 -> context0 {bvcTypeBounds = Map.insert name mbBound (bvcTypeBounds context0)}) mbContext
+
+extendTypeBounds :: BackendValidationContext -> [(String, Maybe BackendType)] -> BackendValidationContext
+extendTypeBounds context0 bounds =
+  context0 {bvcTypeBounds = foldr (uncurry Map.insert) (bvcTypeBounds context0) bounds}
 
 validateBackendConstructorUse :: Maybe BackendValidationContext -> String -> BackendType -> [BackendExpr] -> Either BackendValidationError ()
 validateBackendConstructorUse Nothing _ _ _ =
@@ -622,8 +644,21 @@ validateBackendPattern (Just context0) scrutineeTy (BackendConstructorPattern na
         case matchBackendTypeParametersWithTypeBounds (bvcTypeBounds context0) parameters Map.empty (backendConstructorResult constructor) scrutineeTy of
           Just substitution -> pure substitution
           Nothing -> Left (BackendCaseConstructorScrutineeMismatch name scrutineeTy (backendConstructorResult constructor))
-      let instantiatedFields = map (substituteBackendTypes (completeBackendParameterSubstitution parameters substitution)) fields
-      pure (Just (extendLocals context0 (zip binders instantiatedFields)))
+      let instantiatedFields = map (substituteBackendTypes substitution) fields
+          contextForBody =
+            extendTypeBounds
+              context0
+              (constructorPatternTypeBounds substitution constructor)
+      pure (Just (extendLocals contextForBody (zip binders instantiatedFields)))
+
+constructorPatternTypeBounds :: Map.Map String BackendType -> BackendConstructor -> [(String, Maybe BackendType)]
+constructorPatternTypeBounds substitution constructor =
+  [ (name, fmap (substituteBackendTypes substitution) mbBound)
+    | binder <- backendConstructorForalls constructor,
+      let name = backendTypeBinderName binder,
+      let mbBound = backendTypeBinderBound binder,
+      Map.notMember name substitution
+  ]
 
 constructorTypeParameterBounds :: BackendConstructorInfo -> BackendParameterBounds
 constructorTypeParameterBounds constructorInfo =
