@@ -71,4 +71,10 @@ emitBackendModule checkedModule
 
 isEmitBackendPreludeBinding :: CheckedBinding -> Bool
 isEmitBackendPreludeBinding binding =
-    checkedBindingName binding == "Prelude__id"
+    checkedBindingName binding `elem` emitBackendPreludeBindings
+
+emitBackendPreludeBindings :: [String]
+emitBackendPreludeBindings =
+    [ "Prelude__and"
+    , "Prelude__id"
+    ]

@@ -65,6 +65,15 @@ spec = describe "MLF.Backend.Text" $ do
         output `shouldSatisfy` isInfixOf "define @\"Main__main\"() -> i64"
         output `shouldSatisfy` isInfixOf "@\"Prelude__id\""
 
+    it "preserves referenced Prelude bindings during CLI backend conversion" $ do
+        output <-
+            withTempProgram preludeAndProgram $ \path ->
+                requireRight =<< emitBackendFile path
+
+        output `shouldSatisfy` isInfixOf "define @\"Prelude__and\""
+        output `shouldSatisfy` isInfixOf "call @\"__mlfp_and\""
+        output `shouldSatisfy` isInfixOf "call @\"Prelude__and\"(true)"
+
 simpleFunctionProgram :: String
 simpleFunctionProgram =
     unlines
@@ -80,6 +89,15 @@ preludeImportProgram =
         [ "module Main export (main) {"
         , "  import Prelude exposing (id);"
         , "  def main : Int = id 1;"
+        , "}"
+        ]
+
+preludeAndProgram :: String
+preludeAndProgram =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (and);"
+        , "  def main : Bool = and true false;"
         , "}"
         ]
 

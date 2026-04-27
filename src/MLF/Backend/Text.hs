@@ -79,12 +79,7 @@ renderBackendProgram program =
   where
     env =
         RenderEnv
-            { renderGlobalNames =
-                Set.fromList
-                    [ backendBindingName binding
-                    | backendModule <- backendProgramModules program
-                    , binding <- backendModuleBindings backendModule
-                    ]
+            { renderGlobalNames = renderBackendProgramGlobalNames program
             , renderLocalNames = Set.empty
             }
 
@@ -111,6 +106,17 @@ renderBackendBinding binding =
 renderBackendExpr :: BackendExpr -> Either BackendTextError String
 renderBackendExpr =
     renderExpr RenderEnv {renderGlobalNames = Set.empty, renderLocalNames = Set.empty} "expression" 0
+
+renderBackendProgramGlobalNames :: BackendProgram -> Set.Set String
+renderBackendProgramGlobalNames program =
+    Set.fromList (map backendBindingName bindings)
+        `Set.union` Set.unions (map renderBackendBindingFreeVariables bindings)
+  where
+    bindings =
+        [ binding
+        | backendModule <- backendProgramModules program
+        , binding <- backendModuleBindings backendModule
+        ]
 
 renderBackendModuleGlobalNames :: BackendModule -> Set.Set String
 renderBackendModuleGlobalNames backendModule =
