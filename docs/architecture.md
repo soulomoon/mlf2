@@ -114,12 +114,26 @@ after eMLF type recovery.
 - Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops` and `StateAccess`; edge processing is split across planner/interpreter passes with typed `EdgePlan`.
 - Elaboration entrypoints bundle inputs as `ElabConfig`/`ElabEnv`, and tracing is explicit via `TraceConfig`.
 
-## Typed backend IR boundary
+## Typed backend IR and lowering boundary
 
-`MLF.Backend.IR` is the first backend-owned representation after a `.mlfp`
-program has already passed the existing checker and xMLF typecheck guard.
-`MLF.Backend.Convert` is the only conversion boundary from checked program
-artifacts into that IR. It is not a second inference or typing authority.
+The current checked-program backend path is:
+
+1. `MLF.Frontend.Program.Resolve` assigns resolved symbol identities.
+2. `MLF.Frontend.Program.Check` and `MLF.Frontend.Program.Finalize` accept the
+   `.mlfp` program only after the existing eMLF/xMLF checker boundary and xMLF
+   typecheck guard have succeeded.
+3. `MLF.Backend.Convert` converts the resulting checked program artifacts into
+   the typed backend IR in `MLF.Backend.IR`.
+4. `MLF.Backend.Text` consumes that typed backend IR and emits the first
+   deterministic LLVM-like inspection text for the currently supported subset.
+
+`MLF.Backend.IR` is therefore the first backend-owned representation after a
+`.mlfp` program has already passed the existing checker and xMLF typecheck
+guard. `MLF.Backend.Convert` is the only conversion boundary from checked
+program artifacts into that IR. It is not a second inference or typing
+authority: if the checked artifact cannot be represented faithfully, conversion
+must report an unsupported checked shape instead of inventing frontend
+semantics or repairing types.
 
 The boundary invariants are:
 
@@ -140,8 +154,14 @@ The boundary invariants are:
   type, and alternative result type.
 
 This module intentionally lives in the private `mlf2-internal` library for now.
-Future conversion/lowering modules should depend on this IR rather than reaching
+Conversion and lowering modules should depend on this IR rather than reaching
 back into `MLF.Frontend.Program.*` internals for backend decisions.
+`MLF.Backend.Text` preserves that boundary by validating the IR before
+rendering, rendering only the supported functional subset, and producing
+explicit unsupported-node diagnostics for backend constructs that do not yet
+have textual lowering. Those diagnostics do not weaken source inference,
+checking, module visibility, or runtime semantics; they only describe the
+current IR-to-text lowering surface.
 
 ## `Solved` boundary and thesis-exact cleanup rule
 
