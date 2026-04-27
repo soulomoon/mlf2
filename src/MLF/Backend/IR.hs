@@ -691,21 +691,62 @@ validateBackendPattern (Just context0) scrutineeTy (BackendConstructorPattern na
         case matchBackendTypeParametersWithTypeBounds (bvcTypeBounds context0) parameters Map.empty (backendConstructorResult constructor) scrutineeTy of
           Just substitution -> pure substitution
           Nothing -> Left (BackendCaseConstructorScrutineeMismatch name scrutineeTy (backendConstructorResult constructor))
-      let instantiatedFields = map (substituteBackendTypes substitution) fields
+      let fresheningSubstitution = constructorPatternFresheningSubstitution context0 substitution constructor
+          patternSubstitution = Map.union fresheningSubstitution substitution
+          instantiatedFields = map (substituteBackendTypes patternSubstitution) fields
           contextForBody =
             extendTypeBounds
               context0
-              (constructorPatternTypeBounds substitution constructor)
+              (constructorPatternTypeBounds substitution fresheningSubstitution constructor)
       pure (Just (extendLocals contextForBody (zip binders instantiatedFields)))
 
-constructorPatternTypeBounds :: Map.Map String BackendType -> BackendConstructor -> [(String, Maybe BackendType)]
-constructorPatternTypeBounds substitution constructor =
-  [ (name, fmap (substituteBackendTypes substitution) mbBound)
+constructorPatternFresheningSubstitution ::
+  BackendValidationContext ->
+  Map.Map String BackendType ->
+  BackendConstructor ->
+  Map.Map String BackendType
+constructorPatternFresheningSubstitution context0 substitution constructor =
+  snd (foldl freshen (reservedNames0, Map.empty) unresolvedNames)
+  where
+    unresolvedNames =
+      [ backendTypeBinderName binder
+        | binder <- backendConstructorForalls constructor,
+          Map.notMember (backendTypeBinderName binder) substitution
+      ]
+
+    externalNames =
+      Set.union (Map.keysSet (bvcTypeBounds context0)) (freeBackendTypeVarsIn substitution)
+
+    reservedNames0 =
+      Set.union externalNames (Set.fromList unresolvedNames)
+
+    freshen (reservedNames, freshening) name
+      | Set.member name externalNames =
+          let freshName = freshNameLike name reservedNames
+           in (Set.insert freshName reservedNames, Map.insert name (BTVar freshName) freshening)
+      | otherwise =
+          (Set.insert name reservedNames, freshening)
+
+constructorPatternTypeBounds ::
+  Map.Map String BackendType ->
+  Map.Map String BackendType ->
+  BackendConstructor ->
+  [(String, Maybe BackendType)]
+constructorPatternTypeBounds substitution fresheningSubstitution constructor =
+  [ (freshenedName name, fmap (substituteBackendTypes patternSubstitution) mbBound)
     | binder <- backendConstructorForalls constructor,
       let name = backendTypeBinderName binder,
       let mbBound = backendTypeBinderBound binder,
       Map.notMember name substitution
   ]
+  where
+    patternSubstitution =
+      Map.union fresheningSubstitution substitution
+
+    freshenedName name =
+      case Map.lookup name fresheningSubstitution of
+        Just (BTVar freshName) -> freshName
+        _ -> name
 
 constructorTypeParameterBounds :: BackendConstructorInfo -> BackendParameterBounds
 constructorTypeParameterBounds constructorInfo =

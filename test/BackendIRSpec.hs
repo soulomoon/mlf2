@@ -208,6 +208,12 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackRepackCaseExpr)
       `shouldBe` Right ()
 
+    validateBackendProgram boundedPackOuterNameCollisionCaseProgram
+      `shouldBe` Right ()
+
+    validateBackendProgram boundedPackOuterNameCollisionWrongOuterUseProgram
+      `shouldBe` Left (BackendVariableTypeMismatch "outer" (BTVar "a") intTy)
+
     validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackWrongBoundUseCaseExpr)
       `shouldBe` Left (BackendVariableTypeMismatch "n" (BTVar "a") boolTy)
 
@@ -555,6 +561,41 @@ boundedPackRepackCaseExpr =
           (BackendConstruct boundedPackTy "BoundedPack" [BackendVar (BTVar "a") "n"])
           :| []
     }
+
+boundedPackOuterNameCollisionCaseProgram :: BackendProgram
+boundedPackOuterNameCollisionCaseProgram =
+  boundedPackOuterNameCollisionCaseWith (BackendVar intTy "n")
+
+boundedPackOuterNameCollisionWrongOuterUseProgram :: BackendProgram
+boundedPackOuterNameCollisionWrongOuterUseProgram =
+  boundedPackOuterNameCollisionCaseWith (BackendVar intTy "outer")
+
+boundedPackOuterNameCollisionCaseWith :: BackendExpr -> BackendProgram
+boundedPackOuterNameCollisionCaseWith branchBody =
+  programWithDataAndMainExpr
+    [boundedPackData]
+    ( BackendTyAbs
+        { backendExprType = BTForall "a" (Just boolTy) (BTArrow (BTVar "a") intTy),
+          backendTyParamName = "a",
+          backendTyParamBound = Just boolTy,
+          backendTyAbsBody =
+            BackendLam
+              { backendExprType = BTArrow (BTVar "a") intTy,
+                backendParamName = "outer",
+                backendParamType = BTVar "a",
+                backendBody =
+                  BackendCase
+                    { backendExprType = intTy,
+                      backendScrutinee = boundedPackIntExpr,
+                      backendAlternatives =
+                        BackendAlternative
+                          (BackendConstructorPattern "BoundedPack" ["n"])
+                          branchBody
+                          :| []
+                    }
+              }
+        }
+    )
 
 boundedPackWrongBoundUseCaseExpr :: BackendExpr
 boundedPackWrongBoundUseCaseExpr =
