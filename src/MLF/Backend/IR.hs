@@ -825,7 +825,11 @@ matchBackendTypeParametersWithTypeBounds typeBounds parameterBounds =
       case Map.lookup name parameterBounds of
         Just (Just boundTy)
           | not (alphaEqBackendType boundTy BTBottom) ->
-              let expectedBound = substituteBackendTypes (Map.delete name substitution) boundTy
+              let dependencySubstitution =
+                    completeBackendParameterSubstitution
+                      (Map.delete name parameterBounds)
+                      (Map.delete name substitution)
+                  expectedBound = substituteBackendTypes dependencySubstitution boundTy
                in alphaEqBackendType actual expectedBound || actualTypeVariableBoundMatches actual expectedBound
         _ ->
           True
@@ -843,14 +847,43 @@ matchBackendTypeParametersWithTypeBounds typeBounds parameterBounds =
 
 completeBackendParameterSubstitution :: BackendParameterBounds -> Map.Map String BackendType -> Map.Map String BackendType
 completeBackendParameterSubstitution parameterBounds substitution0 =
-  foldl insertBoundDefault substitution0 (Map.toList parameterBounds)
+  resolveDefaultedBounds defaultedNames substitution1
   where
+    substitution1 =
+      foldl insertBoundDefault substitution0 (Map.toList parameterBounds)
+
+    defaultedNames =
+      Set.fromList
+        [ name
+          | (name, Just boundTy) <- Map.toList parameterBounds,
+            Map.notMember name substitution0,
+            not (alphaEqBackendType boundTy BTBottom)
+        ]
+
     insertBoundDefault substitution (name, Just boundTy)
       | Map.member name substitution = substitution
       | alphaEqBackendType boundTy BTBottom = substitution
       | otherwise = Map.insert name (substituteBackendTypes substitution boundTy) substitution
     insertBoundDefault substitution _ =
       substitution
+
+    resolveDefaultedBounds names =
+      go (Set.size names + Map.size parameterBounds + 1)
+      where
+        go remaining substitution
+          | remaining <= 0 = substitution
+          | substitution' == substitution = substitution
+          | otherwise = go (remaining - 1) substitution'
+          where
+            substitution' =
+              foldl resolveDefaultedBound substitution (Set.toList names)
+
+    resolveDefaultedBound substitution name =
+      case Map.lookup name substitution of
+        Just ty ->
+          Map.insert name (substituteBackendTypes (Map.delete name substitution) ty) substitution
+        Nothing ->
+          substitution
 
 requireUnique :: (String -> BackendValidationError) -> [String] -> Either BackendValidationError ()
 requireUnique mkError names =

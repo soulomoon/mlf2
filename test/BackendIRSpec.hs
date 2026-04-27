@@ -217,6 +217,12 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram boundedListPackWrongBoundUseCaseProgram
       `shouldBe` Left (BackendVariableTypeMismatch "n" (listTy (BTVar "a")) (listTy boolTy))
 
+    validateBackendProgram (programWithDataAndMainExpr [dependentBoundedPackData] dependentBoundedPackIntExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [dependentBoundedPackData] dependentBoundedPackBoolExpr)
+      `shouldBe` Left (BackendConstructorArgumentMismatch "DependentBoundedPack" 0 intTy boolTy)
+
   it "rejects matcher capture from inferred constructor parameters" $ do
     validateBackendProgram captureForallConstructProgram
       `shouldBe` Left (BackendConstructorArgumentMismatch "CaptureForall" 0 captureForallInstantiatedTy captureForallActualTy)
@@ -385,6 +391,20 @@ boundedListPackData =
       backendDataConstructors = [BackendConstructor "BoundedListPack" [BackendTypeBinder "a" (Just intTy)] [listTy (BTVar "a")] boundedListPackTy]
     }
 
+dependentBoundedPackData :: BackendData
+dependentBoundedPackData =
+  BackendData
+    { backendDataName = "DependentBoundedPack",
+      backendDataParameters = [],
+      backendDataConstructors =
+        [ BackendConstructor
+            "DependentBoundedPack"
+            [BackendTypeBinder "z" (Just intTy), BackendTypeBinder "a" (Just (BTVar "z"))]
+            [BTVar "a"]
+            dependentBoundedPackTy
+        ]
+    }
+
 captureForallData :: BackendData
 captureForallData =
   BackendData
@@ -446,6 +466,14 @@ boundedPackIntExpr =
 boundedPackBoolExpr :: BackendExpr
 boundedPackBoolExpr =
   BackendConstruct boundedPackTy "BoundedPack" [boolLit True]
+
+dependentBoundedPackIntExpr :: BackendExpr
+dependentBoundedPackIntExpr =
+  BackendConstruct dependentBoundedPackTy "DependentBoundedPack" [intLit 1]
+
+dependentBoundedPackBoolExpr :: BackendExpr
+dependentBoundedPackBoolExpr =
+  BackendConstruct dependentBoundedPackTy "DependentBoundedPack" [boolLit True]
 
 boundedPackCaseExpr :: BackendExpr
 boundedPackCaseExpr =
@@ -623,6 +651,10 @@ boundedPackTy =
 boundedListPackTy :: BackendType
 boundedListPackTy =
   BTBase (BaseTy "BoundedListPack")
+
+dependentBoundedPackTy :: BackendType
+dependentBoundedPackTy =
+  BTBase (BaseTy "DependentBoundedPack")
 
 listTy :: BackendType -> BackendType
 listTy ty =
