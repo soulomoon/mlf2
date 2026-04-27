@@ -95,6 +95,7 @@ data BackendData = BackendData
 
 data BackendConstructor = BackendConstructor
   { backendConstructorName :: String,
+    backendConstructorForalls :: [String],
     backendConstructorFields :: [BackendType],
     backendConstructorResult :: BackendType
   }
@@ -545,7 +546,7 @@ validateBackendConstructorUse (Just context0) name resultTy args =
       Left (BackendUnknownConstructor name)
     Just constructorInfo -> do
       let constructor = bciConstructor constructorInfo
-          parameters = Set.fromList (bciDataParameters constructorInfo)
+          parameters = constructorTypeParameters constructorInfo
           fields = backendConstructorFields constructor
       unless (length fields == length args) $
         Left (BackendConstructorArityMismatch name (length fields) (length args))
@@ -596,7 +597,7 @@ validateBackendPattern (Just context0) scrutineeTy (BackendConstructorPattern na
       Left (BackendUnknownConstructor name)
     Just constructorInfo -> do
       let constructor = bciConstructor constructorInfo
-          parameters = Set.fromList (bciDataParameters constructorInfo)
+          parameters = constructorTypeParameters constructorInfo
           fields = backendConstructorFields constructor
       requireUnique BackendDuplicatePatternBinding binders
       unless (length fields == length binders) $
@@ -607,6 +608,10 @@ validateBackendPattern (Just context0) scrutineeTy (BackendConstructorPattern na
           Nothing -> Left (BackendCaseConstructorScrutineeMismatch name scrutineeTy (backendConstructorResult constructor))
       let instantiatedFields = map (substituteBackendTypes substitution) fields
       pure (Just (extendLocals context0 (zip binders instantiatedFields)))
+
+constructorTypeParameters :: BackendConstructorInfo -> Set.Set String
+constructorTypeParameters constructorInfo =
+  Set.fromList (bciDataParameters constructorInfo ++ backendConstructorForalls (bciConstructor constructorInfo))
 
 validateCaseAlternative :: BackendType -> BackendAlternative -> Either BackendValidationError ()
 validateCaseAlternative resultTy alternative =

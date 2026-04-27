@@ -19,7 +19,7 @@ module MLF.Backend.Convert
 where
 
 import Control.Monad (foldM, forM, unless, when, zipWithM)
-import Data.List (find)
+import Data.List (find, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -461,6 +461,7 @@ convertConstructorInfo scope info = do
   Right
     BackendConstructor
       { backendConstructorName = ctorRuntimeName info,
+        backendConstructorForalls = map fst (ctorForalls info),
         backendConstructorFields = fields,
         backendConstructorResult = resultTy
       }
@@ -695,39 +696,111 @@ convertConstructorApplication ::
 convertConstructorApplication context env term resultTy =
   case collectApps term of
     (headTerm, args) ->
-      case constructorHeadName headTerm >>= (`Map.lookup` ccConstructors context) of
-        Just constructorMeta -> do
-          let constructor = cmBackend constructorMeta
-              parameters = Set.fromList (backendDataParameters (dmBackend (cmData constructorMeta)))
-              rawFields = backendConstructorFields constructor
-          if length args == length rawFields
-            then do
-              substitution <-
-                case matchBackendTypeParameters parameters Map.empty (backendConstructorResult constructor) resultTy of
-                  Just substitution -> Right substitution
-                  Nothing ->
-                    Left
-                      ( BackendUnsupportedCaseShape
-                          ("constructor result type does not match expected result for `" ++ backendConstructorName constructor ++ "`")
-                      )
-              let fields = map (substituteBackendTypes substitution) rawFields
-              argExprs <- zipWithM (convertTermExpected context env . Just) fields args
-              Right
-                ( Just
-                    BackendConstruct
-                      { backendExprType = resultTy,
-                        backendConstructName = backendConstructorName constructor,
-                        backendConstructArgs = argExprs
-                      }
-                )
-            else Right Nothing
+      case constructorHead headTerm of
+        Just (constructorName, headTypeArgs) ->
+          case Map.lookup constructorName (ccConstructors context) of
+            Just constructorMeta -> do
+              let constructor = cmBackend constructorMeta
+                  parameters = constructorTypeParameters constructorMeta
+                  rawFields = backendConstructorFields constructor
+              if length args == length rawFields
+                then do
+                  initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
+                  resultSubstitution <-
+                    case matchBackendTypeParameters parameters initialSubstitution (backendConstructorResult constructor) resultTy of
+                      Just substitution -> Right substitution
+                      Nothing ->
+                        Left
+                          ( BackendUnsupportedCaseShape
+                              ("constructor result type does not match expected result for `" ++ backendConstructorName constructor ++ "`")
+                          )
+                  substitution <-
+                    foldM
+                      (matchConstructorApplicationArgument env parameters constructor)
+                      resultSubstitution
+                      (zip rawFields args)
+                  let fields = map (substituteBackendTypes substitution) rawFields
+                  argExprs <- zipWithM (convertTermExpected context env . Just) fields args
+                  Right
+                    ( Just
+                        BackendConstruct
+                          { backendExprType = resultTy,
+                            backendConstructName = backendConstructorName constructor,
+                            backendConstructArgs = argExprs
+                          }
+                    )
+                else Right Nothing
+            Nothing -> Right Nothing
         Nothing -> Right Nothing
 
-constructorHeadName :: ElabTerm -> Maybe String
-constructorHeadName term =
-  case stripTypeInsts term of
-    EVar name -> Just name
-    _ -> Nothing
+constructorTypeParameters :: ConstructorMeta -> Set.Set String
+constructorTypeParameters constructorMeta =
+  Set.fromList (backendDataParameters (dmBackend (cmData constructorMeta)) ++ backendConstructorForalls (cmBackend constructorMeta))
+
+constructorTypeApplicationSubstitution ::
+  ConstructorMeta ->
+  [BackendType] ->
+  Either BackendConversionError (Map String BackendType)
+constructorTypeApplicationSubstitution constructorMeta typeArgs = do
+  let constructor = cmBackend constructorMeta
+      typeApplicationNames = constructorTypeApplicationParameterNames constructorMeta
+  when (length typeArgs > length typeApplicationNames) $
+    Left
+      ( BackendUnsupportedCaseShape
+          ("constructor type application arity does not match metadata for `" ++ backendConstructorName constructor ++ "`")
+      )
+  Right (Map.fromList (zip typeApplicationNames typeArgs))
+
+constructorTypeApplicationParameterNames :: ConstructorMeta -> [String]
+constructorTypeApplicationParameterNames constructorMeta =
+  sort (Set.toList (freeSourceTypeVars (ctorType (cmInfo constructorMeta))))
+    ++ map fst (ctorForalls (cmInfo constructorMeta))
+
+freeSourceTypeVars :: SrcType -> Set.Set String
+freeSourceTypeVars =
+  go Set.empty
+  where
+    go bound =
+      \case
+        STVar name
+          | Set.member name bound -> Set.empty
+          | otherwise -> Set.singleton name
+        STArrow dom cod ->
+          go bound dom `Set.union` go bound cod
+        STBase {} ->
+          Set.empty
+        STCon _ args ->
+          foldMap (go bound) args
+        STVarApp name args ->
+          let headVars =
+                if Set.member name bound
+                  then Set.empty
+                  else Set.singleton name
+           in headVars `Set.union` foldMap (go bound) args
+        STForall name mb body ->
+          maybe Set.empty (go bound . unSrcBound) mb
+            `Set.union` go (Set.insert name bound) body
+        STMu name body ->
+          go (Set.insert name bound) body
+        STBottom ->
+          Set.empty
+
+constructorHead :: ElabTerm -> Maybe (String, [BackendType])
+constructorHead term =
+  case collectConstructorHeadTypes [] term of
+    Just (name, typeArgs) ->
+      case traverse convertElabType typeArgs of
+        Right backendTypeArgs -> Just (name, backendTypeArgs)
+        Left _ -> Nothing
+    Nothing -> Nothing
+  where
+    collectConstructorHeadTypes typeArgs =
+      \case
+        ETyInst inner inst
+          | Just ty <- appLikeInstantiationType inst ->
+              collectConstructorHeadTypes (ty : typeArgs) inner
+        EVar name -> Just (name, typeArgs)
+        _ -> Nothing
 
 stripTypeInsts :: ElabTerm -> ElabTerm
 stripTypeInsts =
@@ -828,21 +901,25 @@ constructorApplicationResultType :: ConvertContext -> Env -> ElabTerm -> Either 
 constructorApplicationResultType context env term =
   case collectApps term of
     (headTerm, args) ->
-      case constructorHeadName headTerm >>= (`Map.lookup` ccConstructors context) of
-        Just constructorMeta
-          | length args == length fields -> do
-              substitution <-
-                foldM
-                  (matchConstructorApplicationArgument env parameters constructor)
-                  Map.empty
-                  (zip fields args)
-              let resultTy = substituteBackendTypes substitution (backendConstructorResult constructor)
-              Right (Just (resultTy, Just (cmData constructorMeta)))
-          | otherwise -> Right Nothing
-          where
-            constructor = cmBackend constructorMeta
-            fields = backendConstructorFields constructor
-            parameters = Set.fromList (backendDataParameters (dmBackend (cmData constructorMeta)))
+      case constructorHead headTerm of
+        Just (constructorName, headTypeArgs) ->
+          case Map.lookup constructorName (ccConstructors context) of
+            Just constructorMeta
+              | length args == length fields -> do
+                  initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
+                  substitution <-
+                    foldM
+                      (matchConstructorApplicationArgument env parameters constructor)
+                      initialSubstitution
+                      (zip fields args)
+                  let resultTy = substituteBackendTypes substitution (backendConstructorResult constructor)
+                  Right (Just (resultTy, Just (cmData constructorMeta)))
+              | otherwise -> Right Nothing
+              where
+                constructor = cmBackend constructorMeta
+                fields = backendConstructorFields constructor
+                parameters = constructorTypeParameters constructorMeta
+            Nothing -> Right Nothing
         Nothing -> Right Nothing
 
 matchConstructorApplicationArgument ::
@@ -877,7 +954,7 @@ dataMatchesScrutinee :: BackendType -> DataMeta -> Bool
 dataMatchesScrutinee scrutineeTy dataMeta =
   any
     ( \constructor ->
-        case matchBackendTypeParameters (Set.fromList (backendDataParameters (dmBackend dataMeta))) Map.empty (backendConstructorResult constructor) scrutineeTy of
+        case matchBackendTypeParameters (Set.fromList (backendDataParameters (dmBackend dataMeta) ++ backendConstructorForalls constructor)) Map.empty (backendConstructorResult constructor) scrutineeTy of
           Just _ -> True
           Nothing -> False
     )

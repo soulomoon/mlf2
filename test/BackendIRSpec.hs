@@ -191,6 +191,10 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithDataAndMainExpr [optionData] someBoolAsOptionIntExpr)
       `shouldBe` Left (BackendConstructorArgumentMismatch "Some" 0 intTy boolTy)
 
+  it "uses constructor-level forall metadata when validating constructor fields" $ do
+    validateBackendProgram (programWithDataAndMainExpr [packData] packIntExpr)
+      `shouldBe` Right ()
+
   it "rejects matcher capture from inferred constructor parameters" $ do
     validateBackendProgram captureForallConstructProgram
       `shouldBe` Left (BackendConstructorArgumentMismatch "CaptureForall" 0 captureForallInstantiatedTy captureForallActualTy)
@@ -210,8 +214,8 @@ spec = describe "MLF.Backend.IR" $ do
           [ BackendModule
               { backendModuleName = "Main",
                 backendModuleData =
-                  [ BackendData "LeftBox" [] [BackendConstructor "Box" [intTy] boxTy],
-                    BackendData "RightBox" [] [BackendConstructor "Box" [intTy] boxTy]
+                  [ BackendData "LeftBox" [] [BackendConstructor "Box" [] [intTy] boxTy],
+                    BackendData "RightBox" [] [BackendConstructor "Box" [] [intTy] boxTy]
                   ],
                 backendModuleBindings = [mainLiteralBinding]
               }
@@ -324,7 +328,7 @@ boxData =
   BackendData
     { backendDataName = "Box",
       backendDataParameters = [],
-      backendDataConstructors = [BackendConstructor "Box" [intTy] boxTy]
+      backendDataConstructors = [BackendConstructor "Box" [] [intTy] boxTy]
     }
 
 optionData :: BackendData
@@ -332,7 +336,15 @@ optionData =
   BackendData
     { backendDataName = "Option",
       backendDataParameters = ["a"],
-      backendDataConstructors = [BackendConstructor "Some" [BTVar "a"] (optionTy (BTVar "a"))]
+      backendDataConstructors = [BackendConstructor "Some" [] [BTVar "a"] (optionTy (BTVar "a"))]
+    }
+
+packData :: BackendData
+packData =
+  BackendData
+    { backendDataName = "Pack",
+      backendDataParameters = [],
+      backendDataConstructors = [BackendConstructor "Pack" ["a"] [BTVar "a"] packTy]
     }
 
 captureForallData :: BackendData
@@ -343,6 +355,7 @@ captureForallData =
       backendDataConstructors =
         [ BackendConstructor
             "CaptureForall"
+            []
             [BTForall "a" Nothing (BTVar "p")]
             (captureTy "CaptureForall" (BTVar "p"))
         ]
@@ -356,6 +369,7 @@ captureMuData =
       backendDataConstructors =
         [ BackendConstructor
             "CaptureMu"
+            []
             [BTMu "a" (BTVar "p")]
             (captureTy "CaptureMu" (BTVar "p"))
         ]
@@ -366,7 +380,7 @@ captureCaseData =
   BackendData
     { backendDataName = "CaptureCase",
       backendDataParameters = ["p"],
-      backendDataConstructors = [BackendConstructor "CaptureCase" [] captureCaseTemplateTy]
+      backendDataConstructors = [BackendConstructor "CaptureCase" [] [] captureCaseTemplateTy]
     }
 
 boxCaseExpr :: BackendExpr
@@ -382,6 +396,10 @@ someIntExpr =
 someBoolAsOptionIntExpr :: BackendExpr
 someBoolAsOptionIntExpr =
   BackendConstruct (optionTy intTy) "Some" [boolLit True]
+
+packIntExpr :: BackendExpr
+packIntExpr =
+  BackendConstruct packTy "Pack" [intLit 1]
 
 captureForallConstructProgram :: BackendProgram
 captureForallConstructProgram =
@@ -473,6 +491,10 @@ boolTy =
 boxTy :: BackendType
 boxTy =
   BTBase (BaseTy "Box")
+
+packTy :: BackendType
+packTy =
+  BTBase (BaseTy "Pack")
 
 optionTy :: BackendType -> BackendType
 optionTy ty =

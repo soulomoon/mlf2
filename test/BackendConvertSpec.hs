@@ -163,6 +163,15 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Some"]
 
+  it "preserves constructor type applications when checking constructor fields" $ do
+    checked <- requireChecked constructorForallApplicationProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Pack"]
+
   it "matches repeated constructor parameters modulo alpha-equivalence" $ do
     checked0 <- requireChecked repeatedPolymorphicParameterProgram
     let checked =
@@ -289,6 +298,17 @@ parameterizedConstructorProgram =
       "    | Some : a -> Option a;",
       "",
       "  def main : Option Int = Some 1;",
+      "}"
+    ]
+
+constructorForallApplicationProgram :: String
+constructorForallApplicationProgram =
+  unlines
+    [ "module Main export (Pack(..), main) {",
+      "  data Pack =",
+      "      Pack : forall a. a -> Pack;",
+      "",
+      "  def main : Pack = Pack 1;",
       "}"
     ]
 
