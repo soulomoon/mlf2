@@ -219,6 +219,25 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr mainBinding
       `shouldSatisfy` containsConstructArgType "Main__Pack" (BTVar "b")
 
+  it "matches bounded constructor foralls through dependent type-variable bounds" $ do
+    checked0 <- requireChecked dependentBoundedConstructorForallProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = dependentBoundedWrapElabTy (checkedBindingType binding),
+                    checkedBindingTerm = dependentBoundedWrapTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding
+      `shouldSatisfy` containsConstructArgType "Main__Pack" (BTVar "b")
+
   it "converts nested constructor arguments under expected constructor field types" $ do
     checked <- requireChecked =<< readFile "test/programs/recursive-adt/typeclass-integration.mlfp"
     backend <- requireRight (convertCheckedProgram checked)
@@ -394,6 +413,18 @@ boundedConstructorForallProgram =
       "      Pack : forall (a >= Int). a -> Pack;",
       "",
       "  def main : Pack = Pack 1;",
+      "}"
+    ]
+
+dependentBoundedConstructorForallProgram :: String
+dependentBoundedConstructorForallProgram =
+  unlines
+    [ "module Main export (Pack(..), main) {",
+      "  data Pack =",
+      "      Pack : forall (a >= Int -> Int). a -> Pack;",
+      "",
+      "  def id : Int -> Int = \\x x;",
+      "  def main : Pack = Pack id;",
       "}"
     ]
 
@@ -622,6 +653,36 @@ boundedWrapTerm =
         (Elab.TVar "b")
         (Elab.EApp (Elab.EVar "Main__Pack") (Elab.EVar "x"))
     )
+
+dependentBoundedWrapElabTy :: Elab.ElabType -> Elab.ElabType
+dependentBoundedWrapElabTy resultTy =
+  Elab.TForall
+    "z"
+    (Just intElabBoundTy)
+    ( Elab.TForall
+        "b"
+        (Just (dependentArrowElabBoundTy (Elab.TVar "z")))
+        (Elab.TArrow (Elab.TVar "b") resultTy)
+    )
+
+dependentBoundedWrapTerm :: Elab.ElabTerm
+dependentBoundedWrapTerm =
+  Elab.ETyAbs
+    "z"
+    (Just intElabBoundTy)
+    ( Elab.ETyAbs
+        "b"
+        (Just (dependentArrowElabBoundTy (Elab.TVar "z")))
+        ( Elab.ELam
+            "x"
+            (Elab.TVar "b")
+            (Elab.EApp (Elab.EVar "Main__Pack") (Elab.EVar "x"))
+        )
+    )
+
+dependentArrowElabBoundTy :: Elab.ElabType -> Elab.BoundType
+dependentArrowElabBoundTy ty =
+  Elab.TArrow ty ty
 
 polymorphicIdentityElabTy :: Elab.ElabType
 polymorphicIdentityElabTy =

@@ -223,6 +223,12 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithDataAndMainExpr [dependentBoundedPackData] dependentBoundedPackBoolExpr)
       `shouldBe` Left (BackendConstructorArgumentMismatch "DependentBoundedPack" 0 intTy boolTy)
 
+    validateBackendProgram dependentActualBoundPackProgram
+      `shouldBe` Right ()
+
+    validateBackendProgram dependentActualBoundPackWrongProgram
+      `shouldBe` Left (BackendConstructorArgumentMismatch "DependentActualBoundPack" 0 (listTy intTy) (BTVar "b"))
+
   it "rejects matcher capture from inferred constructor parameters" $ do
     validateBackendProgram captureForallConstructProgram
       `shouldBe` Left (BackendConstructorArgumentMismatch "CaptureForall" 0 captureForallInstantiatedTy captureForallActualTy)
@@ -405,6 +411,20 @@ dependentBoundedPackData =
         ]
     }
 
+dependentActualBoundPackData :: BackendData
+dependentActualBoundPackData =
+  BackendData
+    { backendDataName = "DependentActualBoundPack",
+      backendDataParameters = [],
+      backendDataConstructors =
+        [ BackendConstructor
+            "DependentActualBoundPack"
+            [BackendTypeBinder "a" (Just (listTy intTy))]
+            [BTVar "a"]
+            dependentActualBoundPackTy
+        ]
+    }
+
 captureForallData :: BackendData
 captureForallData =
   BackendData
@@ -474,6 +494,47 @@ dependentBoundedPackIntExpr =
 dependentBoundedPackBoolExpr :: BackendExpr
 dependentBoundedPackBoolExpr =
   BackendConstruct dependentBoundedPackTy "DependentBoundedPack" [boolLit True]
+
+dependentActualBoundPackProgram :: BackendProgram
+dependentActualBoundPackProgram =
+  programWithDataAndMainExpr [dependentActualBoundPackData] (dependentActualBoundPackWrapper intTy)
+
+dependentActualBoundPackWrongProgram :: BackendProgram
+dependentActualBoundPackWrongProgram =
+  programWithDataAndMainExpr [dependentActualBoundPackData] (dependentActualBoundPackWrapper boolTy)
+
+dependentActualBoundPackWrapper :: BackendType -> BackendExpr
+dependentActualBoundPackWrapper zBound =
+  BackendTyAbs
+    { backendExprType = dependentActualBoundPackWrapperTy zBound,
+      backendTyParamName = "z",
+      backendTyParamBound = Just zBound,
+      backendTyAbsBody =
+        BackendTyAbs
+          { backendExprType = dependentActualBoundPackInnerTy,
+            backendTyParamName = "b",
+            backendTyParamBound = Just (listTy (BTVar "z")),
+            backendTyAbsBody =
+              BackendLam
+                { backendExprType = BTArrow (BTVar "b") dependentActualBoundPackTy,
+                  backendParamName = "x",
+                  backendParamType = BTVar "b",
+                  backendBody =
+                    BackendConstruct
+                      dependentActualBoundPackTy
+                      "DependentActualBoundPack"
+                      [BackendVar (BTVar "b") "x"]
+                }
+          }
+    }
+
+dependentActualBoundPackWrapperTy :: BackendType -> BackendType
+dependentActualBoundPackWrapperTy zBound =
+  BTForall "z" (Just zBound) dependentActualBoundPackInnerTy
+
+dependentActualBoundPackInnerTy :: BackendType
+dependentActualBoundPackInnerTy =
+  BTForall "b" (Just (listTy (BTVar "z"))) (BTArrow (BTVar "b") dependentActualBoundPackTy)
 
 boundedPackCaseExpr :: BackendExpr
 boundedPackCaseExpr =
@@ -655,6 +716,10 @@ boundedListPackTy =
 dependentBoundedPackTy :: BackendType
 dependentBoundedPackTy =
   BTBase (BaseTy "DependentBoundedPack")
+
+dependentActualBoundPackTy :: BackendType
+dependentActualBoundPackTy =
+  BTBase (BaseTy "DependentActualBoundPack")
 
 listTy :: BackendType -> BackendType
 listTy ty =

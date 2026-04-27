@@ -1163,20 +1163,31 @@ matchBackendTypeParameters typeBounds parameterBounds =
                       (Map.delete name parameterBounds)
                       (Map.delete name substitution)
                   expectedBound = substituteBackendTypes dependencySubstitution boundTy
-               in alphaEqBackendType actual expectedBound || actualTypeVariableBoundMatches actual expectedBound
+               in typeBoundDependenciesMatch actual expectedBound || actualTypeVariableBoundMatches actual expectedBound
         _ ->
           True
+
+    typeBoundDependenciesMatch actual expectedBound =
+      alphaEqBackendType
+        (resolveTypeBoundDependencies actual)
+        (resolveTypeBoundDependencies expectedBound)
 
     actualTypeVariableBoundMatches actual expectedBound =
       case actual of
         BTVar actualName ->
           case Map.lookup actualName typeBounds of
             Just (Just actualBound) ->
-              alphaEqBackendType actualBound expectedBound
+              typeBoundDependenciesMatch actualBound expectedBound
             _ ->
               False
         _ ->
           False
+
+    resolveTypeBoundDependencies =
+      substituteBackendTypes resolvedTypeBounds
+
+    resolvedTypeBounds =
+      completeBackendParameterSubstitution typeBounds Map.empty
 
 completeBackendParameterSubstitution :: BackendParameterBounds -> Map String BackendType -> Map String BackendType
 completeBackendParameterSubstitution parameterBounds substitution0 =
