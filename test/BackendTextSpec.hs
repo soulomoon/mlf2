@@ -2,6 +2,7 @@
 
 module BackendTextSpec (spec) where
 
+import Control.Exception (bracket)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 
@@ -16,6 +17,8 @@ import MLF.Program
     , renderProgramParseError
     )
 import MLF.Program.CLI (emitBackendFile)
+import System.Directory (getTemporaryDirectory, removeFile)
+import System.IO (hClose, hPutStr, openTempFile)
 import Test.Hspec
 
 spec :: Spec
@@ -47,11 +50,28 @@ spec = describe "MLF.Backend.Text" $ do
         output `shouldSatisfy` isInfixOf "; mlf2 backend-text v0"
         output `shouldSatisfy` isInfixOf "define @\"Main__main\"() -> i64"
 
+    it "emits backend text for CLI files with explicit Prelude imports" $ do
+        output <-
+            withTempProgram preludeImportProgram $ \path ->
+                requireRight =<< emitBackendFile path
+
+        output `shouldSatisfy` isInfixOf "define @\"Main__main\"() -> i64"
+        output `shouldSatisfy` isInfixOf "@\"Prelude__id\""
+
 simpleFunctionProgram :: String
 simpleFunctionProgram =
     unlines
         [ "module Main export (id, main) {"
         , "  def id : Int -> Int = \\x x;"
+        , "  def main : Int = id 1;"
+        , "}"
+        ]
+
+preludeImportProgram :: String
+preludeImportProgram =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (id);"
         , "  def main : Int = id 1;"
         , "}"
         ]
@@ -202,3 +222,14 @@ goldenText :: FilePath -> String -> Expectation
 goldenText goldenPath actual = do
     expected <- readFile goldenPath
     length expected `seq` actual `shouldBe` expected
+
+withTempProgram :: String -> (FilePath -> IO a) -> IO a
+withTempProgram contents action = do
+    tempDir <- getTemporaryDirectory
+    bracket (writeTempProgram tempDir) removeFile action
+  where
+    writeTempProgram tempDir = do
+        (path, handle) <- openTempFile tempDir "mlf2-backend-text.mlfp"
+        hPutStr handle contents
+        hClose handle
+        pure path
