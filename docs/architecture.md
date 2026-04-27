@@ -135,7 +135,8 @@ The boundary invariants are:
   `validateBackendProgram`;
 - ADT construction and case analysis are explicit backend nodes checked against
   program constructor metadata for known constructors, constructor arity,
-  argument/result types, case scrutinee type, and alternative result type.
+  constructor-local `forall` bounds, argument/result types, case scrutinee
+  type, and alternative result type.
 
 This module intentionally lives in the private `mlf2-internal` library for now.
 Future conversion/lowering modules should depend on this IR rather than reaching

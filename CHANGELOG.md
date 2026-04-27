@@ -7,6 +7,9 @@
   programs into the typed backend IR, including backend type conversion,
   fail-closed unsupported-shape diagnostics, explicit ADT construct/case
   recovery, and regression coverage.
+- Preserved constructor-local `forall` bounds in typed backend constructor
+  metadata and enforced those bounds at backend construct/case validation
+  boundaries.
 - Added `.mlfp` source kind checking for declaration parameter annotations,
   ordinary type constructor application, variable-headed type application,
   class constraints, method signatures, and instance heads. Ill-kinded source

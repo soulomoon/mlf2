@@ -195,6 +195,46 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithDataAndMainExpr [packData] packIntExpr)
       `shouldBe` Right ()
 
+  it "enforces constructor-level forall bounds at construct and case boundaries" $ do
+    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackIntExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackBoolExpr)
+      `shouldBe` Left (BackendConstructorArgumentMismatch "BoundedPack" 0 intTy boolTy)
+
+    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackCaseExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackRepackCaseExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram boundedPackOuterNameCollisionCaseProgram
+      `shouldBe` Right ()
+
+    validateBackendProgram boundedPackOuterNameCollisionWrongOuterUseProgram
+      `shouldBe` Left (BackendVariableTypeMismatch "outer" (BTVar "a") intTy)
+
+    validateBackendProgram (programWithDataAndMainExpr [boundedPackData] boundedPackWrongBoundUseCaseExpr)
+      `shouldBe` Left (BackendVariableTypeMismatch "n" (BTVar "a") boolTy)
+
+    validateBackendProgram boundedListPackCaseProgram
+      `shouldBe` Right ()
+
+    validateBackendProgram boundedListPackWrongBoundUseCaseProgram
+      `shouldBe` Left (BackendVariableTypeMismatch "n" (listTy (BTVar "a")) (listTy boolTy))
+
+    validateBackendProgram (programWithDataAndMainExpr [dependentBoundedPackData] dependentBoundedPackIntExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [dependentBoundedPackData] dependentBoundedPackBoolExpr)
+      `shouldBe` Left (BackendConstructorArgumentMismatch "DependentBoundedPack" 0 intTy boolTy)
+
+    validateBackendProgram dependentActualBoundPackProgram
+      `shouldBe` Right ()
+
+    validateBackendProgram dependentActualBoundPackWrongProgram
+      `shouldBe` Left (BackendConstructorArgumentMismatch "DependentActualBoundPack" 0 (listTy intTy) (BTVar "b"))
+
   it "rejects matcher capture from inferred constructor parameters" $ do
     validateBackendProgram captureForallConstructProgram
       `shouldBe` Left (BackendConstructorArgumentMismatch "CaptureForall" 0 captureForallInstantiatedTy captureForallActualTy)
@@ -344,7 +384,51 @@ packData =
   BackendData
     { backendDataName = "Pack",
       backendDataParameters = [],
-      backendDataConstructors = [BackendConstructor "Pack" ["a"] [BTVar "a"] packTy]
+      backendDataConstructors = [BackendConstructor "Pack" [BackendTypeBinder "a" Nothing] [BTVar "a"] packTy]
+    }
+
+boundedPackData :: BackendData
+boundedPackData =
+  BackendData
+    { backendDataName = "BoundedPack",
+      backendDataParameters = [],
+      backendDataConstructors = [BackendConstructor "BoundedPack" [BackendTypeBinder "a" (Just intTy)] [BTVar "a"] boundedPackTy]
+    }
+
+boundedListPackData :: BackendData
+boundedListPackData =
+  BackendData
+    { backendDataName = "BoundedListPack",
+      backendDataParameters = [],
+      backendDataConstructors = [BackendConstructor "BoundedListPack" [BackendTypeBinder "a" (Just intTy)] [listTy (BTVar "a")] boundedListPackTy]
+    }
+
+dependentBoundedPackData :: BackendData
+dependentBoundedPackData =
+  BackendData
+    { backendDataName = "DependentBoundedPack",
+      backendDataParameters = [],
+      backendDataConstructors =
+        [ BackendConstructor
+            "DependentBoundedPack"
+            [BackendTypeBinder "z" (Just intTy), BackendTypeBinder "a" (Just (BTVar "z"))]
+            [BTVar "a"]
+            dependentBoundedPackTy
+        ]
+    }
+
+dependentActualBoundPackData :: BackendData
+dependentActualBoundPackData =
+  BackendData
+    { backendDataName = "DependentActualBoundPack",
+      backendDataParameters = [],
+      backendDataConstructors =
+        [ BackendConstructor
+            "DependentActualBoundPack"
+            [BackendTypeBinder "a" (Just (listTy intTy))]
+            [BTVar "a"]
+            dependentActualBoundPackTy
+        ]
     }
 
 captureForallData :: BackendData
@@ -400,6 +484,172 @@ someBoolAsOptionIntExpr =
 packIntExpr :: BackendExpr
 packIntExpr =
   BackendConstruct packTy "Pack" [intLit 1]
+
+boundedPackIntExpr :: BackendExpr
+boundedPackIntExpr =
+  BackendConstruct boundedPackTy "BoundedPack" [intLit 1]
+
+boundedPackBoolExpr :: BackendExpr
+boundedPackBoolExpr =
+  BackendConstruct boundedPackTy "BoundedPack" [boolLit True]
+
+dependentBoundedPackIntExpr :: BackendExpr
+dependentBoundedPackIntExpr =
+  BackendConstruct dependentBoundedPackTy "DependentBoundedPack" [intLit 1]
+
+dependentBoundedPackBoolExpr :: BackendExpr
+dependentBoundedPackBoolExpr =
+  BackendConstruct dependentBoundedPackTy "DependentBoundedPack" [boolLit True]
+
+dependentActualBoundPackProgram :: BackendProgram
+dependentActualBoundPackProgram =
+  programWithDataAndMainExpr [dependentActualBoundPackData] (dependentActualBoundPackWrapper intTy)
+
+dependentActualBoundPackWrongProgram :: BackendProgram
+dependentActualBoundPackWrongProgram =
+  programWithDataAndMainExpr [dependentActualBoundPackData] (dependentActualBoundPackWrapper boolTy)
+
+dependentActualBoundPackWrapper :: BackendType -> BackendExpr
+dependentActualBoundPackWrapper zBound =
+  BackendTyAbs
+    { backendExprType = dependentActualBoundPackWrapperTy zBound,
+      backendTyParamName = "z",
+      backendTyParamBound = Just zBound,
+      backendTyAbsBody =
+        BackendTyAbs
+          { backendExprType = dependentActualBoundPackInnerTy,
+            backendTyParamName = "b",
+            backendTyParamBound = Just (listTy (BTVar "z")),
+            backendTyAbsBody =
+              BackendLam
+                { backendExprType = BTArrow (BTVar "b") dependentActualBoundPackTy,
+                  backendParamName = "x",
+                  backendParamType = BTVar "b",
+                  backendBody =
+                    BackendConstruct
+                      dependentActualBoundPackTy
+                      "DependentActualBoundPack"
+                      [BackendVar (BTVar "b") "x"]
+                }
+          }
+    }
+
+dependentActualBoundPackWrapperTy :: BackendType -> BackendType
+dependentActualBoundPackWrapperTy zBound =
+  BTForall "z" (Just zBound) dependentActualBoundPackInnerTy
+
+dependentActualBoundPackInnerTy :: BackendType
+dependentActualBoundPackInnerTy =
+  BTForall "b" (Just (listTy (BTVar "z"))) (BTArrow (BTVar "b") dependentActualBoundPackTy)
+
+boundedPackCaseExpr :: BackendExpr
+boundedPackCaseExpr =
+  BackendCase
+    { backendExprType = intTy,
+      backendScrutinee = boundedPackIntExpr,
+      backendAlternatives = BackendAlternative (BackendConstructorPattern "BoundedPack" ["n"]) (BackendVar intTy "n") :| []
+    }
+
+boundedPackRepackCaseExpr :: BackendExpr
+boundedPackRepackCaseExpr =
+  BackendCase
+    { backendExprType = boundedPackTy,
+      backendScrutinee = boundedPackIntExpr,
+      backendAlternatives =
+        BackendAlternative
+          (BackendConstructorPattern "BoundedPack" ["n"])
+          (BackendConstruct boundedPackTy "BoundedPack" [BackendVar (BTVar "a") "n"])
+          :| []
+    }
+
+boundedPackOuterNameCollisionCaseProgram :: BackendProgram
+boundedPackOuterNameCollisionCaseProgram =
+  boundedPackOuterNameCollisionCaseWith (BackendVar intTy "n")
+
+boundedPackOuterNameCollisionWrongOuterUseProgram :: BackendProgram
+boundedPackOuterNameCollisionWrongOuterUseProgram =
+  boundedPackOuterNameCollisionCaseWith (BackendVar intTy "outer")
+
+boundedPackOuterNameCollisionCaseWith :: BackendExpr -> BackendProgram
+boundedPackOuterNameCollisionCaseWith branchBody =
+  programWithDataAndMainExpr
+    [boundedPackData]
+    ( BackendTyAbs
+        { backendExprType = BTForall "a" (Just boolTy) (BTArrow (BTVar "a") intTy),
+          backendTyParamName = "a",
+          backendTyParamBound = Just boolTy,
+          backendTyAbsBody =
+            BackendLam
+              { backendExprType = BTArrow (BTVar "a") intTy,
+                backendParamName = "outer",
+                backendParamType = BTVar "a",
+                backendBody =
+                  BackendCase
+                    { backendExprType = intTy,
+                      backendScrutinee = boundedPackIntExpr,
+                      backendAlternatives =
+                        BackendAlternative
+                          (BackendConstructorPattern "BoundedPack" ["n"])
+                          branchBody
+                          :| []
+                    }
+              }
+        }
+    )
+
+boundedPackWrongBoundUseCaseExpr :: BackendExpr
+boundedPackWrongBoundUseCaseExpr =
+  BackendCase
+    { backendExprType = boolTy,
+      backendScrutinee = boundedPackIntExpr,
+      backendAlternatives =
+        BackendAlternative
+          (BackendConstructorPattern "BoundedPack" ["n"])
+          (BackendVar boolTy "n")
+          :| []
+    }
+
+boundedListPackCaseProgram :: BackendProgram
+boundedListPackCaseProgram =
+  programWithDataAndBindings
+    [boundedListPackData]
+    [ mainBinding
+        BackendCase
+          { backendExprType = listTy intTy,
+            backendScrutinee = boundedListPackListIntExpr,
+            backendAlternatives =
+              BackendAlternative
+                (BackendConstructorPattern "BoundedListPack" ["n"])
+                (BackendVar (listTy intTy) "n")
+                :| []
+          },
+      listArgBinding
+    ]
+
+boundedListPackWrongBoundUseCaseProgram :: BackendProgram
+boundedListPackWrongBoundUseCaseProgram =
+  programWithDataAndBindings
+    [boundedListPackData]
+    [ mainBinding
+        BackendCase
+          { backendExprType = listTy boolTy,
+            backendScrutinee = boundedListPackListIntExpr,
+            backendAlternatives =
+              BackendAlternative
+                (BackendConstructorPattern "BoundedListPack" ["n"])
+                (BackendVar (listTy boolTy) "n")
+                :| []
+          },
+      listArgBinding
+    ]
+
+boundedListPackListIntExpr :: BackendExpr
+boundedListPackListIntExpr =
+  BackendConstruct boundedListPackTy "BoundedListPack" [BackendVar (listTy intTy) "listArg"]
+
+listArgBinding :: BackendBinding
+listArgBinding =
+  binding "listArg" (listTy intTy) (BackendVar (listTy intTy) "listArg")
 
 captureForallConstructProgram :: BackendProgram
 captureForallConstructProgram =
@@ -495,6 +745,26 @@ boxTy =
 packTy :: BackendType
 packTy =
   BTBase (BaseTy "Pack")
+
+boundedPackTy :: BackendType
+boundedPackTy =
+  BTBase (BaseTy "BoundedPack")
+
+boundedListPackTy :: BackendType
+boundedListPackTy =
+  BTBase (BaseTy "BoundedListPack")
+
+dependentBoundedPackTy :: BackendType
+dependentBoundedPackTy =
+  BTBase (BaseTy "DependentBoundedPack")
+
+dependentActualBoundPackTy :: BackendType
+dependentActualBoundPackTy =
+  BTBase (BaseTy "DependentActualBoundPack")
+
+listTy :: BackendType -> BackendType
+listTy ty =
+  BTCon (BaseTy "List") (ty :| [])
 
 optionTy :: BackendType -> BackendType
 optionTy ty =
