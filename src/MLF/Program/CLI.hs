@@ -6,11 +6,15 @@ module MLF.Program.CLI
 
 import Control.Exception (IOException, try)
 import Data.Bifunctor (first)
+import qualified Data.Map.Strict as Map
+import Data.Set (Set)
+import qualified Data.Set as Set
 
 import MLF.Backend.Text
     ( renderBackendTextError
     , renderCheckedProgramBackendText
     )
+import MLF.Elab.Types (ElabTerm (..))
 import MLF.Frontend.Parse.Program
     ( parseLocatedProgramWithFile
     , renderProgramParseError
@@ -58,23 +62,86 @@ emitBackendFile path = do
 
 emitBackendCheckedProgram :: CheckedProgram -> CheckedProgram
 emitBackendCheckedProgram checked =
-    checked {checkedProgramModules = map emitBackendModule (checkedProgramModules checked)}
+    checked {checkedProgramModules = map (emitBackendModule retainedPreludeBindings) modules0}
+  where
+    modules0 = checkedProgramModules checked
+    retainedPreludeBindings = preludeBindingDependencyClosure modules0
 
-emitBackendModule :: CheckedModule -> CheckedModule
-emitBackendModule checkedModule
+emitBackendModule :: Set String -> CheckedModule -> CheckedModule
+emitBackendModule retainedPreludeBindings checkedModule
     | checkedModuleName checkedModule == "Prelude" =
         checkedModule
             { checkedModuleBindings =
-                filter isEmitBackendPreludeBinding (checkedModuleBindings checkedModule)
+                filter
+                    ((`Set.member` retainedPreludeBindings) . checkedBindingName)
+                    (checkedModuleBindings checkedModule)
             }
     | otherwise = checkedModule
 
-isEmitBackendPreludeBinding :: CheckedBinding -> Bool
-isEmitBackendPreludeBinding binding =
-    checkedBindingName binding `elem` emitBackendPreludeBindings
+preludeBindingDependencyClosure :: [CheckedModule] -> Set String
+preludeBindingDependencyClosure modules0 =
+    close (referencedBindingNames nonPreludeBindings) Set.empty
+  where
+    preludeBindingsByName =
+        Map.fromList
+            [ (checkedBindingName binding, binding)
+            | binding <- preludeBindings
+            ]
 
-emitBackendPreludeBindings :: [String]
-emitBackendPreludeBindings =
-    [ "Prelude__and"
-    , "Prelude__id"
-    ]
+    preludeBindings =
+        [ binding
+        | checkedModule <- modules0
+        , checkedModuleName checkedModule == "Prelude"
+        , binding <- checkedModuleBindings checkedModule
+        ]
+
+    nonPreludeBindings =
+        [ binding
+        | checkedModule <- modules0
+        , checkedModuleName checkedModule /= "Prelude"
+        , binding <- checkedModuleBindings checkedModule
+        ]
+
+    close pending retained =
+        case Set.minView (pendingPreludeBindings pending retained) of
+            Nothing -> retained
+            Just (name, pendingRest) ->
+                case Map.lookup name preludeBindingsByName of
+                    Nothing -> close pendingRest retained
+                    Just binding ->
+                        close
+                            (Set.union pendingRest (referencedBindingNames [binding]))
+                            (Set.insert name retained)
+
+    pendingPreludeBindings pending retained =
+        (pending `Set.intersection` Map.keysSet preludeBindingsByName)
+            `Set.difference` retained
+
+referencedBindingNames :: [CheckedBinding] -> Set String
+referencedBindingNames bindings =
+    Set.unions (map (freeElabTermVars . checkedBindingTerm) bindings)
+
+freeElabTermVars :: ElabTerm -> Set String
+freeElabTermVars =
+    go
+  where
+    go term =
+        case term of
+            EVar name ->
+                Set.singleton name
+            ELit {} ->
+                Set.empty
+            ELam name _ body ->
+                Set.delete name (go body)
+            EApp fun arg ->
+                Set.union (go fun) (go arg)
+            ELet name _ rhs body ->
+                Set.union (go rhs) (Set.delete name (go body))
+            ETyAbs _ _ body ->
+                go body
+            ETyInst body _ ->
+                go body
+            ERoll _ body ->
+                go body
+            EUnroll body ->
+                go body

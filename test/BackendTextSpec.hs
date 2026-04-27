@@ -74,6 +74,18 @@ spec = describe "MLF.Backend.Text" $ do
         output `shouldSatisfy` isInfixOf "call @\"__mlfp_and\""
         output `shouldSatisfy` isInfixOf "call @\"Prelude__and\"(true)"
 
+    it "keeps referenced Prelude constructors through conversion before unsupported lowering" $ do
+        result <-
+            withTempProgram preludeConstructorProgram emitBackendFile
+
+        case result of
+            Left err ->
+                err
+                    `shouldSatisfy` isInfixOf
+                        "Unsupported backend text node at binding \"Prelude__Zero\": construct"
+            Right output ->
+                expectationFailure ("expected unsupported constructor diagnostic, got output:\n" ++ output)
+
 simpleFunctionProgram :: String
 simpleFunctionProgram =
     unlines
@@ -98,6 +110,15 @@ preludeAndProgram =
         [ "module Main export (main) {"
         , "  import Prelude exposing (and);"
         , "  def main : Bool = and true false;"
+        , "}"
+        ]
+
+preludeConstructorProgram :: String
+preludeConstructorProgram =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Nat(..));"
+        , "  def main : Nat = Zero;"
         , "}"
         ]
 
