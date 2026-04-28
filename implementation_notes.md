@@ -17,8 +17,10 @@
   types, non-ASCII string literals, and representation-changing roll/unroll
   nodes until closure conversion or a richer runtime representation exists.
 - Backend validation tests now assemble emitted LLVM with `llvm-as` and smoke
-  representative codegen with `llc`; those LLVM 15+ command-line tools must be
-  available on `PATH` or in a standard local LLVM installation.
+  representative codegen with `llc`; LLVM tools with opaque-pointer support
+  must be available on `PATH` or in a standard local LLVM installation. The
+  harness retries with `-opaque-pointers` for LLVM 14-era tools that require
+  the explicit flag.
 
 ## 2026-04-22 - Typed backend IR boundary
 

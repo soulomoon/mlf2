@@ -300,7 +300,7 @@ rewriting them. Diagnostics are high-level and name the backend context and
 node, for example:
 
 ```text
-Unsupported backend LLVM node at binding "main": escaping lambda
+Unsupported backend LLVM expression at binding "main": escaping lambda
 ```
 
 ## Built-In Prelude

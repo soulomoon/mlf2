@@ -376,7 +376,7 @@ validateLLVMAssembly :: String -> Expectation
 validateLLVMAssembly output = do
   llvmAs <- requireTool "llvm-as"
   withTempLLVM output $ \path -> do
-    (exitCode, _stdout, stderr) <- readProcessWithExitCode llvmAs ["-o", "/dev/null", path] ""
+    (exitCode, stderr) <- runLLVMTool llvmAs ["-o", "/dev/null", path]
     case exitCode of
       ExitSuccess -> pure ()
       ExitFailure _ -> expectationFailure ("llvm-as rejected backend output:\n" ++ stderr)
@@ -385,10 +385,28 @@ validateLLVMObjectCode :: String -> Expectation
 validateLLVMObjectCode output = do
   llc <- requireTool "llc"
   withTempLLVM output $ \path -> do
-    (exitCode, _stdout, stderr) <- readProcessWithExitCode llc ["-filetype=obj", "-o", "/dev/null", path] ""
+    (exitCode, stderr) <- runLLVMTool llc ["-filetype=obj", "-o", "/dev/null", path]
     case exitCode of
       ExitSuccess -> pure ()
       ExitFailure _ -> expectationFailure ("llc rejected backend output:\n" ++ stderr)
+
+runLLVMTool :: FilePath -> [String] -> IO (ExitCode, String)
+runLLVMTool tool args = do
+  (plainExitCode, _plainStdout, plainStderr) <- readProcessWithExitCode tool args ""
+  case plainExitCode of
+    ExitSuccess -> pure (ExitSuccess, "")
+    ExitFailure _ -> do
+      (opaqueExitCode, _opaqueStdout, opaqueStderr) <-
+        readProcessWithExitCode tool ("-opaque-pointers" : args) ""
+      pure $
+        case opaqueExitCode of
+          ExitSuccess -> (ExitSuccess, "")
+          ExitFailure _ ->
+            ( opaqueExitCode,
+              plainStderr
+                ++ "\nWith -opaque-pointers:\n"
+                ++ opaqueStderr
+            )
 
 requireTool :: String -> IO FilePath
 requireTool name = do

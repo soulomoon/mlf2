@@ -162,7 +162,8 @@ lowering, rendering only the supported first-order subset, and producing
 explicit unsupported-node diagnostics for backend constructs that do not yet
 have LLVM lowering. The LLVM backend is intentionally repo-local: `Syntax`
 models the small LLVM surface used by mlf2, `Lower` maps backend IR into that
-AST, and `Ppr` emits opaque-pointer LLVM IR text accepted by LLVM 15+ tools.
+AST, and `Ppr` emits opaque-pointer LLVM IR text accepted by LLVM 15+ tools or
+LLVM 14-era tools run with `-opaque-pointers`.
 Closure conversion, higher-order constructor fields, escaping lambdas, and
 final executable linking remain outside the current backend boundary. Those
 diagnostics do not weaken source inference, checking, module visibility, or
