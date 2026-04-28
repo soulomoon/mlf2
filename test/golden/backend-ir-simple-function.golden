@@ -1,0 +1,21 @@
+backend-program
+  main: Main__main
+  modules:
+    module Main
+      data:
+        <none>
+      bindings:
+        binding Main__id : (Int -> Int)
+          exported-main: false
+          expr:
+            lam $x#0 : Int -> (Int -> Int)
+              body:
+                var $x#0 : Int
+        binding Main__main : Int
+          exported-main: true
+          expr:
+            app : Int
+              function:
+                var Main__id : (Int -> Int)
+              argument:
+                lit 1 : Int
