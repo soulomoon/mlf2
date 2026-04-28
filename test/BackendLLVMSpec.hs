@@ -1283,31 +1283,31 @@ llvmObjectCodeParityCaseNames =
 runLLVMParityCase :: ProgramRuntimeCase -> Spec
 runLLVMParityCase runtimeCase =
   it (runtimeCaseName runtimeCase) $ do
-    checked <- loadProgramRuntimeChecked (runtimeCaseSource runtimeCase)
+    result <- emitProgramRuntimeLLVM (runtimeCaseSource runtimeCase)
     case Map.lookup (runtimeCaseName runtimeCase) llvmParityExpectations of
       Nothing ->
         expectationFailure ("missing LLVM parity expectation for " ++ runtimeCaseName runtimeCase)
       Just ExpectLLVMAssembly -> do
-        output <- requireRight (renderCheckedProgramLLVM checked)
+        output <- requireRight result
         validateLLVMAssembly output
         when (runtimeCaseName runtimeCase `Set.member` llvmObjectCodeParityCaseNames) $
           validateLLVMObjectCode output
       Just (ExpectLLVMUnsupported expectedFragment) ->
-        case renderCheckedProgramLLVM checked of
+        case result of
           Left err ->
-            renderBackendLLVMError err `shouldSatisfy` isInfixOf expectedFragment
+            err `shouldSatisfy` isInfixOf expectedFragment
           Right output ->
             expectationFailure $
               "LLVM parity case is now supported; remove its ExpectLLVMUnsupported classification:\n"
                 ++ output
 
-loadProgramRuntimeChecked :: ProgramMatrixSource -> IO CheckedProgram
-loadProgramRuntimeChecked source =
+emitProgramRuntimeLLVM :: ProgramMatrixSource -> IO (Either String String)
+emitProgramRuntimeLLVM source =
   case source of
-    InlineProgram input ->
-      requireChecked input
+    InlineProgram programText ->
+      withTempProgram programText emitBackendFile
     ProgramFile path ->
-      requireChecked =<< readFile path
+      emitBackendFile path
 
 requireChecked :: String -> IO CheckedProgram
 requireChecked input =
