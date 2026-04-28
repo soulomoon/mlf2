@@ -47,9 +47,9 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Finalize` — normalizes lowered surface eMLF, calls the internal detailed eMLF pipeline entrypoints with program-owned external binding modes, resolves `.mlfp` deferred obligations, and accepts rewritten terms only after the xMLF typecheck guard
 - `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI/file runner as an explicit import target
 - `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates checked `.mlfp` bindings through the existing xMLF runtime and renders recovered closed ADT values with source constructor syntax
-- `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before any textual or LLVM-like lowering
+- `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before LLVM lowering
 - `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion and explicit ADT construct/case recovery where the checked xMLF shape is unambiguous
-- `MLF.Backend.Text` — deterministic LLVM-like textual rendering for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
+- `MLF.Backend.LLVM` — repo-local LLVM backend facade over a small typed LLVM AST, lowerer, and pretty-printer for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
 - `MLF.Binding.*` — binding tree queries + executable χe ops + harmonization
 - `MLF.Witness.*` — ω execution helpers (base χe operations)
@@ -124,8 +124,9 @@ The current checked-program backend path is:
    typecheck guard have succeeded.
 3. `MLF.Backend.Convert` converts the resulting checked program artifacts into
    the typed backend IR in `MLF.Backend.IR`.
-4. `MLF.Backend.Text` consumes that typed backend IR and emits the first
-   deterministic LLVM-like inspection text for the currently supported subset.
+4. `MLF.Backend.LLVM` consumes that typed backend IR, lowers the supported
+   subset into a repo-local LLVM AST, and pretty-prints deterministic LLVM
+   `.ll` text.
 
 `MLF.Backend.IR` is therefore the first backend-owned representation after a
 `.mlfp` program has already passed the existing checker and xMLF typecheck
@@ -156,12 +157,17 @@ The boundary invariants are:
 This module intentionally lives in the private `mlf2-internal` library for now.
 Conversion and lowering modules should depend on this IR rather than reaching
 back into `MLF.Frontend.Program.*` internals for backend decisions.
-`MLF.Backend.Text` preserves that boundary by validating the IR before
-rendering, rendering only the supported functional subset, and producing
+`MLF.Backend.LLVM` preserves that boundary by validating the IR before
+lowering, rendering only the supported first-order subset, and producing
 explicit unsupported-node diagnostics for backend constructs that do not yet
-have textual lowering. Those diagnostics do not weaken source inference,
-checking, module visibility, or runtime semantics; they only describe the
-current IR-to-text lowering surface.
+have LLVM lowering. The LLVM backend is intentionally repo-local: `Syntax`
+models the small LLVM surface used by mlf2, `Lower` maps backend IR into that
+AST, and `Ppr` emits opaque-pointer LLVM IR text accepted by LLVM 15+ tools or
+LLVM 14-era tools run with `-opaque-pointers`.
+Closure conversion, higher-order constructor fields, escaping lambdas, and
+final executable linking remain outside the current backend boundary. Those
+diagnostics do not weaken source inference, checking, module visibility, or
+runtime semantics; they only describe the current IR-to-LLVM lowering surface.
 
 ## `Solved` boundary and thesis-exact cleanup rule
 

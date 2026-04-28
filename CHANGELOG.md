@@ -3,10 +3,11 @@
 ## Unreleased
 
 ### Changed
-- Added the first private LLVM-like backend text boundary in
-  `MLF.Backend.Text`, including checked-program conversion entrypoints,
-  deterministic golden output for a minimal function module, explicit
-  unsupported-node diagnostics, and CLI access through `mlf2 emit-backend`.
+- Replaced the private backend inspection-text boundary with a repo-local LLVM
+  IR backend in `MLF.Backend.LLVM`, including a small typed LLVM AST,
+  pretty-printer, backend IR lowerer, checked-program facade, deterministic
+  `.ll` goldens, explicit unsupported-node diagnostics, ADT construct/case
+  lowering, and CLI access through `mlf2 emit-backend`.
 - Added a private `MLF.Backend.Convert` boundary from checked `.mlfp`
   programs into the typed backend IR, including backend type conversion,
   fail-closed unsupported-shape diagnostics, explicit ADT construct/case
@@ -50,7 +51,7 @@
   (`1836 examples, 0 failures`).
 - Added the initial private typed backend IR boundary in `MLF.Backend.IR`.
   Checked `.mlfp` programs now have a documented backend-owned target shape
-  before textual or LLVM-like lowering: typed program/modules/bindings,
+  before LLVM lowering: typed program/modules/bindings,
   explicit data constructor metadata, typed expression nodes, ADT construct/case
   nodes, and a local validator for binding uniqueness, `main` reachability, and
   core type equalities. Program validation also checks lexical/global variable

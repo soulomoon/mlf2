@@ -13,8 +13,8 @@ IR invariants that a converter/lowerer should preserve.
 {- Note [Typed backend IR boundary]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 The backend IR sits after `MLF.Frontend.Program.Check` and the xMLF
-typechecking guard, and before any textual or LLVM-like lowering. The boundary
-is intentionally narrow:
+typechecking guard, and before LLVM lowering. The boundary is intentionally
+narrow:
 
 * every expression node carries its result type;
 * module-level binding names are runtime names and must be globally unique;

@@ -270,8 +270,8 @@ field-specific deriving diagnostic.
 Successful `.mlfp` checking may be followed by conversion into the internal
 typed backend IR owned by `MLF.Backend.IR`. The path is checked `.mlfp`
 program -> existing eMLF/xMLF typecheck guard -> `MLF.Backend.Convert` ->
-typed backend IR -> `MLF.Backend.Text` for the first LLVM-like textual
-inspection boundary.
+typed backend IR -> `MLF.Backend.LLVM` for repo-local LLVM lowering and
+deterministic `.ll` emission.
 
 The backend path does not change source typing, inference, checker diagnostics,
 module/import visibility, runtime value rendering, or the explicit-import
@@ -286,20 +286,21 @@ cabal run mlf2 -- emit-backend path/to/file.mlfp
 ```
 
 Like `run-program`, `emit-backend` parses one source file and prepends the
-built-in Prelude as an explicit module before checking. The emitted text is a
-deterministic inspection format, not a stable ABI or a promise of executable
-LLVM. The initial supported text subset covers checked function bindings,
-literals, variables, lambda/application, let, type abstraction/application,
-global references, and referenced Prelude bindings retained for backend output.
+built-in Prelude as an explicit module before checking. The emitted text is
+LLVM IR for the supported first-order backend subset, not a stable ABI or a
+promise of final executable linking. The supported LLVM subset covers checked
+first-order function bindings, saturated direct calls, literals, variables,
+SSA-style lets, type abstraction/application after specialization, ADT
+construction, and ADT case analysis.
 
 The typed backend IR can also represent data metadata, constructor nodes, case
-nodes, and recursive roll/unroll nodes. The current text lowering intentionally
-rejects backend nodes that are not yet supported instead of silently dropping or
+nodes, and recursive roll/unroll nodes. The LLVM lowering intentionally rejects
+backend nodes that are not yet supported instead of silently dropping or
 rewriting them. Diagnostics are high-level and name the backend context and
 node, for example:
 
 ```text
-Unsupported backend text node at binding "main": case
+Unsupported backend LLVM expression at binding "main": escaping lambda
 ```
 
 ## Built-In Prelude
