@@ -362,6 +362,16 @@ spec = describe "MLF.Backend.Convert" $ do
       other ->
         expectationFailure ("expected recursive-let capture rejection, got " ++ show other)
 
+  it "rejects nested recursive local functions that capture outer recursive functions" $ do
+    checked <- requireChecked nestedRecursiveLetCaptureProgram
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedRecursiveLet detail) -> do
+        detail `shouldSatisfy` isInfixOf "captures lexical bindings"
+        detail `shouldSatisfy` isInfixOf "peel"
+      other ->
+        expectationFailure ("expected nested recursive-let capture rejection, got " ++ show other)
+
   it "reports unsupported source type applications instead of weakening them" $ do
     convertSourceType unsupportedVariableHeadType
       `shouldBe` Left (BackendUnsupportedSourceType unsupportedVariableHeadType)
@@ -388,6 +398,27 @@ recursiveLetCaptureProgram =
       "      Zero -> seed;",
       "      Succ inner -> peel inner",
       "    } in peel seed;",
+      "}"
+    ]
+
+nestedRecursiveLetCaptureProgram :: String
+nestedRecursiveLetCaptureProgram =
+  unlines
+    [ "module Main export (Nat(..), main) {",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat;",
+      "",
+      "  def main : Nat -> Nat =",
+      "    let peel : Nat -> Nat = \\(n : Nat)",
+      "      let bounce : Nat -> Nat = \\(m : Nat) case m of {",
+      "        Zero -> peel Zero;",
+      "        Succ inner -> bounce inner",
+      "      } in case n of {",
+      "        Zero -> Zero;",
+      "        Succ inner -> bounce inner",
+      "      }",
+      "    in peel;",
       "}"
     ]
 

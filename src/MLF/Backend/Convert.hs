@@ -232,7 +232,7 @@ liftRecursiveLetsInTerm context lexicalLocals term =
           bindingTy <- liftEitherConversion (convertElabType schemeTy)
           ensureLiftableRecursiveLet lexicalLocals name bindingTy rhs
           helperName <- freshLiftedRecursiveLetName context name
-          rhs' <- liftRecursiveLetsInTerm context lexicalLocals rhs
+          rhs' <- liftRecursiveLetsInTerm context (Set.insert name lexicalLocals) rhs
           let helperTerm = renameFreeTermVariable name helperName rhs'
           emitLiftedRecursiveLet
             LiftedRecursiveLet
