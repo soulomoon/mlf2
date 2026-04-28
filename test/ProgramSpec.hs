@@ -28,6 +28,7 @@ fixturePaths =
     , "test/programs/recursive-adt/recursive-existential.mlfp"
     , "test/programs/recursive-adt/deriving-eq.mlfp"
     , "test/programs/recursive-adt/recursive-tree-deriving.mlfp"
+    , "test/programs/recursive-adt/recursive-tree-first-order.mlfp"
     , "test/programs/recursive-adt/typeclass-integration.mlfp"
     , "test/programs/recursive-adt/complex-recursive-program.mlfp"
     , "test/programs/recursive-adt/abstract-module-use.mlfp"

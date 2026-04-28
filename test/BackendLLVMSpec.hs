@@ -205,6 +205,32 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "lowers recursive local let functions through helper calls" $ do
+    output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-recursive-let.mlfp"
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"Main__main$letrec$"
+    output `shouldSatisfy` isInfixOf "call ptr @\"Main__main$letrec$"
+    output `shouldSatisfy` isInfixOf "switch i64"
+    output `shouldSatisfy` isInfixOf "phi ptr"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "emits first-order recursive ADT parity fixtures through LLVM" $ do
+    mapM_
+      ( \path -> do
+          output <- requireRight =<< emitBackendFile path
+          output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
+          output `shouldSatisfy` isInfixOf "switch i64"
+          validateLLVMAssembly output
+          validateLLVMObjectCode output
+      )
+      [ "test/programs/recursive-adt/plain-recursive-nat.mlfp",
+        "test/programs/recursive-adt/recursive-list-tail.mlfp",
+        "test/programs/recursive-adt/recursive-gadt.mlfp",
+        "test/programs/recursive-adt/recursive-existential.mlfp",
+        "test/programs/recursive-adt/recursive-tree-first-order.mlfp"
+      ]
+
   it "loads only constructor fields used by a case branch" $ do
     output <- requireRight (renderBackendProgramLLVM unusedPolymorphicPatternFieldProgram)
 
