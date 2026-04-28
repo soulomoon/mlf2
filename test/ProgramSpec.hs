@@ -331,9 +331,6 @@ spec = do
                 Left err -> renderProgramParseError err `shouldSatisfy` (not . null)
                 Right program -> expectationFailure ("expected parse error, got: " ++ show program)
 
-    describe "MLF.Program execution corpus" $ do
-        mapM_ runFixture fixturePaths
-
     describe "MLF.Program shared runtime-success parity surface" $ do
         mapM_ runProgramRuntimeCase programRuntimeSuccessCases
 
@@ -1538,11 +1535,6 @@ spec = do
         it ("roundtrips " ++ path) $ do
             program <- requireParsed =<< readFile path
             parseRawProgram (prettyProgram program) `shouldBe` Right program
-
-    runFixture path =
-        it ("runs " ++ path) $ do
-            program <- requireParsed =<< readFile path
-            (prettyValue <$> runProgram program) `shouldBe` Right "true"
 
     runUnifiedFixture (path, expectedValue) =
         it ("runs " ++ path ++ " through the eMLF-owned `.mlfp` path") $ do
