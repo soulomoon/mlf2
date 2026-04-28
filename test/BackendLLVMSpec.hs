@@ -114,6 +114,22 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "missing specialization"
     validateLLVMAssembly output
 
+  it "lowers local function aliases without requiring closure conversion" $ do
+    output <- requireRight (renderBackendProgramLLVM localFunctionAliasProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
+    output `shouldSatisfy` isInfixOf "ret i64 7"
+    output `shouldNotSatisfy` isInfixOf "Unknown backend LLVM function"
+    validateLLVMAssembly output
+
+  it "preserves top-level function aliases as function forms" $ do
+    output <- requireRight (renderBackendProgramLLVM topLevelFunctionAliasProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"g\"(i64"
+    output `shouldSatisfy` isInfixOf "call i64 @\"id\""
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
+    validateLLVMAssembly output
+
   it "lowers Nat construction and case analysis to heap tags and switch" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-case-analysis.mlfp"
 
@@ -122,6 +138,10 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "phi i64"
     validateLLVMAssembly output
     validateLLVMObjectCode output
+
+  it "rejects duplicate constructor case alternatives before emitting switch" $ do
+    renderBackendProgramLLVM duplicateConstructorCaseProgram
+      `shouldSatisfyLeft` isInfixOf "duplicate constructor case tag"
 
   it "lowers nullary and recursive-list constructors through case" $ do
     checked <- requireChecked recursiveListProgram
@@ -448,6 +468,71 @@ directHeadGlobalPolymorphicZeroArityProgram =
                           (optionTy intTy)
                           noneViaDirectTyAbsExpr
                           intTy,
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+localFunctionAliasProgram :: BackendProgram
+localFunctionAliasProgram =
+  programWithMainExpr intTy $
+    BackendLet
+      intTy
+      "f"
+      unaryIntTy
+      intIdentityExpr
+      ( BackendLet
+          intTy
+          "g"
+          unaryIntTy
+          (BackendVar unaryIntTy "f")
+          (BackendApp intTy (BackendVar unaryIntTy "g") (intLit 7))
+      )
+
+topLevelFunctionAliasProgram :: BackendProgram
+topLevelFunctionAliasProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "id",
+          backendBindingType = unaryIntTy,
+          backendBindingExpr = intIdentityExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "g",
+          backendBindingType = unaryIntTy,
+          backendBindingExpr = BackendVar unaryIntTy "id",
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr = BackendApp intTy (BackendVar unaryIntTy "g") (intLit 7),
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+duplicateConstructorCaseProgram :: BackendProgram
+duplicateConstructorCaseProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          (BackendConstruct (optionTy intTy) "None" [])
+                          ( BackendAlternative (BackendConstructorPattern "None" []) (intLit 0)
+                              :| [BackendAlternative (BackendConstructorPattern "None" []) (intLit 1)]
+                          ),
                       backendBindingExportedAsMain = True
                     }
                 ]

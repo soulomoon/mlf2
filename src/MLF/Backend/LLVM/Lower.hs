@@ -182,7 +182,7 @@ bindingInfo :: BackendBinding -> BindingInfo
 bindingInfo binding =
   BindingInfo
     { biName = backendBindingName binding,
-      biForm = functionFormFromExpr (backendBindingExpr binding),
+      biForm = functionFormFromExpected (backendBindingType binding) (backendBindingExpr binding),
       biExportedAsMain = backendBindingExportedAsMain binding
     }
 
@@ -229,6 +229,71 @@ functionFormFromExpr expr =
   where
     (typeBinders, afterTypes) = collectTypeAbs expr
     (params, body) = collectLams afterTypes
+
+functionFormFromExpected :: BackendType -> BackendExpr -> FunctionForm
+functionFormFromExpected expectedTy expr =
+  case functionFormFromExpr expr of
+    form
+      | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+          form
+      | otherwise ->
+          case aliasFunctionForm expectedTy expr of
+            Just aliasForm -> aliasForm
+            Nothing -> form
+
+aliasFunctionForm :: BackendType -> BackendExpr -> Maybe FunctionForm
+aliasFunctionForm expectedTy expr
+  | not (isAliasExpr expr) = Nothing
+  | null typeBinders && null params = Nothing
+  | otherwise = do
+      headExpr <- either (const Nothing) Just (applyTypeApplicationsToExpr "function alias" afterForalls expr typeArgs)
+      body <- applyAliasArguments headExpr afterForalls (zip argNames params)
+      pure
+        FunctionForm
+          { ffTypeBinders = typeBinders,
+            ffParams = zip argNames params,
+            ffBody = body,
+            ffReturnType = returnTy
+          }
+  where
+    (typeBinders, afterForalls) = collectForallsType expectedTy
+    (params, returnTy) = collectArrowsType afterForalls
+    typeArgs = [BTVar name | (name, _) <- typeBinders]
+    argNames = ["__mlfp_alias_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
+
+isAliasExpr :: BackendExpr -> Bool
+isAliasExpr =
+  \case
+    BackendVar {} -> True
+    BackendTyApp _ fun _ -> isAliasExpr fun
+    _ -> False
+
+collectForallsType :: BackendType -> ([(String, Maybe BackendType)], BackendType)
+collectForallsType =
+  \case
+    BTForall name mbBound body ->
+      let (binders, core) = collectForallsType body
+       in ((name, mbBound) : binders, core)
+    ty -> ([], ty)
+
+collectArrowsType :: BackendType -> ([BackendType], BackendType)
+collectArrowsType =
+  \case
+    BTArrow paramTy resultTy ->
+      let (params, returnTy) = collectArrowsType resultTy
+       in (paramTy : params, returnTy)
+    ty -> ([], ty)
+
+applyAliasArguments :: BackendExpr -> BackendType -> [(String, BackendType)] -> Maybe BackendExpr
+applyAliasArguments expr _ [] =
+  Just expr
+applyAliasArguments expr ty ((name, paramTy) : rest) =
+  case ty of
+    BTArrow expectedParamTy resultTy
+      | alphaEqBackendType expectedParamTy paramTy ->
+          applyAliasArguments (BackendApp resultTy expr (BackendVar paramTy name)) resultTy rest
+    _ ->
+      Nothing
 
 collectTypeAbs :: BackendExpr -> ([(String, Maybe BackendType)], BackendExpr)
 collectTypeAbs =
@@ -456,6 +521,15 @@ asciiString :: String -> Bool
 asciiString =
   all (\char -> ord char >= 0 && ord char <= 127)
 
+firstDuplicate :: (Ord a) => [a] -> Maybe a
+firstDuplicate =
+  go Set.empty
+  where
+    go _ [] = Nothing
+    go seen (value : rest)
+      | Set.member value seen = Just value
+      | otherwise = go (Set.insert value seen) rest
+
 specializationKey :: SpecRequest -> String
 specializationKey request =
   srBindingName request ++ "\0" ++ intercalate "\0" (map backendTypeKey (srTypeArgs request))
@@ -634,7 +708,7 @@ lowerInstantiatedFunctionValue env exprEnv context name resultTy form = do
 
 bindLet :: ProgramEnv -> ExprEnv -> String -> String -> BackendExpr -> LowerM ExprEnv
 bindLet env exprEnv context name rhs =
-  case functionFormFromExpr rhs of
+  case functionFormFromExpected (backendExprType rhs) rhs of
     form
       | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
           pure
@@ -654,11 +728,15 @@ lowerVar env exprEnv context ty name =
   case Map.lookup name (eeValues exprEnv) of
     Just value -> pure value
     Nothing ->
-      case Map.lookup name (pbBindings (peBase env)) of
-        Just binding ->
-          lowerGlobalValue env context ty name binding []
+      case Map.lookup name (eeLocalFunctions exprEnv) of
+        Just localFunction ->
+          lowerLocalFunctionValue env context ty name localFunction []
         Nothing ->
-          liftEither (BackendLLVMUnknownFunction name)
+          case Map.lookup name (pbBindings (peBase env)) of
+            Just binding ->
+              lowerGlobalValue env context ty name binding []
+            Nothing ->
+              liftEither (BackendLLVMUnknownFunction name)
 
 lowerGlobalValue :: ProgramEnv -> String -> BackendType -> String -> BindingInfo -> [BackendType] -> LowerM LowerValue
 lowerGlobalValue env context resultTy name binding typeArgs =
@@ -969,7 +1047,9 @@ lowerCase env exprEnv context resultTy scrutinee alternatives = do
   altLabels <- traverse (const (freshBlock "case.alt")) (NE.toList alternatives)
   defaultLabel <- maybe (freshBlock "case.default") pure (lookupDefaultLabel altLabels)
   joinLabel <- freshBlock "case.join"
-  let switchTargets = mapMaybe constructorSwitchTarget (zip (NE.toList alternatives) altLabels)
+  let constructorTargets = mapMaybe constructorSwitchTarget (zip (NE.toList alternatives) altLabels)
+      switchTargets = [(tag, label) | (tag, label, _) <- constructorTargets]
+  rejectDuplicateSwitchTargets constructorTargets
   finishCurrentBlock (LLVMSwitch (LLVMInt 64) tagValue defaultLabel switchTargets)
   incoming <- concat <$> zipWithM (lowerAlternative resultLLVMType joinLabel scrutineeValue) (NE.toList alternatives) altLabels
   when (lookupDefaultLabel altLabels == Nothing) $ do
@@ -991,8 +1071,15 @@ lowerCase env exprEnv context resultTy scrutinee alternatives = do
         BackendDefaultPattern -> Nothing
         BackendConstructorPattern name _ ->
           case Map.lookup name (pbConstructors (peBase env)) of
-            Just constructorRuntime -> Just (crTag constructorRuntime, label)
+            Just constructorRuntime -> Just (crTag constructorRuntime, label, name)
             Nothing -> Nothing
+
+    rejectDuplicateSwitchTargets targets =
+      case firstDuplicate (map (\(tag, _, _) -> tag) targets) of
+        Just tag ->
+          liftEither (BackendLLVMUnsupportedExpression context ("duplicate constructor case tag " ++ show tag))
+        Nothing ->
+          pure ()
 
     lowerAlternative resultLLVMType joinLabel scrutineeValue alternative label = do
       startBlock label
