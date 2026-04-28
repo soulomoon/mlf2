@@ -548,11 +548,26 @@ lowerTyApp :: ProgramEnv -> ExprEnv -> String -> BackendExpr -> LowerM LowerValu
 lowerTyApp env exprEnv context expr =
   case collectTyApps expr of
     (BackendVar _ name, typeArgs)
+      | Just localFunction <- Map.lookup name (eeLocalFunctions exprEnv) ->
+          lowerLocalFunctionValue env context (backendExprType expr) name localFunction typeArgs
       | Just binding <- Map.lookup name (pbBindings (peBase env)),
         not (null (ffTypeBinders (biForm binding))) ->
           lowerGlobalValue env context (backendExprType expr) name binding typeArgs
     (fun, _) ->
       lowerExpr env exprEnv context fun
+
+lowerLocalFunctionValue :: ProgramEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> LowerM LowerValue
+lowerLocalFunctionValue env context resultTy name localFunction typeArgs = do
+  form <- instantiateFunctionFormM context (lfForm localFunction) typeArgs []
+  unless (null (ffParams form)) $
+    liftEither (BackendLLVMUnsupportedExpression context ("escaping function " ++ show name))
+  unless (alphaEqBackendType resultTy (ffReturnType form)) $
+    liftEither (BackendLLVMInternalError ("local value type mismatch for " ++ name ++ " at " ++ context))
+  value <- lowerExpr env (lfCapturedEnv localFunction) context (ffBody form)
+  expectedTy <- lowerBackendTypeM env context resultTy
+  unless (lvLLVMType value == expectedTy) $
+    liftEither (BackendLLVMInternalError ("local value LLVM type mismatch for " ++ name ++ " at " ++ context))
+  pure value
 
 bindLet :: ProgramEnv -> ExprEnv -> String -> String -> BackendExpr -> LowerM ExprEnv
 bindLet env exprEnv context name rhs =

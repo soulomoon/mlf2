@@ -74,6 +74,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "call ptr @\"none$t"
     validateLLVMAssembly output
 
+  it "instantiates local polymorphic zero-arity values used through type application" $ do
+    output <- requireRight (renderBackendProgramLLVM localPolymorphicZeroArityProgram)
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"main\"()"
+    output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
+    output `shouldNotSatisfy` isInfixOf "Unknown backend LLVM function"
+    validateLLVMAssembly output
+
   it "lowers Nat construction and case analysis to heap tags and switch" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-case-analysis.mlfp"
 
@@ -258,6 +266,36 @@ polymorphicZeroArityProgram =
                           (optionTy intTy)
                           (BackendVar nonePolyTy "none")
                           intTy,
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+localPolymorphicZeroArityProgram :: BackendProgram
+localPolymorphicZeroArityProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = optionTy intTy,
+                      backendBindingExpr =
+                        BackendLet
+                          (optionTy intTy)
+                          "none"
+                          nonePolyTy
+                          nonePolyExpr
+                          ( BackendTyApp
+                              (optionTy intTy)
+                              (BackendVar nonePolyTy "none")
+                              intTy
+                          ),
                       backendBindingExportedAsMain = True
                     }
                 ]
