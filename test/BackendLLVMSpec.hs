@@ -59,6 +59,12 @@ spec = describe "MLF.Backend.LLVM" $ do
     goldenText "test/golden/backend-string.ll.golden" output
     validateLLVMAssembly output
 
+  it "uses collision-free names for distinct type specializations" $ do
+    output <- requireRight (renderBackendProgramLLVM specializationNameCollisionProgram)
+
+    length (filter (isInfixOf "define private ptr @\"poly$t") (lines output)) `shouldBe` 2
+    validateLLVMAssembly output
+
   it "lowers Nat construction and case analysis to heap tags and switch" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-case-analysis.mlfp"
 
@@ -179,6 +185,71 @@ stringProgram =
         ],
       backendProgramMain = "main"
     }
+
+specializationNameCollisionProgram :: BackendProgram
+specializationNameCollisionProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData =
+                [ BackendData "A_B" [] [BackendConstructor "MkA_B" [] [] aUnderscoreTy],
+                  BackendData "A'B" [] [BackendConstructor "MkA'B" [] [] aPrimeTy]
+                ],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "poly",
+                      backendBindingType = polyIdTy,
+                      backendBindingExpr = polyIdExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLet
+                          intTy
+                          "left"
+                          aUnderscoreTy
+                          (polyIdCall aUnderscoreTy (BackendConstruct aUnderscoreTy "MkA_B" []))
+                          ( BackendLet
+                              intTy
+                              "right"
+                              aPrimeTy
+                              (polyIdCall aPrimeTy (BackendConstruct aPrimeTy "MkA'B" []))
+                              (intLit 0)
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+polyIdTy :: BackendType
+polyIdTy =
+  BTForall "a" Nothing (BTArrow (BTVar "a") (BTVar "a"))
+
+polyIdExpr :: BackendExpr
+polyIdExpr =
+  BackendTyAbs
+    polyIdTy
+    "a"
+    Nothing
+    ( BackendLam
+        (BTArrow (BTVar "a") (BTVar "a"))
+        "x"
+        (BTVar "a")
+        (BackendVar (BTVar "a") "x")
+    )
+
+polyIdCall :: BackendType -> BackendExpr -> BackendExpr
+polyIdCall ty arg =
+  BackendApp
+    ty
+    (BackendTyApp (BTArrow ty ty) (BackendVar polyIdTy "poly") ty)
+    arg
 
 partialApplicationProgram :: BackendProgram
 partialApplicationProgram =
@@ -331,6 +402,14 @@ binaryIntTy =
 fnBoxTy :: BackendType
 fnBoxTy =
   BTBase (BaseTy "FnBox")
+
+aUnderscoreTy :: BackendType
+aUnderscoreTy =
+  BTBase (BaseTy "A_B")
+
+aPrimeTy :: BackendType
+aPrimeTy =
+  BTBase (BaseTy "A'B")
 
 mysteryTy :: BackendType
 mysteryTy =

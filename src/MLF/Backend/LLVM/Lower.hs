@@ -23,6 +23,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
+import Numeric (showHex)
 
 import MLF.Backend.IR
 import MLF.Backend.LLVM.Syntax
@@ -314,6 +315,14 @@ collectSpecializationRequests base substitution expr =
                 not (null (ffTypeBinders (biForm binding))),
                 length typeArgs == length (ffTypeBinders (biForm binding)) ->
                   [SpecRequest name (map (substituteBackendTypes substitution) typeArgs)]
+            Just (BackendVar _ name, typeArgs, args)
+              | Just binding <- Map.lookup name (pbBindings base),
+                not (null (ffTypeBinders (biForm binding))) ->
+                  let typeArgs' = map (substituteBackendTypes substitution) typeArgs
+                      args' = map (substituteExprTypes substitution) args
+                   in case instantiateFunctionFormWithTypeArgs ("specialization request " ++ name) (biForm binding) typeArgs' args' of
+                        Right (resolvedTypeArgs, _) -> [SpecRequest name resolvedTypeArgs]
+                        Left _ -> []
             _ -> []
         _ -> []
 
@@ -427,15 +436,7 @@ specializedFunctionName request =
 
 backendTypeKey :: BackendType -> String
 backendTypeKey =
-  sanitizeKey . show
-
-sanitizeKey :: String -> String
-sanitizeKey =
-  map sanitizeChar
-  where
-    sanitizeChar char
-      | isAlphaNum char = char
-      | otherwise = '_'
+  ("t" ++) . intercalate "_" . map (flip showHex "" . ord) . show
 
 lowerMonomorphicBinding :: ProgramEnv -> BindingInfo -> Either BackendLLVMError LLVMFunction
 lowerMonomorphicBinding env binding =
@@ -634,13 +635,13 @@ lowerGlobalCall env exprEnv context name typeArgs args
         Nothing ->
           liftEither (BackendLLVMUnknownFunction name)
         Just binding -> do
-          form <- instantiateFunctionFormM context (biForm binding) typeArgs args
+          (resolvedTypeArgs, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs args
           unless (length args == length (ffParams form)) $
             liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
           bindFunctionArguments env context name form callArgs
           resultTy <- lowerBackendTypeM env context (ffReturnType form)
-          functionName <- globalFunctionName env context binding typeArgs
+          functionName <- globalFunctionName env context binding resolvedTypeArgs
           result <- emitAssign "call" resultTy (LLVMCall functionName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
           pure (LowerValue (ffReturnType form) resultTy result)
 
@@ -690,21 +691,42 @@ extendExprEnvWithArguments exprEnv form args =
 
 instantiateFunctionFormM :: String -> FunctionForm -> [BackendType] -> [BackendExpr] -> LowerM FunctionForm
 instantiateFunctionFormM context form typeArgs args =
-  case instantiateFunctionForm context form typeArgs args of
+  case instantiateFunctionFormWithTypeArgs context form typeArgs args of
+    Right (_, instantiated) -> pure instantiated
+    Left err -> liftEither err
+
+instantiateFunctionFormWithTypeArgsM :: String -> FunctionForm -> [BackendType] -> [BackendExpr] -> LowerM ([BackendType], FunctionForm)
+instantiateFunctionFormWithTypeArgsM context form typeArgs args =
+  case instantiateFunctionFormWithTypeArgs context form typeArgs args of
     Right instantiated -> pure instantiated
     Left err -> liftEither err
 
 instantiateFunctionForm :: String -> FunctionForm -> [BackendType] -> [BackendExpr] -> Either BackendLLVMError FunctionForm
-instantiateFunctionForm context form typeArgs args = do
+instantiateFunctionForm context form typeArgs args =
+  snd <$> instantiateFunctionFormWithTypeArgs context form typeArgs args
+
+instantiateFunctionFormWithTypeArgs :: String -> FunctionForm -> [BackendType] -> [BackendExpr] -> Either BackendLLVMError ([BackendType], FunctionForm)
+instantiateFunctionFormWithTypeArgs context form typeArgs args = do
   substitution <- resolveTypeArguments context form typeArgs args
+  resolvedTypeArgs <- resolvedTypeArguments context (map fst (ffTypeBinders form)) substitution
   let substituteTy = substituteBackendTypes substitution
-  pure
-    FunctionForm
-      { ffTypeBinders = [],
-        ffParams = [(name, substituteTy ty) | (name, ty) <- ffParams form],
-        ffBody = substituteExprTypes substitution (ffBody form),
-        ffReturnType = substituteTy (ffReturnType form)
-      }
+      instantiated =
+        FunctionForm
+          { ffTypeBinders = [],
+            ffParams = [(name, substituteTy ty) | (name, ty) <- ffParams form],
+            ffBody = substituteExprTypes substitution (ffBody form),
+            ffReturnType = substituteTy (ffReturnType form)
+          }
+  pure (resolvedTypeArgs, instantiated)
+
+resolvedTypeArguments :: String -> [String] -> Map String BackendType -> Either BackendLLVMError [BackendType]
+resolvedTypeArguments context binderNames substitution =
+  traverse lookupResolved binderNames
+  where
+    lookupResolved name =
+      case Map.lookup name substitution of
+        Just ty -> Right ty
+        Nothing -> Left (BackendLLVMInternalError ("missing resolved type argument " ++ show name ++ " at " ++ context))
 
 resolveTypeArguments :: String -> FunctionForm -> [BackendType] -> [BackendExpr] -> Either BackendLLVMError (Map String BackendType)
 resolveTypeArguments context form explicitArgs valueArgs
