@@ -13,4 +13,3 @@ entry:
   %"__llvm.call.0" = call i64 @"Main__id"(i64 1)
   ret i64 %"__llvm.call.0"
 }
-

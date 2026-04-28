@@ -19,13 +19,18 @@ import MLF.Backend.LLVM.Syntax
 
 renderLLVMModule :: LLVMModule -> String
 renderLLVMModule llvmModule =
-  unlines $
+  renderLines $
     ["; mlf2 LLVM backend v0", "source_filename = \"mlf2\""]
       ++ blankSeparated
         [ map renderLLVMGlobal (llvmModuleGlobals llvmModule),
           map renderLLVMDeclaration (llvmModuleDeclarations llvmModule),
-          map renderLLVMFunction (llvmModuleFunctions llvmModule)
+          blankSeparated (map renderLLVMFunctionLines (llvmModuleFunctions llvmModule))
         ]
+
+renderLines :: [String] -> String
+renderLines [] = ""
+renderLines lines0 =
+  intercalate "\n" lines0 ++ "\n"
 
 blankSeparated :: [[String]] -> [String]
 blankSeparated =
@@ -54,9 +59,8 @@ renderLLVMDeclaration declaration =
     ++ intercalate ", " (map renderLLVMType (llvmDeclarationParameters declaration))
     ++ ")"
 
-renderLLVMFunction :: LLVMFunction -> String
-renderLLVMFunction function =
-  unlines $
+renderLLVMFunctionLines :: LLVMFunction -> [String]
+renderLLVMFunctionLines function =
     [ "define "
         ++ privateText
         ++ renderLLVMType (llvmFunctionReturnType function)

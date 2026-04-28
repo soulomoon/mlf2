@@ -77,6 +77,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "phi ptr"
     validateLLVMAssembly output
 
+  it "emits recursive-list CLI fixtures without ambiguous Prelude data" $ do
+    output <- requireRight =<< emitBackendFile "test/programs/recursive-adt/recursive-list-tail.mlfp"
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"RecursiveList__tailOrNil\""
+    output `shouldSatisfy` isInfixOf "define i1 @\"RecursiveList__isNil\""
+    output `shouldSatisfy` isInfixOf "phi ptr"
+    validateLLVMAssembly output
+
   it "lowers a first-order existential/GADT-shaped recursive case fixture" $ do
     output <- requireRight =<< emitBackendFile "test/programs/recursive-adt/recursive-existential.mlfp"
 

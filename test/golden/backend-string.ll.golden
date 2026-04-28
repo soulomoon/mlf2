@@ -9,4 +9,3 @@ define ptr @"main"() {
 entry:
   ret ptr @"__mlfp_str.0"
 }
-
