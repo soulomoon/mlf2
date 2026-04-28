@@ -330,14 +330,15 @@ runLLVMUnifiedFixture path =
       "test/programs/unified/authoritative-cross-module-let-polymorphism.mlfp" -> do
         output `shouldSatisfy` isInfixOf "define i64 @\"Core__applyId\"()"
         output `shouldSatisfy` isInfixOf "define i64 @\"User__main\"()"
+        validateLLVMAssembly output
         validateLLVMObjectCode output
       "test/programs/unified/authoritative-case-analysis.mlfp" -> do
         output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
         output `shouldSatisfy` isInfixOf "switch i64"
         output `shouldSatisfy` isInfixOf "phi i64"
+        validateLLVMAssembly output
         validateLLVMObjectCode output
-      _ -> pure ()
-    validateLLVMAssembly output
+      _ -> validateLLVMAssembly output
 
 renderProgramMatrixSourceLLVM :: ProgramMatrixSource -> IO String
 renderProgramMatrixSourceLLVM source =
