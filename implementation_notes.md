@@ -1,3 +1,17 @@
+## 2026-04-28 - Shared Program-to-LLVM parity matrix
+
+- Extracted the `.mlfp` interpreter-success surface from `ProgramSpec` into
+  `ProgramParityMatrix`, including recursive-ADT fixtures, unified fixtures,
+  `ExpectRunValue` rows from the eMLF surface and boundary matrices, and the
+  standalone source-program runtime checks that were previously embedded in
+  `ProgramSpec`.
+- Added `ProgramLLVMParitySpec` to emit LLVM for the shared runtime-success
+  surface. Supported cases must produce LLVM accepted by `llvm-as`, while a
+  small named subset also runs through `llc -filetype=obj -o /dev/null`.
+- Temporary LLVM gaps are named in one explicit unsupported table and checked
+  against a fixed count, so adding or removing interpreter-success coverage
+  cannot silently change the backend parity surface.
+
 ## 2026-04-28 - Real LLVM backend boundary
 
 - Replaced the former backend inspection-text boundary with `MLF.Backend.LLVM`,

@@ -28,6 +28,7 @@ import Phi.AlignmentSpec qualified
 import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
 import PipelineSpec qualified
+import ProgramLLVMParitySpec qualified
 import ProgramSpec qualified
 import Presolution.UnificationClosureSpec qualified
 import PresolutionFacadeSpec qualified
@@ -79,6 +80,7 @@ main = do
     BackendConvertSpec.spec
     BackendIRSpec.spec
     BackendLLVMSpec.spec
+    ProgramLLVMParitySpec.spec
     ProgramSpec.spec
     ResolvedSymbolSpec.spec
     PipelineSpec.spec

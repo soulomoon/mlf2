@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Extracted `ProgramSpec` interpreter-success inputs into a shared `.mlfp`
+  parity matrix and added LLVM parity coverage that emits every supported
+  interpreter-success case, validates it with `llvm-as`, smoke-tests a small
+  `llc` subset, and mechanically counts explicit temporary LLVM unsupported
+  classifications.
 - Replaced the private backend inspection-text boundary with a repo-local LLVM
   IR backend in `MLF.Backend.LLVM`, including a small typed LLVM AST,
   pretty-printer, backend IR lowerer, checked-program facade, deterministic
