@@ -106,6 +106,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "missing specialization"
     validateLLVMAssembly output
 
+  it "collects global specializations after direct head type instantiation" $ do
+    output <- requireRight (renderBackendProgramLLVM directHeadGlobalPolymorphicZeroArityProgram)
+
+    output `shouldSatisfy` isInfixOf "define private ptr @\"none$t"
+    output `shouldSatisfy` isInfixOf "call ptr @\"none$t"
+    output `shouldNotSatisfy` isInfixOf "missing specialization"
+    validateLLVMAssembly output
+
   it "lowers Nat construction and case analysis to heap tags and switch" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-case-analysis.mlfp"
 
@@ -418,6 +426,36 @@ letHeadGlobalPolymorphicZeroArityProgram =
       backendProgramMain = "main"
     }
 
+directHeadGlobalPolymorphicZeroArityProgram :: BackendProgram
+directHeadGlobalPolymorphicZeroArityProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "none",
+                      backendBindingType = nonePolyTy,
+                      backendBindingExpr = nonePolyExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = optionTy intTy,
+                      backendBindingExpr =
+                        BackendTyApp
+                          (optionTy intTy)
+                          noneViaDirectTyAbsExpr
+                          intTy,
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
 optionData :: BackendData
 optionData =
   BackendData
@@ -440,6 +478,18 @@ nonePolyExpr =
     "a"
     Nothing
     (BackendConstruct (optionTy (BTVar "a")) "None" [])
+
+noneViaDirectTyAbsExpr :: BackendExpr
+noneViaDirectTyAbsExpr =
+  BackendTyAbs
+    nonePolyTy
+    "a"
+    Nothing
+    ( BackendTyApp
+        (optionTy (BTVar "a"))
+        (BackendVar nonePolyTy "none")
+        (BTVar "a")
+    )
 
 polyIdTy :: BackendType
 polyIdTy =

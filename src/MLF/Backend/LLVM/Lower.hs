@@ -353,9 +353,8 @@ collectSpecializationRequests base substitution expr =
             ++ collectSpecializationRequests base substitution body
         BackendTyAbs _ name _ body ->
           collectSpecializationRequests base (Map.delete name substitution) body
-        BackendTyApp _ fun ty ->
-          collectSpecializationRequests base substitution fun
-            ++ concatMap (const []) [ty]
+        BackendTyApp {} ->
+          []
         BackendConstruct _ _ args ->
           concatMap (collectSpecializationRequests base substitution) args
         BackendCase _ scrutinee alternatives ->
@@ -367,9 +366,22 @@ collectSpecializationRequests base substitution expr =
           collectSpecializationRequests base substitution payload
 
     collectAdministrativeTypeAppRequests fun typeArgs =
-      case pushTypeApplicationsIntoExpression "specialization request" (backendExprType expr) fun typeArgs of
-        Right (Just applied) -> collectSpecializationRequests base substitution applied
-        _ -> []
+      case pushTypeApplicationsIntoExpression context resultTy fun' typeArgs' of
+        Right (Just applied) ->
+          collectSpecializationRequests base Map.empty applied
+        Right Nothing ->
+          case instantiateFunctionFormWithTypeArgs context (functionFormFromExpr fun') typeArgs' [] of
+            Right (_, form) ->
+              collectSpecializationRequests base Map.empty (ffBody form)
+            Left _ ->
+              []
+        Left _ ->
+          []
+      where
+        context = "specialization request"
+        resultTy = substituteBackendTypes substitution (backendExprType expr)
+        fun' = substituteExprTypes substitution fun
+        typeArgs' = map (substituteBackendTypes substitution) typeArgs
 
 freeGlobalBindingRefs :: ProgramBase -> BindingInfo -> Set String
 freeGlobalBindingRefs base binding =
