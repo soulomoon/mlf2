@@ -2,7 +2,7 @@ module BackendConvertSpec (spec) where
 
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
-import Data.List (find, intercalate)
+import Data.List (find, intercalate, isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Backend.Convert
 import MLF.Backend.IR
@@ -336,10 +336,41 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding `shouldBe` BackendLit intTy (LInt 1)
 
-  it "rejects recursive local lets before emitting invalid backend IR" $ do
+  it "promotes closed recursive local lets to backend helper bindings" $ do
     checked <- requireChecked =<< readFile "test/programs/unified/authoritative-recursive-let.mlfp"
+    backend <- requireRight (convertCheckedProgram checked)
 
-    convertCheckedProgram checked `shouldBe` Left (BackendUnsupportedRecursiveLet "$peel#0")
+    validateBackendProgram backend `shouldBe` Right ()
+
+    helper <-
+      case filter (isInfixOf "$letrec$" . backendBindingName) (backendBindings backend) of
+        [helper] -> pure helper
+        helpers -> expectationFailure ("expected one lifted helper, got " ++ show (map backendBindingName helpers)) >> fail "helper mismatch"
+    backendBindingType helper `shouldSatisfy` isBackendFunctionType
+    backendBindingExpr helper `shouldSatisfy` containsBackendCase
+    backendBindingExpr helper `shouldSatisfy` containsBackendVar (backendBindingName helper)
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendVar (backendBindingName helper)
+
+  it "rejects recursive local functions that capture lexical values" $ do
+    checked <- requireChecked recursiveLetCaptureProgram
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedRecursiveLet detail) ->
+        detail `shouldSatisfy` isInfixOf "captures lexical bindings"
+      other ->
+        expectationFailure ("expected recursive-let capture rejection, got " ++ show other)
+
+  it "rejects nested recursive local functions that capture outer recursive functions" $ do
+    checked <- requireChecked nestedRecursiveLetCaptureProgram
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedRecursiveLet detail) -> do
+        detail `shouldSatisfy` isInfixOf "captures lexical bindings"
+        detail `shouldSatisfy` isInfixOf "peel"
+      other ->
+        expectationFailure ("expected nested recursive-let capture rejection, got " ++ show other)
 
   it "reports unsupported source type applications instead of weakening them" $ do
     convertSourceType unsupportedVariableHeadType
@@ -351,6 +382,43 @@ simpleFunctionProgram =
     [ "module Main export (main) {",
       "  def id : Int -> Int = \\x x;",
       "  def main : Int = id 1;",
+      "}"
+    ]
+
+recursiveLetCaptureProgram :: String
+recursiveLetCaptureProgram =
+  unlines
+    [ "module Main export (Nat(..), main) {",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat;",
+      "",
+      "  def main : Nat -> Nat = \\(seed : Nat)",
+      "    let peel : Nat -> Nat = \\(n : Nat) case n of {",
+      "      Zero -> seed;",
+      "      Succ inner -> peel inner",
+      "    } in peel seed;",
+      "}"
+    ]
+
+nestedRecursiveLetCaptureProgram :: String
+nestedRecursiveLetCaptureProgram =
+  unlines
+    [ "module Main export (Nat(..), main) {",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat;",
+      "",
+      "  def main : Nat -> Nat =",
+      "    let peel : Nat -> Nat = \\(n : Nat)",
+      "      let bounce : Nat -> Nat = \\(m : Nat) case m of {",
+      "        Zero -> peel Zero;",
+      "        Succ inner -> bounce inner",
+      "      } in case n of {",
+      "        Zero -> Zero;",
+      "        Succ inner -> bounce inner",
+      "      }",
+      "    in peel;",
       "}"
     ]
 
@@ -772,6 +840,33 @@ containsBackendTyApp expr =
     BackendConstruct {backendConstructArgs = args} -> any containsBackendTyApp args
     BackendRoll {backendRollPayload = body} -> containsBackendTyApp body
     BackendUnroll {backendUnrollPayload = body} -> containsBackendTyApp body
+    _ -> False
+
+containsBackendVar :: String -> BackendExpr -> Bool
+containsBackendVar expected expr =
+  case expr of
+    BackendVar {backendVarName = name} -> name == expected
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendVar expected scrutinee || any (containsBackendVar expected . backendAltBody) (toList alternatives)
+    BackendLam {backendParamName = name, backendBody = body}
+      | name == expected -> False
+      | otherwise -> containsBackendVar expected body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsBackendVar expected fun || containsBackendVar expected arg
+    BackendLet {backendLetName = name, backendLetRhs = rhs, backendLetBody = body}
+      | name == expected -> containsBackendVar expected rhs
+      | otherwise -> containsBackendVar expected rhs || containsBackendVar expected body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendVar expected body
+    BackendTyApp {backendTyFunction = fun} -> containsBackendVar expected fun
+    BackendConstruct {backendConstructArgs = args} -> any (containsBackendVar expected) args
+    BackendRoll {backendRollPayload = body} -> containsBackendVar expected body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendVar expected body
+    _ -> False
+
+isBackendFunctionType :: BackendType -> Bool
+isBackendFunctionType ty =
+  case ty of
+    BTArrow {} -> True
     _ -> False
 
 containsConstructArgType :: String -> BackendType -> BackendExpr -> Bool

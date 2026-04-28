@@ -1,0 +1,17 @@
+module RecursiveTreeFirstOrder export (Tree(..), mirror, isBranch, main) {
+  data Tree =
+      Leaf : Tree
+    | Branch : Tree -> Tree -> Tree;
+
+  def mirror : Tree -> Tree = \(tree : Tree) case tree of {
+    Leaf -> Leaf;
+    Branch left right -> Branch (mirror right) (mirror left)
+  };
+
+  def isBranch : Tree -> Bool = \(tree : Tree) case tree of {
+    Leaf -> false;
+    Branch _ _ -> true
+  };
+
+  def main : Bool = isBranch (mirror (Branch Leaf Leaf));
+}
