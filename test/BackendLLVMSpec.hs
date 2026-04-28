@@ -138,6 +138,22 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM call"
     validateLLVMAssembly output
 
+  it "lowers case-headed calls before call dispatch" $ do
+    output <- requireRight (renderBackendProgramLLVM caseHeadedCallProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
+    output `shouldSatisfy` isInfixOf "call i64 @\"id\""
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM call"
+    validateLLVMAssembly output
+
+  it "resolves a global named like the runtime and primitive before intrinsic dispatch" $ do
+    output <- requireRight (renderBackendProgramLLVM userNamedRuntimeAndProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"__mlfp_and\"(i64"
+    output `shouldSatisfy` isInfixOf "call i64 @\"__mlfp_and\""
+    output `shouldNotSatisfy` isInfixOf "declare i1 @\"__mlfp_and\"(i1, i1)"
+    validateLLVMAssembly output
+
   it "lowers Nat construction and case analysis to heap tags and switch" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-case-analysis.mlfp"
 
@@ -534,6 +550,66 @@ letHeadedCallProgram =
       intTy
       (BackendLet unaryIntTy "id" unaryIntTy intIdentityExpr (BackendVar unaryIntTy "id"))
       (intLit 7)
+
+caseHeadedCallProgram :: BackendProgram
+caseHeadedCallProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "id",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr = intIdentityExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "fallback",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr =
+                        BackendLam unaryIntTy "x" intTy (intLit 9),
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          ( BackendCase
+                              unaryIntTy
+                              (BackendConstruct (optionTy intTy) "Some" [intLit 0])
+                              ( BackendAlternative (BackendConstructorPattern "Some" ["value"]) (BackendVar unaryIntTy "id")
+                                  :| [BackendAlternative (BackendConstructorPattern "None" []) (BackendVar unaryIntTy "fallback")]
+                              )
+                          )
+                          (intLit 7),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+userNamedRuntimeAndProgram :: BackendProgram
+userNamedRuntimeAndProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "__mlfp_and",
+          backendBindingType = unaryIntTy,
+          backendBindingExpr = intIdentityExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr = BackendApp intTy (BackendVar unaryIntTy "__mlfp_and") (intLit 7),
+          backendBindingExportedAsMain = True
+        }
+    ]
 
 duplicateConstructorCaseProgram :: BackendProgram
 duplicateConstructorCaseProgram =

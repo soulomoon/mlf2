@@ -144,15 +144,20 @@ lowerBackendProgram program = do
     LLVMModule
       { llvmModuleGlobals =
           [LLVMStringGlobal globalName value | (value, globalName) <- Map.toAscList stringGlobals],
-        llvmModuleDeclarations = runtimeDeclarations,
+        llvmModuleDeclarations = runtimeDeclarations base,
         llvmModuleFunctions = functions
       }
 
-runtimeDeclarations :: [LLVMDeclaration]
-runtimeDeclarations =
-  [ LLVMDeclaration "malloc" LLVMPtr [LLVMInt 64],
-    LLVMDeclaration "__mlfp_and" (LLVMInt 1) [LLVMInt 1, LLVMInt 1]
-  ]
+runtimeAndName :: String
+runtimeAndName =
+  "__mlfp_and"
+
+runtimeDeclarations :: ProgramBase -> [LLVMDeclaration]
+runtimeDeclarations base =
+  LLVMDeclaration "malloc" LLVMPtr [LLVMInt 64]
+    : [ LLVMDeclaration runtimeAndName (LLVMInt 1) [LLVMInt 1, LLVMInt 1]
+        | Map.notMember runtimeAndName (pbBindings base)
+      ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
 buildProgramBase program = do
@@ -716,8 +721,14 @@ pushCallIntoExpression context resultTy fun typeArgs args =
     BackendLet _ name bindingTy rhs body -> do
       appliedBody <- applyCallToExpr context resultTy body typeArgs args
       pure (Just (BackendLet resultTy name bindingTy rhs appliedBody))
+    BackendCase _ scrutinee alternatives -> do
+      appliedAlternatives <- traverse applyAlternative alternatives
+      pure (Just (BackendCase resultTy scrutinee appliedAlternatives))
     _ ->
       pure Nothing
+  where
+    applyAlternative (BackendAlternative pattern0 body) =
+      BackendAlternative pattern0 <$> applyCallToExpr context resultTy body typeArgs args
 
 applyCallToExpr :: String -> BackendType -> BackendExpr -> [BackendType] -> [BackendExpr] -> Either BackendLLVMError BackendExpr
 applyCallToExpr context expectedTy expr typeArgs args = do
@@ -871,29 +882,29 @@ lowerDirectFunctionCall env exprEnv context form0 typeArgs args = do
   lowerExpr env (extendExprEnvWithArguments exprEnv form callArgs) context (ffBody form)
 
 lowerGlobalCall :: ProgramEnv -> ExprEnv -> String -> String -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
-lowerGlobalCall env exprEnv context name typeArgs args
-  | name == "__mlfp_and" = do
-      unless (length args == 2) $
-        liftEither (BackendLLVMArityMismatch name 2 (length args))
+lowerGlobalCall env exprEnv context name typeArgs args =
+  case Map.lookup name (pbBindings (peBase env)) of
+    Just binding -> do
+      (resolvedTypeArgs, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs args
+      unless (length args == length (ffParams form)) $
+        liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
       callArgs <- traverse (lowerExpr env exprEnv context) args
-      let expectedTypes = [LLVMInt 1, LLVMInt 1]
-      zipWithM_ (requireLLVMType context name) expectedTypes callArgs
-      result <- emitAssign "call" (LLVMInt 1) (LLVMCall "__mlfp_and" [(LLVMInt 1, lvOperand arg) | arg <- callArgs])
-      pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result)
-  | otherwise =
-      case Map.lookup name (pbBindings (peBase env)) of
-        Nothing ->
-          liftEither (BackendLLVMUnknownFunction name)
-        Just binding -> do
-          (resolvedTypeArgs, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs args
-          unless (length args == length (ffParams form)) $
-            liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
+      bindFunctionArguments env context name form callArgs
+      resultTy <- lowerBackendTypeM env context (ffReturnType form)
+      functionName <- globalFunctionName env context binding resolvedTypeArgs
+      result <- emitAssign "call" resultTy (LLVMCall functionName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
+      pure (LowerValue (ffReturnType form) resultTy result)
+    Nothing
+      | name == runtimeAndName -> do
+          unless (length args == 2) $
+            liftEither (BackendLLVMArityMismatch name 2 (length args))
           callArgs <- traverse (lowerExpr env exprEnv context) args
-          bindFunctionArguments env context name form callArgs
-          resultTy <- lowerBackendTypeM env context (ffReturnType form)
-          functionName <- globalFunctionName env context binding resolvedTypeArgs
-          result <- emitAssign "call" resultTy (LLVMCall functionName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
-          pure (LowerValue (ffReturnType form) resultTy result)
+          let expectedTypes = [LLVMInt 1, LLVMInt 1]
+          zipWithM_ (requireLLVMType context name) expectedTypes callArgs
+          result <- emitAssign "call" (LLVMInt 1) (LLVMCall runtimeAndName [(LLVMInt 1, lvOperand arg) | arg <- callArgs])
+          pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result)
+    Nothing ->
+      liftEither (BackendLLVMUnknownFunction name)
 
 globalFunctionName :: ProgramEnv -> String -> BindingInfo -> [BackendType] -> LowerM String
 globalFunctionName env context binding typeArgs
