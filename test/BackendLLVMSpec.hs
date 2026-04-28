@@ -129,6 +129,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "poly$t"
     validateLLVMAssembly output
 
+  it "collects specializations from let-promoted local function aliases" $ do
+    output <- requireRight (renderBackendProgramLLVM letPromotedAliasSpecializationProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"poly$t"
+    output `shouldSatisfy` isInfixOf "call i64 @\"poly$t"
+    output `shouldNotSatisfy` isInfixOf "missing specialization"
+    validateLLVMAssembly output
+
   it "lowers local function aliases without requiring closure conversion" $ do
     output <- requireRight (renderBackendProgramLLVM localFunctionAliasProgram)
 
@@ -610,6 +618,29 @@ letShadowedGlobalSpecializationProgram =
         ],
       backendProgramMain = "main"
     }
+
+letPromotedAliasSpecializationProgram :: BackendProgram
+letPromotedAliasSpecializationProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "poly",
+          backendBindingType = polyIdTy,
+          backendBindingExpr = polyIdExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendLet
+              intTy
+              "g"
+              unaryIntTy
+              (BackendTyApp unaryIntTy (BackendVar polyIdTy "poly") intTy)
+              (BackendApp intTy (BackendVar unaryIntTy "g") (intLit 7)),
+          backendBindingExportedAsMain = True
+        }
+    ]
 
 localFunctionAliasProgram :: BackendProgram
 localFunctionAliasProgram =

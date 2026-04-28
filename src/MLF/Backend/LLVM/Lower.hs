@@ -485,10 +485,19 @@ collectRequiredSpecializations base reachable =
 
 collectSpecializationRequestsInForm :: ProgramBase -> Map String BackendType -> FunctionForm -> [SpecRequest]
 collectSpecializationRequestsInForm base substitution form =
+  collectSpecializationRequestsInFormWithBound base substitution Set.empty form
+
+collectSpecializationRequestsInFormWithBound ::
+  ProgramBase ->
+  Map String BackendType ->
+  Set String ->
+  FunctionForm ->
+  [SpecRequest]
+collectSpecializationRequestsInFormWithBound base substitution bound form =
   collectSpecializationRequestsWithBound
     base
     substitution
-    (Set.fromList (map fst (ffParams form)))
+    (Set.union (Set.fromList (map fst (ffParams form))) bound)
     (ffBody form)
 
 collectSpecializationRequestsWithBound ::
@@ -547,8 +556,8 @@ collectSpecializationRequestsWithBound base substitution bound expr =
         BackendApp _ fun arg ->
           collectSpecializationRequestsWithBound base substitution bound fun
             ++ collectSpecializationRequestsWithBound base substitution bound arg
-        BackendLet _ name _ rhs body ->
-          collectSpecializationRequestsWithBound base substitution bound rhs
+        BackendLet _ name bindingTy rhs body ->
+          collectLetRhsSpecializationRequests bindingTy rhs
             ++ collectSpecializationRequestsWithBound base substitution (Set.insert name bound) body
         BackendTyAbs _ name _ body ->
           collectSpecializationRequestsWithBound base (Map.delete name substitution) bound body
@@ -570,6 +579,14 @@ collectSpecializationRequestsWithBound base substitution bound expr =
         substitution
         (Set.union (patternBinders (backendAltPattern alternative)) bound)
         (backendAltBody alternative)
+
+    collectLetRhsSpecializationRequests bindingTy rhs =
+      case functionFormFromExpected bindingTy rhs of
+        form
+          | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+              collectSpecializationRequestsInFormWithBound base substitution bound form
+        _ ->
+          collectSpecializationRequestsWithBound base substitution bound rhs
 
     collectAdministrativeTypeAppRequests fun typeArgs =
       case pushTypeApplicationsIntoExpression context resultTy fun' typeArgs' of
