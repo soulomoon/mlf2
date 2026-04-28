@@ -90,6 +90,22 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "escaping type abstraction"
     validateLLVMAssembly output
 
+  it "instantiates polymorphic zero-arity values when type application crosses let heads" $ do
+    output <- requireRight (renderBackendProgramLLVM letHeadPolymorphicZeroArityProgram)
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"main\"()"
+    output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
+    output `shouldNotSatisfy` isInfixOf "unexpected type arguments"
+    validateLLVMAssembly output
+
+  it "collects global specializations when type application crosses let heads" $ do
+    output <- requireRight (renderBackendProgramLLVM letHeadGlobalPolymorphicZeroArityProgram)
+
+    output `shouldSatisfy` isInfixOf "define private ptr @\"none$t"
+    output `shouldSatisfy` isInfixOf "call ptr @\"none$t"
+    output `shouldNotSatisfy` isInfixOf "missing specialization"
+    validateLLVMAssembly output
+
   it "lowers Nat construction and case analysis to heap tags and switch" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-case-analysis.mlfp"
 
@@ -327,6 +343,72 @@ directPolymorphicZeroArityProgram =
                         BackendTyApp
                           (optionTy intTy)
                           nonePolyExpr
+                          intTy,
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+letHeadPolymorphicZeroArityProgram :: BackendProgram
+letHeadPolymorphicZeroArityProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = optionTy intTy,
+                      backendBindingExpr =
+                        BackendTyApp
+                          (optionTy intTy)
+                          ( BackendLet
+                              nonePolyTy
+                              "none"
+                              nonePolyTy
+                              nonePolyExpr
+                              (BackendVar nonePolyTy "none")
+                          )
+                          intTy,
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+letHeadGlobalPolymorphicZeroArityProgram :: BackendProgram
+letHeadGlobalPolymorphicZeroArityProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "none",
+                      backendBindingType = nonePolyTy,
+                      backendBindingExpr = nonePolyExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = optionTy intTy,
+                      backendBindingExpr =
+                        BackendTyApp
+                          (optionTy intTy)
+                          ( BackendLet
+                              nonePolyTy
+                              "ignored"
+                              intTy
+                              (intLit 0)
+                              (BackendVar nonePolyTy "none")
+                          )
                           intTy,
                       backendBindingExportedAsMain = True
                     }

@@ -335,7 +335,8 @@ collectSpecializationRequests base substitution expr =
                         Right (resolvedTypeArgs, form)
                           | null (ffParams form) -> [SpecRequest name resolvedTypeArgs]
                         _ -> []
-            _ -> []
+            (fun, typeArgs) ->
+              collectAdministrativeTypeAppRequests fun typeArgs
         _ -> []
 
     childRequests =
@@ -364,6 +365,11 @@ collectSpecializationRequests base substitution expr =
           collectSpecializationRequests base substitution payload
         BackendUnroll _ payload ->
           collectSpecializationRequests base substitution payload
+
+    collectAdministrativeTypeAppRequests fun typeArgs =
+      case pushTypeApplicationsIntoExpression "specialization request" (backendExprType expr) fun typeArgs of
+        Right (Just applied) -> collectSpecializationRequests base substitution applied
+        _ -> []
 
 freeGlobalBindingRefs :: ProgramBase -> BindingInfo -> Set String
 freeGlobalBindingRefs base binding =
@@ -558,8 +564,44 @@ lowerTyApp env exprEnv context expr =
 
 lowerDirectFunctionValue :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> [BackendType] -> LowerM LowerValue
 lowerDirectFunctionValue env exprEnv context resultTy fun typeArgs = do
-  form <- instantiateFunctionFormM context (functionFormFromExpr fun) typeArgs []
-  lowerInstantiatedFunctionValue env exprEnv context "type-applied expression" resultTy form
+  case pushTypeApplicationsIntoExpression context resultTy fun typeArgs of
+    Right (Just applied) ->
+      lowerExpr env exprEnv context applied
+    Right Nothing -> do
+      form <- instantiateFunctionFormM context (functionFormFromExpr fun) typeArgs []
+      lowerInstantiatedFunctionValue env exprEnv context "type-applied expression" resultTy form
+    Left err ->
+      liftEither err
+
+pushTypeApplicationsIntoExpression :: String -> BackendType -> BackendExpr -> [BackendType] -> Either BackendLLVMError (Maybe BackendExpr)
+pushTypeApplicationsIntoExpression context resultTy fun typeArgs =
+  case fun of
+    BackendLet _ name bindingTy rhs body -> do
+      appliedBody <- applyTypeApplicationsToExpr context resultTy body typeArgs
+      pure (Just (BackendLet resultTy name bindingTy rhs appliedBody))
+    BackendCase _ scrutinee alternatives -> do
+      appliedAlternatives <- traverse applyAlternative alternatives
+      pure (Just (BackendCase resultTy scrutinee appliedAlternatives))
+    _ ->
+      pure Nothing
+  where
+    applyAlternative (BackendAlternative pattern0 body) =
+      BackendAlternative pattern0 <$> applyTypeApplicationsToExpr context resultTy body typeArgs
+
+applyTypeApplicationsToExpr :: String -> BackendType -> BackendExpr -> [BackendType] -> Either BackendLLVMError BackendExpr
+applyTypeApplicationsToExpr context expectedTy expr typeArgs = do
+  (applied, actualTy) <- foldM applyOne (expr, backendExprType expr) typeArgs
+  unless (alphaEqBackendType expectedTy actualTy) $
+    Left (BackendLLVMInternalError ("type application result mismatch at " ++ context))
+  pure applied
+  where
+    applyOne (current, currentTy) typeArg =
+      case currentTy of
+        BTForall name _ bodyTy ->
+          let resultTy = substituteBackendType name typeArg bodyTy
+           in Right (BackendTyApp resultTy current typeArg, resultTy)
+        _ ->
+          Left (BackendLLVMUnsupportedCall ("unexpected type arguments at " ++ context))
 
 lowerLocalFunctionValue :: ProgramEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> LowerM LowerValue
 lowerLocalFunctionValue env context resultTy name localFunction typeArgs = do
