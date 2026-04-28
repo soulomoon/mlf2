@@ -152,12 +152,18 @@ runtimeAndName :: String
 runtimeAndName =
   "__mlfp_and"
 
+runtimeMallocName :: String
+runtimeMallocName =
+  "malloc"
+
 runtimeDeclarations :: ProgramBase -> [LLVMDeclaration]
 runtimeDeclarations base =
-  LLVMDeclaration "malloc" LLVMPtr [LLVMInt 64]
-    : [ LLVMDeclaration runtimeAndName (LLVMInt 1) [LLVMInt 1, LLVMInt 1]
-        | Map.notMember runtimeAndName (pbBindings base)
-      ]
+  [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64]
+    | Map.notMember runtimeMallocName (pbBindings base)
+  ]
+    ++ [ LLVMDeclaration runtimeAndName (LLVMInt 1) [LLVMInt 1, LLVMInt 1]
+         | Map.notMember runtimeAndName (pbBindings base)
+       ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
 buildProgramBase program = do
@@ -1088,7 +1094,7 @@ lowerConstruct env exprEnv context resultTy name args =
       unless (length args == length (backendConstructorFields constructor)) $
         liftEither (BackendLLVMArityMismatch name (length (backendConstructorFields constructor)) (length args))
       argValues <- traverse (lowerExpr env exprEnv context) args
-      object <- emitMalloc (8 * (1 + length args))
+      object <- emitMalloc env context (8 * (1 + length args))
       tagPtr <- emitGep "tag.ptr" object 0
       emitStore (LLVMInt 64) (LLVMIntLiteral 64 (crTag constructorRuntime)) tagPtr
       zipWithM_ (storeField object) [0 ..] argValues
@@ -1286,9 +1292,12 @@ lowerBackendType env context ty =
     BTForall {} -> Left (BackendLLVMUnsupportedType context ty)
     BTBottom -> Left (BackendLLVMUnsupportedType context ty)
 
-emitMalloc :: Int -> LowerM LLVMOperand
-emitMalloc size =
-  emitAssign "malloc" LLVMPtr (LLVMCall "malloc" [(LLVMInt 64, LLVMIntLiteral 64 (toInteger size))])
+emitMalloc :: ProgramEnv -> String -> Int -> LowerM LLVMOperand
+emitMalloc env context size
+  | Map.member runtimeMallocName (pbBindings (peBase env)) =
+      liftEither (BackendLLVMUnsupportedExpression context ("reserved runtime binding " ++ show runtimeMallocName))
+  | otherwise =
+      emitAssign "malloc" LLVMPtr (LLVMCall runtimeMallocName [(LLVMInt 64, LLVMIntLiteral 64 (toInteger size))])
 
 emitGep :: String -> LLVMOperand -> Int -> LowerM LLVMOperand
 emitGep prefix base offset =

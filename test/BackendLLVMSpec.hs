@@ -154,6 +154,18 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "declare i1 @\"__mlfp_and\"(i1, i1)"
     validateLLVMAssembly output
 
+  it "suppresses the runtime malloc declaration when a global owns that name" $ do
+    output <- requireRight (renderBackendProgramLLVM userNamedMallocProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"malloc\"(i64"
+    output `shouldSatisfy` isInfixOf "call i64 @\"malloc\""
+    output `shouldNotSatisfy` isInfixOf "declare ptr @\"malloc\"(i64)"
+    validateLLVMAssembly output
+
+  it "rejects constructor allocation when a global owns the runtime malloc name" $ do
+    renderBackendProgramLLVM mallocCollisionConstructorProgram
+      `shouldSatisfyLeft` isInfixOf "reserved runtime binding \"malloc\""
+
   it "lowers Nat construction and case analysis to heap tags and switch" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-case-analysis.mlfp"
 
@@ -610,6 +622,49 @@ userNamedRuntimeAndProgram =
           backendBindingExportedAsMain = True
         }
     ]
+
+userNamedMallocProgram :: BackendProgram
+userNamedMallocProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "malloc",
+          backendBindingType = unaryIntTy,
+          backendBindingExpr = intIdentityExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr = BackendApp intTy (BackendVar unaryIntTy "malloc") (intLit 7),
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+mallocCollisionConstructorProgram :: BackendProgram
+mallocCollisionConstructorProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "malloc",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr = intIdentityExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = optionTy intTy,
+                      backendBindingExpr = BackendConstruct (optionTy intTy) "None" [],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
 
 duplicateConstructorCaseProgram :: BackendProgram
 duplicateConstructorCaseProgram =
