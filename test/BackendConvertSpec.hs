@@ -2,7 +2,7 @@ module BackendConvertSpec (spec) where
 
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
-import Data.List (find)
+import Data.List (find, intercalate)
 import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Backend.Convert
 import MLF.Backend.IR
@@ -10,6 +10,9 @@ import MLF.Constraint.Types.Graph (BaseTy (..))
 import qualified MLF.Elab.Types as Elab
 import MLF.Frontend.Syntax (Lit (..), SrcTy (..), SrcType)
 import MLF.Program
+import System.Directory (createDirectoryIfMissing)
+import System.Environment (lookupEnv)
+import System.FilePath (takeDirectory)
 import Test.Hspec
 
 spec :: Spec
@@ -33,6 +36,12 @@ spec = describe "MLF.Backend.Convert" $ do
           resultTy `shouldBe` intTy
       other -> expectationFailure ("expected backend application, got " ++ show other)
 
+  it "matches the checked backend IR snapshot for a primitive function program" $ do
+    checked <- requireChecked simpleFunctionProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    backendIRGolden "test/golden/backend-ir-simple-function.golden" backend
+
   it "recovers explicit backend constructors and cases from checked ADT paths" $ do
     checked <- requireChecked adtCaseProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -44,6 +53,12 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
     collectConstructNames (backendBindingExpr mainBinding) `shouldSatisfy` (not . null)
+
+  it "matches the checked backend IR snapshot for a simple ADT case program" $ do
+    checked <- requireChecked adtCaseProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    backendIRGolden "test/golden/backend-ir-adt-case.golden" backend
 
   it "recovers backend cases when the result type differs from the scrutinee ADT" $ do
     checked <- requireChecked intCaseProgram
@@ -507,6 +522,198 @@ requireRight result =
   case result of
     Left err -> expectationFailure (show err) >> fail "unexpected Left"
     Right value -> pure value
+
+backendIRGolden :: FilePath -> BackendProgram -> Expectation
+backendIRGolden goldenPath backend = do
+  validateBackendProgram backend `shouldBe` Right ()
+  goldenText goldenPath (renderBackendIRSnapshot backend)
+
+goldenText :: FilePath -> String -> Expectation
+goldenText goldenPath actual = do
+  accept <- lookupEnv "GOLDEN_ACCEPT"
+  case accept of
+    Just "1" -> do
+      createDirectoryIfMissing True (takeDirectory goldenPath)
+      writeFile goldenPath actual
+    _ -> do
+      expected <- readFile goldenPath
+      length expected `seq` actual `shouldBe` expected
+
+renderBackendIRSnapshot :: BackendProgram -> String
+renderBackendIRSnapshot backend =
+  unlines $
+    [ "backend-program",
+      "  main: " ++ backendProgramMain backend,
+      "  modules:"
+    ]
+      ++ concatMap renderBackendIRModule (backendProgramModules backend)
+
+renderBackendIRModule :: BackendModule -> [String]
+renderBackendIRModule backendModule =
+  [ indent 4 ("module " ++ backendModuleName backendModule),
+    indent 6 "data:"
+  ]
+    ++ renderListOrEmpty 8 renderBackendIRData (backendModuleData backendModule)
+    ++ [indent 6 "bindings:"]
+    ++ renderListOrEmpty 8 renderBackendIRBinding (backendModuleBindings backendModule)
+
+renderBackendIRData :: BackendData -> [String]
+renderBackendIRData backendData =
+  [ indent 8 ("data " ++ backendDataName backendData ++ renderPlainTypeParameters (backendDataParameters backendData)),
+    indent 10 "constructors:"
+  ]
+    ++ renderListOrEmpty 12 renderBackendIRConstructor (backendDataConstructors backendData)
+
+renderBackendIRConstructor :: BackendConstructor -> [String]
+renderBackendIRConstructor constructor =
+  [ indent 12 ("ctor " ++ backendConstructorName constructor ++ renderBackendTypeBinders (backendConstructorForalls constructor)),
+    indent 14 ("fields: " ++ renderTypeList (backendConstructorFields constructor)),
+    indent 14 ("result: " ++ renderBackendIRType (backendConstructorResult constructor))
+  ]
+
+renderBackendIRBinding :: BackendBinding -> [String]
+renderBackendIRBinding binding =
+  [ indent 8 ("binding " ++ backendBindingName binding ++ " : " ++ renderBackendIRType (backendBindingType binding)),
+    indent 10 ("exported-main: " ++ renderBool (backendBindingExportedAsMain binding)),
+    indent 10 "expr:"
+  ]
+    ++ renderBackendIRExpr 12 (backendBindingExpr binding)
+
+renderBackendIRExpr :: Int -> BackendExpr -> [String]
+renderBackendIRExpr level expr =
+  case expr of
+    BackendVar resultTy name ->
+      [indent level ("var " ++ name ++ " : " ++ renderBackendIRType resultTy)]
+    BackendLit resultTy lit ->
+      [indent level ("lit " ++ renderLit lit ++ " : " ++ renderBackendIRType resultTy)]
+    BackendLam resultTy name paramTy body ->
+      [ indent level ("lam " ++ name ++ " : " ++ renderBackendIRType paramTy ++ " -> " ++ renderBackendIRType resultTy),
+        indent (level + 2) "body:"
+      ]
+        ++ renderBackendIRExpr (level + 4) body
+    BackendApp resultTy fun arg ->
+      [ indent level ("app : " ++ renderBackendIRType resultTy),
+        indent (level + 2) "function:"
+      ]
+        ++ renderBackendIRExpr (level + 4) fun
+        ++ [indent (level + 2) "argument:"]
+        ++ renderBackendIRExpr (level + 4) arg
+    BackendLet resultTy name bindingTy rhs body ->
+      [ indent level ("let " ++ name ++ " : " ++ renderBackendIRType bindingTy ++ " -> " ++ renderBackendIRType resultTy),
+        indent (level + 2) "rhs:"
+      ]
+        ++ renderBackendIRExpr (level + 4) rhs
+        ++ [indent (level + 2) "body:"]
+        ++ renderBackendIRExpr (level + 4) body
+    BackendTyAbs resultTy name mbBound body ->
+      [ indent level ("type-lam " ++ renderTypeBinder name mbBound ++ " -> " ++ renderBackendIRType resultTy),
+        indent (level + 2) "body:"
+      ]
+        ++ renderBackendIRExpr (level + 4) body
+    BackendTyApp resultTy fun tyArg ->
+      [ indent level ("type-app [" ++ renderBackendIRType tyArg ++ "] : " ++ renderBackendIRType resultTy),
+        indent (level + 2) "function:"
+      ]
+        ++ renderBackendIRExpr (level + 4) fun
+    BackendConstruct resultTy name args ->
+      [ indent level ("construct " ++ name ++ " : " ++ renderBackendIRType resultTy),
+        indent (level + 2) "args:"
+      ]
+        ++ renderExprList (level + 4) args
+    BackendCase resultTy scrutinee alternatives ->
+      [ indent level ("case : " ++ renderBackendIRType resultTy),
+        indent (level + 2) "scrutinee:"
+      ]
+        ++ renderBackendIRExpr (level + 4) scrutinee
+        ++ [indent (level + 2) "alternatives:"]
+        ++ concatMap (renderBackendIRAlternative (level + 4)) (toList alternatives)
+    BackendRoll resultTy payload ->
+      [ indent level ("roll : " ++ renderBackendIRType resultTy),
+        indent (level + 2) "payload:"
+      ]
+        ++ renderBackendIRExpr (level + 4) payload
+    BackendUnroll resultTy payload ->
+      [ indent level ("unroll : " ++ renderBackendIRType resultTy),
+        indent (level + 2) "payload:"
+      ]
+        ++ renderBackendIRExpr (level + 4) payload
+
+renderBackendIRAlternative :: Int -> BackendAlternative -> [String]
+renderBackendIRAlternative level alternative =
+  [ indent level ("alternative " ++ renderBackendIRPattern (backendAltPattern alternative)),
+    indent (level + 2) "body:"
+  ]
+    ++ renderBackendIRExpr (level + 4) (backendAltBody alternative)
+
+renderBackendIRPattern :: BackendPattern -> String
+renderBackendIRPattern pattern0 =
+  case pattern0 of
+    BackendDefaultPattern ->
+      "default"
+    BackendConstructorPattern name binders ->
+      name ++ "(" ++ intercalate ", " binders ++ ")"
+
+renderExprList :: Int -> [BackendExpr] -> [String]
+renderExprList level exprs =
+  renderListOrEmpty level renderArg (zip [0 :: Int ..] exprs)
+  where
+    renderArg (ix, expr) =
+      indent level ("arg " ++ show ix ++ ":") : renderBackendIRExpr (level + 2) expr
+
+renderBackendIRType :: BackendType -> String
+renderBackendIRType backendTy =
+  case backendTy of
+    BTVar name -> "$" ++ name
+    BTArrow dom cod -> "(" ++ renderBackendIRType dom ++ " -> " ++ renderBackendIRType cod ++ ")"
+    BTBase (BaseTy name) -> name
+    BTCon (BaseTy name) args -> name ++ "<" ++ intercalate ", " (map renderBackendIRType (toList args)) ++ ">"
+    BTForall name mbBound body -> "forall " ++ renderTypeBinder name mbBound ++ ". " ++ renderBackendIRType body
+    BTMu name body -> "mu " ++ name ++ ". " ++ renderBackendIRType body
+    BTBottom -> "bottom"
+
+renderBackendTypeBinders :: [BackendTypeBinder] -> String
+renderBackendTypeBinders binders =
+  case binders of
+    [] -> ""
+    _ -> "<" ++ intercalate ", " [renderTypeBinder name mbBound | BackendTypeBinder name mbBound <- binders] ++ ">"
+
+renderTypeBinder :: String -> Maybe BackendType -> String
+renderTypeBinder name mbBound =
+  "$" ++ name ++ maybe "" ((" >= " ++) . renderBackendIRType) mbBound
+
+renderPlainTypeParameters :: [String] -> String
+renderPlainTypeParameters params =
+  case params of
+    [] -> ""
+    _ -> "<" ++ intercalate ", " (map ("$" ++) params) ++ ">"
+
+renderTypeList :: [BackendType] -> String
+renderTypeList types0 =
+  "[" ++ intercalate ", " (map renderBackendIRType types0) ++ "]"
+
+renderLit :: Lit -> String
+renderLit lit =
+  case lit of
+    LInt n -> show n
+    LBool True -> "true"
+    LBool False -> "false"
+    LString value -> show value
+
+renderBool :: Bool -> String
+renderBool value =
+  case value of
+    True -> "true"
+    False -> "false"
+
+renderListOrEmpty :: Int -> (a -> [String]) -> [a] -> [String]
+renderListOrEmpty level render items =
+  case items of
+    [] -> [indent level "<none>"]
+    _ -> concatMap render items
+
+indent :: Int -> String -> String
+indent level line =
+  replicate level ' ' ++ line
 
 requireBinding :: String -> BackendProgram -> IO BackendBinding
 requireBinding name backend =
