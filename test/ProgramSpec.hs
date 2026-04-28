@@ -331,8 +331,8 @@ spec = do
                 Left err -> renderProgramParseError err `shouldSatisfy` (not . null)
                 Right program -> expectationFailure ("expected parse error, got: " ++ show program)
 
-    describe "MLF.Program execution corpus" $ do
-        mapM_ runFixture fixturePaths
+    describe "MLF.Program shared runtime-success parity surface" $ do
+        mapM_ runProgramRuntimeCase programRuntimeSuccessCases
 
     describe "MLF.Program CLI helper" $ do
         it "runs a frozen sample file by path" $ do
@@ -437,42 +437,6 @@ spec = do
                         ]
             program <- requireParsed programText
             checkProgram program `shouldBe` Left (ProgramDuplicateCaseBranch "Zero")
-
-        it "chooses the exported main instead of a hidden helper main" $ do
-            let programText =
-                    unlines
-                        [ "module Hidden export () {"
-                        , "  def main : Bool = false;"
-                        , "}"
-                        , ""
-                        , "module Visible export (main) {"
-                        , "  def main : Bool = true;"
-                        , "}"
-                        ]
-            program <- requireParsed programText
-            (prettyValue <$> runProgram program) `shouldBe` Right "true"
-
-        it "allows importing a module declared later in the file" $ do
-            let programText =
-                    unlines
-                        [ "module User export (main) {"
-                        , "  import Core exposing (Eq, Nat(..), eq);"
-                        , "  def main : Bool = eq Zero Zero;"
-                        , "}"
-                        , ""
-                        , "module Core export (Eq, Nat(..), eq) {"
-                        , "  class Eq a {"
-                        , "    eq : a -> a -> Bool;"
-                        , "  }"
-                        , ""
-                        , "  data Nat ="
-                        , "      Zero : Nat"
-                        , "    | Succ : Nat -> Nat"
-                        , "    deriving Eq;"
-                        , "}"
-                        ]
-            program <- requireParsed programText
-            (prettyValue <$> runProgram program) `shouldBe` Right "true"
 
         it "rejects imports outside the same compilation unit" $ do
             let programText =
@@ -1241,52 +1205,6 @@ spec = do
                         }
             checkResolvedProgram (ResolvedProgram [resolvedModule]) `shouldSatisfy` isRight
 
-        it "deduplicates mixed unqualified and aliased imports by semantic identity" $ do
-            let programText =
-                    unlines
-                        [ "module Core export (Eq, Token(..), answer, eq) {"
-                        , "  class Eq a {"
-                        , "    eq : a -> a -> Bool;"
-                        , "  }"
-                        , "  data Token ="
-                        , "      Token : Token;"
-                        , "  instance Eq Token {"
-                        , "    eq = \\x \\y true;"
-                        , "  }"
-                        , "  def answer : Token = Token;"
-                        , "}"
-                        , ""
-                        , "module Main export (main) {"
-                        , "  import Core;"
-                        , "  import Core as C exposing (Eq, Token(..), answer, eq);"
-                        , "  def main : Bool = eq answer C.answer;"
-                        , "}"
-                        ]
-            program <- requireParsed programText
-            (prettyValue <$> runProgram program) `shouldBe` Right "true"
-
-        it "resolves alias-only imported instances by semantic head identity" $ do
-            let programText =
-                    unlines
-                        [ "module Core export (Eq, Token(..), eq) {"
-                        , "  class Eq a {"
-                        , "    eq : a -> a -> Bool;"
-                        , "  }"
-                        , "  data Token ="
-                        , "      Token : Token;"
-                        , "  instance Eq Token {"
-                        , "    eq = \\x \\y true;"
-                        , "  }"
-                        , "}"
-                        , ""
-                        , "module Main export (main) {"
-                        , "  import Core as C;"
-                        , "  def main : Bool = C.eq C.Token C.Token;"
-                        , "}"
-                        ]
-            program <- requireParsed programText
-            (prettyValue <$> runProgram program) `shouldBe` Right "true"
-
         it "rejects unknown value references at the resolver boundary" $ do
             let programText =
                     unlines
@@ -1592,131 +1510,13 @@ spec = do
                         `shouldSatisfy` isInfixOf "duplicate-instance.mlfp:2:3"
                 Right _ -> expectationFailure "expected duplicate instance diagnostic"
 
-    describe "MLF.Program runtime value rendering" $ do
-        it "renders closed ADT values with source constructor syntax" $ do
-            let programText =
-                    unlines
-                        [ "module Main export (Nat(..), Option(..), main) {"
-                        , "  data Nat ="
-                        , "      Zero : Nat"
-                        , "    | Succ : Nat -> Nat;"
-                        , ""
-                        , "  data Option a ="
-                        , "      None : Option a"
-                        , "    | Some : a -> Option a;"
-                        , ""
-                        , "  def main : Option Nat = Some (Succ Zero);"
-                        , "}"
-                        ]
-            program <- requireParsed programText
-            (prettyValue <$> runProgram program) `shouldBe` Right "Some (Succ Zero)"
-
-        it "renders qualified ADT main annotations with source constructor syntax" $ do
-            let programText =
-                    unlines
-                        [ "module Core export (Nat(..), Option(..)) {"
-                        , "  data Nat ="
-                        , "      Zero : Nat;"
-                        , ""
-                        , "  data Option a ="
-                        , "      None : Option a"
-                        , "    | Some : a -> Option a;"
-                        , "}"
-                        , ""
-                        , "module Main export (main) {"
-                        , "  import Core as A;"
-                        , "  def main : A.Option A.Nat = A.Some A.Zero;"
-                        , "}"
-                        ]
-            program <- requireParsed programText
-            (prettyValue <$> runProgram program) `shouldBe` Right "Some Zero"
-
-        it "uses qualified ADT heads to disambiguate runtime decoding" $ do
-            let programText =
-                    unlines
-                        [ "module A export (Bit(..)) {"
-                        , "  data Bit ="
-                        , "      ABit : Bit;"
-                        , "}"
-                        , ""
-                        , "module B export (Bit(..)) {"
-                        , "  data Bit ="
-                        , "      BBit : Bit;"
-                        , "}"
-                        , ""
-                        , "module Main export (main) {"
-                        , "  import A as L;"
-                        , "  import B as R;"
-                        , "  def main : R.Bit = R.BBit;"
-                        , "}"
-                        ]
-            program <- requireParsed programText
-            (prettyValue <$> runProgram program) `shouldBe` Right "BBit"
-
-        it "does not decode non-data main values through fallback ADT decoding" $ do
-            let programText =
-                    unlines
-                        [ "module Main export (Token(..), main) {"
-                        , "  data Token ="
-                        , "      Token : Token;"
-                        , ""
-                        , "  def main : Bool -> Bool = \\x x;"
-                        , "}"
-                        ]
-            program <- requireParsed programText
-            case prettyValue <$> runProgram program of
-                Right rendered -> rendered `shouldSatisfy` (/= "Token")
-                Left err -> expectationFailure ("unexpected program failure: " ++ show err)
-
-        it "does not decode typed non-data constructor fields through fallback ADT decoding" $ do
-            let programText =
-                    unlines
-                        [ "module Main export (Token(..), Holder(..), main) {"
-                        , "  data Token ="
-                        , "      Token : Token;"
-                        , ""
-                        , "  data Holder ="
-                        , "      Holder : (Bool -> Bool) -> Holder;"
-                        , ""
-                        , "  def main : Holder = Holder (\\(x : Bool) x);"
-                        , "}"
-                        ]
-            program <- requireParsed programText
-            case prettyValue <$> runProgram program of
-                Right rendered -> rendered `shouldSatisfy` (/= "Holder Token")
-                Left err -> expectationFailure ("unexpected program failure: " ++ show err)
-
-    describe "MLF.Program performance baseline" $ do
-        it "evaluates a recursive Nat equality example at representative depth" $ do
-            let depth = (24 :: Int)
-                nat n = if n <= 0 then "Zero" else "Succ (" ++ nat (n - 1) ++ ")"
-                programText =
-                    unlines
-                        [ "module Baseline export (Eq, Nat(..), eq, main) {"
-                        , "  class Eq a {"
-                        , "    eq : a -> a -> Bool;"
-                        , "  }"
-                        , ""
-                        , "  data Nat ="
-                        , "      Zero : Nat"
-                        , "    | Succ : Nat -> Nat"
-                        , "    deriving Eq;"
-                        , ""
-                        , "  def main : Bool = eq (" ++ nat depth ++ ") (" ++ nat depth ++ ");"
-                        , "}"
-                        ]
-            program <- requireParsed programText
-            (prettyValue <$> runProgram program) `shouldBe` Right "true"
-
     describe "MLF.Program eMLF surface parity matrix" $ do
-        mapM_ runProgramMatrixCase emlfSurfaceParityMatrix
+        mapM_ runProgramMatrixCase (nonRuntimeProgramMatrixCases emlfSurfaceParityMatrix)
 
     describe "MLF.Program eMLF boundary matrix" $ do
-        mapM_ runProgramMatrixCase emlfBoundaryMatrix
+        mapM_ runProgramMatrixCase (nonRuntimeProgramMatrixCases emlfBoundaryMatrix)
 
     describe "MLF.Program eMLF-owned `.mlfp` integration" $ do
-        mapM_ runUnifiedFixture unifiedFixtureExpectations
-
         it "fails for a real type mismatch instead of the old infer-lambda gate" $ do
             let programText =
                     unlines
@@ -1734,22 +1534,41 @@ spec = do
             program <- requireParsed =<< readFile path
             parseRawProgram (prettyProgram program) `shouldBe` Right program
 
-    runFixture path =
-        it ("runs " ++ path) $ do
-            program <- requireParsed =<< readFile path
-            (prettyValue <$> runProgram program) `shouldBe` Right "true"
+    runProgramRuntimeCase runtimeCase =
+        it (runtimeCaseName runtimeCase) $ do
+            program <- loadProgramMatrixSource (runtimeCaseSource runtimeCase)
+            let result = prettyValue <$> runProgram program
+            case runtimeCaseExpectation runtimeCase of
+                ExpectRuntimeValue expectedValue ->
+                    result `shouldBe` Right expectedValue
+                ExpectRuntimePredicate label predicate ->
+                    case result of
+                        Right rendered
+                            | predicate rendered -> pure ()
+                            | otherwise ->
+                                expectationFailure $
+                                    "expected "
+                                        ++ label
+                                        ++ ", got: "
+                                        ++ rendered
+                        Left err ->
+                            expectationFailure ("unexpected program failure: " ++ show err)
 
-    runUnifiedFixture (path, expectedValue) =
-        it ("runs " ++ path ++ " through the eMLF-owned `.mlfp` path") $ do
-            program <- requireParsed =<< readFile path
-            (prettyValue <$> runProgram program) `shouldBe` Right expectedValue
+    nonRuntimeProgramMatrixCases =
+        filter (not . isRuntimeProgramMatrixCase)
+
+    isRuntimeProgramMatrixCase matrixCase =
+        case matrixCaseExpectation matrixCase of
+            ExpectRunValue _ -> True
+            ExpectCheckSuccess -> False
+            ExpectCheckFailureContaining _ -> False
 
     runProgramMatrixCase matrixCase =
         it (matrixCaseName matrixCase) $ do
             program <- loadProgramMatrixSource (matrixCaseSource matrixCase)
             case matrixCaseExpectation matrixCase of
-                ExpectRunValue expectedValue ->
-                    (prettyValue <$> runProgram program) `shouldBe` Right expectedValue
+                ExpectRunValue _ ->
+                    expectationFailure "runtime-success rows are covered by programRuntimeSuccessCases"
                 ExpectCheckSuccess ->
                     checkProgram program `shouldSatisfy` isRight
                 ExpectCheckFailureContaining expectedFragment ->

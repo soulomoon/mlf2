@@ -2,20 +2,18 @@
 
 module BackendLLVMSpec (spec) where
 
-import Control.Exception (bracket)
-import Control.Monad (filterM, when)
+import Control.Monad (when)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import System.Directory (doesFileExist, findExecutable, getTemporaryDirectory, removeFile)
-import System.Environment (lookupEnv)
-import System.Exit (ExitCode (..))
-import System.FilePath (takeFileName)
-import System.IO (hClose, hPutStr, openTempFile)
-import System.Process (readProcessWithExitCode)
 import Test.Hspec
 
+import LLVMToolSupport
+  ( validateLLVMAssembly,
+    validateLLVMObjectCode,
+    withTempProgram,
+  )
 import MLF.Backend.IR
 import MLF.Backend.LLVM
 import qualified MLF.Backend.LLVM.Lower as Lower
@@ -390,14 +388,9 @@ renderProgramMatrixSourceLLVM :: ProgramMatrixSource -> IO String
 renderProgramMatrixSourceLLVM source =
   case source of
     InlineProgram programText ->
-      renderProgramTextLLVM programText
+      requireRight =<< withTempProgram programText emitBackendFile
     ProgramFile path ->
       requireRight =<< emitBackendFile path
-
-renderProgramTextLLVM :: String -> IO String
-renderProgramTextLLVM programText = do
-  checked <- requireChecked programText
-  requireRight (renderCheckedProgramLLVM checked)
 
 simpleFunctionProgram :: String
 simpleFunctionProgram =
@@ -1363,12 +1356,13 @@ unsupportedLLVMParityCases =
     ("unified fixture: test/programs/unified/authoritative-overloaded-method.mlfp", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
     ("unified fixture: test/programs/unified/first-class-polymorphism.mlfp", "Unsupported backend LLVM type at parameter \"$poly#0\" of FirstClassPolymorphism__usePoly"),
     ("standalone: allows importing a module declared later in the file", "Unsupported backend LLVM type at return type of Core__Eq__Nat__eq"),
+    ("standalone: does not decode typed non-data constructor fields through fallback ADT decoding", "escaping lambda"),
     ("standalone: evaluates a recursive Nat equality example at representative depth", "Unsupported backend LLVM type at return type of Baseline__Eq__Nat__eq")
   ]
 
 expectedLLVMUnsupportedParityCount :: Int
 expectedLLVMUnsupportedParityCount =
-  47
+  48
 
 llvmUnsupportedParityCount :: Int
 llvmUnsupportedParityCount =
@@ -1391,31 +1385,31 @@ llvmObjectCodeParityCaseNames =
 runLLVMParityCase :: ProgramRuntimeCase -> Spec
 runLLVMParityCase runtimeCase =
   it (runtimeCaseName runtimeCase) $ do
-    checked <- loadProgramRuntimeChecked (runtimeCaseSource runtimeCase)
+    result <- emitProgramRuntimeLLVM (runtimeCaseSource runtimeCase)
     case Map.lookup (runtimeCaseName runtimeCase) llvmParityExpectations of
       Nothing ->
         expectationFailure ("missing LLVM parity expectation for " ++ runtimeCaseName runtimeCase)
       Just ExpectLLVMAssembly -> do
-        output <- requireRight (renderCheckedProgramLLVM checked)
+        output <- requireRight result
         validateLLVMAssembly output
         when (runtimeCaseName runtimeCase `Set.member` llvmObjectCodeParityCaseNames) $
           validateLLVMObjectCode output
       Just (ExpectLLVMUnsupported expectedFragment) ->
-        case renderCheckedProgramLLVM checked of
+        case result of
           Left err ->
-            renderBackendLLVMError err `shouldSatisfy` isInfixOf expectedFragment
+            err `shouldSatisfy` isInfixOf expectedFragment
           Right output ->
             expectationFailure $
               "LLVM parity case is now supported; remove its ExpectLLVMUnsupported classification:\n"
                 ++ output
 
-loadProgramRuntimeChecked :: ProgramMatrixSource -> IO CheckedProgram
-loadProgramRuntimeChecked source =
+emitProgramRuntimeLLVM :: ProgramMatrixSource -> IO (Either String String)
+emitProgramRuntimeLLVM source =
   case source of
-    InlineProgram input ->
-      requireChecked input
+    InlineProgram programText ->
+      withTempProgram programText emitBackendFile
     ProgramFile path ->
-      requireChecked =<< readFile path
+      emitBackendFile path
 
 requireChecked :: String -> IO CheckedProgram
 requireChecked input =
@@ -1445,107 +1439,3 @@ goldenText :: FilePath -> String -> Expectation
 goldenText goldenPath actual = do
   expected <- readFile goldenPath
   length expected `seq` actual `shouldBe` expected
-
-withTempProgram :: String -> (FilePath -> IO a) -> IO a
-withTempProgram contents action = do
-  tempDir <- getTemporaryDirectory
-  bracket (writeTempProgram tempDir) removeFile action
-  where
-    writeTempProgram tempDir = do
-      (path, handle) <- openTempFile tempDir "mlf2-backend-llvm.mlfp"
-      hPutStr handle contents
-      hClose handle
-      pure path
-
-validateLLVMAssembly :: String -> Expectation
-validateLLVMAssembly output = do
-  mbLlvmAs <- findLLVMTool "llvm-as"
-  case mbLlvmAs of
-    Nothing ->
-      pendingWith "required LLVM tool not found: llvm-as"
-    Just llvmAs ->
-      withTempLLVM output $ \path -> do
-        (exitCode, stderr) <- runLLVMTool llvmAs ["-o", "/dev/null", path]
-        case exitCode of
-          ExitSuccess -> pure ()
-          ExitFailure _ -> expectationFailure ("llvm-as rejected backend output:\n" ++ stderr)
-
-validateLLVMObjectCode :: String -> Expectation
-validateLLVMObjectCode output = do
-  mbLlc <- findLLVMTool "llc"
-  case mbLlc of
-    Nothing ->
-      pendingWith "required LLVM tool not found: llc"
-    Just llc ->
-      withTempLLVM output $ \path -> do
-        (exitCode, stderr) <- runLLVMTool llc ["-filetype=obj", "-o", "/dev/null", path]
-        case exitCode of
-          ExitSuccess -> pure ()
-          ExitFailure _ -> expectationFailure ("llc rejected backend output:\n" ++ stderr)
-
-runLLVMTool :: FilePath -> [String] -> IO (ExitCode, String)
-runLLVMTool tool args = do
-  (plainExitCode, _plainStdout, plainStderr) <- readProcessWithExitCode tool args ""
-  case plainExitCode of
-    ExitSuccess -> pure (ExitSuccess, "")
-    ExitFailure _ -> do
-      (opaqueExitCode, _opaqueStdout, opaqueStderr) <-
-        readProcessWithExitCode tool ("-opaque-pointers" : args) ""
-      pure $
-        case opaqueExitCode of
-          ExitSuccess -> (ExitSuccess, "")
-          ExitFailure _ ->
-            ( opaqueExitCode,
-              plainStderr
-                ++ "\nWith -opaque-pointers:\n"
-                ++ opaqueStderr
-            )
-
-findLLVMTool :: String -> IO (Maybe FilePath)
-findLLVMTool name = do
-  envCandidates <- filterM doesFileExist =<< traverseMaybeEnv (toolEnvNames name)
-  case envCandidates of
-    path : _ -> pure (Just path)
-    [] -> do
-      result <- findExecutable name
-      case result of
-        Just path -> pure (Just path)
-        Nothing -> findKnownLLVMTool name knownLLVMToolPaths
-
-traverseMaybeEnv :: [String] -> IO [FilePath]
-traverseMaybeEnv names = do
-  values <- traverse lookupEnv names
-  pure [path | Just path <- values]
-
-toolEnvNames :: String -> [String]
-toolEnvNames name =
-  case name of
-    "llvm-as" -> ["LLVM_AS"]
-    "llc" -> ["LLC", "LLVM_LLC"]
-    _ -> []
-
-findKnownLLVMTool :: String -> [FilePath] -> IO (Maybe FilePath)
-findKnownLLVMTool name paths = do
-  existing <- filterM doesFileExist [path | path <- paths, takeFileName path == name]
-  case existing of
-    path : _ -> pure (Just path)
-    [] -> pure Nothing
-
-knownLLVMToolPaths :: [FilePath]
-knownLLVMToolPaths =
-  [ "/opt/homebrew/opt/llvm/bin/llvm-as",
-    "/opt/homebrew/opt/llvm/bin/llc",
-    "/usr/local/opt/llvm/bin/llvm-as",
-    "/usr/local/opt/llvm/bin/llc"
-  ]
-
-withTempLLVM :: String -> (FilePath -> IO a) -> IO a
-withTempLLVM output action = do
-  tempDir <- getTemporaryDirectory
-  bracket (writeTempLLVM tempDir) removeFile action
-  where
-    writeTempLLVM tempDir = do
-      (path, handle) <- openTempFile tempDir "mlf2-backend-llvm.ll"
-      hPutStr handle output
-      hClose handle
-      pure path

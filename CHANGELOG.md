@@ -3,13 +3,11 @@
 ## Unreleased
 
 ### Changed
-- Added shared `ProgramSpec`-to-LLVM first-order parity coverage for
-  lambda/application, non-recursive let polymorphism, typed and term
-  annotations, unified let-polymorphism fixtures, cross-module lowering, and
-  constructor/case analysis. The backend LLVM spec now reuses the program
-  matrix definitions through `ProgramMatrix`, validates generated LLVM with
-  `llvm-as`, and smoke-checks object emission for the cross-module and
-  constructor/case fixtures when `llc` is available.
+- Extended the shared `ProgramSpec`-to-LLVM parity matrix from first-order
+  coverage to the canonical interpreter-success surface. The backend LLVM spec
+  now emits supported cases through the file backend path, validates generated
+  LLVM with `llvm-as`, smoke-checks a small `llc` subset, and mechanically
+  counts explicit temporary LLVM unsupported classifications.
 - Replaced the private backend inspection-text boundary with a repo-local LLVM
   IR backend in `MLF.Backend.LLVM`, including a small typed LLVM AST,
   pretty-printer, backend IR lowerer, checked-program facade, deterministic

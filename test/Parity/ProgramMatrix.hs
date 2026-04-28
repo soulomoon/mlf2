@@ -2,11 +2,13 @@ module Parity.ProgramMatrix
     ( ProgramMatrixSource (..)
     , ProgramMatrixExpectation (..)
     , ProgramMatrixCase (..)
+    , ProgramRuntimeExpectation (..)
     , ProgramRuntimeCase (..)
     , fixturePaths
     , unifiedFixtureExpectations
     , emlfSurfaceParityMatrix
     , emlfBoundaryMatrix
+    , programRuntimeSuccessCases
     , programSpecStandaloneRuntimeSuccessCases
     , programSpecToLLVMParityCases
     ) where
@@ -2539,11 +2541,19 @@ emlfBoundaryMatrix =
         (ExpectCheckFailureContaining "ProgramDuplicateImportAlias \"C\"")
     ]
 
+data ProgramRuntimeExpectation
+    = ExpectRuntimeValue String
+    | ExpectRuntimePredicate String (String -> Bool)
+
 data ProgramRuntimeCase = ProgramRuntimeCase
     { runtimeCaseName :: String
     , runtimeCaseSource :: ProgramMatrixSource
-    , runtimeCaseExpectedValue :: String
+    , runtimeCaseExpectation :: ProgramRuntimeExpectation
     }
+
+programRuntimeSuccessCases :: [ProgramRuntimeCase]
+programRuntimeSuccessCases =
+    programSpecToLLVMParityCases
 
 programSpecToLLVMParityCases :: [ProgramRuntimeCase]
 programSpecToLLVMParityCases =
@@ -2558,20 +2568,20 @@ matrixRuntimeCases prefix matrixCases =
     [ ProgramRuntimeCase
         (prefix ++ ": " ++ matrixCaseName matrixCase)
         (matrixCaseSource matrixCase)
-        expectedValue
+        (ExpectRuntimeValue expectedValue)
     | matrixCase <- matrixCases
     , ExpectRunValue expectedValue <- [matrixCaseExpectation matrixCase]
     ]
 
 fixtureRuntimeCases :: [ProgramRuntimeCase]
 fixtureRuntimeCases =
-    [ ProgramRuntimeCase ("fixture: " ++ path) (ProgramFile path) "true"
+    [ ProgramRuntimeCase ("fixture: " ++ path) (ProgramFile path) (ExpectRuntimeValue "true")
     | path <- fixturePaths
     ]
 
 unifiedFixtureRuntimeCases :: [ProgramRuntimeCase]
 unifiedFixtureRuntimeCases =
-    [ ProgramRuntimeCase ("unified fixture: " ++ path) (ProgramFile path) expectedValue
+    [ ProgramRuntimeCase ("unified fixture: " ++ path) (ProgramFile path) (ExpectRuntimeValue expectedValue)
     | (path, expectedValue) <- unifiedFixtureExpectations
     ]
 
@@ -2590,7 +2600,7 @@ programSpecStandaloneRuntimeSuccessCases =
                 , "}"
                 ]
         )
-        "true"
+        (ExpectRuntimeValue "true")
     , ProgramRuntimeCase
         "standalone: allows importing a module declared later in the file"
         ( InlineProgram $
@@ -2612,7 +2622,7 @@ programSpecStandaloneRuntimeSuccessCases =
                 , "}"
                 ]
         )
-        "true"
+        (ExpectRuntimeValue "true")
     , ProgramRuntimeCase
         "standalone: deduplicates mixed unqualified and aliased imports by semantic identity"
         ( InlineProgram $
@@ -2636,7 +2646,7 @@ programSpecStandaloneRuntimeSuccessCases =
                 , "}"
                 ]
         )
-        "true"
+        (ExpectRuntimeValue "true")
     , ProgramRuntimeCase
         "standalone: resolves alias-only imported instances by semantic head identity"
         ( InlineProgram $
@@ -2658,7 +2668,7 @@ programSpecStandaloneRuntimeSuccessCases =
                 , "}"
                 ]
         )
-        "true"
+        (ExpectRuntimeValue "true")
     , ProgramRuntimeCase
         "standalone: renders closed ADT values with source constructor syntax"
         ( InlineProgram $
@@ -2676,7 +2686,7 @@ programSpecStandaloneRuntimeSuccessCases =
                 , "}"
                 ]
         )
-        "Some (Succ Zero)"
+        (ExpectRuntimeValue "Some (Succ Zero)")
     , ProgramRuntimeCase
         "standalone: renders qualified ADT main annotations with source constructor syntax"
         ( InlineProgram $
@@ -2696,7 +2706,7 @@ programSpecStandaloneRuntimeSuccessCases =
                 , "}"
                 ]
         )
-        "Some Zero"
+        (ExpectRuntimeValue "Some Zero")
     , ProgramRuntimeCase
         "standalone: uses qualified ADT heads to disambiguate runtime decoding"
         ( InlineProgram $
@@ -2718,11 +2728,40 @@ programSpecStandaloneRuntimeSuccessCases =
                 , "}"
                 ]
         )
-        "BBit"
+        (ExpectRuntimeValue "BBit")
+    , ProgramRuntimeCase
+        "standalone: does not decode non-data main values through fallback ADT decoding"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Token(..), main) {"
+                , "  data Token ="
+                , "      Token : Token;"
+                , ""
+                , "  def main : Bool -> Bool = \\x x;"
+                , "}"
+                ]
+        )
+        (ExpectRuntimePredicate "rendered value is not Token" (/= "Token"))
+    , ProgramRuntimeCase
+        "standalone: does not decode typed non-data constructor fields through fallback ADT decoding"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Token(..), Holder(..), main) {"
+                , "  data Token ="
+                , "      Token : Token;"
+                , ""
+                , "  data Holder ="
+                , "      Holder : (Bool -> Bool) -> Holder;"
+                , ""
+                , "  def main : Holder = Holder (\\(x : Bool) x);"
+                , "}"
+                ]
+        )
+        (ExpectRuntimePredicate "rendered value is not Holder Token" (/= "Holder Token"))
     , ProgramRuntimeCase
         "standalone: evaluates a recursive Nat equality example at representative depth"
         (InlineProgram (recursiveNatEqualityProgram 24))
-        "true"
+        (ExpectRuntimeValue "true")
     ]
 
 recursiveNatEqualityProgram :: Int -> String
