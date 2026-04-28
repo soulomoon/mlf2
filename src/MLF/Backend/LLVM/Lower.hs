@@ -1280,7 +1280,7 @@ lowerCase env exprEnv context resultTy scrutinee alternatives = do
       finishCurrentBlock (LLVMBr joinLabel)
       pure [(lvOperand bodyValue, sourceLabel)]
 
-    bindAlternativePattern scrutineeValue (BackendAlternative pattern0 _) =
+    bindAlternativePattern scrutineeValue (BackendAlternative pattern0 body) =
       case pattern0 of
         BackendDefaultPattern ->
           pure exprEnv
@@ -1292,14 +1292,22 @@ lowerCase env exprEnv context resultTy scrutinee alternatives = do
               fieldTys <- constructorFieldTypesForScrutinee env context constructorRuntime (lvBackendType scrutineeValue)
               unless (length fieldTys == length binders) $
                 liftEither (BackendLLVMArityMismatch name (length fieldTys) (length binders))
-              loadedFields <- zipWithM (loadField scrutineeValue) [0 ..] fieldTys
+              let usedBinders = freeBackendExprVars body
+              loadedFields <- mapMaybe id <$> traverse (loadUsedField usedBinders scrutineeValue) (zip3 [0 :: Int ..] binders fieldTys)
               pure
                 exprEnv
                   { eeValues =
                       Map.union
-                        (Map.fromList (zip binders loadedFields))
+                        (Map.fromList loadedFields)
                         (eeValues exprEnv)
                   }
+
+    loadUsedField usedBinders scrutineeValue (index0, binder, fieldTy)
+      | Set.member binder usedBinders = do
+          loaded <- loadField scrutineeValue index0 fieldTy
+          pure (Just (binder, loaded))
+      | otherwise =
+          pure Nothing
 
     loadField scrutineeValue index0 fieldTy = do
       llvmTy <- lowerBackendTypeM env context fieldTy

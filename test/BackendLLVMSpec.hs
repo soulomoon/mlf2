@@ -182,6 +182,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "loads only constructor fields used by a case branch" $ do
+    output <- requireRight (renderBackendProgramLLVM unusedPolymorphicPatternFieldProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"main\"(ptr %\"box\")"
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"box\", i64 16"
+    output `shouldNotSatisfy` isInfixOf "getelementptr i8, ptr %\"box\", i64 8"
+    validateLLVMAssembly output
+
   it "rejects duplicate constructor case alternatives before emitting switch" $ do
     renderBackendProgramLLVM duplicateConstructorCaseProgram
       `shouldSatisfyLeft` isInfixOf "duplicate constructor case tag"
@@ -699,6 +707,39 @@ mallocCollisionConstructorProgram =
       backendProgramMain = "main"
     }
 
+unusedPolymorphicPatternFieldProgram :: BackendProgram
+unusedPolymorphicPatternFieldProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [lazyFieldBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = BTArrow lazyFieldBoxTy intTy,
+                      backendBindingExpr =
+                        BackendLam
+                          (BTArrow lazyFieldBoxTy intTy)
+                          "box"
+                          lazyFieldBoxTy
+                          ( BackendCase
+                              intTy
+                              (BackendVar lazyFieldBoxTy "box")
+                              ( BackendAlternative
+                                  (BackendConstructorPattern "Packed" ["unused", "value"])
+                                  (BackendVar intTy "value")
+                                  :| []
+                              )
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
 duplicateConstructorCaseProgram :: BackendProgram
 duplicateConstructorCaseProgram =
   BackendProgram
@@ -914,6 +955,20 @@ fnBoxData =
       backendDataConstructors = [BackendConstructor "FnBox" [] [unaryIntTy] fnBoxTy]
     }
 
+lazyFieldBoxData :: BackendData
+lazyFieldBoxData =
+  BackendData
+    { backendDataName = "LazyFieldBox",
+      backendDataParameters = [],
+      backendDataConstructors =
+        [ BackendConstructor
+            "Packed"
+            []
+            [BTForall "a" Nothing (BTVar "a"), intTy]
+            lazyFieldBoxTy
+        ]
+    }
+
 programWithMainExpr :: BackendType -> BackendExpr -> BackendProgram
 programWithMainExpr mainTy expr =
   programWithBindings
@@ -965,6 +1020,10 @@ binaryIntTy =
 fnBoxTy :: BackendType
 fnBoxTy =
   BTBase (BaseTy "FnBox")
+
+lazyFieldBoxTy :: BackendType
+lazyFieldBoxTy =
+  BTBase (BaseTy "LazyFieldBox")
 
 aUnderscoreTy :: BackendType
 aUnderscoreTy =
