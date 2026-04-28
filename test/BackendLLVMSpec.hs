@@ -130,6 +130,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
     validateLLVMAssembly output
 
+  it "lowers let-headed calls before call dispatch" $ do
+    output <- requireRight (renderBackendProgramLLVM letHeadedCallProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
+    output `shouldSatisfy` isInfixOf "ret i64 7"
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM call"
+    validateLLVMAssembly output
+
   it "lowers Nat construction and case analysis to heap tags and switch" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-case-analysis.mlfp"
 
@@ -142,6 +150,10 @@ spec = describe "MLF.Backend.LLVM" $ do
   it "rejects duplicate constructor case alternatives before emitting switch" $ do
     renderBackendProgramLLVM duplicateConstructorCaseProgram
       `shouldSatisfyLeft` isInfixOf "duplicate constructor case tag"
+
+  it "rejects non-tail default case alternatives before emitting switch" $ do
+    renderBackendProgramLLVM nonTailDefaultCaseProgram
+      `shouldSatisfyLeft` isInfixOf "default case alternative must be last"
 
   it "lowers nullary and recursive-list constructors through case" $ do
     checked <- requireChecked recursiveListProgram
@@ -515,6 +527,14 @@ topLevelFunctionAliasProgram =
         }
     ]
 
+letHeadedCallProgram :: BackendProgram
+letHeadedCallProgram =
+  programWithMainExpr intTy $
+    BackendApp
+      intTy
+      (BackendLet unaryIntTy "id" unaryIntTy intIdentityExpr (BackendVar unaryIntTy "id"))
+      (intLit 7)
+
 duplicateConstructorCaseProgram :: BackendProgram
 duplicateConstructorCaseProgram =
   BackendProgram
@@ -532,6 +552,32 @@ duplicateConstructorCaseProgram =
                           (BackendConstruct (optionTy intTy) "None" [])
                           ( BackendAlternative (BackendConstructorPattern "None" []) (intLit 0)
                               :| [BackendAlternative (BackendConstructorPattern "None" []) (intLit 1)]
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+nonTailDefaultCaseProgram :: BackendProgram
+nonTailDefaultCaseProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          (BackendConstruct (optionTy intTy) "Some" [intLit 7])
+                          ( BackendAlternative BackendDefaultPattern (intLit 0)
+                              :| [BackendAlternative (BackendConstructorPattern "Some" ["value"]) (BackendVar intTy "value")]
                           ),
                       backendBindingExportedAsMain = True
                     }

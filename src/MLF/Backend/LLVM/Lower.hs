@@ -388,6 +388,8 @@ collectSpecializationRequests base substitution expr =
                    in case instantiateFunctionFormWithTypeArgs ("specialization request " ++ name) (biForm binding) typeArgs' args' of
                         Right (resolvedTypeArgs, _) -> [SpecRequest name resolvedTypeArgs]
                         Left _ -> []
+            Just (fun, typeArgs, args) ->
+              collectAdministrativeCallRequests fun typeArgs args
             _ -> []
         BackendTyApp {} ->
           case collectTyApps expr of
@@ -447,6 +449,21 @@ collectSpecializationRequests base substitution expr =
         resultTy = substituteBackendTypes substitution (backendExprType expr)
         fun' = substituteExprTypes substitution fun
         typeArgs' = map (substituteBackendTypes substitution) typeArgs
+
+    collectAdministrativeCallRequests fun typeArgs args =
+      case pushCallIntoExpression context resultTy fun' typeArgs' args' of
+        Right (Just applied) ->
+          collectSpecializationRequests base Map.empty applied
+        Right Nothing ->
+          []
+        Left _ ->
+          []
+      where
+        context = "specialization request"
+        resultTy = substituteBackendTypes substitution (backendExprType expr)
+        fun' = substituteExprTypes substitution fun
+        typeArgs' = map (substituteBackendTypes substitution) typeArgs
+        args' = map (substituteExprTypes substitution) args
 
 freeGlobalBindingRefs :: ProgramBase -> BindingInfo -> Set String
 freeGlobalBindingRefs base binding =
@@ -676,10 +693,14 @@ pushTypeApplicationsIntoExpression context resultTy fun typeArgs =
 
 applyTypeApplicationsToExpr :: String -> BackendType -> BackendExpr -> [BackendType] -> Either BackendLLVMError BackendExpr
 applyTypeApplicationsToExpr context expectedTy expr typeArgs = do
-  (applied, actualTy) <- foldM applyOne (expr, backendExprType expr) typeArgs
+  (applied, actualTy) <- applyTypeApplicationsToExprWithType context expr typeArgs
   unless (alphaEqBackendType expectedTy actualTy) $
     Left (BackendLLVMInternalError ("type application result mismatch at " ++ context))
   pure applied
+
+applyTypeApplicationsToExprWithType :: String -> BackendExpr -> [BackendType] -> Either BackendLLVMError (BackendExpr, BackendType)
+applyTypeApplicationsToExprWithType context expr typeArgs =
+  foldM applyOne (expr, backendExprType expr) typeArgs
   where
     applyOne (current, currentTy) typeArg =
       case currentTy of
@@ -688,6 +709,33 @@ applyTypeApplicationsToExpr context expectedTy expr typeArgs = do
            in Right (BackendTyApp resultTy current typeArg, resultTy)
         _ ->
           Left (BackendLLVMUnsupportedCall ("unexpected type arguments at " ++ context))
+
+pushCallIntoExpression :: String -> BackendType -> BackendExpr -> [BackendType] -> [BackendExpr] -> Either BackendLLVMError (Maybe BackendExpr)
+pushCallIntoExpression context resultTy fun typeArgs args =
+  case fun of
+    BackendLet _ name bindingTy rhs body -> do
+      appliedBody <- applyCallToExpr context resultTy body typeArgs args
+      pure (Just (BackendLet resultTy name bindingTy rhs appliedBody))
+    _ ->
+      pure Nothing
+
+applyCallToExpr :: String -> BackendType -> BackendExpr -> [BackendType] -> [BackendExpr] -> Either BackendLLVMError BackendExpr
+applyCallToExpr context expectedTy expr typeArgs args = do
+  (typedExpr, typedExprTy) <- applyTypeApplicationsToExprWithType context expr typeArgs
+  (applied, actualTy) <- foldM applyOne (typedExpr, typedExprTy) args
+  unless (alphaEqBackendType expectedTy actualTy) $
+    Left (BackendLLVMInternalError ("call result mismatch at " ++ context))
+  pure applied
+  where
+    applyOne (current, currentTy) arg =
+      case currentTy of
+        BTArrow expectedArgTy resultTy
+          | alphaEqBackendType expectedArgTy (backendExprType arg) ->
+              Right (BackendApp resultTy current arg, resultTy)
+          | otherwise ->
+              Left (BackendLLVMUnsupportedCall ("argument type mismatch at " ++ context))
+        _ ->
+          Left (BackendLLVMUnsupportedCall ("too many call arguments at " ++ context))
 
 lowerLocalFunctionValue :: ProgramEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> LowerM LowerValue
 lowerLocalFunctionValue env context resultTy name localFunction typeArgs = do
@@ -799,7 +847,13 @@ lowerCall env exprEnv context expr =
         BackendTyAbs {} ->
           lowerDirectFunctionCall env exprEnv context (functionFormFromExpr headExpr) typeArgs args
         _ ->
-          liftEither (BackendLLVMUnsupportedCall ("unsupported call head at " ++ context))
+          case pushCallIntoExpression context (backendExprType expr) headExpr typeArgs args of
+            Right (Just applied) ->
+              lowerExpr env exprEnv context applied
+            Right Nothing ->
+              liftEither (BackendLLVMUnsupportedCall ("unsupported call head at " ++ context))
+            Left err ->
+              liftEither err
 
 lowerLocalFunctionCall :: ProgramEnv -> ExprEnv -> String -> String -> LocalFunction -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerLocalFunctionCall env callEnv context name localFunction typeArgs args = do
@@ -1038,6 +1092,7 @@ lowerConstruct env exprEnv context resultTy name args =
 
 lowerCase :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> NonEmpty BackendAlternative -> LowerM LowerValue
 lowerCase env exprEnv context resultTy scrutinee alternatives = do
+  rejectNonTailDefaultAlternative
   resultLLVMType <- lowerBackendTypeM env context resultTy
   scrutineeValue <- lowerExpr env exprEnv context scrutinee
   unless (lvLLVMType scrutineeValue == LLVMPtr) $
@@ -1060,6 +1115,18 @@ lowerCase env exprEnv context resultTy scrutinee alternatives = do
   pure (LowerValue resultTy resultLLVMType result)
   where
     alternativesList = NE.toList alternatives
+
+    rejectNonTailDefaultAlternative =
+      case break isDefaultAlternative alternativesList of
+        (_, []) -> pure ()
+        (_, [_]) -> pure ()
+        (_, _ : _ : _) ->
+          liftEither (BackendLLVMUnsupportedExpression context "default case alternative must be last")
+
+    isDefaultAlternative (BackendAlternative BackendDefaultPattern _) =
+      True
+    isDefaultAlternative _ =
+      False
 
     lookupDefaultLabel labels =
       case [label | (BackendAlternative BackendDefaultPattern _, label) <- zip alternativesList labels] of
