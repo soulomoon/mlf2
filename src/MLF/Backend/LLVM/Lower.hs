@@ -29,6 +29,7 @@ import MLF.Backend.IR
 import MLF.Backend.LLVM.Syntax
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Syntax (Lit (..))
+import MLF.Util.Names (freshNameLike)
 
 data BackendLLVMError
   = BackendLLVMValidationFailed BackendValidationError
@@ -315,12 +316,116 @@ collectTypeAbs =
     expr -> ([], expr)
 
 collectLams :: BackendExpr -> ([(String, BackendType)], BackendExpr)
-collectLams =
+collectLams expr =
+  let (params, core) = collectRawLams expr
+      paramNames = Set.fromList (map fst params)
+      reserved = freeBackendExprVars core `Set.difference` paramNames
+      (params', renaming) = freshenLambdaParams reserved params
+   in (params', renameBackendVars renaming core)
+
+collectRawLams :: BackendExpr -> ([(String, BackendType)], BackendExpr)
+collectRawLams =
   \case
     BackendLam _ name paramTy body ->
-      let (params, core) = collectLams body
+      let (params, core) = collectRawLams body
        in ((name, paramTy) : params, core)
     expr -> ([], expr)
+
+freshenLambdaParams :: Set String -> [(String, BackendType)] -> ([(String, BackendType)], Map String String)
+freshenLambdaParams =
+  go Map.empty
+  where
+    go renaming used =
+      \case
+        [] -> ([], renaming)
+        (name, ty) : rest ->
+          let name' = freshNameLike name used
+              used' = Set.insert name' used
+              renaming' = Map.insert name name' renaming
+              (rest', finalRenaming) = go renaming' used' rest
+           in ((name', ty) : rest', finalRenaming)
+
+renameBackendVars :: Map String String -> BackendExpr -> BackendExpr
+renameBackendVars renaming0 =
+  go renaming0
+  where
+    renameName renaming name =
+      Map.findWithDefault name name renaming
+
+    go renaming =
+      \case
+        BackendVar resultTy name ->
+          BackendVar resultTy (renameName renaming name)
+        BackendLit resultTy lit ->
+          BackendLit resultTy lit
+        BackendLam resultTy name paramTy body ->
+          BackendLam resultTy name paramTy (go (Map.delete name renaming) body)
+        BackendApp resultTy fun arg ->
+          BackendApp resultTy (go renaming fun) (go renaming arg)
+        BackendLet resultTy name bindingTy rhs body ->
+          BackendLet resultTy name bindingTy (go renaming rhs) (go (Map.delete name renaming) body)
+        BackendTyAbs resultTy name mbBound body ->
+          BackendTyAbs resultTy name mbBound (go renaming body)
+        BackendTyApp resultTy fun ty ->
+          BackendTyApp resultTy (go renaming fun) ty
+        BackendConstruct resultTy name args ->
+          BackendConstruct resultTy name (map (go renaming) args)
+        BackendCase resultTy scrutinee alternatives ->
+          BackendCase resultTy (go renaming scrutinee) (fmap (renameAlternative renaming) alternatives)
+        BackendRoll resultTy payload ->
+          BackendRoll resultTy (go renaming payload)
+        BackendUnroll resultTy payload ->
+          BackendUnroll resultTy (go renaming payload)
+
+    renameAlternative renaming (BackendAlternative pattern0 body) =
+      BackendAlternative pattern0 (go (withoutPatternBinders pattern0 renaming) body)
+
+    withoutPatternBinders pattern0 renaming =
+      case pattern0 of
+        BackendDefaultPattern ->
+          renaming
+        BackendConstructorPattern _ binders ->
+          foldr Map.delete renaming binders
+
+freeBackendExprVars :: BackendExpr -> Set String
+freeBackendExprVars =
+  go Set.empty
+  where
+    go bound =
+      \case
+        BackendVar _ name
+          | Set.member name bound -> Set.empty
+          | otherwise -> Set.singleton name
+        BackendLit {} ->
+          Set.empty
+        BackendLam _ name _ body ->
+          go (Set.insert name bound) body
+        BackendApp _ fun arg ->
+          go bound fun `Set.union` go bound arg
+        BackendLet _ name _ rhs body ->
+          go bound rhs `Set.union` go (Set.insert name bound) body
+        BackendTyAbs _ _ _ body ->
+          go bound body
+        BackendTyApp _ fun _ ->
+          go bound fun
+        BackendConstruct _ _ args ->
+          Set.unions (map (go bound) args)
+        BackendCase _ scrutinee alternatives ->
+          go bound scrutinee `Set.union` Set.unions (map (freeAlternative bound) (NE.toList alternatives))
+        BackendRoll _ payload ->
+          go bound payload
+        BackendUnroll _ payload ->
+          go bound payload
+
+    freeAlternative bound (BackendAlternative pattern0 body) =
+      go (Set.union (patternBinders pattern0) bound) body
+
+    patternBinders =
+      \case
+        BackendDefaultPattern ->
+          Set.empty
+        BackendConstructorPattern _ binders ->
+          Set.fromList binders
 
 reachableBindings :: ProgramBase -> String -> Either BackendLLVMError [BindingInfo]
 reachableBindings base mainName =

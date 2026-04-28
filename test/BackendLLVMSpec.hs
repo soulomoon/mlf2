@@ -130,6 +130,13 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
     validateLLVMAssembly output
 
+  it "freshens shadowed lambda parameters before emitting LLVM" $ do
+    output <- requireRight (renderBackendProgramLLVM shadowedLambdaParamsProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"shadow\"(i64 %\"x\", i64 %\"x1\")"
+    output `shouldSatisfy` isInfixOf "ret i64 %\"x1\""
+    validateLLVMAssembly output
+
   it "lowers let-headed calls before call dispatch" $ do
     output <- requireRight (renderBackendProgramLLVM letHeadedCallProgram)
 
@@ -551,6 +558,32 @@ topLevelFunctionAliasProgram =
         { backendBindingName = "main",
           backendBindingType = intTy,
           backendBindingExpr = BackendApp intTy (BackendVar unaryIntTy "g") (intLit 7),
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+shadowedLambdaParamsProgram :: BackendProgram
+shadowedLambdaParamsProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "shadow",
+          backendBindingType = binaryIntTy,
+          backendBindingExpr =
+            BackendLam
+              binaryIntTy
+              "x"
+              intTy
+              (BackendLam unaryIntTy "x" intTy (BackendVar intTy "x")),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              intTy
+              (BackendApp unaryIntTy (BackendVar binaryIntTy "shadow") (intLit 1))
+              (intLit 7),
           backendBindingExportedAsMain = True
         }
     ]
