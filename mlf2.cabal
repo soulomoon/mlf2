@@ -402,6 +402,7 @@ test-suite mlf2-test
                       BackendConvertSpec,
                       BackendIRSpec,
                       BackendLLVMSpec,
+                      Parity.ProgramMatrix,
                       ProgramSpec,
                       ResolvedSymbolSpec,
                       PipelineSpec,
