@@ -462,7 +462,7 @@ collectRequiredSpecializations base reachable =
   where
     initialRequests =
       concatMap
-        (collectSpecializationRequests base Map.empty . ffBody . biForm)
+        (collectSpecializationRequestsInForm base Map.empty . biForm)
         (filter (null . ffTypeBinders . biForm) reachable)
 
     go seen [] =
@@ -478,13 +478,26 @@ collectRequiredSpecializations base reachable =
                     spFunctionName = specializedFunctionName request,
                     spForm = form
                   }
-              nestedRequests = collectSpecializationRequests base Map.empty (ffBody form)
+              nestedRequests = collectSpecializationRequestsInForm base Map.empty form
           go (Map.insert key spec seen) (rest ++ nestedRequests)
       where
         key = specializationKey request
 
-collectSpecializationRequests :: ProgramBase -> Map String BackendType -> BackendExpr -> [SpecRequest]
-collectSpecializationRequests base substitution expr =
+collectSpecializationRequestsInForm :: ProgramBase -> Map String BackendType -> FunctionForm -> [SpecRequest]
+collectSpecializationRequestsInForm base substitution form =
+  collectSpecializationRequestsWithBound
+    base
+    substitution
+    (Set.fromList (map fst (ffParams form)))
+    (ffBody form)
+
+collectSpecializationRequestsWithBound ::
+  ProgramBase ->
+  Map String BackendType ->
+  Set String ->
+  BackendExpr ->
+  [SpecRequest]
+collectSpecializationRequestsWithBound base substitution bound expr =
   requestHere ++ childRequests
   where
     requestHere =
@@ -492,12 +505,14 @@ collectSpecializationRequests base substitution expr =
         BackendApp {} ->
           case collectCall expr of
             Just (BackendVar _ name, typeArgs, _)
-              | Just binding <- Map.lookup name (pbBindings base),
+              | Set.notMember name bound,
+                Just binding <- Map.lookup name (pbBindings base),
                 not (null (ffTypeBinders (biForm binding))),
                 length typeArgs == length (ffTypeBinders (biForm binding)) ->
                   [SpecRequest name (map (substituteBackendTypes substitution) typeArgs)]
             Just (BackendVar _ name, typeArgs, args)
-              | Just binding <- Map.lookup name (pbBindings base),
+              | Set.notMember name bound,
+                Just binding <- Map.lookup name (pbBindings base),
                 not (null (ffTypeBinders (biForm binding))) ->
                   let typeArgs' = map (substituteBackendTypes substitution) typeArgs
                       args' = map (substituteExprTypes substitution) args
@@ -510,7 +525,8 @@ collectSpecializationRequests base substitution expr =
         BackendTyApp {} ->
           case collectTyApps expr of
             (BackendVar _ name, typeArgs)
-              | Just binding <- Map.lookup name (pbBindings base),
+              | Set.notMember name bound,
+                Just binding <- Map.lookup name (pbBindings base),
                 not (null (ffTypeBinders (biForm binding))),
                 null (ffParams (biForm binding)) ->
                   let typeArgs' = map (substituteBackendTypes substitution) typeArgs
@@ -526,36 +542,47 @@ collectSpecializationRequests base substitution expr =
       case expr of
         BackendVar {} -> []
         BackendLit {} -> []
-        BackendLam _ _ _ body ->
-          collectSpecializationRequests base substitution body
+        BackendLam _ name _ body ->
+          collectSpecializationRequestsWithBound base substitution (Set.insert name bound) body
         BackendApp _ fun arg ->
-          collectSpecializationRequests base substitution fun
-            ++ collectSpecializationRequests base substitution arg
-        BackendLet _ _ _ rhs body ->
-          collectSpecializationRequests base substitution rhs
-            ++ collectSpecializationRequests base substitution body
+          collectSpecializationRequestsWithBound base substitution bound fun
+            ++ collectSpecializationRequestsWithBound base substitution bound arg
+        BackendLet _ name _ rhs body ->
+          collectSpecializationRequestsWithBound base substitution bound rhs
+            ++ collectSpecializationRequestsWithBound base substitution (Set.insert name bound) body
         BackendTyAbs _ name _ body ->
-          collectSpecializationRequests base (Map.delete name substitution) body
+          collectSpecializationRequestsWithBound base (Map.delete name substitution) bound body
         BackendTyApp {} ->
           []
         BackendConstruct _ _ args ->
-          concatMap (collectSpecializationRequests base substitution) args
+          concatMap (collectSpecializationRequestsWithBound base substitution bound) args
         BackendCase _ scrutinee alternatives ->
-          collectSpecializationRequests base substitution scrutinee
-            ++ concatMap (collectSpecializationRequests base substitution . backendAltBody) (NE.toList alternatives)
+          collectSpecializationRequestsWithBound base substitution bound scrutinee
+            ++ concatMap collectAlternativeRequests (NE.toList alternatives)
         BackendRoll _ payload ->
-          collectSpecializationRequests base substitution payload
+          collectSpecializationRequestsWithBound base substitution bound payload
         BackendUnroll _ payload ->
-          collectSpecializationRequests base substitution payload
+          collectSpecializationRequestsWithBound base substitution bound payload
+
+    collectAlternativeRequests alternative =
+      collectSpecializationRequestsWithBound
+        base
+        substitution
+        (Set.union (patternBinders (backendAltPattern alternative)) bound)
+        (backendAltBody alternative)
 
     collectAdministrativeTypeAppRequests fun typeArgs =
       case pushTypeApplicationsIntoExpression context resultTy fun' typeArgs' of
         Right (Just applied) ->
-          collectSpecializationRequests base Map.empty applied
+          collectSpecializationRequestsWithBound base Map.empty bound applied
         Right Nothing ->
           case instantiateFunctionFormWithTypeArgs context (functionFormFromExpr fun') typeArgs' [] of
             Right (_, form) ->
-              collectSpecializationRequests base Map.empty (ffBody form)
+              collectSpecializationRequestsWithBound
+                base
+                Map.empty
+                (Set.union (Set.fromList (map fst (ffParams form))) bound)
+                (ffBody form)
             Left _ ->
               []
         Left _ ->
@@ -569,7 +596,7 @@ collectSpecializationRequests base substitution expr =
     collectAdministrativeCallRequests fun typeArgs args =
       case pushCallIntoExpression context resultTy fun' typeArgs' args' of
         Right (Just applied) ->
-          collectSpecializationRequests base Map.empty applied
+          collectSpecializationRequestsWithBound base Map.empty bound applied
         Right Nothing ->
           []
         Left _ ->
@@ -581,9 +608,17 @@ collectSpecializationRequests base substitution expr =
         typeArgs' = map (substituteBackendTypes substitution) typeArgs
         args' = map (substituteExprTypes substitution) args
 
+    patternBinders =
+      \case
+        BackendDefaultPattern -> Set.empty
+        BackendConstructorPattern _ binders -> Set.fromList binders
+
 freeGlobalBindingRefs :: ProgramBase -> BindingInfo -> Set String
 freeGlobalBindingRefs base binding =
-  freeGlobalRefs base Set.empty (ffBody (biForm binding))
+  freeGlobalRefs
+    base
+    (Set.fromList (map fst (ffParams (biForm binding))))
+    (ffBody (biForm binding))
 
 freeGlobalRefs :: ProgramBase -> Set String -> BackendExpr -> Set String
 freeGlobalRefs base bound expr =

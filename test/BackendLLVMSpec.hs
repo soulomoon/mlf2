@@ -114,6 +114,21 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "missing specialization"
     validateLLVMAssembly output
 
+  it "treats top-level function parameters as bound during reachability scanning" $ do
+    output <- requireRight (renderBackendProgramLLVM parameterNameShadowsDeadGlobalProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"main\"(i64 %\"x\")"
+    output `shouldNotSatisfy` isInfixOf "define ptr @\"x\""
+    validateLLVMAssembly output
+
+  it "does not collect global specializations for let-bound shadowing names" $ do
+    output <- requireRight (renderBackendProgramLLVM letShadowedGlobalSpecializationProgram)
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"main\"()"
+    output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
+    output `shouldNotSatisfy` isInfixOf "poly$t"
+    validateLLVMAssembly output
+
   it "lowers local function aliases without requiring closure conversion" $ do
     output <- requireRight (renderBackendProgramLLVM localFunctionAliasProgram)
 
@@ -531,6 +546,71 @@ directHeadGlobalPolymorphicZeroArityProgram =
       backendProgramMain = "main"
     }
 
+parameterNameShadowsDeadGlobalProgram :: BackendProgram
+parameterNameShadowsDeadGlobalProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [fnBoxData],
+              backendModuleBindings =
+                [ helperBinding,
+                  BackendBinding
+                    { backendBindingName = "x",
+                      backendBindingType = fnBoxTy,
+                      backendBindingExpr =
+                        BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "helper"],
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr = intIdentityExpr,
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+letShadowedGlobalSpecializationProgram :: BackendProgram
+letShadowedGlobalSpecializationProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData, fnBoxData],
+              backendModuleBindings =
+                [ helperBinding,
+                  BackendBinding
+                    { backendBindingName = "poly",
+                      backendBindingType = badPolyTy,
+                      backendBindingExpr = badPolyExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = optionTy intTy,
+                      backendBindingExpr =
+                        BackendLet
+                          (optionTy intTy)
+                          "poly"
+                          nonePolyTy
+                          nonePolyExpr
+                          ( BackendTyApp
+                              (optionTy intTy)
+                              (BackendVar nonePolyTy "poly")
+                              intTy
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
 localFunctionAliasProgram :: BackendProgram
 localFunctionAliasProgram =
   programWithMainExpr intTy $
@@ -842,6 +922,22 @@ polyIdExpr =
         "x"
         (BTVar "a")
         (BackendVar (BTVar "a") "x")
+    )
+
+badPolyTy :: BackendType
+badPolyTy =
+  BTForall "a" Nothing fnBoxTy
+
+badPolyExpr :: BackendExpr
+badPolyExpr =
+  BackendTyAbs
+    badPolyTy
+    "a"
+    Nothing
+    ( BackendConstruct
+        fnBoxTy
+        "FnBox"
+        [BackendVar unaryIntTy "helper"]
     )
 
 polyIdCall :: BackendType -> BackendExpr -> BackendExpr
