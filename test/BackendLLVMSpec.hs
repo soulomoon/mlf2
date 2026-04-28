@@ -27,6 +27,13 @@ import MLF.Program
     renderProgramParseError,
   )
 import MLF.Program.CLI (emitBackendFile)
+import ProgramMatrix
+  ( ProgramMatrixCase (..),
+    ProgramMatrixExpectation (..),
+    ProgramMatrixSource (..),
+    emlfSurfaceParityMatrix,
+    unifiedFixtureExpectations,
+  )
 
 spec :: Spec
 spec = describe "MLF.Backend.LLVM" $ do
@@ -43,6 +50,13 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
     output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
     validateLLVMAssembly output
+
+  describe "shared ProgramSpec first-order parity" $ do
+    it "keeps the selected shared first-order parity rows wired" $
+      map matrixCaseName backendFirstOrderSurfaceParityCases `shouldBe` backendFirstOrderSurfaceParityNames
+
+    mapM_ runLLVMProgramMatrixCase backendFirstOrderSurfaceParityCases
+    mapM_ runLLVMUnifiedFixture backendUnifiedFixturePaths
 
   it "preserves referenced Prelude bindings and lowers runtime primitive calls" $ do
     output <-
@@ -268,6 +282,75 @@ spec = describe "MLF.Backend.LLVM" $ do
           `shouldSatisfy` isInfixOf "representation-changing roll"
       Right llvmModule ->
         expectationFailure ("expected roll mismatch, got output:\n" ++ renderLLVMModule llvmModule)
+
+backendFirstOrderSurfaceParityNames :: [String]
+backendFirstOrderSurfaceParityNames =
+  [ "runs lambda/application",
+    "runs let polymorphism at Int and Bool",
+    "runs typed let annotation",
+    "runs term annotation"
+  ]
+
+backendFirstOrderSurfaceParityCases :: [ProgramMatrixCase]
+backendFirstOrderSurfaceParityCases =
+  [ matrixCase
+    | matrixCase <- emlfSurfaceParityMatrix,
+      matrixCaseName matrixCase `elem` backendFirstOrderSurfaceParityNames
+  ]
+
+backendUnifiedFixturePaths :: [FilePath]
+backendUnifiedFixturePaths =
+  [ path
+    | (path, _) <- unifiedFixtureExpectations,
+      path
+        `elem` [ "test/programs/unified/authoritative-let-polymorphism.mlfp",
+                 "test/programs/unified/authoritative-cross-module-let-polymorphism.mlfp",
+                 "test/programs/unified/authoritative-case-analysis.mlfp"
+               ]
+  ]
+
+runLLVMProgramMatrixCase :: ProgramMatrixCase -> Spec
+runLLVMProgramMatrixCase matrixCase =
+  it ("lowers " ++ matrixCaseName matrixCase ++ " through LLVM") $ do
+    case matrixCaseExpectation matrixCase of
+      ExpectRunValue _ -> pure ()
+      ExpectCheckSuccess -> pure ()
+      ExpectCheckFailureContaining fragment ->
+        expectationFailure ("selected backend LLVM parity row expects a frontend failure: " ++ fragment)
+    output <- renderProgramMatrixSourceLLVM (matrixCaseSource matrixCase)
+    output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
+    validateLLVMAssembly output
+
+runLLVMUnifiedFixture :: FilePath -> Spec
+runLLVMUnifiedFixture path =
+  it ("lowers " ++ path ++ " through the CLI LLVM backend") $ do
+    output <- requireRight =<< emitBackendFile path
+    output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
+    case path of
+      "test/programs/unified/authoritative-cross-module-let-polymorphism.mlfp" -> do
+        output `shouldSatisfy` isInfixOf "define i64 @\"Core__applyId\"()"
+        output `shouldSatisfy` isInfixOf "define i64 @\"User__main\"()"
+        validateLLVMObjectCode output
+      "test/programs/unified/authoritative-case-analysis.mlfp" -> do
+        output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
+        output `shouldSatisfy` isInfixOf "switch i64"
+        output `shouldSatisfy` isInfixOf "phi i64"
+        validateLLVMObjectCode output
+      _ -> pure ()
+    validateLLVMAssembly output
+
+renderProgramMatrixSourceLLVM :: ProgramMatrixSource -> IO String
+renderProgramMatrixSourceLLVM source =
+  case source of
+    InlineProgram programText ->
+      renderProgramTextLLVM programText
+    ProgramFile path ->
+      requireRight =<< emitBackendFile path
+
+renderProgramTextLLVM :: String -> IO String
+renderProgramTextLLVM programText = do
+  checked <- requireChecked programText
+  requireRight (renderCheckedProgramLLVM checked)
 
 simpleFunctionProgram :: String
 simpleFunctionProgram =
