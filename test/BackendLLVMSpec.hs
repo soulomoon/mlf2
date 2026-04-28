@@ -3,9 +3,11 @@
 module BackendLLVMSpec (spec) where
 
 import Control.Exception (bracket)
-import Control.Monad (filterM)
+import Control.Monad (filterM, when)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import System.Directory (doesFileExist, findExecutable, getTemporaryDirectory, removeFile)
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
@@ -27,11 +29,13 @@ import MLF.Program
     renderProgramParseError,
   )
 import MLF.Program.CLI (emitBackendFile)
-import ProgramMatrix
+import Parity.ProgramMatrix
   ( ProgramMatrixCase (..),
     ProgramMatrixExpectation (..),
     ProgramMatrixSource (..),
+    ProgramRuntimeCase (..),
     emlfSurfaceParityMatrix,
+    programSpecToLLVMParityCases,
     unifiedFixtureExpectations,
   )
 
@@ -258,6 +262,22 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "define i1 @\"RecursiveExistential__unwrapSome\""
     output `shouldSatisfy` isInfixOf "call i1 @\"RecursiveExistential__unwrapSome\""
     validateLLVMAssembly output
+
+  describe "ProgramSpec-to-LLVM parity matrix" $ do
+    it "classifies every interpreter-success case exactly once" $ do
+      let caseNames = map runtimeCaseName programSpecToLLVMParityCases
+          uniqueCaseNames = Set.fromList caseNames
+          unsupportedNames = Set.fromList (map fst unsupportedLLVMParityCases)
+          objectCodeNames = Set.fromList llvmObjectCodeParityCases
+
+      length caseNames `shouldBe` Set.size uniqueCaseNames
+      length unsupportedLLVMParityCases `shouldBe` Set.size unsupportedNames
+      unsupportedNames `Set.isSubsetOf` uniqueCaseNames `shouldBe` True
+      objectCodeNames `Set.isSubsetOf` Set.difference uniqueCaseNames unsupportedNames `shouldBe` True
+      Map.keysSet llvmParityExpectations `shouldBe` uniqueCaseNames
+      llvmUnsupportedParityCount `shouldBe` expectedLLVMUnsupportedParityCount
+
+    mapM_ runLLVMParityCase programSpecToLLVMParityCases
 
   it "rejects partial applications until closure conversion exists" $ do
     renderBackendProgramLLVM partialApplicationProgram
@@ -1251,6 +1271,125 @@ mysteryTy =
 recIntTy :: BackendType
 recIntTy =
   BTMu "self" intTy
+
+data LLVMParityExpectation
+  = ExpectLLVMAssembly
+  | ExpectLLVMUnsupported String
+
+llvmParityExpectations :: Map.Map String LLVMParityExpectation
+llvmParityExpectations =
+  Map.fromList
+    [ ( runtimeCaseName runtimeCase,
+        case Map.lookup (runtimeCaseName runtimeCase) unsupportedByName of
+          Just reason -> ExpectLLVMUnsupported reason
+          Nothing -> ExpectLLVMAssembly
+      )
+    | runtimeCase <- programSpecToLLVMParityCases
+    ]
+  where
+    unsupportedByName = Map.fromList unsupportedLLVMParityCases
+
+unsupportedLLVMParityCases :: [(String, String)]
+unsupportedLLVMParityCases =
+  [ ("surface: runs first-class polymorphic top-level argument", "Unsupported backend LLVM type at parameter \"$poly#0\" of FirstClassPolymorphism__usePoly"),
+    ("surface: runs first-class polymorphic local argument", "could not infer type arguments [\"a\"]"),
+    ("boundary: runs overloaded method dispatch with ordinary nullary constructors", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs overloaded method dispatch with nested ordinary constructors", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs overloaded method dispatch with lambda/application-inferred argument", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs overloaded method dispatch with let-polymorphism-inferred argument", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs overloaded method dispatch with explicit argument annotation", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs overloaded method dispatch on pattern-bound variable", "BackendUnsupportedRecursiveLet"),
+    ("boundary: constructor argument inferred as first-class polymorphic value should run", "escaping type abstraction"),
+    ("boundary: local first-class polymorphic let through constructor boundary should run", "could not infer type arguments [\"a\"]"),
+    ("boundary: pattern-bound first-class polymorphic variable should run", "could not infer type arguments [\"a\"]"),
+    ("boundary: partial overloaded method application should run after deferred resolution", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs higher-kinded data field over a concrete constructor head", "BackendUnsupportedSourceType"),
+    ("boundary: runs nullary constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
+    ("boundary: runs first-class nullary constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
+    ("boundary: runs value-imported constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
+    ("boundary: runs value-exported constructor when owner type is not exported", "BackendUnsupportedSourceType"),
+    ("boundary: runs value-exported constructor from bulk import when owner type is not exported", "BackendUnsupportedSourceType"),
+    ("boundary: runs value-exported constructor from aliased bulk import when owner type is not exported", "BackendUnsupportedSourceType"),
+    ("boundary: runs aliased bulk-imported hidden-owner constructors in one case", "BackendUnsupportedSourceType"),
+    ("boundary: runs value-exported GADT constructor when owner type is not exported", "BackendUnsupportedSourceType"),
+    ("boundary: runs value-imported nonzero-index constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
+    ("boundary: runs constrained helper through hidden Eq evidence", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs ground constrained helper alias with resolved evidence", "Unsupported backend LLVM type at parameter \"$evidence_Eq_eq#0\" of Main__sameBool"),
+    ("boundary: runs constrained helper after local lambda inference", "escaping function \"Main__Eq__Bool__eq\""),
+    ("boundary: runs deferred method with method-level type variable constraint", "BackendTypeCheckFailed"),
+    ("boundary: runs partial deferred method after method-local evidence is fixed by application", "BackendTypeCheckFailed"),
+    ("boundary: runs deferred method when only a later forall binder is inferred", "BackendUnsupportedInstantiation InstElim"),
+    ("boundary: runs constrained helper with method-local evidence fixed by call args", "BackendTypeCheckFailed"),
+    ("boundary: runs deferred class method with method-level Eq constraint", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs constrained helper through method-level evidence constraints", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs explicit constrained parameterized Eq instance", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs parameterized deriving Eq for Option", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs parameterized deriving Eq for recursive List", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs qualified import with alias-only value and constructor access", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs aliased import with exposed method and qualified constructors", "BackendUnsupportedRecursiveLet"),
+    ("boundary: runs aliased import exposing a type without duplicate alias-head instance matches", "BackendUnsupportedRecursiveLet"),
+    ("boundary: deduplicates equivalent instances from mixed unqualified and aliased imports", "BackendUnsupportedRecursiveLet"),
+    ("boundary: deduplicates constrained imported instances from mixed unqualified and aliased imports", "escaping function \"Core__Eq__Bool__eq\""),
+    ("fixture: test/programs/recursive-adt/deriving-eq.mlfp", "BackendUnsupportedRecursiveLet"),
+    ("fixture: test/programs/recursive-adt/recursive-tree-deriving.mlfp", "BackendUnsupportedRecursiveLet"),
+    ("fixture: test/programs/recursive-adt/complex-recursive-program.mlfp", "BackendUnsupportedRecursiveLet"),
+    ("fixture: test/programs/recursive-adt/module-integrated.mlfp", "BackendUnsupportedRecursiveLet"),
+    ("unified fixture: test/programs/unified/authoritative-overloaded-method.mlfp", "BackendUnsupportedRecursiveLet"),
+    ("unified fixture: test/programs/unified/authoritative-recursive-let.mlfp", "BackendUnsupportedRecursiveLet"),
+    ("unified fixture: test/programs/unified/first-class-polymorphism.mlfp", "Unsupported backend LLVM type at parameter \"$poly#0\" of FirstClassPolymorphism__usePoly"),
+    ("standalone: allows importing a module declared later in the file", "BackendUnsupportedRecursiveLet"),
+    ("standalone: evaluates a recursive Nat equality example at representative depth", "BackendUnsupportedRecursiveLet")
+  ]
+
+expectedLLVMUnsupportedParityCount :: Int
+expectedLLVMUnsupportedParityCount =
+  48
+
+llvmUnsupportedParityCount :: Int
+llvmUnsupportedParityCount =
+  length
+    [ ()
+    | ExpectLLVMUnsupported _ <- Map.elems llvmParityExpectations
+    ]
+
+llvmObjectCodeParityCases :: [String]
+llvmObjectCodeParityCases =
+  [ "surface: runs lambda/application",
+    "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp"
+  ]
+
+llvmObjectCodeParityCaseNames :: Set.Set String
+llvmObjectCodeParityCaseNames =
+  Set.fromList llvmObjectCodeParityCases
+
+runLLVMParityCase :: ProgramRuntimeCase -> Spec
+runLLVMParityCase runtimeCase =
+  it (runtimeCaseName runtimeCase) $ do
+    checked <- loadProgramRuntimeChecked (runtimeCaseSource runtimeCase)
+    case Map.lookup (runtimeCaseName runtimeCase) llvmParityExpectations of
+      Nothing ->
+        expectationFailure ("missing LLVM parity expectation for " ++ runtimeCaseName runtimeCase)
+      Just ExpectLLVMAssembly -> do
+        output <- requireRight (renderCheckedProgramLLVM checked)
+        validateLLVMAssembly output
+        when (runtimeCaseName runtimeCase `Set.member` llvmObjectCodeParityCaseNames) $
+          validateLLVMObjectCode output
+      Just (ExpectLLVMUnsupported expectedFragment) ->
+        case renderCheckedProgramLLVM checked of
+          Left err ->
+            renderBackendLLVMError err `shouldSatisfy` isInfixOf expectedFragment
+          Right output ->
+            expectationFailure $
+              "LLVM parity case is now supported; remove its ExpectLLVMUnsupported classification:\n"
+                ++ output
+
+loadProgramRuntimeChecked :: ProgramMatrixSource -> IO CheckedProgram
+loadProgramRuntimeChecked source =
+  case source of
+    InlineProgram input ->
+      requireChecked input
+    ProgramFile path ->
+      requireChecked =<< readFile path
 
 requireChecked :: String -> IO CheckedProgram
 requireChecked input =

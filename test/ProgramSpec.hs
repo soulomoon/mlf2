@@ -17,23 +17,10 @@ import MLF.Frontend.Program.Types
     )
 import MLF.Frontend.Syntax (ResolvedSrcTy (..), mkSrcBound)
 import MLF.Program
-import ProgramMatrix
 import MLF.Program.CLI (runProgramFile)
 import Test.Hspec
 
-fixturePaths :: [FilePath]
-fixturePaths =
-    [ "test/programs/recursive-adt/plain-recursive-nat.mlfp"
-    , "test/programs/recursive-adt/recursive-list-tail.mlfp"
-    , "test/programs/recursive-adt/recursive-gadt.mlfp"
-    , "test/programs/recursive-adt/recursive-existential.mlfp"
-    , "test/programs/recursive-adt/deriving-eq.mlfp"
-    , "test/programs/recursive-adt/recursive-tree-deriving.mlfp"
-    , "test/programs/recursive-adt/typeclass-integration.mlfp"
-    , "test/programs/recursive-adt/complex-recursive-program.mlfp"
-    , "test/programs/recursive-adt/abstract-module-use.mlfp"
-    , "test/programs/recursive-adt/module-integrated.mlfp"
-    ]
+import Parity.ProgramMatrix
 
 spec :: Spec
 spec = do

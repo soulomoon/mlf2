@@ -1,11 +1,29 @@
-module ProgramMatrix
+module Parity.ProgramMatrix
     ( ProgramMatrixSource (..)
     , ProgramMatrixExpectation (..)
     , ProgramMatrixCase (..)
+    , ProgramRuntimeCase (..)
+    , fixturePaths
     , unifiedFixtureExpectations
     , emlfSurfaceParityMatrix
     , emlfBoundaryMatrix
+    , programSpecStandaloneRuntimeSuccessCases
+    , programSpecToLLVMParityCases
     ) where
+
+fixturePaths :: [FilePath]
+fixturePaths =
+    [ "test/programs/recursive-adt/plain-recursive-nat.mlfp"
+    , "test/programs/recursive-adt/recursive-list-tail.mlfp"
+    , "test/programs/recursive-adt/recursive-gadt.mlfp"
+    , "test/programs/recursive-adt/recursive-existential.mlfp"
+    , "test/programs/recursive-adt/deriving-eq.mlfp"
+    , "test/programs/recursive-adt/recursive-tree-deriving.mlfp"
+    , "test/programs/recursive-adt/typeclass-integration.mlfp"
+    , "test/programs/recursive-adt/complex-recursive-program.mlfp"
+    , "test/programs/recursive-adt/abstract-module-use.mlfp"
+    , "test/programs/recursive-adt/module-integrated.mlfp"
+    ]
 
 unifiedFixtureExpectations :: [(FilePath, String)]
 unifiedFixtureExpectations =
@@ -2519,3 +2537,208 @@ emlfBoundaryMatrix =
         )
         (ExpectCheckFailureContaining "ProgramDuplicateImportAlias \"C\"")
     ]
+
+data ProgramRuntimeCase = ProgramRuntimeCase
+    { runtimeCaseName :: String
+    , runtimeCaseSource :: ProgramMatrixSource
+    , runtimeCaseExpectedValue :: String
+    }
+
+programSpecToLLVMParityCases :: [ProgramRuntimeCase]
+programSpecToLLVMParityCases =
+    matrixRuntimeCases "surface" emlfSurfaceParityMatrix
+        ++ matrixRuntimeCases "boundary" emlfBoundaryMatrix
+        ++ fixtureRuntimeCases
+        ++ unifiedFixtureRuntimeCases
+        ++ programSpecStandaloneRuntimeSuccessCases
+
+matrixRuntimeCases :: String -> [ProgramMatrixCase] -> [ProgramRuntimeCase]
+matrixRuntimeCases prefix matrixCases =
+    [ ProgramRuntimeCase
+        (prefix ++ ": " ++ matrixCaseName matrixCase)
+        (matrixCaseSource matrixCase)
+        expectedValue
+    | matrixCase <- matrixCases
+    , ExpectRunValue expectedValue <- [matrixCaseExpectation matrixCase]
+    ]
+
+fixtureRuntimeCases :: [ProgramRuntimeCase]
+fixtureRuntimeCases =
+    [ ProgramRuntimeCase ("fixture: " ++ path) (ProgramFile path) "true"
+    | path <- fixturePaths
+    ]
+
+unifiedFixtureRuntimeCases :: [ProgramRuntimeCase]
+unifiedFixtureRuntimeCases =
+    [ ProgramRuntimeCase ("unified fixture: " ++ path) (ProgramFile path) expectedValue
+    | (path, expectedValue) <- unifiedFixtureExpectations
+    ]
+
+programSpecStandaloneRuntimeSuccessCases :: [ProgramRuntimeCase]
+programSpecStandaloneRuntimeSuccessCases =
+    [ ProgramRuntimeCase
+        "standalone: chooses the exported main instead of a hidden helper main"
+        ( InlineProgram $
+            unlines
+                [ "module Hidden export () {"
+                , "  def main : Bool = false;"
+                , "}"
+                , ""
+                , "module Visible export (main) {"
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        "true"
+    , ProgramRuntimeCase
+        "standalone: allows importing a module declared later in the file"
+        ( InlineProgram $
+            unlines
+                [ "module User export (main) {"
+                , "  import Core exposing (Eq, Nat(..), eq);"
+                , "  def main : Bool = eq Zero Zero;"
+                , "}"
+                , ""
+                , "module Core export (Eq, Nat(..), eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat"
+                , "    deriving Eq;"
+                , "}"
+                ]
+        )
+        "true"
+    , ProgramRuntimeCase
+        "standalone: deduplicates mixed unqualified and aliased imports by semantic identity"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Token(..), answer, eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , "  data Token ="
+                , "      Token : Token;"
+                , "  instance Eq Token {"
+                , "    eq = \\x \\y true;"
+                , "  }"
+                , "  def answer : Token = Token;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core;"
+                , "  import Core as C exposing (Eq, Token(..), answer, eq);"
+                , "  def main : Bool = eq answer C.answer;"
+                , "}"
+                ]
+        )
+        "true"
+    , ProgramRuntimeCase
+        "standalone: resolves alias-only imported instances by semantic head identity"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Eq, Token(..), eq) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , "  data Token ="
+                , "      Token : Token;"
+                , "  instance Eq Token {"
+                , "    eq = \\x \\y true;"
+                , "  }"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as C;"
+                , "  def main : Bool = C.eq C.Token C.Token;"
+                , "}"
+                ]
+        )
+        "true"
+    , ProgramRuntimeCase
+        "standalone: renders closed ADT values with source constructor syntax"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Nat(..), Option(..), main) {"
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  data Option a ="
+                , "      None : Option a"
+                , "    | Some : a -> Option a;"
+                , ""
+                , "  def main : Option Nat = Some (Succ Zero);"
+                , "}"
+                ]
+        )
+        "Some (Succ Zero)"
+    , ProgramRuntimeCase
+        "standalone: renders qualified ADT main annotations with source constructor syntax"
+        ( InlineProgram $
+            unlines
+                [ "module Core export (Nat(..), Option(..)) {"
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , ""
+                , "  data Option a ="
+                , "      None : Option a"
+                , "    | Some : a -> Option a;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import Core as A;"
+                , "  def main : A.Option A.Nat = A.Some A.Zero;"
+                , "}"
+                ]
+        )
+        "Some Zero"
+    , ProgramRuntimeCase
+        "standalone: uses qualified ADT heads to disambiguate runtime decoding"
+        ( InlineProgram $
+            unlines
+                [ "module A export (Bit(..)) {"
+                , "  data Bit ="
+                , "      ABit : Bit;"
+                , "}"
+                , ""
+                , "module B export (Bit(..)) {"
+                , "  data Bit ="
+                , "      BBit : Bit;"
+                , "}"
+                , ""
+                , "module Main export (main) {"
+                , "  import A as L;"
+                , "  import B as R;"
+                , "  def main : R.Bit = R.BBit;"
+                , "}"
+                ]
+        )
+        "BBit"
+    , ProgramRuntimeCase
+        "standalone: evaluates a recursive Nat equality example at representative depth"
+        (InlineProgram (recursiveNatEqualityProgram 24))
+        "true"
+    ]
+
+recursiveNatEqualityProgram :: Int -> String
+recursiveNatEqualityProgram depth =
+    unlines
+        [ "module Baseline export (Eq, Nat(..), eq, main) {"
+        , "  class Eq a {"
+        , "    eq : a -> a -> Bool;"
+        , "  }"
+        , ""
+        , "  data Nat ="
+        , "      Zero : Nat"
+        , "    | Succ : Nat -> Nat"
+        , "    deriving Eq;"
+        , ""
+        , "  def main : Bool = eq (" ++ nat depth ++ ") (" ++ nat depth ++ ");"
+        , "}"
+        ]
+  where
+    nat n = if n <= 0 then "Zero" else "Succ (" ++ nat (n - 1) ++ ")"
