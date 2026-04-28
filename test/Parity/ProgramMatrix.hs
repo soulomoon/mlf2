@@ -1,4 +1,4 @@
-module ProgramParityMatrix
+module Parity.ProgramMatrix
     ( ProgramMatrixSource (..)
     , ProgramMatrixExpectation (..)
     , ProgramMatrixCase (..)
@@ -9,10 +9,8 @@ module ProgramParityMatrix
     , emlfSurfaceParityMatrix
     , emlfBoundaryMatrix
     , programRuntimeSuccessCases
-    , fixtureRuntimeCases
-    , unifiedFixtureRuntimeCases
-    , matrixRuntimeCases
-    , standaloneRuntimeSuccessCases
+    , programSpecStandaloneRuntimeSuccessCases
+    , programSpecToLLVMParityCases
     ) where
 
 fixturePaths :: [FilePath]
@@ -2542,61 +2540,54 @@ emlfBoundaryMatrix =
         (ExpectCheckFailureContaining "ProgramDuplicateImportAlias \"C\"")
     ]
 
-
 data ProgramRuntimeExpectation
     = ExpectRuntimeValue String
     | ExpectRuntimePredicate String (String -> Bool)
 
 data ProgramRuntimeCase = ProgramRuntimeCase
-    { programRuntimeCaseName :: String
-    , programRuntimeCaseSource :: ProgramMatrixSource
-    , programRuntimeCaseExpectation :: ProgramRuntimeExpectation
+    { runtimeCaseName :: String
+    , runtimeCaseSource :: ProgramMatrixSource
+    , runtimeCaseExpectation :: ProgramRuntimeExpectation
     }
 
 programRuntimeSuccessCases :: [ProgramRuntimeCase]
 programRuntimeSuccessCases =
-    fixtureRuntimeCases
+    programSpecToLLVMParityCases
+
+programSpecToLLVMParityCases :: [ProgramRuntimeCase]
+programSpecToLLVMParityCases =
+    matrixRuntimeCases "surface" emlfSurfaceParityMatrix
+        ++ matrixRuntimeCases "boundary" emlfBoundaryMatrix
+        ++ fixtureRuntimeCases
         ++ unifiedFixtureRuntimeCases
-        ++ matrixRuntimeCases emlfSurfaceParityMatrix
-        ++ matrixRuntimeCases emlfBoundaryMatrix
-        ++ standaloneRuntimeSuccessCases
+        ++ programSpecStandaloneRuntimeSuccessCases
+
+matrixRuntimeCases :: String -> [ProgramMatrixCase] -> [ProgramRuntimeCase]
+matrixRuntimeCases prefix matrixCases =
+    [ ProgramRuntimeCase
+        (prefix ++ ": " ++ matrixCaseName matrixCase)
+        (matrixCaseSource matrixCase)
+        (ExpectRuntimeValue expectedValue)
+    | matrixCase <- matrixCases
+    , ExpectRunValue expectedValue <- [matrixCaseExpectation matrixCase]
+    ]
 
 fixtureRuntimeCases :: [ProgramRuntimeCase]
 fixtureRuntimeCases =
-    [ ProgramRuntimeCase
-        ("runs " ++ path)
-        (ProgramFile path)
-        (ExpectRuntimeValue "true")
+    [ ProgramRuntimeCase ("fixture: " ++ path) (ProgramFile path) (ExpectRuntimeValue "true")
     | path <- fixturePaths
     ]
 
 unifiedFixtureRuntimeCases :: [ProgramRuntimeCase]
 unifiedFixtureRuntimeCases =
-    [ ProgramRuntimeCase
-        ("runs " ++ path ++ " through the eMLF-owned `.mlfp` path")
-        (ProgramFile path)
-        (ExpectRuntimeValue expectedValue)
+    [ ProgramRuntimeCase ("unified fixture: " ++ path) (ProgramFile path) (ExpectRuntimeValue expectedValue)
     | (path, expectedValue) <- unifiedFixtureExpectations
     ]
 
-matrixRuntimeCases :: [ProgramMatrixCase] -> [ProgramRuntimeCase]
-matrixRuntimeCases = concatMap matrixRuntimeCase
-  where
-    matrixRuntimeCase matrixCase =
-        case matrixCaseExpectation matrixCase of
-            ExpectRunValue expectedValue ->
-                [ ProgramRuntimeCase
-                    (matrixCaseName matrixCase)
-                    (matrixCaseSource matrixCase)
-                    (ExpectRuntimeValue expectedValue)
-                ]
-            ExpectCheckSuccess -> []
-            ExpectCheckFailureContaining _ -> []
-
-standaloneRuntimeSuccessCases :: [ProgramRuntimeCase]
-standaloneRuntimeSuccessCases =
+programSpecStandaloneRuntimeSuccessCases :: [ProgramRuntimeCase]
+programSpecStandaloneRuntimeSuccessCases =
     [ ProgramRuntimeCase
-        "chooses the exported main instead of a hidden helper main"
+        "standalone: chooses the exported main instead of a hidden helper main"
         ( InlineProgram $
             unlines
                 [ "module Hidden export () {"
@@ -2610,7 +2601,7 @@ standaloneRuntimeSuccessCases =
         )
         (ExpectRuntimeValue "true")
     , ProgramRuntimeCase
-        "allows importing a module declared later in the file"
+        "standalone: allows importing a module declared later in the file"
         ( InlineProgram $
             unlines
                 [ "module User export (main) {"
@@ -2632,7 +2623,7 @@ standaloneRuntimeSuccessCases =
         )
         (ExpectRuntimeValue "true")
     , ProgramRuntimeCase
-        "deduplicates mixed unqualified and aliased imports by semantic identity"
+        "standalone: deduplicates mixed unqualified and aliased imports by semantic identity"
         ( InlineProgram $
             unlines
                 [ "module Core export (Eq, Token(..), answer, eq) {"
@@ -2656,7 +2647,7 @@ standaloneRuntimeSuccessCases =
         )
         (ExpectRuntimeValue "true")
     , ProgramRuntimeCase
-        "resolves alias-only imported instances by semantic head identity"
+        "standalone: resolves alias-only imported instances by semantic head identity"
         ( InlineProgram $
             unlines
                 [ "module Core export (Eq, Token(..), eq) {"
@@ -2678,7 +2669,7 @@ standaloneRuntimeSuccessCases =
         )
         (ExpectRuntimeValue "true")
     , ProgramRuntimeCase
-        "renders closed ADT values with source constructor syntax"
+        "standalone: renders closed ADT values with source constructor syntax"
         ( InlineProgram $
             unlines
                 [ "module Main export (Nat(..), Option(..), main) {"
@@ -2696,7 +2687,7 @@ standaloneRuntimeSuccessCases =
         )
         (ExpectRuntimeValue "Some (Succ Zero)")
     , ProgramRuntimeCase
-        "renders qualified ADT main annotations with source constructor syntax"
+        "standalone: renders qualified ADT main annotations with source constructor syntax"
         ( InlineProgram $
             unlines
                 [ "module Core export (Nat(..), Option(..)) {"
@@ -2716,7 +2707,7 @@ standaloneRuntimeSuccessCases =
         )
         (ExpectRuntimeValue "Some Zero")
     , ProgramRuntimeCase
-        "uses qualified ADT heads to disambiguate runtime decoding"
+        "standalone: uses qualified ADT heads to disambiguate runtime decoding"
         ( InlineProgram $
             unlines
                 [ "module A export (Bit(..)) {"
@@ -2738,7 +2729,7 @@ standaloneRuntimeSuccessCases =
         )
         (ExpectRuntimeValue "BBit")
     , ProgramRuntimeCase
-        "does not decode non-data main values through fallback ADT decoding"
+        "standalone: does not decode non-data main values through fallback ADT decoding"
         ( InlineProgram $
             unlines
                 [ "module Main export (Token(..), main) {"
@@ -2751,7 +2742,7 @@ standaloneRuntimeSuccessCases =
         )
         (ExpectRuntimePredicate "rendered value is not Token" (/= "Token"))
     , ProgramRuntimeCase
-        "does not decode typed non-data constructor fields through fallback ADT decoding"
+        "standalone: does not decode typed non-data constructor fields through fallback ADT decoding"
         ( InlineProgram $
             unlines
                 [ "module Main export (Token(..), Holder(..), main) {"
@@ -2767,13 +2758,13 @@ standaloneRuntimeSuccessCases =
         )
         (ExpectRuntimePredicate "rendered value is not Holder Token" (/= "Holder Token"))
     , ProgramRuntimeCase
-        "evaluates a recursive Nat equality example at representative depth"
-        (InlineProgram performanceBaselineProgramText)
+        "standalone: evaluates a recursive Nat equality example at representative depth"
+        (InlineProgram (recursiveNatEqualityProgram 24))
         (ExpectRuntimeValue "true")
     ]
 
-performanceBaselineProgramText :: String
-performanceBaselineProgramText =
+recursiveNatEqualityProgram :: Int -> String
+recursiveNatEqualityProgram depth =
     unlines
         [ "module Baseline export (Eq, Nat(..), eq, main) {"
         , "  class Eq a {"
@@ -2789,5 +2780,4 @@ performanceBaselineProgramText =
         , "}"
         ]
   where
-    depth = 24 :: Int
     nat n = if n <= 0 then "Zero" else "Succ (" ++ nat (n - 1) ++ ")"

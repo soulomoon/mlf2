@@ -17,9 +17,10 @@ import MLF.Frontend.Program.Types
     )
 import MLF.Frontend.Syntax (ResolvedSrcTy (..), mkSrcBound)
 import MLF.Program
-import ProgramParityMatrix
 import MLF.Program.CLI (runProgramFile)
 import Test.Hspec
+
+import Parity.ProgramMatrix
 
 spec :: Spec
 spec = do
@@ -1747,10 +1748,10 @@ spec = do
             (prettyValue <$> runProgram program) `shouldBe` Right expectedValue
 
     runProgramRuntimeCase runtimeCase =
-        it (programRuntimeCaseName runtimeCase) $ do
-            program <- loadProgramMatrixSource (programRuntimeCaseSource runtimeCase)
+        it (runtimeCaseName runtimeCase) $ do
+            program <- loadProgramMatrixSource (runtimeCaseSource runtimeCase)
             let result = prettyValue <$> runProgram program
-            case programRuntimeCaseExpectation runtimeCase of
+            case runtimeCaseExpectation runtimeCase of
                 ExpectRuntimeValue expectedValue ->
                     result `shouldBe` Right expectedValue
                 ExpectRuntimePredicate label predicate ->
