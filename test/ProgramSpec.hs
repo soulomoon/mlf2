@@ -1511,14 +1511,12 @@ spec = do
                 Right _ -> expectationFailure "expected duplicate instance diagnostic"
 
     describe "MLF.Program eMLF surface parity matrix" $ do
-        mapM_ runProgramMatrixCase emlfSurfaceParityMatrix
+        mapM_ runProgramMatrixCase (nonRuntimeProgramMatrixCases emlfSurfaceParityMatrix)
 
     describe "MLF.Program eMLF boundary matrix" $ do
-        mapM_ runProgramMatrixCase emlfBoundaryMatrix
+        mapM_ runProgramMatrixCase (nonRuntimeProgramMatrixCases emlfBoundaryMatrix)
 
     describe "MLF.Program eMLF-owned `.mlfp` integration" $ do
-        mapM_ runUnifiedFixture unifiedFixtureExpectations
-
         it "fails for a real type mismatch instead of the old infer-lambda gate" $ do
             let programText =
                     unlines
@@ -1535,11 +1533,6 @@ spec = do
         it ("roundtrips " ++ path) $ do
             program <- requireParsed =<< readFile path
             parseRawProgram (prettyProgram program) `shouldBe` Right program
-
-    runUnifiedFixture (path, expectedValue) =
-        it ("runs " ++ path ++ " through the eMLF-owned `.mlfp` path") $ do
-            program <- requireParsed =<< readFile path
-            (prettyValue <$> runProgram program) `shouldBe` Right expectedValue
 
     runProgramRuntimeCase runtimeCase =
         it (runtimeCaseName runtimeCase) $ do
@@ -1561,12 +1554,21 @@ spec = do
                         Left err ->
                             expectationFailure ("unexpected program failure: " ++ show err)
 
+    nonRuntimeProgramMatrixCases =
+        filter (not . isRuntimeProgramMatrixCase)
+
+    isRuntimeProgramMatrixCase matrixCase =
+        case matrixCaseExpectation matrixCase of
+            ExpectRunValue _ -> True
+            ExpectCheckSuccess -> False
+            ExpectCheckFailureContaining _ -> False
+
     runProgramMatrixCase matrixCase =
         it (matrixCaseName matrixCase) $ do
             program <- loadProgramMatrixSource (matrixCaseSource matrixCase)
             case matrixCaseExpectation matrixCase of
-                ExpectRunValue expectedValue ->
-                    (prettyValue <$> runProgram program) `shouldBe` Right expectedValue
+                ExpectRunValue _ ->
+                    expectationFailure "runtime-success rows are covered by programRuntimeSuccessCases"
                 ExpectCheckSuccess ->
                     checkProgram program `shouldSatisfy` isRight
                 ExpectCheckFailureContaining expectedFragment ->
