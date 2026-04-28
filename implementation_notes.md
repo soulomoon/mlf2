@@ -1,3 +1,25 @@
+## 2026-04-28 - Real LLVM backend boundary
+
+- Replaced the former backend inspection-text boundary with `MLF.Backend.LLVM`,
+  a private repo-local LLVM backend made of `Syntax`, `Lower`, `Ppr`, and a
+  facade exposing checked-program and backend-program rendering entrypoints.
+- The backend still targets `MLF.Backend.IR` after checked `.mlfp` conversion.
+  The LLVM facade validates that IR first, then lowers the reachable first-order
+  binding closure to opaque-pointer LLVM IR with deterministic global/local
+  names.
+- Lowering supports first-order integer, boolean, string, ADT pointer, and
+  recursive pointer representations; saturated direct calls; simple concrete
+  polymorphic specializations; SSA-style lets; constructor allocation with
+  zero-based tags; constructor case switches with field loads and join phis;
+  and representation-preserving roll/unroll no-ops.
+- The backend intentionally rejects partial applications, escaping functions,
+  escaping lambdas, function-typed constructor fields, unsupported source/base
+  types, non-ASCII string literals, and representation-changing roll/unroll
+  nodes until closure conversion or a richer runtime representation exists.
+- Backend validation tests now assemble emitted LLVM with `llvm-as` and smoke
+  representative codegen with `llc`; those LLVM 15+ command-line tools must be
+  available on `PATH` or in a standard local LLVM installation.
+
 ## 2026-04-22 - Typed backend IR boundary
 
 - Added `MLF.Backend.IR` as the private backend-owned representation after the
@@ -11,10 +33,10 @@
   variable reference resolution, and local type equalities for lambda,
   application, let, type abstraction/application, and recursive roll/unroll
   nodes.
-- ADT construction and case analysis now have explicit backend IR nodes. Future
-  lowering work should consume this boundary rather than reaching back into
-  source syntax or Church-encoded xMLF terms to rediscover backend control/data
-  structure. Program validation checks those nodes against constructor metadata:
+- ADT construction and case analysis now have explicit backend IR nodes. LLVM
+  lowering consumes this boundary rather than reaching back into source syntax
+  or Church-encoded xMLF terms to rediscover backend control/data structure.
+  Program validation checks those nodes against constructor metadata:
   constructor names are unique and known, construct arguments/results match the
   constructor declaration, and case alternatives match the scrutinee and case
   result types.

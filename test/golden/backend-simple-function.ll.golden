@@ -1,0 +1,16 @@
+; mlf2 LLVM backend v0
+source_filename = "mlf2"
+declare ptr @"malloc"(i64)
+declare i1 @"__mlfp_and"(i1, i1)
+
+define i64 @"Main__id"(i64 %"$x#0") {
+entry:
+  ret i64 %"$x#0"
+}
+
+define i64 @"Main__main"() {
+entry:
+  %"__llvm.call.0" = call i64 @"Main__id"(i64 1)
+  ret i64 %"__llvm.call.0"
+}
+

@@ -104,7 +104,8 @@ Internally, `.mlfp` now reuses the old MLF ownership boundary:
 - `MLF.Frontend.Program.Finalize` normalizes those surface eMLF terms and calls the internal detailed eMLF pipeline entrypoint
 - `MLF.Elab.TypeCheck` remains the typing-judgment owner for checked `.mlfp` / xMLF terms
 - `MLF.Frontend.Program.Run` evaluates checked bindings through the existing xMLF reducer; static module/import/data/class validation may still fail before the eMLF pipeline
-- `MLF.Backend.IR` defines the private typed backend IR boundary and local invariant validator for checked `.mlfp` programs before textual or LLVM-like lowering
+- `MLF.Backend.IR` defines the private typed backend IR boundary and local invariant validator for checked `.mlfp` programs before LLVM lowering
+- `MLF.Backend.LLVM` lowers supported first-order backend IR programs to real LLVM IR text
 
 Frozen examples live under `test/programs/recursive-adt/`, and the Phase-0
 syntax/corpus freeze is documented in
@@ -122,11 +123,15 @@ Run a program file directly from the executable:
 cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp
 ```
 
-Emit the first typed backend textual boundary for a checked program:
+Emit LLVM IR for a checked program:
 
 ```bash
 cabal run mlf2 -- emit-backend test/programs/unified/authoritative-let-polymorphism.mlfp
 ```
+
+Backend LLVM validation tests require LLVM 15+ command-line tools. The test
+suite looks for `llvm-as` and `llc` on `PATH`, with standard Homebrew LLVM
+locations also accepted on macOS.
 
 ## Syntax and paper alignment
 

@@ -10,9 +10,9 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 
-import MLF.Backend.Text
-    ( renderBackendTextError
-    , renderCheckedProgramBackendText
+import MLF.Backend.LLVM
+    ( renderBackendLLVMError
+    , renderCheckedProgramLLVM
     )
 import MLF.Elab.Types (ElabTerm (..))
 import MLF.Frontend.Parse.Program
@@ -40,7 +40,7 @@ programCliUsage =
         , "  mlf2 emit-backend <file.mlfp>"
         , ""
         , "run-program prepends the built-in Prelude and prints the resulting value."
-        , "emit-backend prepends the built-in Prelude and prints first LLVM-like backend text."
+        , "emit-backend prepends the built-in Prelude and prints LLVM IR."
         ]
 
 runProgramFile :: FilePath -> IO (Either String String)
@@ -58,7 +58,7 @@ emitBackendFile path = do
         source <- first show fileResult
         program <- first renderProgramParseError (parseLocatedProgramWithFile path source)
         checked <- first renderProgramDiagnostic (checkLocatedProgram (withPreludeLocated program))
-        first renderBackendTextError (renderCheckedProgramBackendText (emitBackendCheckedProgram checked))
+        first renderBackendLLVMError (renderCheckedProgramLLVM (emitBackendCheckedProgram checked))
 
 emitBackendCheckedProgram :: CheckedProgram -> CheckedProgram
 emitBackendCheckedProgram checked =
