@@ -53,6 +53,14 @@
   without LLVM while still exercising the checks wherever the tools are
   installed. The harness retries with `-opaque-pointers` for LLVM 14-era tools
   that require the explicit flag.
+- The first-order LLVM parity slice now reuses the shared `.mlfp` program
+  matrix through `ProgramMatrix`. `BackendLLVMSpec` lowers the core
+  ProgramSpec cases for lambda/application, non-recursive let polymorphism,
+  typed let annotations, term annotations, and the unified let-polymorphism,
+  cross-module, and constructor/case fixtures. The sibling unsupported classes
+  remain outside this slice: recursive lets, typeclass evidence,
+  first-class-polymorphic values, higher-kinded/GADT-heavy shapes, partial
+  application, and closure conversion.
 
 ## 2026-04-22 - Typed backend IR boundary
 
