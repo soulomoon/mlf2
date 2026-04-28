@@ -13,6 +13,10 @@
   pretty-printer, backend IR lowerer, checked-program facade, deterministic
   `.ll` goldens, explicit unsupported-node diagnostics, ADT construct/case
   lowering, and CLI access through `mlf2 emit-backend`.
+- Extended LLVM backend parity for first-order recursive programs. Closed
+  recursive local functions are promoted to backend helper bindings,
+  recursive Nat/List/Tree/GADT/existential fixtures now assemble and lower
+  through `llc`, and recursive closures remain fail-closed.
 - Added a private `MLF.Backend.Convert` boundary from checked `.mlfp`
   programs into the typed backend IR, including backend type conversion,
   fail-closed unsupported-shape diagnostics, explicit ADT construct/case

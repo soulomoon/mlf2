@@ -19,7 +19,8 @@ module MLF.Backend.Convert
 where
 
 import Control.Monad (foldM, forM, unless, when, zipWithM)
-import Data.List (find, sort)
+import Control.Monad.State.Strict (StateT (StateT), get, modify, runStateT)
+import Data.List (find, intercalate, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -66,7 +67,9 @@ data ConvertContext = ConvertContext
   { ccModuleScopes :: Map String ElaborateScope,
     ccConstructors :: Map String ConstructorMeta,
     ccBindingData :: Map String DataMeta,
-    ccData :: [DataMeta]
+    ccData :: [DataMeta],
+    ccGlobalTerms :: Set.Set String,
+    ccCurrentBindingName :: String
   }
 
 data ConstructorMeta = ConstructorMeta
@@ -85,6 +88,21 @@ type BackendParameterBounds = Map String (Maybe BackendType)
 type BackendTypeBounds = Map String (Maybe BackendType)
 
 data BackendTypeAbsBinder = BackendTypeAbsBinder String (Maybe BackendType)
+
+data LiftedRecursiveLet = LiftedRecursiveLet
+  { lrlName :: String,
+    lrlElabType :: ElabType,
+    lrlBackendType :: BackendType,
+    lrlTerm :: ElabTerm
+  }
+
+data LiftState = LiftState
+  { lsNextHelperIndex :: Int,
+    lsLiftedRecursiveLets :: [LiftedRecursiveLet],
+    lsGeneratedHelperNames :: Set.Set String
+  }
+
+type LiftM = StateT LiftState (Either BackendConversionError)
 
 convertCheckedProgram :: CheckedProgram -> Either BackendConversionError BackendProgram
 convertCheckedProgram checked = do
@@ -131,7 +149,7 @@ backendBuiltinTermTypes =
 convertCheckedModule :: ConvertContext -> Env -> CheckedModule -> Either BackendConversionError BackendModule
 convertCheckedModule context env checkedModule = do
   dataDecls <- mapM (convertDataInfo context) (Map.elems (checkedModuleData checkedModule))
-  bindings <- mapM (convertCheckedBinding context env checkedModule) (checkedModuleBindings checkedModule)
+  bindings <- concat <$> mapM (convertCheckedBinding context env checkedModule) (checkedModuleBindings checkedModule)
   Right
     BackendModule
       { backendModuleName = checkedModuleName checkedModule,
@@ -139,23 +157,270 @@ convertCheckedModule context env checkedModule = do
         backendModuleBindings = bindings
       }
 
-convertCheckedBinding :: ConvertContext -> Env -> CheckedModule -> CheckedBinding -> Either BackendConversionError BackendBinding
+convertCheckedBinding :: ConvertContext -> Env -> CheckedModule -> CheckedBinding -> Either BackendConversionError [BackendBinding]
 convertCheckedBinding context env checkedModule binding = do
+  let bindingContext = context {ccCurrentBindingName = checkedBindingName binding}
   canonicalElabTy <- checkedBindingCanonicalType context checkedModule binding
   bindingTy <- convertElabType canonicalElabTy
-  expr <-
+  (expr, liftedBindings) <-
     case Map.lookup (checkedBindingName binding) (ccConstructors context) of
       Just constructorMeta
         | constructorBindingResultMatches bindingTy constructorMeta ->
-            synthesizeConstructorBinding bindingTy constructorMeta
-      _ -> convertTermExpected context env (Just bindingTy) (checkedBindingTerm binding)
+            do
+              expr <- synthesizeConstructorBinding bindingTy constructorMeta
+              Right (expr, [])
+      _ -> do
+        (liftedTerm, liftedSpecs) <- liftRecursiveLetsInBinding bindingContext (checkedBindingTerm binding)
+        let envWithLifted =
+              foldr
+                (\lifted acc -> extendTermEnv (lrlName lifted) (lrlElabType lifted) acc)
+                env
+                liftedSpecs
+        liftedBindings <- mapM (convertLiftedRecursiveLet bindingContext envWithLifted) liftedSpecs
+        expr <- convertTermExpected bindingContext envWithLifted (Just bindingTy) liftedTerm
+        Right (expr, liftedBindings)
+  let convertedBinding =
+        BackendBinding
+          { backendBindingName = checkedBindingName binding,
+            backendBindingType = bindingTy,
+            backendBindingExpr = expr,
+            backendBindingExportedAsMain = checkedBindingExportedAsMain binding
+          }
+  Right (convertedBinding : liftedBindings)
+
+liftRecursiveLetsInBinding :: ConvertContext -> ElabTerm -> Either BackendConversionError (ElabTerm, [LiftedRecursiveLet])
+liftRecursiveLetsInBinding context term = do
+  (term', state') <-
+    runStateT
+      (liftRecursiveLetsInTerm context Set.empty term)
+      LiftState
+        { lsNextHelperIndex = 0,
+          lsLiftedRecursiveLets = [],
+          lsGeneratedHelperNames = Set.empty
+        }
+  Right (term', lsLiftedRecursiveLets state')
+
+convertLiftedRecursiveLet :: ConvertContext -> Env -> LiftedRecursiveLet -> Either BackendConversionError BackendBinding
+convertLiftedRecursiveLet context env lifted = do
+  expr <- convertTermExpected context env (Just (lrlBackendType lifted)) (lrlTerm lifted)
   Right
     BackendBinding
-      { backendBindingName = checkedBindingName binding,
-        backendBindingType = bindingTy,
+      { backendBindingName = lrlName lifted,
+        backendBindingType = lrlBackendType lifted,
         backendBindingExpr = expr,
-        backendBindingExportedAsMain = checkedBindingExportedAsMain binding
+        backendBindingExportedAsMain = False
       }
+
+liftRecursiveLetsInTerm :: ConvertContext -> Set.Set String -> ElabTerm -> LiftM ElabTerm
+liftRecursiveLetsInTerm context lexicalLocals term =
+  case term of
+    EVar {} ->
+      pure term
+    ELit {} ->
+      pure term
+    ELam name ty body ->
+      ELam name ty <$> liftRecursiveLetsInTerm context (Set.insert name lexicalLocals) body
+    EApp fun arg ->
+      EApp
+        <$> liftRecursiveLetsInTerm context lexicalLocals fun
+        <*> liftRecursiveLetsInTerm context lexicalLocals arg
+    ELet name scheme rhs body -> do
+      let schemeTy = schemeToType scheme
+          bodyLocals = Set.insert name lexicalLocals
+      if termMentionsFreeVariable name rhs
+        then do
+          bindingTy <- liftEitherConversion (convertElabType schemeTy)
+          ensureLiftableRecursiveLet lexicalLocals name bindingTy rhs
+          helperName <- freshLiftedRecursiveLetName context name
+          rhs' <- liftRecursiveLetsInTerm context (Set.insert name lexicalLocals) rhs
+          let helperTerm = renameFreeTermVariable name helperName rhs'
+          emitLiftedRecursiveLet
+            LiftedRecursiveLet
+              { lrlName = helperName,
+                lrlElabType = schemeTy,
+                lrlBackendType = bindingTy,
+                lrlTerm = helperTerm
+              }
+          body' <- liftRecursiveLetsInTerm context bodyLocals body
+          pure (ELet name scheme (EVar helperName) body')
+        else
+          ELet name scheme
+            <$> liftRecursiveLetsInTerm context lexicalLocals rhs
+            <*> liftRecursiveLetsInTerm context bodyLocals body
+    ETyAbs name mbBound body ->
+      ETyAbs name mbBound <$> liftRecursiveLetsInTerm context lexicalLocals body
+    ETyInst inner inst ->
+      ETyInst <$> liftRecursiveLetsInTerm context lexicalLocals inner <*> pure inst
+    ERoll ty body ->
+      ERoll ty <$> liftRecursiveLetsInTerm context lexicalLocals body
+    EUnroll body ->
+      EUnroll <$> liftRecursiveLetsInTerm context lexicalLocals body
+
+ensureLiftableRecursiveLet :: Set.Set String -> String -> BackendType -> ElabTerm -> LiftM ()
+ensureLiftableRecursiveLet lexicalLocals name bindingTy rhs = do
+  let captures =
+        Set.toList $
+          freeTermVariables rhs
+            `Set.intersection` lexicalLocals
+      unsupported reason =
+        BackendUnsupportedRecursiveLet
+          ( name
+              ++ " ("
+              ++ reason
+              ++ ")"
+          )
+  unless (null captures) $
+    throwLiftError
+      ( unsupported
+          ("captures lexical bindings: " ++ intercalate ", " captures)
+      )
+  unless (isMonomorphicFirstOrderFunctionType bindingTy) $
+    throwLiftError (unsupported "expected a monomorphic first-order function type")
+  unless (isFunctionValueTerm rhs) $
+    throwLiftError (unsupported "expected a function-valued recursive right-hand side")
+
+freshLiftedRecursiveLetName :: ConvertContext -> String -> LiftM String
+freshLiftedRecursiveLetName context localName = do
+  state0 <- get
+  let (name, nextIndex) = pickName (lsNextHelperIndex state0)
+  modify
+    ( \state1 ->
+        state1
+          { lsNextHelperIndex = nextIndex,
+            lsGeneratedHelperNames = Set.insert name (lsGeneratedHelperNames state1)
+          }
+    )
+  pure name
+  where
+    pickName index0 =
+      let candidate =
+            ccCurrentBindingName context
+              ++ "$letrec$"
+              ++ localName
+              ++ "$"
+              ++ show index0
+       in if Set.member candidate (ccGlobalTerms context)
+            then pickName (index0 + 1)
+            else (candidate, index0 + 1)
+
+emitLiftedRecursiveLet :: LiftedRecursiveLet -> LiftM ()
+emitLiftedRecursiveLet lifted =
+  modify
+    ( \state0 ->
+        state0
+          { lsLiftedRecursiveLets = lsLiftedRecursiveLets state0 ++ [lifted]
+          }
+    )
+
+liftEitherConversion :: Either BackendConversionError a -> LiftM a
+liftEitherConversion result =
+  StateT $ \state0 ->
+    case result of
+      Right value -> Right (value, state0)
+      Left err -> Left err
+
+throwLiftError :: BackendConversionError -> LiftM a
+throwLiftError err =
+  StateT (const (Left err))
+
+isMonomorphicFirstOrderFunctionType :: BackendType -> Bool
+isMonomorphicFirstOrderFunctionType ty =
+  case ty of
+    BTForall {} ->
+      False
+    _ ->
+      let (args, resultTy) = splitBackendArrows ty
+       in not (null args) && all (isFirstOrderValueType Set.empty) (resultTy : args)
+
+isFirstOrderValueType :: Set.Set String -> BackendType -> Bool
+isFirstOrderValueType bound =
+  \case
+    BTVar name ->
+      Set.member name bound
+    BTArrow {} ->
+      False
+    BTBase {} ->
+      True
+    BTCon _ args ->
+      all (isFirstOrderValueType bound) args
+    BTForall {} ->
+      False
+    BTMu {} ->
+      True
+    BTBottom ->
+      False
+
+isFunctionValueTerm :: ElabTerm -> Bool
+isFunctionValueTerm term =
+  case stripAdministrativeTermWrappers term of
+    ELam {} -> True
+    _ -> False
+
+stripAdministrativeTermWrappers :: ElabTerm -> ElabTerm
+stripAdministrativeTermWrappers =
+  \case
+    ETyAbs _ _ body -> stripAdministrativeTermWrappers body
+    ETyInst inner _ -> stripAdministrativeTermWrappers inner
+    ERoll _ body -> stripAdministrativeTermWrappers body
+    term -> term
+
+freeTermVariables :: ElabTerm -> Set.Set String
+freeTermVariables =
+  go Set.empty
+  where
+    go bound =
+      \case
+        EVar name
+          | Set.member name bound -> Set.empty
+          | otherwise -> Set.singleton name
+        ELit {} ->
+          Set.empty
+        ELam name _ body ->
+          go (Set.insert name bound) body
+        EApp fun arg ->
+          go bound fun `Set.union` go bound arg
+        ELet name _ rhs body ->
+          go (Set.insert name bound) rhs `Set.union` go (Set.insert name bound) body
+        ETyAbs _ _ body ->
+          go bound body
+        ETyInst inner _ ->
+          go bound inner
+        ERoll _ body ->
+          go bound body
+        EUnroll body ->
+          go bound body
+
+renameFreeTermVariable :: String -> String -> ElabTerm -> ElabTerm
+renameFreeTermVariable needle replacement =
+  go Set.empty
+  where
+    renameName bound name
+      | name == needle && Set.notMember name bound = replacement
+      | otherwise = name
+
+    go bound =
+      \case
+        EVar name ->
+          EVar (renameName bound name)
+        ELit lit ->
+          ELit lit
+        ELam name ty body ->
+          ELam name ty (go (Set.insert name bound) body)
+        EApp fun arg ->
+          EApp (go bound fun) (go bound arg)
+        ELet name scheme rhs body
+          | name == needle ->
+              ELet name scheme rhs body
+          | otherwise ->
+              ELet name scheme (go bound rhs) (go (Set.insert name bound) body)
+        ETyAbs name mbBound body ->
+          ETyAbs name mbBound (go bound body)
+        ETyInst inner inst ->
+          ETyInst (go bound inner) inst
+        ERoll ty body ->
+          ERoll ty (go bound body)
+        EUnroll body ->
+          EUnroll (go bound body)
 
 checkedBindingCanonicalType :: ConvertContext -> CheckedModule -> CheckedBinding -> Either BackendConversionError ElabType
 checkedBindingCanonicalType context checkedModule binding = do
@@ -305,7 +570,9 @@ buildConvertContext checked = do
       { ccModuleScopes = moduleScopes,
         ccConstructors = Map.fromList constructorMetas,
         ccBindingData = bindingData,
-        ccData = dataMetas
+        ccData = dataMetas,
+        ccGlobalTerms = checkedProgramGlobalTerms checked,
+        ccCurrentBindingName = ""
       }
 
 allDataInfos :: CheckedProgram -> [DataInfo]
@@ -314,6 +581,15 @@ allDataInfos checked =
     | checkedModule <- checkedProgramModules checked,
       dataInfo <- Map.elems (checkedModuleData checkedModule)
   ]
+
+checkedProgramGlobalTerms :: CheckedProgram -> Set.Set String
+checkedProgramGlobalTerms checked =
+  Set.fromList (Map.keys backendBuiltinTermTypes)
+    `Set.union` Set.fromList
+      [ checkedBindingName binding
+        | checkedModule <- checkedProgramModules checked,
+          binding <- checkedModuleBindings checkedModule
+      ]
 
 dataInfoIdentityMap :: [DataInfo] -> Map SymbolIdentity DataInfo
 dataInfoIdentityMap dataInfos =

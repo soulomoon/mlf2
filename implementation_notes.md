@@ -13,6 +13,21 @@
   against a fixed count, so adding or removing interpreter-success coverage
   cannot silently change the backend parity surface.
 
+## 2026-04-28 - Recursive let and recursive ADT LLVM parity
+
+- `MLF.Backend.Convert` now promotes eligible closed recursive local functions
+  to backend helper bindings before LLVM lowering. The source local name remains
+  a non-recursive alias in the original body, while the helper owns the actual
+  self-call path as an ordinary backend/global function.
+- The promotion is intentionally narrow: only monomorphic first-order recursive
+  local functions are accepted. Recursive local functions that capture lexical
+  values still fail during backend conversion instead of relying on closure
+  conversion that the current backend does not implement.
+- Added a first-order recursive Tree fixture and broadened backend LLVM smoke
+  coverage across recursive Nat, List, Tree, GADT-shaped, existential-shaped,
+  and recursive-local-let programs. The LLVM tests assemble with `llvm-as` and
+  run object-code smoke coverage with `llc` when those tools are available.
+
 ## 2026-04-28 - Real LLVM backend boundary
 
 - Replaced the former backend inspection-text boundary with `MLF.Backend.LLVM`,
