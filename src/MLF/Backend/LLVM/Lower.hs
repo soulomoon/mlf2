@@ -324,6 +324,18 @@ collectSpecializationRequests base substitution expr =
                         Right (resolvedTypeArgs, _) -> [SpecRequest name resolvedTypeArgs]
                         Left _ -> []
             _ -> []
+        BackendTyApp {} ->
+          case collectTyApps expr of
+            (BackendVar _ name, typeArgs)
+              | Just binding <- Map.lookup name (pbBindings base),
+                not (null (ffTypeBinders (biForm binding))),
+                null (ffParams (biForm binding)) ->
+                  let typeArgs' = map (substituteBackendTypes substitution) typeArgs
+                   in case instantiateFunctionFormWithTypeArgs ("specialization request " ++ name) (biForm binding) typeArgs' [] of
+                        Right (resolvedTypeArgs, form)
+                          | null (ffParams form) -> [SpecRequest name resolvedTypeArgs]
+                        _ -> []
+            _ -> []
         _ -> []
 
     childRequests =
@@ -521,8 +533,8 @@ lowerExpr env exprEnv context expr =
       pure bodyValue
     BackendTyAbs {} ->
       liftEither (BackendLLVMUnsupportedExpression context "escaping type abstraction")
-    BackendTyApp _ fun _ ->
-      lowerExpr env exprEnv context fun
+    BackendTyApp {} ->
+      lowerTyApp env exprEnv context expr
     BackendConstruct resultTy name args ->
       lowerConstruct env exprEnv context resultTy name args
     BackendCase resultTy scrutinee alternatives ->
@@ -531,6 +543,16 @@ lowerExpr env exprEnv context expr =
       lowerRollLike env exprEnv context resultTy payload "roll"
     BackendUnroll resultTy payload ->
       lowerRollLike env exprEnv context resultTy payload "unroll"
+
+lowerTyApp :: ProgramEnv -> ExprEnv -> String -> BackendExpr -> LowerM LowerValue
+lowerTyApp env exprEnv context expr =
+  case collectTyApps expr of
+    (BackendVar _ name, typeArgs)
+      | Just binding <- Map.lookup name (pbBindings (peBase env)),
+        not (null (ffTypeBinders (biForm binding))) ->
+          lowerGlobalValue env context (backendExprType expr) name binding typeArgs
+    (fun, _) ->
+      lowerExpr env exprEnv context fun
 
 bindLet :: ProgramEnv -> ExprEnv -> String -> String -> BackendExpr -> LowerM ExprEnv
 bindLet env exprEnv context name rhs =
@@ -555,17 +577,35 @@ lowerVar env exprEnv context ty name =
     Just value -> pure value
     Nothing ->
       case Map.lookup name (pbBindings (peBase env)) of
-        Just binding
-          | not (null (ffTypeBinders (biForm binding))) ->
-              liftEither (BackendLLVMUnsupportedExpression context ("escaping polymorphic binding " ++ show name))
-          | null (ffParams (biForm binding)) -> do
-              resultTy <- lowerBackendTypeM env context ty
-              result <- emitAssign "call" resultTy (LLVMCall name [])
-              pure (LowerValue ty resultTy result)
-          | otherwise ->
-              liftEither (BackendLLVMUnsupportedExpression context ("escaping function " ++ show name))
+        Just binding ->
+          lowerGlobalValue env context ty name binding []
         Nothing ->
           liftEither (BackendLLVMUnknownFunction name)
+
+lowerGlobalValue :: ProgramEnv -> String -> BackendType -> String -> BindingInfo -> [BackendType] -> LowerM LowerValue
+lowerGlobalValue env context resultTy name binding typeArgs =
+  case (ffTypeBinders form, typeArgs) of
+    ([], []) ->
+      lowerInstantiatedGlobalValue resultTy name binding [] form
+    ([], _ : _) ->
+      liftEither (BackendLLVMUnsupportedCall ("unexpected type arguments at " ++ context))
+    (_ : _, []) ->
+      liftEither (BackendLLVMUnsupportedExpression context ("escaping polymorphic binding " ++ show name))
+    (_ : _, _) -> do
+      (resolvedTypeArgs, instantiated) <- instantiateFunctionFormWithTypeArgsM context form typeArgs []
+      lowerInstantiatedGlobalValue resultTy name binding resolvedTypeArgs instantiated
+  where
+    form = biForm binding
+
+    lowerInstantiatedGlobalValue expectedTy functionContext binding0 resolvedTypeArgs instantiated = do
+      unless (null (ffParams instantiated)) $
+        liftEither (BackendLLVMUnsupportedExpression context ("escaping function " ++ show functionContext))
+      unless (alphaEqBackendType expectedTy (ffReturnType instantiated)) $
+        liftEither (BackendLLVMInternalError ("global value type mismatch for " ++ functionContext ++ " at " ++ context))
+      resultLLVMType <- lowerBackendTypeM env context expectedTy
+      functionName <- globalFunctionName env context binding0 resolvedTypeArgs
+      result <- emitAssign "call" resultLLVMType (LLVMCall functionName [])
+      pure (LowerValue expectedTy resultLLVMType result)
 
 lowerLit :: ProgramEnv -> String -> BackendType -> Lit -> LowerM LowerValue
 lowerLit env context ty lit = do

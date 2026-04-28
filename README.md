@@ -129,11 +129,13 @@ Emit LLVM IR for a checked program:
 cabal run mlf2 -- emit-backend test/programs/unified/authoritative-let-polymorphism.mlfp
 ```
 
-Backend LLVM validation tests require LLVM command-line tools with opaque
-pointer support. The test suite looks for `llvm-as` and `llc` on `PATH`, with
-standard Homebrew LLVM locations also accepted on macOS; LLVM 14 tools are run
-with `-opaque-pointers` when needed, while LLVM 15+ tools accept the emitted
-opaque-pointer IR by default.
+Backend LLVM validation tests use LLVM command-line tools with opaque pointer
+support when available. The test suite looks for `llvm-as` and `llc` on `PATH`,
+with standard Homebrew LLVM locations also accepted on macOS; LLVM-dependent
+assertions are marked pending when the tools are absent, so `cabal test` can run
+in environments without LLVM while still exercising the checks wherever the tools
+are installed. LLVM 14 tools are run with `-opaque-pointers` when needed, while
+LLVM 15+ tools accept the emitted opaque-pointer IR by default.
 
 ## Syntax and paper alignment
 

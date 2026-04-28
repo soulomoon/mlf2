@@ -17,10 +17,12 @@
   types, non-ASCII string literals, and representation-changing roll/unroll
   nodes until closure conversion or a richer runtime representation exists.
 - Backend validation tests now assemble emitted LLVM with `llvm-as` and smoke
-  representative codegen with `llc`; LLVM tools with opaque-pointer support
-  must be available on `PATH` or in a standard local LLVM installation. The
-  harness retries with `-opaque-pointers` for LLVM 14-era tools that require
-  the explicit flag.
+  representative codegen with `llc` when LLVM tools are available on `PATH` or
+  in a standard local LLVM installation. LLVM-dependent assertions are marked
+  pending when the tools are absent, so `cabal test` can run in environments
+  without LLVM while still exercising the checks wherever the tools are
+  installed. The harness retries with `-opaque-pointers` for LLVM 14-era tools
+  that require the explicit flag.
 
 ## 2026-04-22 - Typed backend IR boundary
 
