@@ -82,6 +82,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unknown backend LLVM function"
     validateLLVMAssembly output
 
+  it "instantiates direct polymorphic zero-arity expressions used through type application" $ do
+    output <- requireRight (renderBackendProgramLLVM directPolymorphicZeroArityProgram)
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"main\"()"
+    output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
+    output `shouldNotSatisfy` isInfixOf "escaping type abstraction"
+    validateLLVMAssembly output
+
   it "lowers Nat construction and case analysis to heap tags and switch" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-case-analysis.mlfp"
 
@@ -296,6 +304,30 @@ localPolymorphicZeroArityProgram =
                               (BackendVar nonePolyTy "none")
                               intTy
                           ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+directPolymorphicZeroArityProgram :: BackendProgram
+directPolymorphicZeroArityProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = optionTy intTy,
+                      backendBindingExpr =
+                        BackendTyApp
+                          (optionTy intTy)
+                          nonePolyExpr
+                          intTy,
                       backendBindingExportedAsMain = True
                     }
                 ]

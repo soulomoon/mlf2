@@ -553,20 +553,29 @@ lowerTyApp env exprEnv context expr =
       | Just binding <- Map.lookup name (pbBindings (peBase env)),
         not (null (ffTypeBinders (biForm binding))) ->
           lowerGlobalValue env context (backendExprType expr) name binding typeArgs
-    (fun, _) ->
-      lowerExpr env exprEnv context fun
+    (fun, typeArgs) ->
+      lowerDirectFunctionValue env exprEnv context (backendExprType expr) fun typeArgs
+
+lowerDirectFunctionValue :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> [BackendType] -> LowerM LowerValue
+lowerDirectFunctionValue env exprEnv context resultTy fun typeArgs = do
+  form <- instantiateFunctionFormM context (functionFormFromExpr fun) typeArgs []
+  lowerInstantiatedFunctionValue env exprEnv context "type-applied expression" resultTy form
 
 lowerLocalFunctionValue :: ProgramEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> LowerM LowerValue
 lowerLocalFunctionValue env context resultTy name localFunction typeArgs = do
   form <- instantiateFunctionFormM context (lfForm localFunction) typeArgs []
+  lowerInstantiatedFunctionValue env (lfCapturedEnv localFunction) context name resultTy form
+
+lowerInstantiatedFunctionValue :: ProgramEnv -> ExprEnv -> String -> String -> BackendType -> FunctionForm -> LowerM LowerValue
+lowerInstantiatedFunctionValue env exprEnv context name resultTy form = do
   unless (null (ffParams form)) $
     liftEither (BackendLLVMUnsupportedExpression context ("escaping function " ++ show name))
   unless (alphaEqBackendType resultTy (ffReturnType form)) $
-    liftEither (BackendLLVMInternalError ("local value type mismatch for " ++ name ++ " at " ++ context))
-  value <- lowerExpr env (lfCapturedEnv localFunction) context (ffBody form)
+    liftEither (BackendLLVMInternalError ("value type mismatch for " ++ name ++ " at " ++ context))
+  value <- lowerExpr env exprEnv context (ffBody form)
   expectedTy <- lowerBackendTypeM env context resultTy
   unless (lvLLVMType value == expectedTy) $
-    liftEither (BackendLLVMInternalError ("local value LLVM type mismatch for " ++ name ++ " at " ++ context))
+    liftEither (BackendLLVMInternalError ("value LLVM type mismatch for " ++ name ++ " at " ++ context))
   pure value
 
 bindLet :: ProgramEnv -> ExprEnv -> String -> String -> BackendExpr -> LowerM ExprEnv
