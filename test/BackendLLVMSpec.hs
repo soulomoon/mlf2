@@ -1325,17 +1325,13 @@ unsupportedLLVMParityCases =
     ("boundary: runs aliased bulk-imported hidden-owner constructors in one case", "BackendUnsupportedSourceType"),
     ("boundary: runs value-exported GADT constructor when owner type is not exported", "BackendUnsupportedSourceType"),
     ("boundary: runs value-imported nonzero-index constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
-    ("boundary: runs deferred method with method-level type variable constraint", "BackendTypeCheckFailed"),
-    ("boundary: runs partial deferred method after method-local evidence is fixed by application", "BackendTypeCheckFailed"),
-    ("boundary: runs deferred method when only a later forall binder is inferred", "BackendUnsupportedInstantiation InstElim"),
-    ("boundary: runs constrained helper with method-local evidence fixed by call args", "BackendTypeCheckFailed"),
     ("unified fixture: test/programs/unified/first-class-polymorphism.mlfp", "Unsupported backend LLVM type at parameter \"$poly#0\" of FirstClassPolymorphism__usePoly"),
     ("standalone: does not decode typed non-data constructor fields through fallback ADT decoding", "escaping lambda")
   ]
 
 expectedLLVMUnsupportedParityCount :: Int
 expectedLLVMUnsupportedParityCount =
-  21
+  17
 
 llvmUnsupportedParityCount :: Int
 llvmUnsupportedParityCount =

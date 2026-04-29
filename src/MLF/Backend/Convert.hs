@@ -161,7 +161,10 @@ convertCheckedModule context env checkedModule = do
 convertCheckedBinding :: ConvertContext -> Env -> CheckedModule -> CheckedBinding -> Either BackendConversionError [BackendBinding]
 convertCheckedBinding context env checkedModule binding = do
   let bindingContext = context {ccCurrentBindingName = checkedBindingName binding}
-  canonicalElabTy <- checkedBindingCanonicalType context checkedModule binding
+  canonicalElabTyOpen <- checkedBindingCanonicalTypeOpen context checkedModule binding
+  let freeTypeBinders = Set.toAscList (freeElabTypeVars canonicalElabTyOpen)
+      canonicalElabTy = quantifyFreeElabTypeVars freeTypeBinders canonicalElabTyOpen
+      checkedBindingTermClosed = wrapElabTypeAbs freeTypeBinders (checkedBindingTerm binding)
   rawBindingTy <- convertElabType canonicalElabTy
   let bindingTy =
         canonicalizeBackendType context $
@@ -174,7 +177,7 @@ convertCheckedBinding context env checkedModule binding = do
               expr <- synthesizeConstructorBinding bindingTy constructorMeta
               Right (expr, [])
       _ -> do
-        (liftedTerm, liftedSpecs) <- liftRecursiveLetsInBinding bindingContext (checkedBindingTerm binding)
+        (liftedTerm, liftedSpecs) <- liftRecursiveLetsInBinding bindingContext checkedBindingTermClosed
         let envWithLifted =
               foldr
                 (\lifted acc -> extendTermEnv (lrlName lifted) (lrlElabType lifted) acc)
@@ -517,15 +520,78 @@ replaceFreeTermVariable needle replacement =
           EUnroll (go bound body)
 
 checkedBindingCanonicalType :: ConvertContext -> CheckedModule -> CheckedBinding -> Either BackendConversionError ElabType
-checkedBindingCanonicalType context checkedModule binding = do
+checkedBindingCanonicalType context checkedModule binding =
+  closeFreeElabType <$> checkedBindingCanonicalTypeOpen context checkedModule binding
+
+checkedBindingCanonicalTypeOpen :: ConvertContext -> CheckedModule -> CheckedBinding -> Either BackendConversionError ElabType
+checkedBindingCanonicalTypeOpen context checkedModule binding = do
   let checkedTy = checkedBindingType binding
       scope = scopeForModule context (checkedModuleName checkedModule)
   checkedBackendTy <- convertElabType checkedTy
   canonicalTy <- sourceTypeToElabType (lowerType scope (checkedBindingSourceType binding))
   canonicalBackendTy <- convertElabType canonicalTy
+  let strippedCheckedBackendTy = stripVacuousBackendForalls checkedBackendTy
   if alphaEqBackendType checkedBackendTy canonicalBackendTy
     then Right canonicalTy
-    else Right checkedTy
+    else
+      if alphaEqBackendType (normalizeBuiltinBackendType strippedCheckedBackendTy) (normalizeBuiltinBackendType canonicalBackendTy)
+        then Right (backendTypeToElab strippedCheckedBackendTy)
+        else Right checkedTy
+
+stripVacuousBackendForalls :: BackendType -> BackendType
+stripVacuousBackendForalls =
+  \case
+    BTArrow dom cod ->
+      BTArrow (stripVacuousBackendForalls dom) (stripVacuousBackendForalls cod)
+    BTCon con args ->
+      BTCon con (fmap stripVacuousBackendForalls args)
+    BTForall name mbBound body ->
+      let body' = stripVacuousBackendForalls body
+          mbBound' = fmap stripVacuousBackendForalls mbBound
+       in if Set.member name (freeBackendTypeVars body')
+            then BTForall name mbBound' body'
+            else body'
+    BTMu name body ->
+      BTMu name (stripVacuousBackendForalls body)
+    ty ->
+      ty
+
+normalizeBuiltinBackendType :: BackendType -> BackendType
+normalizeBuiltinBackendType =
+  \case
+    BTArrow dom cod ->
+      BTArrow (normalizeBuiltinBackendType dom) (normalizeBuiltinBackendType cod)
+    BTBase base ->
+      BTBase (normalizeBuiltinBase base)
+    BTCon con args ->
+      BTCon (normalizeBuiltinBase con) (fmap normalizeBuiltinBackendType args)
+    BTForall name mbBound body ->
+      BTForall name (fmap normalizeBuiltinBackendType mbBound) (normalizeBuiltinBackendType body)
+    BTMu name body ->
+      BTMu name (normalizeBuiltinBackendType body)
+    ty ->
+      ty
+
+normalizeBuiltinBase :: BaseTy -> BaseTy
+normalizeBuiltinBase (BaseTy name) =
+  BaseTy $
+    case name of
+      "<builtin>.Int" -> "Int"
+      "<builtin>.Bool" -> "Bool"
+      "<builtin>.String" -> "String"
+      _ -> name
+
+closeFreeElabType :: ElabType -> ElabType
+closeFreeElabType ty =
+  quantifyFreeElabTypeVars (Set.toAscList (freeElabTypeVars ty)) ty
+
+quantifyFreeElabTypeVars :: [String] -> ElabType -> ElabType
+quantifyFreeElabTypeVars names ty =
+  foldr (`TForall` Nothing) ty names
+
+wrapElabTypeAbs :: [String] -> ElabTerm -> ElabTerm
+wrapElabTypeAbs names term =
+  foldr (\name acc -> ETyAbs name Nothing acc) term names
 
 scopeForModule :: ConvertContext -> String -> ElaborateScope
 scopeForModule context moduleName =
@@ -1047,18 +1113,8 @@ convertOrdinaryTerm context env term resultTy =
             backendParamType = paramBackendTy,
             backendBody = bodyExpr
           }
-    EApp fun arg -> do
-      funExpr <- convertTerm context env fun
-      argExpr <-
-        case backendExprType funExpr of
-          BTArrow expectedArg _ -> convertTermExpected context env (Just expectedArg) arg
-          _ -> convertTerm context env arg
-      Right
-        BackendApp
-          { backendExprType = resultTy,
-            backendFunction = funExpr,
-            backendArgument = argExpr
-          }
+    EApp fun arg ->
+      convertApplication context env resultTy fun arg
     ELet name scheme rhs body -> do
       let schemeTy = schemeToType scheme
       when (termMentionsFreeVariable name rhs) $
@@ -1074,21 +1130,22 @@ convertOrdinaryTerm context env term resultTy =
             backendLetRhs = rhsExpr,
             backendLetBody = bodyExpr
           }
-    ETyAbs name mbBound body -> do
-      mbBackendBound <- traverse (fmap (canonicalizeBackendType context) . convertElabType . tyToElab) mbBound
-      let boundTy = maybe TBottom tyToElab mbBound
-          bodyExpected =
-            case resultTy of
-              BTForall expectedName _ bodyTy -> Just (substituteBackendType expectedName (BTVar name) bodyTy)
-              _ -> Nothing
-      bodyExpr <- convertTermExpected context (extendTypeEnv name boundTy env) bodyExpected body
-      Right
-        BackendTyAbs
-          { backendExprType = resultTy,
-            backendTyParamName = name,
-            backendTyParamBound = mbBackendBound,
-            backendTyAbsBody = bodyExpr
-          }
+    ETyAbs name mbBound body ->
+      case resultTy of
+        BTForall expectedName _ bodyTy -> do
+          mbBackendBound <- traverse (fmap (canonicalizeBackendType context) . convertElabType . tyToElab) mbBound
+          let boundTy = maybe TBottom tyToElab mbBound
+              bodyExpected = Just (substituteBackendType expectedName (BTVar name) bodyTy)
+          bodyExpr <- convertTermExpected context (extendTypeEnv name boundTy env) bodyExpected body
+          Right
+            BackendTyAbs
+              { backendExprType = resultTy,
+                backendTyParamName = name,
+                backendTyParamBound = mbBackendBound,
+                backendTyAbsBody = bodyExpr
+              }
+        _ ->
+          convertTermExpected context env (Just resultTy) body
     ETyInst inner inst ->
       convertTypeInstantiation context env resultTy inner inst
     ERoll _ body -> do
@@ -1106,6 +1163,69 @@ convertOrdinaryTerm context env term resultTy =
           { backendExprType = resultTy,
             backendUnrollPayload = bodyExpr
           }
+
+convertApplication ::
+  ConvertContext ->
+  Env ->
+  BackendType ->
+  ElabTerm ->
+  ElabTerm ->
+  Either BackendConversionError BackendExpr
+convertApplication context env resultTy fun arg =
+  convertApplicationFromFunction context env resultTy fun arg
+    `orElseConversion` convertApplicationFromExpectedResult context env resultTy fun arg
+
+convertApplicationFromFunction ::
+  ConvertContext ->
+  Env ->
+  BackendType ->
+  ElabTerm ->
+  ElabTerm ->
+  Either BackendConversionError BackendExpr
+convertApplicationFromFunction context env resultTy fun arg = do
+  funExpr <- convertTerm context env fun
+  argExpr <-
+    case backendExprType funExpr of
+      BTArrow expectedArg _ -> convertTermExpected context env (Just expectedArg) arg
+      _ -> convertTerm context env arg
+  Right (backendApplication (applicationResultType resultTy funExpr) funExpr argExpr)
+
+convertApplicationFromExpectedResult ::
+  ConvertContext ->
+  Env ->
+  BackendType ->
+  ElabTerm ->
+  ElabTerm ->
+  Either BackendConversionError BackendExpr
+convertApplicationFromExpectedResult context env resultTy fun arg =
+  case inferBackendType env arg of
+    Right rawArgTy -> do
+      let argTy = canonicalizeBackendType context rawArgTy
+      funExpr <- convertTermExpected context env (Just (BTArrow argTy resultTy)) fun
+      argExpr <- convertTermExpected context env (Just argTy) arg
+      Right (backendApplication resultTy funExpr argExpr)
+    Left err -> Left err
+
+backendApplication :: BackendType -> BackendExpr -> BackendExpr -> BackendExpr
+backendApplication resultTy funExpr argExpr =
+  BackendApp
+    { backendExprType = resultTy,
+      backendFunction = funExpr,
+      backendArgument = argExpr
+    }
+
+applicationResultType :: BackendType -> BackendExpr -> BackendType
+applicationResultType resultTy funExpr =
+  case backendExprType funExpr of
+    BTArrow _ actualResultTy
+      | not (alphaEqBackendType actualResultTy resultTy) -> actualResultTy
+    _ -> resultTy
+
+orElseConversion :: Either BackendConversionError a -> Either BackendConversionError a -> Either BackendConversionError a
+orElseConversion primary fallback =
+  case primary of
+    Right value -> Right value
+    Left _ -> fallback
 
 termMentionsFreeVariable :: String -> ElabTerm -> Bool
 termMentionsFreeVariable needle =
@@ -1151,13 +1271,18 @@ convertTypeInstantiation context env resultTy inner inst =
     _ ->
       case appLikeInstantiationType inst of
         Just tyArg -> do
-          innerExpr <- convertTerm context env inner
+          innerExpr <- convertAppLikeInstantiationFunction context env inner
           case backendExprType innerExpr of
-            BTForall {} -> do
+            BTForall name _ bodyTy -> do
               backendTyArg <- canonicalizeBackendType context <$> convertElabType tyArg
+              let appliedTy = canonicalizeBackendType context (substituteBackendType name backendTyArg bodyTy)
+                  resultTy' =
+                    if alphaEqBackendType appliedTy resultTy
+                      then resultTy
+                      else appliedTy
               Right
                 BackendTyApp
-                  { backendExprType = resultTy,
+                  { backendExprType = resultTy',
                     backendTyFunction = innerExpr,
                     backendTyArgument = backendTyArg
                   }
@@ -1165,6 +1290,42 @@ convertTypeInstantiation context env resultTy inner inst =
               | alphaEqBackendType (backendExprType innerExpr) resultTy -> Right innerExpr
               | otherwise -> Left (BackendUnsupportedInstantiation inst)
         Nothing -> Left (BackendUnsupportedInstantiation inst)
+
+convertAppLikeInstantiationFunction ::
+  ConvertContext ->
+  Env ->
+  ElabTerm ->
+  Either BackendConversionError BackendExpr
+convertAppLikeInstantiationFunction context env inner =
+  case convertTerm context env inner of
+    Right expr
+      | hasForallResult expr -> Right expr
+    Right expr ->
+      case convertStrippedElim of
+        Right strippedExpr
+          | hasForallResult strippedExpr -> Right strippedExpr
+        _ -> Right expr
+    Left err ->
+      case convertStrippedElim of
+        Right strippedExpr -> Right strippedExpr
+        Left _ -> Left err
+  where
+    hasForallResult expr =
+      case backendExprType expr of
+        BTForall {} -> True
+        _ -> False
+
+    convertStrippedElim =
+      let stripped = dropLeadingElimInstantiations inner
+       in if stripped == inner
+            then Left (BackendUnsupportedInstantiation InstElim)
+            else convertTerm context env stripped
+
+dropLeadingElimInstantiations :: ElabTerm -> ElabTerm
+dropLeadingElimInstantiations term =
+  case term of
+    ETyInst inner InstElim -> dropLeadingElimInstantiations inner
+    _ -> term
 
 appLikeInstantiationType :: Instantiation -> Maybe ElabType
 appLikeInstantiationType inst =
