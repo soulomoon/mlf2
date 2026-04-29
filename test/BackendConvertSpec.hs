@@ -327,6 +327,27 @@ spec = describe "MLF.Backend.Convert" $ do
       Right backend ->
         expectationFailure ("expected constructor type application rejection, got " ++ show backend)
 
+  it "rejects constructor head type instantiations that would fall back to same-named type variables" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceType = polymorphicOptionSourceTy,
+                    checkedBindingType = polymorphicOptionElabTy,
+                    checkedBindingTerm = staleSomeInPolymorphicOptionTerm
+                  }
+            )
+            checked0
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedCaseShape message) ->
+        message `shouldSatisfy` isInfixOf "constructor result type does not match expected result"
+      Left err ->
+        expectationFailure ("expected constructor result type mismatch, got " ++ show err)
+      Right backend ->
+        expectationFailure ("expected constructor type application rejection, got " ++ show backend)
+
   it "matches repeated constructor parameters modulo alpha-equivalence" $ do
     checked0 <- requireChecked repeatedPolymorphicParameterProgram
     let checked =
@@ -1074,6 +1095,37 @@ boolElabTy :: Elab.ElabType
 boolElabTy =
   Elab.TBase (BaseTy "Bool")
 
+polymorphicOptionSourceTy :: SrcType
+polymorphicOptionSourceTy =
+  STForall
+    "a"
+    Nothing
+    (STArrow (STVar "a") (STCon "Main.Option" (STVar "a" :| [])))
+
+polymorphicOptionElabTy :: Elab.ElabType
+polymorphicOptionElabTy =
+  Elab.TForall
+    "a"
+    Nothing
+    ( Elab.TArrow
+        (Elab.TVar "a")
+        (Elab.TCon (BaseTy "Main.Option") (Elab.TVar "a" :| []))
+    )
+
+staleSomeInPolymorphicOptionTerm :: Elab.ElabTerm
+staleSomeInPolymorphicOptionTerm =
+  Elab.ETyAbs
+    "a"
+    Nothing
+    ( Elab.ELam
+        "x"
+        (Elab.TVar "a")
+        ( Elab.EApp
+            (Elab.ETyInst (Elab.EVar "Main__Some") (Elab.InstApp boolElabTy))
+            (Elab.EVar "x")
+        )
+    )
+
 intElabBoundTy :: Elab.BoundType
 intElabBoundTy =
   Elab.TBase (BaseTy "Int")
@@ -1182,6 +1234,10 @@ unqualifiedStructuralTElabTy =
 
 mapMainBinding :: (CheckedBinding -> CheckedBinding) -> CheckedProgram -> CheckedProgram
 mapMainBinding f checked =
+  mapBinding (checkedProgramMain checked) f checked
+
+mapBinding :: String -> (CheckedBinding -> CheckedBinding) -> CheckedProgram -> CheckedProgram
+mapBinding target f checked =
   checked
     { checkedProgramModules =
         map updateModule (checkedProgramModules checked)
@@ -1194,7 +1250,7 @@ mapMainBinding f checked =
         }
 
     updateBinding binding
-      | checkedBindingName binding == checkedProgramMain checked = f binding
+      | checkedBindingName binding == target = f binding
       | otherwise = binding
 
 mapBackendMainBinding :: (BackendBinding -> BackendBinding) -> BackendProgram -> BackendProgram

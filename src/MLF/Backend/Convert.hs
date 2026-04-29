@@ -1277,7 +1277,7 @@ convertConstructorApplication context env term resultTy =
       let completedSubstitution = completeBackendParameterSubstitution parameters substitution
           fields = map (substituteBackendTypes completedSubstitution) rawFields
           substitutedResultTy = recoverStructuralBackendType ownerContext (substituteBackendTypes completedSubstitution constructorResultTy)
-      unless (alphaEqBackendType substitutedResultTy effectiveResultTy) $
+      unless (constructorResultTypesMatch ownerContext typeBounds substitutedResultTy effectiveResultTy) $
         Left
           ( BackendUnsupportedCaseShape
               ( "constructor result type does not match expected result for `"
@@ -1286,7 +1286,7 @@ convertConstructorApplication context env term resultTy =
               )
           )
       argExprs <- zipWithM (convertTermExpected context env . Just) fields args
-      mapM_ (checkConstructorArgumentType constructor) (zip [0 :: Int ..] (zip fields argExprs))
+      mapM_ (checkConstructorArgumentType ownerContext typeBounds constructor) (zip [0 :: Int ..] (zip fields argExprs))
       Right
         ( Just
             BackendConstruct
@@ -1303,7 +1303,7 @@ convertConstructorApplication context env term resultTy =
           inferredSubstitution <-
             matchBackendTypeParameters typeBounds dataParameters parameters Map.empty constructorResultTy effectiveResultTy
           if explicitSubstitutionAgreesWithInferred ownerContext typeBounds explicitSubstitution inferredSubstitution
-            then Just inferredSubstitution
+            then Just (Map.union explicitSubstitution inferredSubstitution)
             else Nothing
 
     explicitSubstitutionAgreesWithInferred ownerContext typeBounds explicitSubstitution inferredSubstitution =
@@ -1312,7 +1312,11 @@ convertConstructorApplication context env term resultTy =
         explicitArgumentAgrees (name, explicitTy) =
           case Map.lookup name inferredSubstitution of
             Just (BTVar inferredName)
-              | inferredName == name -> True
+              | inferredName == name ->
+                  Map.notMember inferredName typeBounds
+                    || alphaEqBackendType
+                      (resolveTypeBoundDependencies explicitTy)
+                      (resolveTypeBoundDependencies (BTVar inferredName))
             Just inferredTy ->
               alphaEqBackendType (resolveTypeBoundDependencies explicitTy) (resolveTypeBoundDependencies inferredTy)
             Nothing -> False
@@ -1321,8 +1325,8 @@ convertConstructorApplication context env term resultTy =
           recoverStructuralBackendType ownerContext
             . substituteBackendTypes (completeBackendParameterSubstitution typeBounds Map.empty)
 
-    checkConstructorArgumentType constructor (index, (expectedTy, argExpr)) =
-      unless (alphaEqBackendType (backendExprType argExpr) expectedTy) $
+    checkConstructorArgumentType ownerContext typeBounds constructor (index, (expectedTy, argExpr)) =
+      unless (constructorBoundaryTypesMatch ownerContext typeBounds (backendExprType argExpr) expectedTy) $
         Left
           ( BackendUnsupportedCaseShape
               ( "constructor argument "
@@ -1332,6 +1336,49 @@ convertConstructorApplication context env term resultTy =
                   ++ "`"
               )
           )
+
+    constructorBoundaryTypesMatch ownerContext typeBounds left right =
+      alphaEqBackendType left right
+        || alphaEqBackendType (normalizeConstructorBoundaryType ownerContext typeBounds left) (normalizeConstructorBoundaryType ownerContext typeBounds right)
+
+    constructorResultTypesMatch ownerContext typeBounds left right =
+      constructorBoundaryTypesMatch ownerContext typeBounds left right
+        || resultTypePlaceholderMatches
+          typeBounds
+          (normalizeConstructorBoundaryType ownerContext typeBounds left)
+          (normalizeConstructorBoundaryType ownerContext typeBounds right)
+
+    normalizeConstructorBoundaryType ownerContext typeBounds =
+      recoverStructuralBackendType ownerContext
+        . substituteBackendTypes (completeBackendParameterSubstitution typeBounds Map.empty)
+
+    resultTypePlaceholderMatches typeBounds actual expected =
+      case (actual, expected) of
+        (_, BTVar name)
+          | Map.notMember name typeBounds -> True
+        (BTArrow actualDom actualCod, BTArrow expectedDom expectedCod) ->
+          resultTypePlaceholderMatches typeBounds actualDom expectedDom
+            && resultTypePlaceholderMatches typeBounds actualCod expectedCod
+        (BTCon actualCon actualArgs, BTCon expectedCon expectedArgs)
+          | actualCon == expectedCon,
+            length actualArgs == length expectedArgs ->
+              and (zipWith (resultTypePlaceholderMatches typeBounds) (NE.toList actualArgs) (NE.toList expectedArgs))
+        (BTVarApp actualName actualArgs, BTVarApp expectedName expectedArgs)
+          | actualName == expectedName,
+            length actualArgs == length expectedArgs ->
+              and (zipWith (resultTypePlaceholderMatches typeBounds) (NE.toList actualArgs) (NE.toList expectedArgs))
+        (BTForall actualName actualBound actualBody, BTForall expectedName expectedBound expectedBody) ->
+          resultTypePlaceholderBoundMatches typeBounds actualBound expectedBound
+            && resultTypePlaceholderMatches
+              (Map.insert expectedName Nothing (Map.insert actualName Nothing typeBounds))
+              actualBody
+              expectedBody
+        _ -> alphaEqBackendType actual expected
+
+    resultTypePlaceholderBoundMatches _ Nothing Nothing = True
+    resultTypePlaceholderBoundMatches typeBounds (Just actual) (Just expected) =
+      resultTypePlaceholderMatches typeBounds actual expected
+    resultTypePlaceholderBoundMatches _ _ _ = False
 
 constructorApplicationTerm :: ConvertContext -> ElabTerm -> Either BackendConversionError (Maybe ConstructorApplication)
 constructorApplicationTerm context term =
@@ -2130,7 +2177,9 @@ matchBackendTypeParameters typeBounds dataParameterOrder parameterBounds =
             then Just (Map.insert name actual substitution)
             else Nothing
         Just previous
-          | alphaEqBackendType previous actual && backendParameterBoundMatches name previous substitution -> Just substitution
+          | explicitParameterSubstitutionMatches previous actual
+              && backendParameterBoundMatches name previous substitution ->
+              Just substitution
         _ -> Nothing
 
     firstJust =
@@ -2157,6 +2206,10 @@ matchBackendTypeParameters typeBounds dataParameterOrder parameterBounds =
                in typeBoundDependenciesMatch actual expectedBound || actualTypeVariableBoundMatches actual expectedBound
         _ ->
           True
+
+    explicitParameterSubstitutionMatches previous actual =
+      alphaEqBackendType previous actual
+        || typeBoundDependenciesMatch previous actual
 
     typeBoundDependenciesMatch actual expectedBound =
       alphaEqBackendType
