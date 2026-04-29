@@ -49,6 +49,7 @@ module MLF.Frontend.Program.Types
     ValueInfo (..),
     InstanceInfo (..),
     DeferredBindingMode (..),
+    DeferredMethodEvidence (..),
     DeferredMethodCall (..),
     DeferredConstructorCall (..),
     DeferredCaseCall (..),
@@ -565,13 +566,21 @@ data DeferredBindingMode
   | DeferredBindingMonomorphic
   deriving (Eq, Show)
 
+data DeferredMethodEvidence = DeferredMethodEvidence
+  { deferredMethodEvidenceClassArg :: TypeView,
+    deferredMethodEvidenceRuntimeName :: String,
+    deferredMethodEvidenceType :: SrcType
+  }
+  deriving (Eq, Show)
+
 data DeferredMethodCall = DeferredMethodCall
   { deferredMethodPlaceholder :: String,
     deferredMethodInfo :: MethodInfo,
     deferredMethodArgCount :: Int,
     deferredMethodFullArity :: Int,
     deferredMethodName :: P.MethodName,
-    deferredMethodExpectedResult :: Maybe TypeView
+    deferredMethodExpectedResult :: Maybe TypeView,
+    deferredMethodEvidence :: Maybe DeferredMethodEvidence
   }
   deriving (Eq, Show)
 

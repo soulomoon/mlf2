@@ -27,6 +27,7 @@ module MLF.Frontend.Program.Elaborate
     resolveInstanceInfoByConstraint,
     resolveMethodInstanceInfoWithSubst,
     resolveMethodInstanceInfoByTypeView,
+    lookupEvidenceMethodByClass,
   )
 where
 
@@ -705,7 +706,7 @@ compileExpr scope mbExpected expr = case expr of
       Just OverloadedMethod {valueMethodInfo = methodInfo} ->
         compileNullaryMethodUse scope mbExpected methodInfo
       Just valueInfo@OrdinaryValue {valueRuntimeName = runtimeName} -> do
-        evidenceSurfaces <- valueEvidenceArgs scope valueInfo []
+        evidenceSurfaces <- valueEvidenceArgs scope valueInfo mbExpected []
         pure (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces)
       Just ConstructorValue {valueCtorInfo = ctorInfo} -> do
         compileConstructorHead scope ctorInfo 0 (constructorInitialSubst scope ctorInfo 0 mbExpected)
@@ -782,7 +783,7 @@ compileResolvedExpr scope mbExpected expr = case expr of
       OverloadedMethod {valueMethodInfo = methodInfo} ->
         compileNullaryMethodUse scope mbExpected methodInfo
       OrdinaryValue {valueRuntimeName = runtimeName} -> do
-        evidenceSurfaces <- valueResolvedEvidenceArgs scope valueInfo []
+        evidenceSurfaces <- valueResolvedEvidenceArgs scope valueInfo mbExpected []
         pure (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces)
       ConstructorValue {valueCtorInfo = ctorInfo} -> do
         compileConstructorHead scope ctorInfo 0 (constructorInitialSubst scope ctorInfo 0 mbExpected)
@@ -969,7 +970,7 @@ compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} arg
 compileValueApp scope mbExpected valueInfo args = do
   let expectedArgTys = valueExpectedArgTypes scope valueInfo mbExpected args
   argSurfaces <- zipWithM compileValueArg (expectedArgTys ++ repeat Nothing) args
-  evidenceSurfaces <- valueEvidenceArgs scope valueInfo args
+  evidenceSurfaces <- valueEvidenceArgs scope valueInfo mbExpected args
   let headSurface =
         case valueInfo of
           OrdinaryValue {valueRuntimeName = runtimeName} -> surfaceVar runtimeName
@@ -1023,7 +1024,7 @@ compileResolvedValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorI
 compileResolvedValueApp scope mbExpected valueInfo args = do
   let expectedArgTys = valueExpectedArgTypes scope valueInfo mbExpected args
   argSurfaces <- zipWithM compileValueArg (expectedArgTys ++ repeat Nothing) args
-  evidenceSurfaces <- valueResolvedEvidenceArgs scope valueInfo args
+  evidenceSurfaces <- valueResolvedEvidenceArgs scope valueInfo mbExpected args
   let headSurface =
         case valueInfo of
           OrdinaryValue {valueRuntimeName = runtimeName} -> surfaceVar runtimeName
@@ -1266,13 +1267,13 @@ constructorInitialSubst scope ctorInfo argCount mbExpected =
     Just subst -> subst
     Nothing -> Map.empty
 
-valueEvidenceArgs :: ElaborateScope -> ValueInfo -> [P.Expr] -> ElaborateM [SurfaceExpr]
-valueEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, valueType = visibleTy, valueConstraints = displayConstraints, valueConstraintInfos = constraints} args
+valueEvidenceArgs :: ElaborateScope -> ValueInfo -> Maybe SrcType -> [P.Expr] -> ElaborateM [SurfaceExpr]
+valueEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, valueType = visibleTy, valueConstraints = displayConstraints, valueConstraintInfos = constraints} mbExpected args
   | null constraints = pure []
   | otherwise = do
       subst <-
         case inferCallSubst scope visibleTy args of
-          Just subst0 -> pure (fmap (sourceTypeViewInScope scope) subst0)
+          Just subst0 -> pure (fmap (sourceTypeViewInScope scope) (refineValueEvidenceSubst scope visibleTy mbExpected args subst0))
           Nothing ->
             case displayConstraints of
               constraint : _ -> throwError (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
@@ -1285,15 +1286,15 @@ valueEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, valueType
     usesLocalPolymorphicEvidence constraint =
       not (Set.null (freeTypeVarsTypeView (constraintTypeView constraint)))
         && constraintCoveredByEvidenceInfo scope constraint
-valueEvidenceArgs _ _ _ = pure []
+valueEvidenceArgs _ _ _ _ = pure []
 
-valueResolvedEvidenceArgs :: ElaborateScope -> ValueInfo -> [P.ResolvedExpr] -> ElaborateM [SurfaceExpr]
-valueResolvedEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, valueType = visibleTy, valueConstraints = displayConstraints, valueConstraintInfos = constraints} args
+valueResolvedEvidenceArgs :: ElaborateScope -> ValueInfo -> Maybe SrcType -> [P.ResolvedExpr] -> ElaborateM [SurfaceExpr]
+valueResolvedEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, valueType = visibleTy, valueConstraints = displayConstraints, valueConstraintInfos = constraints} mbExpected args
   | null constraints = pure []
   | otherwise = do
       subst <-
         case inferResolvedCallSubst scope visibleTy args of
-          Just subst0 -> pure (fmap (sourceTypeViewInScope scope) subst0)
+          Just subst0 -> pure (fmap (sourceTypeViewInScope scope) (refineValueEvidenceSubst scope visibleTy mbExpected args subst0))
           Nothing ->
             case displayConstraints of
               constraint : _ -> throwError (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
@@ -1306,7 +1307,16 @@ valueResolvedEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, v
     usesLocalPolymorphicEvidence constraint =
       not (Set.null (freeTypeVarsTypeView (constraintTypeView constraint)))
         && constraintCoveredByEvidenceInfo scope constraint
-valueResolvedEvidenceArgs _ _ _ = pure []
+valueResolvedEvidenceArgs _ _ _ _ = pure []
+
+refineValueEvidenceSubst :: ElaborateScope -> SrcType -> Maybe SrcType -> [arg] -> Map String SrcType -> Map String SrcType
+refineValueEvidenceSubst scope visibleTy mbExpected args subst =
+  case mbExpected >>= matchTypesInScope scope subst resultTyForArity of
+    Just subst' -> subst'
+    Nothing -> subst
+  where
+    (argTys, resultTy) = splitArrows (snd (splitForalls visibleTy))
+    resultTyForArity = foldr STArrow resultTy (drop (length args) argTys)
 
 constraintEvidenceArgExprsInfo :: ElaborateScope -> ConstraintInfo -> ElaborateM [SurfaceExpr]
 constraintEvidenceArgExprsInfo scope constraint
@@ -1865,7 +1875,8 @@ deferMethodCall scope methodInfo fullArity placeholderSourceTy = do
             deferredMethodArgCount = fullArity,
             deferredMethodFullArity = fullArity,
             deferredMethodName = methodName methodInfo,
-            deferredMethodExpectedResult = Nothing
+            deferredMethodExpectedResult = Nothing,
+            deferredMethodEvidence = Nothing
           }
   registerDeferredObligation placeholder placeholderTy (DeferredMethod deferred)
   pure placeholder
@@ -1874,6 +1885,7 @@ deferNullaryMethodCall :: ElaborateScope -> MethodInfo -> TypeView -> ElaborateM
 deferNullaryMethodCall scope methodInfo expectedView = do
   placeholder <- freshDeferredMethodName (methodName methodInfo)
   let placeholderTy = lowerTypeView scope expectedView
+      localEvidence = nullaryMethodEvidence scope methodInfo expectedView
       deferred =
         DeferredMethodCall
           { deferredMethodPlaceholder = placeholder,
@@ -1881,10 +1893,28 @@ deferNullaryMethodCall scope methodInfo expectedView = do
             deferredMethodArgCount = 0,
             deferredMethodFullArity = 0,
             deferredMethodName = methodName methodInfo,
-            deferredMethodExpectedResult = Just expectedView
+            deferredMethodExpectedResult = Just expectedView,
+            deferredMethodEvidence = localEvidence
           }
   registerDeferredObligation placeholder placeholderTy (DeferredMethod deferred)
   pure placeholder
+
+nullaryMethodEvidence :: ElaborateScope -> MethodInfo -> TypeView -> Maybe DeferredMethodEvidence
+nullaryMethodEvidence scope methodInfo expectedView = do
+  classArgTy <- inferNullaryMethodClassArg scope methodInfo (typeViewDisplay expectedView)
+  let classArgView = sourceTypeViewInScope scope classArgTy
+  (runtimeName, evidenceTy) <-
+    lookupEvidenceMethodByClass
+      scope
+      (methodInfoOwnerClassSymbolIdentity methodInfo)
+      (typeViewIdentity classArgView)
+      (methodName methodInfo)
+  pure
+    DeferredMethodEvidence
+      { deferredMethodEvidenceClassArg = classArgView,
+        deferredMethodEvidenceRuntimeName = runtimeName,
+        deferredMethodEvidenceType = evidenceTy
+      }
 
 deferConstructorCall :: ElaborateScope -> ConstructorInfo -> Int -> Map String SrcType -> ElaborateM String
 deferConstructorCall scope ctorInfo argCount initialSubst = do

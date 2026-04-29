@@ -283,6 +283,31 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "Zero")
     , ProgramMatrixCase
+        "checks generic constrained nullary overloaded method through local evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Monoid, Nat(..), mempty, append, neutral, main) {"
+                , "  class Monoid a {"
+                , "    mempty : a;"
+                , "    append : a -> a -> a;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  instance Monoid Nat {"
+                , "    mempty = Zero;"
+                , "    append = \\left \\right left;"
+                , "  }"
+                , ""
+                , "  def neutral : Monoid a => a = mempty;"
+                , "  def main : Nat = neutral;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
+    , ProgramMatrixCase
         "runs nullary overloaded method from expected method argument"
         ( InlineProgram $
             unlines

@@ -36,6 +36,7 @@ import MLF.Frontend.Program.Elaborate
     elaborateScopeDataTypes,
     elaborateScopeRuntimeTypes,
     inferClassArgument,
+    lookupEvidenceMethodByClass,
     lowerType,
     lowerTypeView,
     matchTypes,
@@ -49,6 +50,7 @@ import MLF.Frontend.Program.Types
     ConstructorInfo (..),
     ConstructorShape (..),
     DataInfo (..),
+    DeferredMethodEvidence (..),
     DeferredCaseCall (..),
     DeferredBindingMode (..),
     DeferredConstructorCall (..),
@@ -66,6 +68,7 @@ import MLF.Frontend.Program.Types
     constructorOwnerShapes,
     constructorShapeFromInfo,
     freeTypeVarsTypeView,
+    methodInfoOwnerClassSymbolIdentity,
     SymbolIdentity,
     splitArrows,
     splitForalls,
@@ -969,19 +972,37 @@ resolveDeferredMethods scope deferredMethods = go
         case inferNullaryMethodClassArgument methodInfo expectedView of
           Just view -> Right view
           Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-      (instanceInfo, subst) <- resolveMethodInstanceInfoByTypeView scope methodInfo classArgView
-      methodValue <- concreteMethodValue instanceInfo methodInfo
-      methodSubst <-
-        case inferNullaryMethodSubst methodInfo classArgView subst expectedView of
-          Just subst' -> Right subst'
-          Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-      let eagerConstraints =
-            filter
-              constraintGround
-              (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue))
-      evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty eagerConstraints
-      methodHead <- instantiateMethodValue scope methodSubst methodValue
-      Right (foldl X.EApp methodHead evidenceArgs)
+      case lookupNullaryEvidence deferred methodInfo classArgView of
+        Just runtimeName -> Right (X.EVar runtimeName)
+        Nothing -> do
+          (instanceInfo, subst) <- resolveMethodInstanceInfoByTypeView scope methodInfo classArgView
+          methodValue <- concreteMethodValue instanceInfo methodInfo
+          methodSubst <-
+            case inferNullaryMethodSubst methodInfo classArgView subst expectedView of
+              Just subst' -> Right subst'
+              Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+          let eagerConstraints =
+                filter
+                  constraintGround
+                  (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue))
+          evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty eagerConstraints
+          methodHead <- instantiateMethodValue scope methodSubst methodValue
+          Right (foldl X.EApp methodHead evidenceArgs)
+
+    lookupNullaryEvidence deferred methodInfo classArgView =
+      case
+        lookupEvidenceMethodByClass
+          scope
+          (methodInfoOwnerClassSymbolIdentity methodInfo)
+          (typeViewIdentity classArgView)
+          (methodName methodInfo)
+      of
+        Just (runtimeName, _) -> Just runtimeName
+        Nothing ->
+          case deferredMethodEvidence deferred of
+            Just DeferredMethodEvidence {deferredMethodEvidenceRuntimeName = runtimeName} ->
+              Just runtimeName
+            _ -> Nothing
 
     inferNullaryMethodClassArgument methodInfo expectedView
       | deferredMethodFullArityFromInfo methodInfo /= 0 = Nothing
