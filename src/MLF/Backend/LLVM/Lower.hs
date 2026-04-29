@@ -2209,13 +2209,20 @@ inferStaticFunctionTypeArgs context expectedTy form =
     sourceTy = foldr BTArrow (ffReturnType form) (map snd (ffParams form))
 
 lowerDirectStaticFunctionArgument :: ExprEnv -> String -> String -> BackendType -> BackendExpr -> LowerM LocalFunction
-lowerDirectStaticFunctionArgument callEnv context paramName expectedTy arg =
+lowerDirectStaticFunctionArgument callEnv context paramName expectedTy arg = do
+  let form = functionFormFromExpected expectedTy arg
+  when (null (ffTypeBinders form) && null (ffParams form)) $
+    liftEither
+      ( BackendLLVMUnsupportedExpression
+          context
+          ("unsupported static function argument " ++ show paramName)
+      )
   requireStaticFunctionType
     context
     paramName
     expectedTy
     ( LocalFunction
-        { lfForm = functionFormFromExpected expectedTy arg,
+        { lfForm = form,
           lfCapturedEnv = callEnv
         }
     )
