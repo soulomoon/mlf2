@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Added LLVM lowering support for first-class polymorphic values at
+  non-escaping runtime boundaries. Polymorphic arguments and immediate
+  constructor fields are statically specialized/erased at call and case sites,
+  while escaping closures and partial applications remain fail-closed.
 - Extended the shared `ProgramSpec`-to-LLVM parity matrix from first-order
   coverage to the canonical interpreter-success surface. The backend LLVM spec
   now emits supported cases through the file backend path, validates generated

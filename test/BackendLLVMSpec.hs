@@ -153,6 +153,32 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "missing specialization"
     validateLLVMAssembly output
 
+  it "statically lowers first-class polymorphic top-level arguments" $ do
+    output <- requireRight =<< emitBackendFile "test/programs/unified/first-class-polymorphism.mlfp"
+
+    output `shouldSatisfy` isInfixOf "define i1 @\"FirstClassPolymorphism__main\"()"
+    output `shouldNotSatisfy` isInfixOf "FirstClassPolymorphism__usePoly"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "statically lowers first-class polymorphic local arguments" $ do
+    output <-
+      withTempProgram localFirstClassPolymorphismProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
+    validateLLVMAssembly output
+
+  it "statically lowers immediate constructor fields carrying forall values" $ do
+    output <-
+      withTempProgram constructorFirstClassPolymorphismProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
+    output `shouldNotSatisfy` isInfixOf "escaping type abstraction"
+    validateLLVMAssembly output
+
   it "lowers local function aliases without requiring closure conversion" $ do
     output <- requireRight (renderBackendProgramLLVM localFunctionAliasProgram)
 
@@ -433,6 +459,30 @@ recursiveListProgram =
       "  };",
       "",
       "  def main : Bool = isNil (tailOrNil (RCons Zero RNil));",
+      "}"
+    ]
+
+localFirstClassPolymorphismProgram :: String
+localFirstClassPolymorphismProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Bool =",
+      "    let usePoly : (forall a. a -> a) -> Bool =",
+      "      \\(poly : forall a. a -> a) let keepInt = poly 1 in poly true",
+      "    in let id : forall a. a -> a = \\x x in usePoly id;",
+      "}"
+    ]
+
+constructorFirstClassPolymorphismProgram :: String
+constructorFirstClassPolymorphismProgram =
+  unlines
+    [ "module Main export (PolyBox(..), main) {",
+      "  data PolyBox =",
+      "      PolyBox : (forall a. a -> a) -> PolyBox;",
+      "",
+      "  def main : Bool = case PolyBox (\\x x) of {",
+      "    PolyBox poly -> let keepInt = poly 1 in poly true",
+      "  };",
       "}"
     ]
 
@@ -1310,17 +1360,12 @@ llvmParityExpectations =
 
 unsupportedLLVMParityCases :: [(String, String)]
 unsupportedLLVMParityCases =
-  [ ("surface: runs first-class polymorphic top-level argument", "Unsupported backend LLVM type at parameter \"$poly#0\" of FirstClassPolymorphism__usePoly"),
-    ("surface: runs first-class polymorphic local argument", "could not infer type arguments [\"a\"]"),
-    ("boundary: runs overloaded method dispatch with ordinary nullary constructors", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
+  [ ("boundary: runs overloaded method dispatch with ordinary nullary constructors", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
     ("boundary: runs overloaded method dispatch with nested ordinary constructors", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
     ("boundary: runs overloaded method dispatch with lambda/application-inferred argument", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
     ("boundary: runs overloaded method dispatch with let-polymorphism-inferred argument", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
     ("boundary: runs overloaded method dispatch with explicit argument annotation", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
     ("boundary: runs overloaded method dispatch on pattern-bound variable", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
-    ("boundary: constructor argument inferred as first-class polymorphic value should run", "escaping type abstraction"),
-    ("boundary: local first-class polymorphic let through constructor boundary should run", "could not infer type arguments [\"a\"]"),
-    ("boundary: pattern-bound first-class polymorphic variable should run", "could not infer type arguments [\"a\"]"),
     ("boundary: partial overloaded method application should run after deferred resolution", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
     ("boundary: runs higher-kinded data field over a concrete constructor head", "BackendUnsupportedSourceType"),
     ("boundary: runs nullary constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
@@ -1354,7 +1399,6 @@ unsupportedLLVMParityCases =
     ("fixture: test/programs/recursive-adt/complex-recursive-program.mlfp", "Unsupported backend LLVM type at return type of ComplexRecursiveProgram__Eq__Nat__eq"),
     ("fixture: test/programs/recursive-adt/module-integrated.mlfp", "Unsupported backend LLVM type at return type of Core__Eq__Nat__eq"),
     ("unified fixture: test/programs/unified/authoritative-overloaded-method.mlfp", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
-    ("unified fixture: test/programs/unified/first-class-polymorphism.mlfp", "Unsupported backend LLVM type at parameter \"$poly#0\" of FirstClassPolymorphism__usePoly"),
     ("standalone: allows importing a module declared later in the file", "Unsupported backend LLVM type at return type of Core__Eq__Nat__eq"),
     ("standalone: does not decode typed non-data constructor fields through fallback ADT decoding", "escaping lambda"),
     ("standalone: evaluates a recursive Nat equality example at representative depth", "Unsupported backend LLVM type at return type of Baseline__Eq__Nat__eq")
@@ -1362,7 +1406,7 @@ unsupportedLLVMParityCases =
 
 expectedLLVMUnsupportedParityCount :: Int
 expectedLLVMUnsupportedParityCount =
-  48
+  42
 
 llvmUnsupportedParityCount :: Int
 llvmUnsupportedParityCount =
@@ -1375,7 +1419,8 @@ llvmObjectCodeParityCases :: [String]
 llvmObjectCodeParityCases =
   [ "surface: runs lambda/application",
     "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp",
-    "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp"
+    "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp",
+    "unified fixture: test/programs/unified/first-class-polymorphism.mlfp"
   ]
 
 llvmObjectCodeParityCaseNames :: Set.Set String
