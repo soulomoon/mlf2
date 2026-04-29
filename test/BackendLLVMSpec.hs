@@ -324,6 +324,12 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "ptr @\"calleeWithEvidenceCall\""
     validateLLVMAssembly output
 
+  it "does not collect shadowed local aliases as referenced callees" $ do
+    output <- requireRight (renderBackendProgramLLVM shadowedLocalAliasReferenceCollectorProgram)
+
+    output `shouldNotSatisfy` isInfixOf "define i64 @\"shadowedCalleeWithEvidenceCall\""
+    validateLLVMAssembly output
+
   it "lowers nested evidence wrapper parameters as pointers" $ do
     output <- requireRight (renderBackendProgramLLVM nestedEvidenceWrapperParameterProgram)
 
@@ -799,6 +805,123 @@ aliasedInlineOnlyEvidenceCalleeProgram =
               intTy
               (BackendVar (BTArrow (BTArrow (BTArrow higherOrderEvidenceTy intTy) intTy) intTy) "caller")
               (BackendVar (BTArrow (BTArrow higherOrderEvidenceTy intTy) intTy) "$evidence_C"),
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+shadowedLocalAliasReferenceCollectorProgram :: BackendProgram
+shadowedLocalAliasReferenceCollectorProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "id",
+          backendBindingType = unaryIntTy,
+          backendBindingExpr = intIdentityExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "$evidence_apply",
+          backendBindingType = higherOrderEvidenceTy,
+          backendBindingExpr =
+            BackendLam
+              higherOrderEvidenceTy
+              "f"
+              unaryIntTy
+              ( BackendLam
+                  unaryIntTy
+                  "x"
+                  intTy
+                  (BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x"))
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "actualCalleeWithEvidenceCall",
+          backendBindingType = BTArrow higherOrderEvidenceTy intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow higherOrderEvidenceTy intTy)
+              "$evidence_apply"
+              higherOrderEvidenceTy
+              ( BackendLet
+                  intTy
+                  "localId"
+                  unaryIntTy
+                  (BackendVar unaryIntTy "id")
+                  ( BackendApp
+                      intTy
+                      ( BackendApp
+                          unaryIntTy
+                          (BackendVar higherOrderEvidenceTy "$evidence_apply")
+                          (BackendVar unaryIntTy "localId")
+                      )
+                      (intLit 1)
+                  )
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "shadowedCalleeWithEvidenceCall",
+          backendBindingType = BTArrow higherOrderEvidenceTy intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow higherOrderEvidenceTy intTy)
+              "$evidence_apply"
+              higherOrderEvidenceTy
+              ( BackendLet
+                  intTy
+                  "localId"
+                  unaryIntTy
+                  (BackendVar unaryIntTy "id")
+                  ( BackendApp
+                      intTy
+                      ( BackendApp
+                          unaryIntTy
+                          (BackendVar higherOrderEvidenceTy "$evidence_apply")
+                          (BackendVar unaryIntTy "localId")
+                      )
+                      (intLit 1)
+                  )
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "$evidence_C",
+          backendBindingType = BTArrow (BTArrow higherOrderEvidenceTy intTy) intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow (BTArrow higherOrderEvidenceTy intTy) intTy)
+              "$evidence_method"
+              (BTArrow higherOrderEvidenceTy intTy)
+              ( BackendApp
+                  intTy
+                  (BackendVar (BTArrow higherOrderEvidenceTy intTy) "$evidence_method")
+                  (BackendVar higherOrderEvidenceTy "$evidence_apply")
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendLet
+              intTy
+              "$evidence_method"
+              (BTArrow higherOrderEvidenceTy intTy)
+              (BackendVar (BTArrow higherOrderEvidenceTy intTy) "shadowedCalleeWithEvidenceCall")
+              ( BackendApp
+                  intTy
+                  ( BackendLam
+                      (BTArrow (BTArrow higherOrderEvidenceTy intTy) intTy)
+                      "$evidence_method"
+                      (BTArrow higherOrderEvidenceTy intTy)
+                      ( BackendApp
+                          intTy
+                          (BackendVar (BTArrow (BTArrow higherOrderEvidenceTy intTy) intTy) "$evidence_C")
+                          (BackendVar (BTArrow higherOrderEvidenceTy intTy) "$evidence_method")
+                      )
+                  )
+                  (BackendVar (BTArrow higherOrderEvidenceTy intTy) "actualCalleeWithEvidenceCall")
+              ),
           backendBindingExportedAsMain = True
         }
     ]

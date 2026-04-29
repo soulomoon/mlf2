@@ -624,18 +624,23 @@ collectReferencedFunctionNames base reachable specializations evidenceWrappers =
 
 type LocalFunctionForms = Map String FunctionForm
 
+shadowLocalFunctionForms :: Set String -> LocalFunctionForms -> LocalFunctionForms
+shadowLocalFunctionForms names forms =
+  Map.withoutKeys forms names
+
 collectReferencedFunctionNamesInForm :: ProgramBase -> Map String BackendType -> Set String -> FunctionForm -> Set String
 collectReferencedFunctionNamesInForm base substitution bound form =
   collectReferencedFunctionNamesInFormWithLocals base substitution Map.empty bound form
 
 collectReferencedFunctionNamesInFormWithLocals :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> FunctionForm -> Set String
 collectReferencedFunctionNamesInFormWithLocals base substitution localForms bound form =
-  collectReferencedFunctionNamesInExpr
-    base
-    substitution
-    localForms
-    (Set.union (Set.fromList (map fst (ffParams form))) bound)
-    (ffBody form)
+  let paramNames = Set.fromList (map fst (ffParams form))
+   in collectReferencedFunctionNamesInExpr
+        base
+        substitution
+        (shadowLocalFunctionForms paramNames localForms)
+        (Set.union paramNames bound)
+        (ffBody form)
 
 collectReferencedFunctionNamesInExpr :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> BackendExpr -> Set String
 collectReferencedFunctionNamesInExpr base substitution localForms bound expr =
@@ -717,7 +722,7 @@ collectReferencedFunctionNamesInExpr base substitution localForms bound expr =
         BackendVar {} -> Set.empty
         BackendLit {} -> Set.empty
         BackendLam _ name _ body ->
-          collectReferencedFunctionNamesInExpr base substitution localForms (Set.insert name bound) body
+          collectReferencedFunctionNamesInExpr base substitution (Map.delete name localForms) (Set.insert name bound) body
         BackendApp _ fun arg ->
           collectReferencedFunctionNamesInExpr base substitution localForms bound fun
             `Set.union` collectReferencedFunctionNamesInExpr base substitution localForms bound arg
@@ -758,11 +763,13 @@ collectReferencedFunctionNamesInExpr base substitution localForms bound expr =
           Map.delete name localForms
 
     collectAlternativeReferences alternative =
+      let binders = patternBinders (backendAltPattern alternative)
+       in
       collectReferencedFunctionNamesInExpr
         base
         substitution
-        localForms
-        (Set.union (patternBinders (backendAltPattern alternative)) bound)
+        (shadowLocalFunctionForms binders localForms)
+        (Set.union binders bound)
         (backendAltBody alternative)
 
     patternBinders =
@@ -776,12 +783,13 @@ collectEvidenceWrappersInForm base substitution bound form =
 
 collectEvidenceWrappersInFormWithLocals :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> FunctionForm -> [(BackendType, BackendExpr)]
 collectEvidenceWrappersInFormWithLocals base substitution localForms bound form =
-  collectEvidenceWrappersInExpr
-    base
-    substitution
-    localForms
-    (Set.union (Set.fromList (map fst (ffParams form))) bound)
-    (ffBody form)
+  let paramNames = Set.fromList (map fst (ffParams form))
+   in collectEvidenceWrappersInExpr
+        base
+        substitution
+        (shadowLocalFunctionForms paramNames localForms)
+        (Set.union paramNames bound)
+        (ffBody form)
 
 collectEvidenceWrappersInExpr :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> BackendExpr -> [(BackendType, BackendExpr)]
 collectEvidenceWrappersInExpr base substitution localForms bound expr =
@@ -808,7 +816,7 @@ collectEvidenceWrappersInExpr base substitution localForms bound expr =
         BackendVar {} -> []
         BackendLit {} -> []
         BackendLam _ name _ body ->
-          collectEvidenceWrappersInExpr base substitution localForms (Set.insert name bound) body
+          collectEvidenceWrappersInExpr base substitution (Map.delete name localForms) (Set.insert name bound) body
         BackendApp _ fun arg ->
           collectEvidenceWrappersInExpr base substitution localForms bound fun
             ++ collectEvidenceWrappersInExpr base substitution localForms bound arg
@@ -871,11 +879,13 @@ collectEvidenceWrappersInExpr base substitution localForms bound expr =
           Map.delete name localForms
 
     collectAlternativeWrappers alternative =
+      let binders = patternBinders (backendAltPattern alternative)
+       in
       collectEvidenceWrappersInExpr
         base
         substitution
-        localForms
-        (Set.union (patternBinders (backendAltPattern alternative)) bound)
+        (shadowLocalFunctionForms binders localForms)
+        (Set.union binders bound)
         (backendAltBody alternative)
 
     patternBinders =
