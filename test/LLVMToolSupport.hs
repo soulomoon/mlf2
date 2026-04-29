@@ -1,7 +1,9 @@
 module LLVMToolSupport
     ( LLVMToolchain (..)
     , NativeRunResult (..)
+    , ToolCommand (..)
     , discoverNativeLLVMToolchain
+    , parseExecutableCommand
     , runLLVMNativeExecutable
     , validateLLVMAssembly
     , validateLLVMObjectCode
@@ -11,6 +13,7 @@ module LLVMToolSupport
 
 import Control.Exception (bracket)
 import Control.Monad (filterM)
+import Data.Char (isSpace)
 import System.Directory
     ( createDirectory
     , doesFileExist
@@ -28,7 +31,13 @@ import Test.Hspec
 
 data LLVMToolchain = LLVMToolchain
     { llvmToolchainLlc :: FilePath
-    , llvmToolchainNativeLinker :: FilePath
+    , llvmToolchainNativeLinker :: ToolCommand
+    }
+    deriving (Eq, Show)
+
+data ToolCommand = ToolCommand
+    { toolCommandExecutable :: FilePath
+    , toolCommandArguments :: [String]
     }
     deriving (Eq, Show)
 
@@ -131,7 +140,10 @@ runLLVMNativeExecutableWith toolchain output =
         expectProcessSuccess "llc rejected native-runner LLVM input" llcExitCode "" llcStderr
 
         (linkExitCode, linkStdout, linkStderr) <-
-            readProcessWithExitCode nativeLinker [objectPath, "-o", executablePath] ""
+            readProcessWithExitCode
+                (toolCommandExecutable nativeLinker)
+                (toolCommandArguments nativeLinker ++ [objectPath, "-o", executablePath])
+                ""
         expectProcessSuccess "native linker rejected LLVM object" linkExitCode linkStdout linkStderr
 
         (runExitCode, runStdout, runStderr) <- readProcessWithExitCode executablePath [] ""
@@ -184,17 +196,30 @@ findLLVMTool name = do
                 Just path -> pure (Just path)
                 Nothing -> findKnownLLVMTool name knownLLVMToolPaths
 
-findNativeLinker :: IO (Maybe FilePath)
+findNativeLinker :: IO (Maybe ToolCommand)
 findNativeLinker = do
-    mbEnvCandidate <- findEnvExecutable ["CC"]
+    mbEnvCandidate <- findEnvToolCommand ["CC"]
     case mbEnvCandidate of
-        Just path -> pure (Just path)
-        Nothing -> firstJustM findExecutable ["cc", "clang", "gcc"]
+        Just command -> pure (Just command)
+        Nothing -> firstJustM findExecutableToolCommand ["cc", "clang", "gcc"]
 
 findEnvExecutable :: [String] -> IO (Maybe FilePath)
 findEnvExecutable names = do
     values <- traverse lookupEnv names
     firstJustM resolveExecutableCandidate [path | Just path <- values]
+
+findEnvToolCommand :: [String] -> IO (Maybe ToolCommand)
+findEnvToolCommand names = do
+    values <- traverse lookupEnv names
+    firstJustM resolveExecutableCommandCandidate [path | Just path <- values]
+
+resolveExecutableCommandCandidate :: String -> IO (Maybe ToolCommand)
+resolveExecutableCommandCandidate candidate =
+    case parseExecutableCommand candidate of
+        Nothing -> pure Nothing
+        Just (executable, arguments) -> do
+            mbPath <- resolveExecutableCandidate executable
+            pure $ fmap (`ToolCommand` arguments) mbPath
 
 resolveExecutableCandidate :: FilePath -> IO (Maybe FilePath)
 resolveExecutableCandidate candidate
@@ -206,6 +231,62 @@ resolveExecutableCandidate candidate
                 else Nothing
     | otherwise =
         findExecutable candidate
+
+findExecutableToolCommand :: FilePath -> IO (Maybe ToolCommand)
+findExecutableToolCommand candidate =
+    fmap (`ToolCommand` []) <$> findExecutable candidate
+
+parseExecutableCommand :: String -> Maybe (FilePath, [String])
+parseExecutableCommand candidate =
+    case parseCommandWords candidate of
+        Just (executable : arguments) -> Just (executable, arguments)
+        _ -> Nothing
+
+parseCommandWords :: String -> Maybe [String]
+parseCommandWords = go False [] [] Unquoted
+  where
+    go inWord current wordsSoFar mode input =
+        case (mode, input) of
+            (Unquoted, []) -> Just (reverse (finishWord inWord current wordsSoFar))
+            (SingleQuoted, []) -> Nothing
+            (DoubleQuoted, []) -> Nothing
+            (Unquoted, char : rest)
+                | isSpace char ->
+                    go False [] (finishWord inWord current wordsSoFar) Unquoted rest
+                | char == '\'' ->
+                    go True current wordsSoFar SingleQuoted rest
+                | char == '"' ->
+                    go True current wordsSoFar DoubleQuoted rest
+                | char == '\\' ->
+                    escaped inWord current wordsSoFar Unquoted rest
+                | otherwise ->
+                    go True (char : current) wordsSoFar Unquoted rest
+            (SingleQuoted, char : rest)
+                | char == '\'' ->
+                    go True current wordsSoFar Unquoted rest
+                | otherwise ->
+                    go True (char : current) wordsSoFar SingleQuoted rest
+            (DoubleQuoted, char : rest)
+                | char == '"' ->
+                    go True current wordsSoFar Unquoted rest
+                | char == '\\' ->
+                    escaped inWord current wordsSoFar DoubleQuoted rest
+                | otherwise ->
+                    go True (char : current) wordsSoFar DoubleQuoted rest
+
+    escaped _ _ _ _ [] = Nothing
+    escaped _ current wordsSoFar mode (char : rest) =
+        go True (char : current) wordsSoFar mode rest
+
+    finishWord inWord current wordsSoFar =
+        if inWord
+            then reverse current : wordsSoFar
+            else wordsSoFar
+
+data QuoteMode
+    = Unquoted
+    | SingleQuoted
+    | DoubleQuoted
 
 firstJustM :: (a -> IO (Maybe b)) -> [a] -> IO (Maybe b)
 firstJustM _ [] = pure Nothing
@@ -229,7 +310,7 @@ findKnownLLVMTool name paths = do
         path : _ -> pure (Just path)
         [] -> pure Nothing
 
-missingTool :: String -> Maybe FilePath -> [String]
+missingTool :: String -> Maybe a -> [String]
 missingTool name mbPath =
     case mbPath of
         Just _ -> []

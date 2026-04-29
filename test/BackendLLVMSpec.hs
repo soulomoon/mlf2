@@ -12,6 +12,7 @@ import Test.Hspec
 
 import LLVMToolSupport
   ( NativeRunResult (..),
+    parseExecutableCommand,
     runLLVMNativeExecutable,
     validateLLVMAssembly,
     validateLLVMObjectCode,
@@ -62,6 +63,18 @@ spec = describe "MLF.Backend.LLVM" $ do
     nativeRunExitCode result `shouldBe` ExitFailure 7
     nativeRunStdout result `shouldBe` "native stdout\n"
     nativeRunStderr result `shouldBe` "native stderr\n"
+
+  it "parses CC launchers and flags before executable lookup" $ do
+    parseExecutableCommand "ccache clang -m64"
+      `shouldBe` Just ("ccache", ["clang", "-m64"])
+    parseExecutableCommand "xcrun clang"
+      `shouldBe` Just ("xcrun", ["clang"])
+    parseExecutableCommand "\"/opt/LLVM Tools/bin/clang\" -fuse-ld=lld"
+      `shouldBe` Just ("/opt/LLVM Tools/bin/clang", ["-fuse-ld=lld"])
+    parseExecutableCommand "'/opt/LLVM Tools/bin/clang' '-Wl,-dead_strip'"
+      `shouldBe` Just ("/opt/LLVM Tools/bin/clang", ["-Wl,-dead_strip"])
+    parseExecutableCommand "\"unterminated"
+      `shouldBe` Nothing
 
   describe "shared ProgramSpec first-order parity" $ do
     it "keeps the selected shared first-order parity rows wired" $
