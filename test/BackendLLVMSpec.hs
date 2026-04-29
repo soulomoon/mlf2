@@ -180,6 +180,10 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
     validateLLVMAssembly output
 
+  it "rejects unsupported static function arguments instead of erasing them" $ do
+    renderBackendProgramLLVM staticPartialApplicationArgumentProgram
+      `shouldSatisfyLeft` isInfixOf "unsupported static function argument \"f\""
+
   it "collects specializations for type-applied global static aliases" $ do
     output <-
       withTempProgram typeAppliedGlobalStaticAliasProgram $ \path ->
@@ -2305,6 +2309,40 @@ partialApplicationProgram =
               { backendExprType = unaryIntTy,
                 backendFunction = BackendVar binaryIntTy "add",
                 backendArgument = intLit 1
+              },
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+staticPartialApplicationArgumentProgram :: BackendProgram
+staticPartialApplicationArgumentProgram =
+  programWithBindings
+    [ addBinding,
+      BackendBinding
+        { backendBindingName = "use",
+          backendBindingType = BTArrow unaryIntTy intTy,
+          backendBindingExpr =
+            BackendLam
+              { backendExprType = BTArrow unaryIntTy intTy,
+                backendParamName = "f",
+                backendParamType = unaryIntTy,
+                backendBody = intLit 0
+              },
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              { backendExprType = intTy,
+                backendFunction = BackendVar (BTArrow unaryIntTy intTy) "use",
+                backendArgument =
+                  BackendApp
+                    { backendExprType = unaryIntTy,
+                      backendFunction = BackendVar binaryIntTy "add",
+                      backendArgument = intLit 1
+                    }
               },
           backendBindingExportedAsMain = True
         }
