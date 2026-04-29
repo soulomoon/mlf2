@@ -179,6 +179,48 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Some"]
 
+  it "recovers higher-kinded structural constructors as backend constructors" $ do
+    checked <- requireChecked higherKindedConstructorProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    let constructNames = collectConstructNames (backendBindingExpr mainBinding)
+    constructNames `shouldContain` ["Main__Wrap", "Main__Box"]
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
+
+  it "recovers hidden-owner value-only constructor imports" $ do
+    checked <- requireChecked hiddenOwnerConstructorImportProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Core__NothingF"]
+
+  it "rejects stale structural constructor head type instantiations" $ do
+    checked0 <- requireChecked hiddenOwnerConstructorImportProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingTerm =
+                      addStructuralConstructorHeadInstantiation
+                        boolElabTy
+                        (checkedBindingTerm binding)
+                  }
+            )
+            checked0
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedCaseShape message) ->
+        message `shouldSatisfy` isInfixOf "constructor"
+      Left err ->
+        expectationFailure ("expected structural constructor type application mismatch, got " ++ show err)
+      Right backend ->
+        expectationFailure ("expected structural constructor type application rejection, got " ++ show backend)
+
   it "preserves constructor type applications when checking constructor fields" $ do
     checked <- requireChecked constructorForallApplicationProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -187,6 +229,21 @@ spec = describe "MLF.Backend.Convert" $ do
 
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Pack"]
+
+  it "maps constructor type applications in backend data parameter order" $ do
+    checked0 <- requireChecked dataParameterOrderConstructorProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding {checkedBindingTerm = dataParameterOrderConstructorTerm}
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Mk"]
 
   it "preserves bounded constructor foralls in backend metadata" $ do
     checked <- requireChecked boundedConstructorForallProgram
@@ -280,7 +337,7 @@ spec = describe "MLF.Backend.Convert" $ do
     validateBackendProgram backend `shouldBe` Right ()
     map backendBindingName (backendBindings backend) `shouldSatisfy` any (isInfixOf "$letrec$")
 
-  it "ignores stale constructor head type instantiations" $ do
+  it "rejects constructor head type instantiations with no matching constructor parameter" $ do
     checked0 <- requireChecked constructorForallApplicationProgram
     let checked =
           mapMainBinding
@@ -294,12 +351,60 @@ spec = describe "MLF.Backend.Convert" $ do
                   }
             )
             checked0
-    backend <- requireRight (convertCheckedProgram checked)
 
-    validateBackendProgram backend `shouldBe` Right ()
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedCaseShape message) ->
+        message `shouldSatisfy` isInfixOf "constructor type application arity mismatch"
+      Left err ->
+        expectationFailure ("expected constructor type application arity mismatch, got " ++ show err)
+      Right backend ->
+        expectationFailure ("expected constructor type application rejection, got " ++ show backend)
 
-    mainBinding <- requireBinding (backendProgramMain backend) backend
-    collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Pack"]
+  it "rejects constructor head type instantiations that conflict with the expected result" $ do
+    checked0 <- requireChecked gadtResultConstructorProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingTerm =
+                      replaceConstructorHeadInstantiation
+                        "Main__Box"
+                        boolElabTy
+                        (checkedBindingTerm binding)
+                  }
+            )
+            checked0
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedCaseShape message) ->
+        message `shouldSatisfy` isInfixOf "constructor"
+      Left (BackendValidationFailed (BackendConstructorArgumentMismatch name _ _ _)) ->
+        name `shouldBe` "Main__Box"
+      Left err ->
+        expectationFailure ("expected constructor type application mismatch, got " ++ show err)
+      Right backend ->
+        expectationFailure ("expected constructor type application rejection, got " ++ show backend)
+
+  it "rejects constructor head type instantiations that would fall back to same-named type variables" $ do
+    checked0 <- requireChecked parameterizedConstructorProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceType = polymorphicOptionSourceTy,
+                    checkedBindingType = polymorphicOptionElabTy,
+                    checkedBindingTerm = staleSomeInPolymorphicOptionTerm
+                  }
+            )
+            checked0
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedCaseShape message) ->
+        message `shouldSatisfy` isInfixOf "constructor result type does not match expected result"
+      Left err ->
+        expectationFailure ("expected constructor result type mismatch, got " ++ show err)
+      Right backend ->
+        expectationFailure ("expected constructor type application rejection, got " ++ show backend)
 
   it "matches repeated constructor parameters modulo alpha-equivalence" $ do
     checked0 <- requireChecked repeatedPolymorphicParameterProgram
@@ -358,6 +463,26 @@ spec = describe "MLF.Backend.Convert" $ do
 
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
+
+  it "scopes unqualified structural owner recovery to the current module" $ do
+    checked0 <- requireChecked sameNameUnqualifiedStructuralOwnerProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceType = STBase "Main.T",
+                    checkedBindingType = Elab.TBase (BaseTy "Main.T"),
+                    checkedBindingTerm = unqualifiedStructuralNullaryConstructorTerm
+                  }
+            )
+            checked0
+
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__T"]
+    collectConstructNames (backendBindingExpr mainBinding) `shouldNotContain` ["Core__External"]
 
   it "treats stale app-like instantiations on non-forall terms as no-ops" $ do
     checked0 <- requireChecked simpleFunctionProgram
@@ -533,9 +658,9 @@ spec = describe "MLF.Backend.Convert" $ do
       other ->
         expectationFailure ("expected nested recursive-let capture rejection, got " ++ show other)
 
-  it "reports unsupported source type applications instead of weakening them" $ do
+  it "converts source type applications into backend applied type variables" $ do
     convertSourceType unsupportedVariableHeadType
-      `shouldBe` Left (BackendUnsupportedSourceType unsupportedVariableHeadType)
+      `shouldBe` Right (BTVarApp "f" (intTy :| []))
 
 simpleFunctionProgram :: String
 simpleFunctionProgram =
@@ -638,6 +763,57 @@ parameterizedConstructorProgram =
       "}"
     ]
 
+gadtResultConstructorProgram :: String
+gadtResultConstructorProgram =
+  unlines
+    [ "module Main export (Box(..), main) {",
+      "  data Box a =",
+      "      Box : forall (b >= Int). b -> Box b;",
+      "",
+      "  def main : Box Int = Box 1;",
+      "}"
+    ]
+
+higherKindedConstructorProgram :: String
+higherKindedConstructorProgram =
+  unlines
+    [ "module Main export (Box(..), Wrap(..), main) {",
+      "  data Box a =",
+      "      Box : a -> Box a;",
+      "",
+      "  data Wrap (f :: * -> *) a =",
+      "      Wrap : f a -> Wrap f a;",
+      "",
+      "  def main : Bool = case Wrap (Box false) of {",
+      "    Wrap box -> true",
+      "  };",
+      "}"
+    ]
+
+hiddenOwnerConstructorImportProgram :: String
+hiddenOwnerConstructorImportProgram =
+  unlines
+    [ "module Core export (Box(..), NothingF, accept) {",
+      "  data Box a =",
+      "      Box : a -> Box a;",
+      "",
+      "  data MaybeF (f :: * -> *) a =",
+      "      NothingF : MaybeF f a",
+      "    | JustF : f a -> MaybeF f a;",
+      "",
+      "  def accept : MaybeF Box Bool -> Bool = \\value case value of {",
+      "    NothingF -> true;",
+      "    JustF box -> true",
+      "  };",
+      "}",
+      "",
+      "module Main export (main) {",
+      "  import Core exposing (NothingF, accept);",
+      "  def id : forall a. a -> a = \\x x;",
+      "  def main : Bool = accept (id NothingF);",
+      "}"
+    ]
+
 hiddenEqEvidenceProgram :: String
 hiddenEqEvidenceProgram =
   unlines
@@ -722,6 +898,29 @@ constructorForallApplicationProgram =
       "  def main : Pack = Pack 1;",
       "}"
     ]
+
+dataParameterOrderConstructorProgram :: String
+dataParameterOrderConstructorProgram =
+  unlines
+    [ "module Main export (T(..), main) {",
+      "  data T z a =",
+      "      Mk : z -> a -> T z a;",
+      "",
+      "  def main : T Bool Int = Mk true 1;",
+      "}"
+    ]
+
+dataParameterOrderConstructorTerm :: Elab.ElabTerm
+dataParameterOrderConstructorTerm =
+  Elab.EApp
+    ( Elab.EApp
+        ( Elab.ETyInst
+            (Elab.ETyInst (Elab.EVar "Main__Mk") (Elab.InstApp boolElabTy))
+            (Elab.InstApp intElabTy)
+        )
+        (Elab.ELit (LBool True))
+    )
+    (Elab.ELit (LInt 1))
 
 boundedConstructorForallProgram :: String
 boundedConstructorForallProgram =
@@ -812,6 +1011,24 @@ qualifiedAliasOrderingProgram =
       "  def main : Bool = case Z.make of {",
       "    Z.ZValue -> true",
       "  };",
+      "}"
+    ]
+
+sameNameUnqualifiedStructuralOwnerProgram :: String
+sameNameUnqualifiedStructuralOwnerProgram =
+  unlines
+    [ "module Core export (T(..)) {",
+      "  data T =",
+      "      External : T;",
+      "}",
+      "",
+      "module Main export (T(..), main) {",
+      "  import Core as C;",
+      "",
+      "  data T =",
+      "      T : T;",
+      "",
+      "  def main : T = T;",
       "}"
     ]
 
@@ -980,6 +1197,7 @@ renderBackendIRType backendTy =
     BTArrow dom cod -> "(" ++ renderBackendIRType dom ++ " -> " ++ renderBackendIRType cod ++ ")"
     BTBase (BaseTy name) -> name
     BTCon (BaseTy name) args -> name ++ "<" ++ intercalate ", " (map renderBackendIRType (toList args)) ++ ">"
+    BTVarApp name args -> "$" ++ name ++ "<" ++ intercalate ", " (map renderBackendIRType (toList args)) ++ ">"
     BTForall name mbBound body -> "forall " ++ renderTypeBinder name mbBound ++ ". " ++ renderBackendIRType body
     BTMu name body -> "mu " ++ name ++ ". " ++ renderBackendIRType body
     BTBottom -> "bottom"
@@ -1274,6 +1492,37 @@ intElabTy =
 boolElabTy :: Elab.ElabType
 boolElabTy =
   Elab.TBase (BaseTy "Bool")
+
+polymorphicOptionSourceTy :: SrcType
+polymorphicOptionSourceTy =
+  STForall
+    "a"
+    Nothing
+    (STArrow (STVar "a") (STCon "Main.Option" (STVar "a" :| [])))
+
+polymorphicOptionElabTy :: Elab.ElabType
+polymorphicOptionElabTy =
+  Elab.TForall
+    "a"
+    Nothing
+    ( Elab.TArrow
+        (Elab.TVar "a")
+        (Elab.TCon (BaseTy "Main.Option") (Elab.TVar "a" :| []))
+    )
+
+staleSomeInPolymorphicOptionTerm :: Elab.ElabTerm
+staleSomeInPolymorphicOptionTerm =
+  Elab.ETyAbs
+    "a"
+    Nothing
+    ( Elab.ELam
+        "x"
+        (Elab.TVar "a")
+        ( Elab.EApp
+            (Elab.ETyInst (Elab.EVar "Main__Some") (Elab.InstApp boolElabTy))
+            (Elab.EVar "x")
+        )
+    )
 
 unaryIntElabTy :: Elab.ElabType
 unaryIntElabTy =
@@ -1622,8 +1871,32 @@ alphaEquivalentIdentityTerm =
     Nothing
     (Elab.ELam "$poly_id_b" (Elab.TVar "b") (Elab.EVar "$poly_id_b"))
 
+unqualifiedStructuralNullaryConstructorTerm :: Elab.ElabTerm
+unqualifiedStructuralNullaryConstructorTerm =
+  Elab.ERoll
+    unqualifiedStructuralTElabTy
+    ( Elab.ETyAbs
+        "$T_result"
+        Nothing
+        (Elab.ELam "$T_handler" (Elab.TVar "$T_result") (Elab.EVar "$T_handler"))
+    )
+
+unqualifiedStructuralTElabTy :: Elab.ElabType
+unqualifiedStructuralTElabTy =
+  Elab.TMu
+    "$T_self"
+    ( Elab.TForall
+        "$T_result"
+        Nothing
+        (Elab.TArrow (Elab.TVar "$T_result") (Elab.TVar "$T_result"))
+    )
+
 mapMainBinding :: (CheckedBinding -> CheckedBinding) -> CheckedProgram -> CheckedProgram
 mapMainBinding f checked =
+  mapBinding (checkedProgramMain checked) f checked
+
+mapBinding :: String -> (CheckedBinding -> CheckedBinding) -> CheckedProgram -> CheckedProgram
+mapBinding target f checked =
   checked
     { checkedProgramModules =
         map updateModule (checkedProgramModules checked)
@@ -1636,7 +1909,7 @@ mapMainBinding f checked =
         }
 
     updateBinding binding
-      | checkedBindingName binding == checkedProgramMain checked = f binding
+      | checkedBindingName binding == target = f binding
       | otherwise = binding
 
 withConstructorResult :: String -> SrcType -> CheckedProgram -> CheckedProgram
@@ -1709,6 +1982,66 @@ addStaleConstructorHeadInstantiation target staleTy =
       case stripElabTypeInsts headTerm of
         Elab.EVar name -> name == target
         _ -> False
+
+replaceConstructorHeadInstantiation :: String -> Elab.ElabType -> Elab.ElabTerm -> Elab.ElabTerm
+replaceConstructorHeadInstantiation target replacementTy =
+  go
+  where
+    go term =
+      case collectAppsElab term of
+        (headTerm, args)
+          | isTargetConstructorHead headTerm ->
+              rebuildAppsElab (Elab.ETyInst (stripElabTypeInsts headTerm) (Elab.InstApp replacementTy)) args
+        _ ->
+          case term of
+            Elab.ELam name ty body ->
+              Elab.ELam name ty (go body)
+            Elab.EApp fun arg ->
+              Elab.EApp (go fun) (go arg)
+            Elab.ELet name scheme rhs body ->
+              Elab.ELet name scheme (go rhs) (go body)
+            Elab.ETyAbs name mbBound body ->
+              Elab.ETyAbs name mbBound (go body)
+            Elab.ETyInst inner inst ->
+              Elab.ETyInst (go inner) inst
+            Elab.ERoll ty body ->
+              Elab.ERoll ty (go body)
+            Elab.EUnroll body ->
+              Elab.EUnroll (go body)
+            _ ->
+              term
+
+    isTargetConstructorHead headTerm =
+      case stripElabTypeInsts headTerm of
+        Elab.EVar name -> name == target
+        _ -> False
+
+addStructuralConstructorHeadInstantiation :: Elab.ElabType -> Elab.ElabTerm -> Elab.ElabTerm
+addStructuralConstructorHeadInstantiation staleTy =
+  go
+  where
+    go term =
+      case collectAppsElab term of
+        (headTerm@Elab.ERoll {}, args) ->
+          rebuildAppsElab (Elab.ETyInst headTerm (Elab.InstApp staleTy)) args
+        _ ->
+          case term of
+            Elab.ELam name ty body ->
+              Elab.ELam name ty (go body)
+            Elab.EApp fun arg ->
+              Elab.EApp (go fun) (go arg)
+            Elab.ELet name scheme rhs body ->
+              Elab.ELet name scheme (go rhs) (go body)
+            Elab.ETyAbs name mbBound body ->
+              Elab.ETyAbs name mbBound (go body)
+            Elab.ETyInst inner inst ->
+              Elab.ETyInst (go inner) inst
+            Elab.ERoll ty body ->
+              Elab.ERoll ty (go body)
+            Elab.EUnroll body ->
+              Elab.EUnroll (go body)
+            _ ->
+              term
 
 stripElabTypeInsts :: Elab.ElabTerm -> Elab.ElabTerm
 stripElabTypeInsts term =

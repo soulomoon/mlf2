@@ -35,6 +35,36 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendVariableTypeMismatch "helper" intTy boolTy)
 
+    validateBackendProgram
+      ( programWithBindings
+          [ binding "helper" intTy (intLit 1),
+            mainBinding (BackendVar (BTVar "a") "helper")
+          ]
+      )
+      `shouldBe` Left (BackendVariableTypeMismatch "helper" intTy (BTVar "a"))
+
+    validateBackendProgram
+      ( programWithMainExpr
+          ( BackendLam
+              (BTArrow (BTVar "a") (BTVar "b"))
+              "x"
+              (BTVar "a")
+              (BackendVar (BTVar "b") "x")
+          )
+      )
+      `shouldBe` Left (BackendVariableTypeMismatch "x" (BTVar "a") (BTVar "b"))
+
+    validateBackendProgram
+      ( programWithMainExpr
+          ( BackendLam
+              (BTArrow (BTVar "a") (BTVar "a1"))
+              "x"
+              (BTVar "a")
+              (BackendVar (BTVar "a1") "x")
+          )
+      )
+      `shouldBe` Left (BackendVariableTypeMismatch "x" (BTVar "a") (BTVar "a1"))
+
     validateBackendProgram (programWithMainExpr letIdentityExpr)
       `shouldBe` Right ()
 
@@ -49,6 +79,86 @@ spec = describe "MLF.Backend.IR" $ do
   it "rejects invalid application, lambda, and let nodes" $ do
     validateBackendExpr (BackendApp intTy intIdentityExpr (boolLit True))
       `shouldBe` Left (BackendApplicationArgumentMismatch intTy boolTy)
+
+    validateBackendExpr (BackendApp intTy intIdentityExpr (BackendVar (BTVar "a") "x"))
+      `shouldBe` Left (BackendApplicationArgumentMismatch intTy (BTVar "a"))
+
+    validateBackendExpr (BackendApp (BTVar "a") intIdentityExpr (intLit 1))
+      `shouldBe` Left (BackendApplicationResultMismatch (BTVar "a") intTy)
+
+    let listIntTy = listTy intTy
+        listFreeTy = listTy (BTVar "a")
+        arrowIntBoolTy = BTArrow intTy boolTy
+        arrowFreeBoolTy = BTArrow (BTVar "a") boolTy
+        varAppIntTy = BTVarApp "f" (intTy :| [])
+        varAppFreeTy = BTVarApp "f" (BTVar "a" :| [])
+        forallIntTy = BTForall "x" Nothing (BTArrow intTy (BTVar "x"))
+        forallFreeTy = BTForall "y" Nothing (BTArrow (BTVar "a") (BTVar "y"))
+        structuralBoxIntTy = BTMu "$Box_self" (singleFieldStructuralBody intTy)
+        structuralBoxFreeTy = BTMu "$Box_self" (singleFieldStructuralBody (BTVar "a"))
+        listIntToBoolTy = BTArrow listIntTy boolTy
+        structuralBoxIntToBoolTy = BTArrow structuralBoxIntTy boolTy
+        listTyAbsAppExpr =
+          BackendTyAbs
+            (BTForall "a" Nothing (BTArrow (listTy (BTVar "a")) boolTy))
+            "a"
+            Nothing
+            ( BackendLam
+                (BTArrow (listTy (BTVar "a")) boolTy)
+                "xs"
+                (listTy (BTVar "a"))
+                ( BackendApp
+                    boolTy
+                    (BackendVar listIntToBoolTy "f")
+                    (BackendVar (listTy (BTVar "a")) "xs")
+                )
+            )
+        listIntToBoolExpr =
+          BackendLam listIntToBoolTy "ys" listIntTy (boolLit True)
+        structuralBoxTyAbsAppExpr =
+          BackendTyAbs
+            (BTForall "a" Nothing (BTArrow structuralBoxFreeTy boolTy))
+            "a"
+            Nothing
+            ( BackendLam
+                (BTArrow structuralBoxFreeTy boolTy)
+                "xs"
+                structuralBoxFreeTy
+                ( BackendApp
+                    boolTy
+                    (BackendVar structuralBoxIntToBoolTy "f")
+                    (BackendVar structuralBoxFreeTy "xs")
+                )
+            )
+        structuralBoxIntToBoolExpr =
+          BackendLam structuralBoxIntToBoolTy "box" structuralBoxIntTy (boolLit True)
+
+    validateBackendExpr (BackendApp intTy (BackendVar (BTArrow listIntTy intTy) "f") (BackendVar listFreeTy "xs"))
+      `shouldBe` Left (BackendApplicationArgumentMismatch listIntTy listFreeTy)
+
+    validateBackendExpr (BackendApp listFreeTy (BackendVar (BTArrow intTy listIntTy) "f") (intLit 1))
+      `shouldBe` Left (BackendApplicationResultMismatch listFreeTy listIntTy)
+
+    validateBackendExpr (BackendApp boolTy (BackendVar (BTArrow arrowIntBoolTy boolTy) "f") (BackendVar arrowFreeBoolTy "g"))
+      `shouldBe` Left (BackendApplicationArgumentMismatch arrowIntBoolTy arrowFreeBoolTy)
+
+    validateBackendExpr (BackendApp boolTy (BackendVar (BTArrow varAppIntTy boolTy) "f") (BackendVar varAppFreeTy "x"))
+      `shouldBe` Left (BackendApplicationArgumentMismatch varAppIntTy varAppFreeTy)
+
+    validateBackendExpr (BackendApp boolTy (BackendVar (BTArrow forallIntTy boolTy) "f") (BackendVar forallFreeTy "poly"))
+      `shouldBe` Left (BackendApplicationArgumentMismatch forallIntTy forallFreeTy)
+
+    validateBackendExpr (BackendApp listIntTy (BackendVar (BTArrow intTy listFreeTy) "f") (intLit 1))
+      `shouldBe` Left (BackendApplicationResultMismatch listIntTy listFreeTy)
+
+    validateBackendProgram (programWithBindings [binding "f" listIntToBoolTy listIntToBoolExpr, mainBinding listTyAbsAppExpr])
+      `shouldBe` Left (BackendApplicationArgumentMismatch listIntTy (listTy (BTVar "a")))
+
+    validateBackendProgram (programWithBindings [binding "f" structuralBoxIntToBoolTy structuralBoxIntToBoolExpr, mainBinding structuralBoxTyAbsAppExpr])
+      `shouldBe` Left (BackendApplicationArgumentMismatch structuralBoxIntTy structuralBoxFreeTy)
+
+    validateBackendExpr (BackendApp boolTy (BackendVar (BTArrow structuralBoxFreeTy boolTy) "f") (BackendVar structuralBoxIntTy "box"))
+      `shouldBe` Right ()
 
     validateBackendExpr (BackendLam boolTy "x" intTy (BackendVar intTy "x"))
       `shouldBe` Left (BackendLambdaTypeMismatch boolTy idTy)
@@ -168,6 +278,51 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Right ()
 
+  it "keeps structural recursive owner names module-qualified" $ do
+    alphaEqBackendType (BTBase (BaseTy "Core.T")) (BTMu "$Core.T_self" nullaryStructuralBody)
+      `shouldBe` True
+
+    alphaEqBackendType (BTBase (BaseTy "Other.T")) (BTMu "$Core.T_self" nullaryStructuralBody)
+      `shouldBe` False
+
+    alphaEqBackendType (BTBase (BaseTy "Other.T")) (BTMu "$T_self" nullaryStructuralBody)
+      `shouldBe` False
+
+  it "rejects non-structural recursive bodies as nominal data encodings" $ do
+    alphaEqBackendType (BTBase (BaseTy "Core.T")) (BTMu "$Core.T_self" BTBottom)
+      `shouldBe` False
+
+    validateBackendProgram (programWithMainExpr malformedStructuralBoxConstructExpr)
+      `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy malformedStructuralBoxTy)
+
+  it "checks structural constructor result payloads against metadata" $ do
+    alphaEqBackendType boxTy structuralBoxTy
+      `shouldBe` False
+
+    validateBackendProgram (programWithMainExpr structuralBoxConstructExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithMainExpr mismatchedStructuralBoxConstructExpr)
+      `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy mismatchedStructuralBoxTy)
+
+    validateBackendProgram mismatchedStructuralBoxCaseProgram
+      `shouldBe` Left (BackendCaseConstructorScrutineeMismatch "Box" mismatchedStructuralBoxTy boxTy)
+
+  it "preserves nominal arguments when structural recursive payloads omit them" $ do
+    alphaEqBackendType
+      (BTCon (BaseTy "Core.Phantom") (intTy :| []))
+      (BTMu "$Core.Phantom_self" (BTForall "r" Nothing (BTVar "r")))
+      `shouldBe` False
+
+    alphaEqBackendType
+      (BTCon (BaseTy "Core.Phantom") (BTVar "a" :| []))
+      (BTMu "$Core.Phantom_self" (BTForall "r" Nothing (BTVar "r")))
+      `shouldBe` True
+
+  it "recovers structural data arguments in declared parameter order" $ do
+    validateBackendProgram (programWithDataAndMainExpr [outOfOrderStructuralData] outOfOrderStructuralConstructExpr)
+      `shouldBe` Right ()
+
   it "rejects recursive roll and unroll type mismatches" $ do
     let recTy = BTMu "self" intTy
 
@@ -199,8 +354,23 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithDataAndMainExpr [optionData] optionCaseExpr)
       `shouldBe` Right ()
 
+    validateBackendProgram (programWithDataAndMainExpr [optionData] someIntAsOptionVarExpr)
+      `shouldBe` Left (BackendConstructorArgumentMismatch "Some" 0 (BTVar "a") intTy)
+
     validateBackendProgram (programWithDataAndMainExpr [optionData] someBoolAsOptionIntExpr)
       `shouldBe` Left (BackendConstructorArgumentMismatch "Some" 0 intTy boolTy)
+
+  it "substitutes applied type variables in constructor metadata" $ do
+    substituteBackendTypes
+      (Map.fromList [("f", BTBase (BaseTy "BoxF")), ("a", boolTy)])
+      (BTVarApp "f" (BTVar "a" :| []))
+      `shouldBe` boxFTy boolTy
+
+    validateBackendProgram (programWithDataAndMainExpr [boxFData, maybeFData] justFBoxBoolExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [boxFData, maybeFData] maybeFCaseExpr)
+      `shouldBe` Right ()
 
   it "uses constructor-level forall metadata when validating constructor fields" $ do
     validateBackendProgram (programWithDataAndMainExpr [packData] packIntExpr)
@@ -390,6 +560,25 @@ optionData =
       backendDataConstructors = [BackendConstructor "Some" [] [BTVar "a"] (optionTy (BTVar "a"))]
     }
 
+boxFData :: BackendData
+boxFData =
+  BackendData
+    { backendDataName = "BoxF",
+      backendDataParameters = ["a"],
+      backendDataConstructors = [BackendConstructor "BoxF" [] [BTVar "a"] (boxFTy (BTVar "a"))]
+    }
+
+maybeFData :: BackendData
+maybeFData =
+  BackendData
+    { backendDataName = "MaybeF",
+      backendDataParameters = ["f", "a"],
+      backendDataConstructors =
+        [ BackendConstructor "NothingF" [] [] (maybeFTy (BTVar "f") (BTVar "a")),
+          BackendConstructor "JustF" [] [BTVarApp "f" (BTVar "a" :| [])] (maybeFTy (BTVar "f") (BTVar "a"))
+        ]
+    }
+
 packData :: BackendData
 packData =
   BackendData
@@ -478,6 +667,20 @@ captureCaseData =
       backendDataConstructors = [BackendConstructor "CaptureCase" [] [] captureCaseTemplateTy]
     }
 
+outOfOrderStructuralData :: BackendData
+outOfOrderStructuralData =
+  BackendData
+    { backendDataName = "OutOfOrder",
+      backendDataParameters = ["a", "b"],
+      backendDataConstructors =
+        [ BackendConstructor
+            "OutOfOrder"
+            []
+            [BTVar "b", BTVar "a"]
+            outOfOrderStructuralTy
+        ]
+    }
+
 vacuousRecursiveBoxData :: BackendData
 vacuousRecursiveBoxData =
   BackendData
@@ -496,9 +699,63 @@ someIntExpr :: BackendExpr
 someIntExpr =
   BackendConstruct (optionTy intTy) "Some" [intLit 1]
 
+someIntAsOptionVarExpr :: BackendExpr
+someIntAsOptionVarExpr =
+  BackendConstruct (optionTy (BTVar "a")) "Some" [intLit 1]
+
 someBoolAsOptionIntExpr :: BackendExpr
 someBoolAsOptionIntExpr =
   BackendConstruct (optionTy intTy) "Some" [boolLit True]
+
+malformedStructuralBoxTy :: BackendType
+malformedStructuralBoxTy =
+  BTMu "$Box_self" BTBottom
+
+malformedStructuralBoxConstructExpr :: BackendExpr
+malformedStructuralBoxConstructExpr =
+  BackendConstruct malformedStructuralBoxTy "Box" [intLit 1]
+
+structuralBoxTy :: BackendType
+structuralBoxTy =
+  BTMu "$Box_self" (singleFieldStructuralBody intTy)
+
+structuralBoxConstructExpr :: BackendExpr
+structuralBoxConstructExpr =
+  BackendConstruct structuralBoxTy "Box" [intLit 1]
+
+mismatchedStructuralBoxTy :: BackendType
+mismatchedStructuralBoxTy =
+  BTMu "$Box_self" (singleFieldStructuralBody boolTy)
+
+mismatchedStructuralBoxConstructExpr :: BackendExpr
+mismatchedStructuralBoxConstructExpr =
+  BackendConstruct mismatchedStructuralBoxTy "Box" [intLit 1]
+
+mismatchedStructuralBoxCaseProgram :: BackendProgram
+mismatchedStructuralBoxCaseProgram =
+  programWithDataAndBindings
+    [boxData]
+    [ binding "badBox" mismatchedStructuralBoxTy (BackendVar mismatchedStructuralBoxTy "badBox"),
+      mainBinding
+        ( boxCaseExprWith
+            (BackendVar mismatchedStructuralBoxTy "badBox")
+            (BackendAlternative (BackendConstructorPattern "Box" ["n"]) (BackendVar intTy "n") :| [])
+        )
+    ]
+
+justFBoxBoolExpr :: BackendExpr
+justFBoxBoolExpr =
+  BackendConstruct (maybeFTy (BTBase (BaseTy "BoxF")) boolTy) "JustF" [BackendConstruct (boxFTy boolTy) "BoxF" [boolLit True]]
+
+maybeFCaseExpr :: BackendExpr
+maybeFCaseExpr =
+  BackendCase
+    { backendExprType = boolTy,
+      backendScrutinee = justFBoxBoolExpr,
+      backendAlternatives =
+        BackendAlternative (BackendConstructorPattern "NothingF" []) (boolLit False)
+          :| [BackendAlternative (BackendConstructorPattern "JustF" ["box"]) (boolLit True)]
+    }
 
 packIntExpr :: BackendExpr
 packIntExpr =
@@ -789,6 +1046,14 @@ boolTy :: BackendType
 boolTy =
   BTBase (BaseTy "Bool")
 
+nullaryStructuralBody :: BackendType
+nullaryStructuralBody =
+  BTForall "r" Nothing (BTArrow (BTVar "r") (BTVar "r"))
+
+singleFieldStructuralBody :: BackendType -> BackendType
+singleFieldStructuralBody fieldTy =
+  BTForall "r" Nothing (BTArrow (BTArrow fieldTy (BTVar "r")) (BTVar "r"))
+
 boxTy :: BackendType
 boxTy =
   BTBase (BaseTy "Box")
@@ -824,6 +1089,14 @@ listTy ty =
 optionTy :: BackendType -> BackendType
 optionTy ty =
   BTCon (BaseTy "Option") (ty :| [])
+
+boxFTy :: BackendType -> BackendType
+boxFTy ty =
+  BTCon (BaseTy "BoxF") (ty :| [])
+
+maybeFTy :: BackendType -> BackendType -> BackendType
+maybeFTy fTy argTy =
+  BTCon (BaseTy "MaybeF") (fTy :| [argTy])
 
 pairTy :: BackendType -> BackendType -> BackendType
 pairTy left right =
@@ -868,3 +1141,25 @@ captureCaseTemplateTy =
 captureCaseScrutineeTy :: BackendType
 captureCaseScrutineeTy =
   BTCon (BaseTy "CaptureCase") (BTVar "a1" :| [captureForallActualTy])
+
+outOfOrderStructuralConstructExpr :: BackendExpr
+outOfOrderStructuralConstructExpr =
+  BackendConstruct
+    (outOfOrderTy intTy boolTy)
+    "OutOfOrder"
+    [boolLit True, intLit 1]
+
+outOfOrderTy :: BackendType -> BackendType -> BackendType
+outOfOrderTy aTy bTy =
+  BTCon (BaseTy "OutOfOrder") (aTy :| [bTy])
+
+outOfOrderStructuralTy :: BackendType
+outOfOrderStructuralTy =
+  BTMu "$OutOfOrder_self" outOfOrderStructuralBody
+
+outOfOrderStructuralBody :: BackendType
+outOfOrderStructuralBody =
+  BTForall
+    "r"
+    Nothing
+    (BTArrow (BTArrow (BTVar "b") (BTArrow (BTVar "a") (BTVar "r"))) (BTVar "r"))

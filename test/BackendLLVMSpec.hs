@@ -153,6 +153,32 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "missing specialization"
     validateLLVMAssembly output
 
+  it "rejects rigid applied type heads during type-argument inference" $ do
+    case
+      Lower.inferTypeArgumentsForTest
+        "rigid application head"
+        ["a"]
+        [("value", BTVarApp "f" (BTVar "a" :| []))]
+        [BackendVar (BTVarApp "g" (intTy :| [])) "value"]
+      of
+        Left err ->
+          Lower.renderBackendLLVMError err `shouldSatisfy` isInfixOf "rigid type application head mismatch"
+        Right substitution ->
+          expectationFailure ("expected rigid head mismatch, got substitution: " ++ show substitution)
+
+  it "rejects mismatched applied type arguments during type-argument inference" $ do
+    case
+      Lower.inferTypeArgumentsForTest
+        "applied argument mismatch"
+        ["f"]
+        [("value", BTVarApp "f" (intTy :| []))]
+        [BackendVar (BTCon (BaseTy "Box") (boolTy :| [])) "value"]
+      of
+        Left err ->
+          Lower.renderBackendLLVMError err `shouldSatisfy` isInfixOf "type application argument mismatch"
+        Right substitution ->
+          expectationFailure ("expected applied argument mismatch, got substitution: " ++ show substitution)
+
   it "statically lowers first-class polymorphic top-level arguments" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/first-class-polymorphism.mlfp"
 
@@ -2629,22 +2655,12 @@ llvmParityExpectations =
 
 unsupportedLLVMParityCases :: [(String, String)]
 unsupportedLLVMParityCases =
-  [ ("boundary: runs higher-kinded data field over a concrete constructor head", "BackendUnsupportedSourceType"),
-    ("boundary: runs nullary constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
-    ("boundary: runs first-class nullary constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-imported constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-exported constructor when owner type is not exported", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-exported constructor from bulk import when owner type is not exported", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-exported constructor from aliased bulk import when owner type is not exported", "BackendUnsupportedSourceType"),
-    ("boundary: runs aliased bulk-imported hidden-owner constructors in one case", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-exported GADT constructor when owner type is not exported", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-imported nonzero-index constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
-    ("standalone: does not decode typed non-data constructor fields through fallback ADT decoding", "escaping lambda")
+  [ ("standalone: does not decode typed non-data constructor fields through fallback ADT decoding", "escaping lambda")
   ]
 
 expectedLLVMUnsupportedParityCount :: Int
 expectedLLVMUnsupportedParityCount =
-  11
+  1
 
 llvmUnsupportedParityCount :: Int
 llvmUnsupportedParityCount =
@@ -2655,11 +2671,14 @@ llvmUnsupportedParityCount =
 
 llvmObjectCodeParityCases :: [String]
 llvmObjectCodeParityCases =
-  [ "surface: runs lambda/application",
-    "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp",
-    "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp",
-    "unified fixture: test/programs/unified/first-class-polymorphism.mlfp"
-  ]
+    [ "surface: runs lambda/application",
+      "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp",
+      "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp",
+      "boundary: runs value-exported constructor when owner type is not exported",
+      "boundary: runs aliased bulk-imported hidden-owner constructors in one case",
+      "boundary: runs exposed constructor with qualified alias type identity",
+      "unified fixture: test/programs/unified/first-class-polymorphism.mlfp"
+    ]
 
 llvmObjectCodeParityCaseNames :: Set.Set String
 llvmObjectCodeParityCaseNames =

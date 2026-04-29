@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Changed
+- Extended LLVM backend parity to higher-kinded constructor fields and
+  hidden-owner value-constructor imports. Backend IR now preserves applied type
+  variables, conversion recovers structural higher-kinded constructor terms as
+  explicit backend ADT nodes with module-scoped owner identity, and the temporary
+  LLVM unsupported table no longer lists the issue-owned rows. The `llc` smoke
+  subset now covers both hidden-owner and qualified-alias identity cases.
+- Tightened Backend IR structural ADT validation so field-carrying recursive
+  payloads must agree with constructor metadata before satisfying nominal
+  constructor and case boundaries.
 - Added LLVM lowering support for first-class polymorphic values at
   non-escaping runtime boundaries. Polymorphic arguments and immediate
   constructor fields are statically specialized/erased at call and case sites,
