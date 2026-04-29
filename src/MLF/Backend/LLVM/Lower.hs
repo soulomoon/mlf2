@@ -329,7 +329,7 @@ backendTypeRequiresStaticSpecialization :: BackendType -> Bool
 backendTypeRequiresStaticSpecialization =
   \case
     BTVar {} -> False
-    BTArrow {} -> False
+    BTArrow {} -> True
     BTBase {} -> False
     BTCon {} -> False
     BTForall {} -> True
@@ -1597,16 +1597,18 @@ lowerImmediateConstructCase env exprEnv context resultTy constructorName args fi
             (zip3 binders fieldTys args)
 
     bindUsedField usedBinders acc (binder, fieldTy, arg)
-      | Set.notMember binder usedBinders =
-          pure acc
       | backendTypeRequiresStaticSpecialization fieldTy = do
           localFunction <- lowerStaticFunctionArgument env exprEnv context binder fieldTy arg
-          pure acc {eeLocalFunctions = Map.insert binder localFunction (eeLocalFunctions acc)}
+          if Set.member binder usedBinders
+            then pure acc {eeLocalFunctions = Map.insert binder localFunction (eeLocalFunctions acc)}
+            else pure acc
       | backendTypeHasRuntimeRepresentation env fieldTy = do
           value <- lowerExpr env exprEnv context arg
           expectedTy <- lowerBackendTypeM env context fieldTy
           requireLLVMType context constructorName expectedTy value
-          pure acc {eeValues = Map.insert binder value (eeValues acc)}
+          if Set.member binder usedBinders
+            then pure acc {eeValues = Map.insert binder value (eeValues acc)}
+            else pure acc
       | otherwise = do
           liftEither (BackendLLVMUnsupportedType ("field " ++ show binder ++ " at " ++ context) fieldTy)
 

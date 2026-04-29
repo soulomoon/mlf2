@@ -170,6 +170,16 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
     validateLLVMAssembly output
 
+  it "statically lowers first-class function-typed arguments" $ do
+    output <-
+      withTempProgram firstClassFunctionArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
+    output `shouldNotSatisfy` isInfixOf "Main__use"
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
+    validateLLVMAssembly output
+
   it "rejects static-argument entrypoints instead of eliding main" $ do
     renderBackendProgramLLVM staticArgumentMainProgram
       `shouldSatisfyLeft` isInfixOf "parameter \"poly\" of main"
@@ -288,6 +298,10 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"box\", i64 16"
     output `shouldNotSatisfy` isInfixOf "getelementptr i8, ptr %\"box\", i64 8"
     validateLLVMAssembly output
+
+  it "evaluates unused immediate constructor fields before static erasure" $ do
+    renderBackendProgramLLVM strictImmediateConstructFieldProgram
+      `shouldSatisfyLeft` isInfixOf "representation-changing roll"
 
   it "rejects duplicate constructor case alternatives before emitting switch" $ do
     renderBackendProgramLLVM duplicateConstructorCaseProgram
@@ -478,6 +492,15 @@ localFirstClassPolymorphismProgram =
       "    let usePoly : (forall a. a -> a) -> Bool =",
       "      \\(poly : forall a. a -> a) let keepInt = poly 1 in poly true",
       "    in let id : forall a. a -> a = \\x x in usePoly id;",
+      "}"
+    ]
+
+firstClassFunctionArgumentProgram :: String
+firstClassFunctionArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def main : Int = use (\\(x : Int) x);",
       "}"
     ]
 
@@ -1067,6 +1090,38 @@ unusedPolymorphicPatternFieldProgram =
       backendProgramMain = "main"
     }
 
+strictImmediateConstructFieldProgram :: BackendProgram
+strictImmediateConstructFieldProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [strictBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          ( BackendConstruct
+                              strictBoxTy
+                              "StrictBox"
+                              [polyIdExpr, BackendRoll recIntTy (intLit 1)]
+                          )
+                          ( BackendAlternative
+                              (BackendConstructorPattern "StrictBox" ["poly", "unused"])
+                              (intLit 0)
+                              :| []
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
 duplicateConstructorCaseProgram :: BackendProgram
 duplicateConstructorCaseProgram =
   BackendProgram
@@ -1316,6 +1371,20 @@ lazyFieldBoxData =
         ]
     }
 
+strictBoxData :: BackendData
+strictBoxData =
+  BackendData
+    { backendDataName = "StrictBox",
+      backendDataParameters = [],
+      backendDataConstructors =
+        [ BackendConstructor
+            "StrictBox"
+            []
+            [polyIdTy, recIntTy]
+            strictBoxTy
+        ]
+    }
+
 programWithMainExpr :: BackendType -> BackendExpr -> BackendProgram
 programWithMainExpr mainTy expr =
   programWithBindings
@@ -1380,6 +1449,10 @@ lazyFieldBoxTy :: BackendType
 lazyFieldBoxTy =
   BTBase (BaseTy "LazyFieldBox")
 
+strictBoxTy :: BackendType
+strictBoxTy =
+  BTBase (BaseTy "StrictBox")
+
 aUnderscoreTy :: BackendType
 aUnderscoreTy =
   BTBase (BaseTy "A_B")
@@ -1433,8 +1506,7 @@ unsupportedLLVMParityCases =
     ("boundary: runs value-exported GADT constructor when owner type is not exported", "BackendUnsupportedSourceType"),
     ("boundary: runs value-imported nonzero-index constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
     ("boundary: runs constrained helper through hidden Eq evidence", "constructor result type does not match expected result"),
-    ("boundary: runs ground constrained helper alias with resolved evidence", "Unsupported backend LLVM type at parameter \"$evidence_Eq_eq#0\" of Main__sameBool"),
-    ("boundary: runs constrained helper after local lambda inference", "escaping function \"Main__Eq__Bool__eq\""),
+    ("boundary: runs ground constrained helper alias with resolved evidence", "Unsupported backend LLVM type at return type of Main__alias"),
     ("boundary: runs deferred method with method-level type variable constraint", "BackendTypeCheckFailed"),
     ("boundary: runs partial deferred method after method-local evidence is fixed by application", "BackendTypeCheckFailed"),
     ("boundary: runs deferred method when only a later forall binder is inferred", "BackendUnsupportedInstantiation InstElim"),
@@ -1448,7 +1520,6 @@ unsupportedLLVMParityCases =
     ("boundary: runs aliased import with exposed method and qualified constructors", "Unsupported backend LLVM type at return type of Core__Eq__Nat__eq"),
     ("boundary: runs aliased import exposing a type without duplicate alias-head instance matches", "Unsupported backend LLVM type at return type of Core__Eq__Nat__eq"),
     ("boundary: deduplicates equivalent instances from mixed unqualified and aliased imports", "Unsupported backend LLVM type at return type of Core__Eq__Nat__eq"),
-    ("boundary: deduplicates constrained imported instances from mixed unqualified and aliased imports", "escaping function \"Core__Eq__Bool__eq\""),
     ("fixture: test/programs/recursive-adt/deriving-eq.mlfp", "Unsupported backend LLVM type at return type of DerivingEq__Eq__Nat__eq"),
     ("fixture: test/programs/recursive-adt/recursive-tree-deriving.mlfp", "Unsupported backend LLVM type at return type of RecursiveTreeDeriving__Eq__Tree__eq"),
     ("fixture: test/programs/recursive-adt/complex-recursive-program.mlfp", "Unsupported backend LLVM type at return type of ComplexRecursiveProgram__Eq__Nat__eq"),
@@ -1461,7 +1532,7 @@ unsupportedLLVMParityCases =
 
 expectedLLVMUnsupportedParityCount :: Int
 expectedLLVMUnsupportedParityCount =
-  42
+  40
 
 llvmUnsupportedParityCount :: Int
 llvmUnsupportedParityCount =
