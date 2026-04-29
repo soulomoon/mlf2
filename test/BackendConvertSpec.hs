@@ -8,6 +8,7 @@ import MLF.Backend.Convert
 import MLF.Backend.IR
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import qualified MLF.Elab.Types as Elab
+import MLF.Frontend.Program.Types (ConstructorInfo (..), DataInfo (..))
 import MLF.Frontend.Syntax (Lit (..), SrcTy (..), SrcType)
 import MLF.Program
 import System.Directory (createDirectoryIfMissing)
@@ -314,6 +315,24 @@ spec = describe "MLF.Backend.Convert" $ do
     backend <- requireRight (convertCheckedProgram checked)
 
     validateBackendProgram backend `shouldBe` Right ()
+
+  it "rejects mismatched vacuous recursive constructor fallback results during conversion" $ do
+    checked0 <- requireChecked vacuousRecursiveConstructorFallbackProgram
+    let checked =
+          withConstructorResult "Main__MkBox" (STMu "a" (STBase "Int")) $
+            mapMainBinding
+              ( \binding ->
+                  binding {checkedBindingType = Elab.TMu "b" boolElabTy}
+              )
+              checked0
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedCaseShape message) ->
+        message `shouldSatisfy` isInfixOf "constructor result type does not match expected result"
+      Left err ->
+        expectationFailure ("expected constructor shape rejection, got " ++ show err)
+      Right backend ->
+        expectationFailure ("expected constructor shape rejection, got backend:\n" ++ show backend)
 
   it "keeps same-name data declarations module-scoped during type lowering" $ do
     checked <- requireChecked duplicateDataNameProgram
@@ -672,6 +691,16 @@ duplicateDataNameProgram =
       "  def main : Bool = case A.make of {",
       "    A.A -> true",
       "  };",
+      "}"
+    ]
+
+vacuousRecursiveConstructorFallbackProgram :: String
+vacuousRecursiveConstructorFallbackProgram =
+  unlines
+    [ "module Main export (Box(..), main) {",
+      "  data Box = MkBox : Box;",
+      "",
+      "  def main : Box = MkBox;",
       "}"
     ]
 
@@ -1293,6 +1322,27 @@ mapMainBinding f checked =
     updateBinding binding
       | checkedBindingName binding == checkedProgramMain checked = f binding
       | otherwise = binding
+
+withConstructorResult :: String -> SrcType -> CheckedProgram -> CheckedProgram
+withConstructorResult runtimeName resultTy checked =
+  checked
+    { checkedProgramModules =
+        map updateModule (checkedProgramModules checked)
+    }
+  where
+    updateModule checkedModule =
+      checkedModule
+        { checkedModuleData = fmap updateDataInfo (checkedModuleData checkedModule)
+        }
+
+    updateDataInfo dataInfo =
+      dataInfo {dataConstructors = map updateConstructorInfo (dataConstructors dataInfo)}
+
+    updateConstructorInfo constructorInfo
+      | ctorRuntimeName constructorInfo == runtimeName =
+          constructorInfo {ctorResult = resultTy}
+      | otherwise =
+          constructorInfo
 
 mapBackendMainBinding :: (BackendBinding -> BackendBinding) -> BackendProgram -> BackendProgram
 mapBackendMainBinding f backend =

@@ -1476,11 +1476,16 @@ bindLet env exprEnv context name rhs =
                   Map.insert
                     name
                     LocalFunction {lfForm = form, lfCapturedEnv = exprEnv}
-                    (eeLocalFunctions exprEnv)
+                    (eeLocalFunctions exprEnv),
+                eeValues = Map.delete name (eeValues exprEnv)
               }
     _ -> do
       value <- lowerExpr env exprEnv (context ++ ", let " ++ show name) rhs
-      pure exprEnv {eeValues = Map.insert name value (eeValues exprEnv)}
+      pure
+        exprEnv
+          { eeValues = Map.insert name value (eeValues exprEnv),
+            eeLocalFunctions = Map.delete name (eeLocalFunctions exprEnv)
+          }
 
 lowerVar :: ProgramEnv -> ExprEnv -> String -> BackendType -> String -> LowerM LowerValue
 lowerVar env exprEnv context ty name =
@@ -1940,11 +1945,16 @@ bindCallArguments env callEnv bodyEnv0 context allowNestedEvidence name form arg
                   Map.insert
                     paramName
                     LocalFunction {lfForm = argForm, lfCapturedEnv = callEnv}
-                    (eeLocalFunctions bodyEnv)
+                    (eeLocalFunctions bodyEnv),
+                eeValues = Map.delete paramName (eeValues bodyEnv)
               }
       | otherwise = do
           value <- lowerExprForArgument env callEnv context allowNestedEvidence (paramName, paramTy) arg
-          pure bodyEnv {eeValues = Map.insert paramName value (eeValues bodyEnv)}
+          pure
+            bodyEnv
+              { eeValues = Map.insert paramName value (eeValues bodyEnv),
+                eeLocalFunctions = Map.delete paramName (eeLocalFunctions bodyEnv)
+              }
 
 isInlineFunctionArgument :: Bool -> String -> BackendType -> Bool
 isInlineFunctionArgument allowNestedEvidence paramName paramTy =

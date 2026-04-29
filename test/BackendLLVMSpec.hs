@@ -338,6 +338,10 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "evidence function type mismatch"
     validateLLVMAssembly output
 
+  it "preserves inline function argument shadowing for bare references" $ do
+    renderBackendProgramLLVM inlineFunctionArgumentShadowsValueProgram
+      `shouldSatisfyLeft` isInfixOf "escaping function \"f\""
+
   it "rejects evidence wrappers that capture local term bindings" $ do
     renderBackendProgramLLVM capturingEvidenceWrapperProgram
       `shouldSatisfyLeft` isInfixOf "unsupported evidence function argument"
@@ -891,6 +895,62 @@ localFunctionReferenceShadowsValueProgram =
           backendBindingExportedAsMain = True
         }
     ]
+
+inlineFunctionArgumentShadowsValueProgram :: BackendProgram
+inlineFunctionArgumentShadowsValueProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [fnBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "idInt",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr = intIdentityExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "callee",
+                      backendBindingType = BTArrow unaryIntTy fnBoxTy,
+                      backendBindingExpr =
+                        BackendLam
+                          (BTArrow unaryIntTy fnBoxTy)
+                          "f"
+                          unaryIntTy
+                          (BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "f"]),
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "outer",
+                      backendBindingType = BTArrow unaryIntTy fnBoxTy,
+                      backendBindingExpr =
+                        BackendLam
+                          (BTArrow unaryIntTy fnBoxTy)
+                          "f"
+                          unaryIntTy
+                          ( BackendApp
+                              fnBoxTy
+                              (BackendVar (BTArrow unaryIntTy fnBoxTy) "callee")
+                              (BackendVar unaryIntTy "idInt")
+                          ),
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = fnBoxTy,
+                      backendBindingExpr =
+                        BackendApp
+                          fnBoxTy
+                          (BackendVar (BTArrow unaryIntTy fnBoxTy) "outer")
+                          (BackendVar unaryIntTy "idInt"),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
 
 stringProgram :: BackendProgram
 stringProgram =

@@ -1703,8 +1703,11 @@ constructorTypeParameters constructorMeta =
 looseConstructorResultSubstitution :: Map String BackendType -> BackendType -> BackendType -> Maybe (Map String BackendType)
 looseConstructorResultSubstitution substitution constructorResult expectedResult =
   case (constructorResult, expectedResult) of
-    (BTMu {}, BTMu expectedName expectedBody)
-      | Set.notMember expectedName (freeBackendTypeVars expectedBody) -> Just substitution
+    (BTMu constructorName constructorBody, BTMu expectedName expectedBody)
+      | Set.notMember constructorName (freeBackendTypeVars constructorBody),
+        Set.notMember expectedName (freeBackendTypeVars expectedBody),
+        alphaEqBackendType (substituteBackendTypes substitution constructorBody) expectedBody ->
+          Just substitution
     _ -> Nothing
 
 freeBackendTypeVars :: BackendType -> Set.Set String
