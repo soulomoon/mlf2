@@ -56,6 +56,7 @@ data ProgramEnv = ProgramEnv
   { peBase :: ProgramBase,
     peSpecializations :: Map String Specialization,
     peEvidenceWrappers :: Map String EvidenceWrapper,
+    peFunctionWrappers :: Map String FunctionWrapper,
     peStringGlobals :: Map String String
   }
 
@@ -102,6 +103,14 @@ data EvidenceWrapper = EvidenceWrapper
   }
   deriving (Eq, Show)
 
+data FunctionWrapper = FunctionWrapper
+  { fwKey :: String,
+    fwFunctionName :: String,
+    fwExpectedType :: BackendType,
+    fwExpr :: BackendExpr
+  }
+  deriving (Eq, Show)
+
 data LowerValue = LowerValue
   { lvBackendType :: BackendType,
     lvLLVMType :: LLVMType,
@@ -140,13 +149,15 @@ lowerBackendProgram program = do
   reachable <- reachableBindings base (backendProgramMain program)
   specializations <- collectRequiredSpecializations base reachable
   let evidenceWrappers = collectEvidenceWrappers base reachable specializations
-      referencedFunctionNames = collectReferencedFunctionNames base reachable specializations evidenceWrappers
-      stringGlobals = assignStringGlobals (collectProgramStrings reachable specializations)
+      functionWrappers = collectFunctionWrappers base reachable specializations
+      referencedFunctionNames = collectReferencedFunctionNames base reachable specializations evidenceWrappers functionWrappers
+      stringGlobals = assignStringGlobals (collectProgramStrings reachable specializations evidenceWrappers functionWrappers)
       env =
         ProgramEnv
           { peBase = base,
             peSpecializations = Map.fromList [(specializationKey (spRequest spec), spec) | spec <- specializations],
             peEvidenceWrappers = Map.fromList [(ewKey wrapper, wrapper) | wrapper <- evidenceWrappers],
+            peFunctionWrappers = Map.fromList [(fwKey wrapper, wrapper) | wrapper <- functionWrappers],
             peStringGlobals = stringGlobals
           }
   functions <-
@@ -154,7 +165,8 @@ lowerBackendProgram program = do
       <$> sequence
         [ traverse (lowerMonomorphicBinding env) (filter (shouldLowerReachableBinding referencedFunctionNames) reachable),
           traverse (lowerSpecialization env) (filter (shouldLowerSpecialization referencedFunctionNames) specializations),
-          traverse (lowerEvidenceWrapper env) evidenceWrappers
+          traverse (lowerEvidenceWrapper env) evidenceWrappers,
+          traverse (lowerFunctionWrapper env) functionWrappers
         ]
   mainBinding <- requireBinding base (backendProgramMain program)
   when (not (null (ffTypeBinders (biForm mainBinding)))) $
@@ -716,12 +728,32 @@ collectEvidenceWrappers base reachable specializations =
           ewExpr = expr
         }
 
-collectReferencedFunctionNames :: ProgramBase -> [BindingInfo] -> [Specialization] -> [EvidenceWrapper] -> Set String
-collectReferencedFunctionNames base reachable specializations evidenceWrappers =
+collectFunctionWrappers :: ProgramBase -> [BindingInfo] -> [Specialization] -> [FunctionWrapper]
+collectFunctionWrappers base reachable specializations =
+  zipWith assignName [(0 :: Int) ..] uniqueRequests
+  where
+    requests =
+      concatMap (collectFunctionWrappersInForm base Map.empty Set.empty . biForm) monomorphicReachable
+        ++ concatMap (collectFunctionWrappersInForm base Map.empty Set.empty . spForm) specializations
+    monomorphicReachable =
+      filter (null . ffTypeBinders . biForm) reachable
+    uniqueRequests =
+      map snd (Map.toAscList (Map.fromList [(functionWrapperKey expected expr, (expected, expr)) | (expected, expr) <- requests]))
+    assignName index0 (expected, expr) =
+      FunctionWrapper
+        { fwKey = functionWrapperKey expected expr,
+          fwFunctionName = "__mlfp_function_wrapper$" ++ show index0,
+          fwExpectedType = expected,
+          fwExpr = expr
+        }
+
+collectReferencedFunctionNames :: ProgramBase -> [BindingInfo] -> [Specialization] -> [EvidenceWrapper] -> [FunctionWrapper] -> Set String
+collectReferencedFunctionNames base reachable specializations evidenceWrappers functionWrappers =
   Set.unions
     ( map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . biForm) reachable
         ++ map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . spForm) specializations
         ++ map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . evidenceWrapperForm) evidenceWrappers
+        ++ map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . functionWrapperForm) functionWrappers
     )
 
 type LocalFunctionForms = Map String FunctionForm
@@ -999,6 +1031,75 @@ evidenceWrapperKey :: BackendType -> BackendExpr -> String
 evidenceWrapperKey expected expr =
   backendTypeKey expected ++ "\0" ++ show expr
 
+collectFunctionWrappersInForm :: ProgramBase -> Map String BackendType -> Set String -> FunctionForm -> [(BackendType, BackendExpr)]
+collectFunctionWrappersInForm base substitution bound form =
+  collectFunctionWrappersInExpr
+    base
+    substitution
+    (Set.union (Set.fromList (map fst (ffParams form))) bound)
+    (ffBody form)
+
+collectFunctionWrappersInExpr :: ProgramBase -> Map String BackendType -> Set String -> BackendExpr -> [(BackendType, BackendExpr)]
+collectFunctionWrappersInExpr base substitution bound expr =
+  wrapperRequests ++ childRequests
+  where
+    wrapperRequests =
+      case expr of
+        BackendConstruct resultTy name args ->
+          case Map.lookup name (pbConstructors base) >>= \constructorRuntime -> constructorRuntimeFieldTypes constructorRuntime resultTy of
+            Just fieldTys ->
+              [ (fieldTy', arg')
+              | (fieldTy, arg) <- zip fieldTys args,
+                let fieldTy' = substituteBackendTypes substitution fieldTy,
+                let arg' = substituteExprTypes substitution arg,
+                isFirstOrderFunctionPointerType fieldTy',
+                not (isSimpleFunctionReference arg'),
+                evidenceWrapperArgumentClosed bound arg'
+              ]
+            Nothing -> []
+        _ -> []
+
+    childRequests =
+      case expr of
+        BackendVar {} ->
+          []
+        BackendLit {} ->
+          []
+        BackendLam _ name _ body ->
+          collectFunctionWrappersInExpr base substitution (Set.insert name bound) body
+        BackendApp _ fun arg ->
+          collectFunctionWrappersInExpr base substitution bound fun
+            ++ collectFunctionWrappersInExpr base substitution bound arg
+        BackendLet _ name _ rhs body ->
+          collectFunctionWrappersInExpr base substitution bound rhs
+            ++ collectFunctionWrappersInExpr base substitution (Set.insert name bound) body
+        BackendTyAbs _ name _ body ->
+          collectFunctionWrappersInExpr base (Map.delete name substitution) bound body
+        BackendTyApp _ fun _ ->
+          collectFunctionWrappersInExpr base substitution bound fun
+        BackendConstruct _ _ args ->
+          concatMap (collectFunctionWrappersInExpr base substitution bound) args
+        BackendCase _ scrutinee alternatives ->
+          collectFunctionWrappersInExpr base substitution bound scrutinee
+            ++ concatMap collectAlternativeWrappers (NE.toList alternatives)
+        BackendRoll _ payload ->
+          collectFunctionWrappersInExpr base substitution bound payload
+        BackendUnroll _ payload ->
+          collectFunctionWrappersInExpr base substitution bound payload
+
+    collectAlternativeWrappers alternative =
+      let binders = patternBinders (backendAltPattern alternative)
+       in collectFunctionWrappersInExpr base substitution (Set.union binders bound) (backendAltBody alternative)
+
+    patternBinders =
+      \case
+        BackendDefaultPattern -> Set.empty
+        BackendConstructorPattern _ binders -> Set.fromList binders
+
+functionWrapperKey :: BackendType -> BackendExpr -> String
+functionWrapperKey expected expr =
+  backendTypeKey expected ++ "\0" ++ show expr
+
 isSimpleFunctionReference :: BackendExpr -> Bool
 isSimpleFunctionReference arg =
   case collectTyApps arg of
@@ -1238,12 +1339,14 @@ freeGlobalRefs base bound expr =
         BackendDefaultPattern -> Set.empty
         BackendConstructorPattern _ binders -> Set.fromList binders
 
-collectProgramStrings :: [BindingInfo] -> [Specialization] -> [String]
-collectProgramStrings reachable specializations =
+collectProgramStrings :: [BindingInfo] -> [Specialization] -> [EvidenceWrapper] -> [FunctionWrapper] -> [String]
+collectProgramStrings reachable specializations evidenceWrappers functionWrappers =
   sort $
     nub $
       concatMap (collectStringLiterals . ffBody . biForm) (filter (null . ffTypeBinders . biForm) reachable)
         ++ concatMap (collectStringLiterals . ffBody . spForm) specializations
+        ++ concatMap (collectStringLiterals . ffBody . evidenceWrapperForm) evidenceWrappers
+        ++ concatMap (collectStringLiterals . ffBody . functionWrapperForm) functionWrappers
 
 collectStringLiterals :: BackendExpr -> [String]
 collectStringLiterals =
@@ -1303,6 +1406,10 @@ lowerEvidenceWrapper :: ProgramEnv -> EvidenceWrapper -> Either BackendLLVMError
 lowerEvidenceWrapper env wrapper =
   lowerFunction env (ewFunctionName wrapper) True (evidenceWrapperForm wrapper)
 
+lowerFunctionWrapper :: ProgramEnv -> FunctionWrapper -> Either BackendLLVMError LLVMFunction
+lowerFunctionWrapper env wrapper =
+  lowerFunction env (fwFunctionName wrapper) True (functionWrapperForm wrapper)
+
 evidenceWrapperForm :: EvidenceWrapper -> FunctionForm
 evidenceWrapperForm wrapper =
   FunctionForm
@@ -1316,6 +1423,20 @@ evidenceWrapperForm wrapper =
     paramNames = ["__mlfp_evidence_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
     paramExprs = [BackendVar paramTy name | (name, paramTy) <- zip paramNames params]
     body = applyEvidenceWrapperArgs (ewExpr wrapper) (ewExpectedType wrapper) paramExprs
+
+functionWrapperForm :: FunctionWrapper -> FunctionForm
+functionWrapperForm wrapper =
+  FunctionForm
+    { ffTypeBinders = [],
+      ffParams = zip paramNames params,
+      ffBody = body,
+      ffReturnType = returnTy
+    }
+  where
+    (params, returnTy) = collectArrowsType (fwExpectedType wrapper)
+    paramNames = ["__mlfp_function_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
+    paramExprs = [BackendVar paramTy name | (name, paramTy) <- zip paramNames params]
+    body = applyEvidenceWrapperArgs (fwExpr wrapper) (fwExpectedType wrapper) paramExprs
 
 applyEvidenceWrapperArgs :: BackendExpr -> BackendType -> [BackendExpr] -> BackendExpr
 applyEvidenceWrapperArgs expr _ [] =
@@ -1844,7 +1965,10 @@ lookupFunctionFormByName env functionName =
         [] ->
           case [evidenceWrapperForm wrapper | wrapper <- Map.elems (peEvidenceWrappers env), ewFunctionName wrapper == functionName] of
             form : _ -> Just form
-            [] -> Nothing
+            [] ->
+              case [functionWrapperForm wrapper | wrapper <- Map.elems (peFunctionWrappers env), fwFunctionName wrapper == functionName] of
+                form : _ -> Just form
+                [] -> Nothing
 
 functionFormFromType :: BackendType -> FunctionForm
 functionFormFromType ty =
@@ -1888,6 +2012,18 @@ lowerFunctionArgument env exprEnv context expectedTy arg =
       lowerFunctionReference env exprEnv context expectedTy name typeArgs
     _ ->
       liftEither (BackendLLVMUnsupportedExpression context "unsupported function argument")
+
+lowerStoredFunctionArgument :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> LowerM LowerValue
+lowerStoredFunctionArgument env exprEnv context expectedTy arg =
+  case collectTyApps arg of
+    (BackendVar _ name, typeArgs) ->
+      lowerFunctionReference env exprEnv context expectedTy name typeArgs
+    _ ->
+      case Map.lookup (functionWrapperKey expectedTy arg) (peFunctionWrappers env) of
+        Just wrapper ->
+          pure (LowerValue expectedTy LLVMPtr (LLVMGlobalRef LLVMPtr (fwFunctionName wrapper)))
+        Nothing ->
+          liftEither (BackendLLVMUnsupportedExpression context "unsupported function argument")
 
 lowerEvidenceArgument :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> LowerM LowerValue
 lowerEvidenceArgument env exprEnv context expectedTy arg =
@@ -2567,9 +2703,18 @@ lowerConstruct env exprEnv context resultTy name args =
       liftEither (BackendLLVMUnknownConstructor name)
     Just constructorRuntime -> do
       let constructor = crConstructor constructorRuntime
-      unless (length args == length (backendConstructorFields constructor)) $
-        liftEither (BackendLLVMArityMismatch name (length (backendConstructorFields constructor)) (length args))
-      argValues <- traverse (lowerExpr env exprEnv context) args
+      fieldTys <-
+        case constructorRuntimeFieldTypes constructorRuntime resultTy of
+          Just resolvedFieldTys -> pure resolvedFieldTys
+          Nothing ->
+            liftEither
+              ( BackendLLVMUnsupportedExpression
+                  context
+                  ("could not match constructor result for " ++ backendConstructorName constructor)
+              )
+      unless (length args == length fieldTys) $
+        liftEither (BackendLLVMArityMismatch name (length fieldTys) (length args))
+      argValues <- zipWithM (lowerConstructField env exprEnv context) fieldTys args
       object <- emitMalloc env context (8 * (1 + length args))
       tagPtr <- emitGep "tag.ptr" object 0
       emitStore (LLVMInt 64) (LLVMIntLiteral 64 (crTag constructorRuntime)) tagPtr
@@ -2582,6 +2727,13 @@ lowerConstruct env exprEnv context resultTy name args =
     storeField object index0 value = do
       fieldPtr <- emitGep "field.ptr" object (8 * (index0 + 1))
       emitStore (lvLLVMType value) (lvOperand value) fieldPtr
+
+lowerConstructField :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> LowerM LowerValue
+lowerConstructField env exprEnv context fieldTy arg
+  | isFirstOrderFunctionPointerType fieldTy =
+      lowerStoredFunctionArgument env exprEnv context fieldTy arg
+  | otherwise =
+      lowerExpr env exprEnv context arg
 
 lowerCase :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> NonEmpty BackendAlternative -> LowerM LowerValue
 lowerCase env exprEnv context resultTy scrutinee alternatives =
@@ -2701,10 +2853,15 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
           pure Nothing
 
     loadField scrutineeValue index0 fieldTy = do
-      llvmTy <- lowerBackendTypeM env context fieldTy
+      llvmTy <- lowerStoredFieldTypeM env context fieldTy
       fieldPtr <- emitGep "case.field.ptr" (lvOperand scrutineeValue) (8 * (index0 + 1))
       loaded <- emitAssign "case.field" llvmTy (LLVMLoad llvmTy fieldPtr)
       pure (LowerValue fieldTy llvmTy loaded)
+
+lowerStoredFieldTypeM :: ProgramEnv -> String -> BackendType -> LowerM LLVMType
+lowerStoredFieldTypeM env context fieldTy
+  | isFirstOrderFunctionPointerType fieldTy = pure LLVMPtr
+  | otherwise = lowerBackendTypeM env context fieldTy
 
 lowerImmediateConstructCase ::
   ProgramEnv ->
@@ -2826,19 +2983,26 @@ dummyOperandAfterUnreachable context ty =
 
 constructorFieldTypesForScrutinee :: ProgramEnv -> String -> ConstructorRuntime -> BackendType -> LowerM [BackendType]
 constructorFieldTypesForScrutinee _ context constructorRuntime scrutineeTy =
+  case constructorRuntimeFieldTypes constructorRuntime scrutineeTy of
+    Just fieldTys -> pure fieldTys
+    Nothing ->
+      liftEither
+        ( BackendLLVMUnsupportedExpression
+            context
+            ("could not match constructor result for " ++ backendConstructorName (crConstructor constructorRuntime))
+        )
+
+constructorRuntimeFieldTypes :: ConstructorRuntime -> BackendType -> Maybe [BackendType]
+constructorRuntimeFieldTypes constructorRuntime scrutineeTy =
   case structuralConstructorFieldTypes constructorRuntime scrutineeTy of
     Just fieldTys ->
-      pure fieldTys
+      Just fieldTys
     Nothing ->
       case matchConstructorResult (crDataParameters constructorRuntime) parameters Map.empty (backendConstructorResult constructor) scrutineeTy of
         Just substitution ->
-          pure (map (substituteBackendTypes substitution) (backendConstructorFields constructor))
+          Just (map (substituteBackendTypes substitution) (backendConstructorFields constructor))
         Nothing ->
-          liftEither
-            ( BackendLLVMUnsupportedExpression
-                context
-                ("could not match constructor result for " ++ backendConstructorName constructor)
-            )
+          Nothing
   where
     constructor = crConstructor constructorRuntime
     parameters =

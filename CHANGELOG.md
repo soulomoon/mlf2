@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Changed
+- Eliminated the final temporary LLVM unsupported classification from the
+  shared `ProgramSpec` runtime-success parity matrix. Stored first-order
+  function constructor fields now lower as function pointers, closed direct
+  function fields use private wrappers, captured closure fields still fail
+  closed, and the representative `llc` subset includes the formerly unsupported
+  typed constructor-field row.
 - Extended LLVM backend parity to higher-kinded constructor fields and
   hidden-owner value-constructor imports. Backend IR now preserves applied type
   variables, conversion recovers structural higher-kinded constructor terms as

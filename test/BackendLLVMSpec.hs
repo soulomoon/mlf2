@@ -474,8 +474,11 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   it "preserves inline function argument shadowing for bare references" $ do
-    renderBackendProgramLLVM inlineFunctionArgumentShadowsValueProgram
-      `shouldSatisfyLeft` isInfixOf "escaping function \"f\""
+    output <- requireRight (renderBackendProgramLLVM inlineFunctionArgumentShadowsValueProgram)
+
+    output `shouldSatisfy` isInfixOf "store ptr @\"idInt\""
+    output `shouldNotSatisfy` isInfixOf "escaping function \"f\""
+    validateLLVMAssembly output
 
   it "rejects evidence wrappers that capture local term bindings" $ do
     renderBackendProgramLLVM capturingEvidenceWrapperProgram
@@ -499,15 +502,11 @@ spec = describe "MLF.Backend.LLVM" $ do
     it "classifies every interpreter-success case exactly once" $ do
       let caseNames = map runtimeCaseName programSpecToLLVMParityCases
           uniqueCaseNames = Set.fromList caseNames
-          unsupportedNames = Set.fromList (map fst unsupportedLLVMParityCases)
           objectCodeNames = Set.fromList llvmObjectCodeParityCases
 
       length caseNames `shouldBe` Set.size uniqueCaseNames
-      length unsupportedLLVMParityCases `shouldBe` Set.size unsupportedNames
-      unsupportedNames `Set.isSubsetOf` uniqueCaseNames `shouldBe` True
-      objectCodeNames `Set.isSubsetOf` Set.difference uniqueCaseNames unsupportedNames `shouldBe` True
+      objectCodeNames `Set.isSubsetOf` uniqueCaseNames `shouldBe` True
       Map.keysSet llvmParityExpectations `shouldBe` uniqueCaseNames
-      llvmUnsupportedParityCount `shouldBe` expectedLLVMUnsupportedParityCount
 
     mapM_ runLLVMParityCase programSpecToLLVMParityCases
 
@@ -519,9 +518,23 @@ spec = describe "MLF.Backend.LLVM" $ do
     renderBackendProgramLLVM escapingLambdaProgram
       `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
 
-  it "rejects function-typed constructor fields" $ do
-    renderBackendProgramLLVM functionFieldProgram
-      `shouldSatisfyLeft` isInfixOf "escaping function"
+  it "lowers stored top-level function constructor fields" $ do
+    output <- requireRight (renderBackendProgramLLVM functionFieldProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"helper\""
+    output `shouldSatisfy` isInfixOf "store ptr @\"helper\""
+    validateLLVMAssembly output
+
+  it "lowers stored direct function constructor fields through private wrappers" $ do
+    output <- requireRight (renderBackendProgramLLVM directFunctionFieldProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_function_wrapper$"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_function_wrapper$"
+    validateLLVMAssembly output
+
+  it "rejects captured function constructor fields until closure conversion exists" $ do
+    renderBackendProgramLLVM capturedFunctionFieldProgram
+      `shouldSatisfyLeft` isInfixOf "unsupported function argument"
 
   it "rejects unknown base types" $ do
     renderBackendProgramLLVM unknownBaseProgram
@@ -2406,6 +2419,61 @@ functionFieldProgram =
       backendProgramMain = "main"
     }
 
+directFunctionFieldProgram :: BackendProgram
+directFunctionFieldProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [fnBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = fnBoxTy,
+                      backendBindingExpr = BackendConstruct fnBoxTy "FnBox" [intIdentityExpr],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+capturedFunctionFieldProgram :: BackendProgram
+capturedFunctionFieldProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [fnBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = fnBoxTy,
+                      backendBindingExpr =
+                        BackendLet
+                          fnBoxTy
+                          "captured"
+                          intTy
+                          (intLit 1)
+                          ( BackendConstruct
+                              fnBoxTy
+                              "FnBox"
+                              [ BackendLam
+                                  unaryIntTy
+                                  "x"
+                                  intTy
+                                  (BackendVar intTy "captured")
+                              ]
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
 unknownBaseProgram :: BackendProgram
 unknownBaseProgram =
   programWithMainExpr mysteryTy (BackendVar mysteryTy "main")
@@ -2638,35 +2706,12 @@ recIntTy =
 
 data LLVMParityExpectation
   = ExpectLLVMAssembly
-  | ExpectLLVMUnsupported String
 
 llvmParityExpectations :: Map.Map String LLVMParityExpectation
 llvmParityExpectations =
   Map.fromList
-    [ ( runtimeCaseName runtimeCase,
-        case Map.lookup (runtimeCaseName runtimeCase) unsupportedByName of
-          Just reason -> ExpectLLVMUnsupported reason
-          Nothing -> ExpectLLVMAssembly
-      )
+    [ (runtimeCaseName runtimeCase, ExpectLLVMAssembly)
     | runtimeCase <- programSpecToLLVMParityCases
-    ]
-  where
-    unsupportedByName = Map.fromList unsupportedLLVMParityCases
-
-unsupportedLLVMParityCases :: [(String, String)]
-unsupportedLLVMParityCases =
-  [ ("standalone: does not decode typed non-data constructor fields through fallback ADT decoding", "escaping lambda")
-  ]
-
-expectedLLVMUnsupportedParityCount :: Int
-expectedLLVMUnsupportedParityCount =
-  1
-
-llvmUnsupportedParityCount :: Int
-llvmUnsupportedParityCount =
-  length
-    [ ()
-    | ExpectLLVMUnsupported _ <- Map.elems llvmParityExpectations
     ]
 
 llvmObjectCodeParityCases :: [String]
@@ -2677,7 +2722,8 @@ llvmObjectCodeParityCases =
       "boundary: runs value-exported constructor when owner type is not exported",
       "boundary: runs aliased bulk-imported hidden-owner constructors in one case",
       "boundary: runs exposed constructor with qualified alias type identity",
-      "unified fixture: test/programs/unified/first-class-polymorphism.mlfp"
+      "unified fixture: test/programs/unified/first-class-polymorphism.mlfp",
+      "standalone: does not decode typed non-data constructor fields through fallback ADT decoding"
     ]
 
 llvmObjectCodeParityCaseNames :: Set.Set String
@@ -2696,14 +2742,6 @@ runLLVMParityCase runtimeCase =
         validateLLVMAssembly output
         when (runtimeCaseName runtimeCase `Set.member` llvmObjectCodeParityCaseNames) $
           validateLLVMObjectCode output
-      Just (ExpectLLVMUnsupported expectedFragment) ->
-        case result of
-          Left err ->
-            err `shouldSatisfy` isInfixOf expectedFragment
-          Right output ->
-            expectationFailure $
-              "LLVM parity case is now supported; remove its ExpectLLVMUnsupported classification:\n"
-                ++ output
 
 emitProgramRuntimeLLVM :: ProgramMatrixSource -> IO (Either String String)
 emitProgramRuntimeLLVM source =
