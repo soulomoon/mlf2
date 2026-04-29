@@ -1997,12 +1997,6 @@ convertConstructorApplication context env term resultTy =
       where
         explicitArgumentAgrees (name, explicitTy) =
           case Map.lookup name inferredSubstitution of
-            Just (BTVar inferredName)
-              | inferredName == name ->
-                  Map.notMember inferredName typeBounds
-                    || alphaEqBackendType
-                      (resolveTypeBoundDependencies explicitTy)
-                      (resolveTypeBoundDependencies (BTVar inferredName))
             Just inferredTy ->
               alphaEqBackendType (resolveTypeBoundDependencies explicitTy) (resolveTypeBoundDependencies inferredTy)
             Nothing -> False
@@ -2610,6 +2604,10 @@ structuralBackendHandlerFields =
                 BTArrow fieldTy rest -> go (fields ++ [fieldTy]) rest
                 _ -> Nothing
 
+structuralMuPayloadTypes :: BackendType -> Maybe [BackendType]
+structuralMuPayloadTypes body =
+  concat <$> structuralBackendHandlerFields body
+
 constructorApplicationResultType :: ConvertContext -> Env -> ElabTerm -> Either BackendConversionError (Maybe (BackendType, Maybe DataMeta))
 constructorApplicationResultType context env term =
   constructorApplicationTerm context term >>= \case
@@ -2966,21 +2964,26 @@ matchBackendTypeParameters typeBounds dataParameterOrder parameterBounds =
                 (zip expectedArgs actualArgs)
         _ -> Nothing
 
-    matchStructuralMuExpected leftEnv rightEnv substitution muName _body actualTy =
-      ( structuralMuAsDataType dataParameterOrder muName
+    matchStructuralMuExpected leftEnv rightEnv substitution muName body actualTy =
+      ( structuralMuAsDataTypeForBody muName body
           >>= \expectedTy -> go leftEnv rightEnv substitution expectedTy actualTy
       )
-        <|> ( structuralMuAsActualDataType muName actualTy
+        <|> ( structuralMuPayloadTypes body
+                *> structuralMuAsActualDataType muName actualTy
                 >>= \expectedTy -> go leftEnv rightEnv substitution expectedTy actualTy
             )
 
-    matchStructuralMuActual leftEnv rightEnv substitution expectedTy muName _body =
-      ( structuralMuAsDataType dataParameterOrder muName
+    matchStructuralMuActual leftEnv rightEnv substitution expectedTy muName body =
+      ( structuralMuAsDataTypeForBody muName body
           >>= \actualTy -> go leftEnv rightEnv substitution expectedTy actualTy
       )
-        <|> ( structuralMuAsActualDataType muName expectedTy
+        <|> ( structuralMuPayloadTypes body
+                *> structuralMuAsActualDataType muName expectedTy
                 >>= \actualTy -> go leftEnv rightEnv substitution expectedTy actualTy
             )
+
+    structuralMuAsDataTypeForBody muName body =
+      structuralMuPayloadTypes body *> structuralMuAsDataType dataParameterOrder muName
 
     sameTypeVar leftEnv rightEnv expectedName actualName =
       case (Map.lookup expectedName leftEnv, Map.lookup actualName rightEnv) of

@@ -976,9 +976,7 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
           | Map.member name parameterBounds && Set.notMember name bound ->
               insertParameterSubstitution name actual substitution
         _ ->
-          if alphaEqBackendType expected actual
-            then Just substitution
-            else case (expected, actual) of
+          case (expected, actual) of
               (BTVar {}, _) ->
                 requireAlphaEq substitution expected actual
               (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
@@ -1070,7 +1068,9 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
               (BTBottom, BTBottom) ->
                 Just substitution
               _ ->
-                Nothing
+                if alphaEqBackendType expected actual
+                  then Just substitution
+                  else Nothing
 
     matchMaybeBound _ substitution Nothing Nothing =
       Just substitution
@@ -1079,23 +1079,28 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
     matchMaybeBound _ _ _ _ =
       Nothing
 
-    matchStructuralMuExpected bound substitution muName _body actualTy =
+    matchStructuralMuExpected bound substitution muName body actualTy =
       firstJust
-        [ structuralMuNominalTypeMatches actualTy muName _body >>= \() -> Just substitution,
-          structuralMuAsDataType dataParameterOrder muName
+        [ structuralMuNominalTypeMatches actualTy muName body >>= \() -> Just substitution,
+          structuralMuAsDataTypeForBody muName body
             >>= \expectedTy -> go bound substitution expectedTy actualTy,
-          structuralMuAsActualDataType muName actualTy
+          structuralMuPayloadTypes body
+            *> structuralMuAsActualDataType muName actualTy
             >>= \expectedTy -> go bound substitution expectedTy actualTy
         ]
 
-    matchStructuralMuActual bound substitution expectedTy muName _body =
+    matchStructuralMuActual bound substitution expectedTy muName body =
       firstJust
-        [ structuralMuNominalTypeMatches expectedTy muName _body >>= \() -> Just substitution,
-          structuralMuAsDataType dataParameterOrder muName
+        [ structuralMuNominalTypeMatches expectedTy muName body >>= \() -> Just substitution,
+          structuralMuAsDataTypeForBody muName body
             >>= \actualTy -> go bound substitution expectedTy actualTy,
-          structuralMuAsActualDataType muName expectedTy
+          structuralMuPayloadTypes body
+            *> structuralMuAsActualDataType muName expectedTy
             >>= \actualTy -> go bound substitution expectedTy actualTy
         ]
+
+    structuralMuAsDataTypeForBody muName body =
+      structuralMuPayloadTypes body *> structuralMuAsDataType dataParameterOrder muName
 
     structuralMuNominalTypeMatches nominalTy muName body =
       if nominalMatches

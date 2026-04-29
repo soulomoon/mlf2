@@ -182,6 +182,9 @@ spec = describe "MLF.Backend.IR" $ do
     alphaEqBackendType (BTBase (BaseTy "Core.T")) (BTMu "$Core.T_self" BTBottom)
       `shouldBe` False
 
+    validateBackendProgram (programWithMainExpr malformedStructuralBoxConstructExpr)
+      `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy malformedStructuralBoxTy)
+
   it "preserves nominal arguments when structural recursive payloads omit them" $ do
     alphaEqBackendType
       (BTCon (BaseTy "Core.Phantom") (intTy :| []))
@@ -227,6 +230,9 @@ spec = describe "MLF.Backend.IR" $ do
 
     validateBackendProgram (programWithDataAndMainExpr [optionData] optionCaseExpr)
       `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [optionData] someIntAsOptionVarExpr)
+      `shouldBe` Left (BackendConstructorArgumentMismatch "Some" 0 (BTVar "a") intTy)
 
     validateBackendProgram (programWithDataAndMainExpr [optionData] someBoolAsOptionIntExpr)
       `shouldBe` Left (BackendConstructorArgumentMismatch "Some" 0 intTy boolTy)
@@ -570,9 +576,21 @@ someIntExpr :: BackendExpr
 someIntExpr =
   BackendConstruct (optionTy intTy) "Some" [intLit 1]
 
+someIntAsOptionVarExpr :: BackendExpr
+someIntAsOptionVarExpr =
+  BackendConstruct (optionTy (BTVar "a")) "Some" [intLit 1]
+
 someBoolAsOptionIntExpr :: BackendExpr
 someBoolAsOptionIntExpr =
   BackendConstruct (optionTy intTy) "Some" [boolLit True]
+
+malformedStructuralBoxTy :: BackendType
+malformedStructuralBoxTy =
+  BTMu "$Box_self" BTBottom
+
+malformedStructuralBoxConstructExpr :: BackendExpr
+malformedStructuralBoxConstructExpr =
+  BackendConstruct malformedStructuralBoxTy "Box" [intLit 1]
 
 justFBoxBoolExpr :: BackendExpr
 justFBoxBoolExpr =
