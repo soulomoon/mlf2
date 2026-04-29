@@ -587,8 +587,10 @@ collectEvidenceWrappers base reachable specializations =
   zipWith assignName [(0 :: Int) ..] uniqueRequests
   where
     requests =
-      concatMap (collectEvidenceWrappersInForm base Map.empty Set.empty . biForm) reachable
+      concatMap (collectEvidenceWrappersInForm base Map.empty Set.empty . biForm) monomorphicReachable
         ++ concatMap (collectEvidenceWrappersInForm base Map.empty Set.empty . spForm) specializations
+    monomorphicReachable =
+      filter (null . ffTypeBinders . biForm) reachable
     uniqueRequests =
       map snd (Map.toAscList (Map.fromList [(evidenceWrapperKey expected expr, (expected, expr)) | (expected, expr) <- requests]))
     assignName index0 (expected, expr) =

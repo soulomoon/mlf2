@@ -409,6 +409,23 @@ spec = describe "MLF.Backend.Convert" $ do
     helper <- requireSingleLiftedHelper backend
     length (filter (== "$evidence_E") (backendExprBinders (backendBindingExpr helper))) `shouldBe` 1
 
+  it "keeps renamed let binders out of their own right-hand sides" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = recursiveLetRhsRenameElabTy,
+                    checkedBindingTerm = recursiveLetRhsRenameTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    helper <- requireSingleLiftedHelper backend
+    backendBindingExpr helper `shouldNotSatisfy` containsSelfReferentialLetRhs
+
   it "captures type variables used only by recursive RHS instantiations" $ do
     checked0 <- requireChecked simpleFunctionProgram
     let checked =
@@ -1067,6 +1084,29 @@ backendExprBinders expr =
     patternBackendBinders BackendDefaultPattern = []
     patternBackendBinders (BackendConstructorPattern _ names) = names
 
+containsSelfReferentialLetRhs :: BackendExpr -> Bool
+containsSelfReferentialLetRhs expr =
+  case expr of
+    BackendVar {} -> False
+    BackendLit {} -> False
+    BackendLam {backendBody = body} -> containsSelfReferentialLetRhs body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsSelfReferentialLetRhs fun || containsSelfReferentialLetRhs arg
+    BackendLet {backendLetName = name, backendLetRhs = rhs, backendLetBody = body} ->
+      rhsIsSelfReference name rhs || containsSelfReferentialLetRhs rhs || containsSelfReferentialLetRhs body
+    BackendTyAbs {backendTyAbsBody = body} -> containsSelfReferentialLetRhs body
+    BackendTyApp {backendTyFunction = fun} -> containsSelfReferentialLetRhs fun
+    BackendConstruct {backendConstructArgs = args} -> any containsSelfReferentialLetRhs args
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsSelfReferentialLetRhs scrutinee || any (containsSelfReferentialLetRhs . backendAltBody) (toList alternatives)
+    BackendRoll {backendRollPayload = body} -> containsSelfReferentialLetRhs body
+    BackendUnroll {backendUnrollPayload = body} -> containsSelfReferentialLetRhs body
+  where
+    rhsIsSelfReference name rhs =
+      case rhs of
+        BackendVar {backendVarName = rhsName} -> rhsName == name
+        _ -> False
+
 isBackendFunctionType :: BackendType -> Bool
 isBackendFunctionType ty =
   case ty of
@@ -1178,6 +1218,39 @@ recursiveCaptureAvoidingRhs =
             "$evidence_E"
             (Elab.schemeFromType unaryIntElabTy)
             intIdentityElabTerm
+            (Elab.EApp (Elab.EVar "loop") (Elab.EVar "before"))
+        )
+    )
+
+recursiveLetRhsRenameElabTy :: Elab.ElabType
+recursiveLetRhsRenameElabTy =
+  Elab.TArrow unaryIntElabTy intElabTy
+
+recursiveLetRhsRenameTerm :: Elab.ElabTerm
+recursiveLetRhsRenameTerm =
+  Elab.ELam
+    "$evidence_E"
+    unaryIntElabTy
+    ( Elab.ELet
+        "loop"
+        (Elab.schemeFromType unaryIntElabTy)
+        recursiveLetRhsRenameRhs
+        (Elab.EApp (Elab.EVar "loop") (Elab.ELit (LInt 0)))
+    )
+
+recursiveLetRhsRenameRhs :: Elab.ElabTerm
+recursiveLetRhsRenameRhs =
+  Elab.ELam
+    "n"
+    intElabTy
+    ( Elab.ELet
+        "before"
+        (Elab.schemeFromType intElabTy)
+        (Elab.EApp (Elab.EVar "$evidence_E") (Elab.EVar "n"))
+        ( Elab.ELet
+            "$evidence_E"
+            (Elab.schemeFromType unaryIntElabTy)
+            (Elab.EVar "$evidence_E")
             (Elab.EApp (Elab.EVar "loop") (Elab.EVar "before"))
         )
     )

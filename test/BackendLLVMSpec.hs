@@ -346,6 +346,13 @@ spec = describe "MLF.Backend.LLVM" $ do
     renderBackendProgramLLVM capturingEvidenceWrapperProgram
       `shouldSatisfyLeft` isInfixOf "unsupported evidence function argument"
 
+  it "collects evidence wrappers only after polymorphic forms are specialized" $ do
+    output <- requireRight (renderBackendProgramLLVM polymorphicEvidenceWrapperProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_evidence_wrapper$"
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
+    validateLLVMAssembly output
+
   describe "ProgramSpec-to-LLVM parity matrix" $ do
     it "classifies every interpreter-success case exactly once" $ do
       let caseNames = map runtimeCaseName programSpecToLLVMParityCases
@@ -770,6 +777,75 @@ nestedEvidenceWrapperParameterProgram =
           backendBindingExportedAsMain = True
         }
     ]
+
+polymorphicEvidenceWrapperProgram :: BackendProgram
+polymorphicEvidenceWrapperProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "$evidence_C",
+          backendBindingType = polyEvidenceConsumerTy,
+          backendBindingExpr = polyEvidenceConsumerExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "poly",
+          backendBindingType = polyEvidenceCallerTy,
+          backendBindingExpr = polyEvidenceCallerExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendTyApp
+              intTy
+              (BackendVar polyEvidenceCallerTy "poly")
+              intTy,
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+polyEvidenceConsumerTy :: BackendType
+polyEvidenceConsumerTy =
+  BTForall "a" Nothing (BTArrow (BTArrow (BTVar "a") intTy) intTy)
+
+polyEvidenceConsumerExpr :: BackendExpr
+polyEvidenceConsumerExpr =
+  BackendTyAbs
+    polyEvidenceConsumerTy
+    "a"
+    Nothing
+    ( BackendLam
+        (BTArrow (BTArrow (BTVar "a") intTy) intTy)
+        "$evidence_apply"
+        (BTArrow (BTVar "a") intTy)
+        (intLit 0)
+    )
+
+polyEvidenceCallerTy :: BackendType
+polyEvidenceCallerTy =
+  BTForall "a" Nothing intTy
+
+polyEvidenceCallerExpr :: BackendExpr
+polyEvidenceCallerExpr =
+  BackendTyAbs
+    polyEvidenceCallerTy
+    "a"
+    Nothing
+    ( BackendApp
+        intTy
+        ( BackendTyApp
+            (BTArrow (BTArrow (BTVar "a") intTy) intTy)
+            (BackendVar polyEvidenceConsumerTy "$evidence_C")
+            (BTVar "a")
+        )
+        ( BackendLam
+            (BTArrow (BTVar "a") intTy)
+            "x"
+            (BTVar "a")
+            (intLit 0)
+        )
+    )
 
 localFunctionCallShadowsValueProgram :: BackendProgram
 localFunctionCallShadowsValueProgram =

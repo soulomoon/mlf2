@@ -243,7 +243,8 @@ liftRecursiveLetsInTerm context lexicalTerms lexicalTypes term =
     ELet name scheme rhs body -> do
       let schemeTy = schemeToType scheme
           bodyTerms = Map.insert name schemeTy lexicalTerms
-      if termMentionsFreeVariable name rhs
+          recursiveRhs = Map.notMember name lexicalTerms && termMentionsFreeVariable name rhs
+      if recursiveRhs
         then do
           bindingTy <- liftEitherConversion (convertElabType schemeTy)
           termCaptures <- capturedTermBindings lexicalTerms rhs
@@ -462,7 +463,7 @@ freeTermVariables =
         EApp fun arg ->
           go bound fun `Set.union` go bound arg
         ELet name _ rhs body ->
-          go (Set.insert name bound) rhs `Set.union` go (Set.insert name bound) body
+          go bound rhs `Set.union` go (Set.insert name bound) body
         ETyAbs _ _ body ->
           go bound body
         ETyInst inner _ ->
@@ -672,8 +673,8 @@ replaceFreeTermVariable needle replacement =
           EApp (go fun) (go arg)
         ELet name scheme rhs body
           | name == needle ->
-              ELet name scheme rhs body
-          | shouldRenameTermBinder name (EApp rhs body) ->
+              ELet name scheme (go rhs) body
+          | shouldRenameTermBinder name body ->
               let used =
                     Set.unions
                       [ termVariableNames rhs,
@@ -682,9 +683,8 @@ replaceFreeTermVariable needle replacement =
                         Set.singleton needle
                       ]
                   name' = freshNameLike name used
-                  rhs' = renameBoundTermVariable name name' rhs
                   body' = renameBoundTermVariable name name' body
-               in ELet name' scheme (go rhs') (go body')
+               in ELet name' scheme (go rhs) (go body')
           | otherwise ->
               ELet name scheme (go rhs) (go body)
         ETyAbs name mbBound body
@@ -730,7 +730,7 @@ renameBoundTermVariable old new =
         EApp fun arg ->
           EApp (go fun) (go arg)
         ELet name scheme rhs body
-          | name == old -> ELet name scheme rhs body
+          | name == old -> ELet name scheme (go rhs) body
           | otherwise -> ELet name scheme (go rhs) (go body)
         ETyAbs name mbBound body ->
           ETyAbs name mbBound (go body)
@@ -1547,7 +1547,7 @@ termMentionsFreeVariable needle =
         EApp fun arg ->
           go fun || go arg
         ELet name _ rhs body
-          | name == needle -> False
+          | name == needle -> go rhs
           | otherwise -> go rhs || go body
         ETyAbs _ _ body ->
           go body
