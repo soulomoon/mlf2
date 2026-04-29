@@ -170,6 +170,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
     validateLLVMAssembly output
 
+  it "rejects static-argument entrypoints instead of eliding main" $ do
+    renderBackendProgramLLVM staticArgumentMainProgram
+      `shouldSatisfyLeft` isInfixOf "parameter \"poly\" of main"
+
+  it "rejects recursive static global inlining instead of diverging" $ do
+    renderBackendProgramLLVM recursiveStaticGlobalProgram
+      `shouldSatisfyLeft` isInfixOf "recursive static global \"loop\""
+
   it "statically lowers immediate constructor fields carrying forall values" $ do
     output <-
       withTempProgram constructorFirstClassPolymorphismProgram $ \path ->
@@ -484,6 +492,41 @@ constructorFirstClassPolymorphismProgram =
       "    PolyBox poly -> let keepInt = poly 1 in poly true",
       "  };",
       "}"
+    ]
+
+staticArgumentMainProgram :: BackendProgram
+staticArgumentMainProgram =
+  programWithMainExpr staticPolyBoolTy $
+    BackendLam staticPolyBoolTy "poly" polyIdTy (boolLit True)
+
+recursiveStaticGlobalProgram :: BackendProgram
+recursiveStaticGlobalProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "loop",
+          backendBindingType = staticPolyBoolTy,
+          backendBindingExpr =
+            BackendLam
+              staticPolyBoolTy
+              "poly"
+              polyIdTy
+              ( BackendApp
+                  boolTy
+                  (BackendVar staticPolyBoolTy "loop")
+                  (BackendVar polyIdTy "poly")
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = boolTy,
+          backendBindingExpr =
+            BackendApp
+              boolTy
+              (BackendVar staticPolyBoolTy "loop")
+              polyIdExpr,
+          backendBindingExportedAsMain = True
+        }
     ]
 
 stringProgram :: BackendProgram
@@ -1128,6 +1171,10 @@ polyIdExpr =
         (BackendVar (BTVar "a") "x")
     )
 
+staticPolyBoolTy :: BackendType
+staticPolyBoolTy =
+  BTArrow polyIdTy boolTy
+
 badPolyTy :: BackendType
 badPolyTy =
   BTForall "a" Nothing fnBoxTy
@@ -1297,9 +1344,17 @@ intLit :: Integer -> BackendExpr
 intLit value =
   BackendLit intTy (LInt value)
 
+boolLit :: Bool -> BackendExpr
+boolLit value =
+  BackendLit boolTy (LBool value)
+
 intTy :: BackendType
 intTy =
   BTBase (BaseTy "Int")
+
+boolTy :: BackendType
+boolTy =
+  BTBase (BaseTy "Bool")
 
 stringTy :: BackendType
 stringTy =

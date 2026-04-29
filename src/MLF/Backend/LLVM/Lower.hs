@@ -115,7 +115,8 @@ data FunctionState = FunctionState
     fsNextBlock :: Int,
     fsCurrentLabel :: String,
     fsCurrentInstructions :: [LLVMInstruction],
-    fsCompletedBlocks :: [LLVMBasicBlock]
+    fsCompletedBlocks :: [LLVMBasicBlock],
+    fsStaticGlobalStack :: [String]
   }
   deriving (Eq, Show)
 
@@ -138,7 +139,7 @@ lowerBackendProgram program = do
     (++)
       <$> traverse
         (lowerMonomorphicBinding env)
-        (filter (shouldEmitMonomorphicFunction env . biForm) (filter (null . ffTypeBinders . biForm) reachable))
+        (filter (shouldEmitReachableBinding env (backendProgramMain program)) (filter (null . ffTypeBinders . biForm) reachable))
       <*> traverse
         (lowerSpecialization env)
         (filter (shouldEmitMonomorphicFunction env . spForm) specializations)
@@ -307,6 +308,10 @@ functionFormHasRuntimeCallingConvention env form =
 shouldEmitMonomorphicFunction :: ProgramEnv -> FunctionForm -> Bool
 shouldEmitMonomorphicFunction env form =
   not (functionFormNeedsStaticArguments env form)
+
+shouldEmitReachableBinding :: ProgramEnv -> String -> BindingInfo -> Bool
+shouldEmitReachableBinding env mainName binding =
+  biName binding == mainName || shouldEmitMonomorphicFunction env (biForm binding)
 
 functionFormNeedsStaticArguments :: ProgramEnv -> FunctionForm -> Bool
 functionFormNeedsStaticArguments env form =
@@ -822,7 +827,8 @@ initialFunctionState =
       fsNextBlock = 0,
       fsCurrentLabel = "entry",
       fsCurrentInstructions = [],
-      fsCompletedBlocks = []
+      fsCompletedBlocks = [],
+      fsStaticGlobalStack = []
     }
 
 initialFunctionEnv :: FunctionForm -> [LLVMParameter] -> ExprEnv
@@ -1106,8 +1112,9 @@ lowerGlobalCall env exprEnv context name typeArgs args =
           result <- emitAssign "call" resultTy (LLVMCall functionName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
           pure (LowerValue (ffReturnType form) resultTy result)
         else do
-          bodyEnv <- bindFunctionCallArguments env exprEnv emptyExprEnv context name form args
-          lowerExpr env bodyEnv context (ffBody form)
+          withStaticGlobalInlining context name $ do
+            bodyEnv <- bindFunctionCallArguments env exprEnv emptyExprEnv context name form args
+            lowerExpr env bodyEnv context (ffBody form)
     Nothing
       | name == runtimeAndName -> do
           unless (length args == 2) $
@@ -1143,6 +1150,16 @@ lowerRuntimeCallArguments env callEnv context name form args = do
       value <- lowerExpr env callEnv context arg
       requireLLVMType context name expectedTy value
       pure value
+
+withStaticGlobalInlining :: String -> String -> LowerM a -> LowerM a
+withStaticGlobalInlining context name action = do
+  stack <- gets fsStaticGlobalStack
+  when (name `elem` stack) $
+    liftEither (BackendLLVMUnsupportedExpression context ("recursive static global " ++ show name))
+  modify (\state -> state {fsStaticGlobalStack = name : stack})
+  result <- action
+  modify (\state -> state {fsStaticGlobalStack = stack})
+  pure result
 
 bindFunctionCallArguments :: ProgramEnv -> ExprEnv -> ExprEnv -> String -> String -> FunctionForm -> [BackendExpr] -> LowerM ExprEnv
 bindFunctionCallArguments env callEnv bodyEnv0 context name form args = do
