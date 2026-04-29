@@ -1,3 +1,19 @@
+## 2026-04-29 - Final ProgramSpec-to-LLVM parity closure
+
+- Removed the last temporary LLVM unsupported classification from the shared
+  `ProgramSpec` runtime-success parity matrix. Every
+  `programSpecToLLVMParityCases` row now expects LLVM emission and `llvm-as`
+  validation instead of accepting an unsupported backend diagnostic.
+- The LLVM lowerer now stores first-order function-valued constructor fields as
+  function pointers. Top-level function references are stored directly, closed
+  direct function expressions are lifted through private function wrappers, and
+  captured constructor-field functions still fail closed until closure
+  conversion exists.
+- Representative object-code coverage now includes the former unsupported
+  typed non-data constructor-field row, so the `llc -filetype=obj` smoke subset
+  exercises stored function-field lowering in addition to the existing first
+  order, ADT, import, and first-class-polymorphism representatives.
+
 ## 2026-04-29 - Higher-kinded and hidden-owner constructor LLVM parity
 
 - `MLF.Backend.IR` now preserves checked variable-headed type applications as
