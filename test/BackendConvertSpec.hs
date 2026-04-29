@@ -462,6 +462,46 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingType helper `shouldBe` BTForall "a" Nothing unaryIntBackendTy
     backendBindingExpr helper `shouldSatisfy` containsFreshenedTypeAbsWithOuterBound
 
+  it "leaves type abstraction bounds unchanged under shadowing type binders" $ do
+    source <- readFile "src/MLF/Backend/Convert.hs"
+
+    source `shouldSatisfy` isInfixOf "| name == old ->\n              ETyAbs name mbBound body"
+
+  it "lifts recursive lets that shadow outer term binders" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = recursiveShadowedLetElabTy,
+                    checkedBindingTerm = recursiveShadowedLetTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    helper <- requireSingleLiftedHelper backend
+    backendBindingType helper `shouldBe` unaryIntBackendTy
+    backendBindingExpr helper `shouldSatisfy` containsBackendVar (backendBindingName helper)
+
+  it "preserves lexical type binder order when lifting recursive helper captures" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = recursiveLexicalTypeOrderElabTy,
+                    checkedBindingTerm = recursiveLexicalTypeOrderTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    helper <- requireSingleLiftedHelper backend
+    backendBindingType helper `shouldBe` recursiveLexicalTypeOrderHelperBackendTy
+
   it "rejects recursive local functions that capture lexical values" $ do
     checked <- requireChecked recursiveLetCaptureProgram
 
@@ -1355,6 +1395,88 @@ recursiveTypeBoundScopeRhs =
             (Elab.EApp (Elab.EVar "loop") (Elab.EVar "n"))
         )
         (Elab.InstApp (dependentArrowElabTy (Elab.TVar "a")))
+    )
+
+recursiveShadowedLetElabTy :: Elab.ElabType
+recursiveShadowedLetElabTy =
+  intElabTy
+
+recursiveShadowedLetTerm :: Elab.ElabTerm
+recursiveShadowedLetTerm =
+  Elab.ELet
+    "f"
+    (Elab.schemeFromType unaryIntElabTy)
+    intIdentityElabTerm
+    ( Elab.ELet
+        "f"
+        (Elab.schemeFromType unaryIntElabTy)
+        ( Elab.ELam
+            "n"
+            intElabTy
+            (Elab.EApp (Elab.EVar "f") (Elab.EVar "n"))
+        )
+        (Elab.EApp (Elab.EVar "f") (Elab.ELit (LInt 0)))
+    )
+
+recursiveLexicalTypeOrderElabTy :: Elab.ElabType
+recursiveLexicalTypeOrderElabTy =
+  Elab.TForall
+    "z"
+    Nothing
+    ( Elab.TForall
+        "a"
+        Nothing
+        intElabTy
+    )
+
+recursiveLexicalTypeOrderTerm :: Elab.ElabTerm
+recursiveLexicalTypeOrderTerm =
+  Elab.ETyAbs
+    "z"
+    Nothing
+    ( Elab.ETyAbs
+        "a"
+        Nothing
+        ( Elab.ELet
+            "loop"
+            (Elab.schemeFromType unaryIntElabTy)
+            recursiveLexicalTypeOrderRhs
+            (Elab.EApp (Elab.EVar "loop") (Elab.ELit (LInt 0)))
+        )
+    )
+
+recursiveLexicalTypeOrderRhs :: Elab.ElabTerm
+recursiveLexicalTypeOrderRhs =
+  Elab.ELam
+    "n"
+    intElabTy
+    ( Elab.ELet
+        "captureA"
+        (Elab.schemeFromType intElabTy)
+        ( Elab.ETyInst
+            (Elab.ETyAbs "b" Nothing (Elab.ELit (LInt 0)))
+            (Elab.InstApp (Elab.TVar "a"))
+        )
+        ( Elab.ELet
+            "captureZ"
+            (Elab.schemeFromType intElabTy)
+            ( Elab.ETyInst
+                (Elab.ETyAbs "b" Nothing (Elab.ELit (LInt 0)))
+                (Elab.InstApp (Elab.TVar "z"))
+            )
+            (Elab.EApp (Elab.EVar "loop") (Elab.EVar "n"))
+        )
+    )
+
+recursiveLexicalTypeOrderHelperBackendTy :: BackendType
+recursiveLexicalTypeOrderHelperBackendTy =
+  BTForall
+    "z"
+    Nothing
+    ( BTForall
+        "a"
+        Nothing
+        unaryIntBackendTy
     )
 
 intIdentityElabTerm :: Elab.ElabTerm

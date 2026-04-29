@@ -202,7 +202,7 @@ liftRecursiveLetsInBinding :: ConvertContext -> ElabTerm -> Either BackendConver
 liftRecursiveLetsInBinding context term = do
   (term', state') <-
     runStateT
-      (liftRecursiveLetsInTerm context Map.empty Map.empty term)
+      (liftRecursiveLetsInTerm context Map.empty [] term)
       LiftState
         { lsNextHelperIndex = 0,
           lsLiftedRecursiveLets = [],
@@ -225,7 +225,7 @@ convertLiftedRecursiveLet context env lifted = do
 liftRecursiveLetsInTerm ::
   ConvertContext ->
   Map String ElabType ->
-  Map String (Maybe BoundType) ->
+  [(String, Maybe BoundType)] ->
   ElabTerm ->
   LiftM ElabTerm
 liftRecursiveLetsInTerm context lexicalTerms lexicalTypes term =
@@ -243,11 +243,11 @@ liftRecursiveLetsInTerm context lexicalTerms lexicalTypes term =
     ELet name scheme rhs body -> do
       let schemeTy = schemeToType scheme
           bodyTerms = Map.insert name schemeTy lexicalTerms
-          recursiveRhs = Map.notMember name lexicalTerms && termMentionsFreeVariable name rhs
+          recursiveRhs = isFunctionValueTerm rhs && termMentionsFreeVariable name rhs
       if recursiveRhs
         then do
           bindingTy <- liftEitherConversion (convertElabType schemeTy)
-          termCaptures <- capturedTermBindings lexicalTerms rhs
+          termCaptures <- capturedTermBindings (Map.delete name lexicalTerms) rhs
           typeCaptures <- capturedTypeBindings lexicalTypes schemeTy termCaptures rhs
           ensureLiftableRecursiveLet name bindingTy termCaptures rhs
           helperName <- freshLiftedRecursiveLetName context name
@@ -273,7 +273,7 @@ liftRecursiveLetsInTerm context lexicalTerms lexicalTypes term =
             <$> liftRecursiveLetsInTerm context lexicalTerms lexicalTypes rhs
             <*> liftRecursiveLetsInTerm context bodyTerms lexicalTypes body
     ETyAbs name mbBound body ->
-      ETyAbs name mbBound <$> liftRecursiveLetsInTerm context lexicalTerms (Map.insert name mbBound lexicalTypes) body
+      ETyAbs name mbBound <$> liftRecursiveLetsInTerm context lexicalTerms (insertLexicalTypeBinding name mbBound lexicalTypes) body
     ETyInst inner inst ->
       ETyInst <$> liftRecursiveLetsInTerm context lexicalTerms lexicalTypes inner <*> pure inst
     ERoll ty body ->
@@ -291,11 +291,15 @@ capturedTermBindings lexicalTerms rhs =
   where
     freeVars = freeTermVariables rhs
 
-capturedTypeBindings :: Map String (Maybe BoundType) -> ElabType -> [(String, ElabType)] -> ElabTerm -> LiftM [(String, Maybe BoundType)]
+insertLexicalTypeBinding :: String -> Maybe BoundType -> [(String, Maybe BoundType)] -> [(String, Maybe BoundType)]
+insertLexicalTypeBinding name mbBound lexicalTypes =
+  filter ((/= name) . fst) lexicalTypes ++ [(name, mbBound)]
+
+capturedTypeBindings :: [(String, Maybe BoundType)] -> ElabType -> [(String, ElabType)] -> ElabTerm -> LiftM [(String, Maybe BoundType)]
 capturedTypeBindings lexicalTypes schemeTy termCaptures rhs =
   pure
     [ (name, mbBound)
-    | (name, mbBound) <- Map.toAscList lexicalTypes,
+    | (name, mbBound) <- lexicalTypes,
       Set.member name freeVars
     ]
   where
@@ -759,7 +763,7 @@ renameTermTypeVariable old new =
           ELet name (renameElabSchemeTypeVariable old new scheme) (go rhs) (go body)
         ETyAbs name mbBound body
           | name == old ->
-              ETyAbs name (fmap (renameElabTypeVariable old new) mbBound) body
+              ETyAbs name mbBound body
           | otherwise ->
               ETyAbs name (fmap (renameElabTypeVariable old new) mbBound) (go body)
         ETyInst inner inst ->
