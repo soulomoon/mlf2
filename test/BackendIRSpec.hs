@@ -305,6 +305,9 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithMainExpr mismatchedStructuralBoxConstructExpr)
       `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy mismatchedStructuralBoxTy)
 
+    validateBackendProgram mismatchedStructuralBoxCaseProgram
+      `shouldBe` Left (BackendCaseConstructorScrutineeMismatch "Box" mismatchedStructuralBoxTy boxTy)
+
   it "preserves nominal arguments when structural recursive payloads omit them" $ do
     alphaEqBackendType
       (BTCon (BaseTy "Core.Phantom") (intTy :| []))
@@ -727,6 +730,18 @@ mismatchedStructuralBoxTy =
 mismatchedStructuralBoxConstructExpr :: BackendExpr
 mismatchedStructuralBoxConstructExpr =
   BackendConstruct mismatchedStructuralBoxTy "Box" [intLit 1]
+
+mismatchedStructuralBoxCaseProgram :: BackendProgram
+mismatchedStructuralBoxCaseProgram =
+  programWithDataAndBindings
+    [boxData]
+    [ binding "badBox" mismatchedStructuralBoxTy (BackendVar mismatchedStructuralBoxTy "badBox"),
+      mainBinding
+        ( boxCaseExprWith
+            (BackendVar mismatchedStructuralBoxTy "badBox")
+            (BackendAlternative (BackendConstructorPattern "Box" ["n"]) (BackendVar intTy "n") :| [])
+        )
+    ]
 
 justFBoxBoolExpr :: BackendExpr
 justFBoxBoolExpr =

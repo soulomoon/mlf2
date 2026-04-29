@@ -1028,11 +1028,18 @@ validateBackendConstructorUse (Just context0) name resultTy args =
         substitution
         resultTy
         (BackendConstructorResultMismatch name (backendConstructorResult constructor) resultTy)
-      _ <-
+      finalSubstitution <-
         foldM
           (validateBackendConstructorArgument (bvcTypeBounds context0) (Just (bvcData context0)) dataParameters parameters name)
           substitution
           (zip [0 ..] (zip fields args))
+      validateBackendConstructorResultSubstitution
+        (bvcTypeBounds context0)
+        (Just (bvcData context0))
+        constructorInfo
+        finalSubstitution
+        resultTy
+        (BackendConstructorResultMismatch name (backendConstructorResult constructor) resultTy)
       pure ()
 
 validateBackendConstructorArgument ::
@@ -1317,6 +1324,25 @@ validateBackendConstructorStructuralPayload ::
 validateBackendConstructorStructuralPayload typeBounds constructorInfo substitution ty mismatchError =
   unless (backendConstructorStructuralPayloadMatches typeBounds constructorInfo substitution ty) $
     Left mismatchError
+
+validateBackendConstructorResultSubstitution ::
+  Map.Map String (Maybe BackendType) ->
+  Maybe (Map.Map String BackendData) ->
+  BackendConstructorInfo ->
+  Map.Map String BackendType ->
+  BackendType ->
+  BackendValidationError ->
+  Either BackendValidationError ()
+validateBackendConstructorResultSubstitution typeBounds mbDataDecls constructorInfo substitution resultTy mismatchError =
+  unless (backendStructuralDataBoundaryMatches typeBounds mbDataDecls substitutedResultTy resultTy) $
+    Left mismatchError
+  where
+    constructor =
+      bciConstructor constructorInfo
+    completedSubstitution =
+      completeBackendParameterSubstitution (constructorTypeParameterBounds constructorInfo) substitution
+    substitutedResultTy =
+      substituteBackendTypes completedSubstitution (backendConstructorResult constructor)
 
 backendConstructorStructuralPayloadMatches ::
   Map.Map String (Maybe BackendType) ->
