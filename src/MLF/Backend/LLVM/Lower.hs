@@ -137,6 +137,7 @@ lowerBackendProgram program = do
   reachable <- reachableBindings base (backendProgramMain program)
   specializations <- collectRequiredSpecializations base reachable
   let evidenceWrappers = collectEvidenceWrappers base reachable specializations
+      referencedFunctionNames = collectReferencedFunctionNames base reachable specializations evidenceWrappers
       stringGlobals = assignStringGlobals (collectProgramStrings reachable specializations)
       env =
         ProgramEnv
@@ -148,8 +149,8 @@ lowerBackendProgram program = do
   functions <-
     concat
       <$> sequence
-        [ traverse (lowerMonomorphicBinding env) (filter shouldLowerReachableBinding reachable),
-          traverse (lowerSpecialization env) (filter shouldLowerSpecialization specializations),
+        [ traverse (lowerMonomorphicBinding env) (filter (shouldLowerReachableBinding referencedFunctionNames) reachable),
+          traverse (lowerSpecialization env) (filter (shouldLowerSpecialization referencedFunctionNames) specializations),
           traverse (lowerEvidenceWrapper env) evidenceWrappers
         ]
   mainBinding <- requireBinding base (backendProgramMain program)
@@ -163,16 +164,22 @@ lowerBackendProgram program = do
         llvmModuleFunctions = functions
       }
 
-shouldLowerReachableBinding :: BindingInfo -> Bool
-shouldLowerReachableBinding binding =
+shouldLowerReachableBinding :: Set String -> BindingInfo -> Bool
+shouldLowerReachableBinding referencedFunctionNames binding =
   null (ffTypeBinders form)
-    && (biExportedAsMain binding || canEmitFunctionForm form)
+    && ( biExportedAsMain binding
+           || canEmitFunctionForm form
+           || (Set.member (biName binding) referencedFunctionNames && canEmitReferencedFunctionForm form)
+       )
   where
     form = biForm binding
 
-shouldLowerSpecialization :: Specialization -> Bool
-shouldLowerSpecialization =
-  canEmitFunctionForm . spForm
+shouldLowerSpecialization :: Set String -> Specialization -> Bool
+shouldLowerSpecialization referencedFunctionNames specialization =
+  canEmitFunctionForm form
+    || (Set.member (spFunctionName specialization) referencedFunctionNames && canEmitReferencedFunctionForm form)
+  where
+    form = spForm specialization
 
 canEmitFunctionForm :: FunctionForm -> Bool
 canEmitFunctionForm form =
@@ -181,7 +188,11 @@ canEmitFunctionForm form =
 canEmitInlineOnlyFunctionParameters :: FunctionForm -> Bool
 canEmitInlineOnlyFunctionParameters form =
   not (containsInlineOnlyEvidenceParameterCall form)
-    && all (uncurry canEmitFunctionParameter) (ffParams form)
+    && canEmitReferencedFunctionForm form
+
+canEmitReferencedFunctionForm :: FunctionForm -> Bool
+canEmitReferencedFunctionForm form =
+  all (uncurry canEmitFunctionParameter) (ffParams form)
 
 canEmitFunctionParameter :: String -> BackendType -> Bool
 canEmitFunctionParameter paramName paramTy
@@ -587,6 +598,105 @@ collectEvidenceWrappers base reachable specializations =
           ewExpectedType = expected,
           ewExpr = expr
         }
+
+collectReferencedFunctionNames :: ProgramBase -> [BindingInfo] -> [Specialization] -> [EvidenceWrapper] -> Set String
+collectReferencedFunctionNames base reachable specializations evidenceWrappers =
+  Set.unions
+    ( map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . biForm) reachable
+        ++ map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . spForm) specializations
+        ++ map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . evidenceWrapperForm) evidenceWrappers
+    )
+
+collectReferencedFunctionNamesInForm :: ProgramBase -> Map String BackendType -> Set String -> FunctionForm -> Set String
+collectReferencedFunctionNamesInForm base substitution bound form =
+  collectReferencedFunctionNamesInExpr
+    base
+    substitution
+    (Set.union (Set.fromList (map fst (ffParams form))) bound)
+    (ffBody form)
+
+collectReferencedFunctionNamesInExpr :: ProgramBase -> Map String BackendType -> Set String -> BackendExpr -> Set String
+collectReferencedFunctionNamesInExpr base substitution bound expr =
+  referencedHere `Set.union` childReferences
+  where
+    referencedHere =
+      case collectCall expr of
+        Just (callee, typeArgs, args) ->
+          let typeArgs' = map (substituteBackendTypes substitution) typeArgs
+              args' = map (substituteExprTypes substitution) args
+           in case instantiateFunctionFormWithTypeArgs "referenced function argument" (callableForm callee) typeArgs' args' of
+                Right (_, form) ->
+                  Set.fromList
+                    [ functionName
+                    | ((_, paramTy), arg) <- zip (ffParams form) args',
+                      isFunctionLikeBackendType paramTy,
+                      Just functionName <- [referencedFunctionArgumentName arg]
+                    ]
+                Left _ -> Set.empty
+        Nothing -> Set.empty
+
+    callableForm callee =
+      case callee of
+        BackendVar calleeTy _ -> functionFormFromType calleeTy
+        _ -> functionFormFromExpr callee
+
+    referencedFunctionArgumentName arg =
+      case collectTyApps arg of
+        (BackendVar _ name, typeArgs)
+          | Set.notMember name bound,
+            Just binding <- Map.lookup name (pbBindings base) ->
+              case instantiateFunctionFormWithTypeArgs ("referenced function argument " ++ name) (biForm binding) typeArgs [] of
+                Right (resolvedTypeArgs, _)
+                  | null (ffTypeBinders (biForm binding)) -> Just (biName binding)
+                  | otherwise -> Just (specializedFunctionName (SpecRequest name resolvedTypeArgs))
+                Left _ -> Nothing
+        _ -> Nothing
+
+    childReferences =
+      case expr of
+        BackendVar {} -> Set.empty
+        BackendLit {} -> Set.empty
+        BackendLam _ name _ body ->
+          collectReferencedFunctionNamesInExpr base substitution (Set.insert name bound) body
+        BackendApp _ fun arg ->
+          collectReferencedFunctionNamesInExpr base substitution bound fun
+            `Set.union` collectReferencedFunctionNamesInExpr base substitution bound arg
+        BackendLet _ name bindingTy rhs body ->
+          collectLetRhsReferences bindingTy rhs
+            `Set.union` collectReferencedFunctionNamesInExpr base substitution (Set.insert name bound) body
+        BackendTyAbs _ name _ body ->
+          collectReferencedFunctionNamesInExpr base (Map.delete name substitution) bound body
+        BackendTyApp _ fun _ ->
+          collectReferencedFunctionNamesInExpr base substitution bound fun
+        BackendConstruct _ _ args ->
+          Set.unions (map (collectReferencedFunctionNamesInExpr base substitution bound) args)
+        BackendCase _ scrutinee alternatives ->
+          collectReferencedFunctionNamesInExpr base substitution bound scrutinee
+            `Set.union` Set.unions (map collectAlternativeReferences (NE.toList alternatives))
+        BackendRoll _ payload ->
+          collectReferencedFunctionNamesInExpr base substitution bound payload
+        BackendUnroll _ payload ->
+          collectReferencedFunctionNamesInExpr base substitution bound payload
+
+    collectLetRhsReferences bindingTy rhs =
+      case functionFormFromExpected bindingTy rhs of
+        form
+          | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+              collectReferencedFunctionNamesInForm base substitution bound form
+        _ ->
+          collectReferencedFunctionNamesInExpr base substitution bound rhs
+
+    collectAlternativeReferences alternative =
+      collectReferencedFunctionNamesInExpr
+        base
+        substitution
+        (Set.union (patternBinders (backendAltPattern alternative)) bound)
+        (backendAltBody alternative)
+
+    patternBinders =
+      \case
+        BackendDefaultPattern -> Set.empty
+        BackendConstructorPattern _ binders -> Set.fromList binders
 
 collectEvidenceWrappersInForm :: ProgramBase -> Map String BackendType -> Set String -> FunctionForm -> [(BackendType, BackendExpr)]
 collectEvidenceWrappersInForm base substitution bound form =
