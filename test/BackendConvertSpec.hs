@@ -259,6 +259,26 @@ spec = describe "MLF.Backend.Convert" $ do
 
     validateBackendProgram backend `shouldBe` Right ()
 
+  it "converts hidden Eq evidence for constrained helpers" $ do
+    checked <- requireChecked hiddenEqEvidenceProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+  it "converts constrained parameterized Eq evidence without ambiguous ADT recovery" $ do
+    checked <- requireChecked parameterizedEqEvidenceProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    map backendBindingName (backendBindings backend) `shouldSatisfy` any (isInfixOf "Eq__Option")
+
+  it "lifts recursive parameterized deriving Eq helpers with captured evidence" $ do
+    checked <- requireChecked recursiveListDerivingEqProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    map backendBindingName (backendBindings backend) `shouldSatisfy` any (isInfixOf "$letrec$")
+
   it "ignores stale constructor head type instantiations" $ do
     checked0 <- requireChecked constructorForallApplicationProgram
     let checked =
@@ -474,6 +494,80 @@ parameterizedConstructorProgram =
       "    | Some : a -> Option a;",
       "",
       "  def main : Option Int = Some 1;",
+      "}"
+    ]
+
+hiddenEqEvidenceProgram :: String
+hiddenEqEvidenceProgram =
+  unlines
+    [ "module Main export (Eq, Nat(..), eq, same, main) {",
+      "  class Eq a {",
+      "    eq : a -> a -> Bool;",
+      "  }",
+      "",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat",
+      "    deriving Eq;",
+      "",
+      "  def same : Eq a => a -> a -> Bool = \\x \\y eq x y;",
+      "  def main : Bool = same Zero Zero;",
+      "}"
+    ]
+
+parameterizedEqEvidenceProgram :: String
+parameterizedEqEvidenceProgram =
+  unlines
+    [ "module Main export (Eq, Nat(..), Option(..), eq, main) {",
+      "  class Eq a {",
+      "    eq : a -> a -> Bool;",
+      "  }",
+      "",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat",
+      "    deriving Eq;",
+      "",
+      "  data Option a =",
+      "      None : Option a",
+      "    | Some : a -> Option a;",
+      "",
+      "  instance Eq a => Eq (Option a) {",
+      "    eq = \\left \\right case left of {",
+      "      None -> case right of {",
+      "        None -> true;",
+      "        Some _ -> false",
+      "      };",
+      "      Some l -> case right of {",
+      "        None -> false;",
+      "        Some r -> eq l r",
+      "      }",
+      "    };",
+      "  }",
+      "",
+      "  def main : Bool = eq (Some (Some Zero)) (Some (Some Zero));",
+      "}"
+    ]
+
+recursiveListDerivingEqProgram :: String
+recursiveListDerivingEqProgram =
+  unlines
+    [ "module Main export (Eq, Nat(..), List(..), eq, main) {",
+      "  class Eq a {",
+      "    eq : a -> a -> Bool;",
+      "  }",
+      "",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat",
+      "    deriving Eq;",
+      "",
+      "  data List a =",
+      "      Nil : List a",
+      "    | Cons : a -> List a -> List a",
+      "    deriving Eq;",
+      "",
+      "  def main : Bool = eq (Cons Zero Nil) (Cons Zero Nil);",
       "}"
     ]
 

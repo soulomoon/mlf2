@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Extended LLVM backend support for resolved typeclass evidence and derived
+  `Eq`: constrained helper aliases, method-level evidence constraints,
+  parameterized instances, recursive `List` deriving, recursive ADT deriving
+  fixtures, and mixed qualified/imported instance evidence now lower through
+  first-order function references or generated evidence wrappers.
 - Extended the shared `ProgramSpec`-to-LLVM parity matrix from first-order
   coverage to the canonical interpreter-success surface. The backend LLVM spec
   now emits supported cases through the file backend path, validates generated

@@ -1,3 +1,16 @@
+## 2026-04-28 - Typeclass evidence reaches LLVM backend
+
+- Function-valued Eq evidence now lowers as first-order LLVM function
+  references or private wrappers instead of escaping as unsupported arrow
+  values. Hidden class evidence parameters lower to opaque pointers and calls
+  through evidence use indirect calls.
+- Backend conversion preserves source data identity through evidence, case, and
+  derived `Eq` paths so parameterized and qualified ADTs do not recover the
+  wrong same-shaped data declaration during LLVM conversion.
+- Recursive derived `Eq` helpers that capture only hidden evidence are lifted to
+  backend helper bindings with explicit evidence/type parameters; ordinary
+  lexical captures remain unsupported.
+
 ## 2026-04-28 - Shared Program-to-LLVM parity matrix
 
 - Extracted the `.mlfp` interpreter-success surface from `ProgramSpec` into

@@ -115,6 +115,14 @@ renderLLVMExpression resultTy expression =
         ++ "("
         ++ intercalate ", " (map renderLLVMArgument args)
         ++ ")"
+    LLVMCallOperand callee args ->
+      "call "
+        ++ renderLLVMType resultTy
+        ++ " "
+        ++ renderLLVMOperand callee
+        ++ "("
+        ++ intercalate ", " (map renderLLVMArgument args)
+        ++ ")"
     LLVMGetElementPtr elementTy base indexes ->
       "getelementptr "
         ++ renderLLVMType elementTy
