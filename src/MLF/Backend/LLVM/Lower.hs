@@ -306,6 +306,19 @@ functionFormFromExpected expectedTy expr =
             Just aliasForm -> aliasForm
             Nothing -> form
 
+substituteFunctionFormTypes :: Map String BackendType -> FunctionForm -> FunctionForm
+substituteFunctionFormTypes substitution0 form =
+  FunctionForm
+    { ffTypeBinders = [(name, fmap substituteTy mbBound) | (name, mbBound) <- ffTypeBinders form],
+      ffParams = [(name, substituteTy ty) | (name, ty) <- ffParams form],
+      ffBody = substituteExprTypes substitution (ffBody form),
+      ffReturnType = substituteTy (ffReturnType form)
+    }
+  where
+    binderNames = Set.fromList (map fst (ffTypeBinders form))
+    substitution = Map.withoutKeys substitution0 binderNames
+    substituteTy = substituteBackendTypes substitution
+
 completeAliasFunctionForm :: FunctionForm -> Maybe FunctionForm
 completeAliasFunctionForm form
   | not (isAliasExpr (ffBody form)) = Nothing
@@ -609,16 +622,23 @@ collectReferencedFunctionNames base reachable specializations evidenceWrappers =
         ++ map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . evidenceWrapperForm) evidenceWrappers
     )
 
+type LocalFunctionForms = Map String FunctionForm
+
 collectReferencedFunctionNamesInForm :: ProgramBase -> Map String BackendType -> Set String -> FunctionForm -> Set String
 collectReferencedFunctionNamesInForm base substitution bound form =
+  collectReferencedFunctionNamesInFormWithLocals base substitution Map.empty bound form
+
+collectReferencedFunctionNamesInFormWithLocals :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> FunctionForm -> Set String
+collectReferencedFunctionNamesInFormWithLocals base substitution localForms bound form =
   collectReferencedFunctionNamesInExpr
     base
     substitution
+    localForms
     (Set.union (Set.fromList (map fst (ffParams form))) bound)
     (ffBody form)
 
-collectReferencedFunctionNamesInExpr :: ProgramBase -> Map String BackendType -> Set String -> BackendExpr -> Set String
-collectReferencedFunctionNamesInExpr base substitution bound expr =
+collectReferencedFunctionNamesInExpr :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> BackendExpr -> Set String
+collectReferencedFunctionNamesInExpr base substitution localForms bound expr =
   referencedHere `Set.union` childReferences
   where
     referencedHere =
@@ -628,70 +648,120 @@ collectReferencedFunctionNamesInExpr base substitution bound expr =
               args' = map (substituteExprTypes substitution) args
            in case instantiateFunctionFormWithTypeArgs "referenced function argument" (callableForm callee) typeArgs' args' of
                 Right (_, form) ->
-                  Set.fromList
-                    [ functionName
-                    | ((_, paramTy), arg) <- zip (ffParams form) args',
-                      isFunctionLikeBackendType paramTy,
-                      Just functionName <- [referencedFunctionArgumentName arg]
-                    ]
+                  localCallReferences callee typeArgs' args'
+                    `Set.union` Set.fromList
+                      [ functionName
+                      | ((_, paramTy), arg) <- zip (ffParams form) args',
+                        isFunctionLikeBackendType paramTy,
+                        Just functionName <- [referencedFunctionArgumentName arg]
+                      ]
                 Left _ -> Set.empty
-        Nothing -> Set.empty
+        Nothing ->
+          localTypeApplicationReferences
 
     callableForm callee =
       case callee of
-        BackendVar calleeTy _ -> functionFormFromType calleeTy
+        BackendVar calleeTy name ->
+          case Map.lookup name localForms of
+            Just form -> form
+            Nothing -> functionFormFromType calleeTy
         _ -> functionFormFromExpr callee
 
     referencedFunctionArgumentName arg =
       case collectTyApps arg of
-        (BackendVar _ name, typeArgs)
-          | Set.notMember name bound,
-            Just binding <- Map.lookup name (pbBindings base) ->
-              case instantiateFunctionFormWithTypeArgs ("referenced function argument " ++ name) (biForm binding) typeArgs [] of
-                Right (resolvedTypeArgs, _)
-                  | null (ffTypeBinders (biForm binding)) -> Just (biName binding)
-                  | otherwise -> Just (specializedFunctionName (SpecRequest name resolvedTypeArgs))
-                Left _ -> Nothing
+        (BackendVar _ name, typeArgs) ->
+          referencedFunctionNameByName Set.empty name typeArgs
         _ -> Nothing
+
+    referencedFunctionNameByName seen name typeArgs
+      | Set.member name seen = Nothing
+      | Just form <- Map.lookup name localForms =
+          case instantiateFunctionFormWithTypeArgs ("referenced local function argument " ++ name) form typeArgs [] of
+            Right (_, instantiated) ->
+              case etaAliasTarget instantiated of
+                Just (targetName, targetTypeArgs) ->
+                  referencedFunctionNameByName (Set.insert name seen) targetName targetTypeArgs
+                Nothing -> Nothing
+            Left _ -> Nothing
+      | Set.notMember name bound,
+        Just binding <- Map.lookup name (pbBindings base) =
+          case instantiateFunctionFormWithTypeArgs ("referenced function argument " ++ name) (biForm binding) typeArgs [] of
+            Right (resolvedTypeArgs, _)
+              | null (ffTypeBinders (biForm binding)) -> Just (biName binding)
+              | otherwise -> Just (specializedFunctionName (SpecRequest name resolvedTypeArgs))
+            Left _ -> Nothing
+      | otherwise = Nothing
+
+    localCallReferences callee typeArgs args =
+      case callee of
+        BackendVar _ name
+          | Just form <- Map.lookup name localForms ->
+              collectInstantiatedLocalReferences name form typeArgs args
+        _ -> Set.empty
+
+    localTypeApplicationReferences =
+      case collectTyApps expr of
+        (BackendVar _ name, typeArgs)
+          | Just form <- Map.lookup name localForms ->
+              collectInstantiatedLocalReferences name form (map (substituteBackendTypes substitution) typeArgs) []
+        _ -> Set.empty
+
+    collectInstantiatedLocalReferences name form typeArgs args =
+      case instantiateFunctionFormWithTypeArgs ("referenced local function " ++ name) form typeArgs args of
+        Right (_, instantiated) ->
+          collectReferencedFunctionNamesInFormWithLocals base Map.empty localForms bound instantiated
+        Left _ -> Set.empty
 
     childReferences =
       case expr of
         BackendVar {} -> Set.empty
         BackendLit {} -> Set.empty
         BackendLam _ name _ body ->
-          collectReferencedFunctionNamesInExpr base substitution (Set.insert name bound) body
+          collectReferencedFunctionNamesInExpr base substitution localForms (Set.insert name bound) body
         BackendApp _ fun arg ->
-          collectReferencedFunctionNamesInExpr base substitution bound fun
-            `Set.union` collectReferencedFunctionNamesInExpr base substitution bound arg
+          collectReferencedFunctionNamesInExpr base substitution localForms bound fun
+            `Set.union` collectReferencedFunctionNamesInExpr base substitution localForms bound arg
         BackendLet _ name bindingTy rhs body ->
           collectLetRhsReferences bindingTy rhs
-            `Set.union` collectReferencedFunctionNamesInExpr base substitution (Set.insert name bound) body
+            `Set.union` collectReferencedFunctionNamesInExpr base substitution (collectLetLocalForms name bindingTy rhs) (Set.insert name bound) body
         BackendTyAbs _ name _ body ->
-          collectReferencedFunctionNamesInExpr base (Map.delete name substitution) bound body
+          collectReferencedFunctionNamesInExpr base (Map.delete name substitution) localForms bound body
         BackendTyApp _ fun _ ->
-          collectReferencedFunctionNamesInExpr base substitution bound fun
+          collectReferencedFunctionNamesInExpr base substitution localForms bound fun
         BackendConstruct _ _ args ->
-          Set.unions (map (collectReferencedFunctionNamesInExpr base substitution bound) args)
+          Set.unions (map (collectReferencedFunctionNamesInExpr base substitution localForms bound) args)
         BackendCase _ scrutinee alternatives ->
-          collectReferencedFunctionNamesInExpr base substitution bound scrutinee
+          collectReferencedFunctionNamesInExpr base substitution localForms bound scrutinee
             `Set.union` Set.unions (map collectAlternativeReferences (NE.toList alternatives))
         BackendRoll _ payload ->
-          collectReferencedFunctionNamesInExpr base substitution bound payload
+          collectReferencedFunctionNamesInExpr base substitution localForms bound payload
         BackendUnroll _ payload ->
-          collectReferencedFunctionNamesInExpr base substitution bound payload
+          collectReferencedFunctionNamesInExpr base substitution localForms bound payload
 
     collectLetRhsReferences bindingTy rhs =
       case functionFormFromExpected bindingTy rhs of
+        form0
+          | not (null (ffTypeBinders form0)) || not (null (ffParams form0)) ->
+              let form = substituteFunctionFormTypes substitution form0
+               in if null (ffTypeBinders form)
+                    then collectReferencedFunctionNamesInFormWithLocals base Map.empty localForms bound form
+                    else Set.empty
+        _ ->
+          collectReferencedFunctionNamesInExpr base substitution localForms bound rhs
+
+    collectLetLocalForms name bindingTy rhs =
+      case functionFormFromExpected bindingTy rhs of
         form
           | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
-              collectReferencedFunctionNamesInForm base substitution bound form
+              Map.insert name (substituteFunctionFormTypes substitution form) localForms
         _ ->
-          collectReferencedFunctionNamesInExpr base substitution bound rhs
+          Map.delete name localForms
 
     collectAlternativeReferences alternative =
       collectReferencedFunctionNamesInExpr
         base
         substitution
+        localForms
         (Set.union (patternBinders (backendAltPattern alternative)) bound)
         (backendAltBody alternative)
 
@@ -702,72 +772,109 @@ collectReferencedFunctionNamesInExpr base substitution bound expr =
 
 collectEvidenceWrappersInForm :: ProgramBase -> Map String BackendType -> Set String -> FunctionForm -> [(BackendType, BackendExpr)]
 collectEvidenceWrappersInForm base substitution bound form =
+  collectEvidenceWrappersInFormWithLocals base substitution Map.empty bound form
+
+collectEvidenceWrappersInFormWithLocals :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> FunctionForm -> [(BackendType, BackendExpr)]
+collectEvidenceWrappersInFormWithLocals base substitution localForms bound form =
   collectEvidenceWrappersInExpr
     base
     substitution
+    localForms
     (Set.union (Set.fromList (map fst (ffParams form))) bound)
     (ffBody form)
 
-collectEvidenceWrappersInExpr :: ProgramBase -> Map String BackendType -> Set String -> BackendExpr -> [(BackendType, BackendExpr)]
-collectEvidenceWrappersInExpr base substitution bound expr =
+collectEvidenceWrappersInExpr :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> BackendExpr -> [(BackendType, BackendExpr)]
+collectEvidenceWrappersInExpr base substitution localForms bound expr =
   wrappersHere ++ childWrappers
   where
     wrappersHere =
       case collectCall expr of
         Just (BackendVar _ name, typeArgs, args)
+          | Just form <- Map.lookup name localForms ->
+              let typeArgs' = map (substituteBackendTypes substitution) typeArgs
+                  args' = map (substituteExprTypes substitution) args
+               in collectInstantiatedLocalWrappers name form typeArgs' args'
           | Set.notMember name bound,
             Just binding <- Map.lookup name (pbBindings base) ->
               let typeArgs' = map (substituteBackendTypes substitution) typeArgs
                   args' = map (substituteExprTypes substitution) args
                in case instantiateFunctionFormWithTypeArgs ("evidence wrapper request " ++ name) (biForm binding) typeArgs' args' of
-                    Right (_, form) ->
-                      [ (paramTy, arg)
-                      | ((paramName, paramTy), arg) <- zip (ffParams form) args',
-                        isEvidenceArgument False paramName paramTy,
-                        not (isSimpleFunctionReference arg),
-                        evidenceWrapperArgumentClosed bound arg
-                      ]
+                    Right (_, form) -> evidenceArgumentWrappers form args'
                     Left _ -> []
-        _ -> []
+        _ -> localTypeApplicationWrappers
 
     childWrappers =
       case expr of
         BackendVar {} -> []
         BackendLit {} -> []
         BackendLam _ name _ body ->
-          collectEvidenceWrappersInExpr base substitution (Set.insert name bound) body
+          collectEvidenceWrappersInExpr base substitution localForms (Set.insert name bound) body
         BackendApp _ fun arg ->
-          collectEvidenceWrappersInExpr base substitution bound fun
-            ++ collectEvidenceWrappersInExpr base substitution bound arg
+          collectEvidenceWrappersInExpr base substitution localForms bound fun
+            ++ collectEvidenceWrappersInExpr base substitution localForms bound arg
         BackendLet _ name bindingTy rhs body ->
           collectLetRhsWrappers bindingTy rhs
-            ++ collectEvidenceWrappersInExpr base substitution (Set.insert name bound) body
+            ++ collectEvidenceWrappersInExpr base substitution (collectLetLocalForms name bindingTy rhs) (Set.insert name bound) body
         BackendTyAbs _ name _ body ->
-          collectEvidenceWrappersInExpr base (Map.delete name substitution) bound body
+          collectEvidenceWrappersInExpr base (Map.delete name substitution) localForms bound body
         BackendTyApp _ fun _ ->
-          collectEvidenceWrappersInExpr base substitution bound fun
+          collectEvidenceWrappersInExpr base substitution localForms bound fun
         BackendConstruct _ _ args ->
-          concatMap (collectEvidenceWrappersInExpr base substitution bound) args
+          concatMap (collectEvidenceWrappersInExpr base substitution localForms bound) args
         BackendCase _ scrutinee alternatives ->
-          collectEvidenceWrappersInExpr base substitution bound scrutinee
+          collectEvidenceWrappersInExpr base substitution localForms bound scrutinee
             ++ concatMap collectAlternativeWrappers (NE.toList alternatives)
         BackendRoll _ payload ->
-          collectEvidenceWrappersInExpr base substitution bound payload
+          collectEvidenceWrappersInExpr base substitution localForms bound payload
         BackendUnroll _ payload ->
-          collectEvidenceWrappersInExpr base substitution bound payload
+          collectEvidenceWrappersInExpr base substitution localForms bound payload
+
+    evidenceArgumentWrappers form args =
+      [ (paramTy, arg)
+      | ((paramName, paramTy), arg) <- zip (ffParams form) args,
+        isEvidenceArgument False paramName paramTy,
+        not (isSimpleFunctionReference arg),
+        evidenceWrapperArgumentClosed bound arg
+      ]
+
+    localTypeApplicationWrappers =
+      case collectTyApps expr of
+        (BackendVar _ name, typeArgs)
+          | Just form <- Map.lookup name localForms ->
+              collectInstantiatedLocalWrappers name form (map (substituteBackendTypes substitution) typeArgs) []
+        _ -> []
+
+    collectInstantiatedLocalWrappers name form typeArgs args =
+      case instantiateFunctionFormWithTypeArgs ("evidence wrapper request " ++ name) form typeArgs args of
+        Right (_, instantiated) ->
+          evidenceArgumentWrappers instantiated args
+            ++ collectEvidenceWrappersInFormWithLocals base Map.empty localForms bound instantiated
+        Left _ -> []
 
     collectLetRhsWrappers bindingTy rhs =
       case functionFormFromExpected bindingTy rhs of
+        form0
+          | not (null (ffTypeBinders form0)) || not (null (ffParams form0)) ->
+              let form = substituteFunctionFormTypes substitution form0
+               in if null (ffTypeBinders form)
+                    then collectEvidenceWrappersInFormWithLocals base Map.empty localForms bound form
+                    else []
+        _ ->
+          collectEvidenceWrappersInExpr base substitution localForms bound rhs
+
+    collectLetLocalForms name bindingTy rhs =
+      case functionFormFromExpected bindingTy rhs of
         form
           | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
-              collectEvidenceWrappersInForm base substitution bound form
+              Map.insert name (substituteFunctionFormTypes substitution form) localForms
         _ ->
-          collectEvidenceWrappersInExpr base substitution bound rhs
+          Map.delete name localForms
 
     collectAlternativeWrappers alternative =
       collectEvidenceWrappersInExpr
         base
         substitution
+        localForms
         (Set.union (patternBinders (backendAltPattern alternative)) bound)
         (backendAltBody alternative)
 
