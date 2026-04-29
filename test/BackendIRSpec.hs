@@ -64,6 +64,38 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendExpr (BackendApp (BTVar "a") intIdentityExpr (intLit 1))
       `shouldBe` Left (BackendApplicationResultMismatch (BTVar "a") intTy)
 
+    let listIntTy = listTy intTy
+        listFreeTy = listTy (BTVar "a")
+        arrowIntBoolTy = BTArrow intTy boolTy
+        arrowFreeBoolTy = BTArrow (BTVar "a") boolTy
+        varAppIntTy = BTVarApp "f" (intTy :| [])
+        varAppFreeTy = BTVarApp "f" (BTVar "a" :| [])
+        forallIntTy = BTForall "x" Nothing (BTArrow intTy (BTVar "x"))
+        forallFreeTy = BTForall "y" Nothing (BTArrow (BTVar "a") (BTVar "y"))
+        structuralBoxIntTy = BTMu "$Box_self" (singleFieldStructuralBody intTy)
+        structuralBoxFreeTy = BTMu "$Box_self" (singleFieldStructuralBody (BTVar "a"))
+
+    validateBackendExpr (BackendApp intTy (BackendVar (BTArrow listIntTy intTy) "f") (BackendVar listFreeTy "xs"))
+      `shouldBe` Left (BackendApplicationArgumentMismatch listIntTy listFreeTy)
+
+    validateBackendExpr (BackendApp listFreeTy (BackendVar (BTArrow intTy listIntTy) "f") (intLit 1))
+      `shouldBe` Left (BackendApplicationResultMismatch listFreeTy listIntTy)
+
+    validateBackendExpr (BackendApp boolTy (BackendVar (BTArrow arrowIntBoolTy boolTy) "f") (BackendVar arrowFreeBoolTy "g"))
+      `shouldBe` Left (BackendApplicationArgumentMismatch arrowIntBoolTy arrowFreeBoolTy)
+
+    validateBackendExpr (BackendApp boolTy (BackendVar (BTArrow varAppIntTy boolTy) "f") (BackendVar varAppFreeTy "x"))
+      `shouldBe` Left (BackendApplicationArgumentMismatch varAppIntTy varAppFreeTy)
+
+    validateBackendExpr (BackendApp boolTy (BackendVar (BTArrow forallIntTy boolTy) "f") (BackendVar forallFreeTy "poly"))
+      `shouldBe` Left (BackendApplicationArgumentMismatch forallIntTy forallFreeTy)
+
+    validateBackendExpr (BackendApp listIntTy (BackendVar (BTArrow intTy listFreeTy) "f") (intLit 1))
+      `shouldBe` Left (BackendApplicationResultMismatch listIntTy listFreeTy)
+
+    validateBackendExpr (BackendApp boolTy (BackendVar (BTArrow structuralBoxFreeTy boolTy) "f") (BackendVar structuralBoxIntTy "box"))
+      `shouldBe` Right ()
+
     validateBackendExpr (BackendLam boolTy "x" intTy (BackendVar intTy "x"))
       `shouldBe` Left (BackendLambdaTypeMismatch boolTy idTy)
 

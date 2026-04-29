@@ -248,6 +248,11 @@ data BackendConstructorInfo = BackendConstructorInfo
     bciConstructor :: BackendConstructor
   }
 
+data TypeVariableInstantiation
+  = RejectFreeTypeVariableInstantiation
+  | AllowContextFreeTypeVariableInstantiation
+  deriving (Eq, Show)
+
 type BackendParameterBounds = Map.Map String (Maybe BackendType)
 
 literalBackendType :: Lit -> BackendType
@@ -686,47 +691,27 @@ validateBackendVariable (Just context0) name actualTy =
 
 backendApplicationTypeMatches :: Maybe BackendValidationContext -> BackendType -> BackendType -> Bool
 backendApplicationTypeMatches mbContext expectedTy actualTy =
-  not (topLevelFreeTypeVariableWildcard expectedTy actualTy)
-    && backendTypeMatchesWith True typeBounds dataDecls expectedTy actualTy
+  backendTypeMatchesWith AllowContextFreeTypeVariableInstantiation typeBounds dataDecls expectedTy actualTy
   where
     typeBounds = maybe Map.empty bvcTypeBounds mbContext
     dataDecls = bvcData <$> mbContext
 
-    topLevelFreeTypeVariableWildcard expected actual =
-      case (expected, actual) of
-        (BTVar name, BTVar otherName) ->
-          name /= otherName
-            && applicationTypeVariableIsUnconstrained name
-            && applicationTypeVariableIsUnconstrained otherName
-        (BTVar name, _) ->
-          applicationTypeVariableIsUnconstrained name
-        (_, BTVar name) ->
-          applicationTypeVariableIsUnconstrained name
-        _ ->
-          False
-
-    applicationTypeVariableIsUnconstrained name =
-      case Map.lookup name typeBounds of
-        Nothing -> True
-        Just Nothing -> True
-        Just (Just boundTy) -> alphaEqBackendType boundTy BTBottom
-
 backendVariableTypeMatches :: BackendValidationContext -> BackendType -> BackendType -> Bool
 backendVariableTypeMatches context0 expectedTy actualTy =
-  backendTypeMatchesWith False (bvcTypeBounds context0) (Just (bvcData context0)) expectedTy actualTy
+  backendTypeMatchesWith RejectFreeTypeVariableInstantiation (bvcTypeBounds context0) (Just (bvcData context0)) expectedTy actualTy
 
 backendVariableTypeMatchesWithBounds :: Map.Map String (Maybe BackendType) -> BackendType -> BackendType -> Bool
 backendVariableTypeMatchesWithBounds typeBounds expectedTy actualTy =
-  backendTypeMatchesWith False typeBounds Nothing expectedTy actualTy
+  backendTypeMatchesWith RejectFreeTypeVariableInstantiation typeBounds Nothing expectedTy actualTy
 
 backendTypeMatchesWith ::
-  Bool ->
+  TypeVariableInstantiation ->
   Map.Map String (Maybe BackendType) ->
   Maybe (Map.Map String BackendData) ->
   BackendType ->
   BackendType ->
   Bool
-backendTypeMatchesWith allowFreeTypeVariableInstantiation typeBounds mbDataDecls expectedTy actualTy =
+backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expectedTy actualTy =
   go Set.empty expectedTy actualTy
   where
     go bound expected actual =
@@ -743,13 +728,13 @@ backendTypeMatchesWith allowFreeTypeVariableInstantiation typeBounds mbDataDecls
           (BTMu expectedName expectedBody, BTBase actualBase) ->
             structuralMuMatchesKnownData actualBase [] expectedName expectedBody
           (BTVar expectedName, BTVar actualName)
-            | unconstrainedTypeVariable bound expectedName && unconstrainedTypeVariable bound actualName ->
+            | typeVariablePairMayMatch bound expectedName actualName ->
                 True
           (BTVar expectedName, _)
-            | allowFreeTypeVariableInstantiation && unconstrainedTypeVariable bound expectedName ->
+            | typeVariableMayInstantiate bound expectedName ->
                 True
           (_, BTVar actualName)
-            | allowFreeTypeVariableInstantiation && unconstrainedTypeVariable bound actualName ->
+            | typeVariableMayInstantiate bound actualName ->
                 True
           (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs) ->
             expectedCon == actualCon
@@ -768,18 +753,19 @@ backendTypeMatchesWith allowFreeTypeVariableInstantiation typeBounds mbDataDecls
                      actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
                   in go (Set.insert freshName bound) expectedBody' actualBody'
           (BTMu expectedName expectedBody, BTMu actualName actualBody) ->
-            case (isVacuousRecursiveBinder expectedName expectedBody, isVacuousRecursiveBinder actualName actualBody) of
-              (True, True) ->
-                go bound expectedBody actualBody
-              (True, False) ->
-                recursiveBodyCompatible actualName actualBody expectedBody || go bound expectedBody actual
-              (False, True) ->
-                recursiveBodyCompatible expectedName expectedBody actualBody || go bound expected actualBody
-              (False, False) ->
-                let freshName = freshBinderName expectedName actualName Nothing Nothing expectedBody actualBody
-                    expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
-                    actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
-                 in go (Set.insert freshName bound) expectedBody' actualBody'
+            structuralMuPayloadMayInstantiate expectedName expectedBody actualName actualBody
+              || case (isVacuousRecursiveBinder expectedName expectedBody, isVacuousRecursiveBinder actualName actualBody) of
+                (True, True) ->
+                  go bound expectedBody actualBody
+                (True, False) ->
+                  recursiveBodyCompatible actualName actualBody expectedBody || go bound expectedBody actual
+                (False, True) ->
+                  recursiveBodyCompatible expectedName expectedBody actualBody || go bound expected actualBody
+                (False, False) ->
+                  let freshName = freshBinderName expectedName actualName Nothing Nothing expectedBody actualBody
+                      expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
+                      actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
+                   in go (Set.insert freshName bound) expectedBody' actualBody'
           (BTMu expectedName expectedBody, _)
             | isVacuousRecursiveBinder expectedName expectedBody ->
                 go bound expectedBody actual
@@ -798,12 +784,36 @@ backendTypeMatchesWith allowFreeTypeVariableInstantiation typeBounds mbDataDecls
     maybeBoundMatches _ _ _ =
       False
 
-    unconstrainedTypeVariable bound name =
+    typeVariableMayInstantiate bound name =
       Set.notMember name bound
-        && case Map.lookup name typeBounds of
-          Nothing -> True
-          Just Nothing -> True
-          Just (Just boundTy) -> alphaEqBackendType boundTy BTBottom
+        && case typeVariableInstantiation of
+          RejectFreeTypeVariableInstantiation ->
+            False
+          AllowContextFreeTypeVariableInstantiation ->
+            contextTypeVariableMayInstantiate name
+
+    contextTypeVariableMayInstantiate name =
+      case Map.lookup name typeBounds of
+        Just Nothing -> True
+        Just (Just boundTy) -> alphaEqBackendType boundTy BTBottom
+        Nothing -> False
+
+    typeVariablePairMayMatch bound expectedName actualName =
+      Set.notMember expectedName bound
+        && Set.notMember actualName bound
+        && case typeVariableInstantiation of
+          RejectFreeTypeVariableInstantiation ->
+            freeTypeVariableMayInstantiate expectedName
+              && freeTypeVariableMayInstantiate actualName
+          AllowContextFreeTypeVariableInstantiation ->
+            contextTypeVariableMayInstantiate expectedName
+              && contextTypeVariableMayInstantiate actualName
+
+    freeTypeVariableMayInstantiate name =
+      case Map.lookup name typeBounds of
+        Nothing -> True
+        Just Nothing -> True
+        Just (Just boundTy) -> alphaEqBackendType boundTy BTBottom
 
     typeVariableBoundMatches bound ty otherTy =
       case ty of
@@ -827,6 +837,113 @@ backendTypeMatchesWith allowFreeTypeVariableInstantiation typeBounds mbDataDecls
                 structuralMuPayloadMatchesDataDecl typeBounds dataDecl substitution (BTMu muName body)
           _ ->
             False
+
+    -- Structural ADT payloads encode data parameters inside handler fields. Keep
+    -- that instantiation path local to matching structural encodings of the same
+    -- owner so ordinary recursive type matching still treats free variables
+    -- strictly.
+    structuralMuPayloadMayInstantiate expectedName expectedBody actualName actualBody =
+      case typeVariableInstantiation of
+        RejectFreeTypeVariableInstantiation ->
+          False
+        AllowContextFreeTypeVariableInstantiation ->
+          case (structuralMuDataName expectedName, structuralMuDataName actualName) of
+            (Just expectedDataName, Just actualDataName)
+              | expectedDataName == actualDataName ->
+                  let freshSelf =
+                        freshNameLike
+                          expectedName
+                          ( Set.unions
+                              [ Set.fromList [expectedName, actualName],
+                                Map.keysSet typeBounds,
+                                freeBackendTypeVars expectedBody,
+                                freeBackendTypeVars actualBody
+                              ]
+                          )
+                      expectedBody' = substituteBackendType expectedName (BTVar freshSelf) expectedBody
+                      actualBody' = substituteBackendType actualName (BTVar freshSelf) actualBody
+                   in case (structuralMuPayloadTypes expectedBody', structuralMuPayloadTypes actualBody') of
+                        (Just expectedPayloadTypes, Just actualPayloadTypes) ->
+                          structuralPayloadTypesMayInstantiate
+                            (Set.singleton freshSelf)
+                            expectedPayloadTypes
+                            actualPayloadTypes
+                        _ ->
+                          False
+            _ ->
+              False
+
+    structuralPayloadTypeMayInstantiate bound expected actual =
+      alphaEqBackendType expected actual
+        || case (expected, actual) of
+          (BTVar name, _)
+            | Set.notMember name bound && freeTypeVariableMayInstantiate name ->
+                True
+          (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
+            structuralPayloadTypeMayInstantiate bound expectedDom actualDom
+              && structuralPayloadTypeMayInstantiate bound expectedCod actualCod
+          (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs) ->
+            expectedCon == actualCon
+              && zipAllWith
+                (structuralPayloadTypeMayInstantiate bound)
+                (NE.toList expectedArgs)
+                (NE.toList actualArgs)
+          (BTVarApp expectedName expectedArgs, BTVarApp actualName actualArgs) ->
+            expectedName == actualName
+              && zipAllWith
+                (structuralPayloadTypeMayInstantiate bound)
+                (NE.toList expectedArgs)
+                (NE.toList actualArgs)
+          (BTForall expectedBinder expectedBound expectedForallBody, BTForall actualBinder actualBound actualForallBody) ->
+            structuralPayloadMaybeBoundMayInstantiate bound expectedBound actualBound
+              && let freshName =
+                       freshNameLike
+                         expectedBinder
+                         ( Set.unions
+                             [ Set.fromList [expectedBinder, actualBinder],
+                               Map.keysSet typeBounds,
+                               maybe Set.empty freeBackendTypeVars expectedBound,
+                               maybe Set.empty freeBackendTypeVars actualBound,
+                               freeBackendTypeVars expectedForallBody,
+                               freeBackendTypeVars actualForallBody
+                             ]
+                         )
+                     expectedForallBody' = substituteBackendType expectedBinder (BTVar freshName) expectedForallBody
+                     actualForallBody' = substituteBackendType actualBinder (BTVar freshName) actualForallBody
+                  in structuralPayloadTypeMayInstantiate (Set.insert freshName bound) expectedForallBody' actualForallBody'
+          (BTMu expectedMuName expectedMuBody, BTMu actualMuName actualMuBody) ->
+            let freshName =
+                  freshNameLike
+                    expectedMuName
+                    ( Set.unions
+                        [ Set.fromList [expectedMuName, actualMuName],
+                          Map.keysSet typeBounds,
+                          freeBackendTypeVars expectedMuBody,
+                          freeBackendTypeVars actualMuBody
+                        ]
+                    )
+                expectedMuBody' = substituteBackendType expectedMuName (BTVar freshName) expectedMuBody
+                actualMuBody' = substituteBackendType actualMuName (BTVar freshName) actualMuBody
+             in structuralPayloadTypeMayInstantiate (Set.insert freshName bound) expectedMuBody' actualMuBody'
+          _ ->
+            go bound expected actual
+
+    structuralPayloadTypesMayInstantiate bound expectedPayloadTypes actualPayloadTypes =
+      zipAllWith
+        (structuralPayloadTypeMayInstantiate bound)
+        expectedPayloadTypes
+        actualPayloadTypes
+        || zipAllWith
+          (structuralPayloadTypeMayInstantiate bound)
+          actualPayloadTypes
+          expectedPayloadTypes
+
+    structuralPayloadMaybeBoundMayInstantiate _ Nothing Nothing =
+      True
+    structuralPayloadMaybeBoundMayInstantiate bound (Just expectedBound) (Just actualBound) =
+      structuralPayloadTypeMayInstantiate bound expectedBound actualBound
+    structuralPayloadMaybeBoundMayInstantiate _ _ _ =
+      False
 
     freshBinderName leftName rightName leftBound rightBound leftBody rightBody =
       freshNameLike
