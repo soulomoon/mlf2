@@ -124,6 +124,7 @@ data BackendType
   | BTArrow BackendType BackendType
   | BTBase BaseTy
   | BTCon BaseTy (NonEmpty BackendType)
+  | BTVarApp String (NonEmpty BackendType)
   | BTForall String (Maybe BackendType) BackendType
   | BTMu String BackendType
   | BTBottom
@@ -267,6 +268,12 @@ freeBackendTypeVars =
           Set.empty
         BTCon _ args ->
           foldMap (go bound) args
+        BTVarApp name args ->
+          let headVars =
+                if Set.member name bound
+                  then Set.empty
+                  else Set.singleton name
+           in Set.union headVars (foldMap (go bound) args)
         BTForall name mbBound body ->
           let freeBound = maybe Set.empty (go bound) mbBound
               freeBody = go (Set.insert name bound) body
@@ -298,8 +305,19 @@ alphaEqBackendType =
           go leftEnv rightEnv leftDom rightDom && go leftEnv rightEnv leftCod rightCod
         (BTBase leftBase, BTBase rightBase) ->
           leftBase == rightBase
+        (BTBase leftBase, BTMu rightName rightBody) ->
+          structuralMuMatchesData leftBase [] rightName rightBody
+        (BTMu leftName leftBody, BTBase rightBase) ->
+          structuralMuMatchesData rightBase [] leftName leftBody
         (BTCon leftCon leftArgs, BTCon rightCon rightArgs) ->
           leftCon == rightCon && zipAllWith (go leftEnv rightEnv) (NE.toList leftArgs) (NE.toList rightArgs)
+        (BTCon leftCon leftArgs, BTMu rightName rightBody) ->
+          structuralMuMatchesData leftCon (NE.toList leftArgs) rightName rightBody
+        (BTMu leftName leftBody, BTCon rightCon rightArgs) ->
+          structuralMuMatchesData rightCon (NE.toList rightArgs) leftName leftBody
+        (BTVarApp leftName leftArgs, BTVarApp rightName rightArgs) ->
+          typeVarNamesMatch leftEnv rightEnv leftName rightName
+            && zipAllWith (go leftEnv rightEnv) (NE.toList leftArgs) (NE.toList rightArgs)
         (BTForall leftName leftBound leftBody, BTForall rightName rightBound rightBody) ->
           maybeAlphaEq leftEnv rightEnv leftBound rightBound
             && go
@@ -318,12 +336,138 @@ alphaEqBackendType =
         _ ->
           False
 
+    typeVarNamesMatch leftEnv rightEnv leftName rightName =
+      case (Map.lookup leftName leftEnv, Map.lookup rightName rightEnv) of
+        (Just expectedRight, Just expectedLeft) ->
+          expectedRight == rightName && expectedLeft == leftName
+        (Nothing, Nothing) ->
+          leftName == rightName
+        _ ->
+          False
+
     maybeAlphaEq _ _ Nothing Nothing =
       True
     maybeAlphaEq leftEnv rightEnv (Just leftTy) (Just rightTy) =
       go leftEnv rightEnv leftTy rightTy
     maybeAlphaEq _ _ _ _ =
       False
+
+structuralMuMatchesData :: BaseTy -> [BackendType] -> String -> BackendType -> Bool
+structuralMuMatchesData (BaseTy dataName) args muName body =
+  structuralMuNameMatches dataName muName
+    && case structuralMuPayloadTypes body of
+      Just payloadTypes
+        | null args -> True
+        | otherwise -> zipAllWith alphaEqBackendType args payloadTypes
+      Nothing -> null args
+
+structuralMuAsDataType :: BackendParameterBounds -> String -> BackendType -> Maybe BackendType
+structuralMuAsDataType parameterBounds muName body = do
+  dataName <- structuralMuDataName muName
+  let parameterArgs =
+        [ BTVar name
+          | name <- freeBackendTypeVarsInOrder body,
+            Map.member name parameterBounds
+        ]
+  Just $
+    case parameterArgs of
+      [] -> BTBase (BaseTy dataName)
+      arg : rest -> BTCon (BaseTy dataName) (arg NE.:| rest)
+
+structuralMuAsActualDataType :: String -> BackendType -> Maybe BackendType
+structuralMuAsActualDataType muName actual =
+  case actual of
+    BTBase (BaseTy actualName)
+      | structuralMuNameMatches actualName muName -> Just actual
+    BTCon (BaseTy actualName) _
+      | structuralMuNameMatches actualName muName -> Just actual
+    _ -> Nothing
+
+freeBackendTypeVarsInOrder :: BackendType -> [String]
+freeBackendTypeVarsInOrder =
+  go Set.empty []
+  where
+    go bound seen ty =
+      case ty of
+        BTVar name ->
+          addName bound seen name
+        BTArrow dom cod ->
+          go bound (go bound seen dom) cod
+        BTBase {} ->
+          seen
+        BTCon _ args ->
+          foldl (go bound) seen (NE.toList args)
+        BTVarApp name args ->
+          foldl (go bound) (addName bound seen name) (NE.toList args)
+        BTForall name mb body ->
+          let seen' = maybe seen (go bound seen) mb
+           in go (Set.insert name bound) seen' body
+        BTMu name body ->
+          go (Set.insert name bound) seen body
+        BTBottom ->
+          seen
+
+    addName bound seen name
+      | Set.member name bound = seen
+      | name `elem` seen = seen
+      | otherwise = seen ++ [name]
+
+structuralMuNameMatches :: String -> String -> Bool
+structuralMuNameMatches dataName muName =
+  case structuralMuDataName muName of
+    Just structuralName ->
+      dataName == structuralName || unqualifiedName dataName == structuralName
+    Nothing -> False
+
+structuralMuDataName :: String -> Maybe String
+structuralMuDataName name =
+  stripSuffixSimple "_self" (dropWhile (== '$') name)
+
+stripSuffixSimple :: String -> String -> Maybe String
+stripSuffixSimple suffix value =
+  reverse <$> stripPrefixSimple (reverse suffix) (reverse value)
+
+stripPrefixSimple :: String -> String -> Maybe String
+stripPrefixSimple [] value =
+  Just value
+stripPrefixSimple _ [] =
+  Nothing
+stripPrefixSimple (expected : expectedRest) (actual : actualRest)
+  | expected == actual = stripPrefixSimple expectedRest actualRest
+  | otherwise = Nothing
+
+unqualifiedName :: String -> String
+unqualifiedName =
+  reverse . takeWhile (/= '.') . reverse
+
+structuralMuPayloadTypes :: BackendType -> Maybe [BackendType]
+structuralMuPayloadTypes =
+  \case
+    BTForall resultName _ handlerTy ->
+      concat <$> collectHandlers resultName handlerTy
+    _ -> Nothing
+  where
+    collectHandlers resultName =
+      go []
+      where
+        go handlers ty
+          | alphaEqBackendType ty (BTVar resultName) = Just handlers
+          | otherwise =
+              case ty of
+                BTArrow handlerTy rest -> do
+                  fields <- collectHandlerFields resultName handlerTy
+                  go (handlers ++ [fields]) rest
+                _ -> Nothing
+
+    collectHandlerFields resultName =
+      go []
+      where
+        go fields ty
+          | alphaEqBackendType ty (BTVar resultName) = Just fields
+          | otherwise =
+              case ty of
+                BTArrow fieldTy rest -> go (fields ++ [fieldTy]) rest
+                _ -> Nothing
 
 -- | Capture-avoiding substitution for backend types. Forall binders scope over
 -- their body but not their optional bound, matching the frontend type syntax.
@@ -342,6 +486,11 @@ substituteBackendTypes replacements0 =
         BTArrow dom cod -> BTArrow (go replacements dom) (go replacements cod)
         BTBase {} -> ty
         BTCon con args -> BTCon con (fmap (go replacements) args)
+        BTVarApp name args ->
+          let args' = fmap (go replacements) args
+           in case Map.lookup name replacements >>= (`applyBackendTypeHead` NE.toList args') of
+                Just ty' -> ty'
+                Nothing -> BTVarApp name args'
         BTForall name mbBound body
           | Map.null bodyReplacements ->
               BTForall name (fmap (go replacements) mbBound) body
@@ -382,6 +531,23 @@ substituteBackendTypes replacements0 =
             bodyReplacements = Map.delete name replacements
             freeBodyReplacements = freeBackendTypeVarsIn bodyReplacements
         BTBottom -> BTBottom
+
+applyBackendTypeHead :: BackendType -> [BackendType] -> Maybe BackendType
+applyBackendTypeHead headTy args =
+  case headTy of
+    BTVar name -> Just (mkVarHead name args)
+    BTBase name -> Just (mkConHead name args)
+    BTCon name existingArgs -> Just (mkConHead name (NE.toList existingArgs ++ args))
+    BTVarApp name existingArgs -> Just (mkVarHead name (NE.toList existingArgs ++ args))
+    _ -> Nothing
+  where
+    mkVarHead name = \case
+      [] -> BTVar name
+      arg : rest -> BTVarApp name (arg NE.:| rest)
+
+    mkConHead name = \case
+      [] -> BTBase name
+      arg : rest -> BTCon name (arg NE.:| rest)
 
 unfoldBackendRecursiveType :: BackendType -> Maybe BackendType
 unfoldBackendRecursiveType ty =
@@ -548,6 +714,9 @@ backendVariableTypeMatches typeBounds expectedTy actualTy =
             expectedBase == actualBase
           (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs) ->
             expectedCon == actualCon
+              && zipAllWith (go bound) (NE.toList expectedArgs) (NE.toList actualArgs)
+          (BTVarApp expectedName expectedArgs, BTVarApp actualName actualArgs) ->
+            expectedName == actualName
               && zipAllWith (go bound) (NE.toList expectedArgs) (NE.toList actualArgs)
           (BTForall expectedName expectedBound expectedBody, BTForall actualName actualBound actualBody) ->
             maybeBoundMatches bound expectedBound actualBound
@@ -789,67 +958,79 @@ matchBackendTypeParametersWithTypeBounds typeBounds parameterBounds =
           | Map.member name parameterBounds && Set.notMember name bound ->
               insertParameterSubstitution name actual substitution
         _ ->
-          case (expected, actual) of
-            (BTVar {}, _) ->
-              requireAlphaEq substitution expected actual
-            (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
-              go bound substitution expectedDom actualDom
-                >>= \substitution' -> go bound substitution' expectedCod actualCod
-            (BTBase expectedBase, BTBase actualBase)
-              | expectedBase == actualBase ->
-                  Just substitution
-            (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs)
-              | expectedCon == actualCon ->
-                  foldM
-                    ( \(substitutionAcc, matched) (expectedArg, actualArg) ->
+          if alphaEqBackendType expected actual
+            then Just substitution
+            else case (expected, actual) of
+              (BTVar {}, _) ->
+                requireAlphaEq substitution expected actual
+              (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
+                go bound substitution expectedDom actualDom
+                  >>= \substitution' -> go bound substitution' expectedCod actualCod
+              (BTBase expectedBase, BTBase actualBase)
+                | expectedBase == actualBase ->
+                    Just substitution
+              (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs)
+                | expectedCon == actualCon ->
+                    foldM
+                      ( \(substitutionAcc, matched) (expectedArg, actualArg) ->
+                          if matched
+                            then fmap (\substitutionNext -> (substitutionNext, True)) (go bound substitutionAcc expectedArg actualArg)
+                            else Just (substitutionAcc, False)
+                      )
+                      (substitution, length expectedArgsList == length actualArgsList)
+                      (zip expectedArgsList actualArgsList)
+                      >>= \(substitution', matched) ->
                         if matched
-                          then fmap (\substitutionNext -> (substitutionNext, True)) (go bound substitutionAcc expectedArg actualArg)
-                          else Just (substitutionAcc, False)
-                    )
-                    (substitution, length expectedArgsList == length actualArgsList)
-                    (zip expectedArgsList actualArgsList)
-                    >>= \(substitution', matched) ->
-                      if matched
-                        then Just substitution'
-                        else Nothing
-              where
-                expectedArgsList = NE.toList expectedArgs
-                actualArgsList = NE.toList actualArgs
-            (BTForall expectedName expectedBound expectedBody, BTForall actualName actualBound actualBody) -> do
-              substitution' <- matchMaybeBound bound substitution expectedBound actualBound
-              let used =
-                    Set.unions
-                      [ Set.fromList [expectedName, actualName],
-                        Map.keysSet substitution',
-                        freeBackendTypeVarsIn substitution',
-                        Map.keysSet parameterBounds,
-                        freeBackendTypeVars expectedBody,
-                        freeBackendTypeVars actualBody,
-                        maybe Set.empty freeBackendTypeVars expectedBound,
-                        maybe Set.empty freeBackendTypeVars actualBound
-                      ]
-                  freshName = freshNameLike expectedName used
-                  expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
-                  actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
-              go (Set.insert freshName bound) substitution' expectedBody' actualBody'
-            (BTMu expectedName expectedBody, BTMu actualName actualBody) -> do
-              let used =
-                    Set.unions
-                      [ Set.fromList [expectedName, actualName],
-                        Map.keysSet substitution,
-                        freeBackendTypeVarsIn substitution,
-                        Map.keysSet parameterBounds,
-                        freeBackendTypeVars expectedBody,
-                        freeBackendTypeVars actualBody
-                      ]
-                  freshName = freshNameLike expectedName used
-                  expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
-                  actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
-              go (Set.insert freshName bound) substitution expectedBody' actualBody'
-            (BTBottom, BTBottom) ->
-              Just substitution
-            _ ->
-              Nothing
+                          then Just substitution'
+                          else Nothing
+                where
+                  expectedArgsList = NE.toList expectedArgs
+                  actualArgsList = NE.toList actualArgs
+              (BTMu expectedName expectedBody, actualTy@(BTBase {})) ->
+                matchStructuralMuExpected bound substitution expectedName expectedBody actualTy
+              (BTMu expectedName expectedBody, actualTy@(BTCon {})) ->
+                matchStructuralMuExpected bound substitution expectedName expectedBody actualTy
+              (expectedTy@(BTBase {}), BTMu actualName actualBody) ->
+                matchStructuralMuActual bound substitution expectedTy actualName actualBody
+              (expectedTy@(BTCon {}), BTMu actualName actualBody) ->
+                matchStructuralMuActual bound substitution expectedTy actualName actualBody
+              (BTVarApp expectedName expectedArgs, _) ->
+                matchBackendTypeApplication bound substitution expectedName (NE.toList expectedArgs) actual
+              (BTForall expectedName expectedBound expectedBody, BTForall actualName actualBound actualBody) -> do
+                substitution' <- matchMaybeBound bound substitution expectedBound actualBound
+                let used =
+                      Set.unions
+                        [ Set.fromList [expectedName, actualName],
+                          Map.keysSet substitution',
+                          freeBackendTypeVarsIn substitution',
+                          Map.keysSet parameterBounds,
+                          freeBackendTypeVars expectedBody,
+                          freeBackendTypeVars actualBody,
+                          maybe Set.empty freeBackendTypeVars expectedBound,
+                          maybe Set.empty freeBackendTypeVars actualBound
+                        ]
+                    freshName = freshNameLike expectedName used
+                    expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
+                    actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
+                go (Set.insert freshName bound) substitution' expectedBody' actualBody'
+              (BTMu expectedName expectedBody, BTMu actualName actualBody) -> do
+                let used =
+                      Set.unions
+                        [ Set.fromList [expectedName, actualName],
+                          Map.keysSet substitution,
+                          freeBackendTypeVarsIn substitution,
+                          Map.keysSet parameterBounds,
+                          freeBackendTypeVars expectedBody,
+                          freeBackendTypeVars actualBody
+                        ]
+                    freshName = freshNameLike expectedName used
+                    expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
+                    actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
+                go (Set.insert freshName bound) substitution expectedBody' actualBody'
+              (BTBottom, BTBottom) ->
+                Just substitution
+              _ ->
+                Nothing
 
     matchMaybeBound _ substitution Nothing Nothing =
       Just substitution
@@ -858,9 +1039,47 @@ matchBackendTypeParametersWithTypeBounds typeBounds parameterBounds =
     matchMaybeBound _ _ _ _ =
       Nothing
 
+    matchStructuralMuExpected bound substitution muName body actualTy =
+      firstJust
+        [ structuralMuAsDataType parameterBounds muName body
+            >>= \expectedTy -> go bound substitution expectedTy actualTy,
+          structuralMuAsActualDataType muName actualTy
+            >>= \expectedTy -> go bound substitution expectedTy actualTy
+        ]
+
+    matchStructuralMuActual bound substitution expectedTy muName body =
+      firstJust
+        [ structuralMuAsDataType parameterBounds muName body
+            >>= \actualTy -> go bound substitution expectedTy actualTy,
+          structuralMuAsActualDataType muName expectedTy
+            >>= \actualTy -> go bound substitution expectedTy actualTy
+        ]
+
+    matchBackendTypeApplication bound substitution name expectedArgs actual =
+      case decomposeBackendTypeHead actual of
+        Just (actualHead, actualArgs)
+          | length expectedArgs == length actualArgs -> do
+              substitution' <-
+                if Map.member name parameterBounds && Set.notMember name bound
+                  then insertParameterSubstitution name actualHead substitution
+                  else go bound substitution (BTVar name) actualHead
+              foldM
+                (\substitutionAcc (expectedArg, actualArg) -> go bound substitutionAcc expectedArg actualArg)
+                substitution'
+                (zip expectedArgs actualArgs)
+        _ -> Nothing
+
     requireAlphaEq substitution expected actual
       | alphaEqBackendType expected actual = Just substitution
       | otherwise = Nothing
+
+    firstJust =
+      \case
+        [] -> Nothing
+        candidate : rest ->
+          case candidate of
+            Just value -> Just value
+            Nothing -> firstJust rest
 
     insertParameterSubstitution name actual substitution =
       case Map.lookup name substitution of
@@ -908,6 +1127,15 @@ matchBackendTypeParametersWithTypeBounds typeBounds parameterBounds =
 
     resolvedTypeBounds =
       completeBackendParameterSubstitution typeBounds Map.empty
+
+decomposeBackendTypeHead :: BackendType -> Maybe (BackendType, [BackendType])
+decomposeBackendTypeHead ty =
+  case ty of
+    BTVar name -> Just (BTVar name, [])
+    BTBase name -> Just (BTBase name, [])
+    BTCon name args -> Just (BTBase name, NE.toList args)
+    BTVarApp name args -> Just (BTVar name, NE.toList args)
+    _ -> Nothing
 
 completeBackendParameterSubstitution :: BackendParameterBounds -> Map.Map String BackendType -> Map.Map String BackendType
 completeBackendParameterSubstitution parameterBounds substitution0 =

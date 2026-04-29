@@ -1,3 +1,19 @@
+## 2026-04-29 - Higher-kinded and hidden-owner constructor LLVM parity
+
+- `MLF.Backend.IR` now preserves checked variable-headed type applications as
+  `BTVarApp` instead of rejecting all `STVarApp` fields at backend conversion.
+  Substitution, alpha equality, constructor matching, validation, and LLVM
+  lowering all understand applied type variables once they are resolved to
+  concrete backend data heads.
+- `MLF.Backend.Convert` now recovers backend constructor and case nodes from the
+  structural constructor terms produced for higher-kinded and hidden-owner ADTs.
+  Recovery is anchored to the constructor owner/result shape and the checked
+  constructor metadata, then normalizes structural recursive owner types back to
+  canonical backend data names.
+- LLVM parity now supports the issue-owned higher-kinded data-field rows and
+  hidden-owner value-constructor import rows. Typeclass/evidence and deriving
+  rows remain explicitly classified as separate unsupported backend work.
+
 ## 2026-04-28 - Shared Program-to-LLVM parity matrix
 
 - Extracted the `.mlfp` interpreter-success surface from `ProgramSpec` into

@@ -178,6 +178,26 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Some"]
 
+  it "recovers higher-kinded structural constructors as backend constructors" $ do
+    checked <- requireChecked higherKindedConstructorProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    let constructNames = collectConstructNames (backendBindingExpr mainBinding)
+    constructNames `shouldContain` ["Main__Wrap", "Main__Box"]
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
+
+  it "recovers hidden-owner value-only constructor imports" $ do
+    checked <- requireChecked hiddenOwnerConstructorImportProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Core__NothingF"]
+
   it "preserves constructor type applications when checking constructor fields" $ do
     checked <- requireChecked constructorForallApplicationProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -372,9 +392,9 @@ spec = describe "MLF.Backend.Convert" $ do
       other ->
         expectationFailure ("expected nested recursive-let capture rejection, got " ++ show other)
 
-  it "reports unsupported source type applications instead of weakening them" $ do
+  it "converts source type applications into backend applied type variables" $ do
     convertSourceType unsupportedVariableHeadType
-      `shouldBe` Left (BackendUnsupportedSourceType unsupportedVariableHeadType)
+      `shouldBe` Right (BTVarApp "f" (intTy :| []))
 
 simpleFunctionProgram :: String
 simpleFunctionProgram =
@@ -474,6 +494,46 @@ parameterizedConstructorProgram =
       "    | Some : a -> Option a;",
       "",
       "  def main : Option Int = Some 1;",
+      "}"
+    ]
+
+higherKindedConstructorProgram :: String
+higherKindedConstructorProgram =
+  unlines
+    [ "module Main export (Box(..), Wrap(..), main) {",
+      "  data Box a =",
+      "      Box : a -> Box a;",
+      "",
+      "  data Wrap (f :: * -> *) a =",
+      "      Wrap : f a -> Wrap f a;",
+      "",
+      "  def main : Bool = case Wrap (Box false) of {",
+      "    Wrap box -> true",
+      "  };",
+      "}"
+    ]
+
+hiddenOwnerConstructorImportProgram :: String
+hiddenOwnerConstructorImportProgram =
+  unlines
+    [ "module Core export (Box(..), NothingF, accept) {",
+      "  data Box a =",
+      "      Box : a -> Box a;",
+      "",
+      "  data MaybeF (f :: * -> *) a =",
+      "      NothingF : MaybeF f a",
+      "    | JustF : f a -> MaybeF f a;",
+      "",
+      "  def accept : MaybeF Box Bool -> Bool = \\value case value of {",
+      "    NothingF -> true;",
+      "    JustF box -> true",
+      "  };",
+      "}",
+      "",
+      "module Main export (main) {",
+      "  import Core exposing (NothingF, accept);",
+      "  def id : forall a. a -> a = \\x x;",
+      "  def main : Bool = accept (id NothingF);",
       "}"
     ]
 
@@ -735,6 +795,7 @@ renderBackendIRType backendTy =
     BTArrow dom cod -> "(" ++ renderBackendIRType dom ++ " -> " ++ renderBackendIRType cod ++ ")"
     BTBase (BaseTy name) -> name
     BTCon (BaseTy name) args -> name ++ "<" ++ intercalate ", " (map renderBackendIRType (toList args)) ++ ">"
+    BTVarApp name args -> "$" ++ name ++ "<" ++ intercalate ", " (map renderBackendIRType (toList args)) ++ ">"
     BTForall name mbBound body -> "forall " ++ renderTypeBinder name mbBound ++ ". " ++ renderBackendIRType body
     BTMu name body -> "mu " ++ name ++ ". " ++ renderBackendIRType body
     BTBottom -> "bottom"

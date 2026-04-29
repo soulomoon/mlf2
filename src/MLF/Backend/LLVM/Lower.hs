@@ -187,7 +187,7 @@ buildProgramBase program = do
           { pbBindings = Map.fromList [(biName info, info) | info <- bindingInfos],
             pbBindingOrder = map biName bindingInfos,
             pbConstructors = Map.fromList [(backendConstructorName (crConstructor ctor), ctor) | ctor <- constructors],
-            pbDataNames = Set.fromList (concatMap dataNameAliases (map backendDataName dataDecls))
+            pbDataNames = Set.fromList (map backendDataName dataDecls)
           }
 
 bindingInfo :: BackendBinding -> BindingInfo
@@ -207,28 +207,6 @@ constructorRuntimes dataDecl =
       }
   | (tag, constructor) <- zip [0 ..] (backendDataConstructors dataDecl)
   ]
-
-dataNameAliases :: String -> [String]
-dataNameAliases name =
-  nub [name, suffixAfter '.' name, suffixAfterRuntimeModule name]
-
-suffixAfter :: Char -> String -> String
-suffixAfter needle value =
-  reverse (takeWhile (/= needle) (reverse value))
-
-suffixAfterRuntimeModule :: String -> String
-suffixAfterRuntimeModule value =
-  case splitRuntimeModule value of
-    Just suffix -> suffix
-    Nothing -> value
-
-splitRuntimeModule :: String -> Maybe String
-splitRuntimeModule value =
-  go value
-  where
-    go [] = Nothing
-    go ('_' : '_' : rest) = Just rest
-    go (_ : rest) = go rest
 
 functionFormFromExpr :: BackendExpr -> FunctionForm
 functionFormFromExpr expr =
@@ -419,6 +397,46 @@ freeBackendExprVars =
 
     freeAlternative bound (BackendAlternative pattern0 body) =
       go (Set.union (patternBinders pattern0) bound) body
+
+    patternBinders =
+      \case
+        BackendDefaultPattern ->
+          Set.empty
+        BackendConstructorPattern _ binders ->
+          Set.fromList binders
+
+backendExprVarTypesFor :: Set String -> BackendExpr -> Map String BackendType
+backendExprVarTypesFor targets =
+  go Set.empty
+  where
+    go shadowed =
+      \case
+        BackendVar ty name
+          | Set.member name targets && Set.notMember name shadowed -> Map.singleton name ty
+          | otherwise -> Map.empty
+        BackendLit {} ->
+          Map.empty
+        BackendLam _ name _ body ->
+          go (Set.insert name shadowed) body
+        BackendApp _ fun arg ->
+          go shadowed fun `Map.union` go shadowed arg
+        BackendLet _ name _ rhs body ->
+          go shadowed rhs `Map.union` go (Set.insert name shadowed) body
+        BackendTyAbs _ _ _ body ->
+          go shadowed body
+        BackendTyApp _ fun _ ->
+          go shadowed fun
+        BackendConstruct _ _ args ->
+          Map.unions (map (go shadowed) args)
+        BackendCase _ scrutinee alternatives ->
+          go shadowed scrutinee `Map.union` Map.unions (map (goAlternative shadowed) (NE.toList alternatives))
+        BackendRoll _ payload ->
+          go shadowed payload
+        BackendUnroll _ payload ->
+          go shadowed payload
+
+    goAlternative shadowed (BackendAlternative pattern0 body) =
+      go (Set.union shadowed (patternBinders pattern0)) body
 
     patternBinders =
       \case
@@ -1201,6 +1219,8 @@ matchTypeParams binderSet substitution expected actual =
                 (\subst (tyA, tyB) -> matchTypeParams binderSet subst tyA tyB)
                 substitution
                 (zip (NE.toList argsA) (NE.toList argsB))
+        (BTVarApp name args, _) ->
+          matchTypeParamApplication binderSet substitution name (NE.toList args) actual
         (BTBase baseA, BTBase baseB)
           | baseA == baseB -> Right substitution
         (BTForall nameA boundA bodyA, BTForall nameB boundB bodyB) -> do
@@ -1214,6 +1234,34 @@ matchTypeParams binderSet substitution expected actual =
           matchTypeParams binderSet substitution bodyA (substituteBackendType nameB (BTVar nameA) bodyB)
         (BTBottom, BTBottom) -> Right substitution
         _ -> Right substitution
+
+matchTypeParamApplication ::
+  Set String ->
+  Map String BackendType ->
+  String ->
+  [BackendType] ->
+  BackendType ->
+  Either BackendLLVMError (Map String BackendType)
+matchTypeParamApplication binderSet substitution name expectedArgs actual =
+  case decomposeBackendTypeHead actual of
+    Just (actualHead, actualArgs)
+      | length expectedArgs == length actualArgs -> do
+          substitution' <-
+            if Set.member name binderSet
+              then bindTypeParam name actualHead
+              else matchTypeParams binderSet substitution (BTVar name) actualHead
+          foldM
+            (\subst (expectedArg, actualArg) -> matchTypeParams binderSet subst expectedArg actualArg)
+            substitution'
+            (zip expectedArgs actualArgs)
+    _ -> Right substitution
+  where
+    bindTypeParam paramName actualHead =
+      case Map.lookup paramName substitution of
+        Nothing -> Right (Map.insert paramName actualHead substitution)
+        Just previous
+          | alphaEqBackendType previous actualHead -> Right substitution
+          | otherwise -> Left (BackendLLVMUnsupportedCall ("conflicting inferred type argument for " ++ paramName))
 
 collectCall :: BackendExpr -> Maybe (BackendExpr, [BackendType], [BackendExpr])
 collectCall expr =
@@ -1345,7 +1393,12 @@ lowerCase env exprEnv context resultTy scrutinee alternatives = do
               unless (length fieldTys == length binders) $
                 liftEither (BackendLLVMArityMismatch name (length fieldTys) (length binders))
               let usedBinders = freeBackendExprVars body
-              loadedFields <- mapMaybe id <$> traverse (loadUsedField usedBinders scrutineeValue) (zip3 [0 :: Int ..] binders fieldTys)
+                  bodyBinderTypes = backendExprVarTypesFor (Set.fromList binders) body
+                  effectiveFieldTys =
+                    [ Map.findWithDefault fieldTy binder bodyBinderTypes
+                      | (binder, fieldTy) <- zip binders fieldTys
+                    ]
+              loadedFields <- mapMaybe id <$> traverse (loadUsedField usedBinders scrutineeValue) (zip3 [0 :: Int ..] binders effectiveFieldTys)
               pure
                 exprEnv
                   { eeValues =
@@ -1369,15 +1422,19 @@ lowerCase env exprEnv context resultTy scrutinee alternatives = do
 
 constructorFieldTypesForScrutinee :: ProgramEnv -> String -> ConstructorRuntime -> BackendType -> LowerM [BackendType]
 constructorFieldTypesForScrutinee _ context constructorRuntime scrutineeTy =
-  case matchConstructorResult parameters Map.empty (backendConstructorResult constructor) scrutineeTy of
-    Just substitution ->
-      pure (map (substituteBackendTypes substitution) (backendConstructorFields constructor))
+  case structuralConstructorFieldTypes constructorRuntime scrutineeTy of
+    Just fieldTys ->
+      pure fieldTys
     Nothing ->
-      liftEither
-        ( BackendLLVMUnsupportedExpression
-            context
-            ("could not match constructor result for " ++ backendConstructorName constructor)
-        )
+      case matchConstructorResult parameters Map.empty (backendConstructorResult constructor) scrutineeTy of
+        Just substitution ->
+          pure (map (substituteBackendTypes substitution) (backendConstructorFields constructor))
+        Nothing ->
+          liftEither
+            ( BackendLLVMUnsupportedExpression
+                context
+                ("could not match constructor result for " ++ backendConstructorName constructor)
+            )
   where
     constructor = crConstructor constructorRuntime
     parameters =
@@ -1385,6 +1442,68 @@ constructorFieldTypesForScrutinee _ context constructorRuntime scrutineeTy =
         ( crDataParameters constructorRuntime
             ++ map backendTypeBinderName (backendConstructorForalls constructor)
         )
+
+structuralConstructorFieldTypes :: ConstructorRuntime -> BackendType -> Maybe [BackendType]
+structuralConstructorFieldTypes constructorRuntime scrutineeTy = do
+  (muName, body) <-
+    case scrutineeTy of
+      BTMu name muBody -> Just (name, muBody)
+      _ -> Nothing
+  dataName <- constructorResultDataName (backendConstructorResult constructor)
+  if structuralMuNameMatches dataName muName
+    then do
+      handlerFields <- structuralBackendHandlerFields body
+      fieldTys <- atMay handlerFields (fromInteger (crTag constructorRuntime))
+      if length fieldTys == length (backendConstructorFields constructor)
+        then Just (map (substituteBackendType muName scrutineeTy) fieldTys)
+        else Nothing
+    else Nothing
+  where
+    constructor = crConstructor constructorRuntime
+
+constructorResultDataName :: BackendType -> Maybe String
+constructorResultDataName =
+  \case
+    BTBase (BaseTy name) -> Just name
+    BTCon (BaseTy name) _ -> Just name
+    BTMu name _ -> structuralMuDataName name
+    _ -> Nothing
+
+structuralBackendHandlerFields :: BackendType -> Maybe [[BackendType]]
+structuralBackendHandlerFields =
+  \case
+    BTForall resultName _ handlerTy -> collectHandlers resultName handlerTy
+    _ -> Nothing
+  where
+    collectHandlers resultName =
+      go []
+      where
+        go handlers ty
+          | alphaEqBackendType ty (BTVar resultName) = Just handlers
+          | otherwise =
+              case ty of
+                BTArrow handlerTy rest -> do
+                  fields <- collectHandlerFields resultName handlerTy
+                  go (handlers ++ [fields]) rest
+                _ -> Nothing
+
+    collectHandlerFields resultName =
+      go []
+      where
+        go fields ty
+          | alphaEqBackendType ty (BTVar resultName) = Just fields
+          | otherwise =
+              case ty of
+                BTArrow fieldTy rest -> go (fields ++ [fieldTy]) rest
+                _ -> Nothing
+
+atMay :: [a] -> Int -> Maybe a
+atMay xs index0
+  | index0 < 0 = Nothing
+  | otherwise =
+      case drop index0 xs of
+        value : _ -> Just value
+        [] -> Nothing
 
 matchConstructorResult :: Set String -> Map String BackendType -> BackendType -> BackendType -> Maybe (Map String BackendType)
 matchConstructorResult parameters substitution expected actual =
@@ -1397,33 +1516,181 @@ matchConstructorResult parameters substitution expected actual =
               | alphaEqBackendType previous actual -> Just substitution
               | otherwise -> Nothing
     _ ->
-      case (expected, actual) of
-        (BTVar expectedName, BTVar actualName)
-          | expectedName == actualName -> Just substitution
-        (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
-          matchConstructorResult parameters substitution expectedDom actualDom
-            >>= \subst -> matchConstructorResult parameters subst expectedCod actualCod
-        (BTBase expectedBase, BTBase actualBase)
-          | expectedBase == actualBase -> Just substitution
-        (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs)
-          | expectedCon == actualCon && length expectedArgs == length actualArgs ->
-              foldM
-                (\subst (expectedArg, actualArg) -> matchConstructorResult parameters subst expectedArg actualArg)
-                substitution
-                (zip (NE.toList expectedArgs) (NE.toList actualArgs))
-        (BTForall expectedName expectedBound expectedBody, BTForall actualName actualBound actualBody) -> do
-          subst <-
-            case (expectedBound, actualBound) of
-              (Nothing, Nothing) -> Just substitution
-              (Just expectedBoundTy, Just actualBoundTy) -> matchConstructorResult parameters substitution expectedBoundTy actualBoundTy
-              _ -> Nothing
-          matchConstructorResult parameters subst expectedBody (substituteBackendType actualName (BTVar expectedName) actualBody)
-        (BTMu expectedName expectedBody, BTMu actualName actualBody) ->
-          matchConstructorResult parameters substitution expectedBody (substituteBackendType actualName (BTVar expectedName) actualBody)
-        (BTBottom, BTBottom) ->
-          Just substitution
-        _ ->
-          Nothing
+      if alphaEqBackendType expected actual
+        then Just substitution
+        else
+          ( case (expected, actual) of
+              (BTVar expectedName, BTVar actualName)
+                | expectedName == actualName -> Just substitution
+              (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
+                matchConstructorResult parameters substitution expectedDom actualDom
+                  >>= \subst -> matchConstructorResult parameters subst expectedCod actualCod
+              (BTBase expectedBase, BTBase actualBase)
+                | expectedBase == actualBase -> Just substitution
+              (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs)
+                | expectedCon == actualCon && length expectedArgs == length actualArgs ->
+                    foldM
+                      (\subst (expectedArg, actualArg) -> matchConstructorResult parameters subst expectedArg actualArg)
+                      substitution
+                      (zip (NE.toList expectedArgs) (NE.toList actualArgs))
+              (BTMu expectedName expectedBody, actualTy@(BTBase {})) ->
+                matchStructuralMuExpected expectedName expectedBody actualTy
+              (BTMu expectedName expectedBody, actualTy@(BTCon {})) ->
+                matchStructuralMuExpected expectedName expectedBody actualTy
+              (expectedTy@(BTBase {}), BTMu actualName actualBody) ->
+                matchStructuralMuActual expectedTy actualName actualBody
+              (expectedTy@(BTCon {}), BTMu actualName actualBody) ->
+                matchStructuralMuActual expectedTy actualName actualBody
+              (BTVarApp expectedName expectedArgs, _) ->
+                matchConstructorResultApplication parameters substitution expectedName (NE.toList expectedArgs) actual
+              (BTForall expectedName expectedBound expectedBody, BTForall actualName actualBound actualBody) -> do
+                subst <-
+                  case (expectedBound, actualBound) of
+                    (Nothing, Nothing) -> Just substitution
+                    (Just expectedBoundTy, Just actualBoundTy) -> matchConstructorResult parameters substitution expectedBoundTy actualBoundTy
+                    _ -> Nothing
+                matchConstructorResult parameters subst expectedBody (substituteBackendType actualName (BTVar expectedName) actualBody)
+              (BTMu expectedName expectedBody, BTMu actualName actualBody) ->
+                matchConstructorResult parameters substitution expectedBody (substituteBackendType actualName (BTVar expectedName) actualBody)
+              (BTBottom, BTBottom) ->
+                Just substitution
+              _ ->
+                Nothing
+          )
+  where
+    matchStructuralMuExpected muName body actualTy =
+      firstJust
+        [ structuralMuAsDataType parameters muName body
+            >>= \expectedTy -> matchConstructorResult parameters substitution expectedTy actualTy,
+          structuralMuAsActualDataType muName actualTy
+            >>= \expectedTy -> matchConstructorResult parameters substitution expectedTy actualTy
+        ]
+
+    matchStructuralMuActual expectedTy muName body =
+      firstJust
+        [ structuralMuAsDataType parameters muName body
+            >>= \actualTy -> matchConstructorResult parameters substitution expectedTy actualTy,
+          structuralMuAsActualDataType muName expectedTy
+            >>= \actualTy -> matchConstructorResult parameters substitution expectedTy actualTy
+        ]
+
+    firstJust =
+      \case
+        [] -> Nothing
+        candidate : rest ->
+          case candidate of
+            Just value -> Just value
+            Nothing -> firstJust rest
+
+structuralMuAsDataType :: Set String -> String -> BackendType -> Maybe BackendType
+structuralMuAsDataType parameters muName body = do
+  dataName <- structuralMuDataName muName
+  let parameterArgs =
+        [ BTVar name
+          | name <- freeBackendTypeVarsInOrder body,
+            Set.member name parameters
+        ]
+  Just $
+    case parameterArgs of
+      [] -> BTBase (BaseTy dataName)
+      arg : rest -> BTCon (BaseTy dataName) (arg NE.:| rest)
+
+structuralMuAsActualDataType :: String -> BackendType -> Maybe BackendType
+structuralMuAsActualDataType muName actual =
+  case actual of
+    BTBase (BaseTy actualName)
+      | structuralMuNameMatches actualName muName -> Just actual
+    BTCon (BaseTy actualName) _
+      | structuralMuNameMatches actualName muName -> Just actual
+    _ -> Nothing
+
+structuralMuNameMatches :: String -> String -> Bool
+structuralMuNameMatches dataName muName =
+  case structuralMuDataName muName of
+    Just muDataName ->
+      dataName == muDataName
+        || unqualifiedName dataName == muDataName
+        || dataName == unqualifiedName muDataName
+        || unqualifiedName dataName == unqualifiedName muDataName
+    Nothing -> False
+
+structuralMuDataName :: String -> Maybe String
+structuralMuDataName name =
+  stripSuffixSimple "_self" (dropWhile (== '$') name)
+
+unqualifiedName :: String -> String
+unqualifiedName =
+  reverse . takeWhile (/= '.') . reverse
+
+stripSuffixSimple :: String -> String -> Maybe String
+stripSuffixSimple suffix value =
+  reverse <$> stripPrefixSimple (reverse suffix) (reverse value)
+
+stripPrefixSimple :: String -> String -> Maybe String
+stripPrefixSimple [] value =
+  Just value
+stripPrefixSimple _ [] =
+  Nothing
+stripPrefixSimple (expected : expectedRest) (actual : actualRest)
+  | expected == actual = stripPrefixSimple expectedRest actualRest
+  | otherwise = Nothing
+
+freeBackendTypeVarsInOrder :: BackendType -> [String]
+freeBackendTypeVarsInOrder =
+  go Set.empty []
+  where
+    go bound seen ty =
+      case ty of
+        BTVar name ->
+          addName bound seen name
+        BTArrow dom cod ->
+          go bound (go bound seen dom) cod
+        BTBase {} ->
+          seen
+        BTCon _ args ->
+          foldl (go bound) seen (NE.toList args)
+        BTVarApp name args ->
+          foldl (go bound) (addName bound seen name) (NE.toList args)
+        BTForall name mb body ->
+          let seen' = maybe seen (go bound seen) mb
+           in go (Set.insert name bound) seen' body
+        BTMu name body ->
+          go (Set.insert name bound) seen body
+        BTBottom ->
+          seen
+
+    addName bound seen name
+      | Set.member name bound = seen
+      | name `elem` seen = seen
+      | otherwise = seen ++ [name]
+
+matchConstructorResultApplication ::
+  Set String ->
+  Map String BackendType ->
+  String ->
+  [BackendType] ->
+  BackendType ->
+  Maybe (Map String BackendType)
+matchConstructorResultApplication parameters substitution name expectedArgs actual =
+  case decomposeBackendTypeHead actual of
+    Just (actualHead, actualArgs)
+      | length expectedArgs == length actualArgs -> do
+          substitution' <-
+            if Set.member name parameters
+              then insertParameterSubstitution name actualHead substitution
+              else matchConstructorResult parameters substitution (BTVar name) actualHead
+          foldM
+            (\subst (expectedArg, actualArg) -> matchConstructorResult parameters subst expectedArg actualArg)
+            substitution'
+            (zip expectedArgs actualArgs)
+    _ -> Nothing
+  where
+    insertParameterSubstitution paramName actualHead substitution0 =
+      case Map.lookup paramName substitution0 of
+        Nothing -> Just (Map.insert paramName actualHead substitution0)
+        Just previous
+          | alphaEqBackendType previous actualHead -> Just substitution0
+          | otherwise -> Nothing
 
 lowerRollLike :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> String -> LowerM LowerValue
 lowerRollLike env exprEnv context resultTy payload nodeName = do
@@ -1453,9 +1720,19 @@ lowerBackendType env context ty =
       | otherwise -> Left (BackendLLVMUnsupportedType context ty)
     BTMu {} -> Right LLVMPtr
     BTVar {} -> Left (BackendLLVMUnsupportedType context ty)
+    BTVarApp {} -> Left (BackendLLVMUnsupportedType context ty)
     BTArrow {} -> Left (BackendLLVMUnsupportedType context ty)
     BTForall {} -> Left (BackendLLVMUnsupportedType context ty)
     BTBottom -> Left (BackendLLVMUnsupportedType context ty)
+
+decomposeBackendTypeHead :: BackendType -> Maybe (BackendType, [BackendType])
+decomposeBackendTypeHead ty =
+  case ty of
+    BTVar name -> Just (BTVar name, [])
+    BTBase name -> Just (BTBase name, [])
+    BTCon name args -> Just (BTBase name, NE.toList args)
+    BTVarApp name args -> Just (BTVar name, NE.toList args)
+    _ -> Nothing
 
 emitMalloc :: ProgramEnv -> String -> Int -> LowerM LLVMOperand
 emitMalloc env context size

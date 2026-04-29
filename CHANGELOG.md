@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Extended LLVM backend parity to higher-kinded constructor fields and
+  hidden-owner value-constructor imports. Backend IR now preserves applied type
+  variables, conversion recovers structural higher-kinded constructor terms as
+  explicit backend ADT nodes, and the temporary LLVM unsupported table no
+  longer lists the issue-owned rows.
 - Extended the shared `ProgramSpec`-to-LLVM parity matrix from first-order
   coverage to the canonical interpreter-success surface. The backend LLVM spec
   now emits supported cases through the file backend path, validates generated

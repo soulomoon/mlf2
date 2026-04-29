@@ -191,6 +191,18 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithDataAndMainExpr [optionData] someBoolAsOptionIntExpr)
       `shouldBe` Left (BackendConstructorArgumentMismatch "Some" 0 intTy boolTy)
 
+  it "substitutes applied type variables in constructor metadata" $ do
+    substituteBackendTypes
+      (Map.fromList [("f", BTBase (BaseTy "BoxF")), ("a", boolTy)])
+      (BTVarApp "f" (BTVar "a" :| []))
+      `shouldBe` boxFTy boolTy
+
+    validateBackendProgram (programWithDataAndMainExpr [boxFData, maybeFData] justFBoxBoolExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithDataAndMainExpr [boxFData, maybeFData] maybeFCaseExpr)
+      `shouldBe` Right ()
+
   it "uses constructor-level forall metadata when validating constructor fields" $ do
     validateBackendProgram (programWithDataAndMainExpr [packData] packIntExpr)
       `shouldBe` Right ()
@@ -379,6 +391,25 @@ optionData =
       backendDataConstructors = [BackendConstructor "Some" [] [BTVar "a"] (optionTy (BTVar "a"))]
     }
 
+boxFData :: BackendData
+boxFData =
+  BackendData
+    { backendDataName = "BoxF",
+      backendDataParameters = ["a"],
+      backendDataConstructors = [BackendConstructor "BoxF" [] [BTVar "a"] (boxFTy (BTVar "a"))]
+    }
+
+maybeFData :: BackendData
+maybeFData =
+  BackendData
+    { backendDataName = "MaybeF",
+      backendDataParameters = ["f", "a"],
+      backendDataConstructors =
+        [ BackendConstructor "NothingF" [] [] (maybeFTy (BTVar "f") (BTVar "a")),
+          BackendConstructor "JustF" [] [BTVarApp "f" (BTVar "a" :| [])] (maybeFTy (BTVar "f") (BTVar "a"))
+        ]
+    }
+
 packData :: BackendData
 packData =
   BackendData
@@ -480,6 +511,20 @@ someIntExpr =
 someBoolAsOptionIntExpr :: BackendExpr
 someBoolAsOptionIntExpr =
   BackendConstruct (optionTy intTy) "Some" [boolLit True]
+
+justFBoxBoolExpr :: BackendExpr
+justFBoxBoolExpr =
+  BackendConstruct (maybeFTy (BTBase (BaseTy "BoxF")) boolTy) "JustF" [BackendConstruct (boxFTy boolTy) "BoxF" [boolLit True]]
+
+maybeFCaseExpr :: BackendExpr
+maybeFCaseExpr =
+  BackendCase
+    { backendExprType = boolTy,
+      backendScrutinee = justFBoxBoolExpr,
+      backendAlternatives =
+        BackendAlternative (BackendConstructorPattern "NothingF" []) (boolLit False)
+          :| [BackendAlternative (BackendConstructorPattern "JustF" ["box"]) (boolLit True)]
+    }
 
 packIntExpr :: BackendExpr
 packIntExpr =
@@ -769,6 +814,14 @@ listTy ty =
 optionTy :: BackendType -> BackendType
 optionTy ty =
   BTCon (BaseTy "Option") (ty :| [])
+
+boxFTy :: BackendType -> BackendType
+boxFTy ty =
+  BTCon (BaseTy "BoxF") (ty :| [])
+
+maybeFTy :: BackendType -> BackendType -> BackendType
+maybeFTy fTy argTy =
+  BTCon (BaseTy "MaybeF") (fTy :| [argTy])
 
 pairTy :: BackendType -> BackendType -> BackendType
 pairTy left right =

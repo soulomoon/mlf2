@@ -1322,17 +1322,7 @@ unsupportedLLVMParityCases =
     ("boundary: local first-class polymorphic let through constructor boundary should run", "could not infer type arguments [\"a\"]"),
     ("boundary: pattern-bound first-class polymorphic variable should run", "could not infer type arguments [\"a\"]"),
     ("boundary: partial overloaded method application should run after deferred resolution", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
-    ("boundary: runs higher-kinded data field over a concrete constructor head", "BackendUnsupportedSourceType"),
-    ("boundary: runs nullary constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
-    ("boundary: runs first-class nullary constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-imported constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-exported constructor when owner type is not exported", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-exported constructor from bulk import when owner type is not exported", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-exported constructor from aliased bulk import when owner type is not exported", "BackendUnsupportedSourceType"),
-    ("boundary: runs aliased bulk-imported hidden-owner constructors in one case", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-exported GADT constructor when owner type is not exported", "BackendUnsupportedSourceType"),
-    ("boundary: runs value-imported nonzero-index constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
-    ("boundary: runs constrained helper through hidden Eq evidence", "constructor result type does not match expected result"),
+    ("boundary: runs constrained helper through hidden Eq evidence", "BackendVariableTypeMismatch \"Main__Eq__Nat__eq\""),
     ("boundary: runs ground constrained helper alias with resolved evidence", "Unsupported backend LLVM type at parameter \"$evidence_Eq_eq#0\" of Main__sameBool"),
     ("boundary: runs constrained helper after local lambda inference", "escaping function \"Main__Eq__Bool__eq\""),
     ("boundary: runs deferred method with method-level type variable constraint", "BackendTypeCheckFailed"),
@@ -1340,9 +1330,9 @@ unsupportedLLVMParityCases =
     ("boundary: runs deferred method when only a later forall binder is inferred", "BackendUnsupportedInstantiation InstElim"),
     ("boundary: runs constrained helper with method-local evidence fixed by call args", "BackendTypeCheckFailed"),
     ("boundary: runs deferred class method with method-level Eq constraint", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
-    ("boundary: runs constrained helper through method-level evidence constraints", "constructor result type does not match expected result"),
-    ("boundary: runs explicit constrained parameterized Eq instance", "ambiguous backend data matches scrutinee type"),
-    ("boundary: runs parameterized deriving Eq for Option", "ambiguous backend data matches scrutinee type"),
+    ("boundary: runs constrained helper through method-level evidence constraints", "BackendApplicationResultMismatch"),
+    ("boundary: runs explicit constrained parameterized Eq instance", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
+    ("boundary: runs parameterized deriving Eq for Option", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
     ("boundary: runs parameterized deriving Eq for recursive List", "BackendUnsupportedRecursiveLet"),
     ("boundary: runs qualified import with alias-only value and constructor access", "Unsupported backend LLVM type at return type of Core__Eq__Nat__eq"),
     ("boundary: runs aliased import with exposed method and qualified constructors", "Unsupported backend LLVM type at return type of Core__Eq__Nat__eq"),
@@ -1362,7 +1352,7 @@ unsupportedLLVMParityCases =
 
 expectedLLVMUnsupportedParityCount :: Int
 expectedLLVMUnsupportedParityCount =
-  48
+  38
 
 llvmUnsupportedParityCount :: Int
 llvmUnsupportedParityCount =
@@ -1375,7 +1365,9 @@ llvmObjectCodeParityCases :: [String]
 llvmObjectCodeParityCases =
   [ "surface: runs lambda/application",
     "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp",
-    "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp"
+    "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp",
+    "boundary: runs value-exported constructor when owner type is not exported",
+    "boundary: runs aliased bulk-imported hidden-owner constructors in one case"
   ]
 
 llvmObjectCodeParityCaseNames :: Set.Set String
