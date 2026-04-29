@@ -1322,7 +1322,7 @@ unsupportedLLVMParityCases =
     ("boundary: local first-class polymorphic let through constructor boundary should run", "could not infer type arguments [\"a\"]"),
     ("boundary: pattern-bound first-class polymorphic variable should run", "could not infer type arguments [\"a\"]"),
     ("boundary: partial overloaded method application should run after deferred resolution", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
-    ("boundary: runs constrained helper through hidden Eq evidence", "BackendVariableTypeMismatch \"Main__Eq__Nat__eq\""),
+    ("boundary: runs constrained helper through hidden Eq evidence", "constructor result type does not match expected result"),
     ("boundary: runs ground constrained helper alias with resolved evidence", "Unsupported backend LLVM type at parameter \"$evidence_Eq_eq#0\" of Main__sameBool"),
     ("boundary: runs constrained helper after local lambda inference", "escaping function \"Main__Eq__Bool__eq\""),
     ("boundary: runs deferred method with method-level type variable constraint", "BackendTypeCheckFailed"),
@@ -1330,7 +1330,7 @@ unsupportedLLVMParityCases =
     ("boundary: runs deferred method when only a later forall binder is inferred", "BackendUnsupportedInstantiation InstElim"),
     ("boundary: runs constrained helper with method-local evidence fixed by call args", "BackendTypeCheckFailed"),
     ("boundary: runs deferred class method with method-level Eq constraint", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
-    ("boundary: runs constrained helper through method-level evidence constraints", "BackendApplicationResultMismatch"),
+    ("boundary: runs constrained helper through method-level evidence constraints", "constructor result type does not match expected result"),
     ("boundary: runs explicit constrained parameterized Eq instance", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
     ("boundary: runs parameterized deriving Eq for Option", "Unsupported backend LLVM type at return type of Main__Eq__Nat__eq"),
     ("boundary: runs parameterized deriving Eq for recursive List", "BackendUnsupportedRecursiveLet"),
@@ -1367,7 +1367,8 @@ llvmObjectCodeParityCases =
     "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp",
     "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp",
     "boundary: runs value-exported constructor when owner type is not exported",
-    "boundary: runs aliased bulk-imported hidden-owner constructors in one case"
+    "boundary: runs aliased bulk-imported hidden-owner constructors in one case",
+    "boundary: runs exposed constructor with qualified alias type identity"
   ]
 
 llvmObjectCodeParityCaseNames :: Set.Set String

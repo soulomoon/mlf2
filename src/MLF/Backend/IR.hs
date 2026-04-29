@@ -357,7 +357,7 @@ structuralMuMatchesData (BaseTy dataName) args muName body =
   structuralMuNameMatches dataName muName
     && case structuralMuPayloadTypes body of
       Just payloadTypes
-        | null args -> True
+        | null args || null payloadTypes -> True
         | otherwise -> zipAllWith alphaEqBackendType args payloadTypes
       Nothing -> null args
 
@@ -416,7 +416,8 @@ structuralMuNameMatches :: String -> String -> Bool
 structuralMuNameMatches dataName muName =
   case structuralMuDataName muName of
     Just structuralName ->
-      dataName == structuralName || unqualifiedName dataName == structuralName
+      dataName == structuralName
+        || (isUnqualifiedName structuralName && unqualifiedName dataName == structuralName)
     Nothing -> False
 
 structuralMuDataName :: String -> Maybe String
@@ -435,6 +436,10 @@ stripPrefixSimple _ [] =
 stripPrefixSimple (expected : expectedRest) (actual : actualRest)
   | expected == actual = stripPrefixSimple expectedRest actualRest
   | otherwise = Nothing
+
+isUnqualifiedName :: String -> Bool
+isUnqualifiedName =
+  notElem '.'
 
 unqualifiedName :: String -> String
 unqualifiedName =

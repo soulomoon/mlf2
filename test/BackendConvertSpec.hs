@@ -340,6 +340,25 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
 
+  it "scopes unqualified structural owner recovery to the current module" $ do
+    checked0 <- requireChecked sameNameUnqualifiedStructuralOwnerProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingSourceType = STBase "Main.T",
+                    checkedBindingType = Elab.TBase (BaseTy "Main.T"),
+                    checkedBindingTerm = unqualifiedStructuralNullaryConstructorTerm
+                  }
+            )
+            checked0
+
+    backend <- requireRight (convertCheckedProgram checked)
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__T"]
+    collectConstructNames (backendBindingExpr mainBinding) `shouldNotContain` ["Core__External"]
+
   it "treats stale app-like instantiations on non-forall terms as no-ops" $ do
     checked0 <- requireChecked simpleFunctionProgram
     let checked =
@@ -627,6 +646,24 @@ qualifiedAliasOrderingProgram =
       "  def main : Bool = case Z.make of {",
       "    Z.ZValue -> true",
       "  };",
+      "}"
+    ]
+
+sameNameUnqualifiedStructuralOwnerProgram :: String
+sameNameUnqualifiedStructuralOwnerProgram =
+  unlines
+    [ "module Core export (T(..)) {",
+      "  data T =",
+      "      External : T;",
+      "}",
+      "",
+      "module Main export (T(..), main) {",
+      "  import Core as C;",
+      "",
+      "  data T =",
+      "      T : T;",
+      "",
+      "  def main : T = T;",
       "}"
     ]
 
@@ -1083,6 +1120,26 @@ alphaEquivalentIdentityTerm =
     "b"
     Nothing
     (Elab.ELam "$poly_id_b" (Elab.TVar "b") (Elab.EVar "$poly_id_b"))
+
+unqualifiedStructuralNullaryConstructorTerm :: Elab.ElabTerm
+unqualifiedStructuralNullaryConstructorTerm =
+  Elab.ERoll
+    unqualifiedStructuralTElabTy
+    ( Elab.ETyAbs
+        "$T_result"
+        Nothing
+        (Elab.ELam "$T_handler" (Elab.TVar "$T_result") (Elab.EVar "$T_handler"))
+    )
+
+unqualifiedStructuralTElabTy :: Elab.ElabType
+unqualifiedStructuralTElabTy =
+  Elab.TMu
+    "$T_self"
+    ( Elab.TForall
+        "$T_result"
+        Nothing
+        (Elab.TArrow (Elab.TVar "$T_result") (Elab.TVar "$T_result"))
+    )
 
 mapMainBinding :: (CheckedBinding -> CheckedBinding) -> CheckedProgram -> CheckedProgram
 mapMainBinding f checked =

@@ -1609,14 +1609,16 @@ structuralMuNameMatches dataName muName =
   case structuralMuDataName muName of
     Just muDataName ->
       dataName == muDataName
-        || unqualifiedName dataName == muDataName
-        || dataName == unqualifiedName muDataName
-        || unqualifiedName dataName == unqualifiedName muDataName
+        || (isUnqualifiedName muDataName && unqualifiedName dataName == muDataName)
     Nothing -> False
 
 structuralMuDataName :: String -> Maybe String
 structuralMuDataName name =
   stripSuffixSimple "_self" (dropWhile (== '$') name)
+
+isUnqualifiedName :: String -> Bool
+isUnqualifiedName =
+  notElem '.'
 
 unqualifiedName :: String -> String
 unqualifiedName =

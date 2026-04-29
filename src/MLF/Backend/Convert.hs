@@ -74,6 +74,7 @@ data ConvertContext = ConvertContext
     ccBindingData :: Map String DataMeta,
     ccData :: [DataMeta],
     ccGlobalTerms :: Set.Set String,
+    ccCurrentModuleName :: Maybe String,
     ccCurrentBindingName :: String
   }
 
@@ -166,7 +167,11 @@ convertCheckedModule context env checkedModule = do
 
 convertCheckedBinding :: ConvertContext -> Env -> CheckedModule -> CheckedBinding -> Either BackendConversionError [BackendBinding]
 convertCheckedBinding context env checkedModule binding = do
-  let bindingContext = context {ccCurrentBindingName = checkedBindingName binding}
+  let bindingContext =
+        context
+          { ccCurrentModuleName = Just (checkedModuleName checkedModule),
+            ccCurrentBindingName = checkedBindingName binding
+          }
   canonicalElabTy <- checkedBindingCanonicalType context checkedModule binding
   bindingTy <- checkedBindingCanonicalBackendType context checkedModule binding canonicalElabTy
   (expr, liftedBindings) <-
@@ -606,6 +611,7 @@ buildConvertContext checked = do
         ccBindingData = bindingData,
         ccData = dataMetas,
         ccGlobalTerms = checkedProgramGlobalTerms checked,
+        ccCurrentModuleName = Nothing,
         ccCurrentBindingName = ""
       }
 
@@ -765,6 +771,7 @@ buildDataMeta scope info = do
             ccBindingData = Map.empty,
             ccData = [rawMeta],
             ccGlobalTerms = Set.empty,
+            ccCurrentModuleName = Just (dataModule info),
             ccCurrentBindingName = ""
           }
       constructors =
@@ -824,6 +831,10 @@ backendTypeNeedsStructuralRecovery context =
 dataMetaNeedsStructuralRecovery :: DataMeta -> Bool
 dataMetaNeedsStructuralRecovery dataMeta =
   any backendConstructorContainsVarApp (backendDataConstructors (dmBackend dataMeta))
+
+contextForDataMeta :: ConvertContext -> DataMeta -> ConvertContext
+contextForDataMeta context dataMeta =
+  context {ccCurrentModuleName = Just (dataModule (dmInfo dataMeta))}
 
 constructorMetasForData :: DataMeta -> [ConstructorMeta]
 constructorMetasForData dataMeta =
@@ -1039,7 +1050,7 @@ convertOrdinaryTerm context env term resultTy0 =
       paramBackendTy <-
         case resultTy of
           BTArrow dom _ -> Right dom
-          _ -> convertElabType paramTy
+          _ -> recoverStructuralBackendType context <$> convertElabType paramTy
       let paramEnvTy =
             case backendTypeToElabType paramBackendTy of
               Just canonicalTy -> canonicalTy
@@ -1072,9 +1083,13 @@ convertOrdinaryTerm context env term resultTy0 =
       let schemeTy = schemeToType scheme
       when (termMentionsFreeVariable name rhs) $
         Left (BackendUnsupportedRecursiveLet name)
-      bindingTy <- convertElabType schemeTy
+      bindingTy <- recoverStructuralBackendType context <$> convertElabType schemeTy
       rhsExpr <- convertTermExpected context env (Just bindingTy) rhs
-      bodyExpr <- convertTermExpected context (extendTermEnv name schemeTy env) (Just resultTy) body
+      let bindingEnvTy =
+            case backendTypeToElabType bindingTy of
+              Just canonicalTy -> canonicalTy
+              Nothing -> schemeTy
+      bodyExpr <- convertTermExpected context (extendTermEnv name bindingEnvTy env) (Just resultTy) body
       Right
         BackendLet
           { backendExprType = resultTy,
@@ -1190,45 +1205,67 @@ convertConstructorApplication ::
   BackendType ->
   Either BackendConversionError (Maybe BackendExpr)
 convertConstructorApplication context env term resultTy =
-  case constructorApplicationTerm context term of
+  constructorApplicationTerm context term >>= \case
     Just (ConstructorApplication constructorMeta headTypeArgs args) -> do
       let constructor = cmBackend constructorMeta
+          ownerContext = contextForDataMeta context (cmData constructorMeta)
           parameters = constructorTypeParameters constructorMeta
           rawFields = backendConstructorFields constructor
-          effectiveResultTy = recoverStructuralBackendType context resultTy
-          constructorResultTy = recoverStructuralBackendType context (backendConstructorResult constructor)
+          effectiveResultTy = recoverStructuralBackendType ownerContext (recoverStructuralBackendType context resultTy)
+          constructorResultTy = recoverStructuralBackendType ownerContext (backendConstructorResult constructor)
       typeBounds <- backendTypeBoundsFromEnv env
       initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
-      let mbResultSubstitution =
-            matchBackendTypeParameters typeBounds parameters initialSubstitution constructorResultTy effectiveResultTy
+      let resultSubstitution =
+            case matchBackendTypeParameters typeBounds parameters initialSubstitution constructorResultTy effectiveResultTy of
+              Just substitution -> substitution
+              Nothing -> initialSubstitution
       substitution <-
         foldM
           (matchConstructorApplicationArgument context env typeBounds parameters)
-          (maybe initialSubstitution id mbResultSubstitution)
+          resultSubstitution
           (zip rawFields args)
       let completedSubstitution = completeBackendParameterSubstitution parameters substitution
           fields = map (substituteBackendTypes completedSubstitution) rawFields
-          constructResultTy =
-            case mbResultSubstitution of
-              Just _ -> effectiveResultTy
-              Nothing -> substituteBackendTypes completedSubstitution (backendConstructorResult constructor)
+          substitutedResultTy = recoverStructuralBackendType ownerContext (substituteBackendTypes completedSubstitution constructorResultTy)
+      unless (alphaEqBackendType substitutedResultTy effectiveResultTy || sameBackendDataHead substitutedResultTy effectiveResultTy) $
+        Left
+          ( BackendUnsupportedCaseShape
+              ( "constructor result type does not match expected result for `"
+                  ++ backendConstructorName constructor
+                  ++ "`"
+              )
+          )
       argExprs <- zipWithM (convertTermExpected context env . Just) fields args
       Right
         ( Just
             BackendConstruct
-              { backendExprType = constructResultTy,
+              { backendExprType = effectiveResultTy,
                 backendConstructName = backendConstructorName constructor,
                 backendConstructArgs = argExprs
               }
         )
     Nothing -> Right Nothing
 
-constructorApplicationTerm :: ConvertContext -> ElabTerm -> Maybe ConstructorApplication
+sameBackendDataHead :: BackendType -> BackendType -> Bool
+sameBackendDataHead left right =
+  case (backendTypeDataHeadName left, backendTypeDataHeadName right) of
+    (Just leftName, Just rightName) -> leftName == rightName
+    _ -> False
+
+backendTypeDataHeadName :: BackendType -> Maybe String
+backendTypeDataHeadName =
+  \case
+    BTBase (BaseTy name) -> Just name
+    BTCon (BaseTy name) _ -> Just name
+    _ -> Nothing
+
+constructorApplicationTerm :: ConvertContext -> ElabTerm -> Either BackendConversionError (Maybe ConstructorApplication)
 constructorApplicationTerm context term =
   case collectApps term of
     (headTerm, args) ->
-      directConstructorApplication headTerm args
-        <|> structuralConstructorApplication headTerm args
+      case directConstructorApplication headTerm args of
+        Just application -> Right (Just application)
+        Nothing -> structuralConstructorApplication headTerm args
   where
     directConstructorApplication headTerm args =
       case constructorHead headTerm of
@@ -1240,13 +1277,20 @@ constructorApplicationTerm context term =
 
     structuralConstructorApplication headTerm args =
       case filter (`constructorArityMatches` args) (Map.elems (ccConstructors context)) of
-        [] -> Nothing
+        [] -> Right Nothing
         candidates ->
           let strippedHead = stripTypeInsts headTerm
-              matches = filter (`structuralConstructorHeadMatches` strippedHead) candidates
+              matches = filter (\candidate -> structuralConstructorHeadMatches context candidate strippedHead) candidates
            in case matches of
-                constructorMeta : _ -> Just (ConstructorApplication constructorMeta [] args)
-                [] -> Nothing
+                [constructorMeta] -> Right (Just (ConstructorApplication constructorMeta [] args))
+                [] -> Right Nothing
+                _ ->
+                  Left
+                    ( BackendUnsupportedCaseShape
+                        ( "ambiguous structural constructor matches: "
+                            ++ show (map (backendConstructorName . cmBackend) matches)
+                        )
+                    )
 
     constructorArityMatches constructorMeta args =
       length args == length (backendConstructorFields (cmBackend constructorMeta))
@@ -1256,11 +1300,11 @@ constructorApplicationTerm context term =
         then Just ()
         else Nothing
 
-structuralConstructorHeadMatches :: ConstructorMeta -> ElabTerm -> Bool
-structuralConstructorHeadMatches constructorMeta headTerm =
+structuralConstructorHeadMatches :: ConvertContext -> ConstructorMeta -> ElabTerm -> Bool
+structuralConstructorHeadMatches context constructorMeta headTerm =
   case collectStructuralLams fieldArity headTerm of
     Just (argNames, ERoll resultTy rolledBody)
-      | structuralConstructorResultMatches constructorMeta resultTy ->
+      | structuralConstructorResultMatches context constructorMeta resultTy ->
           case collectStructuralLams ownerArity (stripLeadingTypeAbs rolledBody) of
             Just (handlerNames, selectedBody) ->
               case drop constructorIndex handlerNames of
@@ -1275,18 +1319,26 @@ structuralConstructorHeadMatches constructorMeta headTerm =
     ownerArity = length (backendDataConstructors (dmBackend (cmData constructorMeta)))
     constructorIndex = ctorIndex (cmInfo constructorMeta)
 
-structuralConstructorResultMatches :: ConstructorMeta -> ElabType -> Bool
-structuralConstructorResultMatches constructorMeta resultTy =
+structuralConstructorResultMatches :: ConvertContext -> ConstructorMeta -> ElabType -> Bool
+structuralConstructorResultMatches context constructorMeta resultTy =
   case convertElabType resultTy >>= backendTypeStructuralDataName of
-    Right resultDataName -> constructorDataNameMatches constructorMeta resultDataName
+    Right resultDataName -> constructorDataNameMatches context constructorMeta resultDataName
     Left _ -> False
 
-constructorDataNameMatches :: ConstructorMeta -> String -> Bool
-constructorDataNameMatches constructorMeta resultDataName =
+constructorDataNameMatches :: ConvertContext -> ConstructorMeta -> String -> Bool
+constructorDataNameMatches context constructorMeta resultDataName =
   resultDataName == backendDataName (dmBackend dataMeta)
-    || resultDataName == symbolDefiningName (dataInfoSymbol (dmInfo dataMeta))
+    || localUnqualifiedDataNameMatches context dataMeta resultDataName
   where
     dataMeta = cmData constructorMeta
+
+localUnqualifiedDataNameMatches :: ConvertContext -> DataMeta -> String -> Bool
+localUnqualifiedDataNameMatches context dataMeta resultDataName =
+  case ccCurrentModuleName context of
+    Just moduleName ->
+      dataModule (dmInfo dataMeta) == moduleName
+        && resultDataName == symbolDefiningName (dataInfoSymbol (dmInfo dataMeta))
+    Nothing -> False
 
 backendTypeStructuralDataName :: BackendType -> Either BackendConversionError String
 backendTypeStructuralDataName =
@@ -1520,9 +1572,22 @@ dataMetaByBackendName context name =
 dataMetaByStructuralName :: ConvertContext -> String -> Maybe DataMeta
 dataMetaByStructuralName context name =
   dataMetaByBackendName context name
-    <|> case [dataMeta | dataMeta <- ccData context, symbolDefiningName (dataInfoSymbol (dmInfo dataMeta)) == name] of
-      [dataMeta] -> Just dataMeta
-      _ -> Nothing
+    <|> dataMetaByCurrentModuleStructuralName context name
+
+dataMetaByCurrentModuleStructuralName :: ConvertContext -> String -> Maybe DataMeta
+dataMetaByCurrentModuleStructuralName context name =
+  case ccCurrentModuleName context of
+    Nothing -> Nothing
+    Just moduleName ->
+      case
+        [ dataMeta
+          | dataMeta <- ccData context,
+            dataModule (dmInfo dataMeta) == moduleName,
+            symbolDefiningName (dataInfoSymbol (dmInfo dataMeta)) == name
+        ]
+      of
+        [dataMeta] -> Just dataMeta
+        _ -> Nothing
 
 recoverStructuralBackendType :: ConvertContext -> BackendType -> BackendType
 recoverStructuralBackendType context =
@@ -1584,16 +1649,8 @@ structuralMuAsActualDataType muName actual =
 structuralMuNameMatches :: String -> String -> Bool
 structuralMuNameMatches actualName muName =
   case structuralRecursiveDataName muName of
-    Just structuralName ->
-      actualName == structuralName
-        || unqualifiedName actualName == structuralName
-        || actualName == unqualifiedName structuralName
-        || unqualifiedName actualName == unqualifiedName structuralName
+    Just structuralName -> actualName == structuralName
     Nothing -> False
-
-unqualifiedName :: String -> String
-unqualifiedName =
-  reverse . takeWhile (/= '.') . reverse
 
 freeBackendTypeVarsInOrder :: BackendType -> [String]
 freeBackendTypeVarsInOrder =
@@ -1699,9 +1756,10 @@ structuralBackendHandlerFields =
 
 constructorApplicationResultType :: ConvertContext -> Env -> ElabTerm -> Either BackendConversionError (Maybe (BackendType, Maybe DataMeta))
 constructorApplicationResultType context env term =
-  case constructorApplicationTerm context term of
+  constructorApplicationTerm context term >>= \case
     Just (ConstructorApplication constructorMeta headTypeArgs args) -> do
       let constructor = cmBackend constructorMeta
+          ownerContext = contextForDataMeta context (cmData constructorMeta)
           fields = backendConstructorFields constructor
           parameters = constructorTypeParameters constructorMeta
       typeBounds <- backendTypeBoundsFromEnv env
@@ -1712,9 +1770,10 @@ constructorApplicationResultType context env term =
           initialSubstitution
           (zip fields args)
       let resultTy =
-            substituteBackendTypes
-              (completeBackendParameterSubstitution parameters substitution)
-              (backendConstructorResult constructor)
+            recoverStructuralBackendType ownerContext $
+              substituteBackendTypes
+                (completeBackendParameterSubstitution parameters substitution)
+                (backendConstructorResult constructor)
       Right (Just (resultTy, Just (cmData constructorMeta)))
     Nothing -> Right Nothing
 
