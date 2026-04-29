@@ -178,6 +178,21 @@ spec = describe "MLF.Backend.IR" $ do
     alphaEqBackendType (BTBase (BaseTy "Other.T")) (BTMu "$T_self" intTy)
       `shouldBe` False
 
+  it "preserves nominal arguments when structural recursive payloads omit them" $ do
+    alphaEqBackendType
+      (BTCon (BaseTy "Core.Phantom") (intTy :| []))
+      (BTMu "$Core.Phantom_self" (BTForall "r" Nothing (BTVar "r")))
+      `shouldBe` False
+
+    alphaEqBackendType
+      (BTCon (BaseTy "Core.Phantom") (BTVar "a" :| []))
+      (BTMu "$Core.Phantom_self" (BTForall "r" Nothing (BTVar "r")))
+      `shouldBe` True
+
+  it "recovers structural data arguments in declared parameter order" $ do
+    validateBackendProgram (programWithDataAndMainExpr [outOfOrderStructuralData] outOfOrderStructuralConstructExpr)
+      `shouldBe` Right ()
+
   it "rejects recursive roll and unroll type mismatches" $ do
     let recTy = BTMu "self" intTy
 
@@ -506,6 +521,20 @@ captureCaseData =
     { backendDataName = "CaptureCase",
       backendDataParameters = ["p"],
       backendDataConstructors = [BackendConstructor "CaptureCase" [] [] captureCaseTemplateTy]
+    }
+
+outOfOrderStructuralData :: BackendData
+outOfOrderStructuralData =
+  BackendData
+    { backendDataName = "OutOfOrder",
+      backendDataParameters = ["a", "b"],
+      backendDataConstructors =
+        [ BackendConstructor
+            "OutOfOrder"
+            []
+            [BTVar "b", BTVar "a"]
+            outOfOrderStructuralTy
+        ]
     }
 
 boxCaseExpr :: BackendExpr
@@ -864,3 +893,25 @@ captureCaseTemplateTy =
 captureCaseScrutineeTy :: BackendType
 captureCaseScrutineeTy =
   BTCon (BaseTy "CaptureCase") (BTVar "a1" :| [captureForallActualTy])
+
+outOfOrderStructuralConstructExpr :: BackendExpr
+outOfOrderStructuralConstructExpr =
+  BackendConstruct
+    (outOfOrderTy intTy boolTy)
+    "OutOfOrder"
+    [boolLit True, intLit 1]
+
+outOfOrderTy :: BackendType -> BackendType -> BackendType
+outOfOrderTy aTy bTy =
+  BTCon (BaseTy "OutOfOrder") (aTy :| [bTy])
+
+outOfOrderStructuralTy :: BackendType
+outOfOrderStructuralTy =
+  BTMu "$OutOfOrder_self" outOfOrderStructuralBody
+
+outOfOrderStructuralBody :: BackendType
+outOfOrderStructuralBody =
+  BTForall
+    "r"
+    Nothing
+    (BTArrow (BTArrow (BTVar "b") (BTArrow (BTVar "a") (BTVar "r"))) (BTVar "r"))

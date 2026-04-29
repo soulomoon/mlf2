@@ -1446,7 +1446,7 @@ constructorFieldTypesForScrutinee _ context constructorRuntime scrutineeTy =
     Just fieldTys ->
       pure fieldTys
     Nothing ->
-      case matchConstructorResult parameters Map.empty (backendConstructorResult constructor) scrutineeTy of
+      case matchConstructorResult (crDataParameters constructorRuntime) parameters Map.empty (backendConstructorResult constructor) scrutineeTy of
         Just substitution ->
           pure (map (substituteBackendTypes substitution) (backendConstructorFields constructor))
         Nothing ->
@@ -1525,8 +1525,8 @@ atMay xs index0
         value : _ -> Just value
         [] -> Nothing
 
-matchConstructorResult :: Set String -> Map String BackendType -> BackendType -> BackendType -> Maybe (Map String BackendType)
-matchConstructorResult parameters substitution expected actual =
+matchConstructorResult :: [String] -> Set String -> Map String BackendType -> BackendType -> BackendType -> Maybe (Map String BackendType)
+matchConstructorResult dataParameterOrder parameters substitution expected actual =
   case expected of
     BTVar name
       | Set.member name parameters ->
@@ -1543,14 +1543,14 @@ matchConstructorResult parameters substitution expected actual =
               (BTVar expectedName, BTVar actualName)
                 | expectedName == actualName -> Just substitution
               (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
-                matchConstructorResult parameters substitution expectedDom actualDom
-                  >>= \subst -> matchConstructorResult parameters subst expectedCod actualCod
+                matchConstructorResult dataParameterOrder parameters substitution expectedDom actualDom
+                  >>= \subst -> matchConstructorResult dataParameterOrder parameters subst expectedCod actualCod
               (BTBase expectedBase, BTBase actualBase)
                 | expectedBase == actualBase -> Just substitution
               (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs)
                 | expectedCon == actualCon && length expectedArgs == length actualArgs ->
                     foldM
-                      (\subst (expectedArg, actualArg) -> matchConstructorResult parameters subst expectedArg actualArg)
+                      (\subst (expectedArg, actualArg) -> matchConstructorResult dataParameterOrder parameters subst expectedArg actualArg)
                       substitution
                       (zip (NE.toList expectedArgs) (NE.toList actualArgs))
               (BTMu expectedName expectedBody, actualTy@(BTBase {})) ->
@@ -1562,36 +1562,36 @@ matchConstructorResult parameters substitution expected actual =
               (expectedTy@(BTCon {}), BTMu actualName actualBody) ->
                 matchStructuralMuActual expectedTy actualName actualBody
               (BTVarApp expectedName expectedArgs, _) ->
-                matchConstructorResultApplication parameters substitution expectedName (NE.toList expectedArgs) actual
+                matchConstructorResultApplication dataParameterOrder parameters substitution expectedName (NE.toList expectedArgs) actual
               (BTForall expectedName expectedBound expectedBody, BTForall actualName actualBound actualBody) -> do
                 subst <-
                   case (expectedBound, actualBound) of
                     (Nothing, Nothing) -> Just substitution
-                    (Just expectedBoundTy, Just actualBoundTy) -> matchConstructorResult parameters substitution expectedBoundTy actualBoundTy
+                    (Just expectedBoundTy, Just actualBoundTy) -> matchConstructorResult dataParameterOrder parameters substitution expectedBoundTy actualBoundTy
                     _ -> Nothing
-                matchConstructorResult parameters subst expectedBody (substituteBackendType actualName (BTVar expectedName) actualBody)
+                matchConstructorResult dataParameterOrder parameters subst expectedBody (substituteBackendType actualName (BTVar expectedName) actualBody)
               (BTMu expectedName expectedBody, BTMu actualName actualBody) ->
-                matchConstructorResult parameters substitution expectedBody (substituteBackendType actualName (BTVar expectedName) actualBody)
+                matchConstructorResult dataParameterOrder parameters substitution expectedBody (substituteBackendType actualName (BTVar expectedName) actualBody)
               (BTBottom, BTBottom) ->
                 Just substitution
               _ ->
                 Nothing
           )
   where
-    matchStructuralMuExpected muName body actualTy =
+    matchStructuralMuExpected muName _body actualTy =
       firstJust
-        [ structuralMuAsDataType parameters muName body
-            >>= \expectedTy -> matchConstructorResult parameters substitution expectedTy actualTy,
+        [ structuralMuAsDataType dataParameterOrder muName
+            >>= \expectedTy -> matchConstructorResult dataParameterOrder parameters substitution expectedTy actualTy,
           structuralMuAsActualDataType muName actualTy
-            >>= \expectedTy -> matchConstructorResult parameters substitution expectedTy actualTy
+            >>= \expectedTy -> matchConstructorResult dataParameterOrder parameters substitution expectedTy actualTy
         ]
 
-    matchStructuralMuActual expectedTy muName body =
+    matchStructuralMuActual expectedTy muName _body =
       firstJust
-        [ structuralMuAsDataType parameters muName body
-            >>= \actualTy -> matchConstructorResult parameters substitution expectedTy actualTy,
+        [ structuralMuAsDataType dataParameterOrder muName
+            >>= \actualTy -> matchConstructorResult dataParameterOrder parameters substitution expectedTy actualTy,
           structuralMuAsActualDataType muName expectedTy
-            >>= \actualTy -> matchConstructorResult parameters substitution expectedTy actualTy
+            >>= \actualTy -> matchConstructorResult dataParameterOrder parameters substitution expectedTy actualTy
         ]
 
     firstJust =
@@ -1602,14 +1602,10 @@ matchConstructorResult parameters substitution expected actual =
             Just value -> Just value
             Nothing -> firstJust rest
 
-structuralMuAsDataType :: Set String -> String -> BackendType -> Maybe BackendType
-structuralMuAsDataType parameters muName body = do
+structuralMuAsDataType :: [String] -> String -> Maybe BackendType
+structuralMuAsDataType dataParameterOrder muName = do
   dataName <- structuralMuDataName muName
-  let parameterArgs =
-        [ BTVar name
-          | name <- freeBackendTypeVarsInOrder body,
-            Set.member name parameters
-        ]
+  let parameterArgs = map BTVar dataParameterOrder
   Just $
     case parameterArgs of
       [] -> BTBase (BaseTy dataName)
@@ -1647,52 +1643,24 @@ stripPrefixSimple (expected : expectedRest) (actual : actualRest)
   | expected == actual = stripPrefixSimple expectedRest actualRest
   | otherwise = Nothing
 
-freeBackendTypeVarsInOrder :: BackendType -> [String]
-freeBackendTypeVarsInOrder =
-  go Set.empty []
-  where
-    go bound seen ty =
-      case ty of
-        BTVar name ->
-          addName bound seen name
-        BTArrow dom cod ->
-          go bound (go bound seen dom) cod
-        BTBase {} ->
-          seen
-        BTCon _ args ->
-          foldl (go bound) seen (NE.toList args)
-        BTVarApp name args ->
-          foldl (go bound) (addName bound seen name) (NE.toList args)
-        BTForall name mb body ->
-          let seen' = maybe seen (go bound seen) mb
-           in go (Set.insert name bound) seen' body
-        BTMu name body ->
-          go (Set.insert name bound) seen body
-        BTBottom ->
-          seen
-
-    addName bound seen name
-      | Set.member name bound = seen
-      | name `elem` seen = seen
-      | otherwise = seen ++ [name]
-
 matchConstructorResultApplication ::
+  [String] ->
   Set String ->
   Map String BackendType ->
   String ->
   [BackendType] ->
   BackendType ->
   Maybe (Map String BackendType)
-matchConstructorResultApplication parameters substitution name expectedArgs actual =
+matchConstructorResultApplication dataParameterOrder parameters substitution name expectedArgs actual =
   case decomposeBackendTypeHead actual of
     Just (actualHead, actualArgs)
       | length expectedArgs == length actualArgs -> do
           substitution' <-
             if Set.member name parameters
               then insertParameterSubstitution name actualHead substitution
-              else matchConstructorResult parameters substitution (BTVar name) actualHead
+              else matchConstructorResult dataParameterOrder parameters substitution (BTVar name) actualHead
           foldM
-            (\subst (expectedArg, actualArg) -> matchConstructorResult parameters subst expectedArg actualArg)
+            (\subst (expectedArg, actualArg) -> matchConstructorResult dataParameterOrder parameters subst expectedArg actualArg)
             substitution'
             (zip expectedArgs actualArgs)
     _ -> Nothing

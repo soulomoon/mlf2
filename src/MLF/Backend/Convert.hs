@@ -523,11 +523,12 @@ sourceBoundToElabBound (SrcBound boundTy) =
 
 constructorBindingResultMatches :: BackendType -> ConstructorMeta -> Bool
 constructorBindingResultMatches bindingTy constructorMeta =
-  case matchBackendTypeParameters Map.empty parameters Map.empty (backendConstructorResult constructor) resultTy of
+  case matchBackendTypeParameters Map.empty dataParameters parameters Map.empty (backendConstructorResult constructor) resultTy of
     Just _ -> True
     Nothing -> False
   where
     constructor = cmBackend constructorMeta
+    dataParameters = constructorDataParameters constructorMeta
     parameters = constructorTypeParameters constructorMeta
     (_, bodyTy) = splitBackendForalls bindingTy
     (_, resultTy) = splitBackendArrows bodyTy
@@ -1243,6 +1244,7 @@ convertConstructorApplication context env term resultTy =
     Just (ConstructorApplication constructorMeta headTypeArgs args) -> do
       let constructor = cmBackend constructorMeta
           ownerContext = contextForDataMeta context (cmData constructorMeta)
+          dataParameters = constructorDataParameters constructorMeta
           parameters = constructorTypeParameters constructorMeta
           rawFields = backendConstructorFields constructor
           effectiveResultTy = recoverStructuralBackendType ownerContext (recoverStructuralBackendType context resultTy)
@@ -1250,12 +1252,12 @@ convertConstructorApplication context env term resultTy =
       typeBounds <- backendTypeBoundsFromEnv env
       initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
       let resultSubstitution =
-            case matchBackendTypeParameters typeBounds parameters initialSubstitution constructorResultTy effectiveResultTy of
+            case matchBackendTypeParameters typeBounds dataParameters parameters initialSubstitution constructorResultTy effectiveResultTy of
               Just substitution -> substitution
               Nothing -> initialSubstitution
       substitution <-
         foldM
-          (matchConstructorApplicationArgument context env typeBounds parameters)
+          (matchConstructorApplicationArgument context env typeBounds dataParameters parameters)
           resultSubstitution
           (zip rawFields args)
       let completedSubstitution = completeBackendParameterSubstitution parameters substitution
@@ -1417,6 +1419,10 @@ selectedHandlerCallMatches selectedHandler argNames body =
 constructorTypeParameters :: ConstructorMeta -> BackendParameterBounds
 constructorTypeParameters constructorMeta =
   constructorTypeParameterBoundsFor (dmBackend (cmData constructorMeta)) (cmBackend constructorMeta)
+
+constructorDataParameters :: ConstructorMeta -> [String]
+constructorDataParameters =
+  backendDataParameters . dmBackend . cmData
 
 constructorTypeParameterBoundsFor :: BackendData -> BackendConstructor -> BackendParameterBounds
 constructorTypeParameterBoundsFor dataDecl constructor =
@@ -1698,14 +1704,10 @@ structuralRecursiveDataName name = do
   let withoutPrefix = dropWhile (== '$') name
   stripSuffix "_self" withoutPrefix
 
-structuralMuAsDataType :: BackendParameterBounds -> String -> BackendType -> Maybe BackendType
-structuralMuAsDataType parameterBounds muName body = do
+structuralMuAsDataType :: [String] -> String -> Maybe BackendType
+structuralMuAsDataType dataParameterOrder muName = do
   structuralName <- structuralRecursiveDataName muName
-  let parameterArgs =
-        [ BTVar name
-          | name <- freeBackendTypeVarsInOrder body,
-            Map.member name parameterBounds
-        ]
+  let parameterArgs = map BTVar dataParameterOrder
   Just $
     case parameterArgs of
       [] -> BTBase (BaseTy structuralName)
@@ -1726,35 +1728,6 @@ structuralMuNameMatches actualName muName =
     Just structuralName -> actualName == structuralName
     Nothing -> False
 
-freeBackendTypeVarsInOrder :: BackendType -> [String]
-freeBackendTypeVarsInOrder =
-  go Set.empty []
-  where
-    go bound seen ty =
-      case ty of
-        BTVar name ->
-          addName bound seen name
-        BTArrow dom cod ->
-          go bound (go bound seen dom) cod
-        BTBase {} ->
-          seen
-        BTCon _ args ->
-          foldl (go bound) seen (NE.toList args)
-        BTVarApp name args ->
-          foldl (go bound) (addName bound seen name) (NE.toList args)
-        BTForall name mb body ->
-          let seen' = maybe seen (go bound seen) mb
-           in go (Set.insert name bound) seen' body
-        BTMu name body ->
-          go (Set.insert name bound) seen body
-        BTBottom ->
-          seen
-
-    addName bound seen name
-      | Set.member name bound = seen
-      | name `elem` seen = seen
-      | otherwise = seen ++ [name]
-
 stripSuffix :: String -> String -> Maybe String
 stripSuffix suffix value =
   reverse <$> stripPrefix (reverse suffix) (reverse value)
@@ -1763,27 +1736,29 @@ structuralBackendDataArguments :: (BackendType -> BackendType) -> DataMeta -> Ba
 structuralBackendDataArguments recoverFieldTy dataMeta body = do
   handlerFields <- structuralBackendHandlerFields body
   let dataDecl = dmBackend dataMeta
+      dataParameters = backendDataParameters dataDecl
       constructors = backendDataConstructors dataDecl
       parameterBounds =
-        Map.fromList [(name, Nothing) | name <- backendDataParameters dataDecl]
+        Map.fromList [(name, Nothing) | name <- dataParameters]
   if length handlerFields == length constructors
     then do
       substitution <-
         foldM
-          (matchConstructorFields parameterBounds)
+          (matchConstructorFields dataParameters parameterBounds)
           Map.empty
           (zip constructors handlerFields)
       let completedSubstitution = completeBackendParameterSubstitution parameterBounds substitution
-      Just [Map.findWithDefault (BTVar name) name completedSubstitution | name <- backendDataParameters dataDecl]
+      Just [Map.findWithDefault (BTVar name) name completedSubstitution | name <- dataParameters]
     else Nothing
   where
-    matchConstructorFields parameterBounds substitution (constructor, fields) =
+    matchConstructorFields dataParameters parameterBounds substitution (constructor, fields) =
       if length fields == length (backendConstructorFields constructor)
         then
           foldM
             ( \substitutionAcc (expectedTy, actualTy) ->
                 matchBackendTypeParameters
                   Map.empty
+                  dataParameters
                   (constructorParameterBounds parameterBounds constructor)
                   substitutionAcc
                   expectedTy
@@ -1835,12 +1810,13 @@ constructorApplicationResultType context env term =
       let constructor = cmBackend constructorMeta
           ownerContext = contextForDataMeta context (cmData constructorMeta)
           fields = backendConstructorFields constructor
+          dataParameters = constructorDataParameters constructorMeta
           parameters = constructorTypeParameters constructorMeta
       typeBounds <- backendTypeBoundsFromEnv env
       initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
       substitution <-
         foldM
-          (matchConstructorApplicationArgument context env typeBounds parameters)
+          (matchConstructorApplicationArgument context env typeBounds dataParameters parameters)
           initialSubstitution
           (zip fields args)
       let resultTy =
@@ -1855,18 +1831,19 @@ matchConstructorApplicationArgument ::
   ConvertContext ->
   Env ->
   BackendTypeBounds ->
+  [String] ->
   BackendParameterBounds ->
   Map String BackendType ->
   (BackendType, ElabTerm) ->
   Either BackendConversionError (Map String BackendType)
-matchConstructorApplicationArgument context env typeBounds parameters substitution (expectedTy, arg) =
+matchConstructorApplicationArgument context env typeBounds dataParameters parameters substitution (expectedTy, arg) =
   -- This is only a best-effort way to recover constructor type parameters.
   -- Expected-type conversion of the argument remains authoritative because it
   -- can canonicalize nested constructor applications before validation.
   case inferBackendType env arg of
     Right actualTy0 ->
       let actualTy = recoverStructuralBackendType context actualTy0
-       in case matchBackendTypeParameters typeBounds parameters substitution expectedTy actualTy of
+       in case matchBackendTypeParameters typeBounds dataParameters parameters substitution expectedTy actualTy of
             Just substitution' -> Right substitution'
             Nothing -> Right substitution
     Left _ -> Right substitution
@@ -1886,7 +1863,14 @@ dataMatchesScrutinee :: BackendTypeBounds -> BackendType -> DataMeta -> Bool
 dataMatchesScrutinee typeBounds scrutineeTy dataMeta =
   any
     ( \constructor ->
-        case matchBackendTypeParameters typeBounds (constructorTypeParameterBoundsFor (dmBackend dataMeta) constructor) Map.empty (backendConstructorResult constructor) scrutineeTy of
+        case
+          matchBackendTypeParameters
+            typeBounds
+            (backendDataParameters (dmBackend dataMeta))
+            (constructorTypeParameterBoundsFor (dmBackend dataMeta) constructor)
+            Map.empty
+            (backendConstructorResult constructor)
+            scrutineeTy of
           Just _ -> True
           Nothing -> False
     )
@@ -1987,12 +1971,13 @@ zipWithMCase f constructors handlers =
 
 matchBackendTypeParameters ::
   BackendTypeBounds ->
+  [String] ->
   BackendParameterBounds ->
   Map String BackendType ->
   BackendType ->
   BackendType ->
   Maybe (Map String BackendType)
-matchBackendTypeParameters typeBounds parameterBounds =
+matchBackendTypeParameters typeBounds dataParameterOrder parameterBounds =
   go Map.empty Map.empty
   where
     go leftEnv rightEnv substitution expected actual =
@@ -2069,17 +2054,17 @@ matchBackendTypeParameters typeBounds parameterBounds =
                 (zip expectedArgs actualArgs)
         _ -> Nothing
 
-    matchStructuralMuExpected leftEnv rightEnv substitution muName body actualTy =
+    matchStructuralMuExpected leftEnv rightEnv substitution muName _body actualTy =
       firstJust
-        [ structuralMuAsDataType parameterBounds muName body
+        [ structuralMuAsDataType dataParameterOrder muName
             >>= \expectedTy -> go leftEnv rightEnv substitution expectedTy actualTy,
           structuralMuAsActualDataType muName actualTy
             >>= \expectedTy -> go leftEnv rightEnv substitution expectedTy actualTy
         ]
 
-    matchStructuralMuActual leftEnv rightEnv substitution expectedTy muName body =
+    matchStructuralMuActual leftEnv rightEnv substitution expectedTy muName _body =
       firstJust
-        [ structuralMuAsDataType parameterBounds muName body
+        [ structuralMuAsDataType dataParameterOrder muName
             >>= \actualTy -> go leftEnv rightEnv substitution expectedTy actualTy,
           structuralMuAsActualDataType muName expectedTy
             >>= \actualTy -> go leftEnv rightEnv substitution expectedTy actualTy
