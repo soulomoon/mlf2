@@ -2123,19 +2123,19 @@ constructorApplicationTerm context term =
     structuralConstructorApplication headTerm args =
       case filter (`constructorArityMatches` args) (Map.elems (ccConstructors context)) of
         [] -> Right Nothing
-        candidates ->
-          let strippedHead = stripTypeInsts headTerm
-              matches = filter (\candidate -> structuralConstructorHeadMatches context candidate strippedHead) candidates
-           in case matches of
-                [constructorMeta] -> Right (Just (ConstructorApplication constructorMeta [] args))
-                [] -> Right Nothing
-                _ ->
-                    Left
-                      ( BackendUnsupportedCaseShape
-                          ( "ambiguous structural constructor matches: "
-                              ++ show (map (backendConstructorName . cmBackend) matches)
-                          )
-                      )
+        candidates -> do
+          (strippedHead, headTypeArgs) <- structuralConstructorHeadTypeArgs context headTerm
+          let matches = filter (\candidate -> structuralConstructorHeadMatches context candidate strippedHead) candidates
+          case matches of
+            [constructorMeta] -> Right (Just (ConstructorApplication constructorMeta headTypeArgs args))
+            [] -> Right Nothing
+            _ ->
+              Left
+                ( BackendUnsupportedCaseShape
+                    ( "ambiguous structural constructor matches: "
+                        ++ show (map (backendConstructorName . cmBackend) matches)
+                    )
+                )
 
     constructorArityMatches constructorMeta args =
       length args == length (backendConstructorFields (cmBackend constructorMeta))
@@ -2359,6 +2359,23 @@ stripTypeInsts =
   \case
     ETyInst inner _ -> stripTypeInsts inner
     other -> other
+
+structuralConstructorHeadTypeArgs :: ConvertContext -> ElabTerm -> Either BackendConversionError (ElabTerm, [BackendType])
+structuralConstructorHeadTypeArgs context =
+  go []
+  where
+    go typeArgs =
+      \case
+        ETyInst inner inst
+          | Just ty <- appLikeInstantiationType inst -> do
+              backendTy <- convertTypeArg ty
+              go (backendTy : typeArgs) inner
+          | otherwise ->
+              go typeArgs inner
+        other -> Right (other, typeArgs)
+
+    convertTypeArg ty =
+      normalizeBackendTypeForContext context <$> convertElabType ty
 
 convertCaseApplication ::
   ConvertContext ->

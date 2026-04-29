@@ -199,6 +199,28 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Core__NothingF"]
 
+  it "rejects stale structural constructor head type instantiations" $ do
+    checked0 <- requireChecked hiddenOwnerConstructorImportProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingTerm =
+                      addStructuralConstructorHeadInstantiation
+                        boolElabTy
+                        (checkedBindingTerm binding)
+                  }
+            )
+            checked0
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedCaseShape message) ->
+        message `shouldSatisfy` isInfixOf "constructor"
+      Left err ->
+        expectationFailure ("expected structural constructor type application mismatch, got " ++ show err)
+      Right backend ->
+        expectationFailure ("expected structural constructor type application rejection, got " ++ show backend)
+
   it "preserves constructor type applications when checking constructor fields" $ do
     checked <- requireChecked constructorForallApplicationProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -1993,6 +2015,33 @@ replaceConstructorHeadInstantiation target replacementTy =
       case stripElabTypeInsts headTerm of
         Elab.EVar name -> name == target
         _ -> False
+
+addStructuralConstructorHeadInstantiation :: Elab.ElabType -> Elab.ElabTerm -> Elab.ElabTerm
+addStructuralConstructorHeadInstantiation staleTy =
+  go
+  where
+    go term =
+      case collectAppsElab term of
+        (headTerm@Elab.ERoll {}, args) ->
+          rebuildAppsElab (Elab.ETyInst headTerm (Elab.InstApp staleTy)) args
+        _ ->
+          case term of
+            Elab.ELam name ty body ->
+              Elab.ELam name ty (go body)
+            Elab.EApp fun arg ->
+              Elab.EApp (go fun) (go arg)
+            Elab.ELet name scheme rhs body ->
+              Elab.ELet name scheme (go rhs) (go body)
+            Elab.ETyAbs name mbBound body ->
+              Elab.ETyAbs name mbBound (go body)
+            Elab.ETyInst inner inst ->
+              Elab.ETyInst (go inner) inst
+            Elab.ERoll ty body ->
+              Elab.ERoll ty (go body)
+            Elab.EUnroll body ->
+              Elab.EUnroll (go body)
+            _ ->
+              term
 
 stripElabTypeInsts :: Elab.ElabTerm -> Elab.ElabTerm
 stripElabTypeInsts term =
