@@ -317,6 +317,17 @@ spec = describe "MLF.Backend.LLVM" $ do
     renderBackendProgramLLVM strictImmediateDefaultProgram
       `shouldSatisfyLeft` isInfixOf "representation-changing roll"
 
+  it "lowers unmatched immediate constructor cases to unreachable" $ do
+    output <- requireRight (renderBackendProgramLLVM unmatchedImmediateConstructorProgram)
+
+    output `shouldSatisfy` isInfixOf "unreachable"
+    output `shouldNotSatisfy` isInfixOf "no matching immediate constructor alternative"
+    validateLLVMAssembly output
+
+  it "evaluates immediate constructor fields before unmatched alternatives" $ do
+    renderBackendProgramLLVM strictImmediateUnmatchedProgram
+      `shouldSatisfyLeft` isInfixOf "representation-changing roll"
+
   it "rejects duplicate constructor case alternatives before emitting switch" $ do
     renderBackendProgramLLVM duplicateConstructorCaseProgram
       `shouldSatisfyLeft` isInfixOf "duplicate constructor case tag"
@@ -1174,6 +1185,62 @@ strictImmediateDefaultProgram =
       backendProgramMain = "main"
     }
 
+unmatchedImmediateConstructorProgram :: BackendProgram
+unmatchedImmediateConstructorProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [immediateChoiceData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          ( BackendConstruct
+                              immediateChoiceTy
+                              "WithStatic"
+                              [polyIdExpr, intLit 1]
+                          )
+                          (BackendAlternative (BackendConstructorPattern "Other" []) (intLit 0) :| []),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+strictImmediateUnmatchedProgram :: BackendProgram
+strictImmediateUnmatchedProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [immediateStrictChoiceData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          ( BackendConstruct
+                              immediateStrictChoiceTy
+                              "WithStrictStatic"
+                              [polyIdExpr, BackendRoll recIntTy (intLit 1)]
+                          )
+                          (BackendAlternative (BackendConstructorPattern "StrictOther" []) (intLit 0) :| []),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
 duplicateConstructorCaseProgram :: BackendProgram
 duplicateConstructorCaseProgram =
   BackendProgram
@@ -1437,6 +1504,44 @@ strictBoxData =
         ]
     }
 
+immediateChoiceData :: BackendData
+immediateChoiceData =
+  BackendData
+    { backendDataName = "ImmediateChoice",
+      backendDataParameters = [],
+      backendDataConstructors =
+        [ BackendConstructor
+            "WithStatic"
+            []
+            [polyIdTy, intTy]
+            immediateChoiceTy,
+          BackendConstructor
+            "Other"
+            []
+            []
+            immediateChoiceTy
+        ]
+    }
+
+immediateStrictChoiceData :: BackendData
+immediateStrictChoiceData =
+  BackendData
+    { backendDataName = "ImmediateStrictChoice",
+      backendDataParameters = [],
+      backendDataConstructors =
+        [ BackendConstructor
+            "WithStrictStatic"
+            []
+            [polyIdTy, recIntTy]
+            immediateStrictChoiceTy,
+          BackendConstructor
+            "StrictOther"
+            []
+            []
+            immediateStrictChoiceTy
+        ]
+    }
+
 programWithMainExpr :: BackendType -> BackendExpr -> BackendProgram
 programWithMainExpr mainTy expr =
   programWithBindings
@@ -1504,6 +1609,14 @@ lazyFieldBoxTy =
 strictBoxTy :: BackendType
 strictBoxTy =
   BTBase (BaseTy "StrictBox")
+
+immediateChoiceTy :: BackendType
+immediateChoiceTy =
+  BTBase (BaseTy "ImmediateChoice")
+
+immediateStrictChoiceTy :: BackendType
+immediateStrictChoiceTy =
+  BTBase (BaseTy "ImmediateStrictChoice")
 
 aUnderscoreTy :: BackendType
 aUnderscoreTy =

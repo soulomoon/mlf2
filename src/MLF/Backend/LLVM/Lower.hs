@@ -1545,7 +1545,7 @@ lowerImmediateConstructCase env exprEnv context resultTy constructorName args fi
         liftEither (BackendLLVMInternalError ("immediate case alternative type mismatch at " ++ context))
       pure bodyValue
     Nothing ->
-      liftEither (BackendLLVMUnsupportedExpression context ("no matching immediate constructor alternative " ++ show constructorName))
+      lowerUnmatchedImmediateCase
   where
     alternativesList = NE.toList alternatives
 
@@ -1575,6 +1575,15 @@ lowerImmediateConstructCase env exprEnv context resultTy constructorName args fi
           liftEither (BackendLLVMUnsupportedExpression context ("duplicate constructor case alternative " ++ show name))
         Nothing ->
           pure ()
+
+    lowerUnmatchedImmediateCase = do
+      zipWithM_ evaluateUnusedField fieldTys args
+      expectedTy <- lowerBackendTypeM env context resultTy
+      finishCurrentBlock LLVMUnreachable
+      continuationLabel <- freshBlock "case.unreachable.cont"
+      startBlock continuationLabel
+      operand <- dummyOperandAfterUnreachable context expectedTy
+      pure (LowerValue resultTy expectedTy operand)
 
     bindImmediateAlternativePattern (BackendAlternative pattern0 body) =
       case pattern0 of
@@ -1621,6 +1630,14 @@ lowerImmediateConstructCase env exprEnv context resultTy constructorName args fi
           requireLLVMType context constructorName expectedTy value
       | otherwise =
           liftEither (BackendLLVMUnsupportedType ("field at " ++ context) fieldTy)
+
+dummyOperandAfterUnreachable :: String -> LLVMType -> LowerM LLVMOperand
+dummyOperandAfterUnreachable _ (LLVMInt width) =
+  pure (LLVMIntLiteral width 0)
+dummyOperandAfterUnreachable _ LLVMPtr =
+  pure LLVMNull
+dummyOperandAfterUnreachable context ty =
+  liftEither (BackendLLVMInternalError ("cannot synthesize unreachable value of type " ++ show ty ++ " at " ++ context))
 
 constructorFieldTypesForScrutinee :: ProgramEnv -> String -> ConstructorRuntime -> BackendType -> LowerM [BackendType]
 constructorFieldTypesForScrutinee _ context constructorRuntime scrutineeTy =
