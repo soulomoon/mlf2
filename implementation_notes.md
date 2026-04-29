@@ -14,9 +14,20 @@
   canonical module-qualified backend data names.
 - LLVM parity now supports the issue-owned higher-kinded data-field rows and
   hidden-owner value-constructor import rows, and the `llc` smoke subset includes
-  both hidden-owner and qualified-alias identity representatives. Typeclass/evidence
-  and deriving rows remain explicitly classified as separate unsupported backend
-  work.
+  both hidden-owner and qualified-alias identity representatives.
+
+## 2026-04-28 - Typeclass evidence reaches LLVM backend
+
+- Function-valued Eq evidence now lowers as first-order LLVM function
+  references or private wrappers instead of escaping as unsupported arrow
+  values. Hidden class evidence parameters lower to opaque pointers and calls
+  through evidence use indirect calls.
+- Backend conversion preserves source data identity through evidence, case, and
+  derived `Eq` paths so parameterized and qualified ADTs do not recover the
+  wrong same-shaped data declaration during LLVM conversion.
+- Recursive derived `Eq` helpers that capture only hidden evidence are lifted to
+  backend helper bindings with explicit evidence/type parameters; ordinary
+  lexical captures remain unsupported.
 
 ## 2026-04-28 - Shared Program-to-LLVM parity matrix
 

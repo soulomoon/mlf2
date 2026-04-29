@@ -382,8 +382,6 @@ structuralMuAsActualDataType muName actual =
   case actual of
     BTBase (BaseTy actualName)
       | structuralMuNameMatches actualName muName -> Just actual
-    BTCon (BaseTy actualName) _
-      | structuralMuNameMatches actualName muName -> Just actual
     _ -> Nothing
 
 structuralMuNameMatches :: String -> String -> Bool
@@ -606,9 +604,9 @@ validateBackendExprWith mbContext expr =
       validateBackendExprWith mbContext arg
       case backendExprType fun of
         BTArrow expectedArg expectedResult -> do
-          unless (alphaEqBackendType (backendExprType arg) expectedArg) $
+          unless (backendTypeMatches mbContext expectedArg (backendExprType arg)) $
             Left (BackendApplicationArgumentMismatch expectedArg (backendExprType arg))
-          unless (alphaEqBackendType resultTy expectedResult) $
+          unless (backendTypeMatches mbContext expectedResult resultTy) $
             Left (BackendApplicationResultMismatch resultTy expectedResult)
         other ->
           Left (BackendApplicationExpectedFunction other)
@@ -668,6 +666,12 @@ validateBackendVariable (Just context0) name actualTy =
       unless (backendVariableTypeMatches (bvcTypeBounds context0) expectedTy actualTy) $
         Left (BackendVariableTypeMismatch name expectedTy actualTy)
 
+backendTypeMatches :: Maybe BackendValidationContext -> BackendType -> BackendType -> Bool
+backendTypeMatches mbContext expectedTy actualTy =
+  backendVariableTypeMatches typeBounds expectedTy actualTy
+  where
+    typeBounds = maybe Map.empty bvcTypeBounds mbContext
+
 backendVariableTypeMatches :: Map.Map String (Maybe BackendType) -> BackendType -> BackendType -> Bool
 backendVariableTypeMatches typeBounds expectedTy actualTy =
   go Set.empty expectedTy actualTy
@@ -681,6 +685,12 @@ backendVariableTypeMatches typeBounds expectedTy actualTy =
             go bound expectedDom actualDom && go bound expectedCod actualCod
           (BTBase expectedBase, BTBase actualBase) ->
             expectedBase == actualBase
+          (BTVar expectedName, _)
+            | freeTypeVariable bound expectedName ->
+                True
+          (_, BTVar actualName)
+            | freeTypeVariable bound actualName ->
+                True
           (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs) ->
             expectedCon == actualCon
               && zipAllWith (go bound) (NE.toList expectedArgs) (NE.toList actualArgs)
@@ -694,10 +704,24 @@ backendVariableTypeMatches typeBounds expectedTy actualTy =
                      actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
                   in go (Set.insert freshName bound) expectedBody' actualBody'
           (BTMu expectedName expectedBody, BTMu actualName actualBody) ->
-            let freshName = freshBinderName expectedName actualName Nothing Nothing expectedBody actualBody
-                expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
-                actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
-             in go (Set.insert freshName bound) expectedBody' actualBody'
+            case (isVacuousRecursiveBinder expectedName expectedBody, isVacuousRecursiveBinder actualName actualBody) of
+              (True, True) ->
+                go bound expectedBody actualBody
+              (True, False) ->
+                recursiveBodyCompatible actualName actualBody expectedBody || go bound expectedBody actual
+              (False, True) ->
+                recursiveBodyCompatible expectedName expectedBody actualBody || go bound expected actualBody
+              (False, False) ->
+                let freshName = freshBinderName expectedName actualName Nothing Nothing expectedBody actualBody
+                    expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
+                    actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
+                 in go (Set.insert freshName bound) expectedBody' actualBody'
+          (BTMu expectedName expectedBody, _)
+            | isVacuousRecursiveBinder expectedName expectedBody ->
+                go bound expectedBody actual
+          (_, BTMu actualName actualBody)
+            | isVacuousRecursiveBinder actualName actualBody ->
+                go bound expected actualBody
           (BTBottom, BTBottom) ->
             True
           _ ->
@@ -709,6 +733,9 @@ backendVariableTypeMatches typeBounds expectedTy actualTy =
       go bound expectedBound actualBound
     maybeBoundMatches _ _ _ =
       False
+
+    freeTypeVariable bound name =
+      Set.notMember name bound && Map.notMember name typeBounds
 
     typeVariableBoundMatches bound ty otherTy =
       case ty of
@@ -809,13 +836,31 @@ validateBackendConstructorArgument typeBounds dataParameters parameters name sub
     Just substitution' ->
       pure substitution'
     Nothing ->
-      Left
-        ( BackendConstructorArgumentMismatch
-            name
-            index0
-            (substituteBackendTypes (completeBackendParameterSubstitution parameters substitution) expectedTy)
-            (backendExprType arg)
-        )
+      let completedSubstitution = completeBackendParameterSubstitution parameters substitution
+          substitutedExpectedTy = substituteBackendTypes completedSubstitution expectedTy
+       in if backendTypeContainsVarApp expectedTy
+            && backendVariableTypeMatches typeBounds substitutedExpectedTy (backendExprType arg)
+            then pure substitution
+            else
+              Left
+                ( BackendConstructorArgumentMismatch
+                    name
+                    index0
+                    substitutedExpectedTy
+                    (backendExprType arg)
+                )
+
+backendTypeContainsVarApp :: BackendType -> Bool
+backendTypeContainsVarApp =
+  \case
+    BTVar {} -> False
+    BTArrow dom cod -> backendTypeContainsVarApp dom || backendTypeContainsVarApp cod
+    BTBase {} -> False
+    BTCon _ args -> any backendTypeContainsVarApp args
+    BTVarApp {} -> True
+    BTForall _ mb body -> maybe False backendTypeContainsVarApp mb || backendTypeContainsVarApp body
+    BTMu _ body -> backendTypeContainsVarApp body
+    BTBottom -> False
 
 validateBackendAlternative :: Maybe BackendValidationContext -> BackendType -> BackendType -> BackendAlternative -> Either BackendValidationError ()
 validateBackendAlternative mbContext scrutineeTy resultTy alternative = do
@@ -987,19 +1032,41 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
                     actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
                 go (Set.insert freshName bound) substitution' expectedBody' actualBody'
               (BTMu expectedName expectedBody, BTMu actualName actualBody) -> do
-                let used =
-                      Set.unions
-                        [ Set.fromList [expectedName, actualName],
-                          Map.keysSet substitution,
-                          freeBackendTypeVarsIn substitution,
-                          Map.keysSet parameterBounds,
-                          freeBackendTypeVars expectedBody,
-                          freeBackendTypeVars actualBody
-                        ]
-                    freshName = freshNameLike expectedName used
-                    expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
-                    actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
-                go (Set.insert freshName bound) substitution expectedBody' actualBody'
+                case (isVacuousRecursiveBinder expectedName expectedBody, isVacuousRecursiveBinder actualName actualBody) of
+                  (True, True) ->
+                    go bound substitution expectedBody actualBody
+                  (True, False)
+                    | recursiveBodyCompatible actualName actualBody expectedBody
+                        && expectedBodyHasNoParameters expectedBody ->
+                        Just substitution
+                    | otherwise ->
+                        go bound substitution expectedBody actual
+                  (False, True)
+                    | recursiveBodyCompatible expectedName expectedBody actualBody
+                        && expectedBodyHasNoParameters expectedBody ->
+                        Just substitution
+                    | otherwise ->
+                        go bound substitution expected actualBody
+                  (False, False) -> do
+                    let used =
+                          Set.unions
+                            [ Set.fromList [expectedName, actualName],
+                              Map.keysSet substitution,
+                              freeBackendTypeVarsIn substitution,
+                              Map.keysSet parameterBounds,
+                              freeBackendTypeVars expectedBody,
+                              freeBackendTypeVars actualBody
+                            ]
+                        freshName = freshNameLike expectedName used
+                        expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
+                        actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
+                    go (Set.insert freshName bound) substitution expectedBody' actualBody'
+              (BTMu expectedName expectedBody, _)
+                | isVacuousRecursiveBinder expectedName expectedBody ->
+                    go bound substitution expectedBody actual
+              (_, BTMu actualName actualBody)
+                | isVacuousRecursiveBinder actualName actualBody ->
+                    go bound substitution expected actualBody
               (BTBottom, BTBottom) ->
                 Just substitution
               _ ->
@@ -1014,7 +1081,8 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
 
     matchStructuralMuExpected bound substitution muName _body actualTy =
       firstJust
-        [ structuralMuAsDataType dataParameterOrder muName
+        [ structuralMuNominalTypeMatches actualTy muName _body >>= \() -> Just substitution,
+          structuralMuAsDataType dataParameterOrder muName
             >>= \expectedTy -> go bound substitution expectedTy actualTy,
           structuralMuAsActualDataType muName actualTy
             >>= \expectedTy -> go bound substitution expectedTy actualTy
@@ -1022,11 +1090,26 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
 
     matchStructuralMuActual bound substitution expectedTy muName _body =
       firstJust
-        [ structuralMuAsDataType dataParameterOrder muName
+        [ structuralMuNominalTypeMatches expectedTy muName _body >>= \() -> Just substitution,
+          structuralMuAsDataType dataParameterOrder muName
             >>= \actualTy -> go bound substitution expectedTy actualTy,
           structuralMuAsActualDataType muName expectedTy
             >>= \actualTy -> go bound substitution expectedTy actualTy
         ]
+
+    structuralMuNominalTypeMatches nominalTy muName body =
+      if nominalMatches
+        then Just ()
+        else Nothing
+      where
+        nominalMatches =
+          case nominalTy of
+            BTBase base ->
+              structuralMuMatchesData base [] muName body
+            BTCon base args ->
+              structuralMuMatchesData base (NE.toList args) muName body
+            _ ->
+              False
 
     matchBackendTypeApplication bound substitution name expectedArgs actual =
       case decomposeBackendTypeHead actual of
@@ -1101,6 +1184,9 @@ matchBackendTypeParametersWithTypeBounds typeBounds dataParameterOrder parameter
     resolvedTypeBounds =
       completeBackendParameterSubstitution typeBounds Map.empty
 
+    expectedBodyHasNoParameters expectedBody =
+      Set.null (freeBackendTypeVars expectedBody `Set.intersection` Map.keysSet parameterBounds)
+
 decomposeBackendTypeHead :: BackendType -> Maybe (BackendType, [BackendType])
 decomposeBackendTypeHead ty =
   case ty of
@@ -1109,6 +1195,109 @@ decomposeBackendTypeHead ty =
     BTCon name args -> Just (BTBase name, NE.toList args)
     BTVarApp name args -> Just (BTVar name, NE.toList args)
     _ -> Nothing
+
+isVacuousRecursiveBinder :: String -> BackendType -> Bool
+isVacuousRecursiveBinder name body =
+  Set.notMember name (freeBackendTypeVars body)
+
+recursiveBodyCompatible :: String -> BackendType -> BackendType -> Bool
+recursiveBodyCompatible recursiveName recursiveBody plainBody =
+  case go Set.empty Map.empty Nothing recursiveBody plainBody of
+    Just _ -> True
+    Nothing -> False
+  where
+    go patternVars patternBindings recursiveAlias leftTy rightTy =
+      case (leftTy, rightTy) of
+        (BTVar name, _)
+          | name == recursiveName ->
+              matchRecursiveAlias patternBindings recursiveAlias rightTy
+          | Set.member name patternVars ->
+              matchPatternVar name patternBindings recursiveAlias rightTy
+        (BTVar leftName, BTVar rightName)
+          | leftName == rightName ->
+              Just (patternBindings, recursiveAlias)
+        (BTArrow leftDom leftCod, BTArrow rightDom rightCod) ->
+          go patternVars patternBindings recursiveAlias leftDom rightDom
+            >>= \(patternBindings', recursiveAlias') ->
+              go patternVars patternBindings' recursiveAlias' leftCod rightCod
+        (BTBase leftBase, BTBase rightBase)
+          | leftBase == rightBase ->
+              Just (patternBindings, recursiveAlias)
+        (BTCon leftCon leftArgs, BTCon rightCon rightArgs)
+          | leftCon == rightCon ->
+              foldM
+                ( \(patternBindingsAcc, recursiveAliasAcc) (leftArg, rightArg) ->
+                    go patternVars patternBindingsAcc recursiveAliasAcc leftArg rightArg
+                )
+                (patternBindings, recursiveAlias)
+                (zip (NE.toList leftArgs) (NE.toList rightArgs))
+                >>= \(patternBindings', recursiveAlias') ->
+                  if length leftArgs == length rightArgs
+                    then Just (patternBindings', recursiveAlias')
+                    else Nothing
+        (BTForall leftName Nothing leftBody, BTForall rightName Nothing rightBody) ->
+          let freshName = freshRecursiveBodyBinder leftName rightName leftBody rightBody
+              leftBody' = substituteBackendType leftName (BTVar freshName) leftBody
+              rightBody' = substituteBackendType rightName (BTVar freshName) rightBody
+           in go patternVars patternBindings recursiveAlias leftBody' rightBody'
+        (BTForall leftName (Just leftBound) leftBody, BTForall rightName (Just rightBound) rightBody)
+          | alphaEqBackendType leftBound rightBound ->
+              let freshName = freshRecursiveBodyBinder leftName rightName leftBody rightBody
+                  leftBody' = substituteBackendType leftName (BTVar freshName) leftBody
+                  rightBody' = substituteBackendType rightName (BTVar freshName) rightBody
+               in go patternVars patternBindings recursiveAlias leftBody' rightBody'
+        (BTForall leftName Nothing leftBody, _) ->
+          go (Set.insert leftName patternVars) patternBindings recursiveAlias leftBody rightTy
+        (_, BTForall rightName Nothing rightBody)
+          | Set.member recursiveName (freeBackendTypeVars leftTy) ->
+              let aliasName = freshNameLike rightName (freeBackendTypeVars leftTy `Set.union` freeBackendTypeVars rightBody)
+                  rightBody' = substituteBackendType rightName (BTVar aliasName) rightBody
+               in case recursiveAlias of
+                    Nothing ->
+                      go patternVars patternBindings (Just aliasName) leftTy rightBody'
+                    Just previous
+                      | previous == aliasName ->
+                          go patternVars patternBindings recursiveAlias leftTy rightBody'
+                    _ ->
+                      Nothing
+        (BTBottom, BTBottom) ->
+          Just (patternBindings, recursiveAlias)
+        _ ->
+          Nothing
+
+    matchPatternVar name patternBindings recursiveAlias rightTy =
+      case Map.lookup name patternBindings of
+        Nothing ->
+          Just (Map.insert name rightTy patternBindings, recursiveAlias)
+        Just previous
+          | alphaEqBackendType previous rightTy ->
+              Just (patternBindings, recursiveAlias)
+        _ ->
+          Nothing
+
+    matchRecursiveAlias patternBindings recursiveAlias rightTy =
+      case rightTy of
+        BTVar rightName ->
+          case recursiveAlias of
+            Nothing ->
+              Just (patternBindings, Just rightName)
+            Just expectedName
+              | expectedName == rightName ->
+                  Just (patternBindings, recursiveAlias)
+            _ ->
+              Nothing
+        _ ->
+          Nothing
+
+    freshRecursiveBodyBinder leftName rightName leftBody rightBody =
+      freshNameLike
+        leftName
+        ( Set.unions
+            [ Set.fromList [leftName, rightName, recursiveName],
+              freeBackendTypeVars leftBody,
+              freeBackendTypeVars rightBody
+            ]
+        )
 
 completeBackendParameterSubstitution :: BackendParameterBounds -> Map.Map String BackendType -> Map.Map String BackendType
 completeBackendParameterSubstitution parameterBounds substitution0 =
