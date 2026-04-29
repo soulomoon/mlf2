@@ -6,6 +6,7 @@ Description : Lower typed backend IR into real LLVM IR syntax
 -}
 module MLF.Backend.LLVM.Lower
   ( BackendLLVMError (..),
+    evidenceFunctionTypesCompatible,
     lowerBackendProgram,
     renderBackendLLVMError,
   )
@@ -1926,8 +1927,26 @@ runtimeCompatibleValueType left right =
   alphaEqBackendType left right
     || case (left, right) of
       (BTMu {}, BTMu {}) -> True
-      (BTArrow {}, BTArrow {}) -> True
-      (BTForall {}, BTForall {}) -> True
+      (BTArrow leftParam leftResult, BTArrow rightParam rightResult) ->
+        runtimeCompatibleValueType leftParam rightParam
+          && runtimeCompatibleValueType leftResult rightResult
+      (BTForall leftName leftBound leftBody, BTForall rightName rightBound rightBody) ->
+        runtimeCompatibleMaybeType leftBound rightBound
+          && runtimeCompatibleValueType
+            (substituteBackendType leftName (BTVar freshName) leftBody)
+            (substituteBackendType rightName (BTVar freshName) rightBody)
+        where
+          freshName =
+            freshNameLike
+              leftName
+              ( Set.unions
+                  [ backendTypeVariableNames leftBody,
+                    backendTypeVariableNames rightBody,
+                    maybe Set.empty backendTypeVariableNames leftBound,
+                    maybe Set.empty backendTypeVariableNames rightBound,
+                    Set.fromList [leftName, rightName]
+                  ]
+              )
       (BTBase leftBase, BTBase rightBase) -> leftBase == rightBase
       (BTCon leftCon leftArgs, BTCon rightCon rightArgs) ->
         leftCon == rightCon
@@ -1935,6 +1954,33 @@ runtimeCompatibleValueType left right =
           && and (zipWith runtimeCompatibleValueType (NE.toList leftArgs) (NE.toList rightArgs))
       (BTBottom, BTBottom) -> True
       _ -> False
+
+runtimeCompatibleMaybeType :: Maybe BackendType -> Maybe BackendType -> Bool
+runtimeCompatibleMaybeType Nothing Nothing =
+  True
+runtimeCompatibleMaybeType (Just left) (Just right) =
+  runtimeCompatibleValueType left right
+runtimeCompatibleMaybeType _ _ =
+  False
+
+backendTypeVariableNames :: BackendType -> Set String
+backendTypeVariableNames =
+  \case
+    BTVar name ->
+      Set.singleton name
+    BTArrow param result ->
+      backendTypeVariableNames param `Set.union` backendTypeVariableNames result
+    BTBase {} ->
+      Set.empty
+    BTCon _ args ->
+      Set.unions (map backendTypeVariableNames (NE.toList args))
+    BTForall name mbBound body ->
+      Set.insert name $
+        maybe Set.empty backendTypeVariableNames mbBound `Set.union` backendTypeVariableNames body
+    BTMu name body ->
+      Set.insert name (backendTypeVariableNames body)
+    BTBottom ->
+      Set.empty
 
 lowerLocalFunctionCall :: ProgramEnv -> ExprEnv -> String -> String -> LocalFunction -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerLocalFunctionCall env callEnv context name localFunction typeArgs args = do

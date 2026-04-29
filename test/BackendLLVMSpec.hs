@@ -337,6 +337,18 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "ptr %\"__mlfp_evidence_arg0\""
     validateLLVMAssembly output
 
+  it "rejects higher-order evidence parameters with mismatched nested function shapes" $
+    Lower.evidenceFunctionTypesCompatible
+      (BTArrow (BTArrow unaryIntTy intTy) intTy)
+      (BTArrow (BTArrow unaryBoolTy intTy) intTy)
+      `shouldBe` False
+
+  it "accepts higher-order evidence parameters with matching nested function shapes" $
+    Lower.evidenceFunctionTypesCompatible
+      (BTArrow (BTArrow unaryIntTy intTy) intTy)
+      (BTArrow (BTArrow unaryIntTy intTy) intTy)
+      `shouldBe` True
+
   it "resolves inlined local function calls before captured values" $ do
     output <- requireRight (renderBackendProgramLLVM localFunctionCallShadowsValueProgram)
 
