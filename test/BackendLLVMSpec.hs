@@ -303,6 +303,13 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "emits inline-only callees passed through opaque evidence pointers" $ do
+    output <- requireRight (renderBackendProgramLLVM inlineOnlyEvidenceCalleeProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"callee\"(ptr %\"f\")"
+    output `shouldSatisfy` isInfixOf "ptr @\"callee\""
+    validateLLVMAssembly output
+
   it "lowers nested evidence wrapper parameters as pointers" $ do
     output <- requireRight (renderBackendProgramLLVM nestedEvidenceWrapperParameterProgram)
 
@@ -510,6 +517,68 @@ localFunctionEvidenceMethodProgram =
       "  def use : C a => a -> a = \\x let f : a -> a = \\y y in apply f x;",
       "  def main : Int = use 1;",
       "}"
+    ]
+
+inlineOnlyEvidenceCalleeProgram :: BackendProgram
+inlineOnlyEvidenceCalleeProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "id",
+          backendBindingType = unaryIntTy,
+          backendBindingExpr = intIdentityExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "callee",
+          backendBindingType = BTArrow unaryIntTy intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow unaryIntTy intTy)
+              "f"
+              unaryIntTy
+              (BackendApp intTy (BackendVar unaryIntTy "f") (intLit 1)),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "$evidence_C",
+          backendBindingType = BTArrow (BTArrow unaryIntTy intTy) intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow (BTArrow unaryIntTy intTy) intTy)
+              "$evidence_method"
+              (BTArrow unaryIntTy intTy)
+              ( BackendApp
+                  intTy
+                  (BackendVar (BTArrow unaryIntTy intTy) "$evidence_method")
+                  (BackendVar unaryIntTy "id")
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "caller",
+          backendBindingType = BTArrow (BTArrow (BTArrow unaryIntTy intTy) intTy) intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow (BTArrow (BTArrow unaryIntTy intTy) intTy) intTy)
+              "$evidence_C"
+              (BTArrow (BTArrow unaryIntTy intTy) intTy)
+              ( BackendApp
+                  intTy
+                  (BackendVar (BTArrow (BTArrow unaryIntTy intTy) intTy) "$evidence_C")
+                  (BackendVar (BTArrow unaryIntTy intTy) "callee")
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              intTy
+              (BackendVar (BTArrow (BTArrow (BTArrow unaryIntTy intTy) intTy) intTy) "caller")
+              (BackendVar (BTArrow (BTArrow unaryIntTy intTy) intTy) "$evidence_C"),
+          backendBindingExportedAsMain = True
+        }
     ]
 
 capturingEvidenceWrapperProgram :: BackendProgram

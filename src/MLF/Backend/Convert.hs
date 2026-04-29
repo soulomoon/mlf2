@@ -32,12 +32,14 @@ import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.TypeCheck (Env (..), typeCheckWithEnv)
 import MLF.Elab.Types
   ( ElabTerm (..),
+    ElabScheme,
     ElabType,
     BoundType,
     Instantiation (..),
     Ty (..),
     TypeCheckError,
     elabToBound,
+    schemeFromType,
     tyToElab,
   )
 import MLF.Frontend.Program.Elaborate (ElaborateScope, lowerType, mkElaborateScope)
@@ -54,6 +56,7 @@ import MLF.Frontend.Program.Types
     SymbolIdentity (..),
   )
 import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType)
+import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
   = BackendUnsupportedSourceType SrcType
@@ -244,7 +247,7 @@ liftRecursiveLetsInTerm context lexicalTerms lexicalTypes term =
         then do
           bindingTy <- liftEitherConversion (convertElabType schemeTy)
           termCaptures <- capturedTermBindings lexicalTerms rhs
-          typeCaptures <- capturedTypeBindings lexicalTypes schemeTy termCaptures
+          typeCaptures <- capturedTypeBindings lexicalTypes schemeTy termCaptures rhs
           ensureLiftableRecursiveLet name bindingTy termCaptures rhs
           helperName <- freshLiftedRecursiveLetName context name
           rhs' <- liftRecursiveLetsInTerm context bodyTerms lexicalTypes rhs
@@ -287,8 +290,8 @@ capturedTermBindings lexicalTerms rhs =
   where
     freeVars = freeTermVariables rhs
 
-capturedTypeBindings :: Map String (Maybe BoundType) -> ElabType -> [(String, ElabType)] -> LiftM [(String, Maybe BoundType)]
-capturedTypeBindings lexicalTypes schemeTy termCaptures =
+capturedTypeBindings :: Map String (Maybe BoundType) -> ElabType -> [(String, ElabType)] -> ElabTerm -> LiftM [(String, Maybe BoundType)]
+capturedTypeBindings lexicalTypes schemeTy termCaptures rhs =
   pure
     [ (name, mbBound)
     | (name, mbBound) <- Map.toAscList lexicalTypes,
@@ -298,6 +301,7 @@ capturedTypeBindings lexicalTypes schemeTy termCaptures =
     freeVars =
       freeElabTypeVars schemeTy
         `Set.union` Set.unions (map (freeElabTypeVars . snd) termCaptures)
+        `Set.union` freeElabTermTypeVars rhs
 
 helperType :: [(String, Maybe BoundType)] -> [(String, ElabType)] -> ElabType -> ElabType
 helperType typeCaptures termCaptures bodyTy =
@@ -470,12 +474,16 @@ freeTermVariables =
 
 freeElabTypeVars :: ElabType -> Set.Set String
 freeElabTypeVars =
+  freeElabTypeVarsIn Set.empty
+
+freeElabTypeVarsIn :: Set.Set String -> ElabType -> Set.Set String
+freeElabTypeVarsIn initialBound =
   go Set.empty
   where
     go bound =
       \case
         TVar name
-          | Set.member name bound -> Set.empty
+          | Set.member name (initialBound `Set.union` bound) -> Set.empty
           | otherwise -> Set.singleton name
         TArrow dom cod ->
           go bound dom `Set.union` go bound cod
@@ -484,40 +492,336 @@ freeElabTypeVars =
         TBase {} ->
           Set.empty
         TForall name mb body ->
-          maybe Set.empty (go bound . tyToElab) mb `Set.union` go (Set.insert name bound) body
+          maybe Set.empty (go bound . tyToElab) mb
+            `Set.union` go (Set.insert name bound) body
         TMu name body ->
           go (Set.insert name bound) body
         TBottom ->
           Set.empty
 
-replaceFreeTermVariable :: String -> ElabTerm -> ElabTerm -> ElabTerm
-replaceFreeTermVariable needle replacement =
+freeElabTermTypeVars :: ElabTerm -> Set.Set String
+freeElabTermTypeVars =
   go Set.empty
   where
     go bound =
       \case
+        EVar {} ->
+          Set.empty
+        ELit {} ->
+          Set.empty
+        ELam _ ty body ->
+          freeElabTypeVarsIn bound ty `Set.union` go bound body
+        EApp fun arg ->
+          go bound fun `Set.union` go bound arg
+        ELet _ scheme rhs body ->
+          Set.unions
+            [ freeElabTypeVarsIn bound (schemeToType scheme),
+              go bound rhs,
+              go bound body
+            ]
+        ETyAbs name mbBound body ->
+          maybe Set.empty (freeElabTypeVarsIn bound . tyToElab) mbBound
+            `Set.union` go (Set.insert name bound) body
+        ETyInst inner inst ->
+          go bound inner `Set.union` freeInstantiationTypeVarsIn bound inst
+        ERoll ty body ->
+          freeElabTypeVarsIn bound ty `Set.union` go bound body
+        EUnroll body ->
+          go bound body
+
+freeInstantiationTypeVarsIn :: Set.Set String -> Instantiation -> Set.Set String
+freeInstantiationTypeVarsIn bound =
+  \case
+    InstId ->
+      Set.empty
+    InstApp ty ->
+      freeElabTypeVarsIn bound ty
+    InstBot ty ->
+      freeElabTypeVarsIn bound ty
+    InstIntro ->
+      Set.empty
+    InstElim ->
+      Set.empty
+    InstAbstr name
+      | Set.member name bound -> Set.empty
+      | otherwise -> Set.singleton name
+    InstUnder name inner ->
+      freeInstantiationTypeVarsIn (Set.insert name bound) inner
+    InstInside inner ->
+      freeInstantiationTypeVarsIn bound inner
+    InstSeq left right ->
+      freeInstantiationTypeVarsIn bound left `Set.union` freeInstantiationTypeVarsIn bound right
+
+termVariableNames :: ElabTerm -> Set.Set String
+termVariableNames =
+  \case
+    EVar name ->
+      Set.singleton name
+    ELit {} ->
+      Set.empty
+    ELam name _ body ->
+      Set.insert name (termVariableNames body)
+    EApp fun arg ->
+      termVariableNames fun `Set.union` termVariableNames arg
+    ELet name _ rhs body ->
+      Set.insert name (termVariableNames rhs `Set.union` termVariableNames body)
+    ETyAbs _ _ body ->
+      termVariableNames body
+    ETyInst inner _ ->
+      termVariableNames inner
+    ERoll _ body ->
+      termVariableNames body
+    EUnroll body ->
+      termVariableNames body
+
+elabTermTypeVariableNames :: ElabTerm -> Set.Set String
+elabTermTypeVariableNames =
+  \case
+    EVar {} ->
+      Set.empty
+    ELit {} ->
+      Set.empty
+    ELam _ ty body ->
+      elabTypeVariableNames ty `Set.union` elabTermTypeVariableNames body
+    EApp fun arg ->
+      elabTermTypeVariableNames fun `Set.union` elabTermTypeVariableNames arg
+    ELet _ scheme rhs body ->
+      Set.unions
+        [ elabTypeVariableNames (schemeToType scheme),
+          elabTermTypeVariableNames rhs,
+          elabTermTypeVariableNames body
+        ]
+    ETyAbs name mbBound body ->
+      Set.insert name $
+        maybe Set.empty (elabTypeVariableNames . tyToElab) mbBound
+          `Set.union` elabTermTypeVariableNames body
+    ETyInst inner inst ->
+      elabTermTypeVariableNames inner `Set.union` instantiationTypeVariableNames inst
+    ERoll ty body ->
+      elabTypeVariableNames ty `Set.union` elabTermTypeVariableNames body
+    EUnroll body ->
+      elabTermTypeVariableNames body
+
+elabTypeVariableNames :: ElabType -> Set.Set String
+elabTypeVariableNames =
+  \case
+    TVar name ->
+      Set.singleton name
+    TArrow dom cod ->
+      elabTypeVariableNames dom `Set.union` elabTypeVariableNames cod
+    TCon _ args ->
+      Set.unions (map elabTypeVariableNames (NE.toList args))
+    TBase {} ->
+      Set.empty
+    TForall name mbBound body ->
+      Set.insert name $
+        maybe Set.empty (elabTypeVariableNames . tyToElab) mbBound
+          `Set.union` elabTypeVariableNames body
+    TMu name body ->
+      Set.insert name (elabTypeVariableNames body)
+    TBottom ->
+      Set.empty
+
+instantiationTypeVariableNames :: Instantiation -> Set.Set String
+instantiationTypeVariableNames =
+  \case
+    InstId ->
+      Set.empty
+    InstApp ty ->
+      elabTypeVariableNames ty
+    InstBot ty ->
+      elabTypeVariableNames ty
+    InstIntro ->
+      Set.empty
+    InstElim ->
+      Set.empty
+    InstAbstr name ->
+      Set.singleton name
+    InstUnder name inner ->
+      Set.insert name (instantiationTypeVariableNames inner)
+    InstInside inner ->
+      instantiationTypeVariableNames inner
+    InstSeq left right ->
+      instantiationTypeVariableNames left `Set.union` instantiationTypeVariableNames right
+
+replaceFreeTermVariable :: String -> ElabTerm -> ElabTerm -> ElabTerm
+replaceFreeTermVariable needle replacement =
+  go
+  where
+    replacementFreeTerms = freeTermVariables replacement
+    replacementFreeTypes = freeElabTermTypeVars replacement
+
+    go =
+      \case
         EVar name
-          | name == needle && Set.notMember name bound -> replacement
+          | name == needle -> replacement
           | otherwise -> EVar name
         ELit lit ->
           ELit lit
-        ELam name ty body ->
-          ELam name ty (go (Set.insert name bound) body)
+        ELam name ty body
+          | name == needle ->
+              ELam name ty body
+          | shouldRenameTermBinder name body ->
+              let used = Set.unions [termVariableNames body, termVariableNames replacement, Set.singleton needle]
+                  name' = freshNameLike name used
+                  body' = renameBoundTermVariable name name' body
+               in ELam name' ty (go body')
+          | otherwise ->
+              ELam name ty (go body)
         EApp fun arg ->
-          EApp (go bound fun) (go bound arg)
+          EApp (go fun) (go arg)
         ELet name scheme rhs body
           | name == needle ->
               ELet name scheme rhs body
+          | shouldRenameTermBinder name (EApp rhs body) ->
+              let used =
+                    Set.unions
+                      [ termVariableNames rhs,
+                        termVariableNames body,
+                        termVariableNames replacement,
+                        Set.singleton needle
+                      ]
+                  name' = freshNameLike name used
+                  rhs' = renameBoundTermVariable name name' rhs
+                  body' = renameBoundTermVariable name name' body
+               in ELet name' scheme (go rhs') (go body')
           | otherwise ->
-              ELet name scheme (go bound rhs) (go (Set.insert name bound) body)
-        ETyAbs name mbBound body ->
-          ETyAbs name mbBound (go bound body)
+              ELet name scheme (go rhs) (go body)
+        ETyAbs name mbBound body
+          | shouldRenameTypeBinder name body ->
+              let used =
+                    Set.unions
+                      [ elabTermTypeVariableNames body,
+                        maybe Set.empty (elabTypeVariableNames . tyToElab) mbBound,
+                        elabTermTypeVariableNames replacement
+                      ]
+                  name' = freshNameLike name used
+                  body' = renameTermTypeVariable name name' body
+               in ETyAbs name' mbBound (go body')
+          | otherwise ->
+              ETyAbs name mbBound (go body)
         ETyInst inner inst ->
-          ETyInst (go bound inner) inst
+          ETyInst (go inner) inst
         ERoll ty body ->
-          ERoll ty (go bound body)
+          ERoll ty (go body)
         EUnroll body ->
-          EUnroll (go bound body)
+          EUnroll (go body)
+
+    shouldRenameTermBinder name body =
+      Set.member name replacementFreeTerms && termMentionsFreeVariable needle body
+
+    shouldRenameTypeBinder name body =
+      Set.member name replacementFreeTypes && termMentionsFreeVariable needle body
+
+renameBoundTermVariable :: String -> String -> ElabTerm -> ElabTerm
+renameBoundTermVariable old new =
+  go
+  where
+    go =
+      \case
+        EVar name
+          | name == old -> EVar new
+          | otherwise -> EVar name
+        ELit lit ->
+          ELit lit
+        ELam name ty body
+          | name == old -> ELam name ty body
+          | otherwise -> ELam name ty (go body)
+        EApp fun arg ->
+          EApp (go fun) (go arg)
+        ELet name scheme rhs body
+          | name == old -> ELet name scheme rhs body
+          | otherwise -> ELet name scheme (go rhs) (go body)
+        ETyAbs name mbBound body ->
+          ETyAbs name mbBound (go body)
+        ETyInst inner inst ->
+          ETyInst (go inner) inst
+        ERoll ty body ->
+          ERoll ty (go body)
+        EUnroll body ->
+          EUnroll (go body)
+
+renameTermTypeVariable :: String -> String -> ElabTerm -> ElabTerm
+renameTermTypeVariable old new =
+  go
+  where
+    go =
+      \case
+        EVar name ->
+          EVar name
+        ELit lit ->
+          ELit lit
+        ELam name ty body ->
+          ELam name (renameElabTypeVariable old new ty) (go body)
+        EApp fun arg ->
+          EApp (go fun) (go arg)
+        ELet name scheme rhs body ->
+          ELet name (renameElabSchemeTypeVariable old new scheme) (go rhs) (go body)
+        ETyAbs name mbBound body
+          | name == old ->
+              ETyAbs name (fmap (renameElabTypeVariable old new) mbBound) body
+          | otherwise ->
+              ETyAbs name (fmap (renameElabTypeVariable old new) mbBound) (go body)
+        ETyInst inner inst ->
+          ETyInst (go inner) (renameInstantiationTypeVariable old new inst)
+        ERoll ty body ->
+          ERoll (renameElabTypeVariable old new ty) (go body)
+        EUnroll body ->
+          EUnroll (go body)
+
+renameElabSchemeTypeVariable :: String -> String -> ElabScheme -> ElabScheme
+renameElabSchemeTypeVariable old new =
+  schemeFromType . renameElabTypeVariable old new . schemeToType
+
+renameElabTypeVariable :: String -> String -> Ty var -> Ty var
+renameElabTypeVariable old new =
+  \case
+    TVar name
+      | name == old -> TVar new
+      | otherwise -> TVar name
+    TArrow dom cod ->
+      TArrow (renameElabTypeVariable old new dom) (renameElabTypeVariable old new cod)
+    TCon con args ->
+      TCon con (fmap (renameElabTypeVariable old new) args)
+    TBase base ->
+      TBase base
+    TForall name mbBound body
+      | name == old ->
+          TForall name (fmap (renameElabTypeVariable old new) mbBound) body
+      | otherwise ->
+          TForall name (fmap (renameElabTypeVariable old new) mbBound) (renameElabTypeVariable old new body)
+    TMu name body
+      | name == old -> TMu name body
+      | otherwise -> TMu name (renameElabTypeVariable old new body)
+    TBottom ->
+      TBottom
+
+renameInstantiationTypeVariable :: String -> String -> Instantiation -> Instantiation
+renameInstantiationTypeVariable old new =
+  go
+  where
+    go =
+      \case
+        InstId ->
+          InstId
+        InstApp ty ->
+          InstApp (renameElabTypeVariable old new ty)
+        InstBot ty ->
+          InstBot (renameElabTypeVariable old new ty)
+        InstIntro ->
+          InstIntro
+        InstElim ->
+          InstElim
+        InstAbstr name
+          | name == old -> InstAbstr new
+          | otherwise -> InstAbstr name
+        InstUnder name inner
+          | name == old -> InstUnder name inner
+          | otherwise -> InstUnder name (go inner)
+        InstInside inner ->
+          InstInside (go inner)
+        InstSeq left right ->
+          InstSeq (go left) (go right)
 
 checkedBindingCanonicalType :: ConvertContext -> CheckedModule -> CheckedBinding -> Either BackendConversionError ElabType
 checkedBindingCanonicalType context checkedModule binding =

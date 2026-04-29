@@ -166,13 +166,28 @@ lowerBackendProgram program = do
 shouldLowerReachableBinding :: BindingInfo -> Bool
 shouldLowerReachableBinding binding =
   null (ffTypeBinders form)
-    && (biExportedAsMain binding || not (requiresInlineCall form))
+    && (biExportedAsMain binding || canEmitFunctionForm form)
   where
     form = biForm binding
 
 shouldLowerSpecialization :: Specialization -> Bool
 shouldLowerSpecialization =
-  not . requiresInlineCall . spForm
+  canEmitFunctionForm . spForm
+
+canEmitFunctionForm :: FunctionForm -> Bool
+canEmitFunctionForm form =
+  not (requiresInlineCall form) || canEmitInlineOnlyFunctionParameters form
+
+canEmitInlineOnlyFunctionParameters :: FunctionForm -> Bool
+canEmitInlineOnlyFunctionParameters form =
+  not (containsInlineOnlyEvidenceParameterCall form)
+    && all (uncurry canEmitFunctionParameter) (ffParams form)
+
+canEmitFunctionParameter :: String -> BackendType -> Bool
+canEmitFunctionParameter paramName paramTy
+  | isFunctionLikeBackendType paramTy =
+      isEvidenceParameter paramName paramTy || isFirstOrderFunctionPointerType paramTy
+  | otherwise = True
 
 runtimeAndName :: String
 runtimeAndName =
@@ -1013,7 +1028,7 @@ lowerFunction env name private form = do
 
 lowerFunctionParameterType :: ProgramEnv -> String -> String -> BackendType -> Either BackendLLVMError LLVMType
 lowerFunctionParameterType env context paramName paramTy
-  | isEvidenceParameter paramName paramTy = Right LLVMPtr
+  | isEvidenceParameter paramName paramTy || isFirstOrderFunctionPointerType paramTy = Right LLVMPtr
   | otherwise = lowerBackendType env context paramTy
 
 lowerFunctionParameterTypeM :: ProgramEnv -> String -> Bool -> String -> BackendType -> LowerM LLVMType
@@ -1055,6 +1070,33 @@ isFunctionLikeBackendType =
     BTForall _ _ body -> isFunctionLikeBackendType body
     BTArrow {} -> True
     _ -> False
+
+isFirstOrderFunctionPointerType :: BackendType -> Bool
+isFirstOrderFunctionPointerType ty =
+  case ty of
+    BTArrow {} ->
+      let (params, returnTy) = collectArrowsType ty
+       in all isFirstOrderPointerValueType (returnTy : params)
+    _ ->
+      False
+
+isFirstOrderPointerValueType :: BackendType -> Bool
+isFirstOrderPointerValueType =
+  \case
+    BTVar {} ->
+      False
+    BTArrow {} ->
+      False
+    BTBase {} ->
+      True
+    BTCon _ args ->
+      all isFirstOrderPointerValueType args
+    BTForall {} ->
+      False
+    BTMu {} ->
+      True
+    BTBottom ->
+      False
 
 requiresInlineCall :: FunctionForm -> Bool
 requiresInlineCall form =
@@ -1421,7 +1463,7 @@ lowerCall env exprEnv context expr =
 
 lowerIndirectValueCall :: ProgramEnv -> ExprEnv -> String -> String -> LowerValue -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerIndirectValueCall env exprEnv context name callee typeArgs args = do
-  unless (isEvidenceCallableName name) $
+  unless (isEvidenceCallableName name || isFirstOrderFunctionPointerType (lvBackendType callee)) $
     liftEither (BackendLLVMUnsupportedExpression context ("escaping function value " ++ show name))
   form <- instantiateFunctionFormM context (functionFormFromType (lvBackendType callee)) typeArgs args
   unless (length args == length (ffParams form)) $
