@@ -193,6 +193,16 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithMainExpr malformedStructuralBoxConstructExpr)
       `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy malformedStructuralBoxTy)
 
+  it "checks structural constructor result payloads against metadata" $ do
+    alphaEqBackendType boxTy structuralBoxTy
+      `shouldBe` False
+
+    validateBackendProgram (programWithMainExpr structuralBoxConstructExpr)
+      `shouldBe` Right ()
+
+    validateBackendProgram (programWithMainExpr mismatchedStructuralBoxConstructExpr)
+      `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy mismatchedStructuralBoxTy)
+
   it "preserves nominal arguments when structural recursive payloads omit them" $ do
     alphaEqBackendType
       (BTCon (BaseTy "Core.Phantom") (intTy :| []))
@@ -600,6 +610,22 @@ malformedStructuralBoxConstructExpr :: BackendExpr
 malformedStructuralBoxConstructExpr =
   BackendConstruct malformedStructuralBoxTy "Box" [intLit 1]
 
+structuralBoxTy :: BackendType
+structuralBoxTy =
+  BTMu "$Box_self" (singleFieldStructuralBody intTy)
+
+structuralBoxConstructExpr :: BackendExpr
+structuralBoxConstructExpr =
+  BackendConstruct structuralBoxTy "Box" [intLit 1]
+
+mismatchedStructuralBoxTy :: BackendType
+mismatchedStructuralBoxTy =
+  BTMu "$Box_self" (singleFieldStructuralBody boolTy)
+
+mismatchedStructuralBoxConstructExpr :: BackendExpr
+mismatchedStructuralBoxConstructExpr =
+  BackendConstruct mismatchedStructuralBoxTy "Box" [intLit 1]
+
 justFBoxBoolExpr :: BackendExpr
 justFBoxBoolExpr =
   BackendConstruct (maybeFTy (BTBase (BaseTy "BoxF")) boolTy) "JustF" [BackendConstruct (boxFTy boolTy) "BoxF" [boolLit True]]
@@ -906,6 +932,10 @@ boolTy =
 nullaryStructuralBody :: BackendType
 nullaryStructuralBody =
   BTForall "r" Nothing (BTArrow (BTVar "r") (BTVar "r"))
+
+singleFieldStructuralBody :: BackendType -> BackendType
+singleFieldStructuralBody fieldTy =
+  BTForall "r" Nothing (BTArrow (BTArrow fieldTy (BTVar "r")) (BTVar "r"))
 
 boxTy :: BackendType
 boxTy =

@@ -1931,6 +1931,7 @@ convertConstructorApplication context env term resultTy =
       initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
       resultSubstitution <-
         case constructorResultSubstitution
+          context
           ownerContext
           typeBounds
           dataParameters
@@ -1960,8 +1961,8 @@ convertConstructorApplication context env term resultTy =
               Just nominalTy -> nominalTy
               Nothing -> recoverStructuralBackendType ownerContext substitutedResultTy0
       unless
-        ( constructorResultTypesMatch ownerContext typeBounds substitutedResultTy effectiveResultTy
-            || constructorBoundaryTypesMatch ownerContext typeBounds substitutedResultTy0 effectiveResultTy
+        ( constructorResultTypesMatch context ownerContext typeBounds substitutedResultTy effectiveResultTy
+            || constructorBoundaryTypesMatch context ownerContext typeBounds substitutedResultTy0 effectiveResultTy
         )
         $
         Left
@@ -1972,7 +1973,7 @@ convertConstructorApplication context env term resultTy =
               )
           )
       argExprs <- zipWithM (convertTermExpected context env . Just) fields args
-      mapM_ (checkConstructorArgumentType ownerContext typeBounds constructor) (zip [0 :: Int ..] (zip fields argExprs))
+      mapM_ (checkConstructorArgumentType context ownerContext typeBounds constructor) (zip [0 :: Int ..] (zip fields argExprs))
       Right
         ( Just
             BackendConstruct
@@ -1983,16 +1984,33 @@ convertConstructorApplication context env term resultTy =
         )
     Nothing -> Right Nothing
   where
-    constructorResultSubstitution ownerContext typeBounds dataParameters parameters explicitSubstitution constructorResultTy effectiveResultTy =
-      matchBackendTypeParameters typeBounds dataParameters parameters explicitSubstitution constructorResultTy effectiveResultTy
+    constructorResultSubstitution globalContext ownerContext typeBounds dataParameters parameters explicitSubstitution constructorResultTy effectiveResultTy =
+      matchConstructorResult constructorResultTy effectiveResultTy normalizedExplicitSubstitution
         <|> do
           inferredSubstitution <-
-            matchBackendTypeParameters typeBounds dataParameters parameters Map.empty constructorResultTy effectiveResultTy
-          if explicitSubstitutionAgreesWithInferred ownerContext typeBounds explicitSubstitution inferredSubstitution
-            then Just (Map.union explicitSubstitution inferredSubstitution)
+            matchConstructorResult constructorResultTy effectiveResultTy Map.empty
+          if explicitSubstitutionAgreesWithInferred globalContext ownerContext typeBounds explicitSubstitution inferredSubstitution
+            then Just (Map.union normalizedExplicitSubstitution inferredSubstitution)
             else Nothing
+      where
+        normalizeResultType =
+          normalizeConstructorBoundaryType ownerContext typeBounds
+            . normalizeConstructorBoundaryType globalContext typeBounds
 
-    explicitSubstitutionAgreesWithInferred ownerContext typeBounds explicitSubstitution inferredSubstitution =
+        normalizedExplicitSubstitution =
+          Map.map normalizeResultType explicitSubstitution
+
+        matchConstructorResult expected actual substitution =
+          matchBackendTypeParameters typeBounds dataParameters parameters substitution expected actual
+            <|> matchBackendTypeParameters
+              typeBounds
+              dataParameters
+              parameters
+              substitution
+              (normalizeResultType expected)
+              (normalizeResultType actual)
+
+    explicitSubstitutionAgreesWithInferred globalContext ownerContext typeBounds explicitSubstitution inferredSubstitution =
       all explicitArgumentAgrees (Map.toList explicitSubstitution)
       where
         explicitArgumentAgrees (name, explicitTy) =
@@ -2003,10 +2021,11 @@ convertConstructorApplication context env term resultTy =
 
         resolveTypeBoundDependencies =
           recoverStructuralBackendType ownerContext
+            . recoverStructuralBackendType globalContext
             . substituteBackendTypes (completeBackendParameterSubstitution typeBounds Map.empty)
 
-    checkConstructorArgumentType ownerContext typeBounds constructor (index, (expectedTy, argExpr)) =
-      unless (constructorBoundaryTypesMatch ownerContext typeBounds (backendExprType argExpr) expectedTy) $
+    checkConstructorArgumentType globalContext ownerContext typeBounds constructor (index, (expectedTy, argExpr)) =
+      unless (constructorBoundaryTypesMatch globalContext ownerContext typeBounds (backendExprType argExpr) expectedTy) $
         Left
           ( BackendUnsupportedCaseShape
               ( "constructor argument "
@@ -2017,20 +2036,40 @@ convertConstructorApplication context env term resultTy =
               )
           )
 
-    constructorBoundaryTypesMatch ownerContext typeBounds left right =
+    constructorBoundaryTypesMatch globalContext ownerContext typeBounds left right =
       alphaEqBackendType left right
-        || alphaEqBackendType (normalizeConstructorBoundaryType ownerContext typeBounds left) (normalizeConstructorBoundaryType ownerContext typeBounds right)
+        || normalizedTypesMatch (normalizeBoundaryType globalContext ownerContext typeBounds left) (normalizeBoundaryType globalContext ownerContext typeBounds right)
+      where
+        normalizedTypesMatch leftTy rightTy =
+          alphaEqBackendType leftTy rightTy
+            || maybe False (const True) (matchBackendTypeParameters typeBounds [] Map.empty Map.empty leftTy rightTy)
+            || maybe False (const True) (matchBackendTypeParameters typeBounds [] Map.empty Map.empty rightTy leftTy)
 
-    constructorResultTypesMatch ownerContext typeBounds left right =
-      constructorBoundaryTypesMatch ownerContext typeBounds left right
+    constructorResultTypesMatch globalContext ownerContext typeBounds left right =
+      constructorBoundaryTypesMatch globalContext ownerContext typeBounds left right
         || resultTypePlaceholderMatches
           typeBounds
-          (normalizeConstructorBoundaryType ownerContext typeBounds left)
-          (normalizeConstructorBoundaryType ownerContext typeBounds right)
+          (normalizeBoundaryType globalContext ownerContext typeBounds left)
+          (normalizeBoundaryType globalContext ownerContext typeBounds right)
+
+    normalizeBoundaryType globalContext ownerContext typeBounds =
+      normalizeConstructorBoundaryType ownerContext typeBounds
+        . normalizeConstructorBoundaryType globalContext typeBounds
 
     normalizeConstructorBoundaryType ownerContext typeBounds =
-      recoverStructuralBackendType ownerContext
+      nominalizeStructuralRecursiveHead ownerContext
+        . recoverStructuralBackendType ownerContext
         . substituteBackendTypes (completeBackendParameterSubstitution typeBounds Map.empty)
+
+    nominalizeStructuralRecursiveHead ownerContext ty =
+      case ty of
+        BTMu name _
+          | Just dataMeta <- structuralRecursiveDataMeta ownerContext name ->
+              case structuralMuAsDataType (backendDataParameters (dmBackend dataMeta)) name of
+                Just nominalTy -> nominalTy
+                Nothing -> ty
+        _ ->
+          ty
 
     resultTypePlaceholderMatches typeBounds actual expected =
       case (actual, expected) of

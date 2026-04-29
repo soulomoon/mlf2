@@ -235,13 +235,16 @@ data BackendValidationError
 
 data BackendValidationContext = BackendValidationContext
   { bvcGlobals :: Map.Map String BackendType,
+    bvcData :: Map.Map String BackendData,
     bvcConstructors :: Map.Map String BackendConstructorInfo,
     bvcLocals :: Map.Map String BackendType,
     bvcTypeBounds :: Map.Map String (Maybe BackendType)
   }
 
 data BackendConstructorInfo = BackendConstructorInfo
-  { bciDataParameters :: [String],
+  { bciDataName :: String,
+    bciDataParameters :: [String],
+    bciDataConstructors :: [BackendConstructor],
     bciConstructor :: BackendConstructor
   }
 
@@ -357,7 +360,7 @@ structuralMuMatchesData (BaseTy dataName) args muName body =
   structuralMuNameMatches dataName muName
     && case structuralMuPayloadTypes body of
       Just payloadTypes
-        | null args -> True
+        | null args -> null payloadTypes
         | null payloadTypes -> all isBareTypeVariable args
         | otherwise -> zipAllWith alphaEqBackendType args payloadTypes
       Nothing -> False
@@ -408,24 +411,32 @@ stripPrefixSimple (expected : expectedRest) (actual : actualRest)
   | otherwise = Nothing
 
 structuralMuPayloadTypes :: BackendType -> Maybe [BackendType]
-structuralMuPayloadTypes =
+structuralMuPayloadTypes body =
+  concat <$> structuralMuPayloadHandlers body
+
+structuralMuHandlerTypes :: BackendType -> Maybe (String, [BackendType])
+structuralMuHandlerTypes =
   \case
-    BTForall resultName _ handlerTy ->
-      concat <$> collectHandlers resultName handlerTy
+    BTForall resultName _ handlerTy -> do
+      handlers <- collectHandlerTypes resultName handlerTy
+      Just (resultName, handlers)
     _ -> Nothing
   where
-    collectHandlers resultName =
+    collectHandlerTypes resultName =
       go []
       where
         go handlers ty
           | alphaEqBackendType ty (BTVar resultName) = Just handlers
           | otherwise =
               case ty of
-                BTArrow handlerTy rest -> do
-                  fields <- collectHandlerFields resultName handlerTy
-                  go (handlers ++ [fields]) rest
+                BTArrow handlerTy rest -> go (handlers ++ [handlerTy]) rest
                 _ -> Nothing
 
+structuralMuPayloadHandlers :: BackendType -> Maybe [[BackendType]]
+structuralMuPayloadHandlers body = do
+  (resultName, handlers) <- structuralMuHandlerTypes body
+  traverse (collectHandlerFields resultName) handlers
+  where
     collectHandlerFields resultName =
       go []
       where
@@ -535,7 +546,13 @@ validateBackendProgram program = do
     bindings = concatMap backendModuleBindings modules0
     constructors = concatMap backendDataConstructors (concatMap backendModuleData modules0)
     constructorInfos =
-      [ (backendConstructorName constructor, BackendConstructorInfo (backendDataParameters dataDecl) constructor)
+      [ ( backendConstructorName constructor,
+          BackendConstructorInfo
+            (backendDataName dataDecl)
+            (backendDataParameters dataDecl)
+            (backendDataConstructors dataDecl)
+            constructor
+        )
         | dataDecl <- concatMap backendModuleData modules0,
           constructor <- backendDataConstructors dataDecl
       ]
@@ -544,6 +561,7 @@ validateBackendProgram program = do
         { bvcGlobals =
             Map.fromList [(backendBindingName binding, backendBindingType binding) | binding <- bindings]
               `Map.union` backendRuntimePrimitiveTypes,
+          bvcData = Map.fromList [(backendDataName dataDecl, dataDecl) | dataDecl <- concatMap backendModuleData modules0],
           bvcConstructors = Map.fromList constructorInfos,
           bvcLocals = Map.empty,
           bvcTypeBounds = Map.empty
@@ -663,21 +681,32 @@ validateBackendVariable (Just context0) name actualTy =
     Nothing ->
       Left (BackendUnknownVariable name)
     Just expectedTy ->
-      unless (backendVariableTypeMatches (bvcTypeBounds context0) expectedTy actualTy) $
+      unless (backendVariableTypeMatches context0 expectedTy actualTy) $
         Left (BackendVariableTypeMismatch name expectedTy actualTy)
 
 backendTypeMatches :: Maybe BackendValidationContext -> BackendType -> BackendType -> Bool
 backendTypeMatches mbContext expectedTy actualTy =
-  backendTypeMatchesWith True typeBounds expectedTy actualTy
+  backendTypeMatchesWith True typeBounds dataDecls expectedTy actualTy
   where
     typeBounds = maybe Map.empty bvcTypeBounds mbContext
+    dataDecls = bvcData <$> mbContext
 
-backendVariableTypeMatches :: Map.Map String (Maybe BackendType) -> BackendType -> BackendType -> Bool
-backendVariableTypeMatches typeBounds expectedTy actualTy =
-  backendTypeMatchesWith False typeBounds expectedTy actualTy
+backendVariableTypeMatches :: BackendValidationContext -> BackendType -> BackendType -> Bool
+backendVariableTypeMatches context0 expectedTy actualTy =
+  backendTypeMatchesWith False (bvcTypeBounds context0) (Just (bvcData context0)) expectedTy actualTy
 
-backendTypeMatchesWith :: Bool -> Map.Map String (Maybe BackendType) -> BackendType -> BackendType -> Bool
-backendTypeMatchesWith allowFreeTypeVariableInstantiation typeBounds expectedTy actualTy =
+backendVariableTypeMatchesWithBounds :: Map.Map String (Maybe BackendType) -> BackendType -> BackendType -> Bool
+backendVariableTypeMatchesWithBounds typeBounds expectedTy actualTy =
+  backendTypeMatchesWith False typeBounds Nothing expectedTy actualTy
+
+backendTypeMatchesWith ::
+  Bool ->
+  Map.Map String (Maybe BackendType) ->
+  Maybe (Map.Map String BackendData) ->
+  BackendType ->
+  BackendType ->
+  Bool
+backendTypeMatchesWith allowFreeTypeVariableInstantiation typeBounds mbDataDecls expectedTy actualTy =
   go Set.empty expectedTy actualTy
   where
     go bound expected actual =
@@ -689,6 +718,10 @@ backendTypeMatchesWith allowFreeTypeVariableInstantiation typeBounds expectedTy 
             go bound expectedDom actualDom && go bound expectedCod actualCod
           (BTBase expectedBase, BTBase actualBase) ->
             expectedBase == actualBase
+          (BTBase expectedBase, BTMu actualName actualBody) ->
+            structuralMuMatchesKnownData expectedBase [] actualName actualBody
+          (BTMu expectedName expectedBody, BTBase actualBase) ->
+            structuralMuMatchesKnownData actualBase [] expectedName expectedBody
           (BTVar expectedName, BTVar actualName)
             | unconstrainedTypeVariable bound expectedName && unconstrainedTypeVariable bound actualName ->
                 True
@@ -701,6 +734,10 @@ backendTypeMatchesWith allowFreeTypeVariableInstantiation typeBounds expectedTy 
           (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs) ->
             expectedCon == actualCon
               && zipAllWith (go bound) (NE.toList expectedArgs) (NE.toList actualArgs)
+          (BTCon expectedCon expectedArgs, BTMu actualName actualBody) ->
+            structuralMuMatchesKnownData expectedCon (NE.toList expectedArgs) actualName actualBody
+          (BTMu expectedName expectedBody, BTCon actualCon actualArgs) ->
+            structuralMuMatchesKnownData actualCon (NE.toList actualArgs) expectedName expectedBody
           (BTVarApp expectedName expectedArgs, BTVarApp actualName actualArgs) ->
             expectedName == actualName
               && zipAllWith (go bound) (NE.toList expectedArgs) (NE.toList actualArgs)
@@ -760,6 +797,16 @@ backendTypeMatchesWith allowFreeTypeVariableInstantiation typeBounds expectedTy 
                   False
         _ ->
           False
+
+    structuralMuMatchesKnownData base@(BaseTy dataName) args muName body =
+      structuralMuMatchesData base args muName body
+        || case mbDataDecls >>= Map.lookup dataName of
+          Just dataDecl
+            | structuralMuNameMatches dataName muName,
+              Just substitution <- structuralDataArgumentSubstitution dataDecl args ->
+                structuralMuPayloadMatchesDataDecl typeBounds dataDecl substitution (BTMu muName body)
+          _ ->
+            False
 
     freshBinderName leftName rightName leftBound rightBound leftBody rightBody =
       freshNameLike
@@ -827,30 +874,42 @@ validateBackendConstructorUse (Just context0) name resultTy args =
         case matchBackendTypeParametersWithTypeBounds (bvcTypeBounds context0) dataParameters parameters Map.empty (backendConstructorResult constructor) resultTy of
           Just substitution -> pure substitution
           Nothing -> Left (BackendConstructorResultMismatch name (backendConstructorResult constructor) resultTy)
+      validateBackendConstructorStructuralPayload
+        (bvcTypeBounds context0)
+        constructorInfo
+        substitution
+        (backendConstructorResult constructor)
+        (BackendConstructorResultMismatch name (backendConstructorResult constructor) resultTy)
+      validateBackendConstructorStructuralPayload
+        (bvcTypeBounds context0)
+        constructorInfo
+        substitution
+        resultTy
+        (BackendConstructorResultMismatch name (backendConstructorResult constructor) resultTy)
       _ <-
         foldM
-          (validateBackendConstructorArgument (bvcTypeBounds context0) dataParameters parameters name)
+          (validateBackendConstructorArgument (bvcTypeBounds context0) (Just (bvcData context0)) dataParameters parameters name)
           substitution
           (zip [0 ..] (zip fields args))
       pure ()
 
 validateBackendConstructorArgument ::
   Map.Map String (Maybe BackendType) ->
+  Maybe (Map.Map String BackendData) ->
   [String] ->
   BackendParameterBounds ->
   String ->
   Map.Map String BackendType ->
   (Int, (BackendType, BackendExpr)) ->
   Either BackendValidationError (Map.Map String BackendType)
-validateBackendConstructorArgument typeBounds dataParameters parameters name substitution (index0, (expectedTy, arg)) =
+validateBackendConstructorArgument typeBounds mbDataDecls dataParameters parameters name substitution (index0, (expectedTy, arg)) =
   case matchBackendTypeParametersWithTypeBounds typeBounds dataParameters parameters substitution expectedTy (backendExprType arg) of
     Just substitution' ->
       pure substitution'
     Nothing ->
       let completedSubstitution = completeBackendParameterSubstitution parameters substitution
           substitutedExpectedTy = substituteBackendTypes completedSubstitution expectedTy
-       in if backendTypeContainsVarApp expectedTy
-            && backendVariableTypeMatches typeBounds substitutedExpectedTy (backendExprType arg)
+       in if backendConstructorFieldTypeMatches substitutedExpectedTy
             then pure substitution
             else
               Left
@@ -860,6 +919,12 @@ validateBackendConstructorArgument typeBounds dataParameters parameters name sub
                     substitutedExpectedTy
                     (backendExprType arg)
                 )
+  where
+    backendConstructorFieldTypeMatches substitutedExpectedTy =
+      ( backendTypeContainsVarApp expectedTy
+          && backendVariableTypeMatchesWithBounds typeBounds substitutedExpectedTy (backendExprType arg)
+      )
+        || backendStructuralDataBoundaryMatches typeBounds mbDataDecls substitutedExpectedTy (backendExprType arg)
 
 backendTypeContainsVarApp :: BackendType -> Bool
 backendTypeContainsVarApp =
@@ -872,6 +937,125 @@ backendTypeContainsVarApp =
     BTForall _ mb body -> maybe False backendTypeContainsVarApp mb || backendTypeContainsVarApp body
     BTMu _ body -> backendTypeContainsVarApp body
     BTBottom -> False
+
+backendStructuralDataBoundaryMatches ::
+  Map.Map String (Maybe BackendType) ->
+  Maybe (Map.Map String BackendData) ->
+  BackendType ->
+  BackendType ->
+  Bool
+backendStructuralDataBoundaryMatches typeBounds mbDataDecls expectedTy actualTy =
+  go expectedTy actualTy
+  where
+    go expected actual =
+      alphaEqBackendType expected actual
+        || case (expected, actual) of
+          (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
+            go expectedDom actualDom && go expectedCod actualCod
+          (BTBase expectedBase, BTBase actualBase) ->
+            expectedBase == actualBase
+          (BTBase expectedBase, BTMu actualName actualBody) ->
+            structuralMuMatchesKnownData expectedBase [] actualName actualBody
+          (BTMu expectedName expectedBody, BTBase actualBase) ->
+            structuralMuMatchesKnownData actualBase [] expectedName expectedBody
+          (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs) ->
+            expectedCon == actualCon
+              && zipAllWith go (NE.toList expectedArgs) (NE.toList actualArgs)
+          (BTCon expectedCon expectedArgs, BTMu actualName actualBody) ->
+            structuralMuMatchesKnownData expectedCon (NE.toList expectedArgs) actualName actualBody
+          (BTMu expectedName expectedBody, BTCon actualCon actualArgs) ->
+            structuralMuMatchesKnownData actualCon (NE.toList actualArgs) expectedName expectedBody
+          (BTMu expectedName expectedBody, BTMu actualName actualBody) ->
+            structuralMuBodiesMatchKnownData expectedName expectedBody actualName actualBody
+          (BTForall expectedName expectedBound expectedBody, BTForall actualName actualBound actualBody) ->
+            maybeBoundaryMatches expectedBound actualBound
+              && let freshName = freshBinderName expectedName actualName expectedBound actualBound expectedBody actualBody
+                     expectedBody' = substituteBackendType expectedName (BTVar freshName) expectedBody
+                     actualBody' = substituteBackendType actualName (BTVar freshName) actualBody
+                  in go expectedBody' actualBody'
+          (BTBottom, BTBottom) ->
+            True
+          _ ->
+            False
+
+    structuralMuBodiesMatchKnownData expectedName expectedBody actualName actualBody =
+      case
+        ( structuralMuDataName expectedName,
+          structuralMuDataName actualName,
+          structuralMuHandlerTypes expectedBody,
+          structuralMuHandlerTypes actualBody
+        )
+        of
+          ( Just expectedDataName,
+            Just actualDataName,
+            Just (expectedResultName, expectedHandlers),
+            Just (actualResultName, actualHandlers)
+            )
+              | expectedDataName == actualDataName,
+                Just dataDecl <- mbDataDecls >>= Map.lookup expectedDataName,
+                length expectedHandlers == length actualHandlers,
+                length expectedHandlers == length (backendDataConstructors dataDecl) ->
+                  let freshSelf =
+                        freshNameLike
+                          expectedName
+                          ( Set.unions
+                              [ Set.fromList [expectedName, actualName],
+                                freeBackendTypeVars expectedBody,
+                                freeBackendTypeVars actualBody
+                              ]
+                          )
+                      freshResult =
+                        freshNameLike
+                          expectedResultName
+                          ( Set.unions
+                              [ Set.fromList [expectedResultName, actualResultName, freshSelf],
+                                freeBackendTypeVars expectedBody,
+                                freeBackendTypeVars actualBody
+                              ]
+                          )
+                      normalizeHandler selfName resultName =
+                        substituteBackendTypes
+                          ( Map.fromList
+                              [ (selfName, BTVar freshSelf),
+                                (resultName, BTVar freshResult)
+                              ]
+                          )
+                   in zipAllWith
+                        go
+                        (map (normalizeHandler expectedName expectedResultName) expectedHandlers)
+                        (map (normalizeHandler actualName actualResultName) actualHandlers)
+          _ ->
+            False
+
+    maybeBoundaryMatches Nothing Nothing =
+      True
+    maybeBoundaryMatches (Just expectedBound) (Just actualBound) =
+      go expectedBound actualBound
+    maybeBoundaryMatches _ _ =
+      False
+
+    structuralMuMatchesKnownData base@(BaseTy dataName) args muName body =
+      structuralMuMatchesData base args muName body
+        || case mbDataDecls >>= Map.lookup dataName of
+          Just dataDecl
+            | structuralMuNameMatches dataName muName,
+              Just substitution <- structuralDataArgumentSubstitution dataDecl args ->
+                structuralMuPayloadMatchesDataDecl typeBounds dataDecl substitution (BTMu muName body)
+          _ ->
+            False
+
+    freshBinderName leftName rightName leftBound rightBound leftBody rightBody =
+      freshNameLike
+        leftName
+        ( Set.unions
+            [ Set.fromList [leftName, rightName],
+              Map.keysSet typeBounds,
+              maybe Set.empty freeBackendTypeVars leftBound,
+              maybe Set.empty freeBackendTypeVars rightBound,
+              freeBackendTypeVars leftBody,
+              freeBackendTypeVars rightBody
+            ]
+        )
 
 validateBackendAlternative :: Maybe BackendValidationContext -> BackendType -> BackendType -> BackendAlternative -> Either BackendValidationError ()
 validateBackendAlternative mbContext scrutineeTy resultTy alternative = do
@@ -900,6 +1084,18 @@ validateBackendPattern (Just context0) scrutineeTy (BackendConstructorPattern na
         case matchBackendTypeParametersWithTypeBounds (bvcTypeBounds context0) dataParameters parameters Map.empty (backendConstructorResult constructor) scrutineeTy of
           Just substitution -> pure substitution
           Nothing -> Left (BackendCaseConstructorScrutineeMismatch name scrutineeTy (backendConstructorResult constructor))
+      validateBackendConstructorStructuralPayload
+        (bvcTypeBounds context0)
+        constructorInfo
+        substitution
+        (backendConstructorResult constructor)
+        (BackendCaseConstructorScrutineeMismatch name scrutineeTy (backendConstructorResult constructor))
+      validateBackendConstructorStructuralPayload
+        (bvcTypeBounds context0)
+        constructorInfo
+        substitution
+        scrutineeTy
+        (BackendCaseConstructorScrutineeMismatch name scrutineeTy (backendConstructorResult constructor))
       let fresheningSubstitution = constructorPatternFresheningSubstitution context0 substitution constructor
           patternSubstitution = Map.union fresheningSubstitution substitution
           instantiatedFields = map (substituteBackendTypes patternSubstitution) fields
@@ -959,11 +1155,141 @@ constructorPatternTypeBounds substitution fresheningSubstitution constructor =
 
 constructorTypeParameterBounds :: BackendConstructorInfo -> BackendParameterBounds
 constructorTypeParameterBounds constructorInfo =
+  constructorTypeParameterBoundsForData (bciDataParameters constructorInfo) (bciConstructor constructorInfo)
+
+constructorTypeParameterBoundsForData :: [String] -> BackendConstructor -> BackendParameterBounds
+constructorTypeParameterBoundsForData dataParameters constructor =
   Map.fromList $
-    [(name, Nothing) | name <- bciDataParameters constructorInfo]
+    [(name, Nothing) | name <- dataParameters]
       ++ [ (backendTypeBinderName binder, backendTypeBinderBound binder)
-           | binder <- backendConstructorForalls (bciConstructor constructorInfo)
+           | binder <- backendConstructorForalls constructor
          ]
+
+validateBackendConstructorStructuralPayload ::
+  Map.Map String (Maybe BackendType) ->
+  BackendConstructorInfo ->
+  Map.Map String BackendType ->
+  BackendType ->
+  BackendValidationError ->
+  Either BackendValidationError ()
+validateBackendConstructorStructuralPayload typeBounds constructorInfo substitution ty mismatchError =
+  unless (backendConstructorStructuralPayloadMatches typeBounds constructorInfo substitution ty) $
+    Left mismatchError
+
+backendConstructorStructuralPayloadMatches ::
+  Map.Map String (Maybe BackendType) ->
+  BackendConstructorInfo ->
+  Map.Map String BackendType ->
+  BackendType ->
+  Bool
+backendConstructorStructuralPayloadMatches typeBounds constructorInfo substitution =
+  \case
+    BTMu muName body
+      | structuralMuNameMatches (bciDataName constructorInfo) muName ->
+          case structuralMuHandlerTypes body of
+            Just (resultName, handlers) ->
+              structuralPayloadHandlersMatchForData
+                typeBounds
+                (bciDataParameters constructorInfo)
+                (bciDataConstructors constructorInfo)
+                substitution
+                (BTMu muName body)
+                muName
+                resultName
+                handlers
+            Nothing ->
+              False
+    _ ->
+      True
+
+structuralMuPayloadMatchesDataDecl ::
+  Map.Map String (Maybe BackendType) ->
+  BackendData ->
+  Map.Map String BackendType ->
+  BackendType ->
+  Bool
+structuralMuPayloadMatchesDataDecl typeBounds dataDecl substitution =
+  \case
+    BTMu muName body
+      | structuralMuNameMatches (backendDataName dataDecl) muName ->
+          case structuralMuHandlerTypes body of
+            Just (resultName, handlers) ->
+              structuralPayloadHandlersMatchForData
+                typeBounds
+                (backendDataParameters dataDecl)
+                (backendDataConstructors dataDecl)
+                substitution
+                (BTMu muName body)
+                muName
+                resultName
+                handlers
+            Nothing ->
+              False
+    _ ->
+      True
+
+structuralDataArgumentSubstitution :: BackendData -> [BackendType] -> Maybe (Map.Map String BackendType)
+structuralDataArgumentSubstitution dataDecl args
+  | length dataParameters == length args =
+      Just (Map.fromList (zip dataParameters args))
+  | otherwise =
+      Nothing
+  where
+    dataParameters =
+      backendDataParameters dataDecl
+
+structuralPayloadHandlersMatchForData ::
+  Map.Map String (Maybe BackendType) ->
+  [String] ->
+  [BackendConstructor] ->
+  Map.Map String BackendType ->
+  BackendType ->
+  String ->
+  String ->
+  [BackendType] ->
+  Bool
+structuralPayloadHandlersMatchForData typeBounds dataParameters constructors substitution structuralTy muName resultName handlers =
+  length constructors == length handlers
+    && and (zipWith constructorHandlerMatches constructors handlers)
+  where
+    dataSubstitution =
+      Map.filterWithKey (\name _ -> name `elem` dataParameters) substitution
+    structuralTyWithData =
+      substituteBackendTypes dataSubstitution structuralTy
+    knownSubstitution =
+      Map.insert muName structuralTyWithData dataSubstitution
+    substituteKnownTypes =
+      substituteBackendTypes knownSubstitution
+    constructorHandlerMatches constructor handlerTy =
+      case
+        matchBackendTypeParametersWithTypeBounds
+          typeBounds
+          dataParameters
+          parameters
+          Map.empty
+          expectedHandlerTy
+          actualHandlerTy
+        of
+          Just _ -> True
+          Nothing -> False
+      where
+        expectedHandlerTy =
+          substituteKnownTypes (constructorStructuralHandlerType resultName constructor)
+        actualHandlerTy =
+          substituteKnownTypes handlerTy
+        parameters =
+          Map.map (fmap substituteKnownTypes) $
+            constructorTypeParameterBoundsForData dataParameters constructor
+
+constructorStructuralHandlerType :: String -> BackendConstructor -> BackendType
+constructorStructuralHandlerType resultName constructor =
+  foldr wrapForall handlerBody (backendConstructorForalls constructor)
+  where
+    handlerBody =
+      foldr BTArrow (BTVar resultName) (backendConstructorFields constructor)
+
+    wrapForall binder body =
+      BTForall (backendTypeBinderName binder) (backendTypeBinderBound binder) body
 
 validateCaseAlternative :: BackendType -> BackendAlternative -> Either BackendValidationError ()
 validateCaseAlternative resultTy alternative =
