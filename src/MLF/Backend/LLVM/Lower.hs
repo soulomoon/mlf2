@@ -170,15 +170,63 @@ shouldLowerReachableBinding :: Set String -> BindingInfo -> Bool
 shouldLowerReachableBinding referencedFunctionNames binding =
   null (ffTypeBinders form)
     && ( biExportedAsMain binding
-           || canEmitFunctionForm form
+           || canEmitDirectReachableFunction (biName binding) form
            || (Set.member (biName binding) referencedFunctionNames && canEmitReferencedFunctionForm form)
        )
   where
     form = biForm binding
 
+canEmitDirectReachableFunction :: String -> FunctionForm -> Bool
+canEmitDirectReachableFunction name form
+  | not (requiresInlineCall form) =
+      canEmitFunctionForm form
+  | otherwise =
+      canEmitReferencedFunctionForm form && functionFormCallsGlobal name form
+
+functionFormCallsGlobal :: String -> FunctionForm -> Bool
+functionFormCallsGlobal name form =
+  go (Set.fromList (map fst (ffParams form))) (ffBody form)
+  where
+    go bound expr =
+      case collectCall expr of
+        Just (BackendVar _ calleeName, _, _)
+          | calleeName == name && Set.notMember calleeName bound -> True
+        _ -> childCalls bound expr
+
+    childCalls bound =
+      \case
+        BackendVar {} -> False
+        BackendLit {} -> False
+        BackendLam _ paramName _ body ->
+          go (Set.insert paramName bound) body
+        BackendApp _ fun arg ->
+          go bound fun || go bound arg
+        BackendLet _ localName _ rhs body ->
+          go bound rhs || go (Set.insert localName bound) body
+        BackendTyAbs _ _ _ body ->
+          go bound body
+        BackendTyApp _ fun _ ->
+          go bound fun
+        BackendConstruct _ _ args ->
+          any (go bound) args
+        BackendCase _ scrutinee alternatives ->
+          go bound scrutinee || any (alternativeCalls bound) (NE.toList alternatives)
+        BackendRoll _ payload ->
+          go bound payload
+        BackendUnroll _ payload ->
+          go bound payload
+
+    alternativeCalls bound (BackendAlternative pattern0 body) =
+      go (Set.union bound (patternBinders pattern0)) body
+
+    patternBinders =
+      \case
+        BackendDefaultPattern -> Set.empty
+        BackendConstructorPattern _ binders -> Set.fromList binders
+
 shouldLowerSpecialization :: Set String -> Specialization -> Bool
 shouldLowerSpecialization referencedFunctionNames specialization =
-  canEmitFunctionForm form
+  (not (requiresInlineCall form) && canEmitFunctionForm form)
     || (Set.member (spFunctionName specialization) referencedFunctionNames && canEmitReferencedFunctionForm form)
   where
     form = spForm specialization
@@ -401,6 +449,38 @@ collectForallsType =
       let (binders, core) = collectForallsType body
        in ((name, mbBound) : binders, core)
     ty -> ([], ty)
+
+functionFormType :: FunctionForm -> BackendType
+functionFormType form =
+  foldr
+    (\(name, mbBound) body -> BTForall name mbBound body)
+    (foldr (\(_, paramTy) body -> BTArrow paramTy body) (ffReturnType form) (ffParams form))
+    (ffTypeBinders form)
+
+backendTypeHasRuntimeRepresentation :: ProgramEnv -> BackendType -> Bool
+backendTypeHasRuntimeRepresentation env ty =
+  case lowerBackendType env "runtime representation check" ty of
+    Right _ -> True
+    Left _ -> False
+
+backendTypeRequiresStaticSpecialization :: BackendType -> Bool
+backendTypeRequiresStaticSpecialization =
+  \case
+    BTVar {} -> False
+    BTArrow {} -> True
+    BTBase {} -> False
+    BTCon {} -> False
+    BTForall {} -> True
+    BTMu {} -> False
+    BTBottom -> False
+
+emptyExprEnv :: ExprEnv
+emptyExprEnv =
+  ExprEnv
+    { eeValues = Map.empty,
+      eeLocalFunctions = Map.empty,
+      eeActiveGlobalInlines = Set.empty
+    }
 
 collectArrowsType :: BackendType -> ([BackendType], BackendType)
 collectArrowsType =
@@ -2007,7 +2087,11 @@ lowerGlobalCall env exprEnv context name typeArgs args =
       (resolvedTypeArgs, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs args
       unless (length args == length (ffParams form)) $
         liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
-      if shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args
+      if requiresInlineCall form
+        && Set.member (biName binding) (eeActiveGlobalInlines exprEnv)
+        && not (canEmitFunctionForm form)
+        then liftEither (BackendLLVMUnsupportedExpression context ("recursive static global " ++ show name))
+        else if shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args
         then do
           let bodyEnv0 =
                 exprEnv
@@ -2073,6 +2157,85 @@ globalFunctionName env context binding typeArgs
   where
     request = SpecRequest (biName binding) typeArgs
 
+lowerStaticFunctionArgument :: ProgramEnv -> ExprEnv -> String -> String -> BackendType -> BackendExpr -> LowerM LocalFunction
+lowerStaticFunctionArgument env callEnv context paramName expectedTy arg =
+  case collectTyApps arg of
+    (BackendVar _ name, typeArgs) ->
+      case Map.lookup name (eeLocalFunctions callEnv) of
+        Just localFunction -> do
+          form <- instantiateStaticFunctionForm context expectedTy (lfForm localFunction) typeArgs
+          requireStaticFunctionType context paramName expectedTy (localFunction {lfForm = form})
+        Nothing ->
+          case Map.lookup name (pbBindings (peBase env)) of
+            Just binding -> do
+              form <- instantiateStaticFunctionForm context expectedTy (biForm binding) typeArgs
+              if canEmitFunctionForm form
+                then lowerDirectStaticFunctionArgument callEnv context paramName expectedTy arg
+                else
+                  requireStaticFunctionType
+                    context
+                    paramName
+                    expectedTy
+                    ( LocalFunction
+                        { lfForm = form,
+                          lfCapturedEnv = emptyExprEnv
+                        }
+                    )
+            Nothing ->
+              lowerDirectStaticFunctionArgument callEnv context paramName expectedTy arg
+    _ ->
+      lowerDirectStaticFunctionArgument callEnv context paramName expectedTy arg
+
+instantiateStaticFunctionForm :: String -> BackendType -> FunctionForm -> [BackendType] -> LowerM FunctionForm
+instantiateStaticFunctionForm context expectedTy form typeArgs
+  | null typeArgs && alphaEqBackendType expectedTy (functionFormType form) =
+      pure form
+  | not (null typeArgs) =
+      instantiateFunctionFormM context form typeArgs []
+  | null (ffTypeBinders form) =
+      pure form
+  | otherwise = do
+      inferredTypeArgs <- inferStaticFunctionTypeArgs context expectedTy form
+      instantiateFunctionFormM context form inferredTypeArgs []
+
+inferStaticFunctionTypeArgs :: String -> BackendType -> FunctionForm -> LowerM [BackendType]
+inferStaticFunctionTypeArgs context expectedTy form =
+  case matchTypeParams binderSet Map.empty sourceTy expectedTy >>= resolvedTypeArguments context binderNames of
+    Right typeArgs -> pure typeArgs
+    Left err -> liftEither err
+  where
+    binderNames = map fst (ffTypeBinders form)
+    binderSet = Set.fromList binderNames
+    sourceTy = foldr BTArrow (ffReturnType form) (map snd (ffParams form))
+
+lowerDirectStaticFunctionArgument :: ExprEnv -> String -> String -> BackendType -> BackendExpr -> LowerM LocalFunction
+lowerDirectStaticFunctionArgument callEnv context paramName expectedTy arg =
+  requireStaticFunctionType
+    context
+    paramName
+    expectedTy
+    ( LocalFunction
+        { lfForm = functionFormFromExpected expectedTy arg,
+          lfCapturedEnv = callEnv
+        }
+    )
+
+requireStaticFunctionType :: String -> String -> BackendType -> LocalFunction -> LowerM LocalFunction
+requireStaticFunctionType context paramName expectedTy localFunction = do
+  unless (alphaEqBackendType expectedTy (functionFormType (lfForm localFunction))) $
+    liftEither
+      ( BackendLLVMUnsupportedExpression
+          context
+          ( "static argument "
+              ++ show paramName
+              ++ " has type "
+              ++ show (functionFormType (lfForm localFunction))
+              ++ ", expected "
+              ++ show expectedTy
+          )
+      )
+  pure localFunction
+
 bindFunctionArguments :: ProgramEnv -> String -> Bool -> String -> FunctionForm -> [LowerValue] -> LowerM ()
 bindFunctionArguments env context allowNestedEvidence name form args = do
   unless (length args == length (ffParams form)) $
@@ -2112,13 +2275,13 @@ bindCallArguments env callEnv bodyEnv0 context allowNestedEvidence name form arg
   where
     bindOne bodyEnv ((paramName, paramTy), arg)
       | isInlineFunctionArgument allowNestedEvidence paramName paramTy = do
-          let argForm = functionFormFromExpected paramTy arg
+          localFunction <- lowerStaticFunctionArgument env callEnv context paramName paramTy arg
           pure
             bodyEnv
               { eeLocalFunctions =
                   Map.insert
                     paramName
-                    LocalFunction {lfForm = argForm, lfCapturedEnv = callEnv}
+                    localFunction
                     (eeLocalFunctions bodyEnv),
                 eeValues = Map.delete paramName (eeValues bodyEnv)
               }
@@ -2137,12 +2300,12 @@ isInlineFunctionArgument allowNestedEvidence paramName paramTy =
 isInlineOnlyFunctionParameter :: Bool -> String -> BackendType -> Bool
 isInlineOnlyFunctionParameter allowNestedEvidence paramName paramTy =
   isFunctionLikeBackendType paramTy
-    && (evidenceNeedsInlining || firstOrderFunctionNeedsInlining)
+    && (evidenceNeedsInlining || nonEvidenceNeedsInlining)
   where
     evidenceLike = isEvidenceArgument allowNestedEvidence paramName paramTy
     polymorphicFunction = hasTypeBinders paramTy
     evidenceNeedsInlining = evidenceLike && polymorphicFunction
-    firstOrderFunctionNeedsInlining = not evidenceLike && not polymorphicFunction
+    nonEvidenceNeedsInlining = not evidenceLike
 
 requireLLVMType :: String -> String -> LLVMType -> LowerValue -> LowerM ()
 requireLLVMType context name expected actual =
@@ -2312,7 +2475,22 @@ lowerConstruct env exprEnv context resultTy name args =
       emitStore (lvLLVMType value) (lvOperand value) fieldPtr
 
 lowerCase :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> NonEmpty BackendAlternative -> LowerM LowerValue
-lowerCase env exprEnv context resultTy scrutinee alternatives = do
+lowerCase env exprEnv context resultTy scrutinee alternatives =
+  case scrutinee of
+    BackendConstruct scrutineeTy name args ->
+      case Map.lookup name (pbConstructors (peBase env)) of
+        Just constructorRuntime -> do
+          fieldTys <- constructorFieldTypesForScrutinee env context constructorRuntime scrutineeTy
+          if any backendTypeRequiresStaticSpecialization fieldTys
+            then lowerImmediateConstructCase env exprEnv context resultTy name args fieldTys alternatives
+            else lowerHeapCase env exprEnv context resultTy scrutinee alternatives
+        Nothing ->
+          lowerHeapCase env exprEnv context resultTy scrutinee alternatives
+    _ ->
+      lowerHeapCase env exprEnv context resultTy scrutinee alternatives
+
+lowerHeapCase :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> NonEmpty BackendAlternative -> LowerM LowerValue
+lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
   rejectNonTailDefaultAlternative
   resultLLVMType <- lowerBackendTypeM env context resultTy
   scrutineeValue <- lowerExpr env exprEnv context scrutinee
@@ -2413,6 +2591,124 @@ lowerCase env exprEnv context resultTy scrutinee alternatives = do
       fieldPtr <- emitGep "case.field.ptr" (lvOperand scrutineeValue) (8 * (index0 + 1))
       loaded <- emitAssign "case.field" llvmTy (LLVMLoad llvmTy fieldPtr)
       pure (LowerValue fieldTy llvmTy loaded)
+
+lowerImmediateConstructCase ::
+  ProgramEnv ->
+  ExprEnv ->
+  String ->
+  BackendType ->
+  String ->
+  [BackendExpr] ->
+  [BackendType] ->
+  NonEmpty BackendAlternative ->
+  LowerM LowerValue
+lowerImmediateConstructCase env exprEnv context resultTy constructorName args fieldTys alternatives = do
+  rejectNonTailDefaultAlternative
+  rejectDuplicateConstructorAlternatives
+  unless (length args == length fieldTys) $
+    liftEither (BackendLLVMArityMismatch constructorName (length fieldTys) (length args))
+  case selectedAlternative of
+    Just alternative -> do
+      exprEnv' <- bindImmediateAlternativePattern alternative
+      bodyValue <- lowerExpr env exprEnv' context (backendAltBody alternative)
+      expectedTy <- lowerBackendTypeM env context resultTy
+      unless (lvLLVMType bodyValue == expectedTy) $
+        liftEither (BackendLLVMInternalError ("immediate case alternative type mismatch at " ++ context))
+      pure bodyValue
+    Nothing ->
+      lowerUnmatchedImmediateCase
+  where
+    alternativesList = NE.toList alternatives
+
+    selectedAlternative =
+      case [alternative | alternative@(BackendAlternative (BackendConstructorPattern name _) _) <- alternativesList, name == constructorName] of
+        alternative : _ -> Just alternative
+        [] ->
+          case [alternative | alternative@(BackendAlternative BackendDefaultPattern _) <- alternativesList] of
+            alternative : _ -> Just alternative
+            [] -> Nothing
+
+    rejectNonTailDefaultAlternative =
+      case break isDefaultAlternative alternativesList of
+        (_, []) -> pure ()
+        (_, [_]) -> pure ()
+        (_, _ : _ : _) ->
+          liftEither (BackendLLVMUnsupportedExpression context "default case alternative must be last")
+
+    isDefaultAlternative (BackendAlternative BackendDefaultPattern _) =
+      True
+    isDefaultAlternative _ =
+      False
+
+    rejectDuplicateConstructorAlternatives =
+      case firstDuplicate [name | BackendAlternative (BackendConstructorPattern name _) _ <- alternativesList] of
+        Just name ->
+          liftEither (BackendLLVMUnsupportedExpression context ("duplicate constructor case alternative " ++ show name))
+        Nothing ->
+          pure ()
+
+    lowerUnmatchedImmediateCase = do
+      zipWithM_ evaluateUnusedField fieldTys args
+      expectedTy <- lowerBackendTypeM env context resultTy
+      finishCurrentBlock LLVMUnreachable
+      continuationLabel <- freshBlock "case.unreachable.cont"
+      startBlock continuationLabel
+      operand <- dummyOperandAfterUnreachable context expectedTy
+      pure (LowerValue resultTy expectedTy operand)
+
+    bindImmediateAlternativePattern (BackendAlternative pattern0 body) =
+      case pattern0 of
+        BackendDefaultPattern -> do
+          zipWithM_ evaluateUnusedField fieldTys args
+          pure exprEnv
+        BackendConstructorPattern name binders -> do
+          unless (name == constructorName) $
+            liftEither
+              ( BackendLLVMUnsupportedExpression
+                  context
+                  ("selected immediate constructor mismatch " ++ show name ++ " for " ++ show constructorName)
+              )
+          unless (length binders == length fieldTys) $
+            liftEither (BackendLLVMArityMismatch name (length fieldTys) (length binders))
+          foldM
+            (bindUsedField (freeBackendExprVars body))
+            exprEnv
+            (zip3 binders fieldTys args)
+
+    bindUsedField usedBinders acc (binder, fieldTy, arg)
+      | backendTypeRequiresStaticSpecialization fieldTy = do
+          localFunction <- lowerStaticFunctionArgument env exprEnv context binder fieldTy arg
+          if Set.member binder usedBinders
+            then pure acc {eeLocalFunctions = Map.insert binder localFunction (eeLocalFunctions acc)}
+            else pure acc
+      | backendTypeHasRuntimeRepresentation env fieldTy = do
+          value <- lowerExpr env exprEnv context arg
+          expectedTy <- lowerBackendTypeM env context fieldTy
+          requireLLVMType context constructorName expectedTy value
+          if Set.member binder usedBinders
+            then pure acc {eeValues = Map.insert binder value (eeValues acc)}
+            else pure acc
+      | otherwise = do
+          liftEither (BackendLLVMUnsupportedType ("field " ++ show binder ++ " at " ++ context) fieldTy)
+
+    evaluateUnusedField fieldTy arg
+      | backendTypeRequiresStaticSpecialization fieldTy = do
+          _ <- lowerStaticFunctionArgument env exprEnv context "_" fieldTy arg
+          pure ()
+      | backendTypeHasRuntimeRepresentation env fieldTy = do
+          value <- lowerExpr env exprEnv context arg
+          expectedTy <- lowerBackendTypeM env context fieldTy
+          requireLLVMType context constructorName expectedTy value
+      | otherwise =
+          liftEither (BackendLLVMUnsupportedType ("field at " ++ context) fieldTy)
+
+dummyOperandAfterUnreachable :: String -> LLVMType -> LowerM LLVMOperand
+dummyOperandAfterUnreachable _ (LLVMInt width) =
+  pure (LLVMIntLiteral width 0)
+dummyOperandAfterUnreachable _ LLVMPtr =
+  pure LLVMNull
+dummyOperandAfterUnreachable context ty =
+  liftEither (BackendLLVMInternalError ("cannot synthesize unreachable value of type " ++ show ty ++ " at " ++ context))
 
 constructorFieldTypesForScrutinee :: ProgramEnv -> String -> ConstructorRuntime -> BackendType -> LowerM [BackendType]
 constructorFieldTypesForScrutinee _ context constructorRuntime scrutineeTy =

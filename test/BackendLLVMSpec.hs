@@ -153,6 +153,60 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "missing specialization"
     validateLLVMAssembly output
 
+  it "statically lowers first-class polymorphic top-level arguments" $ do
+    output <- requireRight =<< emitBackendFile "test/programs/unified/first-class-polymorphism.mlfp"
+
+    output `shouldSatisfy` isInfixOf "define i1 @\"FirstClassPolymorphism__main\"()"
+    output `shouldNotSatisfy` isInfixOf "FirstClassPolymorphism__usePoly"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "statically lowers first-class polymorphic local arguments" $ do
+    output <-
+      withTempProgram localFirstClassPolymorphismProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
+    validateLLVMAssembly output
+
+  it "statically lowers first-class function-typed arguments" $ do
+    output <-
+      withTempProgram firstClassFunctionArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
+    output `shouldNotSatisfy` isInfixOf "Main__use"
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
+    validateLLVMAssembly output
+
+  it "collects specializations for type-applied global static aliases" $ do
+    output <-
+      withTempProgram typeAppliedGlobalStaticAliasProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
+    output `shouldSatisfy` isInfixOf "define private i64 @\"Main__id$t"
+    output `shouldNotSatisfy` isInfixOf "missing specialization"
+    validateLLVMAssembly output
+
+  it "rejects static-argument entrypoints instead of eliding main" $ do
+    renderBackendProgramLLVM staticArgumentMainProgram
+      `shouldSatisfyLeft` isInfixOf "parameter \"poly\" of main"
+
+  it "rejects recursive static global inlining instead of diverging" $ do
+    renderBackendProgramLLVM recursiveStaticGlobalProgram
+      `shouldSatisfyLeft` isInfixOf "recursive static global \"loop\""
+
+  it "statically lowers immediate constructor fields carrying forall values" $ do
+    output <-
+      withTempProgram constructorFirstClassPolymorphismProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
+    output `shouldNotSatisfy` isInfixOf "escaping type abstraction"
+    validateLLVMAssembly output
+
   it "lowers local function aliases without requiring closure conversion" $ do
     output <- requireRight (renderBackendProgramLLVM localFunctionAliasProgram)
 
@@ -254,6 +308,25 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"box\", i64 16"
     output `shouldNotSatisfy` isInfixOf "getelementptr i8, ptr %\"box\", i64 8"
     validateLLVMAssembly output
+
+  it "evaluates unused immediate constructor fields before static erasure" $ do
+    renderBackendProgramLLVM strictImmediateConstructFieldProgram
+      `shouldSatisfyLeft` isInfixOf "representation-changing roll"
+
+  it "evaluates immediate constructor fields before default alternatives" $ do
+    renderBackendProgramLLVM strictImmediateDefaultProgram
+      `shouldSatisfyLeft` isInfixOf "representation-changing roll"
+
+  it "lowers unmatched immediate constructor cases to unreachable" $ do
+    output <- requireRight (renderBackendProgramLLVM unmatchedImmediateConstructorProgram)
+
+    output `shouldSatisfy` isInfixOf "unreachable"
+    output `shouldNotSatisfy` isInfixOf "no matching immediate constructor alternative"
+    validateLLVMAssembly output
+
+  it "evaluates immediate constructor fields before unmatched alternatives" $ do
+    renderBackendProgramLLVM strictImmediateUnmatchedProgram
+      `shouldSatisfyLeft` isInfixOf "representation-changing roll"
 
   it "rejects duplicate constructor case alternatives before emitting switch" $ do
     renderBackendProgramLLVM duplicateConstructorCaseProgram
@@ -539,6 +612,84 @@ recursiveListProgram =
       "",
       "  def main : Bool = isNil (tailOrNil (RCons Zero RNil));",
       "}"
+    ]
+
+localFirstClassPolymorphismProgram :: String
+localFirstClassPolymorphismProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Bool =",
+      "    let usePoly : (forall a. a -> a) -> Bool =",
+      "      \\(poly : forall a. a -> a) let keepInt = poly 1 in poly true",
+      "    in let id : forall a. a -> a = \\x x in usePoly id;",
+      "}"
+    ]
+
+firstClassFunctionArgumentProgram :: String
+firstClassFunctionArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def main : Int = use (\\(x : Int) x);",
+      "}"
+    ]
+
+typeAppliedGlobalStaticAliasProgram :: String
+typeAppliedGlobalStaticAliasProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def id : forall a. a -> a = \\x x;",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def main : Int = use id;",
+      "}"
+    ]
+
+constructorFirstClassPolymorphismProgram :: String
+constructorFirstClassPolymorphismProgram =
+  unlines
+    [ "module Main export (PolyBox(..), main) {",
+      "  data PolyBox =",
+      "      PolyBox : (forall a. a -> a) -> PolyBox;",
+      "",
+      "  def main : Bool = case PolyBox (\\x x) of {",
+      "    PolyBox poly -> let keepInt = poly 1 in poly true",
+      "  };",
+      "}"
+    ]
+
+staticArgumentMainProgram :: BackendProgram
+staticArgumentMainProgram =
+  programWithMainExpr staticPolyBoolTy $
+    BackendLam staticPolyBoolTy "poly" polyIdTy (boolLit True)
+
+recursiveStaticGlobalProgram :: BackendProgram
+recursiveStaticGlobalProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "loop",
+          backendBindingType = staticPolyBoolTy,
+          backendBindingExpr =
+            BackendLam
+              staticPolyBoolTy
+              "poly"
+              polyIdTy
+              ( BackendApp
+                  boolTy
+                  (BackendVar staticPolyBoolTy "loop")
+                  (BackendVar polyIdTy "poly")
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = boolTy,
+          backendBindingExpr =
+            BackendApp
+              boolTy
+              (BackendVar staticPolyBoolTy "loop")
+              polyIdExpr,
+          backendBindingExportedAsMain = True
+        }
     ]
 
 ordinaryFunctionEvidenceMethodProgram :: String
@@ -1357,7 +1508,6 @@ inlineFunctionArgumentShadowsValueProgram =
         ],
       backendProgramMain = "main"
     }
-
 stringProgram :: BackendProgram
 stringProgram =
   BackendProgram
@@ -1896,6 +2046,122 @@ unusedPolymorphicPatternFieldProgram =
       backendProgramMain = "main"
     }
 
+strictImmediateConstructFieldProgram :: BackendProgram
+strictImmediateConstructFieldProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [strictBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          ( BackendConstruct
+                              strictBoxTy
+                              "StrictBox"
+                              [polyIdExpr, BackendRoll recIntTy (intLit 1)]
+                          )
+                          ( BackendAlternative
+                              (BackendConstructorPattern "StrictBox" ["poly", "unused"])
+                              (intLit 0)
+                              :| []
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+strictImmediateDefaultProgram :: BackendProgram
+strictImmediateDefaultProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [strictBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          ( BackendConstruct
+                              strictBoxTy
+                              "StrictBox"
+                              [polyIdExpr, BackendRoll recIntTy (intLit 1)]
+                          )
+                          (BackendAlternative BackendDefaultPattern (intLit 0) :| []),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+unmatchedImmediateConstructorProgram :: BackendProgram
+unmatchedImmediateConstructorProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [immediateChoiceData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          ( BackendConstruct
+                              immediateChoiceTy
+                              "WithStatic"
+                              [polyIdExpr, intLit 1]
+                          )
+                          (BackendAlternative (BackendConstructorPattern "Other" []) (intLit 0) :| []),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+strictImmediateUnmatchedProgram :: BackendProgram
+strictImmediateUnmatchedProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [immediateStrictChoiceData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          ( BackendConstruct
+                              immediateStrictChoiceTy
+                              "WithStrictStatic"
+                              [polyIdExpr, BackendRoll recIntTy (intLit 1)]
+                          )
+                          (BackendAlternative (BackendConstructorPattern "StrictOther" []) (intLit 0) :| []),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
 duplicateConstructorCaseProgram :: BackendProgram
 duplicateConstructorCaseProgram =
   BackendProgram
@@ -1999,6 +2265,10 @@ polyIdExpr =
         (BTVar "a")
         (BackendVar (BTVar "a") "x")
     )
+
+staticPolyBoolTy :: BackendType
+staticPolyBoolTy =
+  BTArrow polyIdTy boolTy
 
 badPolyTy :: BackendType
 badPolyTy =
@@ -2150,6 +2420,58 @@ lazyFieldBoxData =
         ]
     }
 
+strictBoxData :: BackendData
+strictBoxData =
+  BackendData
+    { backendDataName = "StrictBox",
+      backendDataParameters = [],
+      backendDataConstructors =
+        [ BackendConstructor
+            "StrictBox"
+            []
+            [polyIdTy, recIntTy]
+            strictBoxTy
+        ]
+    }
+
+immediateChoiceData :: BackendData
+immediateChoiceData =
+  BackendData
+    { backendDataName = "ImmediateChoice",
+      backendDataParameters = [],
+      backendDataConstructors =
+        [ BackendConstructor
+            "WithStatic"
+            []
+            [polyIdTy, intTy]
+            immediateChoiceTy,
+          BackendConstructor
+            "Other"
+            []
+            []
+            immediateChoiceTy
+        ]
+    }
+
+immediateStrictChoiceData :: BackendData
+immediateStrictChoiceData =
+  BackendData
+    { backendDataName = "ImmediateStrictChoice",
+      backendDataParameters = [],
+      backendDataConstructors =
+        [ BackendConstructor
+            "WithStrictStatic"
+            []
+            [polyIdTy, recIntTy]
+            immediateStrictChoiceTy,
+          BackendConstructor
+            "StrictOther"
+            []
+            []
+            immediateStrictChoiceTy
+        ]
+    }
+
 programWithMainExpr :: BackendType -> BackendExpr -> BackendProgram
 programWithMainExpr mainTy expr =
   programWithBindings
@@ -2178,17 +2500,21 @@ intLit :: Integer -> BackendExpr
 intLit value =
   BackendLit intTy (LInt value)
 
+boolLit :: Bool -> BackendExpr
+boolLit value =
+  BackendLit boolTy (LBool value)
+
 intTy :: BackendType
 intTy =
   BTBase (BaseTy "Int")
 
-stringTy :: BackendType
-stringTy =
-  BTBase (BaseTy "String")
-
 boolTy :: BackendType
 boolTy =
   BTBase (BaseTy "Bool")
+
+stringTy :: BackendType
+stringTy =
+  BTBase (BaseTy "String")
 
 optionTy :: BackendType -> BackendType
 optionTy ty =
@@ -2217,6 +2543,18 @@ fnBoxTy =
 lazyFieldBoxTy :: BackendType
 lazyFieldBoxTy =
   BTBase (BaseTy "LazyFieldBox")
+
+strictBoxTy :: BackendType
+strictBoxTy =
+  BTBase (BaseTy "StrictBox")
+
+immediateChoiceTy :: BackendType
+immediateChoiceTy =
+  BTBase (BaseTy "ImmediateChoice")
+
+immediateStrictChoiceTy :: BackendType
+immediateStrictChoiceTy =
+  BTBase (BaseTy "ImmediateStrictChoice")
 
 aUnderscoreTy :: BackendType
 aUnderscoreTy =
@@ -2253,12 +2591,7 @@ llvmParityExpectations =
 
 unsupportedLLVMParityCases :: [(String, String)]
 unsupportedLLVMParityCases =
-  [ ("surface: runs first-class polymorphic top-level argument", "Unsupported backend LLVM type at parameter \"$poly#0\" of FirstClassPolymorphism__usePoly"),
-    ("surface: runs first-class polymorphic local argument", "could not infer type arguments [\"a\"]"),
-    ("boundary: constructor argument inferred as first-class polymorphic value should run", "escaping type abstraction"),
-    ("boundary: local first-class polymorphic let through constructor boundary should run", "could not infer type arguments [\"a\"]"),
-    ("boundary: pattern-bound first-class polymorphic variable should run", "could not infer type arguments [\"a\"]"),
-    ("boundary: runs higher-kinded data field over a concrete constructor head", "BackendUnsupportedSourceType"),
+  [ ("boundary: runs higher-kinded data field over a concrete constructor head", "BackendUnsupportedSourceType"),
     ("boundary: runs nullary constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
     ("boundary: runs first-class nullary constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
     ("boundary: runs value-imported constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
@@ -2268,13 +2601,12 @@ unsupportedLLVMParityCases =
     ("boundary: runs aliased bulk-imported hidden-owner constructors in one case", "BackendUnsupportedSourceType"),
     ("boundary: runs value-exported GADT constructor when owner type is not exported", "BackendUnsupportedSourceType"),
     ("boundary: runs value-imported nonzero-index constructor from mixed higher-kinded data type", "BackendUnsupportedSourceType"),
-    ("unified fixture: test/programs/unified/first-class-polymorphism.mlfp", "Unsupported backend LLVM type at parameter \"$poly#0\" of FirstClassPolymorphism__usePoly"),
     ("standalone: does not decode typed non-data constructor fields through fallback ADT decoding", "escaping lambda")
   ]
 
 expectedLLVMUnsupportedParityCount :: Int
 expectedLLVMUnsupportedParityCount =
-  17
+  11
 
 llvmUnsupportedParityCount :: Int
 llvmUnsupportedParityCount =
@@ -2287,7 +2619,8 @@ llvmObjectCodeParityCases :: [String]
 llvmObjectCodeParityCases =
   [ "surface: runs lambda/application",
     "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp",
-    "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp"
+    "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp",
+    "unified fixture: test/programs/unified/first-class-polymorphism.mlfp"
   ]
 
 llvmObjectCodeParityCaseNames :: Set.Set String

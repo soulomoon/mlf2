@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Added LLVM lowering support for first-class polymorphic values at
+  non-escaping runtime boundaries. Polymorphic arguments and immediate
+  constructor fields are statically specialized/erased at call and case sites,
+  while escaping closures and partial applications remain fail-closed.
 - Extended LLVM backend support for resolved typeclass evidence and derived
   `Eq`: constrained helper aliases, method-level evidence constraints,
   parameterized instances, recursive `List` deriving, recursive ADT deriving
