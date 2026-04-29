@@ -43,6 +43,28 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendVariableTypeMismatch "helper" intTy (BTVar "a"))
 
+    validateBackendProgram
+      ( programWithMainExpr
+          ( BackendLam
+              (BTArrow (BTVar "a") (BTVar "b"))
+              "x"
+              (BTVar "a")
+              (BackendVar (BTVar "b") "x")
+          )
+      )
+      `shouldBe` Left (BackendVariableTypeMismatch "x" (BTVar "a") (BTVar "b"))
+
+    validateBackendProgram
+      ( programWithMainExpr
+          ( BackendLam
+              (BTArrow (BTVar "a") (BTVar "a1"))
+              "x"
+              (BTVar "a")
+              (BackendVar (BTVar "a1") "x")
+          )
+      )
+      `shouldBe` Left (BackendVariableTypeMismatch "x" (BTVar "a") (BTVar "a1"))
+
     validateBackendProgram (programWithMainExpr letIdentityExpr)
       `shouldBe` Right ()
 
@@ -74,6 +96,24 @@ spec = describe "MLF.Backend.IR" $ do
         forallFreeTy = BTForall "y" Nothing (BTArrow (BTVar "a") (BTVar "y"))
         structuralBoxIntTy = BTMu "$Box_self" (singleFieldStructuralBody intTy)
         structuralBoxFreeTy = BTMu "$Box_self" (singleFieldStructuralBody (BTVar "a"))
+        listIntToBoolTy = BTArrow listIntTy boolTy
+        listTyAbsAppExpr =
+          BackendTyAbs
+            (BTForall "a" Nothing (BTArrow (listTy (BTVar "a")) boolTy))
+            "a"
+            Nothing
+            ( BackendLam
+                (BTArrow (listTy (BTVar "a")) boolTy)
+                "xs"
+                (listTy (BTVar "a"))
+                ( BackendApp
+                    boolTy
+                    (BackendVar listIntToBoolTy "f")
+                    (BackendVar (listTy (BTVar "a")) "xs")
+                )
+            )
+        listIntToBoolExpr =
+          BackendLam listIntToBoolTy "ys" listIntTy (boolLit True)
 
     validateBackendExpr (BackendApp intTy (BackendVar (BTArrow listIntTy intTy) "f") (BackendVar listFreeTy "xs"))
       `shouldBe` Left (BackendApplicationArgumentMismatch listIntTy listFreeTy)
@@ -92,6 +132,9 @@ spec = describe "MLF.Backend.IR" $ do
 
     validateBackendExpr (BackendApp listIntTy (BackendVar (BTArrow intTy listFreeTy) "f") (intLit 1))
       `shouldBe` Left (BackendApplicationResultMismatch listIntTy listFreeTy)
+
+    validateBackendProgram (programWithBindings [binding "f" listIntToBoolTy listIntToBoolExpr, mainBinding listTyAbsAppExpr])
+      `shouldBe` Left (BackendApplicationArgumentMismatch listIntTy (listTy (BTVar "a")))
 
     validateBackendExpr (BackendApp boolTy (BackendVar (BTArrow structuralBoxFreeTy boolTy) "f") (BackendVar structuralBoxIntTy "box"))
       `shouldBe` Right ()

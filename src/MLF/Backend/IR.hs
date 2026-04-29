@@ -57,6 +57,7 @@ module MLF.Backend.IR
 where
 
 import Control.Monad (foldM, unless)
+import Data.Char (isDigit)
 import Data.List (sort)
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
@@ -249,8 +250,13 @@ data BackendConstructorInfo = BackendConstructorInfo
   }
 
 data TypeVariableInstantiation
-  = RejectFreeTypeVariableInstantiation
-  | AllowContextFreeTypeVariableInstantiation
+  = RejectFreeTypeVariableInstantiation FreshenedTypeVariableAliases
+  | AllowStructuralPayloadInstantiation
+  deriving (Eq, Show)
+
+data FreshenedTypeVariableAliases
+  = RejectFreshenedTypeVariableAliases
+  | AllowFreshenedTypeVariableAliases
   deriving (Eq, Show)
 
 type BackendParameterBounds = Map.Map String (Maybe BackendType)
@@ -686,23 +692,39 @@ validateBackendVariable (Just context0) name actualTy =
     Nothing ->
       Left (BackendUnknownVariable name)
     Just expectedTy ->
-      unless (backendVariableTypeMatches context0 expectedTy actualTy) $
+      unless (backendVariableTypeMatches context0 name expectedTy actualTy) $
         Left (BackendVariableTypeMismatch name expectedTy actualTy)
 
 backendApplicationTypeMatches :: Maybe BackendValidationContext -> BackendType -> BackendType -> Bool
 backendApplicationTypeMatches mbContext expectedTy actualTy =
-  backendTypeMatchesWith AllowContextFreeTypeVariableInstantiation typeBounds dataDecls expectedTy actualTy
+  backendTypeMatchesWith AllowStructuralPayloadInstantiation typeBounds dataDecls expectedTy actualTy
   where
     typeBounds = maybe Map.empty bvcTypeBounds mbContext
     dataDecls = bvcData <$> mbContext
 
-backendVariableTypeMatches :: BackendValidationContext -> BackendType -> BackendType -> Bool
-backendVariableTypeMatches context0 expectedTy actualTy =
-  backendTypeMatchesWith RejectFreeTypeVariableInstantiation (bvcTypeBounds context0) (Just (bvcData context0)) expectedTy actualTy
+backendVariableTypeMatches :: BackendValidationContext -> String -> BackendType -> BackendType -> Bool
+backendVariableTypeMatches context0 name expectedTy actualTy =
+  backendTypeMatchesWith
+    (RejectFreeTypeVariableInstantiation (freshenedAliasesForVariable name))
+    (bvcTypeBounds context0)
+    (Just (bvcData context0))
+    expectedTy
+    actualTy
 
 backendVariableTypeMatchesWithBounds :: Map.Map String (Maybe BackendType) -> BackendType -> BackendType -> Bool
 backendVariableTypeMatchesWithBounds typeBounds expectedTy actualTy =
-  backendTypeMatchesWith RejectFreeTypeVariableInstantiation typeBounds Nothing expectedTy actualTy
+  backendTypeMatchesWith
+    (RejectFreeTypeVariableInstantiation RejectFreshenedTypeVariableAliases)
+    typeBounds
+    Nothing
+    expectedTy
+    actualTy
+
+freshenedAliasesForVariable :: String -> FreshenedTypeVariableAliases
+freshenedAliasesForVariable ('$' : _) =
+  AllowFreshenedTypeVariableAliases
+freshenedAliasesForVariable _ =
+  RejectFreshenedTypeVariableAliases
 
 backendTypeMatchesWith ::
   TypeVariableInstantiation ->
@@ -728,13 +750,7 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
           (BTMu expectedName expectedBody, BTBase actualBase) ->
             structuralMuMatchesKnownData actualBase [] expectedName expectedBody
           (BTVar expectedName, BTVar actualName)
-            | typeVariablePairMayMatch bound expectedName actualName ->
-                True
-          (BTVar expectedName, _)
-            | typeVariableMayInstantiate bound expectedName ->
-                True
-          (_, BTVar actualName)
-            | typeVariableMayInstantiate bound actualName ->
+            | freshenedTypeVariablesMayMatch bound expectedName actualName ->
                 True
           (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs) ->
             expectedCon == actualCon
@@ -784,36 +800,31 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
     maybeBoundMatches _ _ _ =
       False
 
-    typeVariableMayInstantiate bound name =
-      Set.notMember name bound
-        && case typeVariableInstantiation of
-          RejectFreeTypeVariableInstantiation ->
-            False
-          AllowContextFreeTypeVariableInstantiation ->
-            contextTypeVariableMayInstantiate name
-
-    contextTypeVariableMayInstantiate name =
-      case Map.lookup name typeBounds of
-        Just Nothing -> True
-        Just (Just boundTy) -> alphaEqBackendType boundTy BTBottom
-        Nothing -> False
-
-    typeVariablePairMayMatch bound expectedName actualName =
-      Set.notMember expectedName bound
-        && Set.notMember actualName bound
-        && case typeVariableInstantiation of
-          RejectFreeTypeVariableInstantiation ->
-            freeTypeVariableMayInstantiate expectedName
-              && freeTypeVariableMayInstantiate actualName
-          AllowContextFreeTypeVariableInstantiation ->
-            contextTypeVariableMayInstantiate expectedName
-              && contextTypeVariableMayInstantiate actualName
-
     freeTypeVariableMayInstantiate name =
       case Map.lookup name typeBounds of
         Nothing -> True
         Just Nothing -> True
         Just (Just boundTy) -> alphaEqBackendType boundTy BTBottom
+
+    -- Conversion may alpha-freshen generated case/evidence binders while their
+    -- lexical variable names stay fixed. Keep that escape hatch scoped to
+    -- generated variables; user-facing variables still require exact names.
+    freshenedTypeVariablesMayMatch bound expectedName actualName =
+      case typeVariableInstantiation of
+        RejectFreeTypeVariableInstantiation AllowFreshenedTypeVariableAliases ->
+          Set.notMember expectedName bound
+            && Set.notMember actualName bound
+            && freshenedNameVariant expectedName actualName
+        _ ->
+          False
+
+    freshenedNameVariant leftName rightName =
+      leftName /= rightName
+        && (isFreshenedFrom leftName rightName || isFreshenedFrom rightName leftName)
+
+    isFreshenedFrom baseName candidateName =
+      let (digits, prefix) = span isDigit (reverse candidateName)
+       in not (null digits) && reverse prefix == baseName
 
     typeVariableBoundMatches bound ty otherTy =
       case ty of
@@ -844,9 +855,9 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
     -- strictly.
     structuralMuPayloadMayInstantiate expectedName expectedBody actualName actualBody =
       case typeVariableInstantiation of
-        RejectFreeTypeVariableInstantiation ->
+        RejectFreeTypeVariableInstantiation {} ->
           False
-        AllowContextFreeTypeVariableInstantiation ->
+        AllowStructuralPayloadInstantiation ->
           case (structuralMuDataName expectedName, structuralMuDataName actualName) of
             (Just expectedDataName, Just actualDataName)
               | expectedDataName == actualDataName ->

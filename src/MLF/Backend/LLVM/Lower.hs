@@ -2422,8 +2422,23 @@ inferTypeArguments context binderNames params args = do
   where
     binderSet = Set.fromList binderNames
 
+data TypeParamMatchStrictness
+  = AllowResidualTypeMismatch
+  | RejectResidualTypeMismatch
+  deriving (Eq, Show)
+
 matchTypeParams :: Set String -> Map String BackendType -> BackendType -> BackendType -> Either BackendLLVMError (Map String BackendType)
 matchTypeParams binderSet substitution expected actual =
+  matchTypeParamsWith AllowResidualTypeMismatch binderSet substitution expected actual
+
+matchTypeParamsWith ::
+  TypeParamMatchStrictness ->
+  Set String ->
+  Map String BackendType ->
+  BackendType ->
+  BackendType ->
+  Either BackendLLVMError (Map String BackendType)
+matchTypeParamsWith strictness binderSet substitution expected actual =
   case expected of
     BTVar name
       | Set.member name binderSet ->
@@ -2435,11 +2450,12 @@ matchTypeParams binderSet substitution expected actual =
     _ ->
       case (expected, actual) of
         (BTArrow leftA rightA, BTArrow leftB rightB) ->
-          matchTypeParams binderSet substitution leftA leftB >>= \subst -> matchTypeParams binderSet subst rightA rightB
+          matchTypeParamsWith strictness binderSet substitution leftA leftB >>= \subst ->
+            matchTypeParamsWith strictness binderSet subst rightA rightB
         (BTCon conA argsA, BTCon conB argsB)
           | conA == conB && length argsA == length argsB ->
               foldM
-                (\subst (tyA, tyB) -> matchTypeParams binderSet subst tyA tyB)
+                (\subst (tyA, tyB) -> matchTypeParamsWith strictness binderSet subst tyA tyB)
                 substitution
                 (zip (NE.toList argsA) (NE.toList argsB))
         (BTVarApp name args, _) ->
@@ -2450,13 +2466,26 @@ matchTypeParams binderSet substitution expected actual =
           substA <-
             case (boundA, boundB) of
               (Nothing, Nothing) -> Right substitution
-              (Just tyA, Just tyB) -> matchTypeParams binderSet substitution tyA tyB
+              (Just tyA, Just tyB) -> matchTypeParamsWith strictness binderSet substitution tyA tyB
               _ -> Left (BackendLLVMUnsupportedCall "mismatched forall bounds during type argument inference")
-          matchTypeParams binderSet substA bodyA (substituteBackendType nameB (BTVar nameA) bodyB)
+          matchTypeParamsWith strictness binderSet substA bodyA (substituteBackendType nameB (BTVar nameA) bodyB)
         (BTMu nameA bodyA, BTMu nameB bodyB) ->
-          matchTypeParams binderSet substitution bodyA (substituteBackendType nameB (BTVar nameA) bodyB)
+          matchTypeParamsWith strictness binderSet substitution bodyA (substituteBackendType nameB (BTVar nameA) bodyB)
         (BTBottom, BTBottom) -> Right substitution
-        _ -> Right substitution
+        _
+          | alphaEqBackendType expected actual ->
+              Right substitution
+          | strictness == RejectResidualTypeMismatch ->
+              Left
+                ( BackendLLVMUnsupportedCall
+                    ( "type application argument mismatch during type argument inference: expected "
+                        ++ show expected
+                        ++ ", got "
+                        ++ show actual
+                    )
+                )
+          | otherwise ->
+              Right substitution
 
 matchTypeParamApplication ::
   Set String ->
@@ -2474,7 +2503,7 @@ matchTypeParamApplication binderSet substitution name expectedArgs actual =
               then bindTypeParam name actualHead
               else matchRigidHead name actualHead
           foldM
-            (\subst (expectedArg, actualArg) -> matchTypeParams binderSet subst expectedArg actualArg)
+            (\subst (expectedArg, actualArg) -> matchTypeParamsWith RejectResidualTypeMismatch binderSet subst expectedArg actualArg)
             substitution'
             (zip expectedArgs actualArgs)
       | otherwise ->

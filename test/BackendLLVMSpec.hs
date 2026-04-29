@@ -166,6 +166,19 @@ spec = describe "MLF.Backend.LLVM" $ do
         Right substitution ->
           expectationFailure ("expected rigid head mismatch, got substitution: " ++ show substitution)
 
+  it "rejects mismatched applied type arguments during type-argument inference" $ do
+    case
+      Lower.inferTypeArgumentsForTest
+        "applied argument mismatch"
+        ["f"]
+        [("value", BTVarApp "f" (intTy :| []))]
+        [BackendVar (BTCon (BaseTy "Box") (boolTy :| [])) "value"]
+      of
+        Left err ->
+          Lower.renderBackendLLVMError err `shouldSatisfy` isInfixOf "type application argument mismatch"
+        Right substitution ->
+          expectationFailure ("expected applied argument mismatch, got substitution: " ++ show substitution)
+
   it "statically lowers first-class polymorphic top-level arguments" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/first-class-polymorphism.mlfp"
 
