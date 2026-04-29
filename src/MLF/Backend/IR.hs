@@ -39,6 +39,7 @@ module MLF.Backend.IR
     BackendBinding (..),
     BackendData (..),
     BackendConstructor (..),
+    BackendClosureCapture (..),
     BackendTypeBinder (..),
     BackendType (..),
     BackendExpr (..),
@@ -56,7 +57,7 @@ module MLF.Backend.IR
   )
 where
 
-import Control.Monad (foldM, unless)
+import Control.Monad (foldM, unless, zipWithM_)
 import Data.Char (isDigit)
 import Data.List (sort)
 import Data.List.NonEmpty (NonEmpty)
@@ -100,6 +101,13 @@ data BackendConstructor = BackendConstructor
     backendConstructorForalls :: [BackendTypeBinder],
     backendConstructorFields :: [BackendType],
     backendConstructorResult :: BackendType
+  }
+  deriving (Eq, Show)
+
+data BackendClosureCapture = BackendClosureCapture
+  { backendClosureCaptureName :: String,
+    backendClosureCaptureType :: BackendType,
+    backendClosureCaptureExpr :: BackendExpr
   }
   deriving (Eq, Show)
 
@@ -188,6 +196,18 @@ data BackendExpr
       { backendExprType :: BackendType,
         backendUnrollPayload :: BackendExpr
       }
+  | BackendClosure
+      { backendExprType :: BackendType,
+        backendClosureEntryName :: String,
+        backendClosureCaptures :: [BackendClosureCapture],
+        backendClosureParams :: [(String, BackendType)],
+        backendClosureBody :: BackendExpr
+      }
+  | BackendClosureCall
+      { backendExprType :: BackendType,
+        backendClosureFunction :: BackendExpr,
+        backendClosureArguments :: [BackendExpr]
+      }
   deriving (Eq, Show)
 
 data BackendAlternative = BackendAlternative
@@ -224,6 +244,15 @@ data BackendValidationError
   | BackendRollPayloadMismatch BackendType BackendType
   | BackendUnrollExpectedRecursive BackendType
   | BackendUnrollResultMismatch BackendType BackendType
+  | BackendDuplicateClosureEntry String
+  | BackendDuplicateClosureCapture String
+  | BackendDuplicateClosureParameter String
+  | BackendClosureCaptureTypeMismatch String BackendType BackendType
+  | BackendClosureTypeMismatch String BackendType BackendType
+  | BackendClosureCallExpectedFunction BackendType
+  | BackendClosureCallArityMismatch Int Int
+  | BackendClosureCallArgumentMismatch Int BackendType BackendType
+  | BackendClosureCallResultMismatch BackendType BackendType
   | BackendUnknownConstructor String
   | BackendConstructorArityMismatch String Int Int
   | BackendConstructorArgumentMismatch String Int BackendType BackendType
@@ -544,11 +573,34 @@ unfoldBackendRecursiveType ty =
     BTMu name body -> Just (substituteBackendType name ty body)
     _ -> Nothing
 
+backendClosureEntryNames :: BackendExpr -> [String]
+backendClosureEntryNames =
+  \case
+    BackendVar {} -> []
+    BackendLit {} -> []
+    BackendLam _ _ _ body -> backendClosureEntryNames body
+    BackendApp _ fun arg -> backendClosureEntryNames fun ++ backendClosureEntryNames arg
+    BackendLet _ _ _ rhs body -> backendClosureEntryNames rhs ++ backendClosureEntryNames body
+    BackendTyAbs _ _ _ body -> backendClosureEntryNames body
+    BackendTyApp _ fun _ -> backendClosureEntryNames fun
+    BackendConstruct _ _ args -> concatMap backendClosureEntryNames args
+    BackendCase _ scrutinee alternatives ->
+      backendClosureEntryNames scrutinee ++ concatMap (backendClosureEntryNames . backendAltBody) (NE.toList alternatives)
+    BackendRoll _ payload -> backendClosureEntryNames payload
+    BackendUnroll _ payload -> backendClosureEntryNames payload
+    BackendClosure _ entryName captures _ body ->
+      entryName
+        : concatMap (backendClosureEntryNames . backendClosureCaptureExpr) captures
+          ++ backendClosureEntryNames body
+    BackendClosureCall _ fun args ->
+      backendClosureEntryNames fun ++ concatMap backendClosureEntryNames args
+
 validateBackendProgram :: BackendProgram -> Either BackendValidationError ()
 validateBackendProgram program = do
   requireUnique BackendDuplicateModule (map backendModuleName modules0)
   requireUnique BackendDuplicateBinding (map backendBindingName bindings)
   requireUnique BackendDuplicateConstructor (map backendConstructorName constructors)
+  requireUnique BackendDuplicateClosureEntry closureEntryNames
   unless (backendProgramMain program `elem` map backendBindingName bindings) $
     Left (BackendMainNotFound (backendProgramMain program))
   mapM_ (validateBackendBindingInContext context0) bindings
@@ -556,6 +608,7 @@ validateBackendProgram program = do
     modules0 = backendProgramModules program
     bindings = concatMap backendModuleBindings modules0
     constructors = concatMap backendDataConstructors (concatMap backendModuleData modules0)
+    closureEntryNames = concatMap (backendClosureEntryNames . backendBindingExpr) bindings
     constructorInfos =
       [ ( backendConstructorName constructor,
           BackendConstructorInfo
@@ -683,6 +736,68 @@ validateBackendExprWith mbContext expr =
             Left (BackendUnrollResultMismatch resultTy expectedResultTy)
         Nothing ->
           Left (BackendUnrollExpectedRecursive (backendExprType payload))
+    BackendClosure resultTy entryName captures params body -> do
+      requireUnique BackendDuplicateClosureCapture (map backendClosureCaptureName captures)
+      requireUnique BackendDuplicateClosureParameter (map fst params)
+      requireUnique BackendDuplicateClosureParameter (map backendClosureCaptureName captures ++ map fst params)
+      mapM_ (validateBackendClosureCapture mbContext) captures
+      let bodyContext =
+            foldl
+              (\context0 capture -> extendLocalMaybe context0 (backendClosureCaptureName capture) (backendClosureCaptureType capture))
+              mbContext
+              captures
+          bodyParamContext =
+            foldl
+              (\context0 (paramName, paramTy) -> extendLocalMaybe context0 paramName paramTy)
+              bodyContext
+              params
+      validateBackendExprWith bodyParamContext body
+      let expected = foldr BTArrow (backendExprType body) (map snd params)
+      unless (alphaEqBackendType resultTy expected) $
+        Left (BackendClosureTypeMismatch entryName resultTy expected)
+    BackendClosureCall resultTy fun args -> do
+      validateBackendExprWith mbContext fun
+      mapM_ (validateBackendExprWith mbContext) args
+      validateBackendClosureCall resultTy (backendExprType fun) args
+
+validateBackendClosureCapture :: Maybe BackendValidationContext -> BackendClosureCapture -> Either BackendValidationError ()
+validateBackendClosureCapture mbContext capture = do
+  validateBackendExprWith mbContext expr
+  unless (alphaEqBackendType (backendClosureCaptureType capture) (backendExprType expr)) $
+    Left (BackendClosureCaptureTypeMismatch (backendClosureCaptureName capture) (backendClosureCaptureType capture) (backendExprType expr))
+  where
+    expr = backendClosureCaptureExpr capture
+
+validateBackendClosureCall :: BackendType -> BackendType -> [BackendExpr] -> Either BackendValidationError ()
+validateBackendClosureCall resultTy funTy args =
+  case collectClosureCallType funTy of
+    Nothing ->
+      Left (BackendClosureCallExpectedFunction funTy)
+    Just (paramTys, expectedResultTy) -> do
+      unless (length paramTys == length args) $
+        Left (BackendClosureCallArityMismatch (length paramTys) (length args))
+      zipWithM_
+        validateArg
+        [0 :: Int ..]
+        (zip paramTys args)
+      unless (alphaEqBackendType resultTy expectedResultTy) $
+        Left (BackendClosureCallResultMismatch resultTy expectedResultTy)
+  where
+    validateArg index0 (expectedArgTy, arg) =
+      unless (alphaEqBackendType expectedArgTy (backendExprType arg)) $
+        Left (BackendClosureCallArgumentMismatch index0 expectedArgTy (backendExprType arg))
+
+collectClosureCallType :: BackendType -> Maybe ([BackendType], BackendType)
+collectClosureCallType =
+  go []
+  where
+    go params =
+      \case
+        BTArrow paramTy resultTy ->
+          go (params ++ [paramTy]) resultTy
+        other
+          | null params -> Nothing
+          | otherwise -> Just (params, other)
 
 validateBackendVariable :: Maybe BackendValidationContext -> String -> BackendType -> Either BackendValidationError ()
 validateBackendVariable Nothing _ _ =

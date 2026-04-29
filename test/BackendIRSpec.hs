@@ -166,6 +166,96 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendExpr (BackendLet intTy "x" boolTy (intLit 1) (BackendVar intTy "x"))
       `shouldBe` Left (BackendLetTypeMismatch "x" boolTy intTy)
 
+  it "validates explicit closure construction and indirect closure calls" $ do
+    let closure =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$id",
+              backendClosureCaptures = [],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            }
+        capturedClosure =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$captured",
+              backendClosureCaptures = [BackendClosureCapture "captured" intTy (intLit 7)],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "captured"
+            }
+        callClosure value =
+          BackendLet
+            intTy
+            "f"
+            idTy
+            value
+            (BackendClosureCall intTy (BackendVar idTy "f") [intLit 1])
+
+    validateBackendProgram (programWithMainExpr (callClosure closure))
+      `shouldBe` Right ()
+    validateBackendProgram (programWithMainExpr (callClosure capturedClosure))
+      `shouldBe` Right ()
+
+  it "rejects malformed closure IR" $ do
+    let goodClosure entryName =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = entryName,
+              backendClosureCaptures = [],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            }
+        captureMismatch =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$bad_capture",
+              backendClosureCaptures = [BackendClosureCapture "captured" boolTy (intLit 7)],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            }
+        resultMismatch =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$bad_result",
+              backendClosureCaptures = [],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = boolLit True
+            }
+        duplicateEntries =
+          BackendLet
+            intTy
+            "f"
+            idTy
+            (goodClosure "__mlfp_closure$dup")
+            ( BackendLet
+                intTy
+                "g"
+                idTy
+                (goodClosure "__mlfp_closure$dup")
+                (intLit 0)
+            )
+        duplicateCaptureAndParameter =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$duplicate_binder",
+              backendClosureCaptures = [BackendClosureCapture "x" intTy (intLit 7)],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            }
+        badCall =
+          BackendClosureCall intTy (goodClosure "__mlfp_closure$call") [boolLit True]
+
+    validateBackendProgram (programWithMainExpr captureMismatch)
+      `shouldBe` Left (BackendClosureCaptureTypeMismatch "captured" boolTy intTy)
+    validateBackendProgram (programWithMainExpr resultMismatch)
+      `shouldBe` Left (BackendClosureTypeMismatch "__mlfp_closure$bad_result" idTy (BTArrow intTy boolTy))
+    validateBackendProgram (programWithMainExpr duplicateEntries)
+      `shouldBe` Left (BackendDuplicateClosureEntry "__mlfp_closure$dup")
+    validateBackendProgram (programWithMainExpr duplicateCaptureAndParameter)
+      `shouldBe` Left (BackendDuplicateClosureParameter "x")
+    validateBackendProgram (programWithMainExpr badCall)
+      `shouldBe` Left (BackendClosureCallArgumentMismatch 0 intTy boolTy)
+
   it "checks type application against forall nodes" $ do
     validateBackendExpr
       ( BackendTyApp

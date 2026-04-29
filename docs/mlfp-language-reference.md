@@ -287,17 +287,21 @@ cabal run mlf2 -- emit-backend path/to/file.mlfp
 
 Like `run-program`, `emit-backend` parses one source file and prepends the
 built-in Prelude as an explicit module before checking. The emitted text is
-LLVM IR for the supported first-order backend subset, not a stable ABI or a
-promise of final executable linking. The supported LLVM subset covers checked
-first-order function bindings, saturated direct calls, literals, variables,
-SSA-style lets, type abstraction/application after specialization, ADT
-construction, and ADT case analysis.
+LLVM IR for the supported backend subset, not a stable ABI or a promise of
+final executable linking. The source-facing surface remains primarily
+first-order: checked first-order function bindings, saturated direct calls,
+literals, variables, SSA-style lets, type abstraction/application after
+specialization, ADT construction, and ADT case analysis.
 
 The typed backend IR can also represent data metadata, constructor nodes, case
-nodes, and recursive roll/unroll nodes. The LLVM lowering intentionally rejects
-backend nodes that are not yet supported instead of silently dropping or
-rewriting them. Diagnostics are high-level and name the backend context and
-node, for example:
+nodes, recursive roll/unroll nodes, and explicit closure construction plus
+indirect closure calls. Closure values lower through a private backend ABI that
+stores a code pointer and environment pointer in a heap closure record; this is
+an internal IR-to-LLVM foundation and does not yet imply full `.mlfp` partial
+application or escaping-lambda closure conversion. The LLVM lowering
+intentionally rejects backend nodes that are not yet supported instead of
+silently dropping or rewriting them. Diagnostics are high-level and name the
+backend context and node, for example:
 
 ```text
 Unsupported backend LLVM expression at binding "main": escaping lambda

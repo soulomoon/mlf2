@@ -510,13 +510,31 @@ spec = describe "MLF.Backend.LLVM" $ do
 
     mapM_ runLLVMParityCase programSpecToLLVMParityCases
 
-  it "rejects partial applications until closure conversion exists" $ do
+  it "rejects partial applications until closure conversion is explicit in backend IR" $ do
     renderBackendProgramLLVM partialApplicationProgram
       `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
 
-  it "rejects escaping lambdas until closure conversion exists" $ do
+  it "rejects raw escaping lambdas until closure construction is explicit in backend IR" $ do
     renderBackendProgramLLVM escapingLambdaProgram
       `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
+
+  it "lowers zero-capture closures through the explicit closure ABI" $ do
+    output <- requireRight (renderBackendProgramLLVM zeroCaptureClosureProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$identity\"(ptr %\"__mlfp_env\", i64 %\"x\")"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$identity\""
+    output `shouldSatisfy` isInfixOf "load ptr"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+
+  it "lowers captured local values through closure environments" $ do
+    output <- requireRight (renderBackendProgramLLVM capturedClosureProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$constCaptured\"(ptr %\"__mlfp_env\", i64 %\"x\")"
+    output `shouldSatisfy` isInfixOf "store i64 41"
+    output `shouldSatisfy` isInfixOf "load i64"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
 
   it "lowers stored top-level function constructor fields" $ do
     output <- requireRight (renderBackendProgramLLVM functionFieldProgram)
@@ -2418,6 +2436,49 @@ escapingLambdaProgram =
         backendLetType = unaryIntTy,
         backendLetRhs = intIdentityExpr,
         backendLetBody = BackendVar unaryIntTy "f"
+      }
+
+zeroCaptureClosureProgram :: BackendProgram
+zeroCaptureClosureProgram =
+  programWithMainExpr intTy $
+    BackendLet
+      { backendExprType = intTy,
+        backendLetName = "f",
+        backendLetType = unaryIntTy,
+        backendLetRhs =
+          BackendClosure
+            { backendExprType = unaryIntTy,
+              backendClosureEntryName = "__mlfp_closure$identity",
+              backendClosureCaptures = [],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            },
+        backendLetBody = BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 7]
+      }
+
+capturedClosureProgram :: BackendProgram
+capturedClosureProgram =
+  programWithMainExpr intTy $
+    BackendLet
+      { backendExprType = intTy,
+        backendLetName = "captured",
+        backendLetType = intTy,
+        backendLetRhs = intLit 41,
+        backendLetBody =
+          BackendLet
+            { backendExprType = intTy,
+              backendLetName = "f",
+              backendLetType = unaryIntTy,
+              backendLetRhs =
+                BackendClosure
+                  { backendExprType = unaryIntTy,
+                    backendClosureEntryName = "__mlfp_closure$constCaptured",
+                    backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
+                    backendClosureParams = [("x", intTy)],
+                    backendClosureBody = BackendVar intTy "captured"
+                  },
+              backendLetBody = BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 0]
+            }
       }
 
 functionFieldProgram :: BackendProgram
