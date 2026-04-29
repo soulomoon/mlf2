@@ -169,13 +169,17 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` Right ()
 
   it "keeps structural recursive owner names module-qualified" $ do
-    alphaEqBackendType (BTBase (BaseTy "Core.T")) (BTMu "$Core.T_self" intTy)
+    alphaEqBackendType (BTBase (BaseTy "Core.T")) (BTMu "$Core.T_self" nullaryStructuralBody)
       `shouldBe` True
 
-    alphaEqBackendType (BTBase (BaseTy "Other.T")) (BTMu "$Core.T_self" intTy)
+    alphaEqBackendType (BTBase (BaseTy "Other.T")) (BTMu "$Core.T_self" nullaryStructuralBody)
       `shouldBe` False
 
-    alphaEqBackendType (BTBase (BaseTy "Other.T")) (BTMu "$T_self" intTy)
+    alphaEqBackendType (BTBase (BaseTy "Other.T")) (BTMu "$T_self" nullaryStructuralBody)
+      `shouldBe` False
+
+  it "rejects non-structural recursive bodies as nominal data encodings" $ do
+    alphaEqBackendType (BTBase (BaseTy "Core.T")) (BTMu "$Core.T_self" BTBottom)
       `shouldBe` False
 
   it "preserves nominal arguments when structural recursive payloads omit them" $ do
@@ -821,6 +825,10 @@ intTy =
 boolTy :: BackendType
 boolTy =
   BTBase (BaseTy "Bool")
+
+nullaryStructuralBody :: BackendType
+nullaryStructuralBody =
+  BTForall "r" Nothing (BTArrow (BTVar "r") (BTVar "r"))
 
 boxTy :: BackendType
 boxTy =

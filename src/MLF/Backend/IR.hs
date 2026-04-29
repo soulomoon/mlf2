@@ -360,7 +360,7 @@ structuralMuMatchesData (BaseTy dataName) args muName body =
         | null args -> True
         | null payloadTypes -> all isBareTypeVariable args
         | otherwise -> zipAllWith alphaEqBackendType args payloadTypes
-      Nothing -> null args
+      Nothing -> False
 
 isBareTypeVariable :: BackendType -> Bool
 isBareTypeVariable =

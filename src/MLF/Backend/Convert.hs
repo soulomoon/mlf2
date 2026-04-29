@@ -1251,10 +1251,20 @@ convertConstructorApplication context env term resultTy =
           constructorResultTy = recoverStructuralBackendType ownerContext (backendConstructorResult constructor)
       typeBounds <- backendTypeBoundsFromEnv env
       initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
-      let resultSubstitution =
-            case matchBackendTypeParameters typeBounds dataParameters parameters initialSubstitution constructorResultTy effectiveResultTy of
-              Just substitution -> substitution
-              Nothing -> initialSubstitution
+      resultSubstitution <-
+        case firstJust
+          [ matchBackendTypeParameters typeBounds dataParameters parameters initialSubstitution constructorResultTy effectiveResultTy,
+            matchBackendTypeParameters typeBounds dataParameters parameters Map.empty constructorResultTy effectiveResultTy
+          ] of
+          Just substitution -> Right substitution
+          Nothing ->
+            Left
+              ( BackendUnsupportedCaseShape
+                  ( "constructor result type does not match expected result for `"
+                      ++ backendConstructorName constructor
+                      ++ "`"
+                  )
+              )
       substitution <-
         foldM
           (matchConstructorApplicationArgument context env typeBounds dataParameters parameters)
@@ -1263,7 +1273,7 @@ convertConstructorApplication context env term resultTy =
       let completedSubstitution = completeBackendParameterSubstitution parameters substitution
           fields = map (substituteBackendTypes completedSubstitution) rawFields
           substitutedResultTy = recoverStructuralBackendType ownerContext (substituteBackendTypes completedSubstitution constructorResultTy)
-      unless (alphaEqBackendType substitutedResultTy effectiveResultTy || sameBackendDataHead substitutedResultTy effectiveResultTy) $
+      unless (alphaEqBackendType substitutedResultTy effectiveResultTy) $
         Left
           ( BackendUnsupportedCaseShape
               ( "constructor result type does not match expected result for `"
@@ -1281,19 +1291,14 @@ convertConstructorApplication context env term resultTy =
               }
         )
     Nothing -> Right Nothing
-
-sameBackendDataHead :: BackendType -> BackendType -> Bool
-sameBackendDataHead left right =
-  case (backendTypeDataHeadName left, backendTypeDataHeadName right) of
-    (Just leftName, Just rightName) -> leftName == rightName
-    _ -> False
-
-backendTypeDataHeadName :: BackendType -> Maybe String
-backendTypeDataHeadName =
-  \case
-    BTBase (BaseTy name) -> Just name
-    BTCon (BaseTy name) _ -> Just name
-    _ -> Nothing
+  where
+    firstJust =
+      \case
+        [] -> Nothing
+        candidate : rest ->
+          case candidate of
+            Just value -> Just value
+            Nothing -> firstJust rest
 
 constructorApplicationTerm :: ConvertContext -> ElabTerm -> Either BackendConversionError (Maybe ConstructorApplication)
 constructorApplicationTerm context term =
