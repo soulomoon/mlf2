@@ -14,6 +14,9 @@
 - Fixed LLVM evidence wrapper and inlined-call lowering so generated
   higher-order wrapper parameters lower as pointer-backed arguments and
   lexical local function calls shadow captured evidence values.
+- Fixed LLVM function-reference lowering so local function aliases shadow
+  captured evidence values when passed as function-valued arguments to opaque
+  indirect evidence calls.
 - Rejected generated LLVM evidence wrappers for expressions that capture local
   term bindings instead of emitting top-level wrappers with free local
   references.

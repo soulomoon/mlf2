@@ -317,6 +317,13 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "unexpected type arguments"
     validateLLVMAssembly output
 
+  it "resolves local function references before captured values for indirect arguments" $ do
+    output <- requireRight (renderBackendProgramLLVM localFunctionReferenceShadowsValueProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
+    output `shouldNotSatisfy` isInfixOf "evidence function type mismatch"
+    validateLLVMAssembly output
+
   it "rejects evidence wrappers that capture local term bindings" $ do
     renderBackendProgramLLVM capturingEvidenceWrapperProgram
       `shouldSatisfyLeft` isInfixOf "unsupported evidence function argument"
@@ -645,6 +652,74 @@ localFunctionCallShadowsValueProgram =
               intTy
               (BackendVar (BTArrow unaryIntTy intTy) "outer")
               (BackendVar unaryIntTy "id"),
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+localFunctionReferenceShadowsValueProgram :: BackendProgram
+localFunctionReferenceShadowsValueProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "idInt",
+          backendBindingType = unaryIntTy,
+          backendBindingExpr = intIdentityExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "idBool",
+          backendBindingType = unaryBoolTy,
+          backendBindingExpr = boolIdentityExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "callBool",
+          backendBindingType = BTArrow unaryBoolTy intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow unaryBoolTy intTy)
+              "f"
+              unaryBoolTy
+              (intLit 1),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "outer",
+          backendBindingType = BTArrow unaryIntTy (BTArrow (BTArrow unaryBoolTy intTy) intTy),
+          backendBindingExpr =
+            BackendLam
+              (BTArrow unaryIntTy (BTArrow (BTArrow unaryBoolTy intTy) intTy))
+              "$evidence_E"
+              unaryIntTy
+              ( BackendLam
+                  (BTArrow (BTArrow unaryBoolTy intTy) intTy)
+                  "$evidence_Call"
+                  (BTArrow unaryBoolTy intTy)
+                  ( BackendLet
+                      intTy
+                      "$evidence_E"
+                      unaryBoolTy
+                      (BackendVar unaryBoolTy "idBool")
+                      ( BackendApp
+                          intTy
+                          (BackendVar (BTArrow unaryBoolTy intTy) "$evidence_Call")
+                          (BackendVar unaryBoolTy "$evidence_E")
+                      )
+                  )
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              intTy
+              ( BackendApp
+                  (BTArrow (BTArrow unaryBoolTy intTy) intTy)
+                  (BackendVar (BTArrow unaryIntTy (BTArrow (BTArrow unaryBoolTy intTy) intTy)) "outer")
+                  (BackendVar unaryIntTy "idInt")
+              )
+              (BackendVar (BTArrow unaryBoolTy intTy) "callBool"),
           backendBindingExportedAsMain = True
         }
     ]
@@ -1410,6 +1485,15 @@ intIdentityExpr =
       backendBody = BackendVar intTy "x"
     }
 
+boolIdentityExpr :: BackendExpr
+boolIdentityExpr =
+  BackendLam
+    { backendExprType = unaryBoolTy,
+      backendParamName = "x",
+      backendParamType = boolTy,
+      backendBody = BackendVar boolTy "x"
+    }
+
 fnBoxData :: BackendData
 fnBoxData =
   BackendData
@@ -1468,6 +1552,10 @@ stringTy :: BackendType
 stringTy =
   BTBase (BaseTy "String")
 
+boolTy :: BackendType
+boolTy =
+  BTBase (BaseTy "Bool")
+
 optionTy :: BackendType -> BackendType
 optionTy ty =
   BTCon (BaseTy "Option") (ty :| [])
@@ -1475,6 +1563,10 @@ optionTy ty =
 unaryIntTy :: BackendType
 unaryIntTy =
   BTArrow intTy intTy
+
+unaryBoolTy :: BackendType
+unaryBoolTy =
+  BTArrow boolTy boolTy
 
 binaryIntTy :: BackendType
 binaryIntTy =

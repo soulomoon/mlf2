@@ -1519,12 +1519,67 @@ lowerEvidenceArgument env exprEnv context expectedTy arg =
 
 lowerFunctionReference :: ProgramEnv -> ExprEnv -> String -> BackendType -> String -> [BackendType] -> LowerM LowerValue
 lowerFunctionReference env exprEnv context expectedTy name typeArgs =
+  case Map.lookup name (eeLocalFunctions exprEnv) of
+    Just localFunction ->
+      lowerLocalFunctionReference env context expectedTy name localFunction typeArgs
+    Nothing ->
+      lowerNonLocalFunctionReference env exprEnv context expectedTy name typeArgs
+
+lowerLocalFunctionReference :: ProgramEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> LowerM LowerValue
+lowerLocalFunctionReference env context expectedTy name localFunction typeArgs = do
+  form <-
+    if null typeArgs
+      then pure (lfForm localFunction)
+      else instantiateFunctionFormM context (lfForm localFunction) typeArgs []
+  let actualTy = functionTypeFromFormWithBinders form
+  requireEvidenceFunctionType context name expectedTy actualTy
+  case etaAliasTarget form of
+    Just (targetName, targetTypeArgs) ->
+      lowerFunctionReference env (lfCapturedEnv localFunction) context expectedTy targetName targetTypeArgs
+    Nothing ->
+      liftEither (BackendLLVMUnsupportedExpression context ("unsupported function argument " ++ show name))
+
+etaAliasTarget :: FunctionForm -> Maybe (String, [BackendType])
+etaAliasTarget form =
+  case collectValueApps (ffBody form) of
+    (headExpr, args)
+      | mapMaybe backendVarExprName args == map fst (ffParams form),
+        length args == length (ffParams form) ->
+          case collectTyApps headExpr of
+            (BackendVar _ targetName, targetTypeArgs) ->
+              Just (targetName, eraseAliasBinderTypeArgs targetTypeArgs)
+            _ ->
+              Nothing
+    _ ->
+      Nothing
+  where
+    binderTypeArgs =
+      [BTVar name | (name, _) <- ffTypeBinders form]
+    eraseAliasBinderTypeArgs targetTypeArgs
+      | targetTypeArgs == binderTypeArgs = []
+      | otherwise = targetTypeArgs
+
+collectValueApps :: BackendExpr -> (BackendExpr, [BackendExpr])
+collectValueApps =
+  go []
+  where
+    go args =
+      \case
+        BackendApp _ fun arg -> go (arg : args) fun
+        expr -> (expr, args)
+
+backendVarExprName :: BackendExpr -> Maybe String
+backendVarExprName =
+  \case
+    BackendVar _ name -> Just name
+    _ -> Nothing
+
+lowerNonLocalFunctionReference :: ProgramEnv -> ExprEnv -> String -> BackendType -> String -> [BackendType] -> LowerM LowerValue
+lowerNonLocalFunctionReference env exprEnv context expectedTy name typeArgs =
   case Map.lookup name (eeValues exprEnv) of
     Just value
-      | isFunctionLikeBackendType (lvBackendType value) -> do
-          actualTy <- instantiateCallableTypeM context (lvBackendType value) typeArgs []
-          requireEvidenceFunctionType context name expectedTy actualTy
-          pure (LowerValue expectedTy LLVMPtr (lvOperand value))
+      | isFunctionLikeBackendType (lvBackendType value) ->
+          lowerValueFunctionReference context expectedTy name value typeArgs
     _ ->
       case Map.lookup name (pbBindings (peBase env)) of
         Just binding -> do
@@ -1536,6 +1591,15 @@ lowerFunctionReference env exprEnv context expectedTy name typeArgs =
         Nothing ->
           liftEither (BackendLLVMUnknownFunction name)
 
+lowerValueFunctionReference :: String -> BackendType -> String -> LowerValue -> [BackendType] -> LowerM LowerValue
+lowerValueFunctionReference context expectedTy name value typeArgs = do
+  actualTy <-
+    if null typeArgs
+      then pure (lvBackendType value)
+      else instantiateCallableTypeM context (lvBackendType value) typeArgs []
+  requireEvidenceFunctionType context name expectedTy actualTy
+  pure (LowerValue expectedTy LLVMPtr (lvOperand value))
+
 instantiateCallableTypeM :: String -> BackendType -> [BackendType] -> [BackendExpr] -> LowerM BackendType
 instantiateCallableTypeM context ty typeArgs args = do
   form <- instantiateFunctionFormM context (functionFormFromType ty) typeArgs args
@@ -1544,6 +1608,13 @@ instantiateCallableTypeM context ty typeArgs args = do
 functionTypeFromForm :: FunctionForm -> BackendType
 functionTypeFromForm form =
   foldr BTArrow (ffReturnType form) (map snd (ffParams form))
+
+functionTypeFromFormWithBinders :: FunctionForm -> BackendType
+functionTypeFromFormWithBinders form =
+  foldr
+    (\(name, mbBound) body -> BTForall name mbBound body)
+    (functionTypeFromForm form)
+    (ffTypeBinders form)
 
 requireEvidenceFunctionType :: String -> String -> BackendType -> BackendType -> LowerM ()
 requireEvidenceFunctionType context name expected actual =
