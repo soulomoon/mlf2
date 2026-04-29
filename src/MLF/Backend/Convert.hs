@@ -763,7 +763,7 @@ renameTermTypeVariable old new =
           ELet name (renameElabSchemeTypeVariable old new scheme) (go rhs) (go body)
         ETyAbs name mbBound body
           | name == old ->
-              ETyAbs name mbBound body
+              ETyAbs name (fmap (renameElabTypeVariable old new) mbBound) body
           | otherwise ->
               ETyAbs name (fmap (renameElabTypeVariable old new) mbBound) (go body)
         ETyInst inner inst ->

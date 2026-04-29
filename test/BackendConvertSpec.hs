@@ -462,10 +462,22 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingType helper `shouldBe` BTForall "a" Nothing unaryIntBackendTy
     backendBindingExpr helper `shouldSatisfy` containsFreshenedTypeAbsWithOuterBound
 
-  it "leaves type abstraction bounds unchanged under shadowing type binders" $ do
-    source <- readFile "src/MLF/Backend/Convert.hs"
+  it "renames shadowing type abstraction bounds that refer to outer binders" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = recursiveNestedTypeBoundScopeElabTy,
+                    checkedBindingTerm = recursiveNestedTypeBoundScopeTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
 
-    source `shouldSatisfy` isInfixOf "| name == old ->\n              ETyAbs name mbBound body"
+    validateBackendProgram backend `shouldBe` Right ()
+    helper <- requireSingleLiftedHelper backend
+    backendBindingType helper `shouldBe` BTForall "a" Nothing unaryIntBackendTy
 
   it "lifts recursive lets that shadow outer term binders" $ do
     checked0 <- requireChecked simpleFunctionProgram
@@ -1393,6 +1405,43 @@ recursiveTypeBoundScopeRhs =
             "a"
             (Just (dependentArrowElabBoundTy (Elab.TVar "a")))
             (Elab.EApp (Elab.EVar "loop") (Elab.EVar "n"))
+        )
+        (Elab.InstApp (dependentArrowElabTy (Elab.TVar "a")))
+    )
+
+recursiveNestedTypeBoundScopeElabTy :: Elab.ElabType
+recursiveNestedTypeBoundScopeElabTy =
+  Elab.TForall "a" Nothing intElabTy
+
+recursiveNestedTypeBoundScopeTerm :: Elab.ElabTerm
+recursiveNestedTypeBoundScopeTerm =
+  Elab.ETyAbs
+    "a"
+    Nothing
+    ( Elab.ELet
+        "loop"
+        (Elab.schemeFromType unaryIntElabTy)
+        recursiveNestedTypeBoundScopeRhs
+        (Elab.EApp (Elab.EVar "loop") (Elab.ELit (LInt 0)))
+    )
+
+recursiveNestedTypeBoundScopeRhs :: Elab.ElabTerm
+recursiveNestedTypeBoundScopeRhs =
+  Elab.ELam
+    "n"
+    intElabTy
+    ( Elab.ETyInst
+        ( Elab.ETyAbs
+            "a"
+            (Just (dependentArrowElabBoundTy (Elab.TVar "a")))
+            ( Elab.ETyInst
+                ( Elab.ETyAbs
+                    "a"
+                    (Just (dependentArrowElabBoundTy (Elab.TVar "a")))
+                    (Elab.EApp (Elab.EVar "loop") (Elab.EVar "n"))
+                )
+                (Elab.InstApp (dependentArrowElabTy (Elab.TVar "a")))
+            )
         )
         (Elab.InstApp (dependentArrowElabTy (Elab.TVar "a")))
     )
