@@ -303,6 +303,10 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "rejects evidence wrappers that capture local term bindings" $ do
+    renderBackendProgramLLVM capturingEvidenceWrapperProgram
+      `shouldSatisfyLeft` isInfixOf "unsupported evidence function argument"
+
   describe "ProgramSpec-to-LLVM parity matrix" $ do
     it "classifies every interpreter-success case exactly once" $ do
       let caseNames = map runtimeCaseName programSpecToLLVMParityCases
@@ -485,6 +489,48 @@ localFunctionEvidenceMethodProgram =
       "  def use : C a => a -> a = \\x let f : a -> a = \\y y in apply f x;",
       "  def main : Int = use 1;",
       "}"
+    ]
+
+capturingEvidenceWrapperProgram :: BackendProgram
+capturingEvidenceWrapperProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "$evidence_C",
+          backendBindingType = BTArrow unaryIntTy intTy,
+          backendBindingExpr =
+            BackendLam
+              { backendExprType = BTArrow unaryIntTy intTy,
+                backendParamName = "$evidence_apply",
+                backendParamType = unaryIntTy,
+                backendBody =
+                  BackendApp
+                    intTy
+                    (BackendVar unaryIntTy "$evidence_apply")
+                    (intLit 0)
+              },
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendLet
+              intTy
+              "x"
+              intTy
+              (intLit 1)
+              ( BackendApp
+                  intTy
+                  (BackendVar (BTArrow unaryIntTy intTy) "$evidence_C")
+                  ( BackendLam
+                      unaryIntTy
+                      "y"
+                      intTy
+                      (BackendVar intTy "x")
+                  )
+              ),
+          backendBindingExportedAsMain = True
+        }
     ]
 
 stringProgram :: BackendProgram

@@ -597,7 +597,8 @@ collectEvidenceWrappersInExpr base substitution bound expr =
                       [ (paramTy, arg)
                       | ((paramName, paramTy), arg) <- zip (ffParams form) args',
                         isEvidenceArgument False paramName paramTy,
-                        not (isSimpleFunctionReference arg)
+                        not (isSimpleFunctionReference arg),
+                        evidenceWrapperArgumentClosed bound arg
                       ]
                     Left _ -> []
         _ -> []
@@ -657,6 +658,50 @@ isSimpleFunctionReference arg =
   case collectTyApps arg of
     (BackendVar {}, _) -> True
     _ -> False
+
+evidenceWrapperArgumentClosed :: Set String -> BackendExpr -> Bool
+evidenceWrapperArgumentClosed bound expr =
+  Set.null (freeTermVars expr `Set.intersection` bound)
+
+freeTermVars :: BackendExpr -> Set String
+freeTermVars =
+  go Set.empty
+  where
+    go bound =
+      \case
+        BackendVar _ name
+          | Set.member name bound -> Set.empty
+          | otherwise -> Set.singleton name
+        BackendLit {} ->
+          Set.empty
+        BackendLam _ name _ body ->
+          go (Set.insert name bound) body
+        BackendApp _ fun arg ->
+          Set.union (go bound fun) (go bound arg)
+        BackendLet _ name _ rhs body ->
+          Set.union (go bound rhs) (go (Set.insert name bound) body)
+        BackendTyAbs _ _ _ body ->
+          go bound body
+        BackendTyApp _ fun _ ->
+          go bound fun
+        BackendConstruct _ _ args ->
+          foldMap (go bound) args
+        BackendCase _ scrutinee alternatives ->
+          Set.union
+            (go bound scrutinee)
+            (foldMap (goAlternative bound) (NE.toList alternatives))
+        BackendRoll _ payload ->
+          go bound payload
+        BackendUnroll _ payload ->
+          go bound payload
+
+    goAlternative bound (BackendAlternative pattern0 body) =
+      go (Set.union (patternBinders pattern0) bound) body
+
+    patternBinders =
+      \case
+        BackendDefaultPattern -> Set.empty
+        BackendConstructorPattern _ binders -> Set.fromList binders
 
 collectSpecializationRequestsInForm :: ProgramBase -> Map String BackendType -> FunctionForm -> [SpecRequest]
 collectSpecializationRequestsInForm base substitution form =

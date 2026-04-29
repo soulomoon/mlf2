@@ -11,6 +11,9 @@
 - Fixed LLVM evidence lowering so ordinary function-valued class method
   arguments, including let-bound local helper functions, keep the local
   function inlining path instead of being treated as hidden class evidence.
+- Rejected generated LLVM evidence wrappers for expressions that capture local
+  term bindings instead of emitting top-level wrappers with free local
+  references.
 - Tightened Backend IR recursive-type compatibility so vacuous `mu` wrappers
   are dropped only by continuing the underlying body comparison, preventing
   unrelated wrapped types from passing variable and constructor validation.
