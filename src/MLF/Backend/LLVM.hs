@@ -5,7 +5,9 @@ Description : Real LLVM IR backend facade for checked .mlfp programs
 module MLF.Backend.LLVM
   ( BackendLLVMError (..),
     renderCheckedProgramLLVM,
+    renderCheckedProgramNativeLLVM,
     renderBackendProgramLLVM,
+    renderBackendProgramNativeLLVM,
     renderBackendLLVMError,
   )
 where
@@ -26,9 +28,18 @@ renderCheckedProgramLLVM checked =
   first BackendLLVMConversionFailed (convertCheckedProgram checked)
     >>= renderBackendProgramLLVM
 
+renderCheckedProgramNativeLLVM :: CheckedProgram -> Either BackendLLVMError String
+renderCheckedProgramNativeLLVM checked =
+  first BackendLLVMConversionFailed (convertCheckedProgram checked)
+    >>= renderBackendProgramNativeLLVM
+
 renderBackendProgramLLVM :: BackendProgram -> Either BackendLLVMError String
 renderBackendProgramLLVM program =
   first BackendLLVMLoweringFailed (renderLLVMModule <$> Lower.lowerBackendProgram program)
+
+renderBackendProgramNativeLLVM :: BackendProgram -> Either BackendLLVMError String
+renderBackendProgramNativeLLVM program =
+  first BackendLLVMLoweringFailed (renderLLVMModule <$> Lower.lowerBackendProgramNative program)
 
 data BackendLLVMError
   = BackendLLVMConversionFailed BackendConversionError

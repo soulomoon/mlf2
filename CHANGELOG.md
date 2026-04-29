@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- Added a native LLVM emission contract for pure `.mlfp` entrypoints. The
+  backend can now emit an `i32 @main()` wrapper that renders supported
+  `Int`, `Bool`, and first-order ADT results to stdout, returns exit status
+  `0`, defines the backend-owned `__mlfp_and` runtime primitive for native
+  runs, and rejects unsupported native result shapes before execution.
 - Eliminated the final temporary LLVM unsupported classification from the
   shared `ProgramSpec` runtime-success parity matrix. Stored first-order
   function constructor fields now lower as function pointers, closed direct

@@ -3,6 +3,7 @@
 module MLF.Program.CLI
     ( programCliUsage
     , emitBackendFile
+    , emitNativeFile
     , runProgramFile
     ) where
 
@@ -16,6 +17,7 @@ import qualified Data.Set as Set
 import MLF.Backend.LLVM
     ( renderBackendLLVMError
     , renderCheckedProgramLLVM
+    , renderCheckedProgramNativeLLVM
     )
 import MLF.Elab.Types (ElabTerm (..))
 import MLF.Frontend.Parse.Program
@@ -52,9 +54,11 @@ programCliUsage =
         [ "Usage:"
         , "  mlf2 run-program <file.mlfp>"
         , "  mlf2 emit-backend <file.mlfp>"
+        , "  mlf2 emit-native <file.mlfp>"
         , ""
         , "run-program prepends the built-in Prelude and prints the resulting value."
         , "emit-backend prepends the built-in Prelude and prints LLVM IR."
+        , "emit-native prepends the built-in Prelude and prints LLVM IR with a native process entrypoint."
         ]
 
 runProgramFile :: FilePath -> IO (Either String String)
@@ -73,6 +77,15 @@ emitBackendFile path = do
         program <- first renderProgramParseError (parseLocatedProgramWithFile path source)
         checked <- first renderProgramDiagnostic (checkLocatedProgram (withPreludeLocated program))
         first renderBackendLLVMError (renderCheckedProgramLLVM (emitBackendCheckedProgram checked))
+
+emitNativeFile :: FilePath -> IO (Either String String)
+emitNativeFile path = do
+    fileResult <- try (readFile path) :: IO (Either IOException String)
+    pure $ do
+        source <- first show fileResult
+        program <- first renderProgramParseError (parseLocatedProgramWithFile path source)
+        checked <- first renderProgramDiagnostic (checkLocatedProgram (withPreludeLocated program))
+        first renderBackendLLVMError (renderCheckedProgramNativeLLVM (emitBackendCheckedProgram checked))
 
 emitBackendCheckedProgram :: CheckedProgram -> CheckedProgram
 emitBackendCheckedProgram checked =

@@ -1,6 +1,8 @@
 module LLVMToolSupport
-    ( validateLLVMAssembly
+    ( LLVMRunResult(..)
+    , validateLLVMAssembly
     , validateLLVMObjectCode
+    , runLLVMModule
     , withTempLLVM
     , withTempProgram
     ) where
@@ -14,6 +16,13 @@ import System.FilePath (takeFileName)
 import System.IO (hClose, hPutStr, openTempFile)
 import System.Process (readProcessWithExitCode)
 import Test.Hspec
+
+data LLVMRunResult = LLVMRunResult
+    { llvmRunExitCode :: ExitCode
+    , llvmRunStdout :: String
+    , llvmRunStderr :: String
+    }
+    deriving (Eq, Show)
 
 validateLLVMAssembly :: String -> Expectation
 validateLLVMAssembly output = do
@@ -40,6 +49,15 @@ validateLLVMObjectCode output = do
                 case exitCode of
                     ExitSuccess -> pure ()
                     ExitFailure _ -> expectationFailure ("llc rejected backend output:\n" ++ stderr)
+
+runLLVMModule :: String -> IO LLVMRunResult
+runLLVMModule output = do
+    mbLli <- findLLVMTool "lli"
+    case mbLli of
+        Nothing ->
+            pendingWith "required LLVM tool not found: lli" >> pure (LLVMRunResult ExitSuccess "" "")
+        Just lli ->
+            withTempLLVM output $ \path -> runLLVMExecutable lli path
 
 withTempLLVM :: String -> (FilePath -> IO a) -> IO a
 withTempLLVM output action = do
@@ -81,6 +99,25 @@ runLLVMTool tool args = do
                             ++ opaqueStderr
                         )
 
+runLLVMExecutable :: FilePath -> FilePath -> IO LLVMRunResult
+runLLVMExecutable tool path = do
+    (plainExitCode, plainStdout, plainStderr) <- readProcessWithExitCode tool [path] ""
+    case plainExitCode of
+        ExitSuccess ->
+            pure (LLVMRunResult plainExitCode plainStdout plainStderr)
+        ExitFailure _ -> do
+            (opaqueExitCode, opaqueStdout, opaqueStderr) <-
+                readProcessWithExitCode tool ["-opaque-pointers", path] ""
+            pure $
+                case opaqueExitCode of
+                    ExitSuccess ->
+                        LLVMRunResult opaqueExitCode opaqueStdout opaqueStderr
+                    ExitFailure _ ->
+                        LLVMRunResult
+                            opaqueExitCode
+                            opaqueStdout
+                            (plainStderr ++ "\nWith -opaque-pointers:\n" ++ opaqueStderr)
+
 findLLVMTool :: String -> IO (Maybe FilePath)
 findLLVMTool name = do
     envCandidates <- filterM doesFileExist =<< traverseMaybeEnv (toolEnvNames name)
@@ -102,6 +139,7 @@ toolEnvNames name =
     case name of
         "llvm-as" -> ["LLVM_AS"]
         "llc" -> ["LLC", "LLVM_LLC"]
+        "lli" -> ["LLI", "LLVM_LLI"]
         _ -> []
 
 findKnownLLVMTool :: String -> [FilePath] -> IO (Maybe FilePath)
@@ -115,6 +153,8 @@ knownLLVMToolPaths :: [FilePath]
 knownLLVMToolPaths =
     [ "/opt/homebrew/opt/llvm/bin/llvm-as"
     , "/opt/homebrew/opt/llvm/bin/llc"
+    , "/opt/homebrew/opt/llvm/bin/lli"
     , "/usr/local/opt/llvm/bin/llvm-as"
     , "/usr/local/opt/llvm/bin/llc"
+    , "/usr/local/opt/llvm/bin/lli"
     ]

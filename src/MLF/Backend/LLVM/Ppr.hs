@@ -56,8 +56,12 @@ renderLLVMDeclaration declaration =
     ++ " "
     ++ renderLLVMGlobalName (llvmDeclarationName declaration)
     ++ "("
-    ++ intercalate ", " (map renderLLVMType (llvmDeclarationParameters declaration))
+    ++ intercalate ", " (map renderLLVMType (llvmDeclarationParameters declaration) ++ varArgParameter)
     ++ ")"
+  where
+    varArgParameter
+      | llvmDeclarationVarArgs declaration = ["..."]
+      | otherwise = []
 
 renderLLVMFunctionLines :: LLVMFunction -> [String]
 renderLLVMFunctionLines function =
@@ -123,6 +127,8 @@ renderLLVMExpression resultTy expression =
         ++ "("
         ++ intercalate ", " (map renderLLVMArgument args)
         ++ ")"
+    LLVMAnd left right ->
+      "and " ++ renderLLVMType resultTy ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
     LLVMGetElementPtr elementTy base indexes ->
       "getelementptr "
         ++ renderLLVMType elementTy
@@ -167,14 +173,14 @@ renderLLVMTerminator terminator =
         ++ ", label "
         ++ renderLLVMLabelRef defaultLabel
         ++ " [ "
-        ++ intercalate " " (map renderSwitchTarget targets)
+        ++ intercalate " " (map (renderSwitchTarget ty) targets)
         ++ " ]"
     LLVMUnreachable ->
       "unreachable"
 
-renderSwitchTarget :: (Integer, String) -> String
-renderSwitchTarget (tag, label) =
-  "i64 " ++ show tag ++ ", label " ++ renderLLVMLabelRef label
+renderSwitchTarget :: LLVMType -> (Integer, String) -> String
+renderSwitchTarget ty (tag, label) =
+  renderLLVMType ty ++ " " ++ show tag ++ ", label " ++ renderLLVMLabelRef label
 
 renderLLVMType :: LLVMType -> String
 renderLLVMType ty =

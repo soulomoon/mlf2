@@ -129,13 +129,33 @@ Emit LLVM IR for a checked program:
 cabal run mlf2 -- emit-backend test/programs/unified/authoritative-let-polymorphism.mlfp
 ```
 
+Emit LLVM IR with a native process entrypoint:
+
+```bash
+cabal run mlf2 -- emit-native test/programs/unified/authoritative-let-polymorphism.mlfp
+```
+
+`emit-backend` keeps the raw backend contract: the checked `.mlfp` `main`
+binding remains a module-qualified LLVM function such as `Main__main`.
+`emit-native` adds the process contract used by native execution tests. It emits
+a C ABI `i32 @main()` wrapper that calls the checked zero-argument `.mlfp`
+`main`, renders supported pure results to stdout with the same value text used
+by `run-program`, prints one trailing newline, writes no stderr on success, and
+returns exit status `0`. Native rendering currently supports `Int`, `Bool`, and
+first-order ADT results whose fields are recursively renderable. Function,
+polymorphic, `String`, unknown, and IO-like results are rejected before native
+run assertions use them. Native mode declares libc `malloc` and vararg `printf`
+and defines the backend-owned `__mlfp_and` primitive when no program binding owns
+that runtime name; broader IO behavior remains outside this pure contract.
+
 Backend LLVM validation tests use LLVM command-line tools with opaque pointer
-support when available. The test suite looks for `llvm-as` and `llc` on `PATH`,
-with standard Homebrew LLVM locations also accepted on macOS; LLVM-dependent
-assertions are marked pending when the tools are absent, so `cabal test` can run
-in environments without LLVM while still exercising the checks wherever the tools
-are installed. LLVM 14 tools are run with `-opaque-pointers` when needed, while
-LLVM 15+ tools accept the emitted opaque-pointer IR by default.
+support when available. The test suite looks for `llvm-as`, `llc`, and `lli` on
+`PATH`, with standard Homebrew LLVM locations also accepted on macOS;
+LLVM-dependent assertions are marked pending when the tools are absent, so
+`cabal test` can run in environments without LLVM while still exercising the
+checks wherever the tools are installed. LLVM 14 tools are run with
+`-opaque-pointers` when needed, while LLVM 15+ tools accept the emitted
+opaque-pointer IR by default.
 
 ## Syntax and paper alignment
 
