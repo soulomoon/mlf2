@@ -120,7 +120,8 @@ data LowerValue = LowerValue
 
 data LocalFunction = LocalFunction
   { lfForm :: FunctionForm,
-    lfCapturedEnv :: ExprEnv
+    lfCapturedEnv :: ExprEnv,
+    lfStoredReference :: Maybe (BackendType, BackendExpr)
   }
   deriving (Eq, Show)
 
@@ -1821,7 +1822,11 @@ bindLet env exprEnv context name rhs =
               { eeLocalFunctions =
                   Map.insert
                     name
-                    LocalFunction {lfForm = form, lfCapturedEnv = exprEnv}
+                    LocalFunction
+                      { lfForm = form,
+                        lfCapturedEnv = exprEnv,
+                        lfStoredReference = Just (backendExprType rhs, rhs)
+                      }
                     (eeLocalFunctions exprEnv),
                 eeValues = Map.delete name (eeValues exprEnv)
               }
@@ -2017,7 +2022,7 @@ lowerStoredFunctionArgument :: ProgramEnv -> ExprEnv -> String -> BackendType ->
 lowerStoredFunctionArgument env exprEnv context expectedTy arg =
   case collectTyApps arg of
     (BackendVar _ name, typeArgs) ->
-      lowerFunctionReference env exprEnv context expectedTy name typeArgs
+      lowerStoredFunctionReference env exprEnv context expectedTy name typeArgs
     _ ->
       case Map.lookup (functionWrapperKey expectedTy arg) (peFunctionWrappers env) of
         Just wrapper ->
@@ -2045,8 +2050,20 @@ lowerFunctionReference env exprEnv context expectedTy name typeArgs =
     Nothing ->
       lowerNonLocalFunctionReference env exprEnv context expectedTy name typeArgs
 
+lowerStoredFunctionReference :: ProgramEnv -> ExprEnv -> String -> BackendType -> String -> [BackendType] -> LowerM LowerValue
+lowerStoredFunctionReference env exprEnv context expectedTy name typeArgs =
+  case Map.lookup name (eeLocalFunctions exprEnv) of
+    Just localFunction ->
+      lowerLocalFunctionReferenceWith True env context expectedTy name localFunction typeArgs
+    Nothing ->
+      lowerNonLocalFunctionReference env exprEnv context expectedTy name typeArgs
+
 lowerLocalFunctionReference :: ProgramEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> LowerM LowerValue
-lowerLocalFunctionReference env context expectedTy name localFunction typeArgs = do
+lowerLocalFunctionReference =
+  lowerLocalFunctionReferenceWith False
+
+lowerLocalFunctionReferenceWith :: Bool -> ProgramEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> LowerM LowerValue
+lowerLocalFunctionReferenceWith allowStoredReference env context expectedTy name localFunction typeArgs = do
   form <-
     if null typeArgs
       then pure (lfForm localFunction)
@@ -2057,7 +2074,28 @@ lowerLocalFunctionReference env context expectedTy name localFunction typeArgs =
     Just (targetName, targetTypeArgs) ->
       lowerFunctionReference env (lfCapturedEnv localFunction) context expectedTy targetName targetTypeArgs
     Nothing ->
+      case lowerLocalFunctionStoredReference env expectedTy localFunction of
+        Just value ->
+          if allowStoredReference
+            then pure value
+            else unsupportedFunctionArgument
+        Nothing ->
+          unsupportedFunctionArgument
+  where
+    unsupportedFunctionArgument =
       liftEither (BackendLLVMUnsupportedExpression context ("unsupported function argument " ++ show name))
+
+lowerLocalFunctionStoredReference :: ProgramEnv -> BackendType -> LocalFunction -> Maybe LowerValue
+lowerLocalFunctionStoredReference env expectedTy localFunction =
+  case lfStoredReference localFunction of
+    Just (_, sourceExpr) ->
+      case Map.lookup (functionWrapperKey expectedTy sourceExpr) (peFunctionWrappers env) of
+        Just wrapper ->
+          Just (LowerValue expectedTy LLVMPtr (LLVMGlobalRef LLVMPtr (fwFunctionName wrapper)))
+        Nothing ->
+          Nothing
+    Nothing ->
+      Nothing
 
 etaAliasTarget :: FunctionForm -> Maybe (String, [BackendType])
 etaAliasTarget form =
@@ -2338,7 +2376,8 @@ lowerStaticFunctionArgument env callEnv context paramName expectedTy arg =
                     expectedTy
                     ( LocalFunction
                         { lfForm = form,
-                          lfCapturedEnv = emptyExprEnv
+                          lfCapturedEnv = emptyExprEnv,
+                          lfStoredReference = Nothing
                         }
                     )
             Nothing ->
@@ -2383,7 +2422,8 @@ lowerDirectStaticFunctionArgument callEnv context paramName expectedTy arg = do
     expectedTy
     ( LocalFunction
         { lfForm = form,
-          lfCapturedEnv = callEnv
+          lfCapturedEnv = callEnv,
+          lfStoredReference = Just (expectedTy, arg)
         }
     )
 

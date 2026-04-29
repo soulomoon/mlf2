@@ -532,6 +532,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_function_wrapper$"
     validateLLVMAssembly output
 
+  it "re-stores immediate constructor fields carrying closed direct functions" $ do
+    output <- requireRight (renderBackendProgramLLVM immediateRestoredFunctionFieldProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_function_wrapper$"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_function_wrapper$"
+    output `shouldNotSatisfy` isInfixOf "unsupported function argument"
+    validateLLVMAssembly output
+
   it "rejects captured function constructor fields until closure conversion exists" $ do
     renderBackendProgramLLVM capturedFunctionFieldProgram
       `shouldSatisfyLeft` isInfixOf "unsupported function argument"
@@ -2431,6 +2439,34 @@ directFunctionFieldProgram =
                     { backendBindingName = "main",
                       backendBindingType = fnBoxTy,
                       backendBindingExpr = BackendConstruct fnBoxTy "FnBox" [intIdentityExpr],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+immediateRestoredFunctionFieldProgram :: BackendProgram
+immediateRestoredFunctionFieldProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [fnBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = fnBoxTy,
+                      backendBindingExpr =
+                        BackendCase
+                          fnBoxTy
+                          (BackendConstruct fnBoxTy "FnBox" [intIdentityExpr])
+                          ( BackendAlternative
+                              (BackendConstructorPattern "FnBox" ["f"])
+                              (BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "f"])
+                              :| []
+                          ),
                       backendBindingExportedAsMain = True
                     }
                 ]
