@@ -11,6 +11,9 @@
 - Fixed LLVM evidence lowering so ordinary function-valued class method
   arguments, including let-bound local helper functions, keep the local
   function inlining path instead of being treated as hidden class evidence.
+- Tightened Backend IR recursive-type compatibility so vacuous `mu` wrappers
+  are dropped only by continuing the underlying body comparison, preventing
+  unrelated wrapped types from passing variable and constructor validation.
 - Extended the shared `ProgramSpec`-to-LLVM parity matrix from first-order
   coverage to the canonical interpreter-success surface. The backend LLVM spec
   now emits supported cases through the file backend path, validates generated
