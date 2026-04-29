@@ -97,6 +97,7 @@ spec = describe "MLF.Backend.IR" $ do
         structuralBoxIntTy = BTMu "$Box_self" (singleFieldStructuralBody intTy)
         structuralBoxFreeTy = BTMu "$Box_self" (singleFieldStructuralBody (BTVar "a"))
         listIntToBoolTy = BTArrow listIntTy boolTy
+        structuralBoxIntToBoolTy = BTArrow structuralBoxIntTy boolTy
         listTyAbsAppExpr =
           BackendTyAbs
             (BTForall "a" Nothing (BTArrow (listTy (BTVar "a")) boolTy))
@@ -114,6 +115,23 @@ spec = describe "MLF.Backend.IR" $ do
             )
         listIntToBoolExpr =
           BackendLam listIntToBoolTy "ys" listIntTy (boolLit True)
+        structuralBoxTyAbsAppExpr =
+          BackendTyAbs
+            (BTForall "a" Nothing (BTArrow structuralBoxFreeTy boolTy))
+            "a"
+            Nothing
+            ( BackendLam
+                (BTArrow structuralBoxFreeTy boolTy)
+                "xs"
+                structuralBoxFreeTy
+                ( BackendApp
+                    boolTy
+                    (BackendVar structuralBoxIntToBoolTy "f")
+                    (BackendVar structuralBoxFreeTy "xs")
+                )
+            )
+        structuralBoxIntToBoolExpr =
+          BackendLam structuralBoxIntToBoolTy "box" structuralBoxIntTy (boolLit True)
 
     validateBackendExpr (BackendApp intTy (BackendVar (BTArrow listIntTy intTy) "f") (BackendVar listFreeTy "xs"))
       `shouldBe` Left (BackendApplicationArgumentMismatch listIntTy listFreeTy)
@@ -135,6 +153,9 @@ spec = describe "MLF.Backend.IR" $ do
 
     validateBackendProgram (programWithBindings [binding "f" listIntToBoolTy listIntToBoolExpr, mainBinding listTyAbsAppExpr])
       `shouldBe` Left (BackendApplicationArgumentMismatch listIntTy (listTy (BTVar "a")))
+
+    validateBackendProgram (programWithBindings [binding "f" structuralBoxIntToBoolTy structuralBoxIntToBoolExpr, mainBinding structuralBoxTyAbsAppExpr])
+      `shouldBe` Left (BackendApplicationArgumentMismatch structuralBoxIntTy structuralBoxFreeTy)
 
     validateBackendExpr (BackendApp boolTy (BackendVar (BTArrow structuralBoxFreeTy boolTy) "f") (BackendVar structuralBoxIntTy "box"))
       `shouldBe` Right ()

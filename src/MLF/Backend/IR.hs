@@ -800,12 +800,6 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
     maybeBoundMatches _ _ _ =
       False
 
-    freeTypeVariableMayInstantiate name =
-      case Map.lookup name typeBounds of
-        Nothing -> True
-        Just Nothing -> True
-        Just (Just boundTy) -> alphaEqBackendType boundTy BTBottom
-
     -- Conversion may alpha-freshen generated case/evidence binders while their
     -- lexical variable names stay fixed. Keep that escape hatch scoped to
     -- generated variables; user-facing variables still require exact names.
@@ -888,7 +882,7 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
       alphaEqBackendType expected actual
         || case (expected, actual) of
           (BTVar name, _)
-            | Set.notMember name bound && freeTypeVariableMayInstantiate name ->
+            | Set.notMember name bound && Map.notMember name typeBounds ->
                 True
           (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
             structuralPayloadTypeMayInstantiate bound expectedDom actualDom
