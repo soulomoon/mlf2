@@ -303,6 +303,20 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "lowers nested evidence wrapper parameters as pointers" $ do
+    output <- requireRight (renderBackendProgramLLVM nestedEvidenceWrapperParameterProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_evidence_wrapper$"
+    output `shouldSatisfy` isInfixOf "ptr %\"__mlfp_evidence_arg0\""
+    validateLLVMAssembly output
+
+  it "resolves inlined local function calls before captured values" $ do
+    output <- requireRight (renderBackendProgramLLVM localFunctionCallShadowsValueProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"main\"()"
+    output `shouldNotSatisfy` isInfixOf "unexpected type arguments"
+    validateLLVMAssembly output
+
   it "rejects evidence wrappers that capture local term bindings" $ do
     renderBackendProgramLLVM capturingEvidenceWrapperProgram
       `shouldSatisfyLeft` isInfixOf "unsupported evidence function argument"
@@ -529,6 +543,108 @@ capturingEvidenceWrapperProgram =
                       (BackendVar intTy "x")
                   )
               ),
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+nestedEvidenceWrapperParameterProgram :: BackendProgram
+nestedEvidenceWrapperParameterProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "$evidence_C",
+          backendBindingType = BTArrow higherOrderEvidenceTy intTy,
+          backendBindingExpr =
+            BackendLam
+              { backendExprType = BTArrow higherOrderEvidenceTy intTy,
+                backendParamName = "$evidence_apply",
+                backendParamType = higherOrderEvidenceTy,
+                backendBody =
+                  BackendApp
+                    intTy
+                    ( BackendApp
+                        unaryIntTy
+                        (BackendVar higherOrderEvidenceTy "$evidence_apply")
+                        intIdentityExpr
+                    )
+                    (intLit 1)
+              },
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              intTy
+              (BackendVar (BTArrow higherOrderEvidenceTy intTy) "$evidence_C")
+              ( BackendLam
+                  higherOrderEvidenceTy
+                  "f"
+                  unaryIntTy
+                  ( BackendLam
+                      unaryIntTy
+                      "x"
+                      intTy
+                      (BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x"))
+                  )
+              ),
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+localFunctionCallShadowsValueProgram :: BackendProgram
+localFunctionCallShadowsValueProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "inner",
+          backendBindingType = polyIdTy,
+          backendBindingExpr = polyIdExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "id",
+          backendBindingType = unaryIntTy,
+          backendBindingExpr = intIdentityExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "callee",
+          backendBindingType = BTArrow polyIdTy intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow polyIdTy intTy)
+              "$evidence_E"
+              polyIdTy
+              ( BackendApp
+                  intTy
+                  (BackendTyApp unaryIntTy (BackendVar polyIdTy "$evidence_E") intTy)
+                  (intLit 7)
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "outer",
+          backendBindingType = BTArrow unaryIntTy intTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow unaryIntTy intTy)
+              "$evidence_E"
+              unaryIntTy
+              ( BackendApp
+                  intTy
+                  (BackendVar (BTArrow polyIdTy intTy) "callee")
+                  (BackendVar polyIdTy "inner")
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              intTy
+              (BackendVar (BTArrow unaryIntTy intTy) "outer")
+              (BackendVar unaryIntTy "id"),
           backendBindingExportedAsMain = True
         }
     ]
@@ -1363,6 +1479,10 @@ unaryIntTy =
 binaryIntTy :: BackendType
 binaryIntTy =
   BTArrow intTy unaryIntTy
+
+higherOrderEvidenceTy :: BackendType
+higherOrderEvidenceTy =
+  BTArrow unaryIntTy unaryIntTy
 
 fnBoxTy :: BackendType
 fnBoxTy =

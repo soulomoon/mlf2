@@ -11,6 +11,9 @@
 - Fixed LLVM evidence lowering so ordinary function-valued class method
   arguments, including let-bound local helper functions, keep the local
   function inlining path instead of being treated as hidden class evidence.
+- Fixed LLVM evidence wrapper and inlined-call lowering so generated
+  higher-order wrapper parameters lower as pointer-backed arguments and
+  lexical local function calls shadow captured evidence values.
 - Rejected generated LLVM evidence wrappers for expressions that capture local
   term bindings instead of emitting top-level wrappers with free local
   references.

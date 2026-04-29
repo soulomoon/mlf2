@@ -1034,11 +1034,15 @@ isEvidenceArgument allowNestedEvidence paramName paramTy =
 
 isEvidenceParameter :: String -> BackendType -> Bool
 isEvidenceParameter =
-  isEvidenceArgument False
+  isEvidenceArgument True
 
 isEvidenceName :: String -> Bool
 isEvidenceName =
   isPrefixOf "$evidence_"
+
+isEvidenceCallableName :: String -> Bool
+isEvidenceCallableName name =
+  isEvidenceName name || isNestedEvidenceName name
 
 isNestedEvidenceName :: String -> Bool
 isNestedEvidenceName name =
@@ -1392,15 +1396,15 @@ lowerCall env exprEnv context expr =
     Just (headExpr, typeArgs, args) ->
       case headExpr of
         BackendVar _ name ->
-          case Map.lookup name (eeValues exprEnv) of
-            Just value
-              | isFunctionLikeBackendType (lvBackendType value) ->
-                  lowerIndirectValueCall env exprEnv context name value typeArgs args
-            _ ->
-              case Map.lookup name (eeLocalFunctions exprEnv) of
-                Just localFunction ->
-                  lowerLocalFunctionCall env exprEnv context name localFunction typeArgs args
-                Nothing ->
+          case Map.lookup name (eeLocalFunctions exprEnv) of
+            Just localFunction ->
+              lowerLocalFunctionCall env exprEnv context name localFunction typeArgs args
+            Nothing ->
+              case Map.lookup name (eeValues exprEnv) of
+                Just value
+                  | isFunctionLikeBackendType (lvBackendType value) ->
+                      lowerIndirectValueCall env exprEnv context name value typeArgs args
+                _ ->
                   lowerGlobalCall env exprEnv context name typeArgs args
         BackendLam {} ->
           lowerDirectFunctionCall env exprEnv context (functionFormFromExpr headExpr) typeArgs args
@@ -1417,7 +1421,7 @@ lowerCall env exprEnv context expr =
 
 lowerIndirectValueCall :: ProgramEnv -> ExprEnv -> String -> String -> LowerValue -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerIndirectValueCall env exprEnv context name callee typeArgs args = do
-  unless (isEvidenceName name) $
+  unless (isEvidenceCallableName name) $
     liftEither (BackendLLVMUnsupportedExpression context ("escaping function value " ++ show name))
   form <- instantiateFunctionFormM context (functionFormFromType (lvBackendType callee)) typeArgs args
   unless (length args == length (ffParams form)) $
