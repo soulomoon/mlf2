@@ -444,11 +444,23 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingType helper `shouldBe` BTForall "a" Nothing unaryIntBackendTy
     backendBindingExpr helper `shouldSatisfy` containsBackendTyAppArgument (BTVar "a")
 
-  it "renames type abstraction bounds when recursive helper substitution freshens type binders" $ do
-    source <- readFile "src/MLF/Backend/Convert.hs"
+  it "keeps type abstraction bounds outside freshened binder scope" $ do
+    checked0 <- requireChecked simpleFunctionProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = recursiveTypeBoundScopeElabTy,
+                    checkedBindingTerm = recursiveTypeBoundScopeTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
 
-    source `shouldSatisfy` isInfixOf "mbBound' = fmap (renameElabTypeVariable name name') mbBound"
-    source `shouldSatisfy` isInfixOf "in ETyAbs name' mbBound' (go body')"
+    validateBackendProgram backend `shouldBe` Right ()
+    helper <- requireSingleLiftedHelper backend
+    backendBindingType helper `shouldBe` BTForall "a" Nothing unaryIntBackendTy
+    backendBindingExpr helper `shouldSatisfy` containsFreshenedTypeAbsWithOuterBound
 
   it "rejects recursive local functions that capture lexical values" $ do
     checked <- requireChecked recursiveLetCaptureProgram
@@ -1047,6 +1059,26 @@ containsBackendTyAppArgument expected expr =
     BackendUnroll {backendUnrollPayload = body} -> containsBackendTyAppArgument expected body
     _ -> False
 
+containsFreshenedTypeAbsWithOuterBound :: BackendExpr -> Bool
+containsFreshenedTypeAbsWithOuterBound expr =
+  case expr of
+    BackendTyAbs {backendTyParamName = name, backendTyParamBound = Just (BTArrow (BTVar boundDom) (BTVar boundCod)), backendTyAbsBody = body} ->
+      (name /= "a" && boundDom == "a" && boundCod == "a") || containsFreshenedTypeAbsWithOuterBound body
+    BackendTyAbs {backendTyAbsBody = body} ->
+      containsFreshenedTypeAbsWithOuterBound body
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsFreshenedTypeAbsWithOuterBound scrutinee || any (containsFreshenedTypeAbsWithOuterBound . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsFreshenedTypeAbsWithOuterBound body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsFreshenedTypeAbsWithOuterBound fun || containsFreshenedTypeAbsWithOuterBound arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsFreshenedTypeAbsWithOuterBound rhs || containsFreshenedTypeAbsWithOuterBound body
+    BackendTyApp {backendTyFunction = fun} -> containsFreshenedTypeAbsWithOuterBound fun
+    BackendConstruct {backendConstructArgs = args} -> any containsFreshenedTypeAbsWithOuterBound args
+    BackendRoll {backendRollPayload = body} -> containsFreshenedTypeAbsWithOuterBound body
+    BackendUnroll {backendUnrollPayload = body} -> containsFreshenedTypeAbsWithOuterBound body
+    _ -> False
+
 containsBackendVar :: String -> BackendExpr -> Bool
 containsBackendVar expected expr =
   case expr of
@@ -1295,6 +1327,36 @@ recursiveTypeOnlyInstantiation =
     (Elab.ETyAbs "b" Nothing (Elab.ELit (LInt 0)))
     (Elab.InstApp (Elab.TVar "a"))
 
+recursiveTypeBoundScopeElabTy :: Elab.ElabType
+recursiveTypeBoundScopeElabTy =
+  Elab.TForall "a" Nothing intElabTy
+
+recursiveTypeBoundScopeTerm :: Elab.ElabTerm
+recursiveTypeBoundScopeTerm =
+  Elab.ETyAbs
+    "a"
+    Nothing
+    ( Elab.ELet
+        "loop"
+        (Elab.schemeFromType unaryIntElabTy)
+        recursiveTypeBoundScopeRhs
+        (Elab.EApp (Elab.EVar "loop") (Elab.ELit (LInt 0)))
+    )
+
+recursiveTypeBoundScopeRhs :: Elab.ElabTerm
+recursiveTypeBoundScopeRhs =
+  Elab.ELam
+    "n"
+    intElabTy
+    ( Elab.ETyInst
+        ( Elab.ETyAbs
+            "a"
+            (Just (dependentArrowElabBoundTy (Elab.TVar "a")))
+            (Elab.EApp (Elab.EVar "loop") (Elab.EVar "n"))
+        )
+        (Elab.InstApp (dependentArrowElabTy (Elab.TVar "a")))
+    )
+
 intIdentityElabTerm :: Elab.ElabTerm
 intIdentityElabTerm =
   Elab.ELam "m" intElabTy (Elab.EVar "m")
@@ -1346,6 +1408,10 @@ dependentBoundedWrapTerm =
 
 dependentArrowElabBoundTy :: Elab.ElabType -> Elab.BoundType
 dependentArrowElabBoundTy ty =
+  Elab.TArrow ty ty
+
+dependentArrowElabTy :: Elab.ElabType -> Elab.ElabType
+dependentArrowElabTy ty =
   Elab.TArrow ty ty
 
 polymorphicIdentityElabTy :: Elab.ElabType

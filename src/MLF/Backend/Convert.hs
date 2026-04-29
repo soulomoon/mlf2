@@ -697,8 +697,7 @@ replaceFreeTermVariable needle replacement =
                       ]
                   name' = freshNameLike name used
                   body' = renameTermTypeVariable name name' body
-                  mbBound' = fmap (renameElabTypeVariable name name') mbBound
-               in ETyAbs name' mbBound' (go body')
+               in ETyAbs name' mbBound (go body')
           | otherwise ->
               ETyAbs name mbBound (go body)
         ETyInst inner inst ->
