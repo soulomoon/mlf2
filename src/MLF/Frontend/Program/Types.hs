@@ -313,7 +313,7 @@ programErrorHints err =
     ProgramAmbiguousConstructorUse ctor ->
       ["add an explicit result type annotation, for example `" ++ ctor ++ " : <Type>`"]
     ProgramAmbiguousMethodUse methodName0 ->
-      ["apply `" ++ methodName0 ++ "` to enough arguments or add an annotation that fixes the instance type"]
+      ["apply `" ++ methodName0 ++ "` to enough arguments, or give a nullary method an expected type annotation that fixes the instance type"]
     ProgramAmbiguousConstrainedValueUse valueName ->
       ["use `" ++ valueName ++ "` at a concrete instance type; generic constrained value aliases are not supported yet"]
     ProgramNoMatchingInstance className0 ty ->
@@ -570,7 +570,8 @@ data DeferredMethodCall = DeferredMethodCall
     deferredMethodInfo :: MethodInfo,
     deferredMethodArgCount :: Int,
     deferredMethodFullArity :: Int,
-    deferredMethodName :: P.MethodName
+    deferredMethodName :: P.MethodName,
+    deferredMethodExpectedResult :: Maybe TypeView
   }
   deriving (Eq, Show)
 

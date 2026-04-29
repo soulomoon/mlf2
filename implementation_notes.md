@@ -1,3 +1,14 @@
+## 2026-04-29 - Nullary overloaded method expected-type resolution
+
+- `.mlfp` nullary overloaded methods / associated values now carry expected
+  source-type evidence through deferred method finalization. A use such as
+  `(mempty : Nat)` resolves by matching the method result against the expected
+  type to recover the class argument, then reuses the existing coherent
+  instance/evidence resolution path.
+- Ambiguity remains fail-closed: bare nullary method uses without an explicit
+  or propagated expected type still report `ProgramAmbiguousMethodUse`, and
+  ordinary overloaded methods still require enough term arguments.
+
 ## 2026-04-29 - Final ProgramSpec-to-LLVM parity closure
 
 - Removed the last temporary LLVM unsupported classification from the shared

@@ -702,7 +702,8 @@ compileExpr :: ElaborateScope -> Maybe SrcType -> P.Expr -> ElaborateM SurfaceEx
 compileExpr scope mbExpected expr = case expr of
   EVar name ->
     case Map.lookup name (esValues scope) of
-      Just OverloadedMethod {} -> throwError (ProgramAmbiguousMethodUse name)
+      Just OverloadedMethod {valueMethodInfo = methodInfo} ->
+        compileNullaryMethodUse scope mbExpected methodInfo
       Just valueInfo@OrdinaryValue {valueRuntimeName = runtimeName} -> do
         evidenceSurfaces <- valueEvidenceArgs scope valueInfo []
         pure (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces)
@@ -762,9 +763,15 @@ compileExpr scope mbExpected expr = case expr of
             bodyScope <- extendLocalLowered scope name runtimeName bindingTy
             bodyExpr <- compileExpr bodyScope mbExpected body
             pure (surfaceLet runtimeName rhsExpr' bodyExpr)
-  EAnn inner annTy -> do
-    innerExpr <- compileExpr scope (Just annTy) inner
-    pure (surfaceAnn innerExpr (lowerType scope annTy))
+  EAnn inner annTy ->
+    case inner of
+      EVar name
+        | Just OverloadedMethod {valueMethodInfo = methodInfo} <- Map.lookup name (esValues scope),
+          methodFullArity methodInfo == 0 ->
+            compileExpr scope (Just annTy) inner
+      _ -> do
+        innerExpr <- compileExpr scope (Just annTy) inner
+        pure (surfaceAnn innerExpr (lowerType scope annTy))
   ECase scrutinee alts -> compileCase scope mbExpected scrutinee alts
 
 compileResolvedExpr :: ElaborateScope -> Maybe SrcType -> P.ResolvedExpr -> ElaborateM SurfaceExpr
@@ -772,7 +779,8 @@ compileResolvedExpr scope mbExpected expr = case expr of
   EVar ref -> do
     valueInfo <- lookupResolvedValueInfo scope ref
     case valueInfo of
-      OverloadedMethod {} -> throwError (ProgramAmbiguousMethodUse (resolvedValueRefDisplayName ref))
+      OverloadedMethod {valueMethodInfo = methodInfo} ->
+        compileNullaryMethodUse scope mbExpected methodInfo
       OrdinaryValue {valueRuntimeName = runtimeName} -> do
         evidenceSurfaces <- valueResolvedEvidenceArgs scope valueInfo []
         pure (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces)
@@ -835,8 +843,14 @@ compileResolvedExpr scope mbExpected expr = case expr of
             pure (surfaceLet runtimeName rhsExpr' bodyExpr)
   EAnn inner annTy -> do
     annDisplayTy <- liftEitherElab (displaySrcTypeForResolved scope annTy)
-    innerExpr <- compileResolvedExpr scope (Just annDisplayTy) inner
-    pure (surfaceAnn innerExpr (lowerType scope annDisplayTy))
+    case inner of
+      EVar ref
+        | Right OverloadedMethod {valueMethodInfo = methodInfo} <- runElaborateLookup (lookupResolvedValueInfo scope ref),
+          methodFullArity methodInfo == 0 ->
+            compileResolvedExpr scope (Just annDisplayTy) inner
+      _ -> do
+        innerExpr <- compileResolvedExpr scope (Just annDisplayTy) inner
+        pure (surfaceAnn innerExpr (lowerType scope annDisplayTy))
   ECase scrutinee alts -> compileResolvedCase scope mbExpected scrutinee alts
 
 compileApp :: ElaborateScope -> Maybe SrcType -> P.Expr -> ElaborateM SurfaceExpr
@@ -928,9 +942,6 @@ lookupValueInfoBySymbol scope symbol =
             (_, info) : _ -> Just info
             [] -> Nothing
     Nothing -> Nothing
-
-resolvedValueRefDisplayName :: P.ResolvedValueRef -> String
-resolvedValueRefDisplayName = P.refDisplayName
 
 compileValueApp :: ElaborateScope -> Maybe SrcType -> ValueInfo -> [P.Expr] -> ElaborateM SurfaceExpr
 compileValueApp scope mbExpected ConstructorValue {valueCtorInfo = ctorInfo} args = do
@@ -1431,7 +1442,7 @@ knownResolvedConstructorResultType scope ctorInfo args = do
 
 compileMethodApp :: ElaborateScope -> Maybe SrcType -> MethodInfo -> [P.Expr] -> ElaborateM SurfaceExpr
 compileMethodApp scope mbExpected methodInfo args
-  | null args = throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
+  | null args = compileNullaryMethodUse scope mbExpected methodInfo
   | otherwise = do
       let fullArity = methodFullArity methodInfo
           suppliedArity = length args
@@ -1470,7 +1481,7 @@ compileMethodApp scope mbExpected methodInfo args
 
 compileResolvedMethodApp :: ElaborateScope -> Maybe SrcType -> MethodInfo -> [P.ResolvedExpr] -> ElaborateM SurfaceExpr
 compileResolvedMethodApp scope mbExpected methodInfo args
-  | null args = throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
+  | null args = compileNullaryMethodUse scope mbExpected methodInfo
   | otherwise = do
       let fullArity = methodFullArity methodInfo
           suppliedArity = length args
@@ -1507,6 +1518,29 @@ compileResolvedMethodApp scope mbExpected methodInfo args
                 Nothing -> expanded
       | otherwise = expanded
 
+compileNullaryMethodUse :: ElaborateScope -> Maybe SrcType -> MethodInfo -> ElaborateM SurfaceExpr
+compileNullaryMethodUse scope mbExpected methodInfo =
+  case nullaryMethodExpectedResultView scope mbExpected methodInfo of
+    Just expectedView -> do
+      placeholder <- deferNullaryMethodCall scope methodInfo expectedView
+      pure (surfaceVar placeholder)
+    Nothing -> throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
+
+nullaryMethodExpectedResultView :: ElaborateScope -> Maybe SrcType -> MethodInfo -> Maybe TypeView
+nullaryMethodExpectedResultView scope mbExpected methodInfo = do
+  expectedTy <- mbExpected
+  _ <- inferNullaryMethodClassArg scope methodInfo expectedTy
+  pure (sourceTypeViewInScope scope expectedTy)
+
+inferNullaryMethodClassArg :: ElaborateScope -> MethodInfo -> SrcType -> Maybe SrcType
+inferNullaryMethodClassArg scope methodInfo expectedTy
+  | methodFullArity methodInfo /= 0 = Nothing
+  | otherwise = do
+      let (_, bodyTy) = splitForalls (methodType methodInfo)
+          (_, resultTy) = splitArrows bodyTy
+      subst <- matchTypesInScope scope Map.empty resultTy expectedTy
+      Map.lookup (methodParamName methodInfo) subst
+
 compileExpectedMethodArg :: ElaborateScope -> SrcType -> P.Expr -> ElaborateM SurfaceExpr
 compileExpectedMethodArg scope expectedTy expr = do
   case inferKnownExprType scope expr of
@@ -1526,6 +1560,10 @@ compileExpectedMethodArg scope expectedTy expr = do
       pure (surfaceLet runtimeName actualExpr (surfaceAnn bodyExpr (lowerType scope expectedTy)))
     EVar name
       | Just ConstructorValue {} <- Map.lookup name (esValues scope) ->
+          compileExpr scope (Just expectedTy) expr
+    EVar name
+      | Just OverloadedMethod {valueMethodInfo = methodInfo} <- Map.lookup name (esValues scope),
+        methodFullArity methodInfo == 0 ->
           compileExpr scope (Just expectedTy) expr
     EVar {} ->
       compileExpr scope Nothing expr
@@ -1556,6 +1594,10 @@ compileExpectedResolvedMethodArg scope expectedTy expr = do
       pure (surfaceLet runtimeName actualExpr (surfaceAnn bodyExpr (lowerType scope expectedTy)))
     EVar ref
       | Right ConstructorValue {} <- runElaborateLookup (lookupResolvedValueInfo scope ref) ->
+          compileResolvedExpr scope (Just expectedTy) expr
+    EVar ref
+      | Right OverloadedMethod {valueMethodInfo = methodInfo} <- runElaborateLookup (lookupResolvedValueInfo scope ref),
+        methodFullArity methodInfo == 0 ->
           compileResolvedExpr scope (Just expectedTy) expr
     EVar {} ->
       compileResolvedExpr scope Nothing expr
@@ -1822,7 +1864,24 @@ deferMethodCall scope methodInfo fullArity placeholderSourceTy = do
             deferredMethodInfo = methodInfo,
             deferredMethodArgCount = fullArity,
             deferredMethodFullArity = fullArity,
-            deferredMethodName = methodName methodInfo
+            deferredMethodName = methodName methodInfo,
+            deferredMethodExpectedResult = Nothing
+          }
+  registerDeferredObligation placeholder placeholderTy (DeferredMethod deferred)
+  pure placeholder
+
+deferNullaryMethodCall :: ElaborateScope -> MethodInfo -> TypeView -> ElaborateM String
+deferNullaryMethodCall scope methodInfo expectedView = do
+  placeholder <- freshDeferredMethodName (methodName methodInfo)
+  let placeholderTy = lowerTypeView scope expectedView
+      deferred =
+        DeferredMethodCall
+          { deferredMethodPlaceholder = placeholder,
+            deferredMethodInfo = methodInfo,
+            deferredMethodArgCount = 0,
+            deferredMethodFullArity = 0,
+            deferredMethodName = methodName methodInfo,
+            deferredMethodExpectedResult = Just expectedView
           }
   registerDeferredObligation placeholder placeholderTy (DeferredMethod deferred)
   pure placeholder

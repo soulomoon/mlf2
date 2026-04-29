@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Changed
+- Supported expected-type resolution for nullary overloaded `.mlfp` methods.
+  Associated values such as `mempty : a` now resolve from an explicit or
+  propagated expected source type while bare uses without such evidence still
+  fail closed as ambiguous.
 - Eliminated the final temporary LLVM unsupported classification from the
   shared `ProgramSpec` runtime-success parity matrix. Stored first-order
   function constructor fields now lower as function pointers, closed direct

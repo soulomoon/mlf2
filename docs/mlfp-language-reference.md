@@ -252,7 +252,11 @@ instance Eq a => Eq (Option a) {
 
 Method calls lower to deferred obligations and resolve after eMLF inference.
 Partial overloaded method application is supported by eta-expanding the missing
-arguments. Bare overloaded method names remain ambiguous and are rejected.
+arguments. Nullary overloaded methods / associated values can also resolve from
+an explicit or propagated expected source type when the method result determines
+the class parameter; for example, `(mempty : Nat)` can select a `Monoid Nat`
+instance. Bare overloaded method names without enough term arguments or
+expected-type evidence remain ambiguous and are rejected.
 
 Instance resolution is coherent and fail-closed: duplicate and overlapping
 instance heads are rejected by unification, and a missing instance remains a

@@ -889,31 +889,37 @@ resolveDeferredMethods :: ElaborateScope -> Map String DeferredMethodCall -> Env
 resolveDeferredMethods scope deferredMethods = go
   where
     go env term =
-      case term of
-        X.EVar {} -> Right term
-        X.ELit {} -> Right term
-        X.ELam name ty body -> do
-          let env' = env {termEnv = Map.insert name ty (termEnv env)}
-          X.ELam name ty <$> go env' body
-        X.EApp {} -> rewriteApplication env term
-        X.ELet name scheme rhs body -> do
-          let schemeTy = schemeToType scheme
-              rhsEnv = env {termEnv = Map.insert name schemeTy (termEnv env)}
-          rhs' <- go rhsEnv rhs
-          let rhsTy = inferRewrittenLetType rhsEnv rhs' schemeTy
-              env' = env {termEnv = Map.insert name rhsTy (termEnv env)}
-          body' <- go env' body
-          Right (X.ELet name scheme rhs' body')
-        X.ETyAbs name mbBound body -> do
-          let boundTy = maybe X.TBottom X.tyToElab mbBound
-              env' = env {typeEnv = Map.insert name boundTy (typeEnv env)}
-          X.ETyAbs name mbBound <$> go env' body
-        X.ETyInst inner inst ->
-          (`X.ETyInst` inst) <$> go env inner
-        X.ERoll ty body ->
-          X.ERoll ty <$> go env body
-        X.EUnroll inner ->
-          X.EUnroll <$> go env inner
+      case deferredPlaceholderHeadWithInsts term of
+        Just (name, _)
+          | Just deferred <- Map.lookup name deferredMethods,
+            deferredMethodArgCount deferred == 0 ->
+              resolveDeferredNullaryMethod deferred
+        _ ->
+          case term of
+            X.EVar {} -> Right term
+            X.ELit {} -> Right term
+            X.ELam name ty body -> do
+              let env' = env {termEnv = Map.insert name ty (termEnv env)}
+              X.ELam name ty <$> go env' body
+            X.EApp {} -> rewriteApplication env term
+            X.ELet name scheme rhs body -> do
+              let schemeTy = schemeToType scheme
+                  rhsEnv = env {termEnv = Map.insert name schemeTy (termEnv env)}
+              rhs' <- go rhsEnv rhs
+              let rhsTy = inferRewrittenLetType rhsEnv rhs' schemeTy
+                  env' = env {termEnv = Map.insert name rhsTy (termEnv env)}
+              body' <- go env' body
+              Right (X.ELet name scheme rhs' body')
+            X.ETyAbs name mbBound body -> do
+              let boundTy = maybe X.TBottom X.tyToElab mbBound
+                  env' = env {typeEnv = Map.insert name boundTy (typeEnv env)}
+              X.ETyAbs name mbBound <$> go env' body
+            X.ETyInst inner inst ->
+              (`X.ETyInst` inst) <$> go env inner
+            X.ERoll ty body ->
+              X.ERoll ty <$> go env body
+            X.EUnroll inner ->
+              X.EUnroll <$> go env inner
 
     rewriteApplication env term =
       let (headTerm, args) = collectElabApps term
@@ -952,6 +958,57 @@ resolveDeferredMethods scope deferredMethods = go
           evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty eagerConstraints
           methodHead <- instantiateMethodValue scope methodSubst methodValue
           Right (foldl X.EApp (foldl X.EApp methodHead evidenceArgs) args)
+
+    resolveDeferredNullaryMethod deferred = do
+      expectedView <-
+        case deferredMethodExpectedResult deferred of
+          Just view -> Right view
+          Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+      let methodInfo = deferredMethodInfo deferred
+      classArgView <-
+        case inferNullaryMethodClassArgument methodInfo expectedView of
+          Just view -> Right view
+          Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+      (instanceInfo, subst) <- resolveMethodInstanceInfoByTypeView scope methodInfo classArgView
+      methodValue <- concreteMethodValue instanceInfo methodInfo
+      methodSubst <-
+        case inferNullaryMethodSubst methodInfo classArgView subst expectedView of
+          Just subst' -> Right subst'
+          Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+      let eagerConstraints =
+            filter
+              constraintGround
+              (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue))
+      evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty eagerConstraints
+      methodHead <- instantiateMethodValue scope methodSubst methodValue
+      Right (foldl X.EApp methodHead evidenceArgs)
+
+    inferNullaryMethodClassArgument methodInfo expectedView
+      | deferredMethodFullArityFromInfo methodInfo /= 0 = Nothing
+      | otherwise = do
+          let (_, bodyTy) = splitForalls (methodType methodInfo)
+              (_, resultTy) = splitArrows bodyTy
+          subst <- matchTypesInScope scope Map.empty resultTy (typeViewDisplay expectedView)
+          classArgTy <- Map.lookup (methodParamName methodInfo) subst
+          pure (sourceTypeViewInScope scope classArgTy)
+
+    inferNullaryMethodSubst methodInfo classArgView subst expectedView =
+      let specializedMethodTy =
+            specializeMethodType
+              (methodType methodInfo)
+              (methodParamName methodInfo)
+              (typeViewDisplay classArgView)
+          (_, bodyTy) = splitForalls specializedMethodTy
+          (_, resultTy) = splitArrows bodyTy
+       in fmap (Map.map (sourceTypeViewInScope scope)) $
+            matchTypesInScope
+              scope
+              (fmap typeViewDisplay subst)
+              resultTy
+              (typeViewDisplay expectedView)
+
+    deferredMethodFullArityFromInfo methodInfo =
+      length (fst (splitArrows (snd (splitForalls (methodType methodInfo)))))
 
     inferDeferredArgType env arg =
       case typeCheckWithEnv env arg of
