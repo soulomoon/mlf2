@@ -532,6 +532,20 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_function_wrapper$"
     validateLLVMAssembly output
 
+  it "lowers stored local function constructor fields through private wrappers" $ do
+    output <- requireRight (renderBackendProgramLLVM localFunctionFieldProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_function_wrapper$"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_function_wrapper$"
+    validateLLVMAssembly output
+
+  it "lowers stored transitive local function aliases through private wrappers" $ do
+    output <- requireRight (renderBackendProgramLLVM transitiveLocalFunctionFieldProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_function_wrapper$"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_function_wrapper$"
+    validateLLVMAssembly output
+
   it "re-stores immediate constructor fields carrying closed direct functions" $ do
     output <- requireRight (renderBackendProgramLLVM immediateRestoredFunctionFieldProgram)
 
@@ -2447,6 +2461,35 @@ directFunctionFieldProgram =
       backendProgramMain = "main"
     }
 
+localFunctionFieldProgram :: BackendProgram
+localFunctionFieldProgram =
+  programWithFnBoxMainExpr $
+    BackendLet
+      { backendExprType = fnBoxTy,
+        backendLetName = "f",
+        backendLetType = unaryIntTy,
+        backendLetRhs = intIdentityExpr,
+        backendLetBody = BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "f"]
+      }
+
+transitiveLocalFunctionFieldProgram :: BackendProgram
+transitiveLocalFunctionFieldProgram =
+  programWithFnBoxMainExpr $
+    BackendLet
+      { backendExprType = fnBoxTy,
+        backendLetName = "f",
+        backendLetType = unaryIntTy,
+        backendLetRhs = intIdentityExpr,
+        backendLetBody =
+          BackendLet
+            { backendExprType = fnBoxTy,
+              backendLetName = "g",
+              backendLetType = unaryIntTy,
+              backendLetRhs = BackendVar unaryIntTy "f",
+              backendLetBody = BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "g"]
+            }
+      }
+
 immediateRestoredFunctionFieldProgram :: BackendProgram
 immediateRestoredFunctionFieldProgram =
   BackendProgram
@@ -2650,6 +2693,26 @@ programWithMainExpr mainTy expr =
           backendBindingExportedAsMain = True
         }
     ]
+
+programWithFnBoxMainExpr :: BackendExpr -> BackendProgram
+programWithFnBoxMainExpr expr =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [fnBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = fnBoxTy,
+                      backendBindingExpr = expr,
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
 
 programWithBindings :: [BackendBinding] -> BackendProgram
 programWithBindings bindings =

@@ -759,6 +759,13 @@ collectReferencedFunctionNames base reachable specializations evidenceWrappers f
 
 type LocalFunctionForms = Map String FunctionForm
 
+data LocalStoredFunction = LocalStoredFunction
+  { lsfForm :: FunctionForm,
+    lsfSourceExpr :: BackendExpr
+  }
+
+type LocalStoredFunctions = Map String LocalStoredFunction
+
 shadowLocalFunctionForms :: Set String -> LocalFunctionForms -> LocalFunctionForms
 shadowLocalFunctionForms names forms =
   Map.withoutKeys forms names
@@ -1034,14 +1041,20 @@ evidenceWrapperKey expected expr =
 
 collectFunctionWrappersInForm :: ProgramBase -> Map String BackendType -> Set String -> FunctionForm -> [(BackendType, BackendExpr)]
 collectFunctionWrappersInForm base substitution bound form =
-  collectFunctionWrappersInExpr
-    base
-    substitution
-    (Set.union (Set.fromList (map fst (ffParams form))) bound)
-    (ffBody form)
+  collectFunctionWrappersInFormWithLocals base substitution Map.empty bound form
 
-collectFunctionWrappersInExpr :: ProgramBase -> Map String BackendType -> Set String -> BackendExpr -> [(BackendType, BackendExpr)]
-collectFunctionWrappersInExpr base substitution bound expr =
+collectFunctionWrappersInFormWithLocals :: ProgramBase -> Map String BackendType -> LocalStoredFunctions -> Set String -> FunctionForm -> [(BackendType, BackendExpr)]
+collectFunctionWrappersInFormWithLocals base substitution localFunctions bound form =
+  let paramNames = Set.fromList (map fst (ffParams form))
+   in collectFunctionWrappersInExpr
+        base
+        substitution
+        (Map.withoutKeys localFunctions paramNames)
+        (Set.union paramNames bound)
+        (ffBody form)
+
+collectFunctionWrappersInExpr :: ProgramBase -> Map String BackendType -> LocalStoredFunctions -> Set String -> BackendExpr -> [(BackendType, BackendExpr)]
+collectFunctionWrappersInExpr base substitution localFunctions bound expr =
   wrapperRequests ++ childRequests
   where
     wrapperRequests =
@@ -1049,16 +1062,54 @@ collectFunctionWrappersInExpr base substitution bound expr =
         BackendConstruct resultTy name args ->
           case Map.lookup name (pbConstructors base) >>= \constructorRuntime -> constructorRuntimeFieldTypes constructorRuntime resultTy of
             Just fieldTys ->
-              [ (fieldTy', arg')
+              [ request
               | (fieldTy, arg) <- zip fieldTys args,
                 let fieldTy' = substituteBackendTypes substitution fieldTy,
                 let arg' = substituteExprTypes substitution arg,
                 isFirstOrderFunctionPointerType fieldTy',
-                not (isSimpleFunctionReference arg'),
-                evidenceWrapperArgumentClosed bound arg'
+                Just request <- [functionWrapperRequest fieldTy' arg']
               ]
             Nothing -> []
         _ -> []
+
+    functionWrapperRequest fieldTy arg =
+      case localStoredFunctionWrapperSource arg of
+        Just sourceExpr
+          | evidenceWrapperArgumentClosed bound sourceExpr ->
+              Just (fieldTy, sourceExpr)
+        _ | not (isSimpleFunctionReference arg),
+            evidenceWrapperArgumentClosed bound arg ->
+              Just (fieldTy, arg)
+        _ ->
+          Nothing
+
+    localStoredFunctionWrapperSource arg =
+      case collectTyApps arg of
+        (BackendVar _ name, typeArgs) ->
+          localStoredFunctionSourceByName Set.empty name typeArgs
+        _ -> Nothing
+
+    localStoredFunctionSourceByName seen name typeArgs
+      | Set.member name seen = Nothing
+      | Just localFunction <- Map.lookup name localFunctions =
+          case instantiateFunctionFormWithTypeArgs ("function wrapper request " ++ name) (lsfForm localFunction) typeArgs [] of
+            Right (_, instantiated) ->
+              case etaAliasTarget instantiated of
+                Just (targetName, targetTypeArgs) ->
+                  localStoredFunctionSourceByName (Set.insert name seen) targetName targetTypeArgs
+                Nothing ->
+                  applyStoredSourceTypeArgs name (lsfSourceExpr localFunction) typeArgs
+            Left _ ->
+              Nothing
+      | otherwise =
+          Nothing
+
+    applyStoredSourceTypeArgs _ sourceExpr [] =
+      Just sourceExpr
+    applyStoredSourceTypeArgs name sourceExpr typeArgs =
+      case applyTypeApplicationsToExprWithType ("function wrapper request " ++ name) sourceExpr typeArgs of
+        Right (applied, _) -> Just applied
+        Left _ -> Nothing
 
     childRequests =
       case expr of
@@ -1067,30 +1118,49 @@ collectFunctionWrappersInExpr base substitution bound expr =
         BackendLit {} ->
           []
         BackendLam _ name _ body ->
-          collectFunctionWrappersInExpr base substitution (Set.insert name bound) body
+          collectFunctionWrappersInExpr base substitution (Map.delete name localFunctions) (Set.insert name bound) body
         BackendApp _ fun arg ->
-          collectFunctionWrappersInExpr base substitution bound fun
-            ++ collectFunctionWrappersInExpr base substitution bound arg
+          collectFunctionWrappersInExpr base substitution localFunctions bound fun
+            ++ collectFunctionWrappersInExpr base substitution localFunctions bound arg
         BackendLet _ name _ rhs body ->
-          collectFunctionWrappersInExpr base substitution bound rhs
-            ++ collectFunctionWrappersInExpr base substitution (Set.insert name bound) body
+          collectFunctionWrappersInExpr base substitution localFunctions bound rhs
+            ++ collectFunctionWrappersInExpr base substitution (collectLetLocalFunction name rhs) (Set.insert name bound) body
         BackendTyAbs _ name _ body ->
-          collectFunctionWrappersInExpr base (Map.delete name substitution) bound body
+          collectFunctionWrappersInExpr base (Map.delete name substitution) localFunctions bound body
         BackendTyApp _ fun _ ->
-          collectFunctionWrappersInExpr base substitution bound fun
+          collectFunctionWrappersInExpr base substitution localFunctions bound fun
         BackendConstruct _ _ args ->
-          concatMap (collectFunctionWrappersInExpr base substitution bound) args
+          concatMap (collectFunctionWrappersInExpr base substitution localFunctions bound) args
         BackendCase _ scrutinee alternatives ->
-          collectFunctionWrappersInExpr base substitution bound scrutinee
+          collectFunctionWrappersInExpr base substitution localFunctions bound scrutinee
             ++ concatMap collectAlternativeWrappers (NE.toList alternatives)
         BackendRoll _ payload ->
-          collectFunctionWrappersInExpr base substitution bound payload
+          collectFunctionWrappersInExpr base substitution localFunctions bound payload
         BackendUnroll _ payload ->
-          collectFunctionWrappersInExpr base substitution bound payload
+          collectFunctionWrappersInExpr base substitution localFunctions bound payload
+
+    collectLetLocalFunction name rhs =
+      case functionFormFromExpected (backendExprType rhs) rhs of
+        form
+          | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+              Map.insert
+                name
+                LocalStoredFunction
+                  { lsfForm = substituteFunctionFormTypes substitution form,
+                    lsfSourceExpr = substituteExprTypes substitution rhs
+                  }
+                localFunctions
+        _ ->
+          Map.delete name localFunctions
 
     collectAlternativeWrappers alternative =
       let binders = patternBinders (backendAltPattern alternative)
-       in collectFunctionWrappersInExpr base substitution (Set.union binders bound) (backendAltBody alternative)
+       in collectFunctionWrappersInExpr
+            base
+            substitution
+            (Map.withoutKeys localFunctions binders)
+            (Set.union binders bound)
+            (backendAltBody alternative)
 
     patternBinders =
       \case
@@ -2072,9 +2142,11 @@ lowerLocalFunctionReferenceWith allowStoredReference env context expectedTy name
   requireEvidenceFunctionType context name expectedTy actualTy
   case etaAliasTarget form of
     Just (targetName, targetTypeArgs) ->
-      lowerFunctionReference env (lfCapturedEnv localFunction) context expectedTy targetName targetTypeArgs
+      if allowStoredReference
+        then lowerStoredFunctionReference env (lfCapturedEnv localFunction) context expectedTy targetName targetTypeArgs
+        else lowerFunctionReference env (lfCapturedEnv localFunction) context expectedTy targetName targetTypeArgs
     Nothing ->
-      case lowerLocalFunctionStoredReference env expectedTy localFunction of
+      lowerLocalFunctionStoredReference env context expectedTy localFunction typeArgs >>= \case
         Just value ->
           if allowStoredReference
             then pure value
@@ -2085,17 +2157,26 @@ lowerLocalFunctionReferenceWith allowStoredReference env context expectedTy name
     unsupportedFunctionArgument =
       liftEither (BackendLLVMUnsupportedExpression context ("unsupported function argument " ++ show name))
 
-lowerLocalFunctionStoredReference :: ProgramEnv -> BackendType -> LocalFunction -> Maybe LowerValue
-lowerLocalFunctionStoredReference env expectedTy localFunction =
+lowerLocalFunctionStoredReference :: ProgramEnv -> String -> BackendType -> LocalFunction -> [BackendType] -> LowerM (Maybe LowerValue)
+lowerLocalFunctionStoredReference env context expectedTy localFunction typeArgs =
   case lfStoredReference localFunction of
-    Just (_, sourceExpr) ->
+    Just (_, sourceExpr0) -> do
+      sourceExpr <- storedReferenceSourceExpr context sourceExpr0 typeArgs
       case Map.lookup (functionWrapperKey expectedTy sourceExpr) (peFunctionWrappers env) of
         Just wrapper ->
-          Just (LowerValue expectedTy LLVMPtr (LLVMGlobalRef LLVMPtr (fwFunctionName wrapper)))
+          pure (Just (LowerValue expectedTy LLVMPtr (LLVMGlobalRef LLVMPtr (fwFunctionName wrapper))))
         Nothing ->
-          Nothing
+          pure Nothing
     Nothing ->
-      Nothing
+      pure Nothing
+
+storedReferenceSourceExpr :: String -> BackendExpr -> [BackendType] -> LowerM BackendExpr
+storedReferenceSourceExpr _ sourceExpr [] =
+  pure sourceExpr
+storedReferenceSourceExpr context sourceExpr typeArgs =
+  case applyTypeApplicationsToExprWithType context sourceExpr typeArgs of
+    Right (applied, _) -> pure applied
+    Left err -> liftEither err
 
 etaAliasTarget :: FunctionForm -> Maybe (String, [BackendType])
 etaAliasTarget form =
