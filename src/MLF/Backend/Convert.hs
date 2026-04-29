@@ -1252,10 +1252,14 @@ convertConstructorApplication context env term resultTy =
       typeBounds <- backendTypeBoundsFromEnv env
       initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
       resultSubstitution <-
-        case firstJust
-          [ matchBackendTypeParameters typeBounds dataParameters parameters initialSubstitution constructorResultTy effectiveResultTy,
-            matchBackendTypeParameters typeBounds dataParameters parameters Map.empty constructorResultTy effectiveResultTy
-          ] of
+        case constructorResultSubstitution
+          ownerContext
+          typeBounds
+          dataParameters
+          parameters
+          initialSubstitution
+          constructorResultTy
+          effectiveResultTy of
           Just substitution -> Right substitution
           Nothing ->
             Left
@@ -1282,6 +1286,7 @@ convertConstructorApplication context env term resultTy =
               )
           )
       argExprs <- zipWithM (convertTermExpected context env . Just) fields args
+      mapM_ (checkConstructorArgumentType constructor) (zip [0 :: Int ..] (zip fields argExprs))
       Right
         ( Just
             BackendConstruct
@@ -1292,13 +1297,41 @@ convertConstructorApplication context env term resultTy =
         )
     Nothing -> Right Nothing
   where
-    firstJust =
-      \case
-        [] -> Nothing
-        candidate : rest ->
-          case candidate of
-            Just value -> Just value
-            Nothing -> firstJust rest
+    constructorResultSubstitution ownerContext typeBounds dataParameters parameters explicitSubstitution constructorResultTy effectiveResultTy =
+      matchBackendTypeParameters typeBounds dataParameters parameters explicitSubstitution constructorResultTy effectiveResultTy
+        <|> do
+          inferredSubstitution <-
+            matchBackendTypeParameters typeBounds dataParameters parameters Map.empty constructorResultTy effectiveResultTy
+          if explicitSubstitutionAgreesWithInferred ownerContext typeBounds explicitSubstitution inferredSubstitution
+            then Just inferredSubstitution
+            else Nothing
+
+    explicitSubstitutionAgreesWithInferred ownerContext typeBounds explicitSubstitution inferredSubstitution =
+      all explicitArgumentAgrees (Map.toList explicitSubstitution)
+      where
+        explicitArgumentAgrees (name, explicitTy) =
+          case Map.lookup name inferredSubstitution of
+            Just (BTVar inferredName)
+              | inferredName == name -> True
+            Just inferredTy ->
+              alphaEqBackendType (resolveTypeBoundDependencies explicitTy) (resolveTypeBoundDependencies inferredTy)
+            Nothing -> False
+
+        resolveTypeBoundDependencies =
+          recoverStructuralBackendType ownerContext
+            . substituteBackendTypes (completeBackendParameterSubstitution typeBounds Map.empty)
+
+    checkConstructorArgumentType constructor (index, (expectedTy, argExpr)) =
+      unless (alphaEqBackendType (backendExprType argExpr) expectedTy) $
+        Left
+          ( BackendUnsupportedCaseShape
+              ( "constructor argument "
+                  ++ show index
+                  ++ " type does not match expected field for `"
+                  ++ backendConstructorName constructor
+                  ++ "`"
+              )
+          )
 
 constructorApplicationTerm :: ConvertContext -> ElabTerm -> Either BackendConversionError (Maybe ConstructorApplication)
 constructorApplicationTerm context term =
@@ -1442,7 +1475,16 @@ constructorTypeApplicationSubstitution ::
   [BackendType] ->
   Either BackendConversionError (Map String BackendType)
 constructorTypeApplicationSubstitution constructorMeta typeArgs =
-  Right (Map.fromList (zip typeApplicationNames typeArgs))
+  if length typeArgs <= length typeApplicationNames
+    then Right (Map.fromList (zip typeApplicationNames typeArgs))
+    else
+      Left
+        ( BackendUnsupportedCaseShape
+            ( "constructor type application arity mismatch for `"
+                ++ backendConstructorName (cmBackend constructorMeta)
+                ++ "`"
+            )
+        )
   where
     typeApplicationNames = constructorTypeApplicationParameterNames constructorMeta
 

@@ -279,7 +279,7 @@ spec = describe "MLF.Backend.Convert" $ do
 
     validateBackendProgram backend `shouldBe` Right ()
 
-  it "ignores stale constructor head type instantiations" $ do
+  it "rejects constructor head type instantiations with no matching constructor parameter" $ do
     checked0 <- requireChecked constructorForallApplicationProgram
     let checked =
           mapMainBinding
@@ -293,12 +293,39 @@ spec = describe "MLF.Backend.Convert" $ do
                   }
             )
             checked0
-    backend <- requireRight (convertCheckedProgram checked)
 
-    validateBackendProgram backend `shouldBe` Right ()
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedCaseShape message) ->
+        message `shouldSatisfy` isInfixOf "constructor type application arity mismatch"
+      Left err ->
+        expectationFailure ("expected constructor type application arity mismatch, got " ++ show err)
+      Right backend ->
+        expectationFailure ("expected constructor type application rejection, got " ++ show backend)
 
-    mainBinding <- requireBinding (backendProgramMain backend) backend
-    collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Pack"]
+  it "rejects constructor head type instantiations that conflict with the expected result" $ do
+    checked0 <- requireChecked gadtResultConstructorProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingTerm =
+                      replaceConstructorHeadInstantiation
+                        "Main__Box"
+                        boolElabTy
+                        (checkedBindingTerm binding)
+                  }
+            )
+            checked0
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedCaseShape message) ->
+        message `shouldSatisfy` isInfixOf "constructor"
+      Left (BackendValidationFailed (BackendConstructorArgumentMismatch name _ _ _)) ->
+        name `shouldBe` "Main__Box"
+      Left err ->
+        expectationFailure ("expected constructor type application mismatch, got " ++ show err)
+      Right backend ->
+        expectationFailure ("expected constructor type application rejection, got " ++ show backend)
 
   it "matches repeated constructor parameters modulo alpha-equivalence" $ do
     checked0 <- requireChecked repeatedPolymorphicParameterProgram
@@ -514,6 +541,17 @@ parameterizedConstructorProgram =
       "    | Some : a -> Option a;",
       "",
       "  def main : Option Int = Some 1;",
+      "}"
+    ]
+
+gadtResultConstructorProgram :: String
+gadtResultConstructorProgram =
+  unlines
+    [ "module Main export (Box(..), main) {",
+      "  data Box a =",
+      "      Box : forall (b >= Int). b -> Box b;",
+      "",
+      "  def main : Box Int = Box 1;",
       "}"
     ]
 
@@ -1185,6 +1223,39 @@ addStaleConstructorHeadInstantiation target staleTy =
         (headTerm, args)
           | isTargetConstructorHead headTerm ->
               rebuildAppsElab (Elab.ETyInst headTerm (Elab.InstApp staleTy)) args
+        _ ->
+          case term of
+            Elab.ELam name ty body ->
+              Elab.ELam name ty (go body)
+            Elab.EApp fun arg ->
+              Elab.EApp (go fun) (go arg)
+            Elab.ELet name scheme rhs body ->
+              Elab.ELet name scheme (go rhs) (go body)
+            Elab.ETyAbs name mbBound body ->
+              Elab.ETyAbs name mbBound (go body)
+            Elab.ETyInst inner inst ->
+              Elab.ETyInst (go inner) inst
+            Elab.ERoll ty body ->
+              Elab.ERoll ty (go body)
+            Elab.EUnroll body ->
+              Elab.EUnroll (go body)
+            _ ->
+              term
+
+    isTargetConstructorHead headTerm =
+      case stripElabTypeInsts headTerm of
+        Elab.EVar name -> name == target
+        _ -> False
+
+replaceConstructorHeadInstantiation :: String -> Elab.ElabType -> Elab.ElabTerm -> Elab.ElabTerm
+replaceConstructorHeadInstantiation target replacementTy =
+  go
+  where
+    go term =
+      case collectAppsElab term of
+        (headTerm, args)
+          | isTargetConstructorHead headTerm ->
+              rebuildAppsElab (Elab.ETyInst (stripElabTypeInsts headTerm) (Elab.InstApp replacementTy)) args
         _ ->
           case term of
             Elab.ELam name ty body ->
