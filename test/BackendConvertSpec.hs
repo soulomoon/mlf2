@@ -208,6 +208,21 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Pack"]
 
+  it "maps constructor type applications in backend data parameter order" $ do
+    checked0 <- requireChecked dataParameterOrderConstructorProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding {checkedBindingTerm = dataParameterOrderConstructorTerm}
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__Mk"]
+
   it "preserves bounded constructor foralls in backend metadata" $ do
     checked <- requireChecked boundedConstructorForallProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -861,6 +876,29 @@ constructorForallApplicationProgram =
       "  def main : Pack = Pack 1;",
       "}"
     ]
+
+dataParameterOrderConstructorProgram :: String
+dataParameterOrderConstructorProgram =
+  unlines
+    [ "module Main export (T(..), main) {",
+      "  data T z a =",
+      "      Mk : z -> a -> T z a;",
+      "",
+      "  def main : T Bool Int = Mk true 1;",
+      "}"
+    ]
+
+dataParameterOrderConstructorTerm :: Elab.ElabTerm
+dataParameterOrderConstructorTerm =
+  Elab.EApp
+    ( Elab.EApp
+        ( Elab.ETyInst
+            (Elab.ETyInst (Elab.EVar "Main__Mk") (Elab.InstApp boolElabTy))
+            (Elab.InstApp intElabTy)
+        )
+        (Elab.ELit (LBool True))
+    )
+    (Elab.ELit (LInt 1))
 
 boundedConstructorForallProgram :: String
 boundedConstructorForallProgram =

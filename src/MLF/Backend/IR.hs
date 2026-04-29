@@ -622,9 +622,9 @@ validateBackendExprWith mbContext expr =
       validateBackendExprWith mbContext arg
       case backendExprType fun of
         BTArrow expectedArg expectedResult -> do
-          unless (backendTypeMatches mbContext expectedArg (backendExprType arg)) $
+          unless (backendApplicationTypeMatches mbContext expectedArg (backendExprType arg)) $
             Left (BackendApplicationArgumentMismatch expectedArg (backendExprType arg))
-          unless (backendTypeMatches mbContext expectedResult resultTy) $
+          unless (backendApplicationTypeMatches mbContext expectedResult resultTy) $
             Left (BackendApplicationResultMismatch resultTy expectedResult)
         other ->
           Left (BackendApplicationExpectedFunction other)
@@ -684,12 +684,32 @@ validateBackendVariable (Just context0) name actualTy =
       unless (backendVariableTypeMatches context0 expectedTy actualTy) $
         Left (BackendVariableTypeMismatch name expectedTy actualTy)
 
-backendTypeMatches :: Maybe BackendValidationContext -> BackendType -> BackendType -> Bool
-backendTypeMatches mbContext expectedTy actualTy =
-  backendTypeMatchesWith True typeBounds dataDecls expectedTy actualTy
+backendApplicationTypeMatches :: Maybe BackendValidationContext -> BackendType -> BackendType -> Bool
+backendApplicationTypeMatches mbContext expectedTy actualTy =
+  not (topLevelFreeTypeVariableWildcard expectedTy actualTy)
+    && backendTypeMatchesWith True typeBounds dataDecls expectedTy actualTy
   where
     typeBounds = maybe Map.empty bvcTypeBounds mbContext
     dataDecls = bvcData <$> mbContext
+
+    topLevelFreeTypeVariableWildcard expected actual =
+      case (expected, actual) of
+        (BTVar name, BTVar otherName) ->
+          name /= otherName
+            && applicationTypeVariableIsUnconstrained name
+            && applicationTypeVariableIsUnconstrained otherName
+        (BTVar name, _) ->
+          applicationTypeVariableIsUnconstrained name
+        (_, BTVar name) ->
+          applicationTypeVariableIsUnconstrained name
+        _ ->
+          False
+
+    applicationTypeVariableIsUnconstrained name =
+      case Map.lookup name typeBounds of
+        Nothing -> True
+        Just Nothing -> True
+        Just (Just boundTy) -> alphaEqBackendType boundTy BTBottom
 
 backendVariableTypeMatches :: BackendValidationContext -> BackendType -> BackendType -> Bool
 backendVariableTypeMatches context0 expectedTy actualTy =

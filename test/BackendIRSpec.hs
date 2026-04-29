@@ -58,6 +58,12 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendExpr (BackendApp intTy intIdentityExpr (boolLit True))
       `shouldBe` Left (BackendApplicationArgumentMismatch intTy boolTy)
 
+    validateBackendExpr (BackendApp intTy intIdentityExpr (BackendVar (BTVar "a") "x"))
+      `shouldBe` Left (BackendApplicationArgumentMismatch intTy (BTVar "a"))
+
+    validateBackendExpr (BackendApp (BTVar "a") intIdentityExpr (intLit 1))
+      `shouldBe` Left (BackendApplicationResultMismatch (BTVar "a") intTy)
+
     validateBackendExpr (BackendLam boolTy "x" intTy (BackendVar intTy "x"))
       `shouldBe` Left (BackendLambdaTypeMismatch boolTy idTy)
 

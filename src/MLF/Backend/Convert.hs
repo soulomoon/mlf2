@@ -22,7 +22,7 @@ where
 import Control.Applicative ((<|>))
 import Control.Monad (foldM, forM, unless, when, zipWithM)
 import Control.Monad.State.Strict (StateT (StateT), get, modify, runStateT)
-import Data.List (find, intercalate, nub, sort, stripPrefix)
+import Data.List (find, intercalate, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -1928,31 +1928,29 @@ convertConstructorApplication context env term resultTy =
           effectiveResultTy = constructorExpectedResultType context ownerContext constructorMeta resultTy
           constructorResultTy = canonicalizeStructuralMuNames ownerContext (backendConstructorResult constructor)
       typeBounds <- backendTypeBoundsFromEnv env
-      initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
-      resultSubstitution <-
-        case constructorResultSubstitution
-          context
-          ownerContext
-          typeBounds
-          dataParameters
-          parameters
-          initialSubstitution
-          constructorResultTy
-          effectiveResultTy of
-          Just substitution -> Right substitution
-          Nothing ->
-            Left
-              ( BackendUnsupportedCaseShape
-                  ( "constructor result type does not match expected result for `"
-                      ++ backendConstructorName constructor
-                      ++ "`"
-                  )
-              )
+      initialSubstitutions <- constructorTypeApplicationSubstitutions env constructorMeta headTypeArgs
       substitution <-
-        foldM
-          (matchConstructorApplicationArgument context env typeBounds dataParameters parameters)
-          resultSubstitution
-          (zip rawFields args)
+        firstRightOr
+          (constructorResultMismatch constructor)
+          [ do
+              resultSubstitution <-
+                case constructorResultSubstitution
+                  context
+                  ownerContext
+                  typeBounds
+                  dataParameters
+                  parameters
+                  initialSubstitution
+                  constructorResultTy
+                  effectiveResultTy of
+                  Just substitution -> Right substitution
+                  Nothing -> Left (constructorResultMismatch constructor)
+              foldM
+                (matchConstructorApplicationArgument context env typeBounds dataParameters parameters)
+                resultSubstitution
+                (zip rawFields args)
+            | initialSubstitution <- initialSubstitutions
+          ]
       let completedSubstitution = completeBackendParameterSubstitution parameters substitution
           fields = map (substituteBackendTypes completedSubstitution) rawFields
           substitutedResultTy0 = substituteBackendTypes completedSubstitution constructorResultTy
@@ -1984,6 +1982,13 @@ convertConstructorApplication context env term resultTy =
         )
     Nothing -> Right Nothing
   where
+    constructorResultMismatch constructor =
+      BackendUnsupportedCaseShape
+        ( "constructor result type does not match expected result for `"
+            ++ backendConstructorName constructor
+            ++ "`"
+        )
+
     constructorResultSubstitution globalContext ownerContext typeBounds dataParameters parameters explicitSubstitution constructorResultTy effectiveResultTy =
       matchConstructorResult constructorResultTy effectiveResultTy normalizedExplicitSubstitution
         <|> do
@@ -2264,14 +2269,14 @@ constructorTypeParameterBoundsFor dataDecl constructor =
            | binder <- backendConstructorForalls constructor
          ]
 
-constructorTypeApplicationSubstitution ::
+constructorTypeApplicationSubstitutions ::
+  Env ->
   ConstructorMeta ->
   [BackendType] ->
-  Either BackendConversionError (Map String BackendType)
-constructorTypeApplicationSubstitution constructorMeta typeArgs =
-  if length typeArgs <= length typeApplicationNames
-    then Right (Map.fromList (zip typeApplicationNames typeArgs))
-    else
+  Either BackendConversionError [Map String BackendType]
+constructorTypeApplicationSubstitutions env constructorMeta typeArgs =
+  case usableTypeApplicationNames of
+    [] ->
       Left
         ( BackendUnsupportedCaseShape
             ( "constructor type application arity mismatch for `"
@@ -2279,42 +2284,58 @@ constructorTypeApplicationSubstitution constructorMeta typeArgs =
                 ++ "`"
             )
         )
+    names : otherNames ->
+      Right (nub (map (`substitutionFor` typeArgs) (names : otherNames)))
   where
-    typeApplicationNames = constructorTypeApplicationParameterNames constructorMeta
+    usableTypeApplicationNames =
+      filter ((>= length typeArgs) . length) typeApplicationNameOrders
+
+    typeApplicationNameOrders =
+      nub
+        ( constructorTypeApplicationParameterNames constructorMeta
+            : checkedConstructorTypeApplicationParameterNames env constructorMeta
+        )
+
+    substitutionFor names args =
+      Map.fromList (zip names args)
+
+checkedConstructorTypeApplicationParameterNames :: Env -> ConstructorMeta -> [[String]]
+checkedConstructorTypeApplicationParameterNames env constructorMeta =
+  case Map.lookup (backendConstructorName (cmBackend constructorMeta)) (termEnv env) of
+    Just constructorTy
+      | Right backendTy <- convertElabType constructorTy,
+        let (binders, _) = splitBackendForalls backendTy,
+        let names = map (\(BackendTypeAbsBinder name _) -> name) binders,
+        all (`Map.member` parameters) names ->
+          [names]
+    _ ->
+      []
+  where
+    parameters = constructorTypeParameters constructorMeta
+
+firstRightOr :: e -> [Either e a] -> Either e a
+firstRightOr fallback =
+  go Nothing
+  where
+    go firstErr =
+      \case
+        [] ->
+          maybe (Left fallback) Left firstErr
+        Right value : _ ->
+          Right value
+        Left err : rest ->
+          go (firstErr <|> Just err) rest
 
 constructorTypeApplicationParameterNames :: ConstructorMeta -> [String]
 constructorTypeApplicationParameterNames constructorMeta =
-  sort (Set.toList (freeSourceTypeVars (ctorType (cmInfo constructorMeta))))
+  [ name
+    | name <- constructorDataParameters constructorMeta,
+      Set.member name resultVariables
+  ]
     ++ map backendTypeBinderName (backendConstructorForalls (cmBackend constructorMeta))
-
-freeSourceTypeVars :: SrcType -> Set.Set String
-freeSourceTypeVars =
-  go Set.empty
   where
-    go bound =
-      \case
-        STVar name
-          | Set.member name bound -> Set.empty
-          | otherwise -> Set.singleton name
-        STArrow dom cod ->
-          go bound dom `Set.union` go bound cod
-        STBase {} ->
-          Set.empty
-        STCon _ args ->
-          foldMap (go bound) args
-        STVarApp name args ->
-          let headVars =
-                if Set.member name bound
-                  then Set.empty
-                  else Set.singleton name
-           in headVars `Set.union` foldMap (go bound) args
-        STForall name mb body ->
-          maybe Set.empty (go bound . unSrcBound) mb
-            `Set.union` go (Set.insert name bound) body
-        STMu name body ->
-          go (Set.insert name bound) body
-        STBottom ->
-          Set.empty
+    resultVariables =
+      freeBackendTypeVars (backendConstructorResult (cmBackend constructorMeta))
 
 constructorHead :: ConvertContext -> ElabTerm -> Maybe (String, [BackendType])
 constructorHead context term =
@@ -2658,12 +2679,16 @@ constructorApplicationResultType context env term =
           parameters = constructorTypeParameters constructorMeta
           constructorResultTy = canonicalizeStructuralMuNames ownerContext (backendConstructorResult constructor)
       typeBounds <- backendTypeBoundsFromEnv env
-      initialSubstitution <- constructorTypeApplicationSubstitution constructorMeta headTypeArgs
+      initialSubstitutions <- constructorTypeApplicationSubstitutions env constructorMeta headTypeArgs
       substitution <-
-        foldM
-          (matchConstructorApplicationArgument context env typeBounds dataParameters parameters)
-          initialSubstitution
-          (zip fields args)
+        firstRightOr
+          (BackendUnsupportedCaseShape ("constructor arguments do not match type applications for `" ++ backendConstructorName constructor ++ "`"))
+          [ foldM
+              (matchConstructorApplicationArgument context env typeBounds dataParameters parameters)
+              initialSubstitution
+              (zip fields args)
+            | initialSubstitution <- initialSubstitutions
+          ]
       let completedSubstitution = completeBackendParameterSubstitution parameters substitution
           resultTy0 = substituteBackendTypes completedSubstitution constructorResultTy
           resultTy =
