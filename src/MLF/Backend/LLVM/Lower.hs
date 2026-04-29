@@ -116,7 +116,8 @@ data LocalFunction = LocalFunction
 
 data ExprEnv = ExprEnv
   { eeValues :: Map String LowerValue,
-    eeLocalFunctions :: Map String LocalFunction
+    eeLocalFunctions :: Map String LocalFunction,
+    eeActiveGlobalInlines :: Set String
   }
   deriving (Eq, Show)
 
@@ -1232,7 +1233,7 @@ lowerFunction env name private form = do
     Left (BackendLLVMUnsupportedExpression ("binding " ++ show name) "unspecialized polymorphic binding")
   returnTy <- lowerBackendType env ("return type of " ++ name) (ffReturnType form)
   params <- traverse lowerParam (ffParams form)
-  let initialExprEnv = initialFunctionEnv form params
+  let initialExprEnv = initialFunctionEnv name form params
   result <-
     evalStateT
       ( do
@@ -1270,6 +1271,7 @@ lowerFunctionParameterTypeM env context allowNestedEvidence paramName paramTy =
 lowerArgumentType :: ProgramEnv -> String -> Bool -> String -> BackendType -> Either BackendLLVMError LLVMType
 lowerArgumentType env context allowNestedEvidence paramName paramTy
   | isEvidenceArgument allowNestedEvidence paramName paramTy = Right LLVMPtr
+  | isFirstOrderFunctionPointerType paramTy = Right LLVMPtr
   | otherwise = lowerBackendType env context paramTy
 
 isEvidenceArgument :: Bool -> String -> BackendType -> Bool
@@ -1432,15 +1434,16 @@ initialFunctionState =
       fsCompletedBlocks = []
     }
 
-initialFunctionEnv :: FunctionForm -> [LLVMParameter] -> ExprEnv
-initialFunctionEnv form params =
+initialFunctionEnv :: String -> FunctionForm -> [LLVMParameter] -> ExprEnv
+initialFunctionEnv name form params =
   ExprEnv
     { eeValues =
         Map.fromList
           [ (paramName, LowerValue paramTy (llvmParameterType param) (LLVMLocal (llvmParameterType param) paramName))
           | ((paramName, paramTy), param) <- zip (ffParams form) params
           ],
-      eeLocalFunctions = Map.empty
+      eeLocalFunctions = Map.empty,
+      eeActiveGlobalInlines = Set.singleton name
     }
 
 liftEither :: BackendLLVMError -> LowerM a
@@ -1758,6 +1761,8 @@ lowerExprForArgument :: ProgramEnv -> ExprEnv -> String -> Bool -> (String, Back
 lowerExprForArgument env exprEnv context allowNestedEvidence (paramName, paramTy) arg
   | isEvidenceArgument allowNestedEvidence paramName paramTy =
       lowerEvidenceArgument env exprEnv context paramTy arg
+  | isFirstOrderFunctionPointerType paramTy =
+      lowerFunctionArgument env exprEnv context paramTy arg
   | otherwise =
       lowerExpr env exprEnv context arg
 
@@ -2004,7 +2009,11 @@ lowerGlobalCall env exprEnv context name typeArgs args =
         liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
       if shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args
         then do
-          bodyEnv <- bindCallArguments env exprEnv exprEnv context False name form args
+          let bodyEnv0 =
+                exprEnv
+                  { eeActiveGlobalInlines = Set.insert (biName binding) (eeActiveGlobalInlines exprEnv)
+                  }
+          bodyEnv <- bindCallArguments env exprEnv bodyEnv0 context False name form args
           lowerExpr env bodyEnv context (ffBody form)
         else do
           callArgs <- zipWithM (lowerExprForArgument env exprEnv context False) (ffParams form) args
@@ -2027,7 +2036,7 @@ lowerGlobalCall env exprEnv context name typeArgs args =
 
 shouldInlineGlobalCall :: ProgramEnv -> ExprEnv -> BindingInfo -> [BackendType] -> FunctionForm -> [BackendExpr] -> Bool
 shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args =
-  requiresInlineCall form
+  (requiresInlineCall form && Set.notMember (biName binding) (eeActiveGlobalInlines exprEnv))
     || missingPolymorphicSpecialization env binding resolvedTypeArgs
     || any (evidenceArgumentRequiresInline env exprEnv) (zip (ffParams form) args)
 

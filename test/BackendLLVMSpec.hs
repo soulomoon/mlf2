@@ -349,6 +349,13 @@ spec = describe "MLF.Backend.LLVM" $ do
       (BTArrow (BTArrow unaryIntTy intTy) intTy)
       `shouldBe` True
 
+  it "emits self-recursive higher-order calls instead of expanding them inline" $ do
+    output <- requireRight (renderBackendProgramLLVM selfRecursiveHigherOrderProgram)
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"loop\"(ptr %\"f\", i64 %\"x\")"
+    output `shouldSatisfy` isInfixOf "call i64 @\"loop\"(ptr %\"f\", i64 %\"x\")"
+    validateLLVMAssembly output
+
   it "resolves inlined local function calls before captured values" $ do
     output <- requireRight (renderBackendProgramLLVM localFunctionCallShadowsValueProgram)
 
@@ -567,6 +574,55 @@ localFunctionEvidenceMethodProgram =
       "  def use : C a => a -> a = \\x let f : a -> a = \\y y in apply f x;",
       "  def main : Int = use 1;",
       "}"
+    ]
+
+selfRecursiveHigherOrderProgram :: BackendProgram
+selfRecursiveHigherOrderProgram =
+  programWithBindings
+    [ BackendBinding
+        { backendBindingName = "id",
+          backendBindingType = unaryIntTy,
+          backendBindingExpr = intIdentityExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "loop",
+          backendBindingType = BTArrow unaryIntTy unaryIntTy,
+          backendBindingExpr =
+            BackendLam
+              (BTArrow unaryIntTy unaryIntTy)
+              "f"
+              unaryIntTy
+              ( BackendLam
+                  unaryIntTy
+                  "x"
+                  intTy
+                  ( BackendApp
+                      intTy
+                      ( BackendApp
+                          unaryIntTy
+                          (BackendVar (BTArrow unaryIntTy unaryIntTy) "loop")
+                          (BackendVar unaryIntTy "f")
+                      )
+                      (BackendVar intTy "x")
+                  )
+              ),
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              intTy
+              ( BackendApp
+                  unaryIntTy
+                  (BackendVar (BTArrow unaryIntTy unaryIntTy) "loop")
+                  (BackendVar unaryIntTy "id")
+              )
+              (intLit 1),
+          backendBindingExportedAsMain = True
+        }
     ]
 
 inlineOnlyEvidenceCalleeProgram :: BackendProgram
