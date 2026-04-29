@@ -444,6 +444,12 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingType helper `shouldBe` BTForall "a" Nothing unaryIntBackendTy
     backendBindingExpr helper `shouldSatisfy` containsBackendTyAppArgument (BTVar "a")
 
+  it "renames type abstraction bounds when recursive helper substitution freshens type binders" $ do
+    source <- readFile "src/MLF/Backend/Convert.hs"
+
+    source `shouldSatisfy` isInfixOf "mbBound' = fmap (renameElabTypeVariable name name') mbBound"
+    source `shouldSatisfy` isInfixOf "in ETyAbs name' mbBound' (go body')"
+
   it "rejects recursive local functions that capture lexical values" $ do
     checked <- requireChecked recursiveLetCaptureProgram
 
