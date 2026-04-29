@@ -287,6 +287,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "call i1 @\"RecursiveExistential__unwrapSome\""
     validateLLVMAssembly output
 
+  it "keeps ordinary function-valued method arguments out of evidence lowering" $ do
+    output <- requireRight =<< withTempProgram ordinaryFunctionEvidenceMethodProgram emitBackendFile
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
+    output `shouldNotSatisfy` isInfixOf "Unknown backend LLVM function"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
   describe "ProgramSpec-to-LLVM parity matrix" $ do
     it "classifies every interpreter-success case exactly once" $ do
       let caseNames = map runtimeCaseName programSpecToLLVMParityCases
@@ -433,6 +441,24 @@ recursiveListProgram =
       "  };",
       "",
       "  def main : Bool = isNil (tailOrNil (RCons Zero RNil));",
+      "}"
+    ]
+
+ordinaryFunctionEvidenceMethodProgram :: String
+ordinaryFunctionEvidenceMethodProgram =
+  unlines
+    [ "module Main export (C, apply, idInt, use, main) {",
+      "  class C a {",
+      "    apply : (a -> a) -> a -> a;",
+      "  }",
+      "",
+      "  instance C Int {",
+      "    apply = \\f \\x f x;",
+      "  }",
+      "",
+      "  def idInt : Int -> Int = \\x x;",
+      "  def use : C a => (a -> a) -> a -> a = \\f \\x apply f x;",
+      "  def main : Int = use idInt 1;",
       "}"
     ]
 

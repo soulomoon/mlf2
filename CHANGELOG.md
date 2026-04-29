@@ -8,6 +8,9 @@
   parameterized instances, recursive `List` deriving, recursive ADT deriving
   fixtures, and mixed qualified/imported instance evidence now lower through
   first-order function references or generated evidence wrappers.
+- Fixed LLVM evidence lowering so ordinary function-valued class method
+  arguments keep the local function inlining path instead of being treated as
+  hidden class evidence.
 - Extended the shared `ProgramSpec`-to-LLVM parity matrix from first-order
   coverage to the canonical interpreter-success surface. The backend LLVM spec
   now emits supported cases through the file backend path, validates generated
