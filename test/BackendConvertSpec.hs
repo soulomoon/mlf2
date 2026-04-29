@@ -355,6 +355,7 @@ spec = describe "MLF.Backend.Convert" $ do
 
     backend <- requireRight (convertCheckedProgram checked)
 
+    validateBackendProgram backend `shouldBe` Right ()
     mainBinding <- requireBinding (backendProgramMain backend) backend
     collectConstructNames (backendBindingExpr mainBinding) `shouldContain` ["Main__T"]
     collectConstructNames (backendBindingExpr mainBinding) `shouldNotContain` ["Core__External"]

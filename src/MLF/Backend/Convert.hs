@@ -44,7 +44,7 @@ import MLF.Elab.Types
     elabToBound,
     tyToElab,
   )
-import MLF.Frontend.Program.Elaborate (ElaborateScope, lowerType, mkElaborateScope)
+import MLF.Frontend.Program.Elaborate (ElaborateScope, elaborateScopeDataTypes, lowerType, mkElaborateScope)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
@@ -241,7 +241,8 @@ liftRecursiveLetsInTerm context lexicalLocals term =
           bodyLocals = Set.insert name lexicalLocals
       if termMentionsFreeVariable name rhs
         then do
-          bindingTy <- liftEitherConversion (convertElabType schemeTy)
+          bindingTy0 <- liftEitherConversion (convertElabType schemeTy)
+          let bindingTy = normalizeBackendTypeForContext context bindingTy0
           ensureLiftableRecursiveLet lexicalLocals name bindingTy rhs
           helperName <- freshLiftedRecursiveLetName context name
           rhs' <- liftRecursiveLetsInTerm context (Set.insert name lexicalLocals) rhs
@@ -457,20 +458,30 @@ checkedBindingCanonicalType context checkedModule binding = do
 checkedBindingCanonicalBackendType :: ConvertContext -> CheckedModule -> CheckedBinding -> ElabType -> Either BackendConversionError BackendType
 checkedBindingCanonicalBackendType context checkedModule binding fallbackTy =
   do
-    fallbackBackendTy <- convertElabType fallbackTy
-    let recoveredFallbackTy = recoverStructuralBackendType context fallbackBackendTy
+    fallbackBackendTy0 <- convertElabType fallbackTy
+    let fallbackBackendTy = canonicalizeStructuralMuNames moduleContext fallbackBackendTy0
+    let recoveredFallbackTy = recoverStructuralBackendType moduleContext fallbackBackendTy
     case convertLoweredSourceType scope (checkedBindingSourceType binding) of
-      Right sourceTy ->
-        let recoveredSourceTy = recoverStructuralBackendType context sourceTy
-       in if backendTypeNeedsStructuralRecovery context sourceTy
-              || backendTypeNeedsStructuralRecovery context recoveredSourceTy
-              || backendTypeNeedsStructuralRecovery context fallbackBackendTy
-              || backendTypeNeedsStructuralRecovery context recoveredFallbackTy
-              then Right recoveredSourceTy
-              else Right fallbackBackendTy
+      Right sourceTy0 ->
+        let sourceTy = canonicalizeStructuralMuNames moduleContext sourceTy0
+            recoveredSourceTy = recoverStructuralBackendType moduleContext sourceTy
+         in if backendTypeNeedsStructuralRecovery moduleContext sourceTy
+                || backendTypeNeedsStructuralRecovery moduleContext recoveredSourceTy
+                || backendTypeNeedsStructuralRecovery moduleContext fallbackBackendTy
+                || backendTypeNeedsStructuralRecovery moduleContext recoveredFallbackTy
+                then Right recoveredSourceTy
+                else Right fallbackBackendTy
       Left _ -> Right recoveredFallbackTy
   where
     scope = scopeForModule context (checkedModuleName checkedModule)
+    moduleContext = context {ccCurrentModuleName = Just (checkedModuleName checkedModule)}
+
+normalizeBackendTypeForContext :: ConvertContext -> BackendType -> BackendType
+normalizeBackendTypeForContext context ty =
+  let canonicalTy = canonicalizeStructuralMuNames context ty
+   in if backendTypeNeedsStructuralRecovery context canonicalTy
+        then recoverStructuralBackendType context canonicalTy
+        else canonicalTy
 
 scopeForModule :: ConvertContext -> String -> ElaborateScope
 scopeForModule context moduleName =
@@ -764,7 +775,7 @@ buildDataMeta scope info = do
           { dmInfo = info,
             dmBackend = rawData
           }
-      recoveryContext =
+      rawRecoveryContext =
         ConvertContext
           { ccModuleScopes = Map.empty,
             ccConstructors = Map.empty,
@@ -774,10 +785,18 @@ buildDataMeta scope info = do
             ccCurrentModuleName = Just (dataModule info),
             ccCurrentBindingName = ""
           }
+      canonicalConstructors =
+        map (canonicalizeBackendConstructorTypes rawRecoveryContext) rawConstructors
+      canonicalData =
+        rawData {backendDataConstructors = canonicalConstructors}
+      canonicalMeta =
+        rawMeta {dmBackend = canonicalData}
+      recoveryContext =
+        rawRecoveryContext {ccData = [canonicalMeta]}
       constructors =
         if any backendConstructorContainsVarApp rawConstructors
-          then map (recoverBackendConstructorTypes recoveryContext) rawConstructors
-          else rawConstructors
+          then map (recoverBackendConstructorTypes recoveryContext) canonicalConstructors
+          else canonicalConstructors
   Right
     DataMeta
       { dmInfo = info,
@@ -789,12 +808,30 @@ buildDataMeta scope info = do
             }
       }
 
+canonicalizeBackendConstructorTypes :: ConvertContext -> BackendConstructor -> BackendConstructor
+canonicalizeBackendConstructorTypes context constructor =
+  constructor
+    { backendConstructorForalls = map canonicalizeTypeBinder (backendConstructorForalls constructor),
+      backendConstructorFields = map canonicalizeTy (backendConstructorFields constructor),
+      backendConstructorResult = canonicalizeTy (backendConstructorResult constructor)
+    }
+  where
+    canonicalizeTy =
+      canonicalizeStructuralMuNames context
+
+    canonicalizeTypeBinder binder =
+      binder {backendTypeBinderBound = fmap canonicalizeTy (backendTypeBinderBound binder)}
+
 recoverBackendConstructorTypes :: ConvertContext -> BackendConstructor -> BackendConstructor
 recoverBackendConstructorTypes context constructor =
   constructor
-    { backendConstructorFields = map (recoverStructuralBackendType context) (backendConstructorFields constructor),
+    { backendConstructorForalls = map recoverTypeBinder (backendConstructorForalls constructor),
+      backendConstructorFields = map (recoverStructuralBackendType context) (backendConstructorFields constructor),
       backendConstructorResult = recoverStructuralBackendType context (backendConstructorResult constructor)
     }
+  where
+    recoverTypeBinder binder =
+      binder {backendTypeBinderBound = fmap (recoverStructuralBackendType context) (backendTypeBinderBound binder)}
 
 backendConstructorContainsVarApp :: BackendConstructor -> Bool
 backendConstructorContainsVarApp constructor =
@@ -1029,10 +1066,7 @@ convertSpecialTerm context env term resultTy =
 
 convertOrdinaryTerm :: ConvertContext -> Env -> ElabTerm -> BackendType -> Either BackendConversionError BackendExpr
 convertOrdinaryTerm context env term resultTy0 =
-  let resultTy =
-        if backendTypeNeedsStructuralRecovery context resultTy0
-          then recoverStructuralBackendType context resultTy0
-          else resultTy0
+  let resultTy = normalizeBackendTypeForContext context resultTy0
    in case term of
     EVar name ->
       Right
@@ -1050,7 +1084,7 @@ convertOrdinaryTerm context env term resultTy0 =
       paramBackendTy <-
         case resultTy of
           BTArrow dom _ -> Right dom
-          _ -> recoverStructuralBackendType context <$> convertElabType paramTy
+          _ -> normalizeBackendTypeForContext context <$> convertElabType paramTy
       let paramEnvTy =
             case backendTypeToElabType paramBackendTy of
               Just canonicalTy -> canonicalTy
@@ -1083,7 +1117,7 @@ convertOrdinaryTerm context env term resultTy0 =
       let schemeTy = schemeToType scheme
       when (termMentionsFreeVariable name rhs) $
         Left (BackendUnsupportedRecursiveLet name)
-      bindingTy <- recoverStructuralBackendType context <$> convertElabType schemeTy
+      bindingTy <- normalizeBackendTypeForContext context <$> convertElabType schemeTy
       rhsExpr <- convertTermExpected context env (Just bindingTy) rhs
       let bindingEnvTy =
             case backendTypeToElabType bindingTy of
@@ -1099,7 +1133,7 @@ convertOrdinaryTerm context env term resultTy0 =
             backendLetBody = bodyExpr
           }
     ETyAbs name mbBound body -> do
-      mbBackendBound <- traverse (convertElabType . tyToElab) mbBound
+      mbBackendBound <- traverse (fmap (normalizeBackendTypeForContext context) . convertElabType . tyToElab) mbBound
       let boundTy = maybe TBottom tyToElab mbBound
           bodyExpected =
             case resultTy of
@@ -1178,7 +1212,7 @@ convertTypeInstantiation context env resultTy inner inst =
           innerExpr <- convertTerm context env inner
           case backendExprType innerExpr of
             BTForall {} -> do
-              backendTyArg <- convertElabType tyArg
+              backendTyArg <- normalizeBackendTypeForContext context <$> convertElabType tyArg
               Right
                 BackendTyApp
                   { backendExprType = resultTy,
@@ -1268,7 +1302,7 @@ constructorApplicationTerm context term =
         Nothing -> structuralConstructorApplication headTerm args
   where
     directConstructorApplication headTerm args =
-      case constructorHead headTerm of
+      case constructorHead context headTerm of
         Just (constructorName, headTypeArgs) -> do
           constructorMeta <- Map.lookup constructorName (ccConstructors context)
           guardConstructorArity constructorMeta args
@@ -1435,11 +1469,11 @@ freeSourceTypeVars =
         STBottom ->
           Set.empty
 
-constructorHead :: ElabTerm -> Maybe (String, [BackendType])
-constructorHead term =
+constructorHead :: ConvertContext -> ElabTerm -> Maybe (String, [BackendType])
+constructorHead context term =
   case collectConstructorHeadTypes [] term of
     Just (name, typeArgs) ->
-      case traverse convertElabType typeArgs of
+      case traverse (fmap (normalizeBackendTypeForContext context) . convertElabType) typeArgs of
         Right backendTypeArgs -> Just (name, backendTypeArgs)
         Left _ -> Nothing
     Nothing -> Nothing
@@ -1541,10 +1575,7 @@ caseScrutineeInfo context env scrutineeTerm =
       Just info -> Right info
       Nothing -> do
         scrutineeTy0 <- inferBackendType env scrutineeTerm
-        let scrutineeTy =
-              if backendTypeNeedsStructuralRecovery context scrutineeTy0
-                then recoverStructuralBackendType context scrutineeTy0
-                else scrutineeTy0
+        let scrutineeTy = normalizeBackendTypeForContext context scrutineeTy0
         Right
           ( scrutineeTy,
             scrutineeDataHint context scrutineeTerm
@@ -1572,7 +1603,15 @@ dataMetaByBackendName context name =
 dataMetaByStructuralName :: ConvertContext -> String -> Maybe DataMeta
 dataMetaByStructuralName context name =
   dataMetaByBackendName context name
+    <|> dataMetaByCurrentScopeStructuralName context name
     <|> dataMetaByCurrentModuleStructuralName context name
+
+dataMetaByCurrentScopeStructuralName :: ConvertContext -> String -> Maybe DataMeta
+dataMetaByCurrentScopeStructuralName context name = do
+  moduleName <- ccCurrentModuleName context
+  scope <- Map.lookup moduleName (ccModuleScopes context)
+  info <- Map.lookup name (elaborateScopeDataTypes scope)
+  dataMetaBySymbol context (dataInfoSymbol info)
 
 dataMetaByCurrentModuleStructuralName :: ConvertContext -> String -> Maybe DataMeta
 dataMetaByCurrentModuleStructuralName context name =
@@ -1589,6 +1628,37 @@ dataMetaByCurrentModuleStructuralName context name =
         [dataMeta] -> Just dataMeta
         _ -> Nothing
 
+dataMetaBySymbol :: ConvertContext -> SymbolIdentity -> Maybe DataMeta
+dataMetaBySymbol context symbol =
+  find ((== symbol) . dataInfoSymbol . dmInfo) (ccData context)
+
+canonicalizeStructuralMuNames :: ConvertContext -> BackendType -> BackendType
+canonicalizeStructuralMuNames context =
+  go
+  where
+    go ty =
+      case ty of
+        BTVar {} -> ty
+        BTArrow dom cod -> BTArrow (go dom) (go cod)
+        BTBase {} -> ty
+        BTCon name args -> BTCon name (fmap go args)
+        BTVarApp name args -> BTVarApp name (fmap go args)
+        BTForall name mb body -> BTForall name (fmap go mb) (go body)
+        BTMu name body ->
+          let (name', body') = canonicalizeStructuralMuBinder context name body
+           in BTMu name' (go body')
+        BTBottom -> BTBottom
+
+canonicalizeStructuralMuBinder :: ConvertContext -> String -> BackendType -> (String, BackendType)
+canonicalizeStructuralMuBinder context name body =
+  case structuralRecursiveDataMeta context name of
+    Just dataMeta ->
+      let canonicalName = "$" ++ backendDataName (dmBackend dataMeta) ++ "_self"
+       in if name == canonicalName
+            then (name, body)
+            else (canonicalName, substituteBackendType name (BTVar canonicalName) body)
+    Nothing -> (name, body)
+
 recoverStructuralBackendType :: ConvertContext -> BackendType -> BackendType
 recoverStructuralBackendType context =
   go Set.empty
@@ -1601,12 +1671,16 @@ recoverStructuralBackendType context =
         BTCon name args -> BTCon name (fmap (go seen) args)
         BTVarApp name args -> BTVarApp name (fmap (go seen) args)
         BTForall name mb body -> BTForall name (fmap (go seen) mb) (go seen body)
-        BTMu name body
-          | Set.member name seen -> ty
-          | Just dataMeta <- structuralRecursiveDataMeta context name,
-            Just args <- structuralBackendDataArguments (go (Set.insert name seen)) dataMeta body ->
-              backendDataType (backendDataName (dmBackend dataMeta)) args
-          | otherwise -> BTMu name (go (Set.insert name seen) body)
+        BTMu name body ->
+          let (name', body') = canonicalizeStructuralMuBinder context name body
+              seen' = Set.insert name' (Set.insert name seen)
+           in if Set.member name seen || Set.member name' seen
+                then BTMu name' (canonicalizeStructuralMuNames context body')
+                else case structuralRecursiveDataMeta context name' of
+                  Just dataMeta
+                    | Just args <- structuralBackendDataArguments (go seen') dataMeta body' ->
+                        backendDataType (backendDataName (dmBackend dataMeta)) args
+                  _ -> BTMu name' (go seen' body')
         BTBottom -> BTBottom
 
 backendDataType :: String -> [BackendType] -> BackendType

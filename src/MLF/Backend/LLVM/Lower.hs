@@ -6,6 +6,7 @@ Description : Lower typed backend IR into real LLVM IR syntax
 -}
 module MLF.Backend.LLVM.Lower
   ( BackendLLVMError (..),
+    inferTypeArgumentsForTest,
     lowerBackendProgram,
     renderBackendLLVMError,
   )
@@ -1249,19 +1250,38 @@ matchTypeParamApplication binderSet substitution name expectedArgs actual =
           substitution' <-
             if Set.member name binderSet
               then bindTypeParam name actualHead
-              else matchTypeParams binderSet substitution (BTVar name) actualHead
+              else matchRigidHead name actualHead
           foldM
             (\subst (expectedArg, actualArg) -> matchTypeParams binderSet subst expectedArg actualArg)
             substitution'
             (zip expectedArgs actualArgs)
-    _ -> Right substitution
+      | otherwise ->
+          Left (BackendLLVMUnsupportedCall ("type application arity mismatch during type argument inference for " ++ name))
+    _ ->
+      Left (BackendLLVMUnsupportedCall ("expected applied type while inferring type argument for " ++ name))
   where
+    matchRigidHead expectedName actualHead
+      | alphaEqBackendType (BTVar expectedName) actualHead = Right substitution
+      | otherwise =
+          Left
+            ( BackendLLVMUnsupportedCall
+                ( "rigid type application head mismatch during type argument inference: expected "
+                    ++ show (BTVar expectedName)
+                    ++ ", got "
+                    ++ show actualHead
+                )
+            )
+
     bindTypeParam paramName actualHead =
       case Map.lookup paramName substitution of
         Nothing -> Right (Map.insert paramName actualHead substitution)
         Just previous
           | alphaEqBackendType previous actualHead -> Right substitution
           | otherwise -> Left (BackendLLVMUnsupportedCall ("conflicting inferred type argument for " ++ paramName))
+
+inferTypeArgumentsForTest :: String -> [String] -> [(String, BackendType)] -> [BackendExpr] -> Either BackendLLVMError (Map String BackendType)
+inferTypeArgumentsForTest =
+  inferTypeArguments
 
 collectCall :: BackendExpr -> Maybe (BackendExpr, [BackendType], [BackendExpr])
 collectCall expr =
@@ -1607,22 +1627,12 @@ structuralMuAsActualDataType muName actual =
 structuralMuNameMatches :: String -> String -> Bool
 structuralMuNameMatches dataName muName =
   case structuralMuDataName muName of
-    Just muDataName ->
-      dataName == muDataName
-        || (isUnqualifiedName muDataName && unqualifiedName dataName == muDataName)
+    Just muDataName -> dataName == muDataName
     Nothing -> False
 
 structuralMuDataName :: String -> Maybe String
 structuralMuDataName name =
   stripSuffixSimple "_self" (dropWhile (== '$') name)
-
-isUnqualifiedName :: String -> Bool
-isUnqualifiedName =
-  notElem '.'
-
-unqualifiedName :: String -> String
-unqualifiedName =
-  reverse . takeWhile (/= '.') . reverse
 
 stripSuffixSimple :: String -> String -> Maybe String
 stripSuffixSimple suffix value =

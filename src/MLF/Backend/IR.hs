@@ -415,9 +415,7 @@ freeBackendTypeVarsInOrder =
 structuralMuNameMatches :: String -> String -> Bool
 structuralMuNameMatches dataName muName =
   case structuralMuDataName muName of
-    Just structuralName ->
-      dataName == structuralName
-        || (isUnqualifiedName structuralName && unqualifiedName dataName == structuralName)
+    Just structuralName -> dataName == structuralName
     Nothing -> False
 
 structuralMuDataName :: String -> Maybe String
@@ -436,14 +434,6 @@ stripPrefixSimple _ [] =
 stripPrefixSimple (expected : expectedRest) (actual : actualRest)
   | expected == actual = stripPrefixSimple expectedRest actualRest
   | otherwise = Nothing
-
-isUnqualifiedName :: String -> Bool
-isUnqualifiedName =
-  notElem '.'
-
-unqualifiedName :: String -> String
-unqualifiedName =
-  reverse . takeWhile (/= '.') . reverse
 
 structuralMuPayloadTypes :: BackendType -> Maybe [BackendType]
 structuralMuPayloadTypes =

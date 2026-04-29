@@ -153,6 +153,19 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "missing specialization"
     validateLLVMAssembly output
 
+  it "rejects rigid applied type heads during type-argument inference" $ do
+    case
+      Lower.inferTypeArgumentsForTest
+        "rigid application head"
+        ["a"]
+        [("value", BTVarApp "f" (BTVar "a" :| []))]
+        [BackendVar (BTVarApp "g" (intTy :| [])) "value"]
+      of
+        Left err ->
+          Lower.renderBackendLLVMError err `shouldSatisfy` isInfixOf "rigid type application head mismatch"
+        Right substitution ->
+          expectationFailure ("expected rigid head mismatch, got substitution: " ++ show substitution)
+
   it "lowers local function aliases without requiring closure conversion" $ do
     output <- requireRight (renderBackendProgramLLVM localFunctionAliasProgram)
 

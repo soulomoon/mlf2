@@ -18,22 +18,22 @@ backend-program
             construct Main__Zero : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
               args:
                 <none>
-        binding Main__Succ : (mu $Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Nat_self -> $$Nat_result) -> $$Nat_result)) -> forall $a1. ($a1 -> ((mu $Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> $a1)))
+        binding Main__Succ : (mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> forall $a1. ($a1 -> ((mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> $a1)))
           exported-main: false
           expr:
-            lam $Succ_arg1 : mu $Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Nat_self -> $$Nat_result) -> $$Nat_result)) -> (mu $Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Nat_self -> $$Nat_result) -> $$Nat_result)) -> forall $a1. ($a1 -> ((mu $Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> $a1)))
+            lam $Succ_arg1 : mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> (mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> forall $a1. ($a1 -> ((mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> $a1)))
               body:
-                type-lam $a1 -> forall $a1. ($a1 -> ((mu $Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> $a1))
+                type-lam $a1 -> forall $a1. ($a1 -> ((mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> $a1))
                   body:
-                    lam $Succ_k1 : $a1 -> ($a1 -> ((mu $Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> $a1))
+                    lam $Succ_k1 : $a1 -> ($a1 -> ((mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> $a1))
                       body:
-                        lam $Succ_k2 : (mu $Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> ((mu $Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> $a1)
+                        lam $Succ_k2 : (mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> ((mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> $a1)
                           body:
                             app : $a1
                               function:
-                                var $Succ_k2 : (mu $Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1)
+                                var $Succ_k2 : (mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1)
                               argument:
-                                var $Succ_arg1 : mu $Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Nat_self -> $$Nat_result) -> $$Nat_result))
+                                var $Succ_arg1 : mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result))
         binding Main__main : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
           exported-main: true
           expr:

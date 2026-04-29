@@ -168,6 +168,16 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Right ()
 
+  it "keeps structural recursive owner names module-qualified" $ do
+    alphaEqBackendType (BTBase (BaseTy "Core.T")) (BTMu "$Core.T_self" intTy)
+      `shouldBe` True
+
+    alphaEqBackendType (BTBase (BaseTy "Other.T")) (BTMu "$Core.T_self" intTy)
+      `shouldBe` False
+
+    alphaEqBackendType (BTBase (BaseTy "Other.T")) (BTMu "$T_self" intTy)
+      `shouldBe` False
+
   it "rejects recursive roll and unroll type mismatches" $ do
     let recTy = BTMu "self" intTy
 
