@@ -1010,6 +1010,90 @@ isFunctionLikeBackendType =
 requiresInlineCall :: FunctionForm -> Bool
 requiresInlineCall form =
   any (uncurry (isInlineOnlyFunctionParameter False)) (ffParams form)
+    || containsInlineOnlyEvidenceParameterCall form
+
+containsInlineOnlyEvidenceParameterCall :: FunctionForm -> Bool
+containsInlineOnlyEvidenceParameterCall form =
+  go (evidenceParameterNames form) Set.empty (ffBody form)
+  where
+    go evidenceParams localFunctions expr =
+      callRequiresInline evidenceParams localFunctions expr
+        || case expr of
+          BackendVar {} -> False
+          BackendLit {} -> False
+          BackendLam _ name _ body ->
+            go evidenceParams (Set.delete name localFunctions) body
+          BackendApp _ fun arg ->
+            go evidenceParams localFunctions fun || go evidenceParams localFunctions arg
+          BackendLet _ name bindingTy rhs body ->
+            let rhsForm = functionFormFromExpected bindingTy rhs
+                rhsIsLocalFunction = not (null (ffTypeBinders rhsForm)) || not (null (ffParams rhsForm))
+                localFunctions' =
+                  if rhsIsLocalFunction
+                    then Set.insert name localFunctions
+                    else Set.delete name localFunctions
+             in go evidenceParams localFunctions rhs || go evidenceParams localFunctions' body
+          BackendTyAbs _ _ _ body ->
+            go evidenceParams localFunctions body
+          BackendTyApp _ fun _ ->
+            go evidenceParams localFunctions fun
+          BackendConstruct _ _ args ->
+            any (go evidenceParams localFunctions) args
+          BackendCase _ scrutinee alternatives ->
+            go evidenceParams localFunctions scrutinee
+              || any (goAlternative evidenceParams localFunctions) (NE.toList alternatives)
+          BackendRoll _ payload ->
+            go evidenceParams localFunctions payload
+          BackendUnroll _ payload ->
+            go evidenceParams localFunctions payload
+
+    goAlternative evidenceParams localFunctions (BackendAlternative pattern0 body) =
+      go evidenceParams (localFunctions `Set.difference` patternBinders pattern0) body
+
+    callRequiresInline evidenceParams localFunctions expr =
+      case collectCall expr of
+        Just (BackendVar calleeTy name, typeArgs, args)
+          | Set.member name evidenceParams ->
+              case instantiateFunctionFormWithTypeArgs "inline evidence parameter call" (functionFormFromType calleeTy) typeArgs args of
+                Right (_, callForm) ->
+                  any (uncurry (argumentRequiresInline localFunctions)) (zip (ffParams callForm) args)
+                Left _ ->
+                  False
+        _ ->
+          False
+
+    argumentRequiresInline localFunctions (_, paramTy) arg =
+      isFunctionLikeBackendType paramTy && functionExpressionRequiresInline localFunctions arg
+
+    functionExpressionRequiresInline localFunctions arg =
+      case collectTyApps arg of
+        (BackendVar _ name, _) ->
+          Set.member name localFunctions
+        _ ->
+          case arg of
+            BackendLam {} -> True
+            BackendTyAbs {} -> True
+            BackendLet _ name bindingTy rhs body ->
+              let rhsForm = functionFormFromExpected bindingTy rhs
+                  localFunctions' =
+                    if not (null (ffTypeBinders rhsForm)) || not (null (ffParams rhsForm))
+                      then Set.insert name localFunctions
+                      else Set.delete name localFunctions
+               in functionExpressionRequiresInline localFunctions' body
+            _ -> False
+
+    patternBinders =
+      \case
+        BackendDefaultPattern -> Set.empty
+        BackendConstructorPattern _ binders -> Set.fromList binders
+
+evidenceParameterNames :: FunctionForm -> Set String
+evidenceParameterNames form =
+  Set.fromList
+    [ name
+    | (name, ty) <- ffParams form,
+      isEvidenceArgument False name ty
+    ]
 
 hasTypeBinders :: BackendType -> Bool
 hasTypeBinders =

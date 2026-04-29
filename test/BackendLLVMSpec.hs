@@ -295,6 +295,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "inlines opaque evidence helpers with local function-valued method arguments" $ do
+    output <- requireRight =<< withTempProgram localFunctionEvidenceMethodProgram emitBackendFile
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
+    output `shouldNotSatisfy` isInfixOf "Unknown backend LLVM function"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
   describe "ProgramSpec-to-LLVM parity matrix" $ do
     it "classifies every interpreter-success case exactly once" $ do
       let caseNames = map runtimeCaseName programSpecToLLVMParityCases
@@ -459,6 +467,23 @@ ordinaryFunctionEvidenceMethodProgram =
       "  def idInt : Int -> Int = \\x x;",
       "  def use : C a => (a -> a) -> a -> a = \\f \\x apply f x;",
       "  def main : Int = use idInt 1;",
+      "}"
+    ]
+
+localFunctionEvidenceMethodProgram :: String
+localFunctionEvidenceMethodProgram =
+  unlines
+    [ "module Main export (C, apply, use, main) {",
+      "  class C a {",
+      "    apply : (a -> a) -> a -> a;",
+      "  }",
+      "",
+      "  instance C Int {",
+      "    apply = \\f \\x f x;",
+      "  }",
+      "",
+      "  def use : C a => a -> a = \\x let f : a -> a = \\y y in apply f x;",
+      "  def main : Int = use 1;",
       "}"
     ]
 
