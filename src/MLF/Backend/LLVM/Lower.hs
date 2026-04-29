@@ -591,12 +591,10 @@ collectSpecializationRequestsWithBound base substitution bound expr =
             (BackendVar _ name, typeArgs)
               | Set.notMember name bound,
                 Just binding <- Map.lookup name (pbBindings base),
-                not (null (ffTypeBinders (biForm binding))),
-                null (ffParams (biForm binding)) ->
+                not (null (ffTypeBinders (biForm binding))) ->
                   let typeArgs' = map (substituteBackendTypes substitution) typeArgs
                    in case instantiateFunctionFormWithTypeArgs ("specialization request " ++ name) (biForm binding) typeArgs' [] of
-                        Right (resolvedTypeArgs, form)
-                          | null (ffParams form) -> [SpecRequest name resolvedTypeArgs]
+                        Right (resolvedTypeArgs, _) -> [SpecRequest name resolvedTypeArgs]
                         _ -> []
             (fun, typeArgs) ->
               collectAdministrativeTypeAppRequests fun typeArgs
@@ -1580,7 +1578,8 @@ lowerImmediateConstructCase env exprEnv context resultTy constructorName args fi
 
     bindImmediateAlternativePattern (BackendAlternative pattern0 body) =
       case pattern0 of
-        BackendDefaultPattern ->
+        BackendDefaultPattern -> do
+          zipWithM_ evaluateUnusedField fieldTys args
           pure exprEnv
         BackendConstructorPattern name binders -> do
           unless (name == constructorName) $
@@ -1611,6 +1610,17 @@ lowerImmediateConstructCase env exprEnv context resultTy constructorName args fi
             else pure acc
       | otherwise = do
           liftEither (BackendLLVMUnsupportedType ("field " ++ show binder ++ " at " ++ context) fieldTy)
+
+    evaluateUnusedField fieldTy arg
+      | backendTypeRequiresStaticSpecialization fieldTy = do
+          _ <- lowerStaticFunctionArgument env exprEnv context "_" fieldTy arg
+          pure ()
+      | backendTypeHasRuntimeRepresentation env fieldTy = do
+          value <- lowerExpr env exprEnv context arg
+          expectedTy <- lowerBackendTypeM env context fieldTy
+          requireLLVMType context constructorName expectedTy value
+      | otherwise =
+          liftEither (BackendLLVMUnsupportedType ("field at " ++ context) fieldTy)
 
 constructorFieldTypesForScrutinee :: ProgramEnv -> String -> ConstructorRuntime -> BackendType -> LowerM [BackendType]
 constructorFieldTypesForScrutinee _ context constructorRuntime scrutineeTy =
