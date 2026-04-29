@@ -668,12 +668,16 @@ validateBackendVariable (Just context0) name actualTy =
 
 backendTypeMatches :: Maybe BackendValidationContext -> BackendType -> BackendType -> Bool
 backendTypeMatches mbContext expectedTy actualTy =
-  backendVariableTypeMatches typeBounds expectedTy actualTy
+  backendTypeMatchesWith True typeBounds expectedTy actualTy
   where
     typeBounds = maybe Map.empty bvcTypeBounds mbContext
 
 backendVariableTypeMatches :: Map.Map String (Maybe BackendType) -> BackendType -> BackendType -> Bool
 backendVariableTypeMatches typeBounds expectedTy actualTy =
+  backendTypeMatchesWith False typeBounds expectedTy actualTy
+
+backendTypeMatchesWith :: Bool -> Map.Map String (Maybe BackendType) -> BackendType -> BackendType -> Bool
+backendTypeMatchesWith allowFreeTypeVariableInstantiation typeBounds expectedTy actualTy =
   go Set.empty expectedTy actualTy
   where
     go bound expected actual =
@@ -685,11 +689,14 @@ backendVariableTypeMatches typeBounds expectedTy actualTy =
             go bound expectedDom actualDom && go bound expectedCod actualCod
           (BTBase expectedBase, BTBase actualBase) ->
             expectedBase == actualBase
+          (BTVar expectedName, BTVar actualName)
+            | unconstrainedTypeVariable bound expectedName && unconstrainedTypeVariable bound actualName ->
+                True
           (BTVar expectedName, _)
-            | freeTypeVariable bound expectedName ->
+            | allowFreeTypeVariableInstantiation && unconstrainedTypeVariable bound expectedName ->
                 True
           (_, BTVar actualName)
-            | freeTypeVariable bound actualName ->
+            | allowFreeTypeVariableInstantiation && unconstrainedTypeVariable bound actualName ->
                 True
           (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs) ->
             expectedCon == actualCon
@@ -734,8 +741,12 @@ backendVariableTypeMatches typeBounds expectedTy actualTy =
     maybeBoundMatches _ _ _ =
       False
 
-    freeTypeVariable bound name =
-      Set.notMember name bound && Map.notMember name typeBounds
+    unconstrainedTypeVariable bound name =
+      Set.notMember name bound
+        && case Map.lookup name typeBounds of
+          Nothing -> True
+          Just Nothing -> True
+          Just (Just boundTy) -> alphaEqBackendType boundTy BTBottom
 
     typeVariableBoundMatches bound ty otherTy =
       case ty of

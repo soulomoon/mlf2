@@ -35,6 +35,14 @@ spec = describe "MLF.Backend.IR" $ do
       )
       `shouldBe` Left (BackendVariableTypeMismatch "helper" intTy boolTy)
 
+    validateBackendProgram
+      ( programWithBindings
+          [ binding "helper" intTy (intLit 1),
+            mainBinding (BackendVar (BTVar "a") "helper")
+          ]
+      )
+      `shouldBe` Left (BackendVariableTypeMismatch "helper" intTy (BTVar "a"))
+
     validateBackendProgram (programWithMainExpr letIdentityExpr)
       `shouldBe` Right ()
 
