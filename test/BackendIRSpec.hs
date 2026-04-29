@@ -177,6 +177,17 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendExpr (BackendUnroll boolTy (BackendVar recTy "boxed"))
       `shouldBe` Left (BackendUnrollResultMismatch boolTy intTy)
 
+  it "compares vacuous recursive wrappers by their bodies" $ do
+    validateBackendProgram vacuousRecursiveVariableMismatchProgram
+      `shouldBe` Left (BackendVariableTypeMismatch "x" vacuousRecursiveIntTy vacuousRecursiveBoolTy)
+
+    validateBackendProgram oneSidedVacuousRecursiveMismatchProgram
+      `shouldBe` Left (BackendVariableTypeMismatch "x" recursiveArrowIntTy vacuousRecursiveBoolTy)
+
+    validateBackendProgram vacuousRecursiveConstructorMismatchProgram
+      `shouldBe` Left
+        (BackendConstructorArgumentMismatch "VacuousMuBox" 0 vacuousRecursiveIntTy vacuousRecursiveBoolTy)
+
   it "accepts ADT construction and case analysis through constructor metadata" $ do
     validateBackendProgram (programWithMainExpr boxCaseExpr)
       `shouldBe` Right ()
@@ -467,6 +478,14 @@ captureCaseData =
       backendDataConstructors = [BackendConstructor "CaptureCase" [] [] captureCaseTemplateTy]
     }
 
+vacuousRecursiveBoxData :: BackendData
+vacuousRecursiveBoxData =
+  BackendData
+    { backendDataName = "VacuousMuBox",
+      backendDataParameters = [],
+      backendDataConstructors = [BackendConstructor "VacuousMuBox" [] [vacuousRecursiveIntTy] vacuousRecursiveBoxTy]
+    }
+
 boxCaseExpr :: BackendExpr
 boxCaseExpr =
   boxCaseExprWith
@@ -680,6 +699,38 @@ captureCaseProgram =
       binding "captureCaseArg" captureCaseScrutineeTy (BackendVar captureCaseScrutineeTy "captureCaseArg")
     ]
 
+vacuousRecursiveVariableMismatchProgram :: BackendProgram
+vacuousRecursiveVariableMismatchProgram =
+  programWithBindings
+    [ mainBinding
+        BackendLam
+          { backendExprType = BTArrow vacuousRecursiveIntTy vacuousRecursiveBoolTy,
+            backendParamName = "x",
+            backendParamType = vacuousRecursiveIntTy,
+            backendBody = BackendVar vacuousRecursiveBoolTy "x"
+          }
+    ]
+
+oneSidedVacuousRecursiveMismatchProgram :: BackendProgram
+oneSidedVacuousRecursiveMismatchProgram =
+  programWithBindings
+    [ mainBinding
+        BackendLam
+          { backendExprType = BTArrow recursiveArrowIntTy vacuousRecursiveBoolTy,
+            backendParamName = "x",
+            backendParamType = recursiveArrowIntTy,
+            backendBody = BackendVar vacuousRecursiveBoolTy "x"
+          }
+    ]
+
+vacuousRecursiveConstructorMismatchProgram :: BackendProgram
+vacuousRecursiveConstructorMismatchProgram =
+  programWithDataAndBindings
+    [vacuousRecursiveBoxData]
+    [ mainBinding (BackendConstruct vacuousRecursiveBoxTy "VacuousMuBox" [BackendVar vacuousRecursiveBoolTy "muBoolArg"]),
+      binding "muBoolArg" vacuousRecursiveBoolTy (BackendVar vacuousRecursiveBoolTy "muBoolArg")
+    ]
+
 optionCaseExpr :: BackendExpr
 optionCaseExpr =
   BackendCase
@@ -762,6 +813,10 @@ dependentActualBoundPackTy :: BackendType
 dependentActualBoundPackTy =
   BTBase (BaseTy "DependentActualBoundPack")
 
+vacuousRecursiveBoxTy :: BackendType
+vacuousRecursiveBoxTy =
+  BTBase (BaseTy "VacuousMuBox")
+
 listTy :: BackendType -> BackendType
 listTy ty =
   BTCon (BaseTy "List") (ty :| [])
@@ -793,6 +848,18 @@ captureMuActualTy =
 captureMuInstantiatedTy :: BackendType
 captureMuInstantiatedTy =
   BTMu "a" (BTVar "a1")
+
+vacuousRecursiveIntTy :: BackendType
+vacuousRecursiveIntTy =
+  BTMu "a" intTy
+
+vacuousRecursiveBoolTy :: BackendType
+vacuousRecursiveBoolTy =
+  BTMu "b" boolTy
+
+recursiveArrowIntTy :: BackendType
+recursiveArrowIntTy =
+  BTMu "self" (BTArrow (BTVar "self") intTy)
 
 captureCaseTemplateTy :: BackendType
 captureCaseTemplateTy =
