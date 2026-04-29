@@ -3,6 +3,26 @@
 ## Unreleased
 
 ### Changed
+- Extended LLVM backend support for resolved typeclass evidence and derived
+  `Eq`: constrained helper aliases, method-level evidence constraints,
+  parameterized instances, recursive `List` deriving, recursive ADT deriving
+  fixtures, and mixed qualified/imported instance evidence now lower through
+  first-order function references or generated evidence wrappers.
+- Fixed LLVM evidence lowering so ordinary function-valued class method
+  arguments, including let-bound local helper functions, keep the local
+  function inlining path instead of being treated as hidden class evidence.
+- Fixed LLVM evidence wrapper and inlined-call lowering so generated
+  higher-order wrapper parameters lower as pointer-backed arguments and
+  lexical local function calls shadow captured evidence values.
+- Fixed LLVM function-reference lowering so local function aliases shadow
+  captured evidence values when passed as function-valued arguments to opaque
+  indirect evidence calls.
+- Rejected generated LLVM evidence wrappers for expressions that capture local
+  term bindings instead of emitting top-level wrappers with free local
+  references.
+- Tightened Backend IR recursive-type compatibility so vacuous `mu` wrappers
+  are dropped only by continuing the underlying body comparison, preventing
+  unrelated wrapped types from passing variable and constructor validation.
 - Extended the shared `ProgramSpec`-to-LLVM parity matrix from first-order
   coverage to the canonical interpreter-success surface. The backend LLVM spec
   now emits supported cases through the file backend path, validates generated

@@ -6,6 +6,7 @@ Description : Lower typed backend IR into real LLVM IR syntax
 -}
 module MLF.Backend.LLVM.Lower
   ( BackendLLVMError (..),
+    evidenceFunctionTypesCompatible,
     lowerBackendProgram,
     renderBackendLLVMError,
   )
@@ -15,7 +16,7 @@ import Control.Monad (foldM, unless, when, zipWithM, zipWithM_)
 import Control.Monad.State.Strict (StateT (StateT), evalStateT, get, gets, modify)
 import Data.Bifunctor (first)
 import Data.Char (isAlphaNum, ord)
-import Data.List (intercalate, nub, sort, sortOn)
+import Data.List (intercalate, isPrefixOf, nub, sort, sortOn)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -53,6 +54,7 @@ data ProgramBase = ProgramBase
 data ProgramEnv = ProgramEnv
   { peBase :: ProgramBase,
     peSpecializations :: Map String Specialization,
+    peEvidenceWrappers :: Map String EvidenceWrapper,
     peStringGlobals :: Map String String
   }
 
@@ -91,6 +93,14 @@ data Specialization = Specialization
   }
   deriving (Eq, Show)
 
+data EvidenceWrapper = EvidenceWrapper
+  { ewKey :: String,
+    ewFunctionName :: String,
+    ewExpectedType :: BackendType,
+    ewExpr :: BackendExpr
+  }
+  deriving (Eq, Show)
+
 data LowerValue = LowerValue
   { lvBackendType :: BackendType,
     lvLLVMType :: LLVMType,
@@ -106,7 +116,8 @@ data LocalFunction = LocalFunction
 
 data ExprEnv = ExprEnv
   { eeValues :: Map String LowerValue,
-    eeLocalFunctions :: Map String LocalFunction
+    eeLocalFunctions :: Map String LocalFunction,
+    eeActiveGlobalInlines :: Set String
   }
   deriving (Eq, Show)
 
@@ -127,17 +138,23 @@ lowerBackendProgram program = do
   base <- buildProgramBase program
   reachable <- reachableBindings base (backendProgramMain program)
   specializations <- collectRequiredSpecializations base reachable
-  let stringGlobals = assignStringGlobals (collectProgramStrings reachable specializations)
+  let evidenceWrappers = collectEvidenceWrappers base reachable specializations
+      referencedFunctionNames = collectReferencedFunctionNames base reachable specializations evidenceWrappers
+      stringGlobals = assignStringGlobals (collectProgramStrings reachable specializations)
       env =
         ProgramEnv
           { peBase = base,
             peSpecializations = Map.fromList [(specializationKey (spRequest spec), spec) | spec <- specializations],
+            peEvidenceWrappers = Map.fromList [(ewKey wrapper, wrapper) | wrapper <- evidenceWrappers],
             peStringGlobals = stringGlobals
           }
   functions <-
-    (++)
-      <$> traverse (lowerMonomorphicBinding env) (filter (null . ffTypeBinders . biForm) reachable)
-      <*> traverse (lowerSpecialization env) specializations
+    concat
+      <$> sequence
+        [ traverse (lowerMonomorphicBinding env) (filter (shouldLowerReachableBinding referencedFunctionNames) reachable),
+          traverse (lowerSpecialization env) (filter (shouldLowerSpecialization referencedFunctionNames) specializations),
+          traverse (lowerEvidenceWrapper env) evidenceWrappers
+        ]
   mainBinding <- requireBinding base (backendProgramMain program)
   when (not (null (ffTypeBinders (biForm mainBinding)))) $
     Left (BackendLLVMUnsupportedExpression "program main" "polymorphic main binding")
@@ -148,6 +165,42 @@ lowerBackendProgram program = do
         llvmModuleDeclarations = runtimeDeclarations base,
         llvmModuleFunctions = functions
       }
+
+shouldLowerReachableBinding :: Set String -> BindingInfo -> Bool
+shouldLowerReachableBinding referencedFunctionNames binding =
+  null (ffTypeBinders form)
+    && ( biExportedAsMain binding
+           || canEmitFunctionForm form
+           || (Set.member (biName binding) referencedFunctionNames && canEmitReferencedFunctionForm form)
+       )
+  where
+    form = biForm binding
+
+shouldLowerSpecialization :: Set String -> Specialization -> Bool
+shouldLowerSpecialization referencedFunctionNames specialization =
+  canEmitFunctionForm form
+    || (Set.member (spFunctionName specialization) referencedFunctionNames && canEmitReferencedFunctionForm form)
+  where
+    form = spForm specialization
+
+canEmitFunctionForm :: FunctionForm -> Bool
+canEmitFunctionForm form =
+  not (requiresInlineCall form) || canEmitInlineOnlyFunctionParameters form
+
+canEmitInlineOnlyFunctionParameters :: FunctionForm -> Bool
+canEmitInlineOnlyFunctionParameters form =
+  not (containsInlineOnlyEvidenceParameterCall form)
+    && canEmitReferencedFunctionForm form
+
+canEmitReferencedFunctionForm :: FunctionForm -> Bool
+canEmitReferencedFunctionForm form =
+  all (uncurry canEmitFunctionParameter) (ffParams form)
+
+canEmitFunctionParameter :: String -> BackendType -> Bool
+canEmitFunctionParameter paramName paramTy
+  | isFunctionLikeBackendType paramTy =
+      isEvidenceParameter paramName paramTy || isFirstOrderFunctionPointerType paramTy
+  | otherwise = True
 
 runtimeAndName :: String
 runtimeAndName =
@@ -246,12 +299,43 @@ functionFormFromExpected :: BackendType -> BackendExpr -> FunctionForm
 functionFormFromExpected expectedTy expr =
   case functionFormFromExpr expr of
     form
+      | Just completed <- completeAliasFunctionForm form ->
+          completed
       | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
           form
       | otherwise ->
           case aliasFunctionForm expectedTy expr of
             Just aliasForm -> aliasForm
             Nothing -> form
+
+substituteFunctionFormTypes :: Map String BackendType -> FunctionForm -> FunctionForm
+substituteFunctionFormTypes substitution0 form =
+  FunctionForm
+    { ffTypeBinders = [(name, fmap substituteTy mbBound) | (name, mbBound) <- ffTypeBinders form],
+      ffParams = [(name, substituteTy ty) | (name, ty) <- ffParams form],
+      ffBody = substituteExprTypes substitution (ffBody form),
+      ffReturnType = substituteTy (ffReturnType form)
+    }
+  where
+    binderNames = Set.fromList (map fst (ffTypeBinders form))
+    substitution = Map.withoutKeys substitution0 binderNames
+    substituteTy = substituteBackendTypes substitution
+
+completeAliasFunctionForm :: FunctionForm -> Maybe FunctionForm
+completeAliasFunctionForm form
+  | not (isAliasExpr (ffBody form)) = Nothing
+  | null params = Nothing
+  | otherwise = do
+      body <- applyAliasArguments (ffBody form) (ffReturnType form) (zip argNames params)
+      pure
+        form
+          { ffParams = ffParams form ++ zip argNames params,
+            ffBody = body,
+            ffReturnType = returnTy
+          }
+  where
+    (params, returnTy) = collectArrowsType (ffReturnType form)
+    argNames = ["__mlfp_alias_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
 
 aliasFunctionForm :: BackendType -> BackendExpr -> Maybe FunctionForm
 aliasFunctionForm expectedTy expr
@@ -278,7 +362,37 @@ isAliasExpr =
   \case
     BackendVar {} -> True
     BackendTyApp _ fun _ -> isAliasExpr fun
+    BackendApp _ fun arg -> isAliasExpr fun && isAliasArgument arg
+    BackendLet _ _ _ rhs body -> isTransparentAliasLetRhs rhs && isAliasExpr body
     _ -> False
+
+isAliasLetRhs :: BackendExpr -> Bool
+isAliasLetRhs =
+  \case
+    BackendVar {} -> True
+    BackendTyApp _ fun _ -> isAliasLetRhs fun
+    BackendApp _ fun arg -> isAliasLetRhs fun && isAliasArgument arg
+    BackendLet _ _ _ rhs body -> isAliasLetRhs rhs && isAliasLetRhs body
+    _ -> False
+
+isAliasArgument :: BackendExpr -> Bool
+isAliasArgument =
+  \case
+    BackendVar ty _ -> isFunctionLikeBackendType ty
+    BackendTyApp ty fun _ -> isFunctionLikeBackendType ty && isAliasArgument fun
+    BackendApp ty fun arg -> isFunctionLikeBackendType ty && isAliasExpr fun && isAliasArgument arg
+    BackendLet ty _ _ rhs body -> isFunctionLikeBackendType ty && isTransparentAliasLetRhs rhs && isAliasArgument body
+    _ -> False
+
+isTransparentAliasLetRhs :: BackendExpr -> Bool
+isTransparentAliasLetRhs rhs =
+  isAliasLetRhs rhs || hasTopLevelTypeAbs rhs
+
+hasTopLevelTypeAbs :: BackendExpr -> Bool
+hasTopLevelTypeAbs expr =
+  not (null typeBinders)
+  where
+    (typeBinders, _) = collectTypeAbs expr
 
 collectForallsType :: BackendType -> ([(String, Maybe BackendType)], BackendType)
 collectForallsType =
@@ -483,6 +597,358 @@ collectRequiredSpecializations base reachable =
       where
         key = specializationKey request
 
+collectEvidenceWrappers :: ProgramBase -> [BindingInfo] -> [Specialization] -> [EvidenceWrapper]
+collectEvidenceWrappers base reachable specializations =
+  zipWith assignName [(0 :: Int) ..] uniqueRequests
+  where
+    requests =
+      concatMap (collectEvidenceWrappersInForm base Map.empty Set.empty . biForm) monomorphicReachable
+        ++ concatMap (collectEvidenceWrappersInForm base Map.empty Set.empty . spForm) specializations
+    monomorphicReachable =
+      filter (null . ffTypeBinders . biForm) reachable
+    uniqueRequests =
+      map snd (Map.toAscList (Map.fromList [(evidenceWrapperKey expected expr, (expected, expr)) | (expected, expr) <- requests]))
+    assignName index0 (expected, expr) =
+      EvidenceWrapper
+        { ewKey = evidenceWrapperKey expected expr,
+          ewFunctionName = "__mlfp_evidence_wrapper$" ++ show index0,
+          ewExpectedType = expected,
+          ewExpr = expr
+        }
+
+collectReferencedFunctionNames :: ProgramBase -> [BindingInfo] -> [Specialization] -> [EvidenceWrapper] -> Set String
+collectReferencedFunctionNames base reachable specializations evidenceWrappers =
+  Set.unions
+    ( map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . biForm) reachable
+        ++ map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . spForm) specializations
+        ++ map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . evidenceWrapperForm) evidenceWrappers
+    )
+
+type LocalFunctionForms = Map String FunctionForm
+
+shadowLocalFunctionForms :: Set String -> LocalFunctionForms -> LocalFunctionForms
+shadowLocalFunctionForms names forms =
+  Map.withoutKeys forms names
+
+collectReferencedFunctionNamesInForm :: ProgramBase -> Map String BackendType -> Set String -> FunctionForm -> Set String
+collectReferencedFunctionNamesInForm base substitution bound form =
+  collectReferencedFunctionNamesInFormWithLocals base substitution Map.empty bound form
+
+collectReferencedFunctionNamesInFormWithLocals :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> FunctionForm -> Set String
+collectReferencedFunctionNamesInFormWithLocals base substitution localForms bound form =
+  let paramNames = Set.fromList (map fst (ffParams form))
+   in collectReferencedFunctionNamesInExpr
+        base
+        substitution
+        (shadowLocalFunctionForms paramNames localForms)
+        (Set.union paramNames bound)
+        (ffBody form)
+
+collectReferencedFunctionNamesInExpr :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> BackendExpr -> Set String
+collectReferencedFunctionNamesInExpr base substitution localForms bound expr =
+  referencedHere `Set.union` childReferences
+  where
+    referencedHere =
+      case collectCall expr of
+        Just (callee, typeArgs, args) ->
+          let typeArgs' = map (substituteBackendTypes substitution) typeArgs
+              args' = map (substituteExprTypes substitution) args
+           in case instantiateFunctionFormWithTypeArgs "referenced function argument" (callableForm callee) typeArgs' args' of
+                Right (_, form) ->
+                  localCallReferences callee typeArgs' args'
+                    `Set.union` Set.fromList
+                      [ functionName
+                      | ((_, paramTy), arg) <- zip (ffParams form) args',
+                        isFunctionLikeBackendType paramTy,
+                        Just functionName <- [referencedFunctionArgumentName arg]
+                      ]
+                Left _ -> Set.empty
+        Nothing ->
+          localTypeApplicationReferences
+
+    callableForm callee =
+      case callee of
+        BackendVar calleeTy name ->
+          case Map.lookup name localForms of
+            Just form -> form
+            Nothing -> functionFormFromType calleeTy
+        _ -> functionFormFromExpr callee
+
+    referencedFunctionArgumentName arg =
+      case collectTyApps arg of
+        (BackendVar _ name, typeArgs) ->
+          referencedFunctionNameByName Set.empty name typeArgs
+        _ -> Nothing
+
+    referencedFunctionNameByName seen name typeArgs
+      | Set.member name seen = Nothing
+      | Just form <- Map.lookup name localForms =
+          case instantiateFunctionFormWithTypeArgs ("referenced local function argument " ++ name) form typeArgs [] of
+            Right (_, instantiated) ->
+              case etaAliasTarget instantiated of
+                Just (targetName, targetTypeArgs) ->
+                  referencedFunctionNameByName (Set.insert name seen) targetName targetTypeArgs
+                Nothing -> Nothing
+            Left _ -> Nothing
+      | Set.notMember name bound,
+        Just binding <- Map.lookup name (pbBindings base) =
+          case instantiateFunctionFormWithTypeArgs ("referenced function argument " ++ name) (biForm binding) typeArgs [] of
+            Right (resolvedTypeArgs, _)
+              | null (ffTypeBinders (biForm binding)) -> Just (biName binding)
+              | otherwise -> Just (specializedFunctionName (SpecRequest name resolvedTypeArgs))
+            Left _ -> Nothing
+      | otherwise = Nothing
+
+    localCallReferences callee typeArgs args =
+      case callee of
+        BackendVar _ name
+          | Just form <- Map.lookup name localForms ->
+              collectInstantiatedLocalReferences name form typeArgs args
+        _ -> Set.empty
+
+    localTypeApplicationReferences =
+      case collectTyApps expr of
+        (BackendVar _ name, typeArgs)
+          | Just form <- Map.lookup name localForms ->
+              collectInstantiatedLocalReferences name form (map (substituteBackendTypes substitution) typeArgs) []
+        _ -> Set.empty
+
+    collectInstantiatedLocalReferences name form typeArgs args =
+      case instantiateFunctionFormWithTypeArgs ("referenced local function " ++ name) form typeArgs args of
+        Right (_, instantiated) ->
+          collectReferencedFunctionNamesInFormWithLocals base Map.empty localForms bound instantiated
+        Left _ -> Set.empty
+
+    childReferences =
+      case expr of
+        BackendVar {} -> Set.empty
+        BackendLit {} -> Set.empty
+        BackendLam _ name _ body ->
+          collectReferencedFunctionNamesInExpr base substitution (Map.delete name localForms) (Set.insert name bound) body
+        BackendApp _ fun arg ->
+          collectReferencedFunctionNamesInExpr base substitution localForms bound fun
+            `Set.union` collectReferencedFunctionNamesInExpr base substitution localForms bound arg
+        BackendLet _ name bindingTy rhs body ->
+          collectLetRhsReferences bindingTy rhs
+            `Set.union` collectReferencedFunctionNamesInExpr base substitution (collectLetLocalForms name bindingTy rhs) (Set.insert name bound) body
+        BackendTyAbs _ name _ body ->
+          collectReferencedFunctionNamesInExpr base (Map.delete name substitution) localForms bound body
+        BackendTyApp _ fun _ ->
+          collectReferencedFunctionNamesInExpr base substitution localForms bound fun
+        BackendConstruct _ _ args ->
+          Set.unions (map (collectReferencedFunctionNamesInExpr base substitution localForms bound) args)
+        BackendCase _ scrutinee alternatives ->
+          collectReferencedFunctionNamesInExpr base substitution localForms bound scrutinee
+            `Set.union` Set.unions (map collectAlternativeReferences (NE.toList alternatives))
+        BackendRoll _ payload ->
+          collectReferencedFunctionNamesInExpr base substitution localForms bound payload
+        BackendUnroll _ payload ->
+          collectReferencedFunctionNamesInExpr base substitution localForms bound payload
+
+    collectLetRhsReferences bindingTy rhs =
+      case functionFormFromExpected bindingTy rhs of
+        form0
+          | not (null (ffTypeBinders form0)) || not (null (ffParams form0)) ->
+              let form = substituteFunctionFormTypes substitution form0
+               in if null (ffTypeBinders form)
+                    then collectReferencedFunctionNamesInFormWithLocals base Map.empty localForms bound form
+                    else Set.empty
+        _ ->
+          collectReferencedFunctionNamesInExpr base substitution localForms bound rhs
+
+    collectLetLocalForms name bindingTy rhs =
+      case functionFormFromExpected bindingTy rhs of
+        form
+          | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+              Map.insert name (substituteFunctionFormTypes substitution form) localForms
+        _ ->
+          Map.delete name localForms
+
+    collectAlternativeReferences alternative =
+      let binders = patternBinders (backendAltPattern alternative)
+       in
+      collectReferencedFunctionNamesInExpr
+        base
+        substitution
+        (shadowLocalFunctionForms binders localForms)
+        (Set.union binders bound)
+        (backendAltBody alternative)
+
+    patternBinders =
+      \case
+        BackendDefaultPattern -> Set.empty
+        BackendConstructorPattern _ binders -> Set.fromList binders
+
+collectEvidenceWrappersInForm :: ProgramBase -> Map String BackendType -> Set String -> FunctionForm -> [(BackendType, BackendExpr)]
+collectEvidenceWrappersInForm base substitution bound form =
+  collectEvidenceWrappersInFormWithLocals base substitution Map.empty bound form
+
+collectEvidenceWrappersInFormWithLocals :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> FunctionForm -> [(BackendType, BackendExpr)]
+collectEvidenceWrappersInFormWithLocals base substitution localForms bound form =
+  let paramNames = Set.fromList (map fst (ffParams form))
+   in collectEvidenceWrappersInExpr
+        base
+        substitution
+        (shadowLocalFunctionForms paramNames localForms)
+        (Set.union paramNames bound)
+        (ffBody form)
+
+collectEvidenceWrappersInExpr :: ProgramBase -> Map String BackendType -> LocalFunctionForms -> Set String -> BackendExpr -> [(BackendType, BackendExpr)]
+collectEvidenceWrappersInExpr base substitution localForms bound expr =
+  wrappersHere ++ childWrappers
+  where
+    wrappersHere =
+      case collectCall expr of
+        Just (BackendVar _ name, typeArgs, args)
+          | Just form <- Map.lookup name localForms ->
+              let typeArgs' = map (substituteBackendTypes substitution) typeArgs
+                  args' = map (substituteExprTypes substitution) args
+               in collectInstantiatedLocalWrappers name form typeArgs' args'
+          | Set.notMember name bound,
+            Just binding <- Map.lookup name (pbBindings base) ->
+              let typeArgs' = map (substituteBackendTypes substitution) typeArgs
+                  args' = map (substituteExprTypes substitution) args
+               in case instantiateFunctionFormWithTypeArgs ("evidence wrapper request " ++ name) (biForm binding) typeArgs' args' of
+                    Right (_, form) -> evidenceArgumentWrappers form args'
+                    Left _ -> []
+        _ -> localTypeApplicationWrappers
+
+    childWrappers =
+      case expr of
+        BackendVar {} -> []
+        BackendLit {} -> []
+        BackendLam _ name _ body ->
+          collectEvidenceWrappersInExpr base substitution (Map.delete name localForms) (Set.insert name bound) body
+        BackendApp _ fun arg ->
+          collectEvidenceWrappersInExpr base substitution localForms bound fun
+            ++ collectEvidenceWrappersInExpr base substitution localForms bound arg
+        BackendLet _ name bindingTy rhs body ->
+          collectLetRhsWrappers bindingTy rhs
+            ++ collectEvidenceWrappersInExpr base substitution (collectLetLocalForms name bindingTy rhs) (Set.insert name bound) body
+        BackendTyAbs _ name _ body ->
+          collectEvidenceWrappersInExpr base (Map.delete name substitution) localForms bound body
+        BackendTyApp _ fun _ ->
+          collectEvidenceWrappersInExpr base substitution localForms bound fun
+        BackendConstruct _ _ args ->
+          concatMap (collectEvidenceWrappersInExpr base substitution localForms bound) args
+        BackendCase _ scrutinee alternatives ->
+          collectEvidenceWrappersInExpr base substitution localForms bound scrutinee
+            ++ concatMap collectAlternativeWrappers (NE.toList alternatives)
+        BackendRoll _ payload ->
+          collectEvidenceWrappersInExpr base substitution localForms bound payload
+        BackendUnroll _ payload ->
+          collectEvidenceWrappersInExpr base substitution localForms bound payload
+
+    evidenceArgumentWrappers form args =
+      [ (paramTy, arg)
+      | ((paramName, paramTy), arg) <- zip (ffParams form) args,
+        isEvidenceArgument False paramName paramTy,
+        not (isSimpleFunctionReference arg),
+        evidenceWrapperArgumentClosed bound arg
+      ]
+
+    localTypeApplicationWrappers =
+      case collectTyApps expr of
+        (BackendVar _ name, typeArgs)
+          | Just form <- Map.lookup name localForms ->
+              collectInstantiatedLocalWrappers name form (map (substituteBackendTypes substitution) typeArgs) []
+        _ -> []
+
+    collectInstantiatedLocalWrappers name form typeArgs args =
+      case instantiateFunctionFormWithTypeArgs ("evidence wrapper request " ++ name) form typeArgs args of
+        Right (_, instantiated) ->
+          evidenceArgumentWrappers instantiated args
+            ++ collectEvidenceWrappersInFormWithLocals base Map.empty localForms bound instantiated
+        Left _ -> []
+
+    collectLetRhsWrappers bindingTy rhs =
+      case functionFormFromExpected bindingTy rhs of
+        form0
+          | not (null (ffTypeBinders form0)) || not (null (ffParams form0)) ->
+              let form = substituteFunctionFormTypes substitution form0
+               in if null (ffTypeBinders form)
+                    then collectEvidenceWrappersInFormWithLocals base Map.empty localForms bound form
+                    else []
+        _ ->
+          collectEvidenceWrappersInExpr base substitution localForms bound rhs
+
+    collectLetLocalForms name bindingTy rhs =
+      case functionFormFromExpected bindingTy rhs of
+        form
+          | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+              Map.insert name (substituteFunctionFormTypes substitution form) localForms
+        _ ->
+          Map.delete name localForms
+
+    collectAlternativeWrappers alternative =
+      let binders = patternBinders (backendAltPattern alternative)
+       in
+      collectEvidenceWrappersInExpr
+        base
+        substitution
+        (shadowLocalFunctionForms binders localForms)
+        (Set.union binders bound)
+        (backendAltBody alternative)
+
+    patternBinders =
+      \case
+        BackendDefaultPattern -> Set.empty
+        BackendConstructorPattern _ binders -> Set.fromList binders
+
+evidenceWrapperKey :: BackendType -> BackendExpr -> String
+evidenceWrapperKey expected expr =
+  backendTypeKey expected ++ "\0" ++ show expr
+
+isSimpleFunctionReference :: BackendExpr -> Bool
+isSimpleFunctionReference arg =
+  case collectTyApps arg of
+    (BackendVar {}, _) -> True
+    _ -> False
+
+evidenceWrapperArgumentClosed :: Set String -> BackendExpr -> Bool
+evidenceWrapperArgumentClosed bound expr =
+  Set.null (freeTermVars expr `Set.intersection` bound)
+
+freeTermVars :: BackendExpr -> Set String
+freeTermVars =
+  go Set.empty
+  where
+    go bound =
+      \case
+        BackendVar _ name
+          | Set.member name bound -> Set.empty
+          | otherwise -> Set.singleton name
+        BackendLit {} ->
+          Set.empty
+        BackendLam _ name _ body ->
+          go (Set.insert name bound) body
+        BackendApp _ fun arg ->
+          Set.union (go bound fun) (go bound arg)
+        BackendLet _ name _ rhs body ->
+          Set.union (go bound rhs) (go (Set.insert name bound) body)
+        BackendTyAbs _ _ _ body ->
+          go bound body
+        BackendTyApp _ fun _ ->
+          go bound fun
+        BackendConstruct _ _ args ->
+          foldMap (go bound) args
+        BackendCase _ scrutinee alternatives ->
+          Set.union
+            (go bound scrutinee)
+            (foldMap (goAlternative bound) (NE.toList alternatives))
+        BackendRoll _ payload ->
+          go bound payload
+        BackendUnroll _ payload ->
+          go bound payload
+
+    goAlternative bound (BackendAlternative pattern0 body) =
+      go (Set.union (patternBinders pattern0) bound) body
+
+    patternBinders =
+      \case
+        BackendDefaultPattern -> Set.empty
+        BackendConstructorPattern _ binders -> Set.fromList binders
+
 collectSpecializationRequestsInForm :: ProgramBase -> Map String BackendType -> FunctionForm -> [SpecRequest]
 collectSpecializationRequestsInForm base substitution form =
   collectSpecializationRequestsInFormWithBound base substitution Set.empty form
@@ -536,12 +1002,10 @@ collectSpecializationRequestsWithBound base substitution bound expr =
             (BackendVar _ name, typeArgs)
               | Set.notMember name bound,
                 Just binding <- Map.lookup name (pbBindings base),
-                not (null (ffTypeBinders (biForm binding))),
-                null (ffParams (biForm binding)) ->
+                not (null (ffTypeBinders (biForm binding))) ->
                   let typeArgs' = map (substituteBackendTypes substitution) typeArgs
                    in case instantiateFunctionFormWithTypeArgs ("specialization request " ++ name) (biForm binding) typeArgs' [] of
-                        Right (resolvedTypeArgs, form)
-                          | null (ffParams form) -> [SpecRequest name resolvedTypeArgs]
+                        Right (resolvedTypeArgs, _) -> [SpecRequest name resolvedTypeArgs]
                         _ -> []
             (fun, typeArgs) ->
               collectAdministrativeTypeAppRequests fun typeArgs
@@ -735,13 +1199,41 @@ lowerSpecialization :: ProgramEnv -> Specialization -> Either BackendLLVMError L
 lowerSpecialization env specialization =
   lowerFunction env (spFunctionName specialization) True (spForm specialization)
 
+lowerEvidenceWrapper :: ProgramEnv -> EvidenceWrapper -> Either BackendLLVMError LLVMFunction
+lowerEvidenceWrapper env wrapper =
+  lowerFunction env (ewFunctionName wrapper) True (evidenceWrapperForm wrapper)
+
+evidenceWrapperForm :: EvidenceWrapper -> FunctionForm
+evidenceWrapperForm wrapper =
+  FunctionForm
+    { ffTypeBinders = [],
+      ffParams = zip paramNames params,
+      ffBody = body,
+      ffReturnType = returnTy
+    }
+  where
+    (params, returnTy) = collectArrowsType (ewExpectedType wrapper)
+    paramNames = ["__mlfp_evidence_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
+    paramExprs = [BackendVar paramTy name | (name, paramTy) <- zip paramNames params]
+    body = applyEvidenceWrapperArgs (ewExpr wrapper) (ewExpectedType wrapper) paramExprs
+
+applyEvidenceWrapperArgs :: BackendExpr -> BackendType -> [BackendExpr] -> BackendExpr
+applyEvidenceWrapperArgs expr _ [] =
+  expr
+applyEvidenceWrapperArgs expr ty (arg : rest) =
+  case ty of
+    BTArrow _ resultTy ->
+      applyEvidenceWrapperArgs (BackendApp resultTy expr arg) resultTy rest
+    _ ->
+      expr
+
 lowerFunction :: ProgramEnv -> String -> Bool -> FunctionForm -> Either BackendLLVMError LLVMFunction
 lowerFunction env name private form = do
   unless (null (ffTypeBinders form)) $
     Left (BackendLLVMUnsupportedExpression ("binding " ++ show name) "unspecialized polymorphic binding")
   returnTy <- lowerBackendType env ("return type of " ++ name) (ffReturnType form)
   params <- traverse lowerParam (ffParams form)
-  let initialExprEnv = initialFunctionEnv form params
+  let initialExprEnv = initialFunctionEnv name form params
   result <-
     evalStateT
       ( do
@@ -762,8 +1254,175 @@ lowerFunction env name private form = do
       }
   where
     lowerParam (paramName, paramTy) = do
-      llvmTy <- lowerBackendType env ("parameter " ++ show paramName ++ " of " ++ name) paramTy
+      llvmTy <- lowerFunctionParameterType env ("parameter " ++ show paramName ++ " of " ++ name) paramName paramTy
       pure (LLVMParameter llvmTy paramName)
+
+lowerFunctionParameterType :: ProgramEnv -> String -> String -> BackendType -> Either BackendLLVMError LLVMType
+lowerFunctionParameterType env context paramName paramTy
+  | isEvidenceParameter paramName paramTy || isFirstOrderFunctionPointerType paramTy = Right LLVMPtr
+  | otherwise = lowerBackendType env context paramTy
+
+lowerFunctionParameterTypeM :: ProgramEnv -> String -> Bool -> String -> BackendType -> LowerM LLVMType
+lowerFunctionParameterTypeM env context allowNestedEvidence paramName paramTy =
+  case lowerArgumentType env context allowNestedEvidence paramName paramTy of
+    Right llvmTy -> pure llvmTy
+    Left err -> liftEither err
+
+lowerArgumentType :: ProgramEnv -> String -> Bool -> String -> BackendType -> Either BackendLLVMError LLVMType
+lowerArgumentType env context allowNestedEvidence paramName paramTy
+  | isEvidenceArgument allowNestedEvidence paramName paramTy = Right LLVMPtr
+  | isFirstOrderFunctionPointerType paramTy = Right LLVMPtr
+  | otherwise = lowerBackendType env context paramTy
+
+isEvidenceArgument :: Bool -> String -> BackendType -> Bool
+isEvidenceArgument allowNestedEvidence paramName paramTy =
+  (isEvidenceName paramName || (allowNestedEvidence && isNestedEvidenceName paramName))
+    && isFunctionLikeBackendType paramTy
+
+isEvidenceParameter :: String -> BackendType -> Bool
+isEvidenceParameter =
+  isEvidenceArgument True
+
+isEvidenceName :: String -> Bool
+isEvidenceName =
+  isPrefixOf "$evidence_"
+
+isEvidenceCallableName :: String -> Bool
+isEvidenceCallableName name =
+  isEvidenceName name || isNestedEvidenceName name
+
+isNestedEvidenceName :: String -> Bool
+isNestedEvidenceName name =
+  "__mlfp_alias_arg" `isPrefixOf` name
+    || "__mlfp_evidence_arg" `isPrefixOf` name
+
+isFunctionLikeBackendType :: BackendType -> Bool
+isFunctionLikeBackendType =
+  \case
+    BTForall _ _ body -> isFunctionLikeBackendType body
+    BTArrow {} -> True
+    _ -> False
+
+isFirstOrderFunctionPointerType :: BackendType -> Bool
+isFirstOrderFunctionPointerType ty =
+  case ty of
+    BTArrow {} ->
+      let (params, returnTy) = collectArrowsType ty
+       in all isFirstOrderPointerValueType (returnTy : params)
+    _ ->
+      False
+
+isFirstOrderPointerValueType :: BackendType -> Bool
+isFirstOrderPointerValueType =
+  \case
+    BTVar {} ->
+      False
+    BTArrow {} ->
+      False
+    BTBase {} ->
+      True
+    BTCon _ args ->
+      all isFirstOrderPointerValueType args
+    BTForall {} ->
+      False
+    BTMu {} ->
+      True
+    BTBottom ->
+      False
+
+requiresInlineCall :: FunctionForm -> Bool
+requiresInlineCall form =
+  any (uncurry (isInlineOnlyFunctionParameter False)) (ffParams form)
+    || containsInlineOnlyEvidenceParameterCall form
+
+containsInlineOnlyEvidenceParameterCall :: FunctionForm -> Bool
+containsInlineOnlyEvidenceParameterCall form =
+  go (evidenceParameterNames form) Set.empty (ffBody form)
+  where
+    go evidenceParams localFunctions expr =
+      callRequiresInline evidenceParams localFunctions expr
+        || case expr of
+          BackendVar {} -> False
+          BackendLit {} -> False
+          BackendLam _ name _ body ->
+            go evidenceParams (Set.delete name localFunctions) body
+          BackendApp _ fun arg ->
+            go evidenceParams localFunctions fun || go evidenceParams localFunctions arg
+          BackendLet _ name bindingTy rhs body ->
+            let rhsForm = functionFormFromExpected bindingTy rhs
+                rhsIsLocalFunction = not (null (ffTypeBinders rhsForm)) || not (null (ffParams rhsForm))
+                localFunctions' =
+                  if rhsIsLocalFunction
+                    then Set.insert name localFunctions
+                    else Set.delete name localFunctions
+             in go evidenceParams localFunctions rhs || go evidenceParams localFunctions' body
+          BackendTyAbs _ _ _ body ->
+            go evidenceParams localFunctions body
+          BackendTyApp _ fun _ ->
+            go evidenceParams localFunctions fun
+          BackendConstruct _ _ args ->
+            any (go evidenceParams localFunctions) args
+          BackendCase _ scrutinee alternatives ->
+            go evidenceParams localFunctions scrutinee
+              || any (goAlternative evidenceParams localFunctions) (NE.toList alternatives)
+          BackendRoll _ payload ->
+            go evidenceParams localFunctions payload
+          BackendUnroll _ payload ->
+            go evidenceParams localFunctions payload
+
+    goAlternative evidenceParams localFunctions (BackendAlternative pattern0 body) =
+      go evidenceParams (localFunctions `Set.difference` patternBinders pattern0) body
+
+    callRequiresInline evidenceParams localFunctions expr =
+      case collectCall expr of
+        Just (BackendVar calleeTy name, typeArgs, args)
+          | Set.member name evidenceParams ->
+              case instantiateFunctionFormWithTypeArgs "inline evidence parameter call" (functionFormFromType calleeTy) typeArgs args of
+                Right (_, callForm) ->
+                  any (uncurry (argumentRequiresInline localFunctions)) (zip (ffParams callForm) args)
+                Left _ ->
+                  False
+        _ ->
+          False
+
+    argumentRequiresInline localFunctions (_, paramTy) arg =
+      isFunctionLikeBackendType paramTy && functionExpressionRequiresInline localFunctions arg
+
+    functionExpressionRequiresInline localFunctions arg =
+      case collectTyApps arg of
+        (BackendVar _ name, _) ->
+          Set.member name localFunctions
+        _ ->
+          case arg of
+            BackendLam {} -> True
+            BackendTyAbs {} -> True
+            BackendLet _ name bindingTy rhs body ->
+              let rhsForm = functionFormFromExpected bindingTy rhs
+                  localFunctions' =
+                    if not (null (ffTypeBinders rhsForm)) || not (null (ffParams rhsForm))
+                      then Set.insert name localFunctions
+                      else Set.delete name localFunctions
+               in functionExpressionRequiresInline localFunctions' body
+            _ -> False
+
+    patternBinders =
+      \case
+        BackendDefaultPattern -> Set.empty
+        BackendConstructorPattern _ binders -> Set.fromList binders
+
+evidenceParameterNames :: FunctionForm -> Set String
+evidenceParameterNames form =
+  Set.fromList
+    [ name
+    | (name, ty) <- ffParams form,
+      isEvidenceArgument False name ty
+    ]
+
+hasTypeBinders :: BackendType -> Bool
+hasTypeBinders =
+  \case
+    BTForall {} -> True
+    _ -> False
 
 initialFunctionState :: FunctionState
 initialFunctionState =
@@ -775,15 +1434,16 @@ initialFunctionState =
       fsCompletedBlocks = []
     }
 
-initialFunctionEnv :: FunctionForm -> [LLVMParameter] -> ExprEnv
-initialFunctionEnv form params =
+initialFunctionEnv :: String -> FunctionForm -> [LLVMParameter] -> ExprEnv
+initialFunctionEnv name form params =
   ExprEnv
     { eeValues =
         Map.fromList
           [ (paramName, LowerValue paramTy (llvmParameterType param) (LLVMLocal (llvmParameterType param) paramName))
           | ((paramName, paramTy), param) <- zip (ffParams form) params
           ],
-      eeLocalFunctions = Map.empty
+      eeLocalFunctions = Map.empty,
+      eeActiveGlobalInlines = Set.singleton name
     }
 
 liftEither :: BackendLLVMError -> LowerM a
@@ -939,11 +1599,16 @@ bindLet env exprEnv context name rhs =
                   Map.insert
                     name
                     LocalFunction {lfForm = form, lfCapturedEnv = exprEnv}
-                    (eeLocalFunctions exprEnv)
+                    (eeLocalFunctions exprEnv),
+                eeValues = Map.delete name (eeValues exprEnv)
               }
     _ -> do
       value <- lowerExpr env exprEnv (context ++ ", let " ++ show name) rhs
-      pure exprEnv {eeValues = Map.insert name value (eeValues exprEnv)}
+      pure
+        exprEnv
+          { eeValues = Map.insert name value (eeValues exprEnv),
+            eeLocalFunctions = Map.delete name (eeLocalFunctions exprEnv)
+          }
 
 lowerVar :: ProgramEnv -> ExprEnv -> String -> BackendType -> String -> LowerM LowerValue
 lowerVar env exprEnv context ty name =
@@ -1015,7 +1680,12 @@ lowerCall env exprEnv context expr =
             Just localFunction ->
               lowerLocalFunctionCall env exprEnv context name localFunction typeArgs args
             Nothing ->
-              lowerGlobalCall env exprEnv context name typeArgs args
+              case Map.lookup name (eeValues exprEnv) of
+                Just value
+                  | isFunctionLikeBackendType (lvBackendType value) ->
+                      lowerIndirectValueCall env exprEnv context name value typeArgs args
+                _ ->
+                  lowerGlobalCall env exprEnv context name typeArgs args
         BackendLam {} ->
           lowerDirectFunctionCall env exprEnv context (functionFormFromExpr headExpr) typeArgs args
         BackendTyAbs {} ->
@@ -1029,20 +1699,306 @@ lowerCall env exprEnv context expr =
             Left err ->
               liftEither err
 
+lowerIndirectValueCall :: ProgramEnv -> ExprEnv -> String -> String -> LowerValue -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
+lowerIndirectValueCall env exprEnv context name callee typeArgs args = do
+  unless (isEvidenceCallableName name || isFirstOrderFunctionPointerType (lvBackendType callee)) $
+    liftEither (BackendLLVMUnsupportedExpression context ("escaping function value " ++ show name))
+  form <- instantiateFunctionFormM context (functionFormFromType (lvBackendType callee)) typeArgs args
+  unless (length args == length (ffParams form)) $
+    liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
+  case indirectCalleeFunctionForm env callee of
+    Just calleeForm0 -> do
+      calleeForm <- instantiateFunctionFormM context calleeForm0 typeArgs args
+      if requiresInlineCall calleeForm
+        then do
+          bodyEnv <- bindCallArguments env exprEnv exprEnv context False name calleeForm args
+          lowerExpr env bodyEnv context (ffBody calleeForm)
+        else lowerIndirectPointerCall form
+    Nothing ->
+      lowerIndirectPointerCall form
+  where
+    lowerIndirectPointerCall form = do
+      callArgs <- zipWithM (lowerExprForIndirectArgument env exprEnv context) (ffParams form) args
+      bindIndirectFunctionArguments env context name form callArgs
+      resultTy <- lowerBackendTypeM env context (ffReturnType form)
+      result <- emitAssign "call" resultTy (LLVMCallOperand (lvOperand callee) [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
+      pure (LowerValue (ffReturnType form) resultTy result)
+
+indirectCalleeFunctionForm :: ProgramEnv -> LowerValue -> Maybe FunctionForm
+indirectCalleeFunctionForm env callee =
+  case lvOperand callee of
+    LLVMGlobalRef _ functionName ->
+      lookupFunctionFormByName env functionName
+    _ ->
+      Nothing
+
+lookupFunctionFormByName :: ProgramEnv -> String -> Maybe FunctionForm
+lookupFunctionFormByName env functionName =
+  case Map.lookup functionName (pbBindings (peBase env)) of
+    Just binding -> Just (biForm binding)
+    Nothing ->
+      case [spForm specialization | specialization <- Map.elems (peSpecializations env), spFunctionName specialization == functionName] of
+        form : _ -> Just form
+        [] ->
+          case [evidenceWrapperForm wrapper | wrapper <- Map.elems (peEvidenceWrappers env), ewFunctionName wrapper == functionName] of
+            form : _ -> Just form
+            [] -> Nothing
+
+functionFormFromType :: BackendType -> FunctionForm
+functionFormFromType ty =
+  FunctionForm
+    { ffTypeBinders = typeBinders,
+      ffParams = zip paramNames params,
+      ffBody = BackendVar returnTy "__mlfp_callable_result",
+      ffReturnType = returnTy
+    }
+  where
+    (typeBinders, afterForalls) = collectForallsType ty
+    (params, returnTy) = collectArrowsType afterForalls
+    paramNames = ["__mlfp_callable_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
+
+lowerExprForArgument :: ProgramEnv -> ExprEnv -> String -> Bool -> (String, BackendType) -> BackendExpr -> LowerM LowerValue
+lowerExprForArgument env exprEnv context allowNestedEvidence (paramName, paramTy) arg
+  | isEvidenceArgument allowNestedEvidence paramName paramTy =
+      lowerEvidenceArgument env exprEnv context paramTy arg
+  | isFirstOrderFunctionPointerType paramTy =
+      lowerFunctionArgument env exprEnv context paramTy arg
+  | otherwise =
+      lowerExpr env exprEnv context arg
+
+lowerExprForIndirectArgument :: ProgramEnv -> ExprEnv -> String -> (String, BackendType) -> BackendExpr -> LowerM LowerValue
+lowerExprForIndirectArgument env exprEnv context (paramName, paramTy) arg
+  | isEvidenceArgument False paramName paramTy =
+      lowerEvidenceArgument env exprEnv context paramTy arg
+  | isFunctionLikeBackendType paramTy =
+      case Map.lookup (evidenceWrapperKey paramTy arg) (peEvidenceWrappers env) of
+        Just wrapper ->
+          pure (LowerValue paramTy LLVMPtr (LLVMGlobalRef LLVMPtr (ewFunctionName wrapper)))
+        Nothing ->
+          lowerFunctionArgument env exprEnv context paramTy arg
+  | otherwise =
+      lowerExpr env exprEnv context arg
+
+lowerFunctionArgument :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> LowerM LowerValue
+lowerFunctionArgument env exprEnv context expectedTy arg =
+  case collectTyApps arg of
+    (BackendVar _ name, typeArgs) ->
+      lowerFunctionReference env exprEnv context expectedTy name typeArgs
+    _ ->
+      liftEither (BackendLLVMUnsupportedExpression context "unsupported function argument")
+
+lowerEvidenceArgument :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> LowerM LowerValue
+lowerEvidenceArgument env exprEnv context expectedTy arg =
+  case collectTyApps arg of
+    (BackendVar _ name, typeArgs) ->
+      lowerFunctionReference env exprEnv context expectedTy name typeArgs
+    _ ->
+      case Map.lookup (evidenceWrapperKey expectedTy arg) (peEvidenceWrappers env) of
+        Just wrapper ->
+          pure (LowerValue expectedTy LLVMPtr (LLVMGlobalRef LLVMPtr (ewFunctionName wrapper)))
+        Nothing ->
+          liftEither (BackendLLVMUnsupportedExpression context "unsupported evidence function argument")
+
+lowerFunctionReference :: ProgramEnv -> ExprEnv -> String -> BackendType -> String -> [BackendType] -> LowerM LowerValue
+lowerFunctionReference env exprEnv context expectedTy name typeArgs =
+  case Map.lookup name (eeLocalFunctions exprEnv) of
+    Just localFunction ->
+      lowerLocalFunctionReference env context expectedTy name localFunction typeArgs
+    Nothing ->
+      lowerNonLocalFunctionReference env exprEnv context expectedTy name typeArgs
+
+lowerLocalFunctionReference :: ProgramEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> LowerM LowerValue
+lowerLocalFunctionReference env context expectedTy name localFunction typeArgs = do
+  form <-
+    if null typeArgs
+      then pure (lfForm localFunction)
+      else instantiateFunctionFormM context (lfForm localFunction) typeArgs []
+  let actualTy = functionTypeFromFormWithBinders form
+  requireEvidenceFunctionType context name expectedTy actualTy
+  case etaAliasTarget form of
+    Just (targetName, targetTypeArgs) ->
+      lowerFunctionReference env (lfCapturedEnv localFunction) context expectedTy targetName targetTypeArgs
+    Nothing ->
+      liftEither (BackendLLVMUnsupportedExpression context ("unsupported function argument " ++ show name))
+
+etaAliasTarget :: FunctionForm -> Maybe (String, [BackendType])
+etaAliasTarget form =
+  case collectValueApps (ffBody form) of
+    (headExpr, args)
+      | mapMaybe backendVarExprName args == map fst (ffParams form),
+        length args == length (ffParams form) ->
+          case collectTyApps headExpr of
+            (BackendVar _ targetName, targetTypeArgs) ->
+              Just (targetName, eraseAliasBinderTypeArgs targetTypeArgs)
+            _ ->
+              Nothing
+    _ ->
+      Nothing
+  where
+    binderTypeArgs =
+      [BTVar name | (name, _) <- ffTypeBinders form]
+    eraseAliasBinderTypeArgs targetTypeArgs
+      | targetTypeArgs == binderTypeArgs = []
+      | otherwise = targetTypeArgs
+
+collectValueApps :: BackendExpr -> (BackendExpr, [BackendExpr])
+collectValueApps =
+  go []
+  where
+    go args =
+      \case
+        BackendApp _ fun arg -> go (arg : args) fun
+        expr -> (expr, args)
+
+backendVarExprName :: BackendExpr -> Maybe String
+backendVarExprName =
+  \case
+    BackendVar _ name -> Just name
+    _ -> Nothing
+
+lowerNonLocalFunctionReference :: ProgramEnv -> ExprEnv -> String -> BackendType -> String -> [BackendType] -> LowerM LowerValue
+lowerNonLocalFunctionReference env exprEnv context expectedTy name typeArgs =
+  case Map.lookup name (eeValues exprEnv) of
+    Just value
+      | isFunctionLikeBackendType (lvBackendType value) ->
+          lowerValueFunctionReference context expectedTy name value typeArgs
+    _ ->
+      case Map.lookup name (pbBindings (peBase env)) of
+        Just binding -> do
+          (resolvedTypeArgs, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs []
+          let actualTy = functionTypeFromForm form
+          requireEvidenceFunctionType context name expectedTy actualTy
+          functionName <- globalFunctionName env context binding resolvedTypeArgs
+          pure (LowerValue expectedTy LLVMPtr (LLVMGlobalRef LLVMPtr functionName))
+        Nothing ->
+          liftEither (BackendLLVMUnknownFunction name)
+
+lowerValueFunctionReference :: String -> BackendType -> String -> LowerValue -> [BackendType] -> LowerM LowerValue
+lowerValueFunctionReference context expectedTy name value typeArgs = do
+  actualTy <-
+    if null typeArgs
+      then pure (lvBackendType value)
+      else instantiateCallableTypeM context (lvBackendType value) typeArgs []
+  requireEvidenceFunctionType context name expectedTy actualTy
+  pure (LowerValue expectedTy LLVMPtr (lvOperand value))
+
+instantiateCallableTypeM :: String -> BackendType -> [BackendType] -> [BackendExpr] -> LowerM BackendType
+instantiateCallableTypeM context ty typeArgs args = do
+  form <- instantiateFunctionFormM context (functionFormFromType ty) typeArgs args
+  pure (functionTypeFromForm form)
+
+functionTypeFromForm :: FunctionForm -> BackendType
+functionTypeFromForm form =
+  foldr BTArrow (ffReturnType form) (map snd (ffParams form))
+
+functionTypeFromFormWithBinders :: FunctionForm -> BackendType
+functionTypeFromFormWithBinders form =
+  foldr
+    (\(name, mbBound) body -> BTForall name mbBound body)
+    (functionTypeFromForm form)
+    (ffTypeBinders form)
+
+requireEvidenceFunctionType :: String -> String -> BackendType -> BackendType -> LowerM ()
+requireEvidenceFunctionType context name expected actual =
+  unless (evidenceFunctionTypesCompatible expected actual) $
+    liftEither
+      ( BackendLLVMInternalError
+          ( "evidence function type mismatch for "
+              ++ name
+              ++ " at "
+              ++ context
+              ++ ": expected "
+              ++ show expected
+              ++ ", got "
+              ++ show actual
+          )
+      )
+
+evidenceFunctionTypesCompatible :: BackendType -> BackendType -> Bool
+evidenceFunctionTypesCompatible expected actual =
+  alphaEqBackendType expected actual || sameFunctionShape expected actual
+  where
+    sameFunctionShape left right =
+      case (left, right) of
+        (BTForall _ _ leftBody, BTForall _ _ rightBody) ->
+          sameFunctionShape leftBody rightBody
+        (BTArrow leftParam leftResult, BTArrow rightParam rightResult) ->
+          runtimeCompatibleValueType leftParam rightParam && sameFunctionShape leftResult rightResult
+        _ ->
+          runtimeCompatibleValueType left right
+
+runtimeCompatibleValueType :: BackendType -> BackendType -> Bool
+runtimeCompatibleValueType left right =
+  alphaEqBackendType left right
+    || case (left, right) of
+      (BTMu {}, BTMu {}) -> True
+      (BTArrow leftParam leftResult, BTArrow rightParam rightResult) ->
+        runtimeCompatibleValueType leftParam rightParam
+          && runtimeCompatibleValueType leftResult rightResult
+      (BTForall leftName leftBound leftBody, BTForall rightName rightBound rightBody) ->
+        runtimeCompatibleMaybeType leftBound rightBound
+          && runtimeCompatibleValueType
+            (substituteBackendType leftName (BTVar freshName) leftBody)
+            (substituteBackendType rightName (BTVar freshName) rightBody)
+        where
+          freshName =
+            freshNameLike
+              leftName
+              ( Set.unions
+                  [ backendTypeVariableNames leftBody,
+                    backendTypeVariableNames rightBody,
+                    maybe Set.empty backendTypeVariableNames leftBound,
+                    maybe Set.empty backendTypeVariableNames rightBound,
+                    Set.fromList [leftName, rightName]
+                  ]
+              )
+      (BTBase leftBase, BTBase rightBase) -> leftBase == rightBase
+      (BTCon leftCon leftArgs, BTCon rightCon rightArgs) ->
+        leftCon == rightCon
+          && length leftArgs == length rightArgs
+          && and (zipWith runtimeCompatibleValueType (NE.toList leftArgs) (NE.toList rightArgs))
+      (BTBottom, BTBottom) -> True
+      _ -> False
+
+runtimeCompatibleMaybeType :: Maybe BackendType -> Maybe BackendType -> Bool
+runtimeCompatibleMaybeType Nothing Nothing =
+  True
+runtimeCompatibleMaybeType (Just left) (Just right) =
+  runtimeCompatibleValueType left right
+runtimeCompatibleMaybeType _ _ =
+  False
+
+backendTypeVariableNames :: BackendType -> Set String
+backendTypeVariableNames =
+  \case
+    BTVar name ->
+      Set.singleton name
+    BTArrow param result ->
+      backendTypeVariableNames param `Set.union` backendTypeVariableNames result
+    BTBase {} ->
+      Set.empty
+    BTCon _ args ->
+      Set.unions (map backendTypeVariableNames (NE.toList args))
+    BTForall name mbBound body ->
+      Set.insert name $
+        maybe Set.empty backendTypeVariableNames mbBound `Set.union` backendTypeVariableNames body
+    BTMu name body ->
+      Set.insert name (backendTypeVariableNames body)
+    BTBottom ->
+      Set.empty
+
 lowerLocalFunctionCall :: ProgramEnv -> ExprEnv -> String -> String -> LocalFunction -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerLocalFunctionCall env callEnv context name localFunction typeArgs args = do
+  let allowNestedEvidence = isEvidenceName name
   form <- instantiateFunctionFormM context (lfForm localFunction) typeArgs args
-  callArgs <- traverse (lowerExpr env callEnv context) args
-  bindFunctionArguments env context name form callArgs
-  let bodyEnv = extendExprEnvWithArguments (lfCapturedEnv localFunction) form callArgs
+  bodyEnv <- bindCallArguments env callEnv (lfCapturedEnv localFunction) context allowNestedEvidence name form args
   lowerExpr env bodyEnv context (ffBody form)
 
 lowerDirectFunctionCall :: ProgramEnv -> ExprEnv -> String -> FunctionForm -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerDirectFunctionCall env exprEnv context form0 typeArgs args = do
   form <- instantiateFunctionFormM context form0 typeArgs args
-  callArgs <- traverse (lowerExpr env exprEnv context) args
-  bindFunctionArguments env context "lambda" form callArgs
-  lowerExpr env (extendExprEnvWithArguments exprEnv form callArgs) context (ffBody form)
+  bodyEnv <- bindCallArguments env exprEnv exprEnv context False "lambda" form args
+  lowerExpr env bodyEnv context (ffBody form)
 
 lowerGlobalCall :: ProgramEnv -> ExprEnv -> String -> String -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerGlobalCall env exprEnv context name typeArgs args =
@@ -1051,12 +2007,21 @@ lowerGlobalCall env exprEnv context name typeArgs args =
       (resolvedTypeArgs, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs args
       unless (length args == length (ffParams form)) $
         liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
-      callArgs <- traverse (lowerExpr env exprEnv context) args
-      bindFunctionArguments env context name form callArgs
-      resultTy <- lowerBackendTypeM env context (ffReturnType form)
-      functionName <- globalFunctionName env context binding resolvedTypeArgs
-      result <- emitAssign "call" resultTy (LLVMCall functionName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
-      pure (LowerValue (ffReturnType form) resultTy result)
+      if shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args
+        then do
+          let bodyEnv0 =
+                exprEnv
+                  { eeActiveGlobalInlines = Set.insert (biName binding) (eeActiveGlobalInlines exprEnv)
+                  }
+          bodyEnv <- bindCallArguments env exprEnv bodyEnv0 context False name form args
+          lowerExpr env bodyEnv context (ffBody form)
+        else do
+          callArgs <- zipWithM (lowerExprForArgument env exprEnv context False) (ffParams form) args
+          bindFunctionArguments env context False name form callArgs
+          resultTy <- lowerBackendTypeM env context (ffReturnType form)
+          functionName <- globalFunctionName env context binding resolvedTypeArgs
+          result <- emitAssign "call" resultTy (LLVMCall functionName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
+          pure (LowerValue (ffReturnType form) resultTy result)
     Nothing
       | name == runtimeAndName -> do
           unless (length args == 2) $
@@ -1068,6 +2033,33 @@ lowerGlobalCall env exprEnv context name typeArgs args =
           pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result)
     Nothing ->
       liftEither (BackendLLVMUnknownFunction name)
+
+shouldInlineGlobalCall :: ProgramEnv -> ExprEnv -> BindingInfo -> [BackendType] -> FunctionForm -> [BackendExpr] -> Bool
+shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args =
+  (requiresInlineCall form && Set.notMember (biName binding) (eeActiveGlobalInlines exprEnv))
+    || missingPolymorphicSpecialization env binding resolvedTypeArgs
+    || any (evidenceArgumentRequiresInline env exprEnv) (zip (ffParams form) args)
+
+missingPolymorphicSpecialization :: ProgramEnv -> BindingInfo -> [BackendType] -> Bool
+missingPolymorphicSpecialization env binding resolvedTypeArgs =
+  not (null (ffTypeBinders (biForm binding)))
+    && Map.notMember (specializationKey (SpecRequest (biName binding) resolvedTypeArgs)) (peSpecializations env)
+
+evidenceArgumentRequiresInline :: ProgramEnv -> ExprEnv -> ((String, BackendType), BackendExpr) -> Bool
+evidenceArgumentRequiresInline env exprEnv ((paramName, paramTy), arg) =
+  isEvidenceArgument False paramName paramTy && functionArgumentRequiresInline env exprEnv arg
+
+functionArgumentRequiresInline :: ProgramEnv -> ExprEnv -> BackendExpr -> Bool
+functionArgumentRequiresInline env exprEnv arg =
+  case collectTyApps arg of
+    (BackendVar _ name, typeArgs)
+      | Just localFunction <- Map.lookup name (eeLocalFunctions exprEnv) ->
+          requiresInlineCall (lfForm localFunction)
+      | Just binding <- Map.lookup name (pbBindings (peBase env)) ->
+          case instantiateFunctionFormWithTypeArgs "inline evidence argument" (biForm binding) typeArgs [] of
+            Right (_, form) -> requiresInlineCall form
+            Left _ -> False
+    _ -> False
 
 globalFunctionName :: ProgramEnv -> String -> BindingInfo -> [BackendType] -> LowerM String
 globalFunctionName env context binding typeArgs
@@ -1081,12 +2073,76 @@ globalFunctionName env context binding typeArgs
   where
     request = SpecRequest (biName binding) typeArgs
 
-bindFunctionArguments :: ProgramEnv -> String -> String -> FunctionForm -> [LowerValue] -> LowerM ()
-bindFunctionArguments env context name form args = do
+bindFunctionArguments :: ProgramEnv -> String -> Bool -> String -> FunctionForm -> [LowerValue] -> LowerM ()
+bindFunctionArguments env context allowNestedEvidence name form args = do
   unless (length args == length (ffParams form)) $
     liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
-  expectedTypes <- traverse (lowerBackendTypeM env context . snd) (ffParams form)
+  expectedTypes <- traverse (\(paramName, paramTy) -> lowerFunctionParameterTypeM env context allowNestedEvidence paramName paramTy) (ffParams form)
   zipWithM_ (requireLLVMType context name) expectedTypes args
+
+bindIndirectFunctionArguments :: ProgramEnv -> String -> String -> FunctionForm -> [LowerValue] -> LowerM ()
+bindIndirectFunctionArguments env context name form args = do
+  unless (length args == length (ffParams form)) $
+    liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
+  expectedTypes <- traverse (lowerIndirectFunctionParameterTypeM env context . snd) (ffParams form)
+  zipWithM_ (requireLLVMType context name) expectedTypes args
+
+lowerIndirectFunctionParameterTypeM :: ProgramEnv -> String -> BackendType -> LowerM LLVMType
+lowerIndirectFunctionParameterTypeM env context paramTy
+  | isFunctionLikeBackendType paramTy = pure LLVMPtr
+  | otherwise =
+      case lowerBackendType env context paramTy of
+        Right llvmTy -> pure llvmTy
+        Left err -> liftEither err
+
+bindCallArguments ::
+  ProgramEnv ->
+  ExprEnv ->
+  ExprEnv ->
+  String ->
+  Bool ->
+  String ->
+  FunctionForm ->
+  [BackendExpr] ->
+  LowerM ExprEnv
+bindCallArguments env callEnv bodyEnv0 context allowNestedEvidence name form args = do
+  unless (length args == length (ffParams form)) $
+    liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
+  foldM bindOne bodyEnv0 (zip (ffParams form) args)
+  where
+    bindOne bodyEnv ((paramName, paramTy), arg)
+      | isInlineFunctionArgument allowNestedEvidence paramName paramTy = do
+          let argForm = functionFormFromExpected paramTy arg
+          pure
+            bodyEnv
+              { eeLocalFunctions =
+                  Map.insert
+                    paramName
+                    LocalFunction {lfForm = argForm, lfCapturedEnv = callEnv}
+                    (eeLocalFunctions bodyEnv),
+                eeValues = Map.delete paramName (eeValues bodyEnv)
+              }
+      | otherwise = do
+          value <- lowerExprForArgument env callEnv context allowNestedEvidence (paramName, paramTy) arg
+          pure
+            bodyEnv
+              { eeValues = Map.insert paramName value (eeValues bodyEnv),
+                eeLocalFunctions = Map.delete paramName (eeLocalFunctions bodyEnv)
+              }
+
+isInlineFunctionArgument :: Bool -> String -> BackendType -> Bool
+isInlineFunctionArgument allowNestedEvidence paramName paramTy =
+  isInlineOnlyFunctionParameter allowNestedEvidence paramName paramTy
+
+isInlineOnlyFunctionParameter :: Bool -> String -> BackendType -> Bool
+isInlineOnlyFunctionParameter allowNestedEvidence paramName paramTy =
+  isFunctionLikeBackendType paramTy
+    && (evidenceNeedsInlining || firstOrderFunctionNeedsInlining)
+  where
+    evidenceLike = isEvidenceArgument allowNestedEvidence paramName paramTy
+    polymorphicFunction = hasTypeBinders paramTy
+    evidenceNeedsInlining = evidenceLike && polymorphicFunction
+    firstOrderFunctionNeedsInlining = not evidenceLike && not polymorphicFunction
 
 requireLLVMType :: String -> String -> LLVMType -> LowerValue -> LowerM ()
 requireLLVMType context name expected actual =
@@ -1103,15 +2159,6 @@ requireLLVMType context name expected actual =
               ++ show (lvLLVMType actual)
           )
       )
-
-extendExprEnvWithArguments :: ExprEnv -> FunctionForm -> [LowerValue] -> ExprEnv
-extendExprEnvWithArguments exprEnv form args =
-  exprEnv
-    { eeValues =
-        Map.union
-          (Map.fromList [(name, value) | ((name, _), value) <- zip (ffParams form) args])
-          (eeValues exprEnv)
-    }
 
 instantiateFunctionFormM :: String -> FunctionForm -> [BackendType] -> [BackendExpr] -> LowerM FunctionForm
 instantiateFunctionFormM context form typeArgs args =
