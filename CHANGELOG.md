@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Added LLVM backend support for checked-source partial applications by
+  packaging supplied arguments into explicit closure values. Top-level and local
+  function partials now participate in the shared ProgramSpec-to-LLVM parity
+  matrix with assembly, object-code, and native execution coverage where the
+  local LLVM toolchain is available.
 - Added checked-program closure conversion for ordinary monomorphic escaping
   `.mlfp` lambdas and closure-valued let aliases. Backend conversion now emits
   explicit `BackendClosure` / `BackendClosureCall` IR for returned local

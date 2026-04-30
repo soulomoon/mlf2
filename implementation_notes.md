@@ -1,3 +1,17 @@
+## 2026-04-30 - Partial applications lower as closure values
+
+- Checked-program conversion now packages underapplied monomorphic function
+  calls as explicit `BackendClosure` values that capture supplied arguments and
+  apply the remaining value parameters later. Saturated calls stay on the
+  existing direct or closure-call paths.
+- Local function bindings used through underapplication are closure-converted
+  so the packaged partial captures a closure pointer instead of referencing a
+  local helper from a separate closure entry. Existing typeclass/evidence
+  partial rows stay on the evidence-aware lowering path.
+- LLVM parity coverage now includes top-level and local partial application
+  rows, with `llvm-as`, object-code smoke, and native execution coverage when
+  the local LLVM toolchain is available.
+
 ## 2026-04-30 - Native execution for supported LLVM parity rows
 
 - Extended `BackendLLVMSpec` so supported shared `ProgramSpec`-to-LLVM parity

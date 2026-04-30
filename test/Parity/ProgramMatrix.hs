@@ -67,6 +67,31 @@ emlfSurfaceParityMatrix =
         )
         (ExpectRunValue "1")
     , ProgramMatrixCase
+        "runs top-level partial application"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  def keepLeft : Int -> Int -> Int = \\x \\y x;"
+                , "  def apply : (Int -> Int) -> Int = \\f f 2;"
+                , "  def main : Int = apply (keepLeft 1);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "1")
+    , ProgramMatrixCase
+        "runs local partial application"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  def apply : (Int -> Int) -> Int = \\f f 2;"
+                , "  def main : Int ="
+                , "    let keepLeft : Int -> Int -> Int = \\x \\y x"
+                , "    in apply (keepLeft 1);"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "1")
+    , ProgramMatrixCase
         "runs let polymorphism at Int and Bool"
         ( InlineProgram $
             unlines

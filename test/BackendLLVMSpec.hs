@@ -592,13 +592,41 @@ spec = describe "MLF.Backend.LLVM" $ do
 
     mapM_ runLLVMParityCase programSpecToLLVMParityCases
 
-  it "rejects partial applications until closure conversion is explicit in backend IR" $ do
-    renderBackendProgramLLVM partialApplicationProgram
-      `shouldSatisfyLeft` isInfixOf "Backend LLVM arity mismatch"
+  it "lowers packaged partial applications through the explicit closure ABI" $ do
+    output <- requireRight (renderBackendProgramLLVM partialApplicationProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$addOne\""
+    output `shouldSatisfy` isInfixOf "store i64 1"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
 
   it "rejects raw escaping lambdas until closure construction is explicit in backend IR" $ do
     renderBackendProgramLLVM escapingLambdaProgram
       `shouldSatisfyLeft` isInfixOf "escaping function"
+
+  it "packages source-level top-level partial applications as closure values" $ do
+    output <-
+      withTempProgram sourceTopLevelPartialApplicationProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "__mlfp_closure$Main__main$Main__keepLeft$partial"
+    output `shouldSatisfy` isInfixOf "store i64 1"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceTopLevelPartialApplicationProgram "1"
+
+  it "packages source-level local partial applications as closure values" $ do
+    output <-
+      withTempProgram sourceLocalPartialApplicationProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceLocalPartialApplicationProgram "1"
 
   it "lowers source-level captured closure calls through the explicit closure ABI" $ do
     output <-
@@ -2927,12 +2955,36 @@ partialApplicationProgram =
     [ addBinding,
       BackendBinding
         { backendBindingName = "main",
-          backendBindingType = unaryIntTy,
+          backendBindingType = intTy,
           backendBindingExpr =
-            BackendApp
-              { backendExprType = unaryIntTy,
-                backendFunction = BackendVar binaryIntTy "add",
-                backendArgument = intLit 1
+            BackendLet
+              { backendExprType = intTy,
+                backendLetName = "addOne",
+                backendLetType = unaryIntTy,
+                backendLetRhs =
+                  BackendClosure
+                    { backendExprType = unaryIntTy,
+                      backendClosureEntryName = "__mlfp_closure$addOne",
+                      backendClosureCaptures = [BackendClosureCapture "__mlfp_partial_capture0" intTy (intLit 1)],
+                      backendClosureParams = [("__mlfp_partial_arg0", intTy)],
+                      backendClosureBody =
+                        BackendApp
+                          { backendExprType = intTy,
+                            backendFunction =
+                              BackendApp
+                                { backendExprType = unaryIntTy,
+                                  backendFunction = BackendVar binaryIntTy "add",
+                                  backendArgument = BackendVar intTy "__mlfp_partial_capture0"
+                                },
+                            backendArgument = BackendVar intTy "__mlfp_partial_arg0"
+                          }
+                    },
+                backendLetBody =
+                  BackendClosureCall
+                    { backendExprType = intTy,
+                      backendClosureFunction = BackendVar unaryIntTy "addOne",
+                      backendClosureArguments = [intLit 2]
+                    }
               },
           backendBindingExportedAsMain = True
         }
@@ -3034,6 +3086,27 @@ sourceTopLevelClosureCallProgram =
     [ "module Main export (main) {",
       "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
       "  def main : Int = maker 0;",
+      "}"
+    ]
+
+sourceTopLevelPartialApplicationProgram :: String
+sourceTopLevelPartialApplicationProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def main : Int = apply (keepLeft 1);",
+      "}"
+    ]
+
+sourceLocalPartialApplicationProgram :: String
+sourceLocalPartialApplicationProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def main : Int =",
+      "    let keepLeft : Int -> Int -> Int = \\x \\y x",
+      "    in apply (keepLeft 1);",
       "}"
     ]
 
@@ -3896,6 +3969,7 @@ llvmNativeRepresentativeParityCases =
 llvmObjectCodeParityCases :: [String]
 llvmObjectCodeParityCases =
     [ "surface: runs lambda/application",
+      "surface: runs top-level partial application",
       "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp",
       "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp",
       "boundary: runs value-exported constructor when owner type is not exported",

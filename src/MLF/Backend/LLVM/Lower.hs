@@ -3632,17 +3632,22 @@ lowerClosureRuntimeArgumentMaybe env exprEnv context expectedTy arg =
     Just value ->
       pure (Just value {lvBackendType = expectedTy})
     Nothing ->
-      case collectTyApps arg of
-        (BackendVar _ name, typeArgs)
-          | Just binding <- Map.lookup name (pbBindings (peBase env)) -> do
-              (_, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs []
-              if null (ffParams form)
-                && alphaEqBackendType expectedTy (ffReturnType form)
-                && isClosureRuntimeValueType (ffReturnType form)
-                then Just <$> lowerGlobalValue env context expectedTy name binding typeArgs
-                else pure Nothing
+      case arg of
+        BackendClosure {}
+          | alphaEqBackendType expectedTy (backendExprType arg) ->
+              Just <$> lowerExpr env exprEnv context arg
         _ ->
-          pure Nothing
+          case collectTyApps arg of
+            (BackendVar _ name, typeArgs)
+              | Just binding <- Map.lookup name (pbBindings (peBase env)) -> do
+                  (_, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs []
+                  if null (ffParams form)
+                    && alphaEqBackendType expectedTy (ffReturnType form)
+                    && isClosureRuntimeValueType (ffReturnType form)
+                    then Just <$> lowerGlobalValue env context expectedTy name binding typeArgs
+                    else pure Nothing
+            _ ->
+              pure Nothing
 
 isInlineFunctionArgument :: Bool -> String -> BackendType -> Bool
 isInlineFunctionArgument allowNestedEvidence paramName paramTy =
