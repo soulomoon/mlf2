@@ -19,6 +19,9 @@
   so the packaged partial captures a closure pointer instead of referencing a
   local helper from a separate closure entry. Existing typeclass/evidence
   partial rows stay on the evidence-aware lowering path.
+- Supplied polymorphic function values remain on the existing static
+  specialization path instead of becoming partial-closure captures, because
+  runtime closure environments do not store `forall` values directly.
 - LLVM parity coverage now includes top-level and local partial application
   rows, with `llvm-as`, object-code smoke, and native execution coverage when
   the local LLVM toolchain is available.

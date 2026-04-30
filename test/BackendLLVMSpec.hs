@@ -701,6 +701,17 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
     assertNativeProgram sourcePartialApplicationDirectFunctionArgumentProgram "4"
 
+  it "keeps polymorphic supplied partial arguments on the static specialization path" $ do
+    output <-
+      withTempProgram sourcePartialApplicationPolymorphicArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "escaping polymorphic binding"
+    output `shouldNotSatisfy` isInfixOf "Main__usePoly$partial"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationPolymorphicArgumentProgram "true"
+
   it "captures locals when wrapping demanded inline function arguments" $ do
     output <-
       withTempProgram sourceClosureDemandedInlineFunctionArgumentProgram $ \path ->
@@ -3288,6 +3299,18 @@ sourcePartialApplicationDirectFunctionArgumentProgram =
       "  def choose : (Int -> Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x ignored;",
       "  def apply : (Int -> Int) -> Int = \\f f 4;",
       "  def main : Int = apply (choose keepLeft 0);",
+      "}"
+    ]
+
+sourcePartialApplicationPolymorphicArgumentProgram :: String
+sourcePartialApplicationPolymorphicArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def id : forall a. a -> a = \\x x;",
+      "  def usePoly : (forall a. a -> a) -> Int -> Bool =",
+      "    \\poly \\ignored let keepInt : Int = poly 1 in poly true;",
+      "  def apply : (Int -> Bool) -> Bool = \\f f 0;",
+      "  def main : Bool = apply (usePoly id);",
       "}"
     ]
 

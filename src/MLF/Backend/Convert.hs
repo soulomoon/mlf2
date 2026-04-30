@@ -2366,8 +2366,18 @@ partialApplicationCanCaptureSuppliedArgs context scope =
     canCapture (argTy, argExpr)
       | isClosureConvertibleFunctionType argTy =
           backendExprIsClosureValue context scope argExpr
+      | isPolymorphicFunctionCaptureType argTy =
+          False
       | otherwise =
           True
+
+isPolymorphicFunctionCaptureType :: BackendType -> Bool
+isPolymorphicFunctionCaptureType =
+  \case
+    BTForall _ _ body ->
+      isClosureConvertibleFunctionType body || isPolymorphicFunctionCaptureType body
+    _ ->
+      False
 
 convertOrdinaryTerm :: LambdaMode -> ConvertContext -> Env -> ClosureScope -> ElabTerm -> BackendType -> ConvertM BackendExpr
 convertOrdinaryTerm mode context env scope term resultTy0 =
