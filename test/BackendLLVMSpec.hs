@@ -152,6 +152,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
     validateLLVMAssembly output
 
+  it "uses qualified closure entries for directly called type applications" $ do
+    output <- requireRight (renderBackendProgramLLVM directPolymorphicClosureCallProgram)
+
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_direct_typeapp$"
+    output `shouldSatisfy` isInfixOf "$__mlfp_closure$direct_call_poly\""
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"__mlfp_closure$direct_call_poly\""
+    validateLLVMAssembly output
+
   it "instantiates direct polymorphic zero-arity expressions used through type application" $ do
     output <- requireRight (renderBackendProgramLLVM directPolymorphicZeroArityProgram)
 
@@ -1953,6 +1961,56 @@ localPolymorphicClosureEntryExpr =
             ( BackendClosure
                 { backendExprType = BTArrow (BTVar "a") (BTVar "a"),
                   backendClosureEntryName = "__mlfp_closure$local_poly",
+                  backendClosureCaptures = [],
+                  backendClosureParams = [("y", BTVar "a")],
+                  backendClosureBody = BackendVar (BTVar "a") "y"
+                }
+            )
+            (BackendClosureCall (BTVar "a") (BackendVar (BTArrow (BTVar "a") (BTVar "a")) "f") [BackendVar (BTVar "a") "x"])
+        )
+    )
+
+directPolymorphicClosureCallProgram :: BackendProgram
+directPolymorphicClosureCallProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          (BackendTyApp (BTArrow intTy intTy) directPolymorphicClosureCallExpr intTy)
+                          (intLit 3),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+directPolymorphicClosureCallExpr :: BackendExpr
+directPolymorphicClosureCallExpr =
+  BackendTyAbs
+    localPolymorphicClosureEntryTy
+    "a"
+    Nothing
+    ( BackendLam
+        (BTArrow (BTVar "a") (BTVar "a"))
+        "x"
+        (BTVar "a")
+        ( BackendLet
+            (BTVar "a")
+            "f"
+            (BTArrow (BTVar "a") (BTVar "a"))
+            ( BackendClosure
+                { backendExprType = BTArrow (BTVar "a") (BTVar "a"),
+                  backendClosureEntryName = "__mlfp_closure$direct_call_poly",
                   backendClosureCaptures = [],
                   backendClosureParams = [("y", BTVar "a")],
                   backendClosureBody = BackendVar (BTVar "a") "y"

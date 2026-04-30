@@ -3272,7 +3272,8 @@ lowerLocalFunctionCall env callEnv context name localFunction typeArgs args = do
 
 lowerDirectFunctionCall :: ProgramEnv -> ExprEnv -> String -> FunctionForm -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerDirectFunctionCall env exprEnv context form0 typeArgs args = do
-  form <- instantiateFunctionFormM context form0 typeArgs args
+  (resolvedTypeArgs, form1) <- instantiateFunctionFormWithTypeArgsM context form0 typeArgs args
+  let form = qualifyInstantiatedClosureEntries "__mlfp_direct_typeapp" resolvedTypeArgs form1
   bodyEnv <- bindCallArguments env exprEnv exprEnv context False "lambda" form args
   lowerExpr env bodyEnv context (ffBody form)
 
