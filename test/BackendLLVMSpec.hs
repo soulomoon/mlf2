@@ -1185,6 +1185,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "routes over-applied raw function-pointer results through indirect calls" $ do
+    output <- requireRight (renderBackendProgramLLVM rawReturnedFunctionPointerCallProgram)
+
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.call."
+    output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.call."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
   it "rejects unknown base types" $ do
     renderBackendProgramLLVM unknownBaseProgram
       `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
@@ -4397,6 +4405,74 @@ capturedFunctionPointerCallProgram =
                               }
                           )
                           [intLit 41],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+rawReturnedFunctionPointerCallProgram :: BackendProgram
+rawReturnedFunctionPointerCallProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "inc",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr =
+                        BackendLam
+                          { backendExprType = unaryIntTy,
+                            backendParamName = "x",
+                            backendParamType = intTy,
+                            backendBody = BackendVar intTy "x"
+                          },
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "idRaw",
+                      backendBindingType = BTArrow unaryIntTy (BTArrow intTy unaryIntTy),
+                      backendBindingExpr =
+                        BackendLam
+                          { backendExprType = BTArrow unaryIntTy (BTArrow intTy unaryIntTy),
+                            backendParamName = "$evidence_f",
+                            backendParamType = unaryIntTy,
+                            backendBody =
+                              BackendLam
+                                { backendExprType = BTArrow intTy unaryIntTy,
+                                  backendParamName = "ignored",
+                                  backendParamType = intTy,
+                                  backendBody =
+                                    BackendLet
+                                      unaryIntTy
+                                      "dummy"
+                                      intTy
+                                      (intLit 0)
+                                      (BackendVar unaryIntTy "$evidence_f")
+                                }
+                          },
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          ( BackendApp
+                              unaryIntTy
+                              ( BackendApp
+                                  (BTArrow intTy unaryIntTy)
+                                  (BackendVar (BTArrow unaryIntTy (BTArrow intTy unaryIntTy)) "idRaw")
+                                  (BackendVar unaryIntTy "inc")
+                              )
+                              (intLit 0)
+                          )
+                          (intLit 41),
                       backendBindingExportedAsMain = True
                     }
                 ]
