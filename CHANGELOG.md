@@ -32,6 +32,9 @@
 - Fixed closure conversion and LLVM lowering for type-abstracted closure-valued
   globals and nested `let` aliases of closure parameters, keeping both on the
   explicit closure-call ABI instead of the raw function-pointer path.
+- Fixed backend closure-value classification for case alternatives so
+  constructor pattern binders shadow outer closure locals before let aliases are
+  classified as closure-valued.
 - Supported expected-type resolution for nullary overloaded `.mlfp` methods.
   Associated values such as `mempty : a` now resolve from an explicit or
   propagated expected source type while bare uses without such evidence still

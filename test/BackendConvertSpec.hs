@@ -788,6 +788,16 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr useBinding `shouldSatisfy` containsBackendApp
     backendBindingExpr useBinding `shouldNotSatisfy` containsBackendClosureCall
 
+  it "clears shadowed closure locals when classifying case pattern results" $ do
+    checked <- requireChecked shadowedCaseClosureLocalProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    useBinding <- requireBinding "Main__use" backend
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendCase
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendApp
+    backendBindingExpr useBinding `shouldNotSatisfy` containsBackendClosureCall
+
   it "rejects closure-valued constructor fields until ADT fields are closure-aware" $ do
     checked <- requireChecked closureValuedConstructorFieldProgram
 
@@ -1287,6 +1297,22 @@ shadowedClosureLocalProgram =
       "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
       "    let h : Int -> Int = let f : Int -> Int = id in f in",
       "    h 0;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
+      "}"
+    ]
+
+shadowedCaseClosureLocalProgram :: String
+shadowedCaseClosureLocalProgram =
+  unlines
+    [ "module Main export (FnBox(..), main) {",
+      "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
+      "  def id : Int -> Int = \\(x : Int) x;",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "    let g : Int -> Int = case FnBox id of { FnBox f -> f } in",
+      "    g 0;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
       "    let f : Int -> Int = \\(x : Int) captured in",

@@ -2091,8 +2091,26 @@ backendExprIsClosureValue context scope =
               }
        in backendExprIsClosureValue context bodyScope body
     BackendCase {backendAlternatives = alternatives} ->
-      all (backendExprIsClosureValue context scope . backendAltBody) (NE.toList alternatives)
+      all alternativeIsClosureValue (NE.toList alternatives)
     _ -> False
+  where
+    alternativeIsClosureValue alternative =
+      backendExprIsClosureValue
+        context
+        (scopeWithoutPatternBinders (backendAltPattern alternative))
+        (backendAltBody alternative)
+
+    scopeWithoutPatternBinders pattern0 =
+      scope
+        { closureScopeLocals =
+            closureScopeLocals scope `Set.difference` backendPatternBinders pattern0
+        }
+
+backendPatternBinders :: BackendPattern -> Set.Set String
+backendPatternBinders =
+  \case
+    BackendDefaultPattern -> Set.empty
+    BackendConstructorPattern _ binders -> Set.fromList binders
 
 isClosureHeadTerm :: ConvertContext -> ClosureScope -> ElabTerm -> Bool
 isClosureHeadTerm context scope term =
