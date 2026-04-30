@@ -1422,7 +1422,7 @@ aliasedClosureValueArguments context scope bindingTy term =
     (paramTys, _) = splitBackendArrows valueTy
     (params, body) = collectLeadingLams (length paramTys) term
     exposedCount = length paramTys - length params
-    (headTerm, suppliedArgs) = collectApps body
+    (headTerm, suppliedArgs) = collectAliasedApps body
     suppliedCount = length suppliedArgs
 
 lookupClosureValueArgumentDemand :: ConvertContext -> ClosureScope -> String -> Set.Set Int
@@ -4322,6 +4322,30 @@ collectApps =
       case term of
         EApp fun arg -> go (arg : args) fun
         other -> (other, args)
+
+collectAliasedApps :: ElabTerm -> (ElabTerm, [ElabTerm])
+collectAliasedApps =
+  go Set.empty
+  where
+    go seen term =
+      let (headTerm, args) = collectApps (stripAdministrativeTermWrappers term)
+          (resolvedHead, aliasArgs) = resolveHead seen headTerm
+       in (resolvedHead, aliasArgs ++ args)
+
+    resolveHead seen term =
+      case stripAdministrativeTermWrappers term of
+        ELet name _ rhs body
+          | Set.notMember name seen ->
+              let (bodyHead, bodyArgs) = go (Set.insert name seen) body
+               in case stripClosureHeadTypeInsts bodyHead of
+                    EVar bodyName
+                      | bodyName == name ->
+                          let (rhsHead, rhsArgs) = go (Set.insert name seen) rhs
+                           in (rhsHead, rhsArgs ++ bodyArgs)
+                    _ ->
+                      (term, [])
+        other ->
+          (other, [])
 
 inferBackendType :: Env -> ElabTerm -> Either BackendConversionError BackendType
 inferBackendType env term =

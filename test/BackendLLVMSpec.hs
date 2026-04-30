@@ -676,6 +676,18 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
     assertNativeProgram sourcePartialApplicationClosureDemandAliasProgram "1"
 
+  it "tracks partial closure-valued argument demand through wrapped aliases" $ do
+    output <-
+      withTempProgram sourcePartialApplicationClosureDemandWrappedAliasProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationClosureDemandWrappedAliasProgram "1"
+
   it "tracks partial closure-valued argument demand for local helpers" $ do
     output <-
       withTempProgram sourcePartialApplicationLocalClosureDemandProgram $ \path ->
@@ -3308,6 +3320,19 @@ sourcePartialApplicationClosureDemandAliasProgram =
       "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
       "  def useAlias : (Int -> Int -> Int) -> Int = use;",
       "  def main : Int = useAlias keepLeft;",
+      "}"
+    ]
+
+sourcePartialApplicationClosureDemandWrappedAliasProgram :: String
+sourcePartialApplicationClosureDemandWrappedAliasProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def useWrapped : (Int -> Int -> Int) -> Int =",
+      "    let f : (Int -> Int -> Int) -> Int = use in f;",
+      "  def main : Int = useWrapped keepLeft;",
       "}"
     ]
 

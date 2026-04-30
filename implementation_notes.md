@@ -31,6 +31,9 @@
 - Generated partial-closure capture and parameter names are freshened against
   visible source binders and globals before packaging, preventing source
   bindings from colliding with backend-generated closure slots.
+- Closure-demand alias analysis looks through simple let-wrapped aliases such
+  as `let f = use in f`, preserving supplied-argument offsets while propagating
+  demanded closure-value parameters.
 - LLVM parity coverage now includes top-level and local partial application
   rows, with `llvm-as`, object-code smoke, and native execution coverage when
   the local LLVM toolchain is available.

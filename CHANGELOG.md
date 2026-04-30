@@ -44,6 +44,8 @@
   entering the closure ABI.
 - Freshened generated partial-closure capture and parameter names against
   in-scope binders so source names cannot collide with backend-generated slots.
+- Propagated closure-demanded argument indices through simple let-wrapped
+  function aliases before backend partial-application packaging.
 - LLVM case lowering now treats closure-valued case results as closure
   pointers, so `BackendClosureCall` can use a case-selected closure callee
   without rejecting the callee's arrow result type. Closure-valued let aliases
