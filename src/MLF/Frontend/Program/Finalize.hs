@@ -35,6 +35,7 @@ import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
     elaborateScopeRuntimeTypes,
+    classInfoForConstraint,
     inferClassArgument,
     lookupEvidenceMethodByClass,
     lowerType,
@@ -44,6 +45,7 @@ import MLF.Frontend.Program.Elaborate
     resolveInstanceInfoByConstraint,
     resolveMethodInstanceInfoByTypeView,
     sourceTypeViewInScope,
+    zeroMethodConstraintCoveredByEvidenceInfo,
   )
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -56,6 +58,8 @@ import MLF.Frontend.Program.Types
     DeferredConstructorCall (..),
     DeferredMethodCall (..),
     DeferredProgramObligation (..),
+    ClassInfo (..),
+    EvidenceInfo (..),
     InstanceInfo (..),
     LoweredBinding (..),
     MethodInfo (..),
@@ -958,7 +962,7 @@ resolveDeferredMethods scope deferredMethods = go
                 filter
                   constraintGround
                   (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue))
-          evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty eagerConstraints
+          evidenceArgs <- resolveConstraintEvidenceTerms scope (deferredMethodLocalEvidence deferred) Set.empty eagerConstraints
           methodHead <- instantiateMethodValue scope methodSubst methodValue
           Right (foldl X.EApp (foldl X.EApp methodHead evidenceArgs) args)
 
@@ -982,6 +986,7 @@ resolveDeferredMethods scope deferredMethods = go
           evidenceArgs <-
             resolveConstraintEvidenceTerms
               scope
+              (deferredMethodLocalEvidence deferred)
               Set.empty
               (nullaryMethodLocalConstraints methodInfo classArgView methodSubst)
           Right (foldl X.EApp evidenceHead evidenceArgs)
@@ -996,7 +1001,7 @@ resolveDeferredMethods scope deferredMethods = go
                 filter
                   constraintGround
                   (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue))
-          evidenceArgs <- resolveConstraintEvidenceTerms scope Set.empty eagerConstraints
+          evidenceArgs <- resolveConstraintEvidenceTerms scope (deferredMethodLocalEvidence deferred) Set.empty eagerConstraints
           methodHead <- instantiateMethodValue scope methodSubst methodValue
           Right (foldl X.EApp methodHead evidenceArgs)
 
@@ -1007,6 +1012,12 @@ resolveDeferredMethods scope deferredMethods = go
           (methodInfoOwnerClassSymbolIdentity methodInfo)
           (typeViewIdentity classArgView)
           (methodName methodInfo)
+          `orElseEvidenceMethod`
+          lookupEvidenceMethod
+            (deferredMethodLocalEvidence deferred)
+            (methodInfoOwnerClassSymbolIdentity methodInfo)
+            (typeViewIdentity classArgView)
+            (methodName methodInfo)
       of
         Just (runtimeName, evidenceTy) ->
           Just
@@ -1019,10 +1030,6 @@ resolveDeferredMethods scope deferredMethods = go
           case deferredMethodEvidence deferred of
             Just evidence -> Just evidence
             _ -> Nothing
-
-    instantiateLocalMethodEvidence scope0 subst DeferredMethodEvidence {deferredMethodEvidenceRuntimeName = runtimeName, deferredMethodEvidenceType = evidenceTy} =
-      foldl X.ETyInst (X.EVar runtimeName)
-        <$> methodForallInstantiations scope0 subst (fst (splitForalls evidenceTy))
 
     nullaryMethodLocalConstraints methodInfo classArgView methodSubst =
       let headVars = freeTypeVarsTypeView classArgView
@@ -1095,28 +1102,33 @@ resolveDeferredMethods scope deferredMethods = go
               (fmap typeViewDisplay subst)
               (zip paramTys argViews)
 
-resolveConstraintEvidenceTerms :: ElaborateScope -> Set (SymbolIdentity, String) -> [ConstraintInfo] -> Either ProgramError [ElabTerm]
-resolveConstraintEvidenceTerms scope seen constraints =
-  concat <$> mapM (resolveConstraintEvidenceTerm scope seen) constraints
+resolveConstraintEvidenceTerms :: ElaborateScope -> [EvidenceInfo] -> Set (SymbolIdentity, String) -> [ConstraintInfo] -> Either ProgramError [ElabTerm]
+resolveConstraintEvidenceTerms scope localEvidence seen constraints =
+  concat <$> mapM (resolveConstraintEvidenceTerm scope localEvidence seen) constraints
 
-resolveConstraintEvidenceTerm :: ElaborateScope -> Set (SymbolIdentity, String) -> ConstraintInfo -> Either ProgramError [ElabTerm]
-resolveConstraintEvidenceTerm scope seen constraint = do
+resolveConstraintEvidenceTerm :: ElaborateScope -> [EvidenceInfo] -> Set (SymbolIdentity, String) -> ConstraintInfo -> Either ProgramError [ElabTerm]
+resolveConstraintEvidenceTerm scope localEvidence seen constraint = do
   let key = (constraintClassSymbol constraint, show (typeViewIdentity (constraintTypeView constraint)))
   if key `Set.member` seen
     then Left (ProgramNoMatchingInstance (constraintDisplayClass constraint) (typeViewDisplay (constraintTypeView constraint)))
     else do
-      (instanceInfo, subst) <- resolveInstanceInfoByConstraint scope constraint
-      let seen' = Set.insert key seen
-          methodValues = ordinaryInstanceMethods instanceInfo
-      if null methodValues
-        then do
-          _ <-
-            resolveConstraintEvidenceTerms
-              scope
-              seen'
-              (map (applyConstraintInfoSubst subst) (instanceConstraintInfos instanceInfo))
-          Right []
-        else mapM (materializeMethodEvidence (freeTypeVarsTypeView (constraintTypeView constraint)) seen' subst) methodValues
+      mbLocalEvidence <- resolveLocalConstraintEvidenceTerms scope localEvidence constraint
+      case mbLocalEvidence of
+        Just evidenceTerms -> Right evidenceTerms
+        Nothing -> do
+          (instanceInfo, subst) <- resolveInstanceInfoByConstraint scope constraint
+          let seen' = Set.insert key seen
+              methodValues = ordinaryInstanceMethods instanceInfo
+          if null methodValues
+            then do
+              _ <-
+                resolveConstraintEvidenceTerms
+                  scope
+                  localEvidence
+                  seen'
+                  (map (applyConstraintInfoSubst subst) (instanceConstraintInfos instanceInfo))
+              Right []
+            else mapM (materializeMethodEvidence (freeTypeVarsTypeView (constraintTypeView constraint)) seen' subst) methodValues
   where
     ordinaryInstanceMethods instanceInfo =
       [valueInfo | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethods instanceInfo)]
@@ -1129,10 +1141,82 @@ resolveConstraintEvidenceTerm scope seen constraint = do
       nestedEvidence <-
         resolveConstraintEvidenceTerms
           scope
+          localEvidence
           seen'
           eagerConstraints
       methodHead <- instantiateMethodValue scope subst valueInfo
       pure (foldl X.EApp methodHead nestedEvidence)
+
+resolveLocalConstraintEvidenceTerms :: ElaborateScope -> [EvidenceInfo] -> ConstraintInfo -> Either ProgramError (Maybe [ElabTerm])
+resolveLocalConstraintEvidenceTerms scope localEvidence constraint =
+  case classInfoForConstraint scope constraint of
+    Nothing -> Right Nothing
+    Just classInfo
+      | Map.null (classMethods classInfo) ->
+          Right $
+            if zeroMethodConstraintCoveredByEvidenceInfo scope constraint
+              || zeroMethodConstraintCoveredByEvidence localEvidence constraint
+              then Just []
+              else Nothing
+      | otherwise -> do
+          let localMethodEvidence =
+                mapM
+                  ( \methodInfo -> do
+                      (runtimeName, evidenceTy) <-
+                        lookupEvidenceMethodByClass
+                          scope
+                          (constraintClassSymbol constraint)
+                          (typeViewIdentity (constraintTypeView constraint))
+                          (methodName methodInfo)
+                          `orElseEvidenceMethod`
+                          lookupEvidenceMethod
+                            localEvidence
+                            (constraintClassSymbol constraint)
+                            (typeViewIdentity (constraintTypeView constraint))
+                            (methodName methodInfo)
+                      pure
+                        DeferredMethodEvidence
+                          { deferredMethodEvidenceClassArg = constraintTypeView constraint,
+                            deferredMethodEvidenceRuntimeName = runtimeName,
+                            deferredMethodEvidenceType = evidenceTy
+                          }
+                  )
+                  (Map.elems (classMethods classInfo))
+          case localMethodEvidence of
+            Nothing -> Right Nothing
+            Just evidence ->
+              Just <$> mapM (instantiateLocalMethodEvidence scope Map.empty) evidence
+
+lookupEvidenceMethod :: [EvidenceInfo] -> SymbolIdentity -> SrcType -> String -> Maybe (String, SrcType)
+lookupEvidenceMethod evidenceInfos classIdentity headIdentityTy methodName0 =
+  case
+    [ methodEvidence
+      | evidence <- evidenceInfos,
+        evidenceClassSymbol evidence == classIdentity,
+        evidenceTypeIdentity evidence == headIdentityTy,
+        Just methodEvidence <- [Map.lookup methodName0 (evidenceMethods evidence)]
+    ]
+  of
+    methodEvidence : _ -> Just methodEvidence
+    [] -> Nothing
+
+orElseEvidenceMethod :: Maybe (String, SrcType) -> Maybe (String, SrcType) -> Maybe (String, SrcType)
+orElseEvidenceMethod (Just evidence) _ = Just evidence
+orElseEvidenceMethod Nothing fallback = fallback
+
+zeroMethodConstraintCoveredByEvidence :: [EvidenceInfo] -> ConstraintInfo -> Bool
+zeroMethodConstraintCoveredByEvidence evidenceInfos constraint =
+  any
+    ( \evidence ->
+        evidenceClassSymbol evidence == constraintClassSymbol constraint
+          && evidenceTypeIdentity evidence == typeViewIdentity (constraintTypeView constraint)
+    )
+    evidenceInfos
+
+instantiateLocalMethodEvidence :: ElaborateScope -> Map String TypeView -> DeferredMethodEvidence -> Either ProgramError ElabTerm
+instantiateLocalMethodEvidence scope subst DeferredMethodEvidence {deferredMethodEvidenceRuntimeName = runtimeName, deferredMethodEvidenceType = evidenceTy} =
+  foldl X.ETyInst (X.EVar runtimeName)
+    <$> methodForallInstantiations scope subst (fst (splitForalls evidenceTy))
 
 constraintDeterminedByTypeVars :: Set String -> ConstraintInfo -> Bool
 constraintDeterminedByTypeVars typeVars constraint =

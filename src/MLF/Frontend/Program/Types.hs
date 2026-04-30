@@ -580,7 +580,8 @@ data DeferredMethodCall = DeferredMethodCall
     deferredMethodFullArity :: Int,
     deferredMethodName :: P.MethodName,
     deferredMethodExpectedResult :: Maybe TypeView,
-    deferredMethodEvidence :: Maybe DeferredMethodEvidence
+    deferredMethodEvidence :: Maybe DeferredMethodEvidence,
+    deferredMethodLocalEvidence :: [EvidenceInfo]
   }
   deriving (Eq, Show)
 

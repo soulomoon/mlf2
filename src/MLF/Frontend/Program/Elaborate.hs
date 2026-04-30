@@ -15,6 +15,7 @@ module MLF.Frontend.Program.Elaborate
     lowerResolvedConstrainedExprBinding,
     lowerExprBinding,
     inferClassArgument,
+    classInfoForConstraint,
     lowerType,
     sourceTypeViewInScope,
     matchTypes,
@@ -27,6 +28,7 @@ module MLF.Frontend.Program.Elaborate
     resolveInstanceInfoByConstraint,
     resolveMethodInstanceInfoWithSubst,
     resolveMethodInstanceInfoByTypeView,
+    zeroMethodConstraintCoveredByEvidenceInfo,
     lookupEvidenceMethodByClass,
   )
 where
@@ -1876,7 +1878,8 @@ deferMethodCall scope methodInfo fullArity placeholderSourceTy = do
             deferredMethodFullArity = fullArity,
             deferredMethodName = methodName methodInfo,
             deferredMethodExpectedResult = Nothing,
-            deferredMethodEvidence = Nothing
+            deferredMethodEvidence = Nothing,
+            deferredMethodLocalEvidence = esEvidence scope
           }
   registerDeferredObligation placeholder placeholderTy (DeferredMethod deferred)
   pure placeholder
@@ -1894,7 +1897,8 @@ deferNullaryMethodCall scope methodInfo expectedView = do
             deferredMethodFullArity = 0,
             deferredMethodName = methodName methodInfo,
             deferredMethodExpectedResult = Just expectedView,
-            deferredMethodEvidence = localEvidence
+            deferredMethodEvidence = localEvidence,
+            deferredMethodLocalEvidence = esEvidence scope
           }
   registerDeferredObligation placeholder placeholderTy (DeferredMethod deferred)
   pure placeholder

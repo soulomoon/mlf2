@@ -337,6 +337,28 @@ emlfBoundaryMatrix =
         )
         ExpectCheckSuccess
     , ProgramMatrixCase
+        "checks generic constrained nullary overloaded method with polymorphic method-local evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Pick, Pair(..), eq, pick, picked, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Pair a b ="
+                , "      Pair : a -> b -> Pair a b;"
+                , ""
+                , "  class Pick a {"
+                , "    pick : Eq b => Pair a b;"
+                , "  }"
+                , ""
+                , "  def picked : (Pick a, Eq b) => Pair a b = pick;"
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
+    , ProgramMatrixCase
         "runs nullary overloaded method from expected method argument"
         ( InlineProgram $
             unlines
