@@ -2093,6 +2093,41 @@ backendTypeKey :: BackendType -> String
 backendTypeKey =
   ("t" ++) . intercalate "_" . map (flip showHex "" . ord) . show
 
+lowerValueKindKey :: LowerValueKind -> String
+lowerValueKindKey =
+  \case
+    LowerRuntimeValue -> "runtime"
+    LowerClosureRecord -> "closure"
+    LowerFunctionPointer -> "function"
+
+returnedPartialClosureEntryName :: LowerValueKind -> BackendType -> Int -> [LowerValueKind] -> BackendType -> String
+returnedPartialClosureEntryName calleeKind calleeTy suppliedCount suppliedKinds resultTy =
+  intercalate
+    "$"
+    [ "__mlfp_returned_partial",
+      lowerValueKindKey calleeKind,
+      show suppliedCount,
+      intercalate "_" (map lowerValueKindKey suppliedKinds),
+      backendTypeKey calleeTy,
+      backendTypeKey resultTy
+    ]
+
+returnedPartialCalleeCaptureName :: String
+returnedPartialCalleeCaptureName =
+  "__mlfp_returned_partial_callee"
+
+returnedPartialSuppliedArgName :: Int -> String
+returnedPartialSuppliedArgName index0 =
+  "__mlfp_returned_partial_supplied" ++ show index0
+
+returnedPartialParamName :: Int -> String
+returnedPartialParamName index0 =
+  "__mlfp_returned_partial_param" ++ show index0
+
+functionTypeFromParts :: [BackendType] -> BackendType -> BackendType
+functionTypeFromParts params returnTy =
+  foldr BTArrow returnTy params
+
 lowerMonomorphicBinding :: ProgramEnv -> BindingInfo -> Either BackendLLVMError LLVMFunction
 lowerMonomorphicBinding env binding =
   lowerFunction env (biName binding) False (biForm binding)
@@ -2234,6 +2269,7 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
         Just entries -> entries
         Nothing ->
           collectAppliedLocalClosureEntries
+            ++ collectReturnedPartialClosureEntries
             ++ collectClosureEntriesInExpr base localForms valueKinds fun
             ++ collectClosureEntriesInExpr base localForms valueKinds arg
     BackendLet _ name bindingTy rhs body ->
@@ -2242,17 +2278,11 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
         rhsEntries =
           case functionFormFromExpected bindingTy rhs of
             form
-              | null (ffTypeBinders form),
-                not (null (ffParams form)) ->
-                  collectClosureEntriesInFormWithParamKinds
-                    base
-                    localForms
-                    ( Map.fromList
-                        [ (paramName, localFunctionBodyFallbackParameterValueKind paramName paramTy)
-                        | (paramName, paramTy) <- ffParams form
-                        ]
-                    )
-                    form
+              | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+                  -- Function body entries can depend on whether arguments arrive
+                  -- as raw function pointers or closure records, so collect them
+                  -- from call sites where supplied argument kinds are known.
+                  []
             _ ->
               collectClosureEntriesInExpr base localForms valueKinds rhs
         bodyLocalForms = collectLetLocalForm localForms name bindingTy rhs
@@ -2298,6 +2328,104 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
           | Just form <- Map.lookup name localForms ->
               collectInstantiatedLocalClosureEntries name form typeArgs args
         _ -> []
+
+    collectReturnedPartialClosureEntries =
+      case collectCall expr of
+        Just (headExpr, typeArgs, args)
+          | Just form <- returnedPartialHeadForm headExpr ->
+              case instantiateFunctionFormWithTypeArgs "returned partial closure entry collection" form typeArgs args of
+                Right (_, instantiated) ->
+                  returnedPartialEntriesForExtraArgs (ffReturnType instantiated) (drop (length (ffParams instantiated)) args) (backendExprType expr)
+                Left _ -> []
+        _ -> []
+
+    returnedPartialHeadForm =
+      \case
+        BackendVar _ name
+          | Just form <- Map.lookup name localForms ->
+              Just form
+          | Just binding <- Map.lookup name (pbBindings base) ->
+              Just (biForm binding)
+        headExpr@BackendLam {} ->
+          Just (functionFormFromExpr headExpr)
+        headExpr@BackendTyAbs {} ->
+          Just (functionFormFromExpr headExpr)
+        _ ->
+          Nothing
+
+    returnedPartialEntriesForExtraArgs calleeTy args resultTy =
+      let (paramTys, returnTy) = collectArrowsType calleeTy
+       in case compare (length args) (length paramTys) of
+            LT
+              | not (null args),
+                not (null paramTys) ->
+                  returnedPartialEntries calleeTy args resultTy
+            GT
+              | isFunctionLikeBackendType returnTy ->
+                  returnedPartialEntriesForExtraArgs returnTy (drop (length paramTys) args) resultTy
+            _ ->
+              []
+
+    returnedPartialEntries calleeTy args resultTy =
+      [ returnedPartialEntry calleeKind calleeTy suppliedParamTys remainingParamTys finalReturnTy suppliedKinds resultTy
+      | not (null args),
+        length args < length paramTys,
+        alphaEqBackendType resultTy expectedResultTy,
+        calleeKind <- LowerClosureRecord : [LowerFunctionPointer | isFirstOrderFunctionPointerType calleeTy]
+      ]
+      where
+        (paramTys, finalReturnTy) = collectArrowsType calleeTy
+        suppliedCount = length args
+        suppliedParamTys = take suppliedCount paramTys
+        remainingParamTys = drop suppliedCount paramTys
+        expectedResultTy = functionTypeFromParts remainingParamTys finalReturnTy
+        suppliedKinds =
+          [ argumentValueKind localForms valueKinds (returnedPartialSuppliedArgName index0) paramTy arg
+          | (index0, (paramTy, arg)) <- zip [0 :: Int ..] (zip suppliedParamTys args)
+          ]
+
+    returnedPartialEntry calleeKind calleeTy suppliedParamTys remainingParamTys finalReturnTy suppliedKinds resultTy =
+      ClosureEntry
+        { ceFunctionType = resultTy,
+          ceEntryName = returnedPartialClosureEntryName calleeKind calleeTy (length suppliedParamTys) suppliedKinds resultTy,
+          ceCaptures =
+            ClosureCaptureSlot returnedPartialCalleeCaptureName calleeTy calleeKind
+              : [ ClosureCaptureSlot (returnedPartialSuppliedArgName index0) paramTy suppliedKind
+                  | (index0, (paramTy, suppliedKind)) <- zip [0 :: Int ..] (zip suppliedParamTys suppliedKinds)
+                ],
+          ceParams = remainingParams,
+          ceBody = returnedPartialBody calleeKind calleeTy suppliedParamTys remainingParams finalReturnTy
+        }
+      where
+        remainingParams =
+          [(returnedPartialParamName index0, paramTy) | (index0, paramTy) <- zip [0 :: Int ..] remainingParamTys]
+
+    returnedPartialBody calleeKind calleeTy suppliedParamTys remainingParams finalReturnTy =
+      case calleeKind of
+        LowerClosureRecord ->
+          BackendClosureCall finalReturnTy calleeExpr callArgs
+        LowerFunctionPointer ->
+          applyReturnedPartialArgs calleeExpr calleeTy callArgs
+        LowerRuntimeValue ->
+          BackendVar finalReturnTy "__mlfp_unreachable_returned_partial"
+      where
+        calleeExpr = BackendVar calleeTy returnedPartialCalleeCaptureName
+        suppliedArgs =
+          [ BackendVar paramTy (returnedPartialSuppliedArgName index0)
+          | (index0, paramTy) <- zip [0 :: Int ..] suppliedParamTys
+          ]
+        remainingArgs =
+          [BackendVar paramTy paramName | (paramName, paramTy) <- remainingParams]
+        callArgs = suppliedArgs ++ remainingArgs
+
+    applyReturnedPartialArgs fun _ [] =
+      fun
+    applyReturnedPartialArgs fun funTy (arg : rest) =
+      case funTy of
+        BTArrow _ resultTy ->
+          applyReturnedPartialArgs (BackendApp resultTy fun arg) resultTy rest
+        _ ->
+          fun
 
     collectAdministrativeCallEntries =
       case collectCall expr of
@@ -2345,7 +2473,7 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
     collectLetLocalForm localForms0 name bindingTy rhs =
       case functionFormFromExpected bindingTy rhs of
         form
-          | not (null (ffTypeBinders form)) ->
+          | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
               Map.insert name form localForms0
         _ ->
           Map.delete name localForms0
@@ -3255,7 +3383,32 @@ lowerClosureValueCall env exprEnv context resultTy callee typeArgs args = do
   lowerClosurePointerValueCall env exprEnv context resultTy callee {lvBackendType = calleeTy} args
 
 lowerReturnedFunctionValueCall :: ProgramEnv -> ExprEnv -> String -> String -> BackendType -> LowerValue -> [BackendExpr] -> LowerM LowerValue
-lowerReturnedFunctionValueCall env exprEnv context name resultTy callee args =
+lowerReturnedFunctionValueCall env exprEnv context name resultTy callee args = do
+  when (lvValueKind callee == LowerRuntimeValue) $
+    liftEither (BackendLLVMUnsupportedExpression context ("returned value is not callable: " ++ show (lvBackendType callee)))
+  let (paramTys, returnTy) = collectArrowsType (lvBackendType callee)
+  when (null paramTys) $
+    liftEither (BackendLLVMUnsupportedExpression context ("returned value is not callable: " ++ show (lvBackendType callee)))
+  case compare (length args) (length paramTys) of
+    LT
+      | null args -> do
+          unless (alphaEqBackendType resultTy (lvBackendType callee)) $
+            liftEither (BackendLLVMInternalError ("returned function value type mismatch at " ++ context))
+          pure callee {lvBackendType = resultTy}
+      | otherwise ->
+          lowerReturnedPartialClosureValue env exprEnv context resultTy callee paramTys returnTy args
+    EQ ->
+      lowerSaturatedReturnedFunctionValueCall env exprEnv context name resultTy callee args
+    GT
+      | isFunctionLikeBackendType returnTy -> do
+          let (directArgs, remainingArgs) = splitAt (length paramTys) args
+          saturated <- lowerSaturatedReturnedFunctionValueCall env exprEnv context name returnTy callee directArgs
+          lowerReturnedFunctionValueCall env exprEnv context name resultTy saturated remainingArgs
+      | otherwise ->
+          liftEither (BackendLLVMArityMismatch name (length paramTys) (length args))
+
+lowerSaturatedReturnedFunctionValueCall :: ProgramEnv -> ExprEnv -> String -> String -> BackendType -> LowerValue -> [BackendExpr] -> LowerM LowerValue
+lowerSaturatedReturnedFunctionValueCall env exprEnv context name resultTy callee args =
   case lvValueKind callee of
     LowerClosureRecord ->
       lowerClosurePointerValueCall env exprEnv context resultTy callee args
@@ -3263,6 +3416,44 @@ lowerReturnedFunctionValueCall env exprEnv context name resultTy callee args =
       lowerIndirectValueCall env exprEnv context name callee [] args
     LowerRuntimeValue ->
       liftEither (BackendLLVMUnsupportedExpression context ("returned value is not callable: " ++ show (lvBackendType callee)))
+
+lowerReturnedPartialClosureValue :: ProgramEnv -> ExprEnv -> String -> BackendType -> LowerValue -> [BackendType] -> BackendType -> [BackendExpr] -> LowerM LowerValue
+lowerReturnedPartialClosureValue env exprEnv context resultTy callee paramTys returnTy args = do
+  unless (lvLLVMType callee == LLVMPtr) $
+    liftEither (BackendLLVMUnsupportedExpression context ("returned partial callee is not a pointer: " ++ show (lvBackendType callee)))
+  let suppliedCount = length args
+      suppliedParamTys = take suppliedCount paramTys
+      remainingParamTys = drop suppliedCount paramTys
+      expectedResultTy = functionTypeFromParts remainingParamTys returnTy
+  unless (suppliedCount < length paramTys) $
+    liftEither (BackendLLVMArityMismatch "returned partial" (length paramTys) suppliedCount)
+  unless (alphaEqBackendType resultTy expectedResultTy) $
+    liftEither (BackendLLVMInternalError ("returned partial result mismatch at " ++ context))
+  suppliedValues <- zipWithM lowerPartialArg (zip [0 :: Int ..] suppliedParamTys) args
+  let suppliedKinds = map lvValueKind suppliedValues
+      entryName = returnedPartialClosureEntryName (lvValueKind callee) (lvBackendType callee) suppliedCount suppliedKinds resultTy
+  envPointer <- lowerReturnedPartialEnvironment suppliedParamTys suppliedValues
+  closurePointer <- emitMalloc env context 16
+  codePtrField <- emitGep "closure.code.ptr" closurePointer 0
+  emitStore LLVMPtr (LLVMGlobalRef LLVMPtr entryName) codePtrField
+  envPtrField <- emitGep "closure.env.ptr" closurePointer 8
+  emitStore LLVMPtr envPointer envPtrField
+  pure (LowerValue resultTy LLVMPtr closurePointer LowerClosureRecord)
+  where
+    lowerPartialArg (index0, paramTy) arg =
+      lowerExprForIndirectArgument env exprEnv context (returnedPartialSuppliedArgName index0, paramTy) arg
+
+    lowerReturnedPartialEnvironment suppliedParamTys suppliedValues = do
+      envPointer <- emitMalloc env context (8 * (1 + length suppliedValues))
+      storeCapture envPointer 0 (lvBackendType callee, callee)
+      zipWithM_ (storeCapture envPointer) [1 :: Int ..] (zip suppliedParamTys suppliedValues)
+      pure envPointer
+
+    storeCapture envPointer index0 (captureTy, value) = do
+      expectedTy <- lowerClosureStoredTypeM env context captureTy
+      requireLLVMType context returnedPartialCalleeCaptureName expectedTy value
+      fieldPtr <- emitGep "closure.env.field.ptr" envPointer (8 * index0)
+      emitStore expectedTy (lvOperand value) fieldPtr
 
 lowerClosureCallee :: ProgramEnv -> ExprEnv -> String -> BackendExpr -> LowerM LowerValue
 lowerClosureCallee env exprEnv context =
@@ -4539,12 +4730,6 @@ localFunctionParameterValueKind :: String -> BackendType -> LowerValueKind
 localFunctionParameterValueKind name ty
   | isEvidenceParameter name ty = LowerFunctionPointer
   | isFirstOrderFunctionPointerType ty = LowerFunctionPointer
-  | isClosureRuntimeValueType ty = LowerClosureRecord
-  | otherwise = LowerRuntimeValue
-
-localFunctionBodyFallbackParameterValueKind :: String -> BackendType -> LowerValueKind
-localFunctionBodyFallbackParameterValueKind name ty
-  | isEvidenceParameter name ty = LowerFunctionPointer
   | isClosureRuntimeValueType ty = LowerClosureRecord
   | otherwise = LowerRuntimeValue
 
