@@ -250,6 +250,7 @@ data BackendValidationError
   | BackendDuplicateClosureParameter String
   | BackendClosureCaptureTypeMismatch String BackendType BackendType
   | BackendClosureExpectedFunction String BackendType
+  | BackendClosureParameterArityMismatch String Int Int
   | BackendClosureTypeMismatch String BackendType BackendType
   | BackendClosureCallExpectedFunction BackendType
   | BackendClosureCallExpectedClosureValue BackendType
@@ -747,8 +748,6 @@ validateBackendExprWith mbContext expr =
         Nothing ->
           Left (BackendUnrollExpectedRecursive (backendExprType payload))
     BackendClosure resultTy entryName captures params body -> do
-      unless (isBackendArrowType resultTy) $
-        Left (BackendClosureExpectedFunction entryName resultTy)
       requireUnique BackendDuplicateClosureCapture (map backendClosureCaptureName captures)
       requireUnique BackendDuplicateClosureParameter (map fst params)
       requireUnique BackendDuplicateClosureParameter (map backendClosureCaptureName captures ++ map fst params)
@@ -764,9 +763,7 @@ validateBackendExprWith mbContext expr =
               bodyContext
               params
       validateBackendExprWith bodyParamContext body
-      let expected = foldr BTArrow (backendExprType body) (map snd params)
-      unless (alphaEqBackendType resultTy expected) $
-        Left (BackendClosureTypeMismatch entryName resultTy expected)
+      validateBackendClosureFunctionType entryName resultTy params (backendExprType body)
     BackendClosureCall resultTy fun args -> do
       validateBackendExprWith mbContext fun
       mapM_ (validateBackendExprWith mbContext) args
@@ -779,6 +776,18 @@ validateBackendClosureCapture mbContext capture = do
     Left (BackendClosureCaptureTypeMismatch (backendClosureCaptureName capture) (backendClosureCaptureType capture) (backendExprType expr))
   where
     expr = backendClosureCaptureExpr capture
+
+validateBackendClosureFunctionType :: String -> BackendType -> [(String, BackendType)] -> BackendType -> Either BackendValidationError ()
+validateBackendClosureFunctionType entryName resultTy params bodyTy =
+  case collectClosureCallType resultTy of
+    Nothing ->
+      Left (BackendClosureExpectedFunction entryName resultTy)
+    Just (declaredParamTys, declaredResultTy) -> do
+      unless (length declaredParamTys == length params) $
+        Left (BackendClosureParameterArityMismatch entryName (length params) (length declaredParamTys))
+      let expected = foldr BTArrow bodyTy (map snd params)
+      unless (and (zipWith alphaEqBackendType declaredParamTys (map snd params)) && alphaEqBackendType declaredResultTy bodyTy) $
+        Left (BackendClosureTypeMismatch entryName resultTy expected)
 
 backendAppClosureHead :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
 backendAppClosureHead =
@@ -885,12 +894,6 @@ collectClosureCallType =
         other
           | null params -> Nothing
           | otherwise -> Just (params, other)
-
-isBackendArrowType :: BackendType -> Bool
-isBackendArrowType =
-  \case
-    BTArrow {} -> True
-    _ -> False
 
 validateBackendVariable :: Maybe BackendValidationContext -> String -> BackendType -> Either BackendValidationError ()
 validateBackendVariable Nothing _ _ =
