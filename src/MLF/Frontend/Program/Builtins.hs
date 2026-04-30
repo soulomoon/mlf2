@@ -7,6 +7,7 @@ module MLF.Frontend.Program.Builtins
     builtinTypeSymbol,
     builtinValueSymbol,
     builtinValues,
+    builtinOpaqueValueNames,
     builtinOpaqueTypes,
     builtinOpaqueTypeNames,
     isBuiltinTypeName,
@@ -115,6 +116,14 @@ builtinOrdinary name ty =
         valueOriginModule = builtinModuleName
       }
   )
+
+builtinOpaqueValueNames :: Set String
+builtinOpaqueValueNames =
+  Set.fromList
+    [ runtimeName
+      | OrdinaryValue {valueRuntimeName = runtimeName, valueType = ty} <- Map.elems builtinValues,
+        srcTypeMentionsOpaqueBuiltin ty
+    ]
 
 builtinOpaqueTypes :: Map String DataInfo
 builtinOpaqueTypes =

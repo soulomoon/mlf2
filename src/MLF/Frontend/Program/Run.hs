@@ -68,15 +68,21 @@ rejectOpaqueMain checked =
       | Builtins.srcTypeMentionsOpaqueBuiltin ty ->
           Left (ProgramPipelineError "run-program does not support IO main values yet")
     _ ->
-      case reachableOpaqueRuntimeBindings checked of
-        [] -> Right ()
-        bindings ->
+      case reachableOpaqueRuntimeDependencies checked of
+        [] ->
+          Right ()
+        dependencies ->
           Left
             ( ProgramPipelineError
                 ( "run-program does not support IO dependencies yet: "
-                    ++ intercalate ", " (map checkedBindingName bindings)
+                    ++ intercalate ", " dependencies
                 )
             )
+
+reachableOpaqueRuntimeDependencies :: CheckedProgram -> [String]
+reachableOpaqueRuntimeDependencies checked =
+  map checkedBindingName (reachableOpaqueRuntimeBindings checked)
+    ++ Set.toAscList (reachableOpaquePrimitiveNames checked)
 
 reachableRuntimeBindings :: CheckedProgram -> [CheckedBinding]
 reachableRuntimeBindings checked =
@@ -95,6 +101,20 @@ reachableOpaqueRuntimeBindings checked =
       checkedBindingName binding `Set.member` reachableNames,
       checkedBindingMentionsOpaqueBuiltin binding
   ]
+  where
+    reachableNames = reachableBindingNames checked (Set.singleton (checkedProgramMain checked))
+
+reachableOpaquePrimitiveNames :: CheckedProgram -> Set.Set String
+reachableOpaquePrimitiveNames checked =
+  reachableFreeRuntimeNames checked `Set.intersection` Builtins.builtinOpaqueValueNames
+
+reachableFreeRuntimeNames :: CheckedProgram -> Set.Set String
+reachableFreeRuntimeNames checked =
+  Set.unions
+    [ freeTermVariables (checkedBindingTerm binding)
+      | binding <- allCheckedBindings checked,
+        checkedBindingName binding `Set.member` reachableNames
+    ]
   where
     reachableNames = reachableBindingNames checked (Set.singleton (checkedProgramMain checked))
 

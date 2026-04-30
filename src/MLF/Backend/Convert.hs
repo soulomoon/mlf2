@@ -230,7 +230,8 @@ referencedOpaqueBuiltinBindings checked =
   ]
   where
     opaqueNames =
-      Set.fromList
+      Builtins.builtinOpaqueValueNames
+        `Set.union` Set.fromList
         [ checkedBindingName binding
           | binding <- allCheckedBindings checked,
             checkedBindingMentionsOpaqueBuiltin binding

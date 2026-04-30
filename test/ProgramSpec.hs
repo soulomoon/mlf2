@@ -491,6 +491,25 @@ spec = do
                 )
                 (const False)
 
+        it "rejects running pure mains that directly call opaque primitives" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : Unit = (\\(_action : IO Unit) Unit) (__io_pure Unit);"
+                        , "}"
+                        ]
+            runLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                ( \diagnostic ->
+                    all
+                        (`isInfixOf` renderProgramDiagnostic diagnostic)
+                        [ "run-program does not support IO dependencies yet"
+                        , "__io_pure"
+                        ]
+                )
+                (const False)
+
         it "rejects a user module named Prelude when the built-in Prelude is active" $ do
             located <-
                 requireLocated $
