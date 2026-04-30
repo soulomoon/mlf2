@@ -2,7 +2,7 @@
 
 module BackendLLVMSpec (spec) where
 
-import Control.Monad (when)
+import Control.Monad (forM_, when)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
@@ -57,6 +57,45 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
     output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
     validateLLVMAssembly output
+
+  describe "IO backend contract" $ do
+    it "rejects checked main : IO Unit before LLVM lowering" $ do
+      result <- emitBackendSource ioPureUnitMainProgram
+
+      result `shouldFailWithAll` backendIOUnsupportedFragments
+
+    it "rejects primitive IO operations without emitting LLVM" $
+      forM_
+        [ ("putStrLn", ioPutStrLnMainProgram),
+          ("direct __io_pure/__io_bind", ioDirectPrimitiveMainProgram)
+        ]
+        ( \(_label, programText) -> do
+            result <- emitBackendSource programText
+            result `shouldFailWithAll` backendIOUnsupportedFragments
+        )
+
+    it "rejects pure mains that depend on IO-typed helpers" $ do
+      result <- emitBackendSource pureMainIODependencyProgram
+
+      result
+        `shouldFailWithAll` [ "IO dependencies are not supported by backend conversion yet",
+                              "Main__main -> Main__discard"
+                            ]
+
+    it "rejects pure mains that directly reference opaque IO primitives" $ do
+      result <- emitBackendSource pureMainDirectIOPrimitiveProgram
+
+      result
+        `shouldFailWithAll` [ "IO dependencies are not supported by backend conversion yet",
+                              "Main__main -> __io_pure"
+                            ]
+
+    it "accepts pure mains when IO-typed bindings are unused" $ do
+      output <- requireRight =<< emitBackendSource pureMainUnusedIOProgram
+
+      output `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
+      output `shouldNotSatisfy` isInfixOf "__io_"
+      validateLLVMAssembly output
 
   describe "native process entrypoint" $ do
     it "prints an Int main value to stdout and exits successfully" $
@@ -1154,6 +1193,25 @@ emitNativeSource :: String -> IO (Either String String)
 emitNativeSource programText =
   withTempProgram programText emitNativeFile
 
+emitBackendSource :: String -> IO (Either String String)
+emitBackendSource programText =
+  withTempProgram programText emitBackendFile
+
+shouldFailWithAll :: Either String String -> [String] -> Expectation
+shouldFailWithAll result fragments =
+  case result of
+    Left message ->
+      mapM_ (\fragment -> message `shouldSatisfy` isInfixOf fragment) fragments
+    Right output ->
+      expectationFailure ("expected backend failure, got output:\n" ++ output)
+
+backendIOUnsupportedFragments :: [String]
+backendIOUnsupportedFragments =
+  [ "Backend LLVM conversion failed",
+    "Unsupported backend conversion shape",
+    "IO programs are not supported by backend conversion yet"
+  ]
+
 renderProgramMatrixSourceLLVM :: ProgramMatrixSource -> IO String
 renderProgramMatrixSourceLLVM source =
   case source of
@@ -1168,6 +1226,62 @@ simpleFunctionProgram =
     [ "module Main export (id, main) {",
       "  def id : Int -> Int = \\x x;",
       "  def main : Int = id 1;",
+      "}"
+    ]
+
+ioPureUnitMainProgram :: String
+ioPureUnitMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, pure);",
+      "  def main : IO Unit = pure Unit;",
+      "}"
+    ]
+
+ioPutStrLnMainProgram :: String
+ioPutStrLnMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, putStrLn);",
+      "  def main : IO Unit = putStrLn \"hello\";",
+      "}"
+    ]
+
+ioDirectPrimitiveMainProgram :: String
+ioDirectPrimitiveMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO);",
+      "  def main : IO Unit = __io_bind (__io_pure Unit) (\\(_done : Unit) __io_putStrLn \"world\");",
+      "}"
+    ]
+
+pureMainIODependencyProgram :: String
+pureMainIODependencyProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, pure);",
+      "  def discard : IO Unit -> Unit = \\(_action : IO Unit) Unit;",
+      "  def main : Unit = discard (pure Unit);",
+      "}"
+    ]
+
+pureMainDirectIOPrimitiveProgram :: String
+pureMainDirectIOPrimitiveProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO);",
+      "  def main : Unit = (\\(_action : IO Unit) Unit) (__io_pure Unit);",
+      "}"
+    ]
+
+pureMainUnusedIOProgram :: String
+pureMainUnusedIOProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, pure);",
+      "  def unused : IO Unit = pure Unit;",
+      "  def main : Bool = true;",
       "}"
     ]
 

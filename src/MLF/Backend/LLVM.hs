@@ -17,6 +17,7 @@ import Data.Bifunctor (first)
 import MLF.Backend.Convert
   ( BackendConversionError,
     convertCheckedProgram,
+    renderBackendConversionError,
   )
 import MLF.Backend.IR (BackendProgram)
 import qualified MLF.Backend.LLVM.Lower as Lower
@@ -50,6 +51,6 @@ renderBackendLLVMError :: BackendLLVMError -> String
 renderBackendLLVMError err =
   case err of
     BackendLLVMConversionFailed conversionErr ->
-      "Backend LLVM conversion failed: " ++ show conversionErr
+      "Backend LLVM conversion failed: " ++ renderBackendConversionError conversionErr
     BackendLLVMLoweringFailed loweringErr ->
       Lower.renderBackendLLVMError loweringErr
