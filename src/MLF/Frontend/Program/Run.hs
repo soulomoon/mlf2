@@ -121,10 +121,10 @@ data MainMode
 
 classifyMainMode :: CheckedProgram -> MainMode
 classifyMainMode checked =
-  case mainSourceType checked of
+  case mainIdentitySourceType checked of
     Just ty
       | isIOUnitSourceType ty -> MainIOUnit
-      | Builtins.srcTypeMentionsOpaqueBuiltin ty -> MainUnsupportedIO ty
+      | Builtins.srcTypeMentionsOpaqueBuiltin ty -> MainUnsupportedIO (recoverMainSourceType checked ty)
     _ -> MainPure
 
 isIOUnitSourceType :: SrcType -> Bool
@@ -139,12 +139,15 @@ isIOUnitSourceType ty =
 isUnitSourceType :: SrcType -> Bool
 isUnitSourceType ty =
   case ty of
-    STBase name -> isUnitTypeName name
-    STCon name args -> isUnitTypeName name && null (toList args)
+    STBase name -> isPreludeUnitTypeName name
+    STCon name args -> isPreludeUnitTypeName name && null (toList args)
     _ -> False
 
 isIOTypeName :: String -> Bool
-isIOTypeName name = unqualifiedSourceName name == "IO"
+isIOTypeName name = name == Builtins.builtinModuleName ++ ".IO"
+
+isPreludeUnitTypeName :: String -> Bool
+isPreludeUnitTypeName name = name == "Prelude.Unit"
 
 isUnitTypeName :: String -> Bool
 isUnitTypeName name = unqualifiedSourceName name == "Unit"
@@ -191,11 +194,13 @@ data RuntimeContext = RuntimeContext
 
 type RuntimeEnv = Map.Map String RuntimeValue
 
+type RuntimeLookupStack = [String]
+
 data RuntimeValue
   = RuntimeLit Lit
   | RuntimeUnit
   | RuntimeData String [RuntimeValue]
-  | RuntimeClosure String SurfaceExpr RuntimeEnv
+  | RuntimeClosure String SurfaceExpr RuntimeEnv RuntimeLookupStack
   | RuntimeConstructor ConstructorInfo [RuntimeValue]
   | RuntimePrimitive RuntimePrimitive [RuntimeValue]
   | RuntimeIO RuntimeIOAction
@@ -242,26 +247,30 @@ mkRuntimeContext checked =
     }
 
 evalRuntimeExpr :: RuntimeContext -> RuntimeEnv -> SurfaceExpr -> Either ProgramError RuntimeValue
-evalRuntimeExpr context env expr =
+evalRuntimeExpr context =
+  evalRuntimeExprWithStack context []
+
+evalRuntimeExprWithStack :: RuntimeContext -> RuntimeLookupStack -> RuntimeEnv -> SurfaceExpr -> Either ProgramError RuntimeValue
+evalRuntimeExprWithStack context stack env expr =
   case expr of
-    Surface.EVar name -> lookupRuntimeValue context env name
+    Surface.EVar name -> lookupRuntimeValue context stack env name
     Surface.ELit lit -> Right (RuntimeLit lit)
     Surface.ELam name body ->
-      Right (RuntimeClosure name body env)
+      Right (RuntimeClosure name body env stack)
     Surface.ELamAnn name _ body ->
-      Right (RuntimeClosure name body env)
+      Right (RuntimeClosure name body env stack)
     Surface.EApp fun arg -> do
-      funValue <- evalRuntimeExpr context env fun
-      argValue <- evalRuntimeExpr context env arg
+      funValue <- evalRuntimeExprWithStack context stack env fun
+      argValue <- evalRuntimeExprWithStack context stack env arg
       applyRuntimeValue context funValue argValue
     Surface.ELet name rhs body -> do
-      rhsValue <- evalRuntimeExpr context env rhs
-      evalRuntimeExpr context (Map.insert name rhsValue env) body
+      rhsValue <- evalRuntimeExprWithStack context stack env rhs
+      evalRuntimeExprWithStack context stack (Map.insert name rhsValue env) body
     Surface.EAnn inner _ ->
-      evalRuntimeExpr context env inner
+      evalRuntimeExprWithStack context stack env inner
 
-lookupRuntimeValue :: RuntimeContext -> RuntimeEnv -> String -> Either ProgramError RuntimeValue
-lookupRuntimeValue context env name =
+lookupRuntimeValue :: RuntimeContext -> RuntimeLookupStack -> RuntimeEnv -> String -> Either ProgramError RuntimeValue
+lookupRuntimeValue context stack env name =
   case Map.lookup name env of
     Just value -> Right value
     Nothing ->
@@ -270,9 +279,19 @@ lookupRuntimeValue context env name =
         Nothing
           | name `Set.member` runtimeUnitConstructors context || isDeferredUnitConstructorName name -> Right RuntimeUnit
           | Just ctor <- Map.lookup name (runtimeConstructors context) -> Right (runtimeConstructorValue ctor [])
+          | name `elem` stack -> Left (recursiveRuntimeBindingError name stack)
           | Just binding <- Map.lookup name (runtimeBindings context) ->
-              evalRuntimeExpr context Map.empty (checkedBindingSurfaceExpr binding)
+              evalRuntimeExprWithStack context (name : stack) Map.empty (checkedBindingSurfaceExpr binding)
           | otherwise -> Left (ProgramUnknownValue name)
+
+recursiveRuntimeBindingError :: String -> RuntimeLookupStack -> ProgramError
+recursiveRuntimeBindingError name stack =
+  ProgramPipelineError
+    ( "run-program IO runtime encountered recursive top-level binding lookup: "
+        ++ intercalate " -> " cyclePath
+    )
+  where
+    cyclePath = dropWhile (/= name) (reverse stack) ++ [name]
 
 runtimePrimitive :: String -> Maybe RuntimePrimitive
 runtimePrimitive name =
@@ -295,8 +314,8 @@ runtimeConstructorValue ctor args
 applyRuntimeValue :: RuntimeContext -> RuntimeValue -> RuntimeValue -> Either ProgramError RuntimeValue
 applyRuntimeValue context funValue argValue =
   case funValue of
-    RuntimeClosure name body closureEnv ->
-      evalRuntimeExpr context (Map.insert name argValue closureEnv) body
+    RuntimeClosure name body closureEnv closureStack ->
+      evalRuntimeExprWithStack context closureStack (Map.insert name argValue closureEnv) body
     RuntimePrimitive prim args ->
       applyRuntimePrimitive prim (args ++ [argValue])
     RuntimeConstructor ctor args
@@ -522,6 +541,10 @@ prettyValueArg value = case value of
 
 mainSourceType :: CheckedProgram -> Maybe SrcType
 mainSourceType checked =
+  recoverMainSourceType checked <$> mainIdentitySourceType checked
+
+mainIdentitySourceType :: CheckedProgram -> Maybe SrcType
+mainIdentitySourceType checked =
   case
     [ checkedBindingSourceType binding
       | checkedModule <- checkedProgramModules checked,
@@ -529,7 +552,7 @@ mainSourceType checked =
         checkedBindingName binding == checkedProgramMain checked
     ]
   of
-    ty : _ -> Just (recoverMainSourceType checked ty)
+    ty : _ -> Just ty
     [] -> Nothing
 
 recoverMainSourceType :: CheckedProgram -> SrcType -> SrcType

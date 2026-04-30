@@ -538,6 +538,55 @@ spec = do
                         ]
             (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right ""
 
+        it "does not classify qualified non-Prelude Unit results as runtime IO Unit" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module A export (Unit(..)) {"
+                        , "  data Unit ="
+                        , "      Unit : Unit;"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  import A as A;"
+                        , "  def main : IO A.Unit = __io_pure A.Unit;"
+                        , "}"
+                        ]
+            runLocatedProgramOutput located `shouldSatisfy` either
+                ( \diagnostic ->
+                    case diagnosticError diagnostic of
+                        ProgramPipelineError msg ->
+                            all
+                                (`isInfixOf` msg)
+                                [ "run-program supports only main : IO Unit"
+                                , "A.Unit"
+                                ]
+                        _ -> False
+                )
+                (const False)
+
+        it "rejects recursive IO main lookup without hanging" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = main;"
+                        , "}"
+                        ]
+            runLocatedProgramOutput (withPreludeLocated located) `shouldSatisfy` either
+                ( \diagnostic ->
+                    case diagnosticError diagnostic of
+                        ProgramPipelineError msg ->
+                            all
+                                (`isInfixOf` msg)
+                                [ "recursive top-level binding lookup"
+                                , "Main__main -> Main__main"
+                                ]
+                        _ -> False
+                )
+                (const False)
+
         it "rejects IO mains whose result type is not Unit" $ do
             located <-
                 requireLocated $
