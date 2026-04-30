@@ -620,6 +620,44 @@ spec = do
                         ]
             (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "scoped\n"
 
+        it "resolves deferred case placeholders inside IO continuations" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Nat(..), bind, pure, putStrLn);"
+                        , "  def after : Nat -> IO Unit = \\n case n of {"
+                        , "    Zero -> putStrLn \"zero\";"
+                        , "    Succ rest -> putStrLn \"succ\""
+                        , "  };"
+                        , "  def action : IO Nat = pure (Succ Zero);"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "succ\n"
+
+        it "resolves deferred method placeholders inside IO continuations" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Nat(..), bind, pure, putStrLn);"
+                        , "  class Speak a {"
+                        , "    speak : a -> IO Unit;"
+                        , "  }"
+                        , "  instance Speak Nat {"
+                        , "    speak = \\n case n of {"
+                        , "      Zero -> putStrLn \"zero\";"
+                        , "      Succ rest -> putStrLn \"succ\""
+                        , "    };"
+                        , "  }"
+                        , "  def after : Nat -> IO Unit = \\n speak n;"
+                        , "  def action : IO Nat = pure (Succ Zero);"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "succ\n"
+
         it "rejects recursive IO main lookup without hanging" $ do
             located <-
                 requireLocated $
