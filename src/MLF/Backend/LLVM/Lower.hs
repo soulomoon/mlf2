@@ -2205,10 +2205,22 @@ collectClosureEntriesInForm base =
 
 collectClosureEntriesInFormWithLocals :: ProgramBase -> LocalFunctionForms -> FunctionForm -> [ClosureEntry]
 collectClosureEntriesInFormWithLocals base localForms form =
+  collectClosureEntriesInFormWithParamKinds base localForms Map.empty form
+
+collectClosureEntriesInFormWithParamKinds :: ProgramBase -> LocalFunctionForms -> Map String LowerValueKind -> FunctionForm -> [ClosureEntry]
+collectClosureEntriesInFormWithParamKinds base localForms suppliedParamKinds form =
   collectClosureEntriesInExpr base (shadowLocalFunctionForms paramNames localForms) paramValueKinds (ffBody form)
   where
     paramNames = Set.fromList (map fst (ffParams form))
-    paramValueKinds = Map.fromList [(paramName, parameterValueKind paramName paramTy) | (paramName, paramTy) <- ffParams form]
+    paramValueKinds =
+      Map.fromList
+        [ ( paramName,
+            case Map.lookup paramName suppliedParamKinds of
+              Just kind -> kind
+              Nothing -> parameterValueKind paramName paramTy
+          )
+        | (paramName, paramTy) <- ffParams form
+        ]
 
 collectClosureEntriesInExpr :: ProgramBase -> LocalFunctionForms -> Map String LowerValueKind -> BackendExpr -> [ClosureEntry]
 collectClosureEntriesInExpr base localForms valueKinds expr =
@@ -2216,7 +2228,7 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
     BackendVar {} -> []
     BackendLit {} -> []
     BackendLam _ name paramTy body ->
-      collectClosureEntriesInExpr base (Map.delete name localForms) (Map.insert name (parameterValueKind name paramTy) valueKinds) body
+      collectClosureEntriesInExpr base (Map.delete name localForms) (Map.insert name (localFunctionParameterValueKind name paramTy) valueKinds) body
     BackendApp _ fun arg ->
       case collectAdministrativeCallEntries of
         Just entries -> entries
@@ -2307,9 +2319,10 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
     collectInstantiatedClosureEntries ownerName form typeArgs args =
       case instantiateFunctionFormWithTypeArgs ("closure entry collection " ++ ownerName) form typeArgs args of
         Right (resolvedTypeArgs, instantiated) ->
-          collectClosureEntriesInFormWithLocals
+          collectClosureEntriesInFormWithParamKinds
             base
             localForms
+            (suppliedArgumentValueKinds instantiated args)
             (qualifyInstantiatedClosureEntries ownerName resolvedTypeArgs instantiated)
         Left _ ->
           []
@@ -2359,6 +2372,25 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
         && case collectTyApps (backendClosureCaptureExpr capture) of
           (BackendVar {}, _) -> True
           _ -> False
+
+    suppliedArgumentValueKinds instantiated args =
+      Map.fromList
+        [ (paramName, argumentValueKind localForms valueKinds paramName paramTy arg)
+        | ((paramName, paramTy), arg) <- zip (ffParams instantiated) args
+        ]
+
+    argumentValueKind localForms0 valueKinds0 paramName paramTy arg
+      | isEvidenceArgument True paramName paramTy =
+          LowerFunctionPointer
+      | isFunctionLikeBackendType paramTy =
+          case arg of
+            BackendClosure {} -> LowerClosureRecord
+            _ ->
+              case aliasValueKind localForms0 valueKinds0 arg of
+                Just kind -> kind
+                Nothing -> valueKindForType paramTy
+      | otherwise =
+          LowerRuntimeValue
 
     aliasValueKind localForms0 valueKinds0 expr0 =
       case expr0 of
@@ -4446,6 +4478,13 @@ backendExprValueKindWith env visitedGlobals valueKinds expr
 
 parameterValueKind :: String -> BackendType -> LowerValueKind
 parameterValueKind name ty
+  | isEvidenceParameter name ty = LowerFunctionPointer
+  | isFirstOrderFunctionPointerType ty = LowerFunctionPointer
+  | isClosureRuntimeValueType ty = LowerClosureRecord
+  | otherwise = LowerRuntimeValue
+
+localFunctionParameterValueKind :: String -> BackendType -> LowerValueKind
+localFunctionParameterValueKind name ty
   | isEvidenceParameter name ty = LowerFunctionPointer
   | isClosureRuntimeValueType ty = LowerClosureRecord
   | otherwise = LowerRuntimeValue
