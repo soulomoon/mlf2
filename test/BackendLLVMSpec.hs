@@ -592,13 +592,247 @@ spec = describe "MLF.Backend.LLVM" $ do
 
     mapM_ runLLVMParityCase programSpecToLLVMParityCases
 
-  it "rejects partial applications until closure conversion is explicit in backend IR" $ do
-    renderBackendProgramLLVM partialApplicationProgram
-      `shouldSatisfyLeft` isInfixOf "Backend LLVM arity mismatch"
+  it "lowers packaged partial applications through the explicit closure ABI" $ do
+    output <- requireRight (renderBackendProgramLLVM partialApplicationProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$addOne\""
+    output `shouldSatisfy` isInfixOf "store i64 1"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
 
   it "rejects raw escaping lambdas until closure construction is explicit in backend IR" $ do
     renderBackendProgramLLVM escapingLambdaProgram
       `shouldSatisfyLeft` isInfixOf "escaping function"
+
+  it "packages source-level top-level partial applications as closure values" $ do
+    output <-
+      withTempProgram sourceTopLevelPartialApplicationProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "__mlfp_closure$Main__main$Main__keepLeft$partial"
+    output `shouldSatisfy` isInfixOf "store i64 1"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceTopLevelPartialApplicationProgram "1"
+
+  it "packages source-level local partial applications as closure values" $ do
+    output <-
+      withTempProgram sourceLocalPartialApplicationProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceLocalPartialApplicationProgram "1"
+
+  it "packages partial applications with closure-valued supplied arguments" $ do
+    output <-
+      withTempProgram sourcePartialApplicationClosureArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "unsupported static function argument"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationClosureArgumentProgram "41"
+
+  it "packages partial applications with global closure-valued supplied arguments" $ do
+    output <-
+      withTempProgram sourcePartialApplicationGlobalClosureArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "unsupported static function argument"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationGlobalClosureArgumentProgram "41"
+
+  it "packages partial applications headed by closure-valued parameters" $ do
+    output <-
+      withTempProgram sourcePartialApplicationClosureParameterProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "BackendClosureCallExpectedClosureValue"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationClosureParameterProgram "1"
+
+  it "tracks partial closure-valued argument demand through top-level aliases" $ do
+    output <-
+      withTempProgram sourcePartialApplicationClosureDemandAliasProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationClosureDemandAliasProgram "1"
+
+  it "tracks partial closure-valued argument demand through wrapped aliases" $ do
+    output <-
+      withTempProgram sourcePartialApplicationClosureDemandWrappedAliasProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationClosureDemandWrappedAliasProgram "1"
+
+  it "offsets propagated closure-demand indices through eta-expanded aliases" $ do
+    output <-
+      withTempProgram sourcePartialApplicationClosureDemandEtaAliasProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationClosureDemandEtaAliasProgram "1"
+
+  it "tracks partial closure-valued argument demand for local helpers" $ do
+    output <-
+      withTempProgram sourcePartialApplicationLocalClosureDemandProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationLocalClosureDemandProgram "1"
+
+  it "wraps closure-demanded arguments after evidence arguments" $ do
+    output <-
+      withTempProgram sourceClosureDemandAfterEvidenceProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    output `shouldNotSatisfy` isInfixOf "BackendClosureCallExpectedClosureValue"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceClosureDemandAfterEvidenceProgram "1"
+
+  it "packages constrained partial applications after hidden evidence" $ do
+    output <-
+      withTempProgram sourceConstrainedPartialApplicationProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldNotSatisfy` isInfixOf "unsupported static function argument"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceConstrainedPartialApplicationProgram "1"
+
+  it "packages constrained partial applications through constrained aliases" $ do
+    output <-
+      withTempProgram sourceConstrainedPartialApplicationAliasProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldNotSatisfy` isInfixOf "Backend LLVM arity mismatch"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceConstrainedPartialApplicationAliasProgram "1"
+
+  it "freshens generated partial capture names against local binders" $ do
+    output <-
+      withTempProgram sourcePartialApplicationGeneratedNameCollisionProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "BackendDuplicateClosureCapture"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationGeneratedNameCollisionProgram "1"
+
+  it "wraps direct function arguments before packaging partial applications" $ do
+    output <-
+      withTempProgram sourcePartialApplicationDirectFunctionArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "unsupported static function argument"
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationDirectFunctionArgumentProgram "4"
+
+  it "wraps closure-demanded arguments for let-headed call aliases" $ do
+    output <-
+      withTempProgram sourceClosureDemandLetHeadedCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceClosureDemandLetHeadedCallProgram "1"
+
+  it "wraps closure-demanded arguments for eta-expanded call heads" $ do
+    output <-
+      withTempProgram sourceClosureDemandEtaCallHeadProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceClosureDemandEtaCallHeadProgram "1"
+
+  it "keeps polymorphic supplied partial arguments on the static specialization path" $ do
+    output <-
+      withTempProgram sourcePartialApplicationPolymorphicArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "escaping polymorphic binding"
+    output `shouldNotSatisfy` isInfixOf "Main__usePoly$partial"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationPolymorphicArgumentProgram "true"
+
+  it "keeps higher-rank supplied partial functions on the static specialization path" $ do
+    output <-
+      withTempProgram sourcePartialApplicationHigherRankFunctionArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "escaping function value"
+    output `shouldNotSatisfy` isInfixOf "Main__useHigher$partial"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationHigherRankFunctionArgumentProgram "1"
+
+  it "captures locals when wrapping demanded inline function arguments" $ do
+    output <-
+      withTempProgram sourceClosureDemandedInlineFunctionArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "unsupported static function argument"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceClosureDemandedInlineFunctionArgumentProgram "41"
+
+  it "captures locals for non-variable partial callees" $ do
+    output <-
+      withTempProgram sourcePartialApplicationNonVariableCalleeProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "Backend LLVM arity mismatch"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationNonVariableCalleeProgram "1"
 
   it "lowers source-level captured closure calls through the explicit closure ABI" $ do
     output <-
@@ -2939,12 +3173,36 @@ partialApplicationProgram =
     [ addBinding,
       BackendBinding
         { backendBindingName = "main",
-          backendBindingType = unaryIntTy,
+          backendBindingType = intTy,
           backendBindingExpr =
-            BackendApp
-              { backendExprType = unaryIntTy,
-                backendFunction = BackendVar binaryIntTy "add",
-                backendArgument = intLit 1
+            BackendLet
+              { backendExprType = intTy,
+                backendLetName = "addOne",
+                backendLetType = unaryIntTy,
+                backendLetRhs =
+                  BackendClosure
+                    { backendExprType = unaryIntTy,
+                      backendClosureEntryName = "__mlfp_closure$addOne",
+                      backendClosureCaptures = [BackendClosureCapture "__mlfp_partial_capture0" intTy (intLit 1)],
+                      backendClosureParams = [("__mlfp_partial_arg0", intTy)],
+                      backendClosureBody =
+                        BackendApp
+                          { backendExprType = intTy,
+                            backendFunction =
+                              BackendApp
+                                { backendExprType = unaryIntTy,
+                                  backendFunction = BackendVar binaryIntTy "add",
+                                  backendArgument = BackendVar intTy "__mlfp_partial_capture0"
+                                },
+                            backendArgument = BackendVar intTy "__mlfp_partial_arg0"
+                          }
+                    },
+                backendLetBody =
+                  BackendClosureCall
+                    { backendExprType = intTy,
+                      backendClosureFunction = BackendVar unaryIntTy "addOne",
+                      backendClosureArguments = [intLit 2]
+                    }
               },
           backendBindingExportedAsMain = True
         }
@@ -3046,6 +3304,256 @@ sourceTopLevelClosureCallProgram =
     [ "module Main export (main) {",
       "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
       "  def main : Int = maker 0;",
+      "}"
+    ]
+
+sourceTopLevelPartialApplicationProgram :: String
+sourceTopLevelPartialApplicationProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def main : Int = apply (keepLeft 1);",
+      "}"
+    ]
+
+sourceLocalPartialApplicationProgram :: String
+sourceLocalPartialApplicationProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def main : Int =",
+      "    let keepLeft : Int -> Int -> Int = \\x \\y x",
+      "    in apply (keepLeft 1);",
+      "}"
+    ]
+
+sourcePartialApplicationClosureArgumentProgram :: String
+sourcePartialApplicationClosureArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def choose : (Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let inc : Int -> Int = \\(x : Int) captured in",
+      "    apply (choose inc 0);",
+      "}"
+    ]
+
+sourcePartialApplicationGlobalClosureArgumentProgram :: String
+sourcePartialApplicationGlobalClosureArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def choose : (Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def globalInc : Int -> Int =",
+      "    let captured : Int = 41 in",
+      "    \\(x : Int) captured;",
+      "  def main : Int = apply (choose globalInc 0);",
+      "}"
+    ]
+
+sourcePartialApplicationClosureParameterProgram :: String
+sourcePartialApplicationClosureParameterProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def main : Int = use keepLeft;",
+      "}"
+    ]
+
+sourcePartialApplicationClosureDemandAliasProgram :: String
+sourcePartialApplicationClosureDemandAliasProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def useAlias : (Int -> Int -> Int) -> Int = use;",
+      "  def main : Int = useAlias keepLeft;",
+      "}"
+    ]
+
+sourcePartialApplicationClosureDemandWrappedAliasProgram :: String
+sourcePartialApplicationClosureDemandWrappedAliasProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def useWrapped : (Int -> Int -> Int) -> Int =",
+      "    let f : (Int -> Int -> Int) -> Int = use in f;",
+      "  def main : Int = useWrapped keepLeft;",
+      "}"
+    ]
+
+sourcePartialApplicationClosureDemandEtaAliasProgram :: String
+sourcePartialApplicationClosureDemandEtaAliasProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def useAfter : Int -> (Int -> Int -> Int) -> Int = \\n use;",
+      "  def main : Int = useAfter 0 keepLeft;",
+      "}"
+    ]
+
+sourcePartialApplicationLocalClosureDemandProgram :: String
+sourcePartialApplicationLocalClosureDemandProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def main : Int =",
+      "    let use : (Int -> Int -> Int) -> Int = \\f apply (f 1)",
+      "    in use keepLeft;",
+      "}"
+    ]
+
+sourceClosureDemandAfterEvidenceProgram :: String
+sourceClosureDemandAfterEvidenceProgram =
+  unlines
+    [ "module Main export (Marker, main) {",
+      "  class Marker a {",
+      "  }",
+      "  instance Marker Bool {",
+      "  }",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : Marker Bool => (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def main : Int = use keepLeft;",
+      "}"
+    ]
+
+sourceConstrainedPartialApplicationProgram :: String
+sourceConstrainedPartialApplicationProgram =
+  unlines
+    [ "module Main export (Pick, main) {",
+      "  class Pick a {",
+      "    pick : a -> a -> a;",
+      "  }",
+      "  instance Pick Int {",
+      "    pick = \\x \\y x;",
+      "  }",
+      "  def keep : Pick Int => Int -> Int -> Int = \\x \\y pick x y;",
+      "  def apply : (Int -> Int) -> Int = \\f f 1;",
+      "  def main : Int = apply (keep 1);",
+      "}"
+    ]
+
+sourceConstrainedPartialApplicationAliasProgram :: String
+sourceConstrainedPartialApplicationAliasProgram =
+  unlines
+    [ "module Main export (Pick, main) {",
+      "  class Pick a {",
+      "    pick : a -> a -> a;",
+      "  }",
+      "  instance Pick Int {",
+      "    pick = \\x \\y x;",
+      "  }",
+      "  def keep : Pick Int => Int -> Int -> Int = \\x \\y pick x y;",
+      "  def keepAlias : Pick Int => Int -> Int -> Int = keep;",
+      "  def apply : (Int -> Int) -> Int = \\f f 1;",
+      "  def main : Int = apply (keepAlias 1);",
+      "}"
+    ]
+
+sourcePartialApplicationGeneratedNameCollisionProgram :: String
+sourcePartialApplicationGeneratedNameCollisionProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def main : Int =",
+      "    let __mlfp_partial_capture0 : Int -> Int -> Int = \\x \\y x in",
+      "    apply (__mlfp_partial_capture0 1);",
+      "}"
+    ]
+
+sourcePartialApplicationDirectFunctionArgumentProgram :: String
+sourcePartialApplicationDirectFunctionArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def choose : (Int -> Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x ignored;",
+      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def main : Int = apply (choose keepLeft 0);",
+      "}"
+    ]
+
+sourceClosureDemandLetHeadedCallProgram :: String
+sourceClosureDemandLetHeadedCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def main : Int =",
+      "    (let f : (Int -> Int -> Int) -> Int = use in f) keepLeft;",
+      "}"
+    ]
+
+sourceClosureDemandEtaCallHeadProgram :: String
+sourceClosureDemandEtaCallHeadProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def main : Int = (\\(u : Int -> Int -> Int) use u) keepLeft;",
+      "}"
+    ]
+
+sourcePartialApplicationPolymorphicArgumentProgram :: String
+sourcePartialApplicationPolymorphicArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def id : forall a. a -> a = \\x x;",
+      "  def usePoly : (forall a. a -> a) -> Int -> Bool =",
+      "    \\poly \\ignored let keepInt : Int = poly 1 in poly true;",
+      "  def apply : (Int -> Bool) -> Bool = \\f f 0;",
+      "  def main : Bool = apply (usePoly id);",
+      "}"
+    ]
+
+sourcePartialApplicationHigherRankFunctionArgumentProgram :: String
+sourcePartialApplicationHigherRankFunctionArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def id : forall a. a -> a = \\x x;",
+      "  def idScore : (forall a. a -> a) -> Int = \\poly poly 1;",
+      "  def useHigher : ((forall a. a -> a) -> Int) -> Int -> Int =",
+      "    \\score \\ignored score id;",
+      "  def apply : (Int -> Int) -> Int = \\f f 0;",
+      "  def main : Int = apply (useHigher idScore);",
+      "}"
+    ]
+
+sourceClosureDemandedInlineFunctionArgumentProgram :: String
+sourceClosureDemandedInlineFunctionArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def choose : (Int -> Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x ignored;",
+      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let use : (Int -> Int -> Int) -> Int = \\fn apply (choose fn 0) in",
+      "    use (\\x \\y captured);",
+      "}"
+    ]
+
+sourcePartialApplicationNonVariableCalleeProgram :: String
+sourcePartialApplicationNonVariableCalleeProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def make : Int -> Int -> Int -> Int = \\base \\ignored \\x base;",
+      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def main : Int =",
+      "    let base : Int = 1 in",
+      "    apply (((\\z make z) base) 2);",
       "}"
     ]
 
@@ -3892,6 +4400,7 @@ llvmNativeRepresentativeParityCases =
 llvmObjectCodeParityCases :: [String]
 llvmObjectCodeParityCases =
     [ "surface: runs lambda/application",
+      "surface: runs top-level partial application",
       "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp",
       "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp",
       "boundary: runs value-exported constructor when owner type is not exported",

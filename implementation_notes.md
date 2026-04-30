@@ -1,3 +1,43 @@
+## 2026-04-30 - Partial applications lower as closure values
+
+- Checked-program conversion now packages underapplied monomorphic function
+  calls as explicit `BackendClosure` values that capture supplied arguments and
+  apply the remaining value parameters later. Saturated calls stay on the
+  existing direct or closure-call paths.
+- Higher-order partials keep function-typed supplied arguments in the packaged
+  closure. When a callee parameter is later underapplied, direct function
+  arguments are first wrapped as closure values so the generated partial
+  closure does not mix raw function pointers with closure-record calls.
+- Direct function wrappers created for closure-demanded arguments now capture
+  local free variables from inline function expressions, so the generated
+  closure entry does not reference names outside its closure environment.
+- Closure-value argument demand is propagated through top-level aliases and
+  local let-bound helpers. Non-variable partial callees beta-normalize immediate
+  lambda heads and capture local free variables before their closure entry is
+  emitted, so generated entries do not reference out-of-scope locals.
+- Local function bindings used through underapplication are closure-converted
+  so the packaged partial captures a closure pointer instead of referencing a
+  local helper from a separate closure entry. Existing typeclass/evidence
+  partial rows stay on the evidence-aware lowering path.
+- Supplied polymorphic function values remain on the existing static
+  specialization path instead of becoming partial-closure captures, because
+  runtime closure environments do not store `forall` values directly.
+- Supplied higher-rank function values follow the same boundary: only
+  first-order function-pointer shapes are wrapped and captured in partial
+  closures, matching the LLVM lowerer's stored-function representation.
+- Ordinary call conversion treats hidden evidence arguments by their exact
+  argument index, so evidence already supplied in a call spine does not suppress
+  closure wrapping for a later closure-demanded function argument.
+- Generated partial-closure capture and parameter names are freshened against
+  visible source binders and globals before packaging, preventing source
+  bindings from colliding with backend-generated closure slots.
+- Closure-demand alias analysis looks through simple let-wrapped aliases such
+  as `let f = use in f`, preserving supplied-argument offsets while propagating
+  demanded closure-value parameters.
+- LLVM parity coverage now includes top-level and local partial application
+  rows, with `llvm-as`, object-code smoke, and native execution coverage when
+  the local LLVM toolchain is available.
+
 ## 2026-04-30 - Closure-valued ADT fields
 
 - Checked-program conversion now stores monomorphic function-valued constructor

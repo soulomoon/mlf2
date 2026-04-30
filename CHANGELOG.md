@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Added LLVM backend support for checked-source partial applications by
+  packaging supplied arguments into explicit closure values. Top-level and local
+  function partials now participate in the shared ProgramSpec-to-LLVM parity
+  matrix with assembly, object-code, and native execution coverage where the
+  local LLVM toolchain is available.
 - Added checked-program closure conversion for ordinary monomorphic escaping
   `.mlfp` lambdas and closure-valued let aliases. Backend conversion now emits
   explicit `BackendClosure` / `BackendClosureCall` IR for returned local
@@ -25,6 +30,26 @@
   rows are explicitly classified with diagnostic fragments.
 
 ### Changed
+- Fixed higher-order checked-source partial applications so supplied
+  closure-valued arguments, alias-propagated closure-demanded parameters, local
+  helper demands, and non-variable partial callees stay on the explicit closure
+  ABI instead of falling back to static function lowering.
+- Fixed checked-source partial applications with supplied polymorphic function
+  values so they stay on the static specialization path instead of being
+  captured into runtime closure environments.
+- Fixed checked-source partial applications with supplied higher-rank function
+  values so non-first-order function parameters also stay on static lowering
+  instead of being captured into unsupported closure entries.
+- Fixed packaged partial-application argument conversion so direct supplied
+  functions are wrapped as closure values before capture, and direct-function
+  closure wrappers capture free locals from inline function expressions.
+- Fixed closure-demanded call argument conversion after hidden evidence
+  arguments so later direct function arguments are still wrapped before
+  entering the closure ABI.
+- Freshened generated partial-closure capture and parameter names against
+  in-scope binders so source names cannot collide with backend-generated slots.
+- Propagated closure-demanded argument indices through simple let-wrapped
+  function aliases before backend partial-application packaging.
 - LLVM case lowering now treats closure-valued case results as closure
   pointers, so `BackendClosureCall` can use a case-selected closure callee
   without rejecting the callee's arrow result type. Closure-valued let aliases

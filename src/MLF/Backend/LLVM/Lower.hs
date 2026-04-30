@@ -2339,12 +2339,28 @@ functionWrapperForm wrapper =
 applyEvidenceWrapperArgs :: BackendExpr -> BackendType -> [BackendExpr] -> BackendExpr
 applyEvidenceWrapperArgs expr _ [] =
   expr
+applyEvidenceWrapperArgs expr ty args
+  | backendExprIsExplicitClosure expr =
+      BackendClosureCall
+        { backendExprType = returnTy,
+          backendClosureFunction = expr,
+          backendClosureArguments = args
+        }
+  where
+    (_, returnTy) = collectArrowsType ty
 applyEvidenceWrapperArgs expr ty (arg : rest) =
   case ty of
     BTArrow _ resultTy ->
       applyEvidenceWrapperArgs (BackendApp resultTy expr arg) resultTy rest
     _ ->
       expr
+
+backendExprIsExplicitClosure :: BackendExpr -> Bool
+backendExprIsExplicitClosure =
+  \case
+    BackendClosure {} -> True
+    BackendLet _ _ _ _ body -> backendExprIsExplicitClosure body
+    _ -> False
 
 lowerFunction :: ProgramEnv -> String -> Bool -> FunctionForm -> Either BackendLLVMError LLVMFunction
 lowerFunction env name private form = do
@@ -2916,10 +2932,47 @@ lowerClosureValue env exprEnv context resultTy entryName captures = do
   pure (LowerValue resultTy LLVMPtr closurePointer)
   where
     lowerCapture capture = do
-      value <- lowerExpr env exprEnv (context ++ ", closure capture " ++ show (backendClosureCaptureName capture)) (backendClosureCaptureExpr capture)
+      value <-
+        if shouldLowerStoredFunctionCapture capture
+          then
+            lowerStoredFunctionArgument
+              env
+              exprEnv
+              (context ++ ", closure capture " ++ show (backendClosureCaptureName capture))
+              (backendClosureCaptureType capture)
+              (backendClosureCaptureExpr capture)
+          else
+            lowerExpr env exprEnv (context ++ ", closure capture " ++ show (backendClosureCaptureName capture)) (backendClosureCaptureExpr capture)
       expectedTy <- lowerClosureStoredTypeM env context (backendClosureCaptureType capture)
       requireLLVMType context (backendClosureCaptureName capture) expectedTy value
       pure (expectedTy, value)
+
+    shouldLowerStoredFunctionCapture capture =
+      isFirstOrderFunctionPointerType (backendClosureCaptureType capture)
+        && not (isEvidenceArgument True (backendClosureCaptureName capture) (backendClosureCaptureType capture))
+        && not (captureExprIsRuntimeClosureValue capture)
+        && case collectTyApps (backendClosureCaptureExpr capture) of
+          (BackendVar {}, _) -> True
+          _ -> False
+
+    captureExprIsRuntimeClosureValue capture =
+      case closurePointerAliasValue exprEnv (backendClosureCaptureExpr capture) of
+        Just _ ->
+          True
+        Nothing ->
+          captureExprNamesGlobalClosureValue capture
+
+    captureExprNamesGlobalClosureValue capture =
+      case collectTyApps (backendClosureCaptureExpr capture) of
+        (BackendVar _ name, typeArgs)
+          | Just binding <- Map.lookup name (pbBindings (peBase env)),
+            Right (_, form) <- instantiateFunctionFormWithTypeArgs context (biForm binding) typeArgs [],
+            null (ffParams form),
+            alphaEqBackendType (backendClosureCaptureType capture) (ffReturnType form),
+            isClosureRuntimeValueType (ffReturnType form) ->
+              True
+        _ ->
+          False
 
     lowerClosureEnvironment [] =
       pure LLVMNull
@@ -3634,17 +3687,22 @@ lowerClosureRuntimeArgumentMaybe env exprEnv context expectedTy arg =
     Just value ->
       pure (Just value {lvBackendType = expectedTy})
     Nothing ->
-      case collectTyApps arg of
-        (BackendVar _ name, typeArgs)
-          | Just binding <- Map.lookup name (pbBindings (peBase env)) -> do
-              (_, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs []
-              if null (ffParams form)
-                && alphaEqBackendType expectedTy (ffReturnType form)
-                && isClosureRuntimeValueType (ffReturnType form)
-                then Just <$> lowerGlobalValue env context expectedTy name binding typeArgs
-                else pure Nothing
+      case arg of
+        BackendClosure {}
+          | alphaEqBackendType expectedTy (backendExprType arg) ->
+              Just <$> lowerExpr env exprEnv context arg
         _ ->
-          pure Nothing
+          case collectTyApps arg of
+            (BackendVar _ name, typeArgs)
+              | Just binding <- Map.lookup name (pbBindings (peBase env)) -> do
+                  (_, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs []
+                  if null (ffParams form)
+                    && alphaEqBackendType expectedTy (ffReturnType form)
+                    && isClosureRuntimeValueType (ffReturnType form)
+                    then Just <$> lowerGlobalValue env context expectedTy name binding typeArgs
+                    else pure Nothing
+            _ ->
+              pure Nothing
 
 isInlineFunctionArgument :: Bool -> String -> BackendType -> Bool
 isInlineFunctionArgument allowNestedEvidence paramName paramTy =
