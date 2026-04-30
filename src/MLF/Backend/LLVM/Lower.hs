@@ -4352,12 +4352,16 @@ valueKindForType ty
 
 functionFormReturnValueKind :: ProgramEnv -> FunctionForm -> LowerValueKind
 functionFormReturnValueKind env form =
-  backendExprValueKind env paramKinds (ffBody form)
+  functionFormReturnValueKindWith env Set.empty form
+
+functionFormReturnValueKindWith :: ProgramEnv -> Set String -> FunctionForm -> LowerValueKind
+functionFormReturnValueKindWith env visitedGlobals form =
+  backendExprValueKindWith env visitedGlobals paramKinds (ffBody form)
   where
     paramKinds = Map.fromList [(paramName, parameterValueKind paramName paramTy) | (paramName, paramTy) <- ffParams form]
 
-backendExprValueKind :: ProgramEnv -> Map String LowerValueKind -> BackendExpr -> LowerValueKind
-backendExprValueKind env valueKinds expr
+backendExprValueKindWith :: ProgramEnv -> Set String -> Map String LowerValueKind -> BackendExpr -> LowerValueKind
+backendExprValueKindWith env visitedGlobals valueKinds expr
   | not (isFunctionLikeBackendType (backendExprType expr)) = LowerRuntimeValue
   | otherwise =
       case expr of
@@ -4368,9 +4372,9 @@ backendExprValueKind env valueKinds expr
             (BackendVar ty name, typeArgs) ->
               variableValueKind ty name typeArgs
             _ ->
-              backendExprValueKind env valueKinds fun
+              backendExprValueKindWith env visitedGlobals valueKinds fun
         BackendLet _ name bindingTy rhs body ->
-          backendExprValueKind env valueKindsForBody body
+          backendExprValueKindWith env visitedGlobals valueKindsForBody body
           where
             valueKindsForBody =
               case functionLikeAliasValueKind valueKinds rhs of
@@ -4382,7 +4386,7 @@ backendExprValueKind env valueKinds expr
                       | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
                           Map.delete name valueKinds
                     _ ->
-                      Map.insert name (backendExprValueKind env valueKinds rhs) valueKinds
+                      Map.insert name (backendExprValueKindWith env visitedGlobals valueKinds rhs) valueKinds
         BackendClosure {} ->
           LowerClosureRecord
         _ ->
@@ -4415,7 +4419,7 @@ backendExprValueKind env valueKinds expr
                             | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
                                 Map.delete name kinds
                           _ ->
-                            Map.insert name (backendExprValueKind env kinds rhs) kinds
+                            Map.insert name (backendExprValueKindWith env visitedGlobals kinds rhs) kinds
                in functionLikeAliasValueKind kindsForBody body
         _ ->
           Nothing
@@ -4429,8 +4433,12 @@ backendExprValueKind env valueKinds expr
             Just binding ->
               case instantiateFunctionFormWithTypeArgs "value-kind classification" (biForm binding) typeArgs [] of
                 Right (_, form)
-                  | null (ffParams form) ->
-                      functionFormReturnValueKind env form
+                  | not (null (ffParams form)) ->
+                      LowerFunctionPointer
+                  | Set.member name visitedGlobals ->
+                      valueKindForType ty
+                  | otherwise ->
+                      functionFormReturnValueKindWith env (Set.insert name visitedGlobals) form
                 _ ->
                   LowerFunctionPointer
             Nothing ->

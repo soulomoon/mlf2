@@ -2,12 +2,14 @@
 
 module BackendLLVMSpec (spec) where
 
+import Control.Exception (evaluate)
 import Control.Monad (forM_, when)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import System.Exit (ExitCode (..))
+import System.Timeout (timeout)
 import Test.Hspec
 
 import LLVMToolSupport
@@ -1201,6 +1203,18 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.call."
     validateLLVMAssembly output
     validateLLVMObjectCode output
+
+  it "guards nullary global value-kind cycles" $ do
+    result <- timeout 1000000 (evaluate (renderBackendProgramLLVM nullaryGlobalValueKindCycleProgram))
+    case result of
+      Nothing ->
+        expectationFailure "value-kind classification did not terminate"
+      Just llvmResult -> do
+        output <- requireRight llvmResult
+        output `shouldSatisfy` isInfixOf "define ptr @\"left\"()"
+        output `shouldSatisfy` isInfixOf "call ptr @\"right\"()"
+        output `shouldSatisfy` isInfixOf "call ptr @\"left\"()"
+        validateLLVMAssembly output
 
   it "rejects unknown base types" $ do
     renderBackendProgramLLVM unknownBaseProgram
@@ -4562,6 +4576,43 @@ rawFunctionPointerAliasReturnProgram =
             }
         ],
       backendProgramMain = "main"
+    }
+
+nullaryGlobalValueKindCycleProgram :: BackendProgram
+nullaryGlobalValueKindCycleProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ nullaryFunctionAliasBinding "left" "right",
+                  nullaryFunctionAliasBinding "right" "left",
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr = BackendApp intTy (BackendVar unaryIntTy "left") (intLit 41),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+nullaryFunctionAliasBinding :: String -> String -> BackendBinding
+nullaryFunctionAliasBinding name target =
+  BackendBinding
+    { backendBindingName = name,
+      backendBindingType = unaryIntTy,
+      backendBindingExpr =
+        BackendLet
+          unaryIntTy
+          "dummy"
+          intTy
+          (intLit 0)
+          (BackendVar unaryIntTy target),
+      backendBindingExportedAsMain = False
     }
 
 unknownBaseProgram :: BackendProgram
