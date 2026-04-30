@@ -2243,6 +2243,18 @@ qualifyInstantiatedClosureEntries ownerName resolvedTypeArgs form
   | null resolvedTypeArgs = form
   | otherwise = qualifyClosureEntriesInForm (closureEntryOwnerName ownerName resolvedTypeArgs) form
 
+qualifyInstantiatedClosureEntriesWithParamKinds :: String -> [BackendType] -> Map String LowerValueKind -> FunctionForm -> FunctionForm
+qualifyInstantiatedClosureEntriesWithParamKinds ownerName resolvedTypeArgs suppliedParamKinds form
+  | null resolvedTypeArgs && null firstOrderParamKinds = form
+  | otherwise = qualifyClosureEntriesInForm (closureEntryOwnerNameWithParamKinds ownerName resolvedTypeArgs firstOrderParamKinds) form
+  where
+    firstOrderParamKinds =
+      [ suppliedKind
+      | (paramName, paramTy) <- ffParams form,
+        isFirstOrderFunctionPointerType paramTy,
+        Just suppliedKind <- [Map.lookup paramName suppliedParamKinds]
+      ]
+
 qualifyClosureEntriesInExpr :: String -> BackendExpr -> BackendExpr
 qualifyClosureEntriesInExpr ownerName =
   go
@@ -2290,6 +2302,13 @@ qualifyClosureEntriesInExpr ownerName =
 qualifiedClosureEntryName :: String -> String -> String
 qualifiedClosureEntryName ownerName entryName =
   ownerName ++ "$" ++ entryName
+
+closureEntryOwnerNameWithParamKinds :: String -> [BackendType] -> [LowerValueKind] -> String
+closureEntryOwnerNameWithParamKinds name typeArgs firstOrderParamKinds =
+  closureEntryOwnerName name typeArgs
+    ++ if null firstOrderParamKinds
+      then ""
+      else "$vk$" ++ intercalate "_" (map lowerValueKindKey firstOrderParamKinds)
 
 collectClosureEntriesInForm :: ProgramBase -> FunctionForm -> [ClosureEntry]
 collectClosureEntriesInForm base =
@@ -2526,8 +2545,10 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
           collectClosureEntriesInFormWithParamKinds
             base
             localForms
-            (suppliedArgumentValueKinds instantiated args)
-            (qualifyInstantiatedClosureEntries ownerName resolvedTypeArgs instantiated)
+            suppliedParamKinds
+            (qualifyInstantiatedClosureEntriesWithParamKinds ownerName resolvedTypeArgs suppliedParamKinds instantiated)
+          where
+            suppliedParamKinds = suppliedArgumentValueKinds instantiated args
         Left _ ->
           []
 
@@ -4021,20 +4042,33 @@ lowerLocalFunctionCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> Stri
 lowerLocalFunctionCall env callEnv context resultTy name localFunction typeArgs args = do
   let allowNestedEvidence = isEvidenceName name
   (resolvedTypeArgs, form0) <- instantiateFunctionFormWithTypeArgsM context (lfForm localFunction) typeArgs args
-  let form = qualifyInstantiatedClosureEntries name resolvedTypeArgs form0
-      arity = length (ffParams form)
+  let arity = length (ffParams form0)
   case compare (length args) arity of
     GT -> do
-      unless (isFunctionLikeBackendType (ffReturnType form)) $
+      unless (isFunctionLikeBackendType (ffReturnType form0)) $
         liftEither (BackendLLVMArityMismatch name arity (length args))
       let (directArgs, closureArgs) = splitAt arity args
-      callee <- lowerLocalFunctionCall env callEnv context (ffReturnType form) name localFunction typeArgs directArgs
+      callee <- lowerLocalFunctionCall env callEnv context (ffReturnType form0) name localFunction typeArgs directArgs
       lowerReturnedFunctionValueCall env callEnv context name resultTy callee closureArgs
     LT ->
       liftEither (BackendLLVMArityMismatch name arity (length args))
     EQ -> do
-      bodyEnv <- bindCallArguments env callEnv (lfCapturedEnv localFunction) context allowNestedEvidence name form args
+      bodyEnv <- bindCallArguments env callEnv (lfCapturedEnv localFunction) context allowNestedEvidence name form0 args
+      let form = qualifyInstantiatedClosureEntriesWithParamKinds name resolvedTypeArgs (boundParamValueKinds form0 bodyEnv) form0
       lowerExpr env bodyEnv context (ffBody form)
+  where
+    boundParamValueKinds form bodyEnv =
+      Map.fromList
+        [ (paramName, paramValueKind bodyEnv paramName paramTy)
+        | (paramName, paramTy) <- ffParams form
+        ]
+
+    paramValueKind bodyEnv paramName paramTy =
+      case Map.lookup paramName (eeValues bodyEnv) of
+        Just value -> lvValueKind value
+        Nothing
+          | Map.member paramName (eeLocalFunctions bodyEnv) -> LowerFunctionPointer
+          | otherwise -> parameterValueKind paramName paramTy
 
 lowerDirectFunctionCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> FunctionForm -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerDirectFunctionCall env exprEnv context resultTy form0 typeArgs args = do

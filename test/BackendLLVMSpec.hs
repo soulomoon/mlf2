@@ -1378,11 +1378,24 @@ spec = describe "MLF.Backend.LLVM" $ do
   it "preserves let-bound first-order parameters captured by nested closures" $ do
     output <- requireRight (renderBackendProgramLLVM letBoundFirstOrderParameterClosureProgram)
 
-    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$let_capture_first_order_param\""
+    output `shouldSatisfy` isInfixOf "define private i64 @\"makeCaller$vk$function$__mlfp_closure$let_capture_first_order_param\""
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.env.field"
     output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.closure.env.field"
     validateLLVMAssembly output
     validateLLVMObjectCode output
+
+  it "specializes closure entries by callable capture representation" $ do
+    output <- requireRight (renderBackendProgramLLVM mixedCallableCaptureClosureEntryProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"makeCaller$vk$function$__mlfp_closure$mixed_callable_capture\""
+    output `shouldSatisfy` isInfixOf "define private i64 @\"makeCaller$vk$closure$__mlfp_closure$mixed_callable_capture\""
+    output `shouldNotSatisfy` isInfixOf "duplicate closure entry"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+    nativeOutput <- requireRight (renderBackendProgramNativeLLVM mixedCallableCaptureClosureEntryProgram)
+    runLLVMNativeExecutable nativeOutput
+      `shouldReturn` NativeRunResult ExitSuccess "42\n" ""
 
   it "packages partial applications of returned closures" $ do
     output <- requireRight (renderBackendProgramLLVM returnedClosurePartialApplicationProgram)
@@ -5492,6 +5505,81 @@ letBoundFirstOrderParameterClosureProgram =
           backendBindingExportedAsMain = True
         }
     ]
+
+mixedCallableCaptureClosureEntryProgram :: BackendProgram
+mixedCallableCaptureClosureEntryProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ helperBinding,
+                  BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLet
+                          intTy
+                          "makeCaller"
+                          (BTArrow unaryIntTy unaryIntTy)
+                          mixedCallableCaptureFunction
+                          ( BackendLet
+                              intTy
+                              "ignored"
+                              intTy
+                              ( BackendApp
+                                  intTy
+                                  ( BackendApp
+                                      unaryIntTy
+                                      (BackendVar (BTArrow unaryIntTy unaryIntTy) "makeCaller")
+                                      (BackendVar unaryIntTy "helper")
+                                  )
+                                  (intLit 7)
+                              )
+                              ( BackendApp
+                                  intTy
+                                  ( BackendApp
+                                      unaryIntTy
+                                      (BackendVar (BTArrow unaryIntTy unaryIntTy) "makeCaller")
+                                      mixedCallableCaptureClosureArgument
+                                  )
+                                  (intLit 0)
+                              )
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
+    }
+
+mixedCallableCaptureFunction :: BackendExpr
+mixedCallableCaptureFunction =
+  BackendLam
+    { backendExprType = BTArrow unaryIntTy unaryIntTy,
+      backendParamName = "f",
+      backendParamType = unaryIntTy,
+      backendBody =
+        BackendClosure
+          { backendExprType = unaryIntTy,
+            backendClosureEntryName = "__mlfp_closure$mixed_callable_capture",
+            backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "f")],
+            backendClosureParams = [("x", intTy)],
+            backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
+          }
+    }
+
+mixedCallableCaptureClosureArgument :: BackendExpr
+mixedCallableCaptureClosureArgument =
+  BackendClosure
+    { backendExprType = unaryIntTy,
+      backendClosureEntryName = "__mlfp_closure$mixed_callable_argument",
+      backendClosureCaptures = [],
+      backendClosureParams = [("x", intTy)],
+      backendClosureBody = intLit 42
+    }
 
 returnedClosurePartialApplicationProgram :: BackendProgram
 returnedClosurePartialApplicationProgram =
