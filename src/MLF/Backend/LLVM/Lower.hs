@@ -2926,7 +2926,7 @@ lowerInstantiatedFunctionValue env exprEnv context name resultTy form = do
 
 bindLet :: ProgramEnv -> ExprEnv -> String -> String -> BackendExpr -> LowerM ExprEnv
 bindLet env exprEnv context name rhs =
-  case closurePointerAliasValue exprEnv rhs of
+  case callablePointerAliasValue exprEnv rhs of
     Just value ->
       pure
         exprEnv
@@ -2958,23 +2958,37 @@ bindLet env exprEnv context name rhs =
                 eeLocalFunctions = Map.delete name (eeLocalFunctions exprEnv)
               }
 
+callablePointerAliasValue :: ExprEnv -> BackendExpr -> Maybe LowerValue
+callablePointerAliasValue =
+  pointerAliasValue isCallablePointerAliasValue
+  where
+    isCallablePointerAliasValue value =
+      case lvValueKind value of
+        LowerClosureRecord -> True
+        LowerFunctionPointer -> True
+        LowerRuntimeValue -> False
+
 closurePointerAliasValue :: ExprEnv -> BackendExpr -> Maybe LowerValue
-closurePointerAliasValue exprEnv =
+closurePointerAliasValue =
+  pointerAliasValue ((== LowerClosureRecord) . lvValueKind)
+
+pointerAliasValue :: (LowerValue -> Bool) -> ExprEnv -> BackendExpr -> Maybe LowerValue
+pointerAliasValue matches exprEnv =
   \case
     BackendVar ty name
       | isFunctionLikeBackendType ty,
         Just value <- Map.lookup name (eeValues exprEnv),
         lvLLVMType value == LLVMPtr,
-        lvValueKind value == LowerClosureRecord ->
+        matches value ->
           Just value {lvBackendType = ty}
     BackendTyApp ty fun _
       | isFunctionLikeBackendType ty,
-        Just value <- closurePointerAliasValue exprEnv fun ->
+        Just value <- pointerAliasValue matches exprEnv fun ->
           Just value {lvBackendType = ty}
     BackendLet ty name bindingTy rhs body
       | isFunctionLikeBackendType ty ->
           let exprEnvForBody =
-                case closurePointerAliasValue exprEnv rhs of
+                case pointerAliasValue matches exprEnv rhs of
                   Just value ->
                     exprEnv
                       { eeValues = Map.insert name value {lvBackendType = bindingTy} (eeValues exprEnv),
@@ -2985,7 +2999,7 @@ closurePointerAliasValue exprEnv =
                       { eeValues = Map.delete name (eeValues exprEnv),
                         eeLocalFunctions = Map.delete name (eeLocalFunctions exprEnv)
                       }
-           in closurePointerAliasValue exprEnvForBody body
+           in pointerAliasValue matches exprEnvForBody body
     _ ->
       Nothing
 
@@ -4359,19 +4373,55 @@ backendExprValueKind env valueKinds expr
           backendExprValueKind env valueKindsForBody body
           where
             valueKindsForBody =
-              case functionFormFromExpected bindingTy rhs of
-                form
-                  | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
-                      Map.delete name valueKinds
-                _ ->
-                  Map.insert name (backendExprValueKind env valueKinds rhs) valueKinds
+              case functionLikeAliasValueKind valueKinds rhs of
+                Just kind ->
+                  Map.insert name kind valueKinds
+                Nothing ->
+                  case functionFormFromExpected bindingTy rhs of
+                    form
+                      | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+                          Map.delete name valueKinds
+                    _ ->
+                      Map.insert name (backendExprValueKind env valueKinds rhs) valueKinds
         BackendClosure {} ->
           LowerClosureRecord
         _ ->
           valueKindForType (backendExprType expr)
   where
     variableValueKind ty name typeArgs =
-      case Map.lookup name valueKinds of
+      variableValueKindWith valueKinds ty name typeArgs
+
+    functionLikeAliasValueKind kinds =
+      \case
+        BackendVar ty name
+          | isFunctionLikeBackendType ty ->
+              Just (variableValueKindWith kinds ty name [])
+        expr0@(BackendTyApp ty fun _)
+          | isFunctionLikeBackendType ty ->
+              case collectTyApps expr0 of
+                (BackendVar varTy name, typeArgs) ->
+                  Just (variableValueKindWith kinds varTy name typeArgs)
+                _ ->
+                  functionLikeAliasValueKind kinds fun
+        BackendLet ty name bindingTy rhs body
+          | isFunctionLikeBackendType ty ->
+              let kindsForBody =
+                    case functionLikeAliasValueKind kinds rhs of
+                      Just kind ->
+                        Map.insert name kind kinds
+                      Nothing ->
+                        case functionFormFromExpected bindingTy rhs of
+                          form
+                            | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+                                Map.delete name kinds
+                          _ ->
+                            Map.insert name (backendExprValueKind env kinds rhs) kinds
+               in functionLikeAliasValueKind kindsForBody body
+        _ ->
+          Nothing
+
+    variableValueKindWith kinds ty name typeArgs =
+      case Map.lookup name kinds of
         Just kind ->
           kind
         Nothing ->

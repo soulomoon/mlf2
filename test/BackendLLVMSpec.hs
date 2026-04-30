@@ -1193,6 +1193,15 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "preserves let-bound raw function-pointer aliases as values" $ do
+    output <- requireRight (renderBackendProgramLLVM rawFunctionPointerAliasReturnProgram)
+
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.call."
+    output `shouldNotSatisfy` isInfixOf "escaping function"
+    output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.call."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
   it "rejects unknown base types" $ do
     renderBackendProgramLLVM unknownBaseProgram
       `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
@@ -4468,6 +4477,80 @@ rawReturnedFunctionPointerCallProgram =
                               ( BackendApp
                                   (BTArrow intTy unaryIntTy)
                                   (BackendVar (BTArrow unaryIntTy (BTArrow intTy unaryIntTy)) "idRaw")
+                                  (BackendVar unaryIntTy "inc")
+                              )
+                              (intLit 0)
+                          )
+                          (intLit 41),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+rawFunctionPointerAliasReturnProgram :: BackendProgram
+rawFunctionPointerAliasReturnProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "inc",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr =
+                        BackendLam
+                          { backendExprType = unaryIntTy,
+                            backendParamName = "x",
+                            backendParamType = intTy,
+                            backendBody = BackendVar intTy "x"
+                          },
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "idAlias",
+                      backendBindingType = BTArrow unaryIntTy (BTArrow intTy unaryIntTy),
+                      backendBindingExpr =
+                        BackendLam
+                          { backendExprType = BTArrow unaryIntTy (BTArrow intTy unaryIntTy),
+                            backendParamName = "$evidence_f",
+                            backendParamType = unaryIntTy,
+                            backendBody =
+                              BackendLam
+                                { backendExprType = BTArrow intTy unaryIntTy,
+                                  backendParamName = "ignored",
+                                  backendParamType = intTy,
+                                  backendBody =
+                                    BackendLet
+                                      unaryIntTy
+                                      "dummy"
+                                      intTy
+                                      (intLit 0)
+                                      ( BackendLet
+                                          unaryIntTy
+                                          "g"
+                                          unaryIntTy
+                                          (BackendVar unaryIntTy "$evidence_f")
+                                          (BackendVar unaryIntTy "g")
+                                      )
+                                }
+                          },
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          ( BackendApp
+                              unaryIntTy
+                              ( BackendApp
+                                  (BTArrow intTy unaryIntTy)
+                                  (BackendVar (BTArrow unaryIntTy (BTArrow intTy unaryIntTy)) "idAlias")
                                   (BackendVar unaryIntTy "inc")
                               )
                               (intLit 0)
