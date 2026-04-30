@@ -407,6 +407,31 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "Box Zero")
     , ProgramMatrixCase
+        "checks parameterized nullary overloaded method through local evidence alias"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (DefaultBox, Nat(..), Box(..), defaultBox, selected, main) {"
+                , "  class DefaultBox a {"
+                , "    defaultBox : Box a;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  instance DefaultBox Nat {"
+                , "    defaultBox = Box Zero;"
+                , "  }"
+                , ""
+                , "  def selected : DefaultBox a => Box a = defaultBox;"
+                , "  def main : Box Nat = selected;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
+    , ProgramMatrixCase
         "rejects nullary overloaded method without expected type evidence"
         ( InlineProgram $
             unlines

@@ -1528,6 +1528,31 @@ spec = do
             checkProgram program `shouldSatisfy` either
                 (\err -> not ("ProgramCannotInferLambda" `isInfixOf` show err))
                 (const False)
+
+        it "runs a parameterized nullary local-evidence alias at a concrete result type" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (DefaultBox, Nat(..), Box(..), defaultBox, selected, main) {"
+                        , "  class DefaultBox a {"
+                        , "    defaultBox : Box a;"
+                        , "  }"
+                        , ""
+                        , "  data Nat ="
+                        , "      Zero : Nat;"
+                        , ""
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , ""
+                        , "  instance DefaultBox Nat {"
+                        , "    defaultBox = Box Zero;"
+                        , "  }"
+                        , ""
+                        , "  def selected : DefaultBox a => Box a = defaultBox;"
+                        , "  def main : Box Nat = selected;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            (prettyValue <$> runProgram program) `shouldBe` Right "Box Zero"
   where
     roundtripFixture path =
         it ("roundtrips " ++ path) $ do

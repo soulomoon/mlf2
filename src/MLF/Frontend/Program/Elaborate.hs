@@ -709,7 +709,7 @@ compileExpr scope mbExpected expr = case expr of
         compileNullaryMethodUse scope mbExpected methodInfo
       Just valueInfo@OrdinaryValue {valueRuntimeName = runtimeName} -> do
         evidenceSurfaces <- valueEvidenceArgs scope valueInfo mbExpected []
-        pure (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces)
+        pure (annotateExpectedBareValueUse scope mbExpected valueInfo (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces))
       Just ConstructorValue {valueCtorInfo = ctorInfo} -> do
         compileConstructorHead scope ctorInfo 0 (constructorInitialSubst scope ctorInfo 0 mbExpected)
       Nothing -> throwError (ProgramUnknownValue name)
@@ -784,9 +784,9 @@ compileResolvedExpr scope mbExpected expr = case expr of
     case valueInfo of
       OverloadedMethod {valueMethodInfo = methodInfo} ->
         compileNullaryMethodUse scope mbExpected methodInfo
-      OrdinaryValue {valueRuntimeName = runtimeName} -> do
-        evidenceSurfaces <- valueResolvedEvidenceArgs scope valueInfo mbExpected []
-        pure (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces)
+      ordinary@OrdinaryValue {valueRuntimeName = runtimeName} -> do
+        evidenceSurfaces <- valueResolvedEvidenceArgs scope ordinary mbExpected []
+        pure (annotateExpectedBareValueUse scope mbExpected ordinary (foldl surfaceApp (surfaceVar runtimeName) evidenceSurfaces))
       ConstructorValue {valueCtorInfo = ctorInfo} -> do
         compileConstructorHead scope ctorInfo 0 (constructorInitialSubst scope ctorInfo 0 mbExpected)
   ELit lit -> pure (surfaceLit lit)
@@ -979,12 +979,7 @@ compileValueApp scope mbExpected valueInfo args = do
           OverloadedMethod {} -> error "compileValueApp does not handle overloaded methods"
       headWithEvidence = foldl surfaceApp headSurface evidenceSurfaces
       applied = foldl surfaceApp headWithEvidence argSurfaces
-  pure $ case mbExpected of
-    Just expectedTy
-      | not (isLocalOrdinaryValue valueInfo),
-        isRecursiveResultType expectedTy || isRecursiveResultType (lowerType scope expectedTy) ->
-          surfaceAnn applied (lowerType scope expectedTy)
-    _ -> applied
+  pure (annotateExpectedValueUse scope mbExpected valueInfo applied)
   where
     compileValueArg (Just expectedTy) arg
       | isPartialOverloadedMethodApp scope arg =
@@ -1033,12 +1028,7 @@ compileResolvedValueApp scope mbExpected valueInfo args = do
           OverloadedMethod {} -> error "compileResolvedValueApp does not handle overloaded methods"
       headWithEvidence = foldl surfaceApp headSurface evidenceSurfaces
       applied = foldl surfaceApp headWithEvidence argSurfaces
-  pure $ case mbExpected of
-    Just expectedTy
-      | not (isLocalOrdinaryValue valueInfo),
-        isRecursiveResultType expectedTy || isRecursiveResultType (lowerType scope expectedTy) ->
-          surfaceAnn applied (lowerType scope expectedTy)
-    _ -> applied
+  pure (annotateExpectedValueUse scope mbExpected valueInfo applied)
   where
     compileValueArg (Just expectedTy) arg
       | isPartialOverloadedResolvedMethodApp scope arg =
@@ -1431,6 +1421,32 @@ resolvedRhsConsumesAppliedArgs expr argCount =
 isLocalOrdinaryValue :: ValueInfo -> Bool
 isLocalOrdinaryValue OrdinaryValue {valueOriginModule = "<local>"} = True
 isLocalOrdinaryValue _ = False
+
+annotateExpectedValueUse :: ElaborateScope -> Maybe SrcType -> ValueInfo -> SurfaceExpr -> SurfaceExpr
+annotateExpectedValueUse scope mbExpected valueInfo applied =
+  case mbExpected of
+    Just expectedTy
+      | not (isLocalOrdinaryValue valueInfo),
+        isRecursiveResultType expectedTy || isRecursiveResultType (lowerType scope expectedTy) ->
+          surfaceAnn applied (lowerType scope expectedTy)
+    _ -> applied
+
+annotateExpectedBareValueUse :: ElaborateScope -> Maybe SrcType -> ValueInfo -> SurfaceExpr -> SurfaceExpr
+annotateExpectedBareValueUse scope mbExpected valueInfo applied =
+  case mbExpected of
+    Just expectedTy
+      | not (isLocalOrdinaryValue valueInfo),
+        sourceTypeHasAppliedHead expectedTy ->
+          surfaceAnn applied (lowerType scope expectedTy)
+    _ -> applied
+
+sourceTypeHasAppliedHead :: SrcType -> Bool
+sourceTypeHasAppliedHead ty =
+  case ty of
+    STCon {} -> True
+    STVarApp {} -> True
+    STForall _ _ body -> sourceTypeHasAppliedHead body
+    _ -> False
 
 knownConstructorResultType :: ElaborateScope -> ConstructorInfo -> [P.Expr] -> Maybe SrcType
 knownConstructorResultType scope ctorInfo args = do

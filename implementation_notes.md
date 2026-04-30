@@ -1,3 +1,15 @@
+## 2026-04-30 - Nullary local evidence for parameterized result aliases
+
+- Tightened nullary overloaded method finalization so placeholder type
+  instantiations are replayed for concrete instance methods but not blindly
+  applied to already-instantiated local evidence parameters. This keeps
+  constrained aliases such as `DefaultBox a => Box a` usable at `Box Nat`
+  without over-instantiating the local evidence rewrite.
+- The `.mlfp` elaborator now preserves expected result annotations on bare
+  constrained value uses, matching the existing application path so source
+  aliases can instantiate their hidden evidence arguments from the surrounding
+  expected type.
+
 ## 2026-04-29 - Nullary overloaded method expected-type resolution
 
 - `.mlfp` nullary overloaded methods / associated values now carry expected

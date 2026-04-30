@@ -94,11 +94,15 @@ finalizeBinding scope lowered = do
   (term, actualTy) <-
     finalizeDeferredObligations scope (loweredBindingDeferredObligations lowered) tcEnv term0 actualTy0 (loweredBindingExpectedType lowered)
   let isUncheckedConstructor = constructorBindingNeedsUnchecked scope (loweredBindingName lowered)
-      acceptedTerm = repairConstructorBindingTerm scope (loweredBindingName lowered) term
+      acceptedTerm0 = repairConstructorBindingTerm scope (loweredBindingName lowered) term
   acceptedTy <-
     if isUncheckedConstructor
       then srcTypeToElabType (loweredBindingExpectedType lowered)
-      else Right actualTy
+      else Right (stripLeadingVacuousForalls actualTy)
+  let acceptedTerm =
+        if isUncheckedConstructor
+          then acceptedTerm0
+          else stripLeadingVacuousTypeAbs actualTy acceptedTerm0
   if isUncheckedConstructor
     then
       Right
@@ -900,7 +904,7 @@ resolveDeferredMethods scope deferredMethods = go
         Just (name, headInsts)
           | Just deferred <- Map.lookup name deferredMethods,
             deferredMethodArgCount deferred == 0 ->
-              reapplyHeadInsts headInsts <$> resolveDeferredNullaryMethod deferred
+              resolveDeferredNullaryMethod headInsts deferred
         _ ->
           case term of
             X.EVar {} -> Right term
@@ -966,7 +970,7 @@ resolveDeferredMethods scope deferredMethods = go
           methodHead <- instantiateMethodValue scope methodSubst methodValue
           Right (foldl X.EApp (foldl X.EApp methodHead evidenceArgs) args)
 
-    resolveDeferredNullaryMethod deferred = do
+    resolveDeferredNullaryMethod headInsts deferred = do
       expectedView <-
         case deferredMethodExpectedResult deferred of
           Just view -> Right view
@@ -989,7 +993,11 @@ resolveDeferredMethods scope deferredMethods = go
               (deferredMethodLocalEvidence deferred)
               Set.empty
               (nullaryMethodLocalConstraints methodInfo classArgView methodSubst)
-          Right (foldl X.EApp evidenceHead evidenceArgs)
+          let evidenceTerm = foldl X.EApp evidenceHead evidenceArgs
+          Right $
+            if nullaryMethodResultIsClassParameter methodInfo
+              then reapplyHeadInsts headInsts evidenceTerm
+              else evidenceTerm
         Nothing -> do
           (instanceInfo, subst) <- resolveMethodInstanceInfoByTypeView scope methodInfo classArgView
           methodValue <- concreteMethodValue instanceInfo methodInfo
@@ -1003,7 +1011,7 @@ resolveDeferredMethods scope deferredMethods = go
                   (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValue))
           evidenceArgs <- resolveConstraintEvidenceTerms scope (deferredMethodLocalEvidence deferred) Set.empty eagerConstraints
           methodHead <- instantiateMethodValue scope methodSubst methodValue
-          Right (foldl X.EApp methodHead evidenceArgs)
+          Right (reapplyHeadInsts headInsts (foldl X.EApp methodHead evidenceArgs))
 
     lookupNullaryEvidence deferred methodInfo classArgView =
       case
@@ -1075,6 +1083,11 @@ resolveDeferredMethods scope deferredMethods = go
               (fmap typeViewDisplay subst)
               resultTy
               (typeViewDisplay expectedView)
+
+    nullaryMethodResultIsClassParameter methodInfo =
+      let (_, bodyTy) = splitForalls (methodType methodInfo)
+          (_, resultTy) = splitArrows bodyTy
+       in resultTy == STVar (methodParamName methodInfo)
 
     deferredMethodFullArityFromInfo methodInfo =
       length (fst (splitArrows (snd (splitForalls (methodType methodInfo)))))
@@ -1509,6 +1522,64 @@ stripVacuousForalls (X.TArrow dom cod) =
 stripVacuousForalls (X.TMu name body) =
   X.TMu name (stripVacuousForalls body)
 stripVacuousForalls ty = ty
+
+stripLeadingVacuousForalls :: ElabType -> ElabType
+stripLeadingVacuousForalls (X.TForall v _ body)
+  | v `Set.notMember` freeTypeVarsType body = stripLeadingVacuousForalls body
+stripLeadingVacuousForalls (X.TForall v mb body) =
+  X.TForall v mb (stripLeadingVacuousForalls body)
+stripLeadingVacuousForalls ty = ty
+
+stripLeadingVacuousTypeAbs :: ElabType -> ElabTerm -> ElabTerm
+stripLeadingVacuousTypeAbs ty term =
+  case (ty, term) of
+    (X.TForall v _ bodyTy, X.ETyAbs termV _ body)
+      | v `Set.notMember` freeTypeVarsType bodyTy,
+        termV `Set.notMember` freeTypeVarsTerm body ->
+          stripLeadingVacuousTypeAbs bodyTy body
+    (X.TForall _ _ bodyTy, X.ETyAbs termV mb body) ->
+      X.ETyAbs termV mb (stripLeadingVacuousTypeAbs bodyTy body)
+    _ -> term
+
+freeTypeVarsTerm :: ElabTerm -> Set String
+freeTypeVarsTerm term =
+  case term of
+    X.EVar {} -> Set.empty
+    X.ELit {} -> Set.empty
+    X.ELam _ ty body ->
+      freeTypeVarsType ty `Set.union` freeTypeVarsTerm body
+    X.EApp fun arg ->
+      freeTypeVarsTerm fun `Set.union` freeTypeVarsTerm arg
+    X.ELet _ scheme rhs body ->
+      Set.unions
+        [ freeTypeVarsType (schemeToType scheme),
+          freeTypeVarsTerm rhs,
+          freeTypeVarsTerm body
+        ]
+    X.ETyAbs v mb body ->
+      let boundFv = maybe Set.empty freeTypeVarsType mb
+          bodyFv = Set.delete v (freeTypeVarsTerm body)
+       in boundFv `Set.union` bodyFv
+    X.ETyInst inner inst ->
+      freeTypeVarsTerm inner `Set.union` freeTypeVarsInstantiation inst
+    X.ERoll ty body ->
+      freeTypeVarsType ty `Set.union` freeTypeVarsTerm body
+    X.EUnroll body ->
+      freeTypeVarsTerm body
+
+freeTypeVarsInstantiation :: X.Instantiation -> Set String
+freeTypeVarsInstantiation inst =
+  case inst of
+    X.InstId -> Set.empty
+    X.InstApp ty -> freeTypeVarsType ty
+    X.InstBot ty -> freeTypeVarsType ty
+    X.InstIntro -> Set.empty
+    X.InstElim -> Set.empty
+    X.InstAbstr v -> Set.singleton v
+    X.InstUnder v inner -> Set.delete v (freeTypeVarsInstantiation inner)
+    X.InstInside inner -> freeTypeVarsInstantiation inner
+    X.InstSeq left right ->
+      freeTypeVarsInstantiation left `Set.union` freeTypeVarsInstantiation right
 
 surfaceFreeVars :: SurfaceExpr -> Set String
 surfaceFreeVars = go Set.empty
