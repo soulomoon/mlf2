@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- Added native LLVM toolchain runner support to the test harness. LLVM backend
+  tests can now discover `llc` plus a native linker, build a temporary
+  executable from emitted `.ll`, run it, and capture stdout, stderr, and exit
+  status while skipping explicitly when tools are unavailable.
+
 ### Changed
 - Supported expected-type resolution for nullary overloaded `.mlfp` methods.
   Associated values such as `mempty : a` now resolve from an explicit or

@@ -7,10 +7,14 @@ import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import System.Exit (ExitCode (..))
 import Test.Hspec
 
 import LLVMToolSupport
-  ( validateLLVMAssembly,
+  ( NativeRunResult (..),
+    parseExecutableCommand,
+    runLLVMNativeExecutable,
+    validateLLVMAssembly,
     validateLLVMObjectCode,
     withTempProgram,
   )
@@ -52,6 +56,25 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
     output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
     validateLLVMAssembly output
+
+  it "runs a linked native executable and captures process output" $ do
+    result <- runLLVMNativeExecutable nativeOutputCaptureLLVM
+
+    nativeRunExitCode result `shouldBe` ExitFailure 7
+    nativeRunStdout result `shouldBe` "native stdout\n"
+    nativeRunStderr result `shouldBe` "native stderr\n"
+
+  it "parses CC launchers and flags before executable lookup" $ do
+    parseExecutableCommand "ccache clang -m64"
+      `shouldBe` Just ("ccache", ["clang", "-m64"])
+    parseExecutableCommand "xcrun clang"
+      `shouldBe` Just ("xcrun", ["clang"])
+    parseExecutableCommand "\"/opt/LLVM Tools/bin/clang\" -fuse-ld=lld"
+      `shouldBe` Just ("/opt/LLVM Tools/bin/clang", ["-fuse-ld=lld"])
+    parseExecutableCommand "'/opt/LLVM Tools/bin/clang' '-Wl,-dead_strip'"
+      `shouldBe` Just ("/opt/LLVM Tools/bin/clang", ["-Wl,-dead_strip"])
+    parseExecutableCommand "\"unterminated"
+      `shouldBe` Nothing
 
   describe "shared ProgramSpec first-order parity" $ do
     it "keeps the selected shared first-order parity rows wired" $
@@ -641,6 +664,25 @@ simpleFunctionProgram =
     [ "module Main export (id, main) {",
       "  def id : Int -> Int = \\x x;",
       "  def main : Int = id 1;",
+      "}"
+    ]
+
+nativeOutputCaptureLLVM :: String
+nativeOutputCaptureLLVM =
+  unlines
+    [ "; mlf2 native runner smoke",
+      "source_filename = \"mlf2-native-runner-smoke\"",
+      "@\"stdout_text\" = private unnamed_addr constant [14 x i8] c\"native stdout\\0A\"",
+      "@\"stderr_text\" = private unnamed_addr constant [14 x i8] c\"native stderr\\0A\"",
+      "declare i64 @\"write\"(i32, ptr, i64)",
+      "",
+      "define i32 @\"main\"() {",
+      "entry:",
+      "  %\"stdout.ptr\" = getelementptr inbounds [14 x i8], ptr @\"stdout_text\", i64 0, i64 0",
+      "  %\"stderr.ptr\" = getelementptr inbounds [14 x i8], ptr @\"stderr_text\", i64 0, i64 0",
+      "  call i64 @\"write\"(i32 1, ptr %\"stdout.ptr\", i64 14)",
+      "  call i64 @\"write\"(i32 2, ptr %\"stderr.ptr\", i64 14)",
+      "  ret i32 7",
       "}"
     ]
 

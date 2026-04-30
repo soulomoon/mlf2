@@ -973,7 +973,18 @@ resolveDeferredMethods scope deferredMethods = go
           Just view -> Right view
           Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
       case lookupNullaryEvidence deferred methodInfo classArgView of
-        Just runtimeName -> Right (X.EVar runtimeName)
+        Just evidence -> do
+          methodSubst <-
+            case inferNullaryMethodSubst methodInfo classArgView Map.empty expectedView of
+              Just subst' -> Right subst'
+              Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+          evidenceHead <- instantiateLocalMethodEvidence scope methodSubst evidence
+          evidenceArgs <-
+            resolveConstraintEvidenceTerms
+              scope
+              Set.empty
+              (nullaryMethodLocalConstraints methodInfo classArgView methodSubst)
+          Right (foldl X.EApp evidenceHead evidenceArgs)
         Nothing -> do
           (instanceInfo, subst) <- resolveMethodInstanceInfoByTypeView scope methodInfo classArgView
           methodValue <- concreteMethodValue instanceInfo methodInfo
@@ -997,12 +1008,42 @@ resolveDeferredMethods scope deferredMethods = go
           (typeViewIdentity classArgView)
           (methodName methodInfo)
       of
-        Just (runtimeName, _) -> Just runtimeName
+        Just (runtimeName, evidenceTy) ->
+          Just
+            DeferredMethodEvidence
+              { deferredMethodEvidenceClassArg = classArgView,
+                deferredMethodEvidenceRuntimeName = runtimeName,
+                deferredMethodEvidenceType = evidenceTy
+              }
         Nothing ->
           case deferredMethodEvidence deferred of
-            Just DeferredMethodEvidence {deferredMethodEvidenceRuntimeName = runtimeName} ->
-              Just runtimeName
+            Just evidence -> Just evidence
             _ -> Nothing
+
+    instantiateLocalMethodEvidence scope0 subst DeferredMethodEvidence {deferredMethodEvidenceRuntimeName = runtimeName, deferredMethodEvidenceType = evidenceTy} =
+      foldl X.ETyInst (X.EVar runtimeName)
+        <$> methodForallInstantiations scope0 subst (fst (splitForalls evidenceTy))
+
+    nullaryMethodLocalConstraints methodInfo classArgView methodSubst =
+      let headVars = freeTypeVarsTypeView classArgView
+          specializedForClass =
+            map
+              (specializeConstraintInfoType (methodParamName methodInfo) classArgView)
+              (methodConstraintInfos methodInfo)
+          methodLocal =
+            filter
+              (not . constraintDeterminedByTypeVars headVars)
+              specializedForClass
+       in map (applyConstraintInfoSubst methodSubst) methodLocal
+
+    specializeConstraintInfoType paramName headView constraint =
+      constraint
+        { constraintTypeView =
+            TypeView
+              { typeViewDisplay = substituteTypeVar paramName (typeViewDisplay headView) (typeViewDisplay (constraintTypeView constraint)),
+                typeViewIdentity = substituteTypeVar paramName (typeViewIdentity headView) (typeViewIdentity (constraintTypeView constraint))
+              }
+        }
 
     inferNullaryMethodClassArgument methodInfo expectedView
       | deferredMethodFullArityFromInfo methodInfo /= 0 = Nothing
