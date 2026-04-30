@@ -595,6 +595,18 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "store ptr @\"__mlfp_closure$poly\""
     validateLLVMAssembly output
 
+  it "keys function wrappers from qualified specialization forms" $ do
+    output <- requireRight (renderBackendProgramLLVM polymorphicClosureFunctionWrapperProgram)
+
+    let wrapperDefinitions =
+          filter
+            (\line -> "define private i64 @\"__mlfp_function_wrapper$" `isInfixOf` line)
+            (lines output)
+    length wrapperDefinitions `shouldSatisfy` (>= 2)
+    output `shouldSatisfy` isInfixOf "$__mlfp_closure$wrapper_key"
+    output `shouldNotSatisfy` isInfixOf "unsupported function argument"
+    validateLLVMAssembly output
+
   it "lowers stored top-level function constructor fields" $ do
     output <- requireRight (renderBackendProgramLLVM functionFieldProgram)
 
@@ -2721,6 +2733,84 @@ polymorphicClosureSpecializationCall argTy arg =
   BackendApp
     intTy
     (BackendTyApp (BTArrow argTy intTy) (BackendVar polymorphicClosureSpecializationTy "poly") argTy)
+    arg
+
+polymorphicClosureFunctionWrapperProgram :: BackendProgram
+polymorphicClosureFunctionWrapperProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [fnBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "polyWrapper",
+                      backendBindingType = polymorphicClosureFunctionWrapperTy,
+                      backendBindingExpr = polymorphicClosureFunctionWrapperExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLet
+                          intTy
+                          "left"
+                          fnBoxTy
+                          (polymorphicClosureFunctionWrapperCall intTy (intLit 7))
+                          ( BackendLet
+                              intTy
+                              "right"
+                              fnBoxTy
+                              (polymorphicClosureFunctionWrapperCall boolTy (boolLit True))
+                              (intLit 0)
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+polymorphicClosureFunctionWrapperTy :: BackendType
+polymorphicClosureFunctionWrapperTy =
+  BTForall "a" Nothing (BTArrow (BTVar "a") fnBoxTy)
+
+polymorphicClosureFunctionWrapperExpr :: BackendExpr
+polymorphicClosureFunctionWrapperExpr =
+  BackendTyAbs
+    polymorphicClosureFunctionWrapperTy
+    "a"
+    Nothing
+    ( BackendLam
+        (BTArrow (BTVar "a") fnBoxTy)
+        "ignored"
+        (BTVar "a")
+        (BackendConstruct fnBoxTy "FnBox" [closureContainingFunctionExpr])
+    )
+
+closureContainingFunctionExpr :: BackendExpr
+closureContainingFunctionExpr =
+  BackendLet
+    unaryIntTy
+    "unusedClosure"
+    unaryIntTy
+    ( BackendClosure
+        { backendExprType = unaryIntTy,
+          backendClosureEntryName = "__mlfp_closure$wrapper_key",
+          backendClosureCaptures = [],
+          backendClosureParams = [("x", intTy)],
+          backendClosureBody = BackendVar intTy "x"
+        }
+    )
+    intIdentityExpr
+
+polymorphicClosureFunctionWrapperCall :: BackendType -> BackendExpr -> BackendExpr
+polymorphicClosureFunctionWrapperCall argTy arg =
+  BackendApp
+    fnBoxTy
+    (BackendTyApp (BTArrow argTy fnBoxTy) (BackendVar polymorphicClosureFunctionWrapperTy "polyWrapper") argTy)
     arg
 
 functionFieldProgram :: BackendProgram

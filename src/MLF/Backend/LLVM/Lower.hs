@@ -1244,7 +1244,7 @@ collectEvidenceWrappers base reachable specializations =
   where
     requests =
       concatMap (collectEvidenceWrappersInForm base Map.empty Set.empty . biForm) monomorphicReachable
-        ++ concatMap (collectEvidenceWrappersInForm base Map.empty Set.empty . spForm) specializations
+        ++ concatMap (collectEvidenceWrappersInForm base Map.empty Set.empty . qualifiedSpecializationForm) specializations
     monomorphicReachable =
       filter (null . ffTypeBinders . biForm) reachable
     uniqueRequests =
@@ -1263,7 +1263,7 @@ collectFunctionWrappers base reachable specializations =
   where
     requests =
       concatMap (collectFunctionWrappersInForm base Map.empty Set.empty . biForm) monomorphicReachable
-        ++ concatMap (collectFunctionWrappersInForm base Map.empty Set.empty . spForm) specializations
+        ++ concatMap (collectFunctionWrappersInForm base Map.empty Set.empty . qualifiedSpecializationForm) specializations
     monomorphicReachable =
       filter (null . ffTypeBinders . biForm) reachable
     uniqueRequests =
