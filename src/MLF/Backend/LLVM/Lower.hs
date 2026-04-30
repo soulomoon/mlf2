@@ -177,7 +177,7 @@ lowerBackendProgram program = do
   specializations <- collectRequiredSpecializations base reachable
   let evidenceWrappers = collectEvidenceWrappers base reachable specializations
       functionWrappers = collectFunctionWrappers base reachable specializations
-      closureEntries = collectClosureEntries reachable specializations evidenceWrappers functionWrappers
+      closureEntries0 = collectClosureEntries reachable specializations evidenceWrappers functionWrappers
       referencedFunctionNames = collectReferencedFunctionNames base reachable specializations evidenceWrappers functionWrappers
       stringGlobals = assignStringGlobals (collectProgramStrings reachable specializations evidenceWrappers functionWrappers)
       env =
@@ -188,6 +188,7 @@ lowerBackendProgram program = do
             peFunctionWrappers = Map.fromList [(fwKey wrapper, wrapper) | wrapper <- functionWrappers],
             peStringGlobals = stringGlobals
           }
+  closureEntries <- requireUniqueClosureEntries closureEntries0
   functions <-
     concat
       <$> sequence
@@ -1592,22 +1593,94 @@ lowerMonomorphicBinding env binding =
 
 lowerSpecialization :: ProgramEnv -> Specialization -> Either BackendLLVMError LLVMFunction
 lowerSpecialization env specialization =
-  lowerFunction env (spFunctionName specialization) True (spForm specialization)
+  lowerFunction env (spFunctionName specialization) True (qualifiedSpecializationForm specialization)
 
 lowerEvidenceWrapper :: ProgramEnv -> EvidenceWrapper -> Either BackendLLVMError LLVMFunction
 lowerEvidenceWrapper env wrapper =
-  lowerFunction env (ewFunctionName wrapper) True (evidenceWrapperForm wrapper)
+  lowerFunction env (ewFunctionName wrapper) True (qualifiedEvidenceWrapperForm wrapper)
 
 lowerFunctionWrapper :: ProgramEnv -> FunctionWrapper -> Either BackendLLVMError LLVMFunction
 lowerFunctionWrapper env wrapper =
-  lowerFunction env (fwFunctionName wrapper) True (functionWrapperForm wrapper)
+  lowerFunction env (fwFunctionName wrapper) True (qualifiedFunctionWrapperForm wrapper)
 
 collectClosureEntries :: [BindingInfo] -> [Specialization] -> [EvidenceWrapper] -> [FunctionWrapper] -> [ClosureEntry]
 collectClosureEntries reachable specializations evidenceWrappers functionWrappers =
   concatMap (collectClosureEntriesInExpr . ffBody . biForm) (filter (null . ffTypeBinders . biForm) reachable)
-    ++ concatMap (collectClosureEntriesInExpr . ffBody . spForm) specializations
-    ++ concatMap (collectClosureEntriesInExpr . ffBody . evidenceWrapperForm) evidenceWrappers
-    ++ concatMap (collectClosureEntriesInExpr . ffBody . functionWrapperForm) functionWrappers
+    ++ concatMap (collectClosureEntriesInExpr . ffBody . qualifiedSpecializationForm) specializations
+    ++ concatMap (collectClosureEntriesInExpr . ffBody . qualifiedEvidenceWrapperForm) evidenceWrappers
+    ++ concatMap (collectClosureEntriesInExpr . ffBody . qualifiedFunctionWrapperForm) functionWrappers
+
+requireUniqueClosureEntries :: [ClosureEntry] -> Either BackendLLVMError [ClosureEntry]
+requireUniqueClosureEntries entries =
+  case firstDuplicate (map ceEntryName entries) of
+    Just entryName ->
+      Left (BackendLLVMInternalError ("duplicate closure entry after specialization: " ++ entryName))
+    Nothing ->
+      Right entries
+
+qualifiedSpecializationForm :: Specialization -> FunctionForm
+qualifiedSpecializationForm specialization =
+  qualifyClosureEntriesInForm (spFunctionName specialization) (spForm specialization)
+
+qualifiedEvidenceWrapperForm :: EvidenceWrapper -> FunctionForm
+qualifiedEvidenceWrapperForm wrapper =
+  qualifyClosureEntriesInForm (ewFunctionName wrapper) (evidenceWrapperForm wrapper)
+
+qualifiedFunctionWrapperForm :: FunctionWrapper -> FunctionForm
+qualifiedFunctionWrapperForm wrapper =
+  qualifyClosureEntriesInForm (fwFunctionName wrapper) (functionWrapperForm wrapper)
+
+qualifyClosureEntriesInForm :: String -> FunctionForm -> FunctionForm
+qualifyClosureEntriesInForm ownerName form =
+  form {ffBody = qualifyClosureEntriesInExpr ownerName (ffBody form)}
+
+qualifyClosureEntriesInExpr :: String -> BackendExpr -> BackendExpr
+qualifyClosureEntriesInExpr ownerName =
+  go
+  where
+    go =
+      \case
+        BackendVar resultTy name ->
+          BackendVar resultTy name
+        BackendLit resultTy lit ->
+          BackendLit resultTy lit
+        BackendLam resultTy name paramTy body ->
+          BackendLam resultTy name paramTy (go body)
+        BackendApp resultTy fun arg ->
+          BackendApp resultTy (go fun) (go arg)
+        BackendLet resultTy name bindingTy rhs body ->
+          BackendLet resultTy name bindingTy (go rhs) (go body)
+        BackendTyAbs resultTy name mbBound body ->
+          BackendTyAbs resultTy name mbBound (go body)
+        BackendTyApp resultTy fun ty ->
+          BackendTyApp resultTy (go fun) ty
+        BackendConstruct resultTy name args ->
+          BackendConstruct resultTy name (map go args)
+        BackendCase resultTy scrutinee alternatives ->
+          BackendCase resultTy (go scrutinee) (fmap qualifyAlternative alternatives)
+        BackendRoll resultTy payload ->
+          BackendRoll resultTy (go payload)
+        BackendUnroll resultTy payload ->
+          BackendUnroll resultTy (go payload)
+        BackendClosure resultTy entryName captures params body ->
+          BackendClosure
+            resultTy
+            (qualifiedClosureEntryName ownerName entryName)
+            (map qualifyCapture captures)
+            params
+            (go body)
+        BackendClosureCall resultTy fun args ->
+          BackendClosureCall resultTy (go fun) (map go args)
+
+    qualifyAlternative alternative =
+      alternative {backendAltBody = go (backendAltBody alternative)}
+
+    qualifyCapture capture =
+      capture {backendClosureCaptureExpr = go (backendClosureCaptureExpr capture)}
+
+qualifiedClosureEntryName :: String -> String -> String
+qualifiedClosureEntryName ownerName entryName =
+  ownerName ++ "$" ++ entryName
 
 collectClosureEntriesInExpr :: BackendExpr -> [ClosureEntry]
 collectClosureEntriesInExpr =
@@ -2321,13 +2394,13 @@ lookupFunctionFormByName env functionName =
   case Map.lookup functionName (pbBindings (peBase env)) of
     Just binding -> Just (biForm binding)
     Nothing ->
-      case [spForm specialization | specialization <- Map.elems (peSpecializations env), spFunctionName specialization == functionName] of
+      case [qualifiedSpecializationForm specialization | specialization <- Map.elems (peSpecializations env), spFunctionName specialization == functionName] of
         form : _ -> Just form
         [] ->
-          case [evidenceWrapperForm wrapper | wrapper <- Map.elems (peEvidenceWrappers env), ewFunctionName wrapper == functionName] of
+          case [qualifiedEvidenceWrapperForm wrapper | wrapper <- Map.elems (peEvidenceWrappers env), ewFunctionName wrapper == functionName] of
             form : _ -> Just form
             [] ->
-              case [functionWrapperForm wrapper | wrapper <- Map.elems (peFunctionWrappers env), fwFunctionName wrapper == functionName] of
+              case [qualifiedFunctionWrapperForm wrapper | wrapper <- Map.elems (peFunctionWrappers env), fwFunctionName wrapper == functionName] of
                 form : _ -> Just form
                 [] -> Nothing
 

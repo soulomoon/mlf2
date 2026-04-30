@@ -244,6 +244,27 @@ spec = describe "MLF.Backend.IR" $ do
             }
         badCall =
           BackendClosureCall intTy (goodClosure "__mlfp_closure$call") [boolLit True]
+        unlistedLocalCapture =
+          BackendLet
+            idTy
+            "captured"
+            intTy
+            (intLit 7)
+            ( BackendClosure
+                { backendExprType = idTy,
+                  backendClosureEntryName = "__mlfp_closure$unlisted_capture",
+                  backendClosureCaptures = [],
+                  backendClosureParams = [("x", intTy)],
+                  backendClosureBody = BackendVar intTy "captured"
+                }
+            )
+        appCalledClosure =
+          BackendLet
+            intTy
+            "f"
+            idTy
+            (goodClosure "__mlfp_closure$app")
+            (BackendApp intTy (BackendVar idTy "f") (intLit 1))
 
     validateBackendProgram (programWithMainExpr captureMismatch)
       `shouldBe` Left (BackendClosureCaptureTypeMismatch "captured" boolTy intTy)
@@ -255,6 +276,10 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` Left (BackendDuplicateClosureParameter "x")
     validateBackendProgram (programWithMainExpr badCall)
       `shouldBe` Left (BackendClosureCallArgumentMismatch 0 intTy boolTy)
+    validateBackendProgram (programWithMainExpr unlistedLocalCapture)
+      `shouldBe` Left (BackendUnknownVariable "captured")
+    validateBackendProgram (programWithMainExpr appCalledClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
 
   it "checks type application against forall nodes" $ do
     validateBackendExpr
