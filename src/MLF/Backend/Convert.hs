@@ -153,6 +153,10 @@ extendClosureScopeTerms :: [(String, ElabType)] -> ClosureScope -> ClosureScope
 extendClosureScopeTerms bindings scope =
   foldr (\(name, ty) acc -> extendClosureScopeTerm name ty False acc) scope bindings
 
+extendClosureScopeLambdaParams :: [(String, ElabType)] -> ClosureScope -> ClosureScope
+extendClosureScopeLambdaParams bindings scope =
+  foldr (\(name, ty) acc -> extendClosureScopeTerm name ty (isClosureConvertibleElabType ty) acc) scope bindings
+
 runConvertM :: ConvertM a -> Either BackendConversionError a
 runConvertM action =
   evalStateT
@@ -1768,7 +1772,12 @@ convertOrdinaryTerm mode context env scope term resultTy0 =
               Just canonicalTy -> canonicalTy
               Nothing -> paramTy
           bodyMode = directLambdaBodyMode bodyExpected body
-          bodyScope = extendClosureScopeTerm name paramEnvTy False scope
+          bodyScope =
+            extendClosureScopeTerm
+              name
+              paramEnvTy
+              (isClosureConvertibleFunctionType paramBackendTy)
+              scope
       bodyExpr <- convertTermExpectedMode bodyMode context (extendTermEnv name paramEnvTy env) bodyScope bodyExpected body
       pure
         BackendLam
@@ -2092,7 +2101,7 @@ convertLambdaClosure mode context env scope resultTy term = do
           )
           emptyClosureScope
           captures
-      bodyScope = extendClosureScopeTerms paramEnvBindings captureScope
+      bodyScope = extendClosureScopeLambdaParams paramEnvBindings captureScope
       bodyEnv =
         foldr
           (uncurry extendTermEnv)

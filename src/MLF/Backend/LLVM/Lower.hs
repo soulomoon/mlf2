@@ -2917,33 +2917,41 @@ lowerClosureValue env exprEnv context resultTy entryName captures = do
 
 lowerClosureCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> [BackendExpr] -> LowerM LowerValue
 lowerClosureCall env exprEnv context resultTy fun args = do
-  callee <- lowerExpr env exprEnv context fun
-  unless (lvLLVMType callee == LLVMPtr) $
-    liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a pointer: " ++ show (lvBackendType callee)))
-  let (paramTys, returnTy) = collectArrowsType (lvBackendType callee)
-  when (null paramTys) $
-    liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a function: " ++ show (lvBackendType callee)))
-  unless (length paramTys == length args) $
-    liftEither (BackendLLVMArityMismatch "closure" (length paramTys) (length args))
-  resultLLVMType <- lowerRuntimeValueTypeM env context resultTy
-  returnLLVMType <- lowerRuntimeValueTypeM env context returnTy
-  unless (resultLLVMType == returnLLVMType) $
-    liftEither (BackendLLVMInternalError ("closure call result mismatch at " ++ context))
-  callArgs <- zipWithM lowerClosureArg (zip [0 :: Int ..] paramTys) args
-  codePtrField <- emitGep "closure.code.ptr" (lvOperand callee) 0
-  codePtr <- emitAssign "closure.code" LLVMPtr (LLVMLoad LLVMPtr codePtrField)
-  envPtrField <- emitGep "closure.env.ptr" (lvOperand callee) 8
-  closureEnv <- emitAssign "closure.env" LLVMPtr (LLVMLoad LLVMPtr envPtrField)
-  result <-
-    emitAssign
-      "closure.call"
-      resultLLVMType
-      ( LLVMCallOperand
-          codePtr
-          ((LLVMPtr, closureEnv) : [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
-      )
-  pure (LowerValue resultTy resultLLVMType result)
+  case collectTyApps fun of
+    (BackendVar _ name, typeArgs)
+      | Just localFunction <- Map.lookup name (eeLocalFunctions exprEnv) ->
+          lowerLocalFunctionCall env exprEnv context name localFunction typeArgs args
+    _ ->
+      lowerClosurePointerCall
   where
+    lowerClosurePointerCall = do
+      callee <- lowerExpr env exprEnv context fun
+      unless (lvLLVMType callee == LLVMPtr) $
+        liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a pointer: " ++ show (lvBackendType callee)))
+      let (paramTys, returnTy) = collectArrowsType (lvBackendType callee)
+      when (null paramTys) $
+        liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a function: " ++ show (lvBackendType callee)))
+      unless (length paramTys == length args) $
+        liftEither (BackendLLVMArityMismatch "closure" (length paramTys) (length args))
+      resultLLVMType <- lowerRuntimeValueTypeM env context resultTy
+      returnLLVMType <- lowerRuntimeValueTypeM env context returnTy
+      unless (resultLLVMType == returnLLVMType) $
+        liftEither (BackendLLVMInternalError ("closure call result mismatch at " ++ context))
+      callArgs <- zipWithM lowerClosureArg (zip [0 :: Int ..] paramTys) args
+      codePtrField <- emitGep "closure.code.ptr" (lvOperand callee) 0
+      codePtr <- emitAssign "closure.code" LLVMPtr (LLVMLoad LLVMPtr codePtrField)
+      envPtrField <- emitGep "closure.env.ptr" (lvOperand callee) 8
+      closureEnv <- emitAssign "closure.env" LLVMPtr (LLVMLoad LLVMPtr envPtrField)
+      result <-
+        emitAssign
+          "closure.call"
+          resultLLVMType
+          ( LLVMCallOperand
+              codePtr
+              ((LLVMPtr, closureEnv) : [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
+          )
+      pure (LowerValue resultTy resultLLVMType result)
+
     lowerClosureArg (index0, paramTy) arg =
       lowerExprForIndirectArgument env exprEnv context ("__mlfp_closure_arg" ++ show index0, paramTy) arg
 
@@ -3547,6 +3555,14 @@ bindCallArguments env callEnv bodyEnv0 context allowNestedEvidence name form arg
   foldM bindOne bodyEnv0 (zip (ffParams form) args)
   where
     bindOne bodyEnv ((paramName, paramTy), arg)
+      | isFirstOrderFunctionPointerType paramTy,
+        Just _ <- closurePointerAliasValue callEnv arg = do
+          value <- lowerExprForArgument env callEnv context allowNestedEvidence (paramName, paramTy) arg
+          pure
+            bodyEnv
+              { eeValues = Map.insert paramName value (eeValues bodyEnv),
+                eeLocalFunctions = Map.delete paramName (eeLocalFunctions bodyEnv)
+              }
       | isInlineFunctionArgument allowNestedEvidence paramName paramTy = do
           localFunction <- lowerStaticFunctionArgument env callEnv context paramName paramTy arg
           pure

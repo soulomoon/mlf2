@@ -605,6 +605,17 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "lowers closure-valued function parameters through the explicit closure ABI" $ do
+    output <-
+      withTempProgram sourceFunctionParameterClosureCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$Main__main$"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "call i64 %\"__llvm.malloc"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
   it "lowers source-level returned closure values as pointer results" $ do
     output <-
       withTempProgram sourceReturnedClosureProgram $ \path ->
@@ -2912,6 +2923,18 @@ sourceCapturedClosureCallProgram =
       "    let f : Int -> Int = \\(x : Int) captured in",
       "    let g : Int -> Int = f in",
       "    g 0;",
+      "}"
+    ]
+
+sourceFunctionParameterClosureCallProgram :: String
+sourceFunctionParameterClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
       "}"
     ]
 

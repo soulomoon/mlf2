@@ -688,6 +688,17 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCapture "captured"
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
 
+  it "closure-converts closure-valued function parameters at call sites" $ do
+    checked <- requireChecked functionParameterClosureCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    useBinding <- requireBinding "Main__use" backend
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendClosureCall
+    backendBindingExpr useBinding `shouldNotSatisfy` containsBackendApp
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
+
   it "closure-converts calls to closure-valued top-level bindings" $ do
     checked <- requireChecked topLevelClosureCallProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -1120,6 +1131,18 @@ capturedClosureCallProgram =
       "    let f : Int -> Int = \\(x : Int) captured in",
       "    let g : Int -> Int = f in",
       "    g 0;",
+      "}"
+    ]
+
+functionParameterClosureCallProgram :: String
+functionParameterClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
       "}"
     ]
 
