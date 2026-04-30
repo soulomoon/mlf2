@@ -13,10 +13,18 @@ import qualified MLF.Frontend.Syntax.Program as P
 preludeSource :: String
 preludeSource =
   unlines
-    [ "module Prelude export (Nat(..), Option(..), List(..), Eq, eq, and, id) {",
+    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Monad, eq, pure, bind, putStrLn, and, id) {",
       "  class Eq a {",
       "    eq : a -> a -> Bool;",
       "  }",
+      "",
+      "  class Monad (m :: * -> *) {",
+      "    pure : forall a. a -> m a;",
+      "    bind : forall a b. m a -> (a -> m b) -> m b;",
+      "  }",
+      "",
+      "  data Unit =",
+      "      Unit : Unit;",
       "",
       "  data Nat =",
       "      Zero : Nat",
@@ -33,6 +41,12 @@ preludeSource =
       "    | Cons : a -> List a -> List a",
       "    deriving Eq;",
       "",
+      "  instance Monad IO {",
+      "    pure = \\value __io_pure value;",
+      "    bind = \\action \\next __io_bind action next;",
+      "  }",
+      "",
+      "  def putStrLn : String -> IO Unit = __io_putStrLn;",
       "  def and : Bool -> Bool -> Bool = \\left \\right __mlfp_and left right;",
       "  def id : forall a. a -> a = \\x x;",
       "}"

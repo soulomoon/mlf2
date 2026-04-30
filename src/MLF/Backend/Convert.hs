@@ -45,6 +45,7 @@ import MLF.Elab.Types
     schemeFromType,
     tyToElab,
   )
+import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Elaborate (ElaborateScope, elaborateScopeDataTypes, lowerType, mkElaborateScope)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -116,6 +117,7 @@ type LiftM = StateT LiftState (Either BackendConversionError)
 
 convertCheckedProgram :: CheckedProgram -> Either BackendConversionError BackendProgram
 convertCheckedProgram checked = do
+  rejectOpaqueBuiltinMain checked
   context <- buildConvertContext checked
   initialEnv <- buildInitialEnv context checked
   modules0 <- mapM (convertCheckedModule context initialEnv) (checkedProgramModules checked)
@@ -184,13 +186,67 @@ backendBuiltinTermTypes =
 convertCheckedModule :: ConvertContext -> Env -> CheckedModule -> Either BackendConversionError BackendModule
 convertCheckedModule context env checkedModule = do
   dataDecls <- mapM (convertDataInfo context) (Map.elems (checkedModuleData checkedModule))
-  bindings <- concat <$> mapM (convertCheckedBinding context env checkedModule) (checkedModuleBindings checkedModule)
+  bindings <-
+    concat
+      <$> mapM
+        (convertCheckedBinding context env checkedModule)
+        (filter (not . checkedBindingMentionsOpaqueBuiltin) (checkedModuleBindings checkedModule))
   Right
     BackendModule
       { backendModuleName = checkedModuleName checkedModule,
         backendModuleData = dataDecls,
         backendModuleBindings = bindings
       }
+
+rejectOpaqueBuiltinMain :: CheckedProgram -> Either BackendConversionError ()
+rejectOpaqueBuiltinMain checked =
+  case
+    [ binding
+      | checkedModule <- checkedProgramModules checked,
+        binding <- checkedModuleBindings checkedModule,
+        checkedBindingName binding == checkedProgramMain checked
+    ]
+  of
+    binding : _
+      | checkedBindingMentionsOpaqueBuiltin binding ->
+          Left (BackendUnsupportedCaseShape "IO programs are not supported by backend conversion yet")
+    _ ->
+      case referencedOpaqueBuiltinBindings checked of
+        [] -> Right ()
+        refs ->
+          Left
+            ( BackendUnsupportedCaseShape
+                ( "IO dependencies are not supported by backend conversion yet: "
+                    ++ intercalate ", " [owner ++ " -> " ++ opaque | (owner, opaque) <- refs]
+                )
+            )
+
+referencedOpaqueBuiltinBindings :: CheckedProgram -> [(String, String)]
+referencedOpaqueBuiltinBindings checked =
+  [ (checkedBindingName binding, opaqueName)
+    | binding <- allCheckedBindings checked,
+      not (checkedBindingMentionsOpaqueBuiltin binding),
+      opaqueName <- Set.toList (freeTermVariables (checkedBindingTerm binding) `Set.intersection` opaqueNames)
+  ]
+  where
+    opaqueNames =
+      Builtins.builtinOpaqueValueNames
+        `Set.union` Set.fromList
+        [ checkedBindingName binding
+          | binding <- allCheckedBindings checked,
+            checkedBindingMentionsOpaqueBuiltin binding
+        ]
+
+allCheckedBindings :: CheckedProgram -> [CheckedBinding]
+allCheckedBindings checked =
+  [ binding
+    | checkedModule <- checkedProgramModules checked,
+      binding <- checkedModuleBindings checkedModule
+  ]
+
+checkedBindingMentionsOpaqueBuiltin :: CheckedBinding -> Bool
+checkedBindingMentionsOpaqueBuiltin =
+  Builtins.srcTypeMentionsOpaqueBuiltin . checkedBindingSourceType
 
 convertCheckedBinding :: ConvertContext -> Env -> CheckedModule -> CheckedBinding -> Either BackendConversionError [BackendBinding]
 convertCheckedBinding context env checkedModule binding = do

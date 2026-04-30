@@ -1,6 +1,6 @@
 module ProgramSpec (spec) where
 
-import Data.Either (isRight)
+import Data.Either (isLeft, isRight)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
@@ -365,6 +365,185 @@ spec = do
                         , "}"
                         ]
             (prettyValue <$> runLocatedProgram (withPreludeLocated located)) `shouldBe` Right "Some Zero"
+
+        it "typechecks the initial Prelude IO and Monad surface" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (pureUnit, main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Monad, pure, bind, putStrLn);"
+                        , "  def pureUnit : IO Unit = pure Unit;"
+                        , "  def after : Unit -> IO Unit = \\_done putStrLn \"world\";"
+                        , "  def main : IO Unit = bind (putStrLn \"hello\") after;"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isRight
+
+        it "typechecks direct IO bind primitive uses with consistent arguments" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = __io_bind (__io_pure Unit) (\\(_n : Unit) __io_putStrLn \"world\");"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isRight
+
+        it "rejects inconsistent direct IO bind primitive arguments" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = __io_bind (__io_pure 1) (\\(_n : Unit) __io_putStrLn \"world\");"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isLeft
+
+        it "rejects non-IO expressions for Prelude IO annotations" $ do
+            intLocated <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = 1;"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated intLocated) `shouldSatisfy` either
+                (isInfixOf "type mismatch" . renderProgramDiagnostic)
+                (const False)
+            identityLocated <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = \\x x;"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated identityLocated) `shouldSatisfy` either
+                (isInfixOf "type mismatch" . renderProgramDiagnostic)
+                (const False)
+
+        it "rejects monomorphic IO actions for polymorphic IO annotations" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (IO);"
+                        , "  def main : forall a. IO a = __io_pure 1;"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                (isInfixOf "type mismatch" . renderProgramDiagnostic)
+                (const False)
+
+        it "rejects inconsistent Prelude IO bind argument substitutions" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, putStrLn);"
+                        , "  def main : IO Unit = bind (__io_pure 1) (\\(_n : Unit) putStrLn \"world\");"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                (isInfixOf "ambiguous overloaded method use `bind`" . renderProgramDiagnostic)
+                (const False)
+
+        it "rejects constructor imports for opaque Prelude IO" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (IO(..));"
+                        , "  def main : Bool = true;"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                ((== ProgramImportNotExported "Prelude" "IO") . diagnosticError)
+                (const False)
+
+        it "rejects case inspection of opaque Prelude IO values" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, pure);"
+                        , "  def action : IO Unit = pure Unit;"
+                        , "  def main : Unit = case action of {"
+                        , "    _ -> Unit"
+                        , "  };"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                (isInfixOf "case scrutinee is not a data type" . renderProgramDiagnostic)
+                (const False)
+
+        it "keeps overloaded pure ambiguous without an IO expected result" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), pure);"
+                        , "  def main : Unit = pure Unit;"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                ((== ProgramAmbiguousMethodUse "pure") . diagnosticError)
+                (const False)
+
+        it "rejects running IO mains until runtime support exists" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
+                        , "  def main : IO Unit = putStrLn \"hello\";"
+                        , "}"
+                        ]
+            runLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                ((== ProgramPipelineError "run-program does not support IO main values yet") . diagnosticError)
+                (const False)
+
+        it "rejects running pure mains that depend on opaque Prelude helpers" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, pure);"
+                        , "  def discard : IO Unit -> Unit = \\(_action : IO Unit) Unit;"
+                        , "  def main : Unit = discard (pure Unit);"
+                        , "}"
+                        ]
+            runLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                ( \diagnostic ->
+                    all
+                        (`isInfixOf` renderProgramDiagnostic diagnostic)
+                        [ "run-program does not support IO dependencies yet"
+                        , "Main__discard"
+                        ]
+                )
+                (const False)
+
+        it "rejects running pure mains that directly call opaque primitives" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : Unit = (\\(_action : IO Unit) Unit) (__io_pure Unit);"
+                        , "}"
+                        ]
+            runLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                ( \diagnostic ->
+                    all
+                        (`isInfixOf` renderProgramDiagnostic diagnostic)
+                        [ "run-program does not support IO dependencies yet"
+                        , "__io_pure"
+                        ]
+                )
+                (const False)
 
         it "rejects a user module named Prelude when the built-in Prelude is active" $ do
             located <-

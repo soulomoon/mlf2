@@ -31,6 +31,7 @@ import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Maybe (mapMaybe)
 import qualified Data.Set as Set
+import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     lowerConstructorBinding,
@@ -40,7 +41,7 @@ import MLF.Frontend.Program.Elaborate
     resolveInstanceInfoWithIdentityType,
     sourceTypeViewInScope,
   )
-import MLF.Frontend.Program.Finalize (finalizeBinding)
+import MLF.Frontend.Program.Finalize (finalizeBinding, finalizeBindingAllowOpaque)
 import MLF.Frontend.Program.Resolve (resolveProgram)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -142,11 +143,7 @@ data KindTerm
   deriving (Eq, Show)
 
 emptyScope :: Scope
-emptyScope = mkScope builtinValues Map.empty Map.empty []
-
-mkScope :: Map String ValueInfo -> Map String DataInfo -> Map String ClassInfo -> [InstanceInfo] -> Scope
-mkScope values0 types0 classes0 instances0 =
-  mkScopeWithHidden values0 types0 Map.empty classes0 instances0
+emptyScope = mkScopeWithHidden Builtins.builtinValues Map.empty Builtins.builtinOpaqueTypes Map.empty []
 
 mkScopeWithHidden ::
   Map String ValueInfo ->
@@ -194,27 +191,6 @@ scopeElaborateTypes scope =
 indexByIdentity :: (a -> SymbolIdentity) -> Map String a -> Map SymbolIdentity [(String, a)]
 indexByIdentity identityOf =
   Map.fromListWith (++) . map (\(name, info) -> (identityOf info, [(name, info)])) . Map.toList
-
-builtinValues :: Map String ValueInfo
-builtinValues =
-  Map.singleton
-    "__mlfp_and"
-    OrdinaryValue
-      { valueDisplayName = "__mlfp_and",
-        valueInfoSymbol =
-          SymbolIdentity
-            { symbolNamespace = SymbolValue,
-              symbolDefiningModule = "<builtin>",
-              symbolDefiningName = "__mlfp_and",
-              symbolOwnerIdentity = Nothing
-        },
-        valueRuntimeName = "__mlfp_and",
-        valueType = STArrow (STBase "Bool") (STArrow (STBase "Bool") (STBase "Bool")),
-        valueIdentityType = STArrow (STBase "Bool") (STArrow (STBase "Bool") (STBase "Bool")),
-        valueConstraints = [],
-        valueConstraintInfos = [],
-        valueOriginModule = "<builtin>"
-      }
 
 emptyDisplayNameEnv :: DisplayNameEnv
 emptyDisplayNameEnv =
@@ -366,10 +342,7 @@ resolvedSymbolDisplayName =
   P.refDisplayName
 
 isBuiltinTypeSymbol :: ResolvedSymbol -> Bool
-isBuiltinTypeSymbol symbol =
-  let identity = resolvedSymbolIdentity symbol
-   in symbolNamespace identity == SymbolType
-        && symbolDefiningModule identity == "<builtin>"
+isBuiltinTypeSymbol = Builtins.isBuiltinTypeSymbol
 
 -- Program checking ------------------------------------------------------------
 
@@ -1408,7 +1381,7 @@ kindEnvFromScope scope =
     { kindTypeConstructors =
         Map.fromList
           [ (dataInfoSymbolIdentity dataInfo, dataKind (dataTypeParams dataInfo))
-            | dataInfo <- Map.elems (scopeTypes scope)
+            | dataInfo <- Map.elems (scopeElaborateTypes scope)
           ],
       kindTypeVariables = Map.empty,
       kindMetaSubst = Map.empty,
@@ -1709,7 +1682,7 @@ resolvedTypeHeadKind env symbol =
 
 resolvedTypeHeadKindMaybe :: KindEnv -> ResolvedSymbol -> Maybe P.SrcKind
 resolvedTypeHeadKindMaybe env symbol
-  | isBuiltinTypeSymbol symbol = Just P.KType
+  | isBuiltinTypeSymbol symbol = Builtins.builtinTypeKind (symbolDefiningName (resolvedSymbolIdentity symbol))
   | otherwise = Map.lookup (resolvedSymbolIdentity symbol) (kindTypeConstructors env)
 
 buildLocalDataInfo :: DisplayNameEnv -> ResolvedModule -> P.ResolvedModuleSyntax -> TcM (Map String DataInfo)
@@ -2083,7 +2056,7 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
 
     mkEqInstance classSymbol classInfo eqMethodSymbol resolvedDataDecl displayDataDecl = do
       dataSymbol <- uniqueResolvedLocalSymbol ProgramDuplicateType (P.dataDeclName resolvedDataDecl) (resolvedModuleLocalTypes resolvedModule)
-      boolSymbol <- pure (builtinTypeSymbol "Bool")
+      boolSymbol <- pure (Builtins.builtinTypeSymbol "Bool")
       andSymbol <- valueSymbolForName "__mlfp_and"
       ctorEntries <-
         forM (P.dataDeclConstructors resolvedDataDecl) $ \ctor -> do
@@ -2177,19 +2150,6 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
       case P.typeParamNames (P.dataDeclParams dataDecl) of
         [] -> RSTBase dataSymbol
         param0 : paramsRest -> RSTCon dataSymbol (RSTVar param0 :| map RSTVar paramsRest)
-
-    builtinTypeSymbol name =
-      mkResolvedSymbol
-        ( SymbolIdentity
-            { symbolNamespace = SymbolType,
-              symbolDefiningModule = "<builtin>",
-              symbolDefiningName = name,
-              symbolOwnerIdentity = Nothing
-            }
-        )
-        name
-        name
-        SymbolBuiltin
 
     valueSymbolForName name =
       case Map.lookup name (scopeValues scope) of
@@ -2495,7 +2455,7 @@ checkInstance elaborateScope scope instDecl = do
                 }
         liftEither
           ( lowerConstrainedResolvedExprBinding elaborateScope methodRuntimeName (valueConstraintInfos valueInfo) methodSourceView False (P.methodDefExpr methodDef)
-              >>= finalizeBinding elaborateScope
+              >>= finalizeBindingAllowOpaque elaborateScope
           )
       _ -> throwError (ProgramUnexpectedInstanceMethod (className classInfo) (P.methodDefName methodDef))
   where
@@ -2514,7 +2474,7 @@ checkDef elaborateScope scope defDecl = do
     ordinary@OrdinaryValue {} -> do
       liftEither
         ( lowerResolvedConstrainedExprBinding elaborateScope (valueRuntimeName ordinary) (P.defDeclType defDecl) (P.defDeclName defDecl == "main") (P.defDeclExpr defDecl)
-            >>= finalizeBinding elaborateScope
+            >>= finalizeBindingAllowOpaque elaborateScope
         )
     _ -> throwError (ProgramDuplicateValue (P.defDeclName defDecl))
 
@@ -2534,7 +2494,7 @@ buildExports mod0 localData localClasses localValues = do
           }
     Just items -> do
       values <- foldM (collectResolvedExportValue localValues localClasses localData) Map.empty items
-      types <- foldM (collectResolvedExportType localData) Map.empty items
+      types <- foldM (collectResolvedExportType (P.moduleName mod0) localData) Map.empty items
       classes <- foldM (collectResolvedExportClass localClasses) Map.empty items
       pure
         ModuleExports
@@ -2586,11 +2546,15 @@ collectResolvedExportValue localValues localClasses localData acc = \case
          in liftEither (addValues acc methodValues)
       Nothing -> pure acc
 
-collectResolvedExportType :: Map String DataInfo -> Map String ExportedTypeInfo -> P.ResolvedExportItem -> TcM (Map String ExportedTypeInfo)
-collectResolvedExportType localData acc = \case
+collectResolvedExportType :: P.ModuleName -> Map String DataInfo -> Map String ExportedTypeInfo -> P.ResolvedExportItem -> TcM (Map String ExportedTypeInfo)
+collectResolvedExportType moduleName0 localData acc = \case
   P.ExportType ref ->
     case localDataByRef ref localData of
       Just (typeName, dataInfo) -> pure (Map.insert typeName (ExportedTypeInfo dataInfo Map.empty) acc)
+      Nothing
+        | moduleName0 == "Prelude",
+          Just dataInfo <- builtinOpaqueDataByRef ref ->
+            pure (Map.insert (P.resolvedExportTypeName ref) (ExportedTypeInfo dataInfo Map.empty) acc)
       Nothing -> pure acc
   P.ExportTypeWithConstructors ref ->
     case localDataByRef ref localData of
@@ -2599,6 +2563,18 @@ collectResolvedExportType localData acc = \case
           (Map.insert typeName (ExportedTypeInfo dataInfo (Map.fromList [(ctorName ctor, ctor) | ctor <- dataConstructors dataInfo])) acc)
       Nothing -> throwError (ProgramExportNotLocal (P.resolvedExportTypeName ref))
   P.ExportValue _ -> pure acc
+
+builtinOpaqueDataByRef :: P.ResolvedExportTypeRef -> Maybe DataInfo
+builtinOpaqueDataByRef ref =
+  case
+    [ dataInfo
+      | symbol <- P.resolvedExportTypeSymbols ref,
+        Builtins.isBuiltinTypeSymbol symbol,
+        Just dataInfo <- [Map.lookup (symbolDefiningName (resolvedSymbolIdentity symbol)) Builtins.builtinOpaqueTypes]
+    ]
+  of
+    dataInfo : _ -> Just dataInfo
+    [] -> Nothing
 
 collectResolvedExportClass :: Map String ClassInfo -> Map String ClassInfo -> P.ResolvedExportItem -> TcM (Map String ClassInfo)
 collectResolvedExportClass localClasses acc = \case

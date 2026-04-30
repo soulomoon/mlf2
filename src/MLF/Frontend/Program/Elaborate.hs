@@ -33,6 +33,7 @@ module MLF.Frontend.Program.Elaborate
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Monad ((>=>), foldM, replicateM, when, zipWithM)
 import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.State.Strict (State, get, modify, runState)
@@ -43,6 +44,7 @@ import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import MLF.Frontend.Normalize (substSrcType)
+import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Surface
   ( surfaceAnn,
     surfaceApp,
@@ -251,14 +253,14 @@ sourceTypeIdentityInScope scope = canonical
           case Map.lookup name (esTypes scope) of
             Just info -> STBase (qualifiedDataName info)
             Nothing
-              | name `Set.member` builtinTypeNames -> STBase ("<builtin>." ++ name)
+              | Builtins.isBuiltinTypeName name -> STBase (Builtins.builtinModuleName ++ "." ++ name)
               | otherwise -> ty
         STCon name args ->
           let args' = fmap canonical args
            in case Map.lookup name (esTypes scope) of
                 Just info -> STCon (qualifiedDataName info) args'
                 Nothing
-                  | name `Set.member` builtinTypeNames -> STCon ("<builtin>." ++ name) args'
+                  | Builtins.isBuiltinTypeName name -> STCon (Builtins.builtinModuleName ++ "." ++ name) args'
                   | otherwise -> STCon name args'
         STVarApp name args -> STVarApp name (fmap canonical args)
         STArrow dom cod -> STArrow (canonical dom) (canonical cod)
@@ -270,9 +272,6 @@ sourceTypeIdentityInScope scope = canonical
     qualifiedDataName info =
       let identity = dataInfoSymbolIdentity info
        in symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
-
-builtinTypeNames :: Set String
-builtinTypeNames = Set.fromList ["Bool", "Int", "String"]
 
 constrainedRuntimeType :: ElaborateScope -> [P.ClassConstraint] -> SrcType -> SrcType
 constrainedRuntimeType scope =
@@ -360,10 +359,15 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
       STArrow dom cod -> STArrow (lowerWith seen subst currentData dom) (lowerWith seen subst currentData cod)
       STBase name ->
         case Map.lookup name dataTypes of
+          Just info
+            | Builtins.isOpaqueBuiltinDataInfo info -> STBase name
           Just info -> encodeDataType subst info []
           Nothing -> STBase name
       STCon name args ->
         case Map.lookup name dataTypes of
+          Just info
+            | Builtins.isOpaqueBuiltinDataInfo info ->
+                STCon name (fmap (lowerWith seen subst currentData) args)
           Just info -> encodeDataType subst info (actualArgsForData (lowerWith seen subst currentData) info (toListNE args))
           Nothing -> STCon name (fmap (lowerWith seen subst currentData) args)
       STVarApp name args ->
@@ -639,10 +643,7 @@ displayNameForSymbol namesByIdentity symbol =
     Nothing -> Nothing
 
 isBuiltinTypeSymbol :: ResolvedSymbol -> Bool
-isBuiltinTypeSymbol symbol =
-  let identity = resolvedSymbolIdentity symbol
-   in symbolNamespace identity == SymbolType
-        && symbolDefiningModule identity == "<builtin>"
+isBuiltinTypeSymbol = Builtins.isBuiltinTypeSymbol
 
 constructorSurfaceExpr :: ElaborateScope -> ConstructorInfo -> SurfaceExpr
 constructorSurfaceExpr scope ctorInfo =
@@ -1354,7 +1355,7 @@ deferMethodEvidenceExpr scope classArgView methodInfo = do
         stripVacuousSrcForalls $
           specializeMethodType (methodType methodInfo) (methodParamName methodInfo) (typeViewDisplay classArgView)
       fullArity = methodFullArity methodInfo
-  placeholder <- deferMethodCall scope methodInfo fullArity methodTy
+  placeholder <- deferMethodCall scope methodInfo fullArity methodTy Nothing
   expanded <- etaExpandMissingArgs scope methodInfo methodTy Nothing 0 fullArity (surfaceVar placeholder)
   pure (surfaceAnn expanded (lowerTypeView scope (TypeView methodTy (specializeMethodType (methodTypeIdentity methodInfo) (methodParamName methodInfo) (typeViewIdentity classArgView)))))
 
@@ -1427,7 +1428,9 @@ annotateExpectedValueUse scope mbExpected valueInfo applied =
   case mbExpected of
     Just expectedTy
       | not (isLocalOrdinaryValue valueInfo),
-        isRecursiveResultType expectedTy || isRecursiveResultType (lowerType scope expectedTy) ->
+        isRecursiveResultType expectedTy
+          || isRecursiveResultType (lowerType scope expectedTy)
+          || Builtins.srcTypeMentionsOpaqueBuiltin expectedTy ->
           surfaceAnn applied (lowerType scope expectedTy)
     _ -> applied
 
@@ -1447,6 +1450,18 @@ sourceTypeHasAppliedHead ty =
     STVarApp {} -> True
     STForall _ _ body -> sourceTypeHasAppliedHead body
     _ -> False
+
+sourceTypeHasVariableHeadApplication :: SrcType -> Bool
+sourceTypeHasVariableHeadApplication ty =
+  case ty of
+    STVar {} -> False
+    STBase {} -> False
+    STCon _ args -> any sourceTypeHasVariableHeadApplication args
+    STVarApp {} -> True
+    STArrow dom cod -> sourceTypeHasVariableHeadApplication dom || sourceTypeHasVariableHeadApplication cod
+    STForall _ mb body -> maybe False (sourceTypeHasVariableHeadApplication . unSrcBound) mb || sourceTypeHasVariableHeadApplication body
+    STMu _ body -> sourceTypeHasVariableHeadApplication body
+    STBottom -> False
 
 knownConstructorResultType :: ElaborateScope -> ConstructorInfo -> [P.Expr] -> Maybe SrcType
 knownConstructorResultType scope ctorInfo args = do
@@ -1474,8 +1489,12 @@ compileMethodApp scope mbExpected methodInfo args
   | otherwise = do
       let fullArity = methodFullArity methodInfo
           suppliedArity = length args
-          knownClassArg = knownMethodClassArg scope methodInfo args
-          placeholderTy = placeholderMethodType scope methodInfo args
+          mbExpectedResult =
+            if suppliedArity >= fullArity
+              then mbExpected
+              else Nothing
+          knownClassArg = knownMethodClassArg scope methodInfo args mbExpectedResult
+          placeholderTy = placeholderMethodType scope methodInfo args mbExpectedResult
           knownArgTys =
             case knownClassArg of
               Just _ -> Just (take suppliedArity (methodArgumentTypes placeholderTy))
@@ -1492,7 +1511,9 @@ compileMethodApp scope mbExpected methodInfo args
               expanded <- etaExpandMissingArgs scope methodInfo placeholderTy mbExpected suppliedArity fullArity applied
               pure (annotatePartialMethod expanded placeholderTy suppliedArity fullArity)
         _ -> do
-          placeholder <- deferMethodCall scope methodInfo fullArity placeholderTy
+          when (sourceTypeHasVariableHeadApplication placeholderTy) $
+            throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
+          placeholder <- deferMethodCall scope methodInfo fullArity placeholderTy (sourceTypeViewInScope scope <$> mbExpectedResult)
           let applied = foldl surfaceApp (surfaceVar placeholder) argSurfaces
           expanded <- etaExpandMissingArgs scope methodInfo placeholderTy mbExpected suppliedArity fullArity applied
           pure (annotatePartialMethod expanded placeholderTy suppliedArity fullArity)
@@ -1513,8 +1534,12 @@ compileResolvedMethodApp scope mbExpected methodInfo args
   | otherwise = do
       let fullArity = methodFullArity methodInfo
           suppliedArity = length args
-          knownClassArg = knownResolvedMethodClassArg scope methodInfo args
-          placeholderTy = placeholderResolvedMethodType scope methodInfo args
+          mbExpectedResult =
+            if suppliedArity >= fullArity
+              then mbExpected
+              else Nothing
+          knownClassArg = knownResolvedMethodClassArg scope methodInfo args mbExpectedResult
+          placeholderTy = placeholderResolvedMethodType scope methodInfo args mbExpectedResult
           knownArgTys =
             case knownClassArg of
               Just _ -> Just (take suppliedArity (methodArgumentTypes placeholderTy))
@@ -1531,7 +1556,9 @@ compileResolvedMethodApp scope mbExpected methodInfo args
               expanded <- etaExpandMissingArgs scope methodInfo placeholderTy mbExpected suppliedArity fullArity applied
               pure (annotatePartialMethod expanded placeholderTy suppliedArity fullArity)
         _ -> do
-          placeholder <- deferMethodCall scope methodInfo fullArity placeholderTy
+          when (sourceTypeHasVariableHeadApplication placeholderTy) $
+            throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
+          placeholder <- deferMethodCall scope methodInfo fullArity placeholderTy (sourceTypeViewInScope scope <$> mbExpectedResult)
           let applied = foldl surfaceApp (surfaceVar placeholder) argSurfaces
           expanded <- etaExpandMissingArgs scope methodInfo placeholderTy mbExpected suppliedArity fullArity applied
           pure (annotatePartialMethod expanded placeholderTy suppliedArity fullArity)
@@ -1761,6 +1788,11 @@ shouldResolveMethodBeforeInference :: ElaborateScope -> MethodInfo -> SrcType ->
 shouldResolveMethodBeforeInference scope methodInfo classArgTy =
   case lookupEvidenceMethodByClass scope (methodInfoClassIdentity methodInfo) (typeViewIdentity (sourceTypeViewInScope scope classArgTy)) (methodName methodInfo) of
     Just _ -> True
+    Nothing
+      | Builtins.srcTypeMentionsOpaqueBuiltin classArgTy ->
+          case resolveMethodInstanceInfoByTypeView scope methodInfo (sourceTypeViewInScope scope classArgTy) of
+            Right _ -> True
+            Left _ -> False
     Nothing -> False
 
 resolveConstraintEvidenceExpr :: ElaborateScope -> Set (SymbolIdentity, String) -> ConstraintInfo -> ElaborateM [SurfaceExpr]
@@ -1882,8 +1914,8 @@ methodArgumentTypes ty =
       (argTys, _) = splitArrows bodyTy
    in argTys
 
-deferMethodCall :: ElaborateScope -> MethodInfo -> Int -> SrcType -> ElaborateM String
-deferMethodCall scope methodInfo fullArity placeholderSourceTy = do
+deferMethodCall :: ElaborateScope -> MethodInfo -> Int -> SrcType -> Maybe TypeView -> ElaborateM String
+deferMethodCall scope methodInfo fullArity placeholderSourceTy mbExpectedResult = do
   placeholder <- freshDeferredMethodName (methodName methodInfo)
   let placeholderTy = lowerType scope placeholderSourceTy
       deferred =
@@ -1893,7 +1925,7 @@ deferMethodCall scope methodInfo fullArity placeholderSourceTy = do
             deferredMethodArgCount = fullArity,
             deferredMethodFullArity = fullArity,
             deferredMethodName = methodName methodInfo,
-            deferredMethodExpectedResult = Nothing,
+            deferredMethodExpectedResult = mbExpectedResult,
             deferredMethodEvidence = Nothing,
             deferredMethodLocalEvidence = esEvidence scope
           }
@@ -2068,48 +2100,72 @@ registerDeferredObligation placeholder placeholderTy obligation =
           }
     )
 
-placeholderMethodType :: ElaborateScope -> MethodInfo -> [P.Expr] -> SrcType
-placeholderMethodType scope methodInfo args =
+placeholderMethodType :: ElaborateScope -> MethodInfo -> [P.Expr] -> Maybe SrcType -> SrcType
+placeholderMethodType scope methodInfo args mbExpectedResult =
   let paramName = methodParamName methodInfo
       methodTy = methodType methodInfo
       quantifiedMethodTy = quantifiedMethodType methodInfo
-      knownClassArg = knownMethodClassArg scope methodInfo args
+      knownClassArg = knownMethodClassArg scope methodInfo args mbExpectedResult
    in case knownClassArg of
-        Just classArgTy -> stripVacuousSrcForalls (specializeMethodType methodTy paramName classArgTy)
+        Just classArgTy ->
+          let specializedTy = stripVacuousSrcForalls (specializeMethodType methodTy paramName classArgTy)
+              callSubst =
+                case inferMethodCallSubst scope methodInfo classArgTy args of
+                  Just subst -> subst
+                  Nothing -> Map.empty
+           in stripVacuousSrcForalls (specializeQuantifiedType callSubst specializedTy)
         Nothing -> quantifiedMethodTy
 
-placeholderResolvedMethodType :: ElaborateScope -> MethodInfo -> [P.ResolvedExpr] -> SrcType
-placeholderResolvedMethodType scope methodInfo args =
+placeholderResolvedMethodType :: ElaborateScope -> MethodInfo -> [P.ResolvedExpr] -> Maybe SrcType -> SrcType
+placeholderResolvedMethodType scope methodInfo args mbExpectedResult =
   let paramName = methodParamName methodInfo
       methodTy = methodType methodInfo
       quantifiedMethodTy = quantifiedMethodType methodInfo
-      knownClassArg = knownResolvedMethodClassArg scope methodInfo args
+      knownClassArg = knownResolvedMethodClassArg scope methodInfo args mbExpectedResult
    in case knownClassArg of
-        Just classArgTy -> stripVacuousSrcForalls (specializeMethodType methodTy paramName classArgTy)
+        Just classArgTy ->
+          let specializedTy = stripVacuousSrcForalls (specializeMethodType methodTy paramName classArgTy)
+              callSubst =
+                case inferResolvedMethodCallSubst scope methodInfo classArgTy args of
+                  Just subst -> subst
+                  Nothing -> Map.empty
+           in stripVacuousSrcForalls (specializeQuantifiedType callSubst specializedTy)
         Nothing -> quantifiedMethodTy
 
-knownMethodClassArg :: ElaborateScope -> MethodInfo -> [P.Expr] -> Maybe SrcType
-knownMethodClassArg scope methodInfo args = do
+knownMethodClassArg :: ElaborateScope -> MethodInfo -> [P.Expr] -> Maybe SrcType -> Maybe SrcType
+knownMethodClassArg scope methodInfo args mbExpectedResult =
+  knownMethodClassArgFromArgs scope methodInfo (map (inferKnownExprType scope) args)
+    <|> knownMethodClassArgFromExpected scope methodInfo (map (inferKnownExprType scope) args) mbExpectedResult
+
+knownResolvedMethodClassArg :: ElaborateScope -> MethodInfo -> [P.ResolvedExpr] -> Maybe SrcType -> Maybe SrcType
+knownResolvedMethodClassArg scope methodInfo args mbExpectedResult =
+  knownMethodClassArgFromArgs scope methodInfo (map (inferKnownResolvedExprType scope) args)
+    <|> knownMethodClassArgFromExpected scope methodInfo (map (inferKnownResolvedExprType scope) args) mbExpectedResult
+
+knownMethodClassArgFromArgs :: ElaborateScope -> MethodInfo -> [Maybe SrcType] -> Maybe SrcType
+knownMethodClassArgFromArgs scope methodInfo argTypes = do
   let (_, bodyTy) = splitForalls (methodType methodInfo)
       (paramTys, _) = splitArrows bodyTy
       knownPairs =
         [ (templateTy, actualTy)
-          | (templateTy, arg) <- zip paramTys args,
-            Just actualTy <- [inferKnownExprType scope arg]
+          | (templateTy, mbActualTy) <- zip paramTys argTypes,
+            Just actualTy <- [mbActualTy]
         ]
   subst <- foldM (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy) Map.empty knownPairs
   Map.lookup (methodParamName methodInfo) subst
 
-knownResolvedMethodClassArg :: ElaborateScope -> MethodInfo -> [P.ResolvedExpr] -> Maybe SrcType
-knownResolvedMethodClassArg scope methodInfo args = do
+knownMethodClassArgFromExpected :: ElaborateScope -> MethodInfo -> [Maybe SrcType] -> Maybe SrcType -> Maybe SrcType
+knownMethodClassArgFromExpected _ _ _ Nothing = Nothing
+knownMethodClassArgFromExpected scope methodInfo argTypes (Just expectedTy) = do
   let (_, bodyTy) = splitForalls (methodType methodInfo)
       (paramTys, _) = splitArrows bodyTy
       knownPairs =
         [ (templateTy, actualTy)
-          | (templateTy, arg) <- zip paramTys args,
-            Just actualTy <- [inferKnownResolvedExprType scope arg]
+          | (templateTy, mbActualTy) <- zip paramTys argTypes,
+            Just actualTy <- [mbActualTy]
         ]
-  subst <- foldM (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy) Map.empty knownPairs
+  substFromArgs <- foldM (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy) Map.empty knownPairs
+  subst <- matchTypesInScope scope substFromArgs (specializeSrcType substFromArgs (snd (splitArrows bodyTy))) expectedTy
   Map.lookup (methodParamName methodInfo) subst
 
 quantifiedMethodType :: MethodInfo -> SrcType
@@ -2130,6 +2186,10 @@ inferKnownExprType scope expr =
         Just valueInfo@OrdinaryValue {} -> Just (ordinaryValueTypeInScope scope valueInfo)
         Just ConstructorValue {valueCtorInfo = ctorInfo} -> Just (constructorVisibleType scope ctorInfo)
         _ -> Nothing
+    ELam param body -> do
+      paramTy <- P.paramType param
+      let scope' = extendLocalSourceTypePure scope (P.paramName param) (P.paramName param) paramTy
+      STArrow paramTy <$> inferKnownExprType scope' body
     EAnn _ annTy -> Just annTy
     EApp _ _ ->
       case collectApps expr of
@@ -2140,7 +2200,7 @@ inferKnownExprType scope expr =
                   | let ty = ordinaryValueTypeInScope scope valueInfo,
                     not (null args),
                     hasLeadingForall ty ->
-                      Nothing
+                      appliedKnownOrdinaryValueResultType scope ty (map (inferKnownExprType scope) args) (length args)
                 ConstructorValue {valueCtorInfo = ctorInfo}
                   | length args == length (ctorArgs ctorInfo) ->
                       knownConstructorResultType scope ctorInfo args
@@ -2157,6 +2217,10 @@ inferKnownResolvedExprType scope expr =
         Right valueInfo@OrdinaryValue {} -> Just (ordinaryValueTypeInScope scope valueInfo)
         Right ConstructorValue {valueCtorInfo = ctorInfo} -> Just (constructorVisibleType scope ctorInfo)
         _ -> Nothing
+    ELam param body -> do
+      paramTy <- P.paramType param >>= either (const Nothing) Just . displaySrcTypeForResolved scope
+      let scope' = extendLocalSourceTypePure scope (P.paramName param) (P.paramName param) paramTy
+      STArrow paramTy <$> inferKnownResolvedExprType scope' body
     EAnn _ annTy -> either (const Nothing) Just (displaySrcTypeForResolved scope annTy)
     EApp _ _ ->
       case collectResolvedApps expr of
@@ -2167,7 +2231,7 @@ inferKnownResolvedExprType scope expr =
                   | let ty = ordinaryValueTypeInScope scope valueInfo,
                     not (null args),
                     hasLeadingForall ty ->
-                      Nothing
+                      appliedKnownOrdinaryValueResultType scope ty (map (inferKnownResolvedExprType scope) args) (length args)
                 ConstructorValue {valueCtorInfo = ctorInfo}
                   | length args == length (ctorArgs ctorInfo) ->
                       knownResolvedConstructorResultType scope ctorInfo args
@@ -2180,6 +2244,21 @@ hasLeadingForall ty =
   case ty of
     STForall {} -> True
     _ -> False
+
+appliedKnownOrdinaryValueResultType :: ElaborateScope -> SrcType -> [Maybe SrcType] -> Int -> Maybe SrcType
+appliedKnownOrdinaryValueResultType scope visibleTy mbArgTypes argCount = do
+  let (_, bodyTy) = splitForalls visibleTy
+      (argTys, _) = splitArrows bodyTy
+  if argCount > length argTys
+    then Nothing
+    else do
+      actualArgTypes <- sequence (take argCount mbArgTypes)
+      subst <-
+        foldM
+          (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy)
+          Map.empty
+          (zip argTys actualArgTypes)
+      peelAppliedType (specializeQuantifiedType subst visibleTy) argCount
 
 litSrcType :: Lit -> SrcType
 litSrcType lit =
@@ -2229,6 +2308,7 @@ compileCase scope mbExpected scrutinee alts = do
             case (mbInferredScrutineeTy, mbAnnotationScrutineeTy) of
               (Nothing, Just annTy) -> Just annTy
               _ -> Nothing
+      rejectOpaqueBuiltinCase scope mbScrutineeTy
       mapM_ (\scrutineeTy -> mapM_ (validatePatternType scope scrutineeTy . P.altPattern) alts) mbScrutineeTy
       scrutineeExpr0 <- compileExpr scope mbScrutineeTy scrutinee
       let scrutineeExpr =
@@ -2274,6 +2354,7 @@ compileResolvedCase scope mbExpected scrutinee alts = do
             case (mbInferredScrutineeTy, mbAnnotationScrutineeTy) of
               (Nothing, Just annTy) -> Just annTy
               _ -> Nothing
+      rejectOpaqueBuiltinCase scope mbScrutineeTy
       mapM_ (\scrutineeTy -> mapM_ (validateResolvedPatternType scope scrutineeTy . P.altPattern) alts) mbScrutineeTy
       scrutineeExpr0 <- compileResolvedExpr scope mbScrutineeTy scrutinee
       let scrutineeExpr =
@@ -2328,6 +2409,14 @@ localResolvedIdentityScrutinee scope expr =
         Just OrdinaryValue {valueOriginModule = "<local>"} <- Map.lookup name (esValues scope) ->
           Just arg
     _ -> Nothing
+
+rejectOpaqueBuiltinCase :: ElaborateScope -> Maybe SrcType -> ElaborateM ()
+rejectOpaqueBuiltinCase scope mbScrutineeTy =
+  case mbScrutineeTy of
+    Just scrutineeTy
+      | Builtins.srcTypeMentionsOpaqueBuiltin (canonicalSourceType scope scrutineeTy) ->
+          throwError (ProgramCaseOnNonDataType scrutineeTy)
+    _ -> pure ()
 
 compileCatchAllOnly :: ElaborateScope -> Maybe SrcType -> Maybe SrcType -> SurfaceExpr -> [P.Alt] -> ElaborateM SurfaceExpr
 compileCatchAllOnly scope mbExpected mbScrutineeTy scrutineeExpr alts =

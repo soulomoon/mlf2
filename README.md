@@ -90,6 +90,8 @@ The unified `.mlfp` surface includes:
 - existential constructors via `forall`
 - single-parameter typeclasses, class constraints, and schema instances
 - `deriving Eq` for nullary, recursive, and parameterized ADTs whose fields have Eq evidence
+- a built-in Prelude with `Nat`, `Option`, `List`, `Eq`, `Unit`, opaque
+  `IO`, minimal `Monad IO`, `pure`, `bind`, `putStrLn`, `and`, and `id`
 
 `.mlfp` modules are same-compilation-unit modules today: imports resolve among
 modules in the parsed program, with the CLI runner adding the built-in Prelude
