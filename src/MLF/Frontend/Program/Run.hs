@@ -396,22 +396,25 @@ runtimeConstructorValue context spec args
     ctor = runtimeConstructorInfo spec
 
 runtimeConstructorResultType :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError SrcType
-runtimeConstructorResultType context spec args = do
-  argViews <- mapM (runtimeValueTypeView context) args
-  let scope = runtimeElaborateScope context
-      ctor = runtimeConstructorInfo spec
-      startSubst = maybe Map.empty deferredConstructorInitialSubst (runtimeConstructorDeferred spec)
-      resultTy = runtimeConstructorOccurrenceResultType spec
-      subst =
-        case
-          foldM
-            (\acc (templateTy, actualView) -> matchTypesInScope scope acc templateTy (typeViewDisplay actualView))
-            startSubst
-            (zip (ctorArgs ctor) argViews)
-        of
-          Just subst' -> subst'
-          Nothing -> startSubst
+runtimeConstructorResultType context spec args =
   Right (Map.foldrWithKey substituteTypeVar resultTy subst)
+  where
+    scope = runtimeElaborateScope context
+    ctor = runtimeConstructorInfo spec
+    startSubst = maybe Map.empty deferredConstructorInitialSubst (runtimeConstructorDeferred spec)
+    resultTy = runtimeConstructorOccurrenceResultType spec
+    resultTyFromDeferred = Map.foldrWithKey substituteTypeVar resultTy startSubst
+    subst
+      | Set.null (freeTypeVarsRuntimeSrcType resultTyFromDeferred) = startSubst
+      | otherwise = foldl refineFromRuntimeArg startSubst (zip (ctorArgs ctor) args)
+
+    refineFromRuntimeArg acc (templateTy, arg) =
+      case runtimeValueTypeView context arg of
+        Left _ -> acc
+        Right actualView ->
+          case matchTypesInScope scope acc templateTy (typeViewDisplay actualView) of
+            Just acc' -> acc'
+            Nothing -> acc
 
 runtimeConstructorOccurrenceResultType :: RuntimeConstructorSpec -> SrcType
 runtimeConstructorOccurrenceResultType spec =
@@ -431,6 +434,29 @@ dropSourceArrows count ty =
   case ty of
     STArrow _ resultTy -> dropSourceArrows (count - 1) resultTy
     _ -> ty
+
+freeTypeVarsRuntimeSrcType :: SrcType -> Set.Set String
+freeTypeVarsRuntimeSrcType = go Set.empty
+  where
+    go bound ty =
+      case ty of
+        STVar name
+          | name `Set.member` bound -> Set.empty
+          | otherwise -> Set.singleton name
+        STArrow dom cod -> go bound dom `Set.union` go bound cod
+        STBase {} -> Set.empty
+        STCon _ args -> foldMap (go bound) args
+        STVarApp name args ->
+          let headVars =
+                if name `Set.member` bound
+                  then Set.empty
+                  else Set.singleton name
+           in headVars `Set.union` foldMap (go bound) args
+        STForall name mb body ->
+          maybe Set.empty (go bound . unSrcBound) mb
+            `Set.union` go (Set.insert name bound) body
+        STMu name body -> go (Set.insert name bound) body
+        STBottom -> Set.empty
 
 isPreludeUnitConstructor :: ConstructorInfo -> Bool
 isPreludeUnitConstructor ctor =

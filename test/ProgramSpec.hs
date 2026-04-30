@@ -695,6 +695,22 @@ spec = do
                         ]
             (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "eq\n"
 
+        it "constructs IO ADT payloads with function fields without runtime type inference" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, pure, putStrLn);"
+                        , "  data Box ="
+                        , "      Box : (Int -> Int) -> Box;"
+                        , "  def idFn : Int -> Int = \\(n : Int) n;"
+                        , "  def after : Box -> IO Unit = \\_box putStrLn \"boxed\";"
+                        , "  def action : IO Box = pure (Box idFn);"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "boxed\n"
+
         it "rejects recursive IO main lookup without hanging" $ do
             located <-
                 requireLocated $
