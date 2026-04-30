@@ -4,6 +4,7 @@ module MLF.Frontend.Program.Finalize
   ( finalizeBinding,
     recoverSourceType,
     sourceForallMatches,
+    stripVacuousForallsAndTypeAbs,
   )
 where
 
@@ -95,14 +96,12 @@ finalizeBinding scope lowered = do
     finalizeDeferredObligations scope (loweredBindingDeferredObligations lowered) tcEnv term0 actualTy0 (loweredBindingExpectedType lowered)
   let isUncheckedConstructor = constructorBindingNeedsUnchecked scope (loweredBindingName lowered)
       acceptedTerm0 = repairConstructorBindingTerm scope (loweredBindingName lowered) term
-  acceptedTy <-
+  (acceptedTy, acceptedTerm) <-
     if isUncheckedConstructor
-      then srcTypeToElabType (loweredBindingExpectedType lowered)
-      else Right (stripLeadingVacuousForalls actualTy)
-  let acceptedTerm =
-        if isUncheckedConstructor
-          then acceptedTerm0
-          else stripLeadingVacuousTypeAbs actualTy acceptedTerm0
+      then do
+        expectedTy <- srcTypeToElabType (loweredBindingExpectedType lowered)
+        Right (expectedTy, acceptedTerm0)
+      else Right (stripVacuousForallsAndTypeAbs actualTy acceptedTerm0)
   if isUncheckedConstructor
     then
       Right
@@ -1523,23 +1522,17 @@ stripVacuousForalls (X.TMu name body) =
   X.TMu name (stripVacuousForalls body)
 stripVacuousForalls ty = ty
 
-stripLeadingVacuousForalls :: ElabType -> ElabType
-stripLeadingVacuousForalls (X.TForall v _ body)
-  | v `Set.notMember` freeTypeVarsType body = stripLeadingVacuousForalls body
-stripLeadingVacuousForalls (X.TForall v mb body) =
-  X.TForall v mb (stripLeadingVacuousForalls body)
-stripLeadingVacuousForalls ty = ty
-
-stripLeadingVacuousTypeAbs :: ElabType -> ElabTerm -> ElabTerm
-stripLeadingVacuousTypeAbs ty term =
+stripVacuousForallsAndTypeAbs :: ElabType -> ElabTerm -> (ElabType, ElabTerm)
+stripVacuousForallsAndTypeAbs ty term =
   case (ty, term) of
     (X.TForall v _ bodyTy, X.ETyAbs termV _ body)
       | v `Set.notMember` freeTypeVarsType bodyTy,
         termV `Set.notMember` freeTypeVarsTerm body ->
-          stripLeadingVacuousTypeAbs bodyTy body
-    (X.TForall _ _ bodyTy, X.ETyAbs termV mb body) ->
-      X.ETyAbs termV mb (stripLeadingVacuousTypeAbs bodyTy body)
-    _ -> term
+          stripVacuousForallsAndTypeAbs bodyTy body
+    (X.TForall typeV mbTy bodyTy, X.ETyAbs termV mbTerm body) ->
+      let (bodyTy', body') = stripVacuousForallsAndTypeAbs bodyTy body
+       in (X.TForall typeV mbTy bodyTy', X.ETyAbs termV mbTerm body')
+    _ -> (ty, term)
 
 freeTypeVarsTerm :: ElabTerm -> Set String
 freeTypeVarsTerm term =

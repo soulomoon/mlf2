@@ -13,6 +13,10 @@
   nominal ADT instantiation arguments for retained type applications, avoiding
   finalizer-wide head recovery while keeping the constrained alias row in
   shared interpreter and LLVM parity coverage.
+- Finalization now decides vacuous `forall` stripping from the checked type and
+  the matching term type-abstraction spine together, so a binder retained by a
+  term-level instantiation remains in both `checkedBindingType` and
+  `checkedBindingTerm`.
 
 ## 2026-04-29 - Nullary overloaded method expected-type resolution
 
