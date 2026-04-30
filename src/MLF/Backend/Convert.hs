@@ -2130,9 +2130,13 @@ packageDirectFunctionValue ::
 packageDirectFunctionValue context scope resultTy headTerm headExpr = do
   entryName <- freshClosureEntryName context (partialApplicationHint headTerm)
   let (paramTys, _) = splitBackendArrows resultTy
+      (paramNames, _) =
+        freshNamesLike
+          (closureGeneratedNameScope context scope headTerm)
+          (take (length paramTys) closureArgNameCandidates)
       params =
         [ (name, paramTy)
-        | (name, paramTy) <- zip remainingParamNames paramTys
+        | (name, paramTy) <- zip paramNames paramTys
         ]
       paramVars =
         [ BackendVar paramTy name
@@ -2162,7 +2166,7 @@ packageDirectFunctionValue context scope resultTy headTerm headExpr = do
         backendClosureBody = body
       }
   where
-    remainingParamNames =
+    closureArgNameCandidates =
       ["__mlfp_closure_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
 
 packagePartialApplication ::
@@ -2200,10 +2204,18 @@ packagePartialApplication context env scope resultTy headTerm headTy suppliedPar
         | (name, argTy) <- remainingParams
         ]
       allArgs = suppliedVars ++ remainingVars
+      (suppliedCaptureNames, usedAfterSuppliedCaptures) =
+        freshNamesLike
+          (closureGeneratedNameScope context scope headTerm)
+          (take (length suppliedParamTys) suppliedCaptureNameCandidates)
+      (remainingParamNames, _) =
+        freshNamesLike
+          usedAfterSuppliedCaptures
+          (take (length remainingParamTys) remainingParamNameCandidates)
       functionCaptureName =
         freshNameLike
           (partialFunctionCaptureNameFor headTerm)
-          (Set.fromList (take (length suppliedParamTys) suppliedCaptureNames ++ take (length remainingParamTys) remainingParamNames))
+          (Set.fromList (suppliedCaptureNames ++ remainingParamNames))
   (captures, body) <-
     if isClosureHeadTerm context scope headTerm
       then do
@@ -2267,10 +2279,28 @@ packagePartialApplication context env scope resultTy headTerm headTy suppliedPar
         backendClosureBody = body
       }
   where
-    suppliedCaptureNames =
+    suppliedCaptureNameCandidates =
       ["__mlfp_partial_capture" ++ show index0 | index0 <- [(0 :: Int) ..]]
-    remainingParamNames =
+    remainingParamNameCandidates =
       ["__mlfp_partial_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
+
+freshNamesLike :: Set.Set String -> [String] -> ([String], Set.Set String)
+freshNamesLike used0 =
+  go used0 []
+  where
+    go used names [] =
+      (reverse names, used)
+    go used names (candidate : rest) =
+      let name = freshNameLike candidate used
+       in go (Set.insert name used) (name : names) rest
+
+closureGeneratedNameScope :: ConvertContext -> ClosureScope -> ElabTerm -> Set.Set String
+closureGeneratedNameScope context scope term =
+  Set.unions
+    [ closureScopeBoundTerms scope,
+      ccGlobalTerms context,
+      freeTermVariables term
+    ]
 
 partialFunctionCaptureName :: String
 partialFunctionCaptureName =

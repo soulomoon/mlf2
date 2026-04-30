@@ -699,6 +699,16 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
     assertNativeProgram sourceClosureDemandAfterEvidenceProgram "1"
 
+  it "freshens generated partial capture names against local binders" $ do
+    output <-
+      withTempProgram sourcePartialApplicationGeneratedNameCollisionProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "BackendDuplicateClosureCapture"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationGeneratedNameCollisionProgram "1"
+
   it "wraps direct function arguments before packaging partial applications" $ do
     output <-
       withTempProgram sourcePartialApplicationDirectFunctionArgumentProgram $ \path ->
@@ -3325,6 +3335,17 @@ sourceClosureDemandAfterEvidenceProgram =
       "  def apply : (Int -> Int) -> Int = \\f f 2;",
       "  def use : Marker Bool => (Int -> Int -> Int) -> Int = \\f apply (f 1);",
       "  def main : Int = use keepLeft;",
+      "}"
+    ]
+
+sourcePartialApplicationGeneratedNameCollisionProgram :: String
+sourcePartialApplicationGeneratedNameCollisionProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def main : Int =",
+      "    let __mlfp_partial_capture0 : Int -> Int -> Int = \\x \\y x in",
+      "    apply (__mlfp_partial_capture0 1);",
       "}"
     ]
 
