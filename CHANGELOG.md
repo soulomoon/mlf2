@@ -12,6 +12,10 @@
   tests can now discover `llc` plus a native linker, build a temporary
   executable from emitted `.ll`, run it, and capture stdout, stderr, and exit
   status while skipping explicitly when tools are unavailable.
+- Added native executable checks for supported shared `ProgramSpec`-to-LLVM
+  parity rows. The backend LLVM spec now compiles, links, runs, and compares
+  supported rows against their interpreter result text, while native-unsupported
+  rows are explicitly classified with diagnostic fragments.
 
 ### Changed
 - LLVM case lowering now treats closure-valued case results as closure

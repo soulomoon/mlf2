@@ -1,3 +1,14 @@
+## 2026-04-30 - Native execution for supported LLVM parity rows
+
+- Extended `BackendLLVMSpec` so supported shared `ProgramSpec`-to-LLVM parity
+  rows emit native-entrypoint LLVM, validate it, compile/link/run it through the
+  native toolchain helper, and compare stdout/stderr/exit status against the
+  same runtime expectations used by `ProgramSpec`.
+- Native-unsupported parity rows are now named in one explicit map with expected
+  diagnostic fragments. The remaining predicate rows that require rendering
+  function values stay rejected before native execution instead of silently
+  remaining assembly-only.
+
 ## 2026-04-30 - Nullary local evidence for parameterized result aliases
 
 - Tightened nullary overloaded method finalization so placeholder type

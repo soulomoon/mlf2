@@ -2925,7 +2925,7 @@ lowerClosureCall env exprEnv context resultTy fun args = do
       lowerClosurePointerCall
   where
     lowerClosurePointerCall = do
-      callee <- lowerExpr env exprEnv context fun
+      callee <- lowerClosureCallee env exprEnv context fun
       unless (lvLLVMType callee == LLVMPtr) $
         liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a pointer: " ++ show (lvBackendType callee)))
       let (paramTys, returnTy) = collectArrowsType (lvBackendType callee)
@@ -2933,8 +2933,8 @@ lowerClosureCall env exprEnv context resultTy fun args = do
         liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a function: " ++ show (lvBackendType callee)))
       unless (length paramTys == length args) $
         liftEither (BackendLLVMArityMismatch "closure" (length paramTys) (length args))
-      resultLLVMType <- lowerRuntimeValueTypeM env context resultTy
-      returnLLVMType <- lowerRuntimeValueTypeM env context returnTy
+      resultLLVMType <- lowerBackendTypeM env context resultTy
+      returnLLVMType <- lowerBackendTypeM env context returnTy
       unless (resultLLVMType == returnLLVMType) $
         liftEither (BackendLLVMInternalError ("closure call result mismatch at " ++ context))
       callArgs <- zipWithM lowerClosureArg (zip [0 :: Int ..] paramTys) args
@@ -2954,6 +2954,15 @@ lowerClosureCall env exprEnv context resultTy fun args = do
 
     lowerClosureArg (index0, paramTy) arg =
       lowerExprForIndirectArgument env exprEnv context ("__mlfp_closure_arg" ++ show index0, paramTy) arg
+
+lowerClosureCallee :: ProgramEnv -> ExprEnv -> String -> BackendExpr -> LowerM LowerValue
+lowerClosureCallee env exprEnv context =
+  \case
+    BackendLet _ name _ rhs body -> do
+      exprEnv' <- bindLet env exprEnv context name rhs
+      lowerClosureCallee env exprEnv' context body
+    expr ->
+      lowerExpr env exprEnv context expr
 
 lowerCall :: ProgramEnv -> ExprEnv -> String -> BackendExpr -> LowerM LowerValue
 lowerCall env exprEnv context expr =

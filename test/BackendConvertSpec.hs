@@ -322,6 +322,8 @@ spec = describe "MLF.Backend.Convert" $ do
     backend <- requireRight (convertCheckedProgram checked)
 
     validateBackendProgram backend `shouldBe` Right ()
+    sameBinding <- requireBinding "Main__same" backend
+    backendBindingExpr sameBinding `shouldNotSatisfy` containsBackendClosureCall
 
   it "converts constrained parameterized Eq evidence without ambiguous ADT recovery" $ do
     checked <- requireChecked parameterizedEqEvidenceProgram

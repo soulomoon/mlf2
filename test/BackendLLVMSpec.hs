@@ -36,6 +36,7 @@ import Parity.ProgramMatrix
     ProgramMatrixExpectation (..),
     ProgramMatrixSource (..),
     ProgramRuntimeCase (..),
+    ProgramRuntimeExpectation (..),
     emlfSurfaceParityMatrix,
     programSpecToLLVMParityCases,
     unifiedFixtureExpectations,
@@ -579,9 +580,14 @@ spec = describe "MLF.Backend.LLVM" $ do
       let caseNames = map runtimeCaseName programSpecToLLVMParityCases
           uniqueCaseNames = Set.fromList caseNames
           objectCodeNames = Set.fromList llvmObjectCodeParityCases
+          nativeUnsupportedNames = Map.keysSet llvmNativeUnsupportedParityCases
+          nativeRepresentativeNames = Set.fromList llvmNativeRepresentativeParityCases
 
       length caseNames `shouldBe` Set.size uniqueCaseNames
       objectCodeNames `Set.isSubsetOf` uniqueCaseNames `shouldBe` True
+      nativeUnsupportedNames `Set.isSubsetOf` uniqueCaseNames `shouldBe` True
+      nativeRepresentativeNames `Set.isSubsetOf` uniqueCaseNames `shouldBe` True
+      nativeRepresentativeNames `Set.disjoint` nativeUnsupportedNames `shouldBe` True
       Map.keysSet llvmParityExpectations `shouldBe` uniqueCaseNames
 
     mapM_ runLLVMParityCase programSpecToLLVMParityCases
@@ -670,6 +676,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$case_some\"(ptr %\"__mlfp_env\", i64 %\"x\")"
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$case_none\"(ptr %\"__mlfp_env\", i64 %\"x\")"
     output `shouldSatisfy` isInfixOf "phi ptr"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+
+  it "lowers let-selected closure callees through the explicit closure ABI" $ do
+    output <- requireRight (renderBackendProgramLLVM letSelectedClosureCalleeProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$let_callee\"(ptr %\"__mlfp_env\", i64 %\"x\")"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$let_callee\""
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
     validateLLVMAssembly output
 
@@ -3054,6 +3068,27 @@ caseSelectedClosureCalleeProgram =
           backendClosureBody = body
         }
 
+letSelectedClosureCalleeProgram :: BackendProgram
+letSelectedClosureCalleeProgram =
+  programWithMainExpr intTy $
+    BackendClosureCall
+      intTy
+      ( BackendLet
+          unaryIntTy
+          "f"
+          unaryIntTy
+          ( BackendClosure
+              { backendExprType = unaryIntTy,
+                backendClosureEntryName = "__mlfp_closure$let_callee",
+                backendClosureCaptures = [],
+                backendClosureParams = [("x", intTy)],
+                backendClosureBody = BackendVar intTy "x"
+              }
+          )
+          (BackendVar unaryIntTy "f")
+      )
+      [intLit 7]
+
 polymorphicClosureSpecializationProgram :: BackendProgram
 polymorphicClosureSpecializationProgram =
   BackendProgram
@@ -3702,14 +3737,40 @@ recIntTy =
   BTMu "self" intTy
 
 data LLVMParityExpectation
-  = ExpectLLVMAssembly
+  = ExpectLLVMNativeRun
+  | ExpectLLVMNativeUnsupported String
 
 llvmParityExpectations :: Map.Map String LLVMParityExpectation
 llvmParityExpectations =
   Map.fromList
-    [ (runtimeCaseName runtimeCase, ExpectLLVMAssembly)
+    [ ( runtimeCaseName runtimeCase,
+        case Map.lookup (runtimeCaseName runtimeCase) llvmNativeUnsupportedParityCases of
+          Just reason -> ExpectLLVMNativeUnsupported reason
+          Nothing -> ExpectLLVMNativeRun
+      )
     | runtimeCase <- programSpecToLLVMParityCases
     ]
+
+llvmNativeUnsupportedParityCases :: Map.Map String String
+llvmNativeUnsupportedParityCases =
+  Map.fromList
+    [ ( "standalone: does not decode non-data main values through fallback ADT decoding",
+        "main must be a zero-argument pure value"
+      ),
+      ( "standalone: does not decode typed non-data constructor fields through fallback ADT decoding",
+        "function main values are not native-renderable"
+      )
+    ]
+
+llvmNativeRepresentativeParityCases :: [String]
+llvmNativeRepresentativeParityCases =
+  [ "surface: runs lambda/application",
+    "surface: runs let polymorphism at Int and Bool",
+    "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp",
+    "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp",
+    "unified fixture: test/programs/unified/authoritative-overloaded-method.mlfp",
+    "unified fixture: test/programs/unified/first-class-polymorphism.mlfp"
+  ]
 
 llvmObjectCodeParityCases :: [String]
 llvmObjectCodeParityCases =
@@ -3734,11 +3795,33 @@ runLLVMParityCase runtimeCase =
     case Map.lookup (runtimeCaseName runtimeCase) llvmParityExpectations of
       Nothing ->
         expectationFailure ("missing LLVM parity expectation for " ++ runtimeCaseName runtimeCase)
-      Just ExpectLLVMAssembly -> do
+      Just ExpectLLVMNativeRun -> do
         output <- requireRight result
         validateLLVMAssembly output
         when (runtimeCaseName runtimeCase `Set.member` llvmObjectCodeParityCaseNames) $
           validateLLVMObjectCode output
+        nativeOutput <- requireRight =<< emitProgramRuntimeNativeLLVM (runtimeCaseSource runtimeCase)
+        validateLLVMAssembly nativeOutput
+        validateLLVMObjectCode nativeOutput
+        nativeResult <- runLLVMNativeExecutable nativeOutput
+        assertNativeRuntimeResult (runtimeCaseExpectation runtimeCase) nativeResult
+      Just (ExpectLLVMNativeUnsupported fragment) -> do
+        output <- requireRight result
+        validateLLVMAssembly output
+        when (runtimeCaseName runtimeCase `Set.member` llvmObjectCodeParityCaseNames) $
+          validateLLVMObjectCode output
+        nativeResult <- emitProgramRuntimeNativeLLVM (runtimeCaseSource runtimeCase)
+        case nativeResult of
+          Left err ->
+            err `shouldSatisfy` isInfixOf fragment
+          Right nativeOutput ->
+            expectationFailure $
+              "expected native LLVM emission to reject "
+                ++ runtimeCaseName runtimeCase
+                ++ " with "
+                ++ show fragment
+                ++ ", but it emitted:\n"
+                ++ nativeOutput
 
 emitProgramRuntimeLLVM :: ProgramMatrixSource -> IO (Either String String)
 emitProgramRuntimeLLVM source =
@@ -3747,6 +3830,69 @@ emitProgramRuntimeLLVM source =
       withTempProgram programText emitBackendFile
     ProgramFile path ->
       emitBackendFile path
+
+emitProgramRuntimeNativeLLVM :: ProgramMatrixSource -> IO (Either String String)
+emitProgramRuntimeNativeLLVM source =
+  case source of
+    InlineProgram programText ->
+      withTempProgram programText emitNativeFile
+    ProgramFile path ->
+      emitNativeFile path
+
+assertNativeRuntimeResult :: ProgramRuntimeExpectation -> NativeRunResult -> Expectation
+assertNativeRuntimeResult expectation result =
+  case expectation of
+    ExpectRuntimeValue expectedValue -> do
+      when (nativeRunExitCode result /= ExitSuccess) $
+        expectationFailure $
+          nativeRunMismatch
+            ("expected native process exit success for value " ++ show expectedValue)
+            result
+      when (nativeRunStdout result /= expectedValue ++ "\n") $
+        expectationFailure $
+          nativeRunMismatch
+            ("expected stdout " ++ show (expectedValue ++ "\n"))
+            result
+      when (nativeRunStderr result /= "") $
+        expectationFailure $
+          nativeRunMismatch "expected empty stderr" result
+    ExpectRuntimePredicate label predicate -> do
+      when (nativeRunExitCode result /= ExitSuccess) $
+        expectationFailure $
+          nativeRunMismatch
+            ("expected native process exit success for predicate " ++ label)
+            result
+      when (nativeRunStderr result /= "") $
+        expectationFailure $
+          nativeRunMismatch "expected empty stderr" result
+      case stripSingleTrailingNewline (nativeRunStdout result) of
+        Nothing ->
+          expectationFailure $
+            nativeRunMismatch "expected stdout with one trailing newline" result
+        Just rendered
+          | predicate rendered -> pure ()
+          | otherwise ->
+              expectationFailure $
+                nativeRunMismatch
+                  ("expected " ++ label ++ ", got " ++ show rendered)
+                  result
+
+stripSingleTrailingNewline :: String -> Maybe String
+stripSingleTrailingNewline output =
+  case reverse output of
+    '\n' : rest -> Just (reverse rest)
+    _ -> Nothing
+
+nativeRunMismatch :: String -> NativeRunResult -> String
+nativeRunMismatch label result =
+  unlines
+    [ label,
+      "exit code: " ++ show (nativeRunExitCode result),
+      "stdout:",
+      nativeRunStdout result,
+      "stderr:",
+      nativeRunStderr result
+    ]
 
 requireChecked :: String -> IO CheckedProgram
 requireChecked input =

@@ -155,7 +155,11 @@ extendClosureScopeTerms bindings scope =
 
 extendClosureScopeLambdaParams :: [(String, ElabType)] -> ClosureScope -> ClosureScope
 extendClosureScopeLambdaParams bindings scope =
-  foldr (\(name, ty) acc -> extendClosureScopeTerm name ty (isClosureConvertibleElabType ty) acc) scope bindings
+  foldr (\(name, ty) acc -> extendClosureScopeTerm name ty (isClosureConvertibleTermBinding name ty) acc) scope bindings
+
+isClosureConvertibleTermBinding :: String -> ElabType -> Bool
+isClosureConvertibleTermBinding name ty =
+  not (isEvidenceCaptureName name) && isClosureConvertibleElabType ty
 
 runConvertM :: ConvertM a -> Either BackendConversionError a
 runConvertM action =
@@ -1776,7 +1780,7 @@ convertOrdinaryTerm mode context env scope term resultTy0 =
             extendClosureScopeTerm
               name
               paramEnvTy
-              (isClosureConvertibleFunctionType paramBackendTy)
+              (not (isEvidenceCaptureName name) && isClosureConvertibleFunctionType paramBackendTy)
               scope
       bodyExpr <- convertTermExpectedMode bodyMode context (extendTermEnv name paramEnvTy env) bodyScope bodyExpected body
       pure
@@ -2097,7 +2101,7 @@ convertLambdaClosure mode context env scope resultTy term = do
   let captureScope =
         foldr
           ( \(name, ty) acc ->
-              extendClosureScopeTerm name ty (Set.member name (closureScopeLocals scope) || isClosureConvertibleElabType ty) acc
+              extendClosureScopeTerm name ty (Set.member name (closureScopeLocals scope) || isClosureConvertibleTermBinding name ty) acc
           )
           emptyClosureScope
           captures
