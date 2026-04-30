@@ -2954,6 +2954,22 @@ programSpecStandaloneRuntimeSuccessCases =
         )
         (ExpectRuntimePredicate "rendered value is not Holder Token" (/= "Holder Token"))
     , ProgramRuntimeCase
+        "standalone: applies captured function-valued constructor fields"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (FnBox(..), main) {"
+                , "  data FnBox ="
+                , "      FnBox : (Int -> Int) -> FnBox;"
+                , ""
+                , "  def main : Int ="
+                , "    let captured : Int = 41 in"
+                , "    let f : Int -> Int = \\(x : Int) captured in"
+                , "    case FnBox f of { FnBox g -> g 0 };"
+                , "}"
+                ]
+        )
+        (ExpectRuntimeValue "41")
+    , ProgramRuntimeCase
         "standalone: evaluates a recursive Nat equality example at representative depth"
         (InlineProgram (recursiveNatEqualityProgram 24))
         (ExpectRuntimeValue "true")

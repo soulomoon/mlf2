@@ -246,21 +246,44 @@ spec = describe "MLF.Backend.IR" $ do
             ]
         shadowedCaseClosureGlobalProgram =
           programWithDataAndBindings
-            [fnBoxData]
+            [boxData]
             [ binding "f" idTy globalClosure,
-              binding
-                "g"
-                idTy
+              mainBinding
                 ( BackendCase
-                    idTy
-                    (BackendConstruct fnBoxTy "FnBox" [intIdentityExpr])
-                    (BackendAlternative (BackendConstructorPattern "FnBox" ["f"]) (BackendVar idTy "f") :| [])
-                ),
-              mainBinding (BackendApp intTy (BackendVar idTy "g") (intLit 1))
+                    intTy
+                    (BackendConstruct boxTy "Box" [intLit 1])
+                    (BackendAlternative (BackendConstructorPattern "Box" ["f"]) (BackendVar intTy "f") :| [])
+                )
             ]
 
     validateBackendProgram shadowedLetCallProgram `shouldBe` Right ()
     validateBackendProgram shadowedCaseClosureGlobalProgram `shouldBe` Right ()
+
+  it "treats function-valued case pattern binders as closure values during validation" $ do
+    let fieldClosure =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$field",
+              backendClosureCaptures = [],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            }
+        program =
+          programWithDataAndBindings
+            [fnBoxData]
+            [ mainBinding
+                ( BackendClosureCall
+                    intTy
+                    ( BackendCase
+                        idTy
+                        (BackendConstruct fnBoxTy "FnBox" [fieldClosure])
+                        (BackendAlternative (BackendConstructorPattern "FnBox" ["f"]) (BackendVar idTy "f") :| [])
+                    )
+                    [intLit 1]
+                )
+            ]
+
+    validateBackendProgram program `shouldBe` Right ()
 
   it "rejects malformed closure IR" $ do
     let goodClosure entryName =

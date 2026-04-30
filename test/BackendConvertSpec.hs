@@ -788,34 +788,36 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr useBinding `shouldSatisfy` containsBackendApp
     backendBindingExpr useBinding `shouldNotSatisfy` containsBackendClosureCall
 
-  it "clears shadowed closure locals when classifying case pattern results" $ do
+  it "classifies function-valued case pattern fields as closure locals" $ do
     checked <- requireChecked shadowedCaseClosureLocalProgram
     backend <- requireRight (convertCheckedProgram checked)
 
     validateBackendProgram backend `shouldBe` Right ()
     useBinding <- requireBinding "Main__use" backend
     backendBindingExpr useBinding `shouldSatisfy` containsBackendCase
-    backendBindingExpr useBinding `shouldSatisfy` containsBackendApp
-    backendBindingExpr useBinding `shouldNotSatisfy` containsBackendClosureCall
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendClosure
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendClosureCall
 
-  it "keeps local non-closure binders from inheriting same-named closure globals" $ do
+  it "lets function-valued case fields shadow same-named closure globals" $ do
     checked <- requireChecked shadowedGlobalClosureHeadProgram
     backend <- requireRight (convertCheckedProgram checked)
 
     validateBackendProgram backend `shouldBe` Right ()
     mainBinding <- requireBinding (backendProgramMain backend) backend
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
-    backendBindingExpr mainBinding `shouldSatisfy` containsBackendApp
-    backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendClosureCall
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
 
-  it "rejects closure-valued constructor fields until ADT fields are closure-aware" $ do
+  it "stores and projects closure-valued constructor fields as closure values" $ do
     checked <- requireChecked closureValuedConstructorFieldProgram
+    backend <- requireRight (convertCheckedProgram checked)
 
-    case convertCheckedProgram checked of
-      Left (BackendUnsupportedCaseShape message) ->
-        message `shouldSatisfy` isInfixOf "closure-valued constructor field"
-      other ->
-        expectationFailure ("expected closure-valued constructor field rejection, got " ++ show other)
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCapture "captured"
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
 
   it "collects closure parameters through lets before returned lambdas" $ do
     checked <- requireChecked returnedLetLambdaClosureProgram

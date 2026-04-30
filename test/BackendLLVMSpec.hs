@@ -550,10 +550,10 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "evidence function type mismatch"
     validateLLVMAssembly output
 
-  it "preserves inline function argument shadowing for bare references" $ do
+  it "preserves inline function argument shadowing beside closure-valued fields" $ do
     output <- requireRight (renderBackendProgramLLVM inlineFunctionArgumentShadowsValueProgram)
 
-    output `shouldSatisfy` isInfixOf "store ptr @\"idInt\""
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_shadow\""
     output `shouldNotSatisfy` isInfixOf "escaping function \"f\""
     validateLLVMAssembly output
 
@@ -698,14 +698,18 @@ spec = describe "MLF.Backend.LLVM" $ do
   it "preserves shadowed lambda parameters collected through lets" $
     assertNativeProgram sourceReturnedLetLambdaShadowingProgram "7"
 
-  it "rejects source closure-valued constructor fields before LLVM emission" $ do
-    result <- withTempProgram sourceClosureValuedConstructorFieldProgram emitBackendFile
+  it "lowers source closure-valued constructor fields through the explicit closure ABI" $ do
+    output <-
+      withTempProgram sourceClosureValuedConstructorFieldProgram $ \path ->
+        requireRight =<< emitBackendFile path
 
-    case result of
-      Left err ->
-        err `shouldSatisfy` isInfixOf "closure-valued constructor field"
-      Right output ->
-        expectationFailure ("expected closure-valued constructor field rejection, got output:\n" ++ output)
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$Main__main$"
+    output `shouldSatisfy` isInfixOf "store i64 41"
+    output `shouldSatisfy` isInfixOf "load ptr"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "closure-valued constructor field"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
 
   it "lowers zero-capture closures through the explicit closure ABI" $ do
     output <- requireRight (renderBackendProgramLLVM zeroCaptureClosureProgram)
@@ -754,16 +758,11 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "store ptr @\"__mlfp_closure$poly\""
     validateLLVMAssembly output
 
-  it "keys function wrappers from qualified specialization forms" $ do
+  it "keeps closure-valued constructor fields on the closure ABI across specializations" $ do
     output <- requireRight (renderBackendProgramLLVM polymorphicClosureFunctionWrapperProgram)
 
-    let wrapperDefinitions =
-          filter
-            (\line -> "define private i64 @\"__mlfp_function_wrapper$" `isInfixOf` line)
-            (lines output)
-    length wrapperDefinitions `shouldSatisfy` (>= 2)
     output `shouldSatisfy` isInfixOf "$__mlfp_closure$wrapper_key"
-    output `shouldNotSatisfy` isInfixOf "unsupported function argument"
+    output `shouldNotSatisfy` isInfixOf "__mlfp_function_wrapper$"
     validateLLVMAssembly output
 
   it "qualifies closure entries in inlined polymorphic global calls" $ do
@@ -777,53 +776,66 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "store ptr @\"__mlfp_closure$inline\""
     validateLLVMAssembly output
 
-  it "rejects closure entry names that collide with generated wrapper functions" $
-    renderBackendProgramLLVM closureEntryFunctionWrapperCollisionProgram
-      `shouldSatisfyLeft` isInfixOf "Duplicate backend LLVM symbol: \"__mlfp_function_wrapper$0\""
+  it "does not reserve retired stored-function wrapper names without generated wrappers" $ do
+    output <- requireRight (renderBackendProgramLLVM closureEntryFunctionWrapperCollisionProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_function_wrapper$0\""
+    output `shouldNotSatisfy` isInfixOf "Duplicate backend LLVM symbol"
+    validateLLVMAssembly output
 
   it "rejects closure entry names that collide with runtime declarations" $
     renderBackendProgramLLVM closureEntryRuntimeDeclarationCollisionProgram
       `shouldSatisfyLeft` isInfixOf "Duplicate backend LLVM symbol: \"malloc\""
 
-  it "lowers stored top-level function constructor fields" $ do
+  it "lowers stored explicit closure constructor fields" $ do
     output <- requireRight (renderBackendProgramLLVM functionFieldProgram)
 
-    output `shouldSatisfy` isInfixOf "define i64 @\"helper\""
-    output `shouldSatisfy` isInfixOf "store ptr @\"helper\""
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_top\""
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_top\""
+    output `shouldNotSatisfy` isInfixOf "__mlfp_function_wrapper$"
     validateLLVMAssembly output
 
-  it "lowers stored direct function constructor fields through private wrappers" $ do
+  it "lowers stored direct closure constructor fields through closure records" $ do
     output <- requireRight (renderBackendProgramLLVM directFunctionFieldProgram)
 
-    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_function_wrapper$"
-    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_function_wrapper$"
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_direct\""
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_direct\""
+    output `shouldNotSatisfy` isInfixOf "__mlfp_function_wrapper$"
     validateLLVMAssembly output
 
-  it "lowers stored local function constructor fields through private wrappers" $ do
+  it "lowers stored local closure constructor fields through pointer aliases" $ do
     output <- requireRight (renderBackendProgramLLVM localFunctionFieldProgram)
 
-    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_function_wrapper$"
-    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_function_wrapper$"
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_local\""
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_local\""
+    output `shouldNotSatisfy` isInfixOf "__mlfp_function_wrapper$"
     validateLLVMAssembly output
 
-  it "lowers stored transitive local function aliases through private wrappers" $ do
+  it "lowers stored transitive local closure aliases through pointer aliases" $ do
     output <- requireRight (renderBackendProgramLLVM transitiveLocalFunctionFieldProgram)
 
-    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_function_wrapper$"
-    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_function_wrapper$"
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_transitive\""
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_transitive\""
+    output `shouldNotSatisfy` isInfixOf "__mlfp_function_wrapper$"
     validateLLVMAssembly output
 
-  it "re-stores immediate constructor fields carrying closed direct functions" $ do
+  it "re-stores case-projected constructor fields carrying closures" $ do
     output <- requireRight (renderBackendProgramLLVM immediateRestoredFunctionFieldProgram)
 
-    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_function_wrapper$"
-    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_function_wrapper$"
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_restored\""
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_restored\""
+    output `shouldSatisfy` isInfixOf "load ptr"
     output `shouldNotSatisfy` isInfixOf "unsupported function argument"
     validateLLVMAssembly output
 
-  it "rejects captured function constructor fields until closure conversion exists" $ do
-    renderBackendProgramLLVM capturedFunctionFieldProgram
-      `shouldSatisfyLeft` isInfixOf "unsupported function argument"
+  it "lowers captured function constructor fields through closure environments" $ do
+    output <- requireRight (renderBackendProgramLLVM capturedFunctionFieldProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$field_captured\""
+    output `shouldSatisfy` isInfixOf "store i64 1"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$field_captured\""
+    output `shouldNotSatisfy` isInfixOf "unsupported function argument"
+    validateLLVMAssembly output
 
   it "rejects unknown base types" $ do
     renderBackendProgramLLVM unknownBaseProgram
@@ -1875,7 +1887,7 @@ inlineFunctionArgumentShadowsValueProgram =
                           (BTArrow unaryIntTy fnBoxTy)
                           "f"
                           unaryIntTy
-                          (BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "f"]),
+                          (BackendConstruct fnBoxTy "FnBox" [closureWithEntry "__mlfp_closure$field_shadow"]),
                       backendBindingExportedAsMain = False
                     },
                   BackendBinding
@@ -3342,19 +3354,7 @@ polymorphicClosureFunctionWrapperExpr =
 
 closureContainingFunctionExpr :: BackendExpr
 closureContainingFunctionExpr =
-  BackendLet
-    unaryIntTy
-    "unusedClosure"
-    unaryIntTy
-    ( BackendClosure
-        { backendExprType = unaryIntTy,
-          backendClosureEntryName = "__mlfp_closure$wrapper_key",
-          backendClosureCaptures = [],
-          backendClosureParams = [("x", intTy)],
-          backendClosureBody = BackendVar intTy "x"
-        }
-    )
-    intIdentityExpr
+  closureWithEntry "__mlfp_closure$wrapper_key"
 
 polymorphicClosureFunctionWrapperCall :: BackendType -> BackendExpr -> BackendExpr
 polymorphicClosureFunctionWrapperCall argTy arg =
@@ -3434,13 +3434,7 @@ closureEntryFunctionWrapperCollisionProgram =
     BackendConstruct
       fnBoxTy
       "FnBox"
-      [ BackendLet
-          unaryIntTy
-          "unusedClosure"
-          unaryIntTy
-          (closureWithEntry "__mlfp_function_wrapper$0")
-          intIdentityExpr
-      ]
+      [closureWithEntry "__mlfp_function_wrapper$0"]
 
 closureEntryRuntimeDeclarationCollisionProgram :: BackendProgram
 closureEntryRuntimeDeclarationCollisionProgram =
@@ -3474,7 +3468,7 @@ functionFieldProgram =
                   BackendBinding
                     { backendBindingName = "main",
                       backendBindingType = fnBoxTy,
-                      backendBindingExpr = BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "helper"],
+                      backendBindingExpr = BackendConstruct fnBoxTy "FnBox" [closureWithEntry "__mlfp_closure$field_top"],
                       backendBindingExportedAsMain = True
                     }
                 ]
@@ -3494,7 +3488,7 @@ directFunctionFieldProgram =
                 [ BackendBinding
                     { backendBindingName = "main",
                       backendBindingType = fnBoxTy,
-                      backendBindingExpr = BackendConstruct fnBoxTy "FnBox" [intIdentityExpr],
+                      backendBindingExpr = BackendConstruct fnBoxTy "FnBox" [closureWithEntry "__mlfp_closure$field_direct"],
                       backendBindingExportedAsMain = True
                     }
                 ]
@@ -3510,7 +3504,7 @@ localFunctionFieldProgram =
       { backendExprType = fnBoxTy,
         backendLetName = "f",
         backendLetType = unaryIntTy,
-        backendLetRhs = intIdentityExpr,
+        backendLetRhs = closureWithEntry "__mlfp_closure$field_local",
         backendLetBody = BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "f"]
       }
 
@@ -3521,7 +3515,7 @@ transitiveLocalFunctionFieldProgram =
       { backendExprType = fnBoxTy,
         backendLetName = "f",
         backendLetType = unaryIntTy,
-        backendLetRhs = intIdentityExpr,
+        backendLetRhs = closureWithEntry "__mlfp_closure$field_transitive",
         backendLetBody =
           BackendLet
             { backendExprType = fnBoxTy,
@@ -3546,7 +3540,7 @@ immediateRestoredFunctionFieldProgram =
                       backendBindingExpr =
                         BackendCase
                           fnBoxTy
-                          (BackendConstruct fnBoxTy "FnBox" [intIdentityExpr])
+                          (BackendConstruct fnBoxTy "FnBox" [closureWithEntry "__mlfp_closure$field_restored"])
                           ( BackendAlternative
                               (BackendConstructorPattern "FnBox" ["f"])
                               (BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "f"])
@@ -3580,11 +3574,13 @@ capturedFunctionFieldProgram =
                           ( BackendConstruct
                               fnBoxTy
                               "FnBox"
-                              [ BackendLam
-                                  unaryIntTy
-                                  "x"
-                                  intTy
-                                  (BackendVar intTy "captured")
+                              [ BackendClosure
+                                  { backendExprType = unaryIntTy,
+                                    backendClosureEntryName = "__mlfp_closure$field_captured",
+                                    backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
+                                    backendClosureParams = [("x", intTy)],
+                                    backendClosureBody = BackendVar intTy "captured"
+                                  }
                               ]
                           ),
                       backendBindingExportedAsMain = True
@@ -3902,7 +3898,8 @@ llvmObjectCodeParityCases =
       "boundary: runs aliased bulk-imported hidden-owner constructors in one case",
       "boundary: runs exposed constructor with qualified alias type identity",
       "unified fixture: test/programs/unified/first-class-polymorphism.mlfp",
-      "standalone: does not decode typed non-data constructor fields through fallback ADT decoding"
+      "standalone: does not decode typed non-data constructor fields through fallback ADT decoding",
+      "standalone: applies captured function-valued constructor fields"
     ]
 
 llvmObjectCodeParityCaseNames :: Set.Set String
