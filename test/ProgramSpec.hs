@@ -403,6 +403,19 @@ spec = do
                 (isInfixOf "type mismatch" . renderProgramDiagnostic)
                 (const False)
 
+        it "rejects inconsistent Prelude IO bind argument substitutions" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, putStrLn);"
+                        , "  def main : IO Unit = bind (__io_pure 1) (\\(_n : Unit) putStrLn \"world\");"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                (isInfixOf "ambiguous overloaded method use `bind`" . renderProgramDiagnostic)
+                (const False)
+
         it "rejects constructor imports for opaque Prelude IO" $ do
             located <-
                 requireLocated $

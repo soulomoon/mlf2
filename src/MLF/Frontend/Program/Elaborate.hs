@@ -2186,6 +2186,10 @@ inferKnownExprType scope expr =
         Just valueInfo@OrdinaryValue {} -> Just (ordinaryValueTypeInScope scope valueInfo)
         Just ConstructorValue {valueCtorInfo = ctorInfo} -> Just (constructorVisibleType scope ctorInfo)
         _ -> Nothing
+    ELam param body -> do
+      paramTy <- P.paramType param
+      let scope' = extendLocalSourceTypePure scope (P.paramName param) (P.paramName param) paramTy
+      STArrow paramTy <$> inferKnownExprType scope' body
     EAnn _ annTy -> Just annTy
     EApp _ _ ->
       case collectApps expr of
@@ -2196,7 +2200,7 @@ inferKnownExprType scope expr =
                   | let ty = ordinaryValueTypeInScope scope valueInfo,
                     not (null args),
                     hasLeadingForall ty ->
-                      Nothing
+                      appliedKnownOrdinaryValueResultType scope ty (map (inferKnownExprType scope) args) (length args)
                 ConstructorValue {valueCtorInfo = ctorInfo}
                   | length args == length (ctorArgs ctorInfo) ->
                       knownConstructorResultType scope ctorInfo args
@@ -2213,6 +2217,10 @@ inferKnownResolvedExprType scope expr =
         Right valueInfo@OrdinaryValue {} -> Just (ordinaryValueTypeInScope scope valueInfo)
         Right ConstructorValue {valueCtorInfo = ctorInfo} -> Just (constructorVisibleType scope ctorInfo)
         _ -> Nothing
+    ELam param body -> do
+      paramTy <- P.paramType param >>= either (const Nothing) Just . displaySrcTypeForResolved scope
+      let scope' = extendLocalSourceTypePure scope (P.paramName param) (P.paramName param) paramTy
+      STArrow paramTy <$> inferKnownResolvedExprType scope' body
     EAnn _ annTy -> either (const Nothing) Just (displaySrcTypeForResolved scope annTy)
     EApp _ _ ->
       case collectResolvedApps expr of
@@ -2223,7 +2231,7 @@ inferKnownResolvedExprType scope expr =
                   | let ty = ordinaryValueTypeInScope scope valueInfo,
                     not (null args),
                     hasLeadingForall ty ->
-                      Nothing
+                      appliedKnownOrdinaryValueResultType scope ty (map (inferKnownResolvedExprType scope) args) (length args)
                 ConstructorValue {valueCtorInfo = ctorInfo}
                   | length args == length (ctorArgs ctorInfo) ->
                       knownResolvedConstructorResultType scope ctorInfo args
@@ -2236,6 +2244,21 @@ hasLeadingForall ty =
   case ty of
     STForall {} -> True
     _ -> False
+
+appliedKnownOrdinaryValueResultType :: ElaborateScope -> SrcType -> [Maybe SrcType] -> Int -> Maybe SrcType
+appliedKnownOrdinaryValueResultType scope visibleTy mbArgTypes argCount = do
+  let (_, bodyTy) = splitForalls visibleTy
+      (argTys, _) = splitArrows bodyTy
+  if argCount > length argTys
+    then Nothing
+    else do
+      actualArgTypes <- sequence (take argCount mbArgTypes)
+      subst <-
+        foldM
+          (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy)
+          Map.empty
+          (zip argTys actualArgTypes)
+      peelAppliedType (specializeQuantifiedType subst visibleTy) argCount
 
 litSrcType :: Lit -> SrcType
 litSrcType lit =
