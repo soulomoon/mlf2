@@ -35,8 +35,8 @@
   now also stay runtime pointer aliases during lowering instead of being
   reclassified as raw escaping local functions.
 - Fixed checked-program closure conversion to clear shadowed closure locals when
-  classifying nested `let` values, and to fail closed on closure-valued
-  constructor fields until ADT field lowering has a closure-aware representation.
+  classifying nested `let` values, and to store/project monomorphic
+  function-valued constructor fields as explicit closure values.
 - Fixed closure conversion and LLVM lowering for type-abstracted closure-valued
   globals and nested `let` aliases of closure parameters, keeping both on the
   explicit closure-call ABI instead of the raw function-pointer path.
@@ -67,10 +67,10 @@
   runs, and rejects unsupported native result shapes before execution.
 - Eliminated the final temporary LLVM unsupported classification from the
   shared `ProgramSpec` runtime-success parity matrix. Stored first-order
-  function constructor fields now lower as function pointers, closed direct
-  function fields use private wrappers, captured closure fields still fail
-  closed, and the representative `llc` subset includes the formerly unsupported
-  typed constructor-field row.
+  function constructor fields now lower through the explicit closure ABI,
+  including captured closure fields projected by case analysis, and the
+  representative `llc` subset includes the formerly unsupported typed
+  constructor-field row.
 - Extended LLVM backend parity to higher-kinded constructor fields and
   hidden-owner value-constructor imports. Backend IR now preserves applied type
   variables, conversion recovers structural higher-kinded constructor terms as

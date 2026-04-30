@@ -16,6 +16,19 @@
   rows, with `llvm-as`, object-code smoke, and native execution coverage when
   the local LLVM toolchain is available.
 
+## 2026-04-30 - Closure-valued ADT fields
+
+- Checked-program conversion now stores monomorphic function-valued constructor
+  fields as `BackendClosure` values. Direct function references are
+  eta-expanded under the known field type when they are not already closure
+  values, while captured lambdas keep their closure environments.
+- Backend IR validation and LLVM lowering now treat constructor pattern binders
+  for arrow fields as closure-valued locals. Case-projected function fields are
+  loaded as closure pointers and must be applied with `BackendClosureCall`.
+- The shared ProgramSpec-to-LLVM parity matrix includes a runtime row that
+  stores a captured function in an ADT, projects it with case analysis, applies
+  it, and returns `41`.
+
 ## 2026-04-30 - Native execution for supported LLVM parity rows
 
 - Extended `BackendLLVMSpec` so supported shared `ProgramSpec`-to-LLVM parity
@@ -77,10 +90,10 @@
   `programSpecToLLVMParityCases` row now expects LLVM emission and `llvm-as`
   validation instead of accepting an unsupported backend diagnostic.
 - The LLVM lowerer now stores first-order function-valued constructor fields as
-  function pointers. Top-level function references are stored directly, closed
-  direct function expressions are lifted through private function wrappers, and
-  captured constructor-field functions still fail closed until closure
-  conversion exists.
+  explicit closure pointers. Checked-program conversion eta-expands direct
+  function references when needed, captured constructor-field functions carry
+  closure environments, and case-projected function fields remain
+  `BackendClosureCall` callees.
 - Representative object-code coverage now includes the former unsupported
   typed non-data constructor-field row, so the `llc -filetype=obj` smoke subset
   exercises stored function-field lowering in addition to the existing first

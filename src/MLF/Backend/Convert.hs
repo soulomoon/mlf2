@@ -158,9 +158,14 @@ extendClosureScopeTerm name ty isClosure scope =
           else Set.delete name (closureScopeLocals scope)
     }
 
-extendClosureScopeTerms :: [(String, ElabType)] -> ClosureScope -> ClosureScope
-extendClosureScopeTerms bindings scope =
-  foldr (\(name, ty) acc -> extendClosureScopeTerm name ty False acc) scope bindings
+extendClosureScopePatternFields :: [((String, ElabType), BackendType)] -> ClosureScope -> ClosureScope
+extendClosureScopePatternFields bindings scope =
+  foldr
+    ( \((name, ty), fieldTy) acc ->
+        extendClosureScopeTerm name ty (isClosureConvertibleFunctionType fieldTy) acc
+    )
+    scope
+    bindings
 
 extendClosureScopeLambdaParams :: [(String, ElabType)] -> ClosureScope -> ClosureScope
 extendClosureScopeLambdaParams bindings scope =
@@ -2476,23 +2481,73 @@ backendExprIsClosureValue context scope =
     alternativeIsClosureValue alternative =
       backendExprIsClosureValue
         context
-        (scopeWithoutPatternBinders (backendAltPattern alternative))
+        (scopeForPatternBody (backendAltPattern alternative) (backendAltBody alternative))
         (backendAltBody alternative)
 
-    scopeWithoutPatternBinders pattern0 =
+    scopeForPatternBody pattern0 body =
       scope
         { closureScopeBoundTerms = closureScopeBoundTerms scope <> binders,
           closureScopeLocals =
-            closureScopeLocals scope `Set.difference` binders
+            (closureScopeLocals scope `Set.difference` binders) <> closureBinders
         }
       where
         binders = backendPatternBinders pattern0
+        closureBinders =
+          Set.filter
+            (\name -> backendExprMentionsNameWithClosureType name body)
+            binders
 
 backendPatternBinders :: BackendPattern -> Set.Set String
 backendPatternBinders =
   \case
     BackendDefaultPattern -> Set.empty
     BackendConstructorPattern _ binders -> Set.fromList binders
+
+backendExprMentionsNameWithClosureType :: String -> BackendExpr -> Bool
+backendExprMentionsNameWithClosureType needle =
+  go
+  where
+    go =
+      \case
+        BackendVar ty name ->
+          name == needle && isClosureConvertibleFunctionType ty
+        BackendLit {} ->
+          False
+        BackendLam _ name _ body
+          | name == needle -> False
+          | otherwise -> go body
+        BackendApp _ fun arg ->
+          go fun || go arg
+        BackendLet _ name _ rhs body
+          | name == needle -> go rhs
+          | otherwise -> go rhs || go body
+        BackendTyAbs _ _ _ body ->
+          go body
+        BackendTyApp ty (BackendVar _ name) _
+          | name == needle,
+            isClosureConvertibleFunctionType ty ->
+              True
+        BackendTyApp _ fun _ ->
+          go fun
+        BackendConstruct _ _ args ->
+          any go args
+        BackendCase _ scrutinee alternatives ->
+          go scrutinee || any goAlternative (NE.toList alternatives)
+        BackendRoll _ payload ->
+          go payload
+        BackendUnroll _ payload ->
+          go payload
+        BackendClosure _ _ captures params body ->
+          any (go . backendClosureCaptureExpr) captures
+            || (not (Set.member needle closureBinders) && go body)
+          where
+            closureBinders = Set.fromList (map backendClosureCaptureName captures ++ map fst params)
+        BackendClosureCall _ fun args ->
+          go fun || any go args
+
+    goAlternative (BackendAlternative pattern0 body)
+      | Set.member needle (backendPatternBinders pattern0) = False
+      | otherwise = go body
 
 isClosureHeadTerm :: ConvertContext -> ClosureScope -> ElabTerm -> Bool
 isClosureHeadTerm context scope term =
@@ -2925,8 +2980,7 @@ convertConstructorApplication _mode context env scope term resultTy =
                   )
               )
           )
-      argExprs <- zipWithM (convertTermExpectedMode DirectLambda context env scope . Just) fields args
-      liftEitherConvert (mapM_ (rejectClosureValuedConstructorField constructor) (zip3 [0 :: Int ..] fields argExprs))
+      argExprs <- zipWithM (convertConstructorFieldArgument context env scope) fields args
       liftEitherConvert (mapM_ (checkConstructorArgumentType context ownerContext typeBounds constructor) (zip [0 :: Int ..] (zip fields argExprs)))
       pure
         ( Just
@@ -2944,20 +2998,6 @@ convertConstructorApplication _mode context env scope term resultTy =
             ++ backendConstructorName constructor
             ++ "`"
         )
-
-    rejectClosureValuedConstructorField constructor (index0, fieldTy, argExpr)
-      | isClosureConvertibleFunctionType fieldTy,
-        backendExprIsClosureValue context scope argExpr =
-          Left
-            ( BackendUnsupportedCaseShape
-                ( "closure-valued constructor field `"
-                    ++ backendConstructorName constructor
-                    ++ "` argument "
-                    ++ show index0
-                    ++ " requires closure-aware ADT field lowering"
-                )
-            )
-      | otherwise = Right ()
 
     constructorResultSubstitution globalContext ownerContext typeBounds dataParameters parameters explicitSubstitution constructorResultTy effectiveResultTy =
       matchConstructorResult constructorResultTy effectiveResultTy normalizedExplicitSubstitution
@@ -3073,6 +3113,67 @@ convertConstructorApplication _mode context env scope term resultTy =
     resultTypePlaceholderBoundMatches typeBounds (Just actual) (Just expected) =
       resultTypePlaceholderMatches typeBounds actual expected
     resultTypePlaceholderBoundMatches _ _ _ = False
+
+convertConstructorFieldArgument ::
+  ConvertContext ->
+  Env ->
+  ClosureScope ->
+  BackendType ->
+  ElabTerm ->
+  ConvertM BackendExpr
+convertConstructorFieldArgument context env scope fieldTy arg
+  | isClosureConvertibleFunctionType fieldTy = do
+      closureExpr <- convertTermExpectedMode (ClosureLambda Nothing) context env scope (Just fieldTy) arg
+      if backendExprIsClosureValue context scope closureExpr
+        then pure closureExpr
+        else convertEtaExpandedConstructorFieldClosure context env scope fieldTy arg
+  | otherwise =
+      convertTermExpectedMode DirectLambda context env scope (Just fieldTy) arg
+
+convertEtaExpandedConstructorFieldClosure ::
+  ConvertContext ->
+  Env ->
+  ClosureScope ->
+  BackendType ->
+  ElabTerm ->
+  ConvertM BackendExpr
+convertEtaExpandedConstructorFieldClosure context env scope fieldTy arg = do
+  params <- closureFieldEtaParams fieldTy arg
+  let applied = foldl EApp arg [EVar name | (name, _) <- params]
+      etaTerm = foldr (\(name, ty) body -> ELam name ty body) applied params
+  convertTermExpectedMode (ClosureLambda Nothing) context env scope (Just fieldTy) etaTerm
+
+closureFieldEtaParams :: BackendType -> ElabTerm -> ConvertM [(String, ElabType)]
+closureFieldEtaParams fieldTy arg = do
+  let (paramTys, _) = splitBackendArrows fieldTy
+  when (null paramTys) $
+    liftEitherConvert (Left (BackendUnsupportedCaseShape "closure-valued constructor field expected a function type"))
+  paramElabTys <-
+    traverse
+      ( \paramTy ->
+          case backendTypeToElabType paramTy of
+            Just elabTy -> pure elabTy
+            Nothing ->
+              liftEitherConvert
+                ( Left
+                    ( BackendUnsupportedCaseShape
+                        "closure-valued constructor field has a parameter type that cannot be eta-expanded"
+                    )
+                )
+      )
+      paramTys
+  let paramNames = freshConstructorFieldParamNames (length paramElabTys) (termVariableNames arg)
+  pure (zip paramNames paramElabTys)
+
+freshConstructorFieldParamNames :: Int -> Set.Set String -> [String]
+freshConstructorFieldParamNames count used0 =
+  go 0 used0
+  where
+    go index0 used
+      | index0 >= count = []
+      | otherwise =
+          let candidate = freshNameLike ("__mlfp_field_arg" ++ show index0) used
+           in candidate : go (index0 + 1) (Set.insert candidate used)
 
 constructorApplicationTerm :: ConvertContext -> ElabTerm -> Either BackendConversionError (Maybe ConstructorApplication)
 constructorApplicationTerm context term =
@@ -3877,7 +3978,7 @@ convertCaseAlternative mode context env scope resultTy dataMeta scrutineeTy cons
           (\(name, ty) acc -> extendTermEnv name ty acc)
           env
           fieldEnvTypes
-      scope' = extendClosureScopeTerms fieldEnvTypes scope
+      scope' = extendClosureScopePatternFields (zip fieldEnvTypes fields) scope
       bodyMode =
         if isClosureConvertibleFunctionType resultTy
           then ClosureLambda Nothing
