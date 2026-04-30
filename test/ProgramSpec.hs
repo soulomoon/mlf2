@@ -593,6 +593,33 @@ spec = do
                         ]
             (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "foo\n"
 
+        it "keeps deferred constructor lookup scoped to the binding that created the placeholder" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module A export (Foo, mkAction) {"
+                        , "  import Prelude exposing (IO, pure);"
+                        , "  data Foo ="
+                        , "      Unit : Int -> Foo;"
+                        , "  def mkAction : Int -> IO Foo = \\n pure (Unit n);"
+                        , "}"
+                        , ""
+                        , "module B export (Bar(..), unused) {"
+                        , "  data Bar ="
+                        , "      Unit : Bar;"
+                        , "  def unused : Bar = Unit;"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, putStrLn);"
+                        , "  import A exposing (Foo, mkAction);"
+                        , "  def action : IO Foo = mkAction 1;"
+                        , "  def after : Foo -> IO Unit = \\_foo putStrLn \"scoped\";"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "scoped\n"
+
         it "rejects recursive IO main lookup without hanging" $ do
             located <-
                 requireLocated $

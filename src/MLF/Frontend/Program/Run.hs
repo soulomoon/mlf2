@@ -191,9 +191,10 @@ rejectOpaqueDependencies checked =
 
 data RuntimeContext = RuntimeContext
   { runtimeBindings :: Map.Map String CheckedBinding,
-    runtimeConstructors :: Map.Map String ConstructorInfo,
-    runtimeDeferredConstructors :: Map.Map String ConstructorInfo
+    runtimeConstructors :: Map.Map String ConstructorInfo
   }
+
+type RuntimeDeferredConstructors = Map.Map String ConstructorInfo
 
 type RuntimeEnv = Map.Map String RuntimeValue
 
@@ -203,7 +204,7 @@ data RuntimeValue
   = RuntimeLit Lit
   | RuntimeUnit
   | RuntimeData String [RuntimeValue]
-  | RuntimeClosure String SurfaceExpr RuntimeEnv RuntimeLookupStack
+  | RuntimeClosure String SurfaceExpr RuntimeEnv RuntimeLookupStack RuntimeDeferredConstructors
   | RuntimeConstructor ConstructorInfo [RuntimeValue]
   | RuntimePrimitive RuntimePrimitive [RuntimeValue]
   | RuntimeIO RuntimeIOAction
@@ -226,7 +227,7 @@ mainIOAction checked = do
     case Map.lookup (checkedProgramMain checked) (runtimeBindings context) of
       Just found -> Right found
       Nothing -> Left ProgramMainNotFound
-  value <- evalRuntimeExpr context Map.empty (checkedBindingSurfaceExpr binding)
+  value <- evalRuntimeBinding context [] binding
   case value of
     RuntimeIO action -> Right action
     _ -> Left (ProgramPipelineError "run-program IO main did not evaluate to an IO action")
@@ -237,51 +238,69 @@ mkRuntimeContext :: CheckedProgram -> RuntimeContext
 mkRuntimeContext checked =
   RuntimeContext
     { runtimeBindings = Map.fromList [(checkedBindingName binding, binding) | binding <- allCheckedBindings checked],
-      runtimeConstructors = Map.fromList [(ctorRuntimeName ctor, ctor) | dataInfo <- allDataInfos checked, ctor <- dataConstructors dataInfo],
-      runtimeDeferredConstructors =
-        Map.fromList
-          [ (placeholder, deferredConstructorInfo deferred)
-            | binding <- allCheckedBindings checked,
-              (placeholder, DeferredConstructor deferred) <- Map.toList (checkedBindingDeferredObligations binding)
-          ]
+      runtimeConstructors = Map.fromList [(ctorRuntimeName ctor, ctor) | dataInfo <- allDataInfos checked, ctor <- dataConstructors dataInfo]
     }
 
-evalRuntimeExpr :: RuntimeContext -> RuntimeEnv -> SurfaceExpr -> Either ProgramError RuntimeValue
-evalRuntimeExpr context =
-  evalRuntimeExprWithStack context []
+evalRuntimeBinding :: RuntimeContext -> RuntimeLookupStack -> CheckedBinding -> Either ProgramError RuntimeValue
+evalRuntimeBinding context stack binding =
+  evalRuntimeExprWithStack
+    context
+    stack
+    (bindingDeferredConstructors binding)
+    Map.empty
+    (checkedBindingSurfaceExpr binding)
 
-evalRuntimeExprWithStack :: RuntimeContext -> RuntimeLookupStack -> RuntimeEnv -> SurfaceExpr -> Either ProgramError RuntimeValue
-evalRuntimeExprWithStack context stack env expr =
+bindingDeferredConstructors :: CheckedBinding -> RuntimeDeferredConstructors
+bindingDeferredConstructors binding =
+  Map.fromList
+    [ (placeholder, deferredConstructorInfo deferred)
+      | (placeholder, DeferredConstructor deferred) <- Map.toList (checkedBindingDeferredObligations binding)
+    ]
+
+evalRuntimeExprWithStack ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredConstructors ->
+  RuntimeEnv ->
+  SurfaceExpr ->
+  Either ProgramError RuntimeValue
+evalRuntimeExprWithStack context stack deferredConstructors env expr =
   case expr of
-    Surface.EVar name -> lookupRuntimeValue context stack env name
+    Surface.EVar name -> lookupRuntimeValue context stack deferredConstructors env name
     Surface.ELit lit -> Right (RuntimeLit lit)
     Surface.ELam name body ->
-      Right (RuntimeClosure name body env stack)
+      Right (RuntimeClosure name body env stack deferredConstructors)
     Surface.ELamAnn name _ body ->
-      Right (RuntimeClosure name body env stack)
+      Right (RuntimeClosure name body env stack deferredConstructors)
     Surface.EApp fun arg -> do
-      funValue <- evalRuntimeExprWithStack context stack env fun
-      argValue <- evalRuntimeExprWithStack context stack env arg
+      funValue <- evalRuntimeExprWithStack context stack deferredConstructors env fun
+      argValue <- evalRuntimeExprWithStack context stack deferredConstructors env arg
       applyRuntimeValue context funValue argValue
     Surface.ELet name rhs body -> do
-      rhsValue <- evalRuntimeExprWithStack context stack env rhs
-      evalRuntimeExprWithStack context stack (Map.insert name rhsValue env) body
+      rhsValue <- evalRuntimeExprWithStack context stack deferredConstructors env rhs
+      evalRuntimeExprWithStack context stack deferredConstructors (Map.insert name rhsValue env) body
     Surface.EAnn inner _ ->
-      evalRuntimeExprWithStack context stack env inner
+      evalRuntimeExprWithStack context stack deferredConstructors env inner
 
-lookupRuntimeValue :: RuntimeContext -> RuntimeLookupStack -> RuntimeEnv -> String -> Either ProgramError RuntimeValue
-lookupRuntimeValue context stack env name =
+lookupRuntimeValue ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredConstructors ->
+  RuntimeEnv ->
+  String ->
+  Either ProgramError RuntimeValue
+lookupRuntimeValue context stack deferredConstructors env name =
   case Map.lookup name env of
     Just value -> Right value
     Nothing ->
       case runtimePrimitive name of
         Just prim -> Right (RuntimePrimitive prim [])
         Nothing
-          | Just ctor <- Map.lookup name (runtimeDeferredConstructors context) -> Right (runtimeConstructorValue ctor [])
+          | Just ctor <- Map.lookup name deferredConstructors -> Right (runtimeConstructorValue ctor [])
           | Just ctor <- Map.lookup name (runtimeConstructors context) -> Right (runtimeConstructorValue ctor [])
           | name `elem` stack -> Left (recursiveRuntimeBindingError name stack)
           | Just binding <- Map.lookup name (runtimeBindings context) ->
-              evalRuntimeExprWithStack context (name : stack) Map.empty (checkedBindingSurfaceExpr binding)
+              evalRuntimeBinding context (name : stack) binding
           | otherwise -> Left (ProgramUnknownValue name)
 
 recursiveRuntimeBindingError :: String -> RuntimeLookupStack -> ProgramError
@@ -325,8 +344,8 @@ isPreludeUnitTypeIdentity identity =
 applyRuntimeValue :: RuntimeContext -> RuntimeValue -> RuntimeValue -> Either ProgramError RuntimeValue
 applyRuntimeValue context funValue argValue =
   case funValue of
-    RuntimeClosure name body closureEnv closureStack ->
-      evalRuntimeExprWithStack context closureStack (Map.insert name argValue closureEnv) body
+    RuntimeClosure name body closureEnv closureStack closureDeferredConstructors ->
+      evalRuntimeExprWithStack context closureStack closureDeferredConstructors (Map.insert name argValue closureEnv) body
     RuntimePrimitive prim args ->
       applyRuntimePrimitive prim (args ++ [argValue])
     RuntimeConstructor ctor args
