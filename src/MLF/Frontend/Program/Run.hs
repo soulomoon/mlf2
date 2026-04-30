@@ -13,7 +13,7 @@ module MLF.Frontend.Program.Run
 where
 
 import Data.Foldable (toList)
-import Data.List (intercalate, isPrefixOf)
+import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Elab.Pipeline (ElabTerm (..), Pretty (..), Ty (..), freeTypeVarsType, normalize, schemeFromType, typeCheck)
@@ -27,9 +27,12 @@ import MLF.Frontend.Program.Types
     CheckedProgram (..),
     ConstructorInfo (..),
     DataInfo (..),
+    DeferredConstructorCall (..),
+    DeferredProgramObligation (..),
     ProgramDiagnostic,
     ProgramError (..),
     SymbolIdentity (..),
+    SymbolNamespace (..),
     diagnosticForProgramError,
   )
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
@@ -189,7 +192,7 @@ rejectOpaqueDependencies checked =
 data RuntimeContext = RuntimeContext
   { runtimeBindings :: Map.Map String CheckedBinding,
     runtimeConstructors :: Map.Map String ConstructorInfo,
-    runtimeUnitConstructors :: Set.Set String
+    runtimeDeferredConstructors :: Map.Map String ConstructorInfo
   }
 
 type RuntimeEnv = Map.Map String RuntimeValue
@@ -235,14 +238,11 @@ mkRuntimeContext checked =
   RuntimeContext
     { runtimeBindings = Map.fromList [(checkedBindingName binding, binding) | binding <- allCheckedBindings checked],
       runtimeConstructors = Map.fromList [(ctorRuntimeName ctor, ctor) | dataInfo <- allDataInfos checked, ctor <- dataConstructors dataInfo],
-      runtimeUnitConstructors =
-        Set.fromList
-          [ ctorRuntimeName ctor
-            | dataInfo <- allDataInfos checked,
-              isUnitTypeName (symbolDefiningName (dataInfoSymbol dataInfo)),
-              ctor <- dataConstructors dataInfo,
-              isUnitTypeName (ctorName ctor),
-              null (ctorArgs ctor)
+      runtimeDeferredConstructors =
+        Map.fromList
+          [ (placeholder, deferredConstructorInfo deferred)
+            | binding <- allCheckedBindings checked,
+              (placeholder, DeferredConstructor deferred) <- Map.toList (checkedBindingDeferredObligations binding)
           ]
     }
 
@@ -277,7 +277,7 @@ lookupRuntimeValue context stack env name =
       case runtimePrimitive name of
         Just prim -> Right (RuntimePrimitive prim [])
         Nothing
-          | name `Set.member` runtimeUnitConstructors context || isDeferredUnitConstructorName name -> Right RuntimeUnit
+          | Just ctor <- Map.lookup name (runtimeDeferredConstructors context) -> Right (runtimeConstructorValue ctor [])
           | Just ctor <- Map.lookup name (runtimeConstructors context) -> Right (runtimeConstructorValue ctor [])
           | name `elem` stack -> Left (recursiveRuntimeBindingError name stack)
           | Just binding <- Map.lookup name (runtimeBindings context) ->
@@ -302,14 +302,25 @@ runtimePrimitive name =
     "__mlfp_and" -> Just RuntimeAnd
     _ -> Nothing
 
-isDeferredUnitConstructorName :: String -> Bool
-isDeferredUnitConstructorName name = "$deferred_ctor_Unit_" `isPrefixOf` name
-
 runtimeConstructorValue :: ConstructorInfo -> [RuntimeValue] -> RuntimeValue
 runtimeConstructorValue ctor args
-  | null (ctorArgs ctor) && isUnitTypeName (ctorName ctor) = RuntimeUnit
+  | isPreludeUnitConstructor ctor && null args = RuntimeUnit
   | length args == length (ctorArgs ctor) = RuntimeData (ctorName ctor) args
   | otherwise = RuntimeConstructor ctor args
+
+isPreludeUnitConstructor :: ConstructorInfo -> Bool
+isPreludeUnitConstructor ctor =
+  null (ctorArgs ctor)
+    && isPreludeUnitTypeIdentity (ctorOwningTypeIdentity ctor)
+    && symbolNamespace (ctorInfoSymbol ctor) == SymbolConstructor
+    && symbolDefiningModule (ctorInfoSymbol ctor) == "Prelude"
+    && symbolDefiningName (ctorInfoSymbol ctor) == "Unit"
+
+isPreludeUnitTypeIdentity :: SymbolIdentity -> Bool
+isPreludeUnitTypeIdentity identity =
+  symbolNamespace identity == SymbolType
+    && symbolDefiningModule identity == "Prelude"
+    && symbolDefiningName identity == "Unit"
 
 applyRuntimeValue :: RuntimeContext -> RuntimeValue -> RuntimeValue -> Either ProgramError RuntimeValue
 applyRuntimeValue context funValue argValue =

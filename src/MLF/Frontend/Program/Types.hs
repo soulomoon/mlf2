@@ -641,6 +641,7 @@ data CheckedBinding = CheckedBinding
   { checkedBindingName :: String,
     checkedBindingSourceType :: SrcType,
     checkedBindingSurfaceExpr :: SurfaceExpr,
+    checkedBindingDeferredObligations :: Map String DeferredProgramObligation,
     checkedBindingTerm :: ElabTerm,
     checkedBindingType :: ElabType,
     checkedBindingExportedAsMain :: Bool

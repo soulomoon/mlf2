@@ -565,6 +565,34 @@ spec = do
                 )
                 (const False)
 
+        it "resolves deferred non-Unit constructors passed through IO bind" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Nat(..), bind, pure, putStrLn);"
+                        , "  def after : Nat -> IO Unit = \\_n putStrLn \"nat\";"
+                        , "  def action : IO Nat = pure Zero;"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "nat\n"
+
+        it "resolves deferred non-nullary constructors named Unit as functions" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (Foo(..), main) {"
+                        , "  import Prelude as P exposing (Unit, IO, bind, pure, putStrLn);"
+                        , "  data Foo ="
+                        , "      Unit : Int -> Foo;"
+                        , "  def after : Foo -> IO P.Unit = \\_foo putStrLn \"foo\";"
+                        , "  def action : IO Foo = pure (Unit 1);"
+                        , "  def main : IO P.Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "foo\n"
+
         it "rejects recursive IO main lookup without hanging" $ do
             located <-
                 requireLocated $
