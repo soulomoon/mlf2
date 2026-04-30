@@ -798,6 +798,16 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr useBinding `shouldSatisfy` containsBackendApp
     backendBindingExpr useBinding `shouldNotSatisfy` containsBackendClosureCall
 
+  it "keeps local non-closure binders from inheriting same-named closure globals" $ do
+    checked <- requireChecked shadowedGlobalClosureHeadProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendApp
+    backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendClosureCall
+
   it "rejects closure-valued constructor fields until ADT fields are closure-aware" $ do
     checked <- requireChecked closureValuedConstructorFieldProgram
 
@@ -1317,6 +1327,17 @@ shadowedCaseClosureLocalProgram =
       "    let captured : Int = 41 in",
       "    let f : Int -> Int = \\(x : Int) captured in",
       "    use f;",
+      "}"
+    ]
+
+shadowedGlobalClosureHeadProgram :: String
+shadowedGlobalClosureHeadProgram =
+  unlines
+    [ "module Main export (FnBox(..), main) {",
+      "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
+      "  def f : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
+      "  def id : Int -> Int = \\(x : Int) x;",
+      "  def main : Int = case FnBox id of { FnBox f -> f 0 };",
       "}"
     ]
 

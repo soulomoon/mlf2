@@ -35,6 +35,9 @@
 - Fixed backend closure-value classification for case alternatives so
   constructor pattern binders shadow outer closure locals before let aliases are
   classified as closure-valued.
+- Fixed closure call-head classification so local non-closure binders shadow
+  same-named closure-valued globals instead of inheriting the global closure
+  ABI.
 - Supported expected-type resolution for nullary overloaded `.mlfp` methods.
   Associated values such as `mempty : a` now resolve from an explicit or
   propagated expected source type while bare uses without such evidence still

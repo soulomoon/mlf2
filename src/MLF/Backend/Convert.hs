@@ -126,6 +126,7 @@ type ConvertM = StateT ConvertState (Either BackendConversionError)
 
 data ClosureScope = ClosureScope
   { closureScopeTerms :: Map String ElabType,
+    closureScopeBoundTerms :: Set.Set String,
     closureScopeLocals :: Set.Set String
   }
 
@@ -137,6 +138,7 @@ emptyClosureScope :: ClosureScope
 emptyClosureScope =
   ClosureScope
     { closureScopeTerms = Map.empty,
+      closureScopeBoundTerms = Set.empty,
       closureScopeLocals = Set.empty
     }
 
@@ -144,6 +146,7 @@ extendClosureScopeTerm :: String -> ElabType -> Bool -> ClosureScope -> ClosureS
 extendClosureScopeTerm name ty isClosure scope =
   scope
     { closureScopeTerms = Map.insert name ty (closureScopeTerms scope),
+      closureScopeBoundTerms = Set.insert name (closureScopeBoundTerms scope),
       closureScopeLocals =
         if isClosure
           then Set.insert name (closureScopeLocals scope)
@@ -2068,14 +2071,14 @@ letBindingNeedsClosure context scope name bindingTy rhs body =
 isClosureAliasTerm :: ConvertContext -> ClosureScope -> ElabTerm -> Bool
 isClosureAliasTerm context scope term =
   case stripClosureHeadTypeInsts term of
-    EVar name -> Set.member name (closureScopeLocals scope) || Set.member name (ccClosureGlobals context)
+    EVar name -> closureScopeNameIsClosure context scope name
     _ -> False
 
 backendExprIsClosureValue :: ConvertContext -> ClosureScope -> BackendExpr -> Bool
 backendExprIsClosureValue context scope =
   \case
     BackendClosure {} -> True
-    BackendVar _ name -> Set.member name (closureScopeLocals scope) || Set.member name (ccClosureGlobals context)
+    BackendVar _ name -> closureScopeNameIsClosure context scope name
     BackendTyAbs _ _ _ body -> backendExprIsClosureValue context scope body
     BackendTyApp _ fun _ -> backendExprIsClosureValue context scope fun
     BackendLet _ name _ rhs body ->
@@ -2102,9 +2105,12 @@ backendExprIsClosureValue context scope =
 
     scopeWithoutPatternBinders pattern0 =
       scope
-        { closureScopeLocals =
-            closureScopeLocals scope `Set.difference` backendPatternBinders pattern0
+        { closureScopeBoundTerms = closureScopeBoundTerms scope <> binders,
+          closureScopeLocals =
+            closureScopeLocals scope `Set.difference` binders
         }
+      where
+        binders = backendPatternBinders pattern0
 
 backendPatternBinders :: BackendPattern -> Set.Set String
 backendPatternBinders =
@@ -2115,8 +2121,14 @@ backendPatternBinders =
 isClosureHeadTerm :: ConvertContext -> ClosureScope -> ElabTerm -> Bool
 isClosureHeadTerm context scope term =
   case stripClosureHeadTypeInsts term of
-    EVar name -> Set.member name (closureScopeLocals scope) || Set.member name (ccClosureGlobals context)
+    EVar name -> closureScopeNameIsClosure context scope name
     _ -> False
+
+closureScopeNameIsClosure :: ConvertContext -> ClosureScope -> String -> Bool
+closureScopeNameIsClosure context scope name
+  | Set.member name (closureScopeLocals scope) = True
+  | Set.member name (closureScopeBoundTerms scope) = False
+  | otherwise = Set.member name (ccClosureGlobals context)
 
 stripClosureHeadTypeInsts :: ElabTerm -> ElabTerm
 stripClosureHeadTypeInsts =
