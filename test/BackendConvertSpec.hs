@@ -712,6 +712,26 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
     backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendApp
 
+  it "closure-converts calls to type-abstracted closure-valued top-level bindings" $ do
+    checked <- requireChecked polymorphicTopLevelClosureCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    makerBinding <- requireBinding "Main__maker" backend
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr makerBinding `shouldSatisfy` containsBackendClosure
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
+    backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendApp
+
+  it "closure-converts closure-valued function parameters through nested let aliases" $ do
+    checked <- requireChecked functionParameterNestedClosureAliasCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    useBinding <- requireBinding "Main__use" backend
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendClosureCall
+    backendBindingExpr useBinding `shouldNotSatisfy` containsBackendApp
+
   it "clears shadowed closure locals when classifying let RHS values" $ do
     checked <- requireChecked shadowedClosureLocalProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -1186,6 +1206,29 @@ topLevelClosureCallProgram =
     [ "module Main export (main) {",
       "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
       "  def main : Int = maker 0;",
+      "}"
+    ]
+
+polymorphicTopLevelClosureCallProgram :: String
+polymorphicTopLevelClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def maker : forall a. a -> Int = let captured : Int = 41 in \\(x : a) captured;",
+      "  def main : Int = maker 0;",
+      "}"
+    ]
+
+functionParameterNestedClosureAliasCallProgram :: String
+functionParameterNestedClosureAliasCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "    let g : Int -> Int = (let h : Int -> Int = f in h) in",
+      "    g 1;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
       "}"
     ]
 

@@ -2826,6 +2826,21 @@ closurePointerAliasValue exprEnv =
       | isFunctionLikeBackendType ty,
         Just value <- closurePointerAliasValue exprEnv fun ->
           Just value {lvBackendType = ty}
+    BackendLet ty name bindingTy rhs body
+      | isFunctionLikeBackendType ty ->
+          let exprEnvForBody =
+                case closurePointerAliasValue exprEnv rhs of
+                  Just value ->
+                    exprEnv
+                      { eeValues = Map.insert name value {lvBackendType = bindingTy} (eeValues exprEnv),
+                        eeLocalFunctions = Map.delete name (eeLocalFunctions exprEnv)
+                      }
+                  Nothing ->
+                    exprEnv
+                      { eeValues = Map.delete name (eeValues exprEnv),
+                        eeLocalFunctions = Map.delete name (eeLocalFunctions exprEnv)
+                      }
+           in closurePointerAliasValue exprEnvForBody body
     _ ->
       Nothing
 

@@ -653,6 +653,17 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "lowers type-abstracted top-level closure calls through the explicit closure ABI" $ do
+    output <-
+      withTempProgram sourcePolymorphicTopLevelClosureCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define private ptr @\"Main__maker"
+    output `shouldSatisfy` isInfixOf "call ptr @\"Main__maker"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
   it "lowers top-level closure values passed as function arguments" $ do
     output <-
       withTempProgram sourceTopLevelClosureArgumentProgram $ \path ->
@@ -660,6 +671,17 @@ spec = describe "MLF.Backend.LLVM" $ do
 
     output `shouldSatisfy` isInfixOf "call ptr @\"Main__maker\"()"
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "lowers closure-valued function parameters through nested let aliases" $ do
+    output <-
+      withTempProgram sourceFunctionParameterNestedClosureAliasCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$Main__main$"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "BackendClosureCallExpectedClosureValue"
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
@@ -3015,6 +3037,15 @@ sourceTopLevelClosureCallProgram =
       "}"
     ]
 
+sourcePolymorphicTopLevelClosureCallProgram :: String
+sourcePolymorphicTopLevelClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def maker : forall a. a -> Int = let captured : Int = 41 in \\(x : a) captured;",
+      "  def main : Int = maker 0;",
+      "}"
+    ]
+
 sourceTopLevelClosureArgumentProgram :: String
 sourceTopLevelClosureArgumentProgram =
   unlines
@@ -3022,6 +3053,20 @@ sourceTopLevelClosureArgumentProgram =
       "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
       "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
       "  def main : Int = use maker;",
+      "}"
+    ]
+
+sourceFunctionParameterNestedClosureAliasCallProgram :: String
+sourceFunctionParameterNestedClosureAliasCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "    let g : Int -> Int = (let h : Int -> Int = f in h) in",
+      "    g 1;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
       "}"
     ]
 

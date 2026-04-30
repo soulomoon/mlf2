@@ -26,6 +26,9 @@
 - Fixed checked-program closure conversion to clear shadowed closure locals when
   classifying nested `let` values, and to fail closed on closure-valued
   constructor fields until ADT field lowering has a closure-aware representation.
+- Fixed closure conversion and LLVM lowering for type-abstracted closure-valued
+  globals and nested `let` aliases of closure parameters, keeping both on the
+  explicit closure-call ABI instead of the raw function-pointer path.
 - Supported expected-type resolution for nullary overloaded `.mlfp` methods.
   Associated values such as `mempty : a` now resolve from an explicit or
   propagated expected source type while bare uses without such evidence still

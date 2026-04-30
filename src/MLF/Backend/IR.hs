@@ -666,6 +666,8 @@ backendExprIsGlobalClosureValue globals locals =
       True
     BackendVar _ name ->
       Set.member name locals || Set.member name globals
+    BackendTyAbs _ _ _ body ->
+      backendExprIsGlobalClosureValue globals locals body
     BackendTyApp _ fun _ ->
       backendExprIsGlobalClosureValue globals locals fun
     BackendLet _ name _ rhs body ->
@@ -957,15 +959,22 @@ backendExprCallsNameAsClosureHead needle =
 
 closureCallHeadReferencesAny :: Set.Set String -> BackendExpr -> Bool
 closureCallHeadReferencesAny needles expr =
-  any (`closureCallHeadReferencesName` expr) needles
+  closureCallHeadReferencesAnyFrom needles expr
 
-closureCallHeadReferencesName :: String -> BackendExpr -> Bool
-closureCallHeadReferencesName needle =
+closureCallHeadReferencesAnyFrom :: Set.Set String -> BackendExpr -> Bool
+closureCallHeadReferencesAnyFrom aliases0 =
   \case
     BackendVar _ name ->
-      name == needle
+      Set.member name aliases0
     BackendTyApp _ fun _ ->
-      closureCallHeadReferencesName needle fun
+      closureCallHeadReferencesAnyFrom aliases0 fun
+    BackendLet _ name _ rhs body ->
+      let aliasesWithoutShadow = Set.delete name aliases0
+          aliasesForBody =
+            if closureCallHeadReferencesAnyFrom aliases0 rhs
+              then Set.insert name aliasesWithoutShadow
+              else aliasesWithoutShadow
+       in closureCallHeadReferencesAnyFrom aliasesForBody body
     _ ->
       False
 

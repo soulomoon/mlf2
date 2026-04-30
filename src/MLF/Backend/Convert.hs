@@ -2017,6 +2017,7 @@ backendExprIsClosureValue context scope =
   \case
     BackendClosure {} -> True
     BackendVar _ name -> Set.member name (closureScopeLocals scope) || Set.member name (ccClosureGlobals context)
+    BackendTyAbs _ _ _ body -> backendExprIsClosureValue context scope body
     BackendTyApp _ fun _ -> backendExprIsClosureValue context scope fun
     BackendLet _ name _ rhs body ->
       let bodyScope =
