@@ -3069,9 +3069,9 @@ lowerCall env exprEnv context expr =
                 _ ->
                   lowerGlobalCall env exprEnv context (backendExprType expr) name typeArgs args
         BackendLam {} ->
-          lowerDirectFunctionCall env exprEnv context (functionFormFromExpr headExpr) typeArgs args
+          lowerDirectFunctionCall env exprEnv context (backendExprType expr) (functionFormFromExpr headExpr) typeArgs args
         BackendTyAbs {} ->
-          lowerDirectFunctionCall env exprEnv context (functionFormFromExpr headExpr) typeArgs args
+          lowerDirectFunctionCall env exprEnv context (backendExprType expr) (functionFormFromExpr headExpr) typeArgs args
         _ ->
           case pushCallIntoExpression context (backendExprType expr) headExpr typeArgs args of
             Right (Just applied) ->
@@ -3450,12 +3450,26 @@ lowerLocalFunctionCall env callEnv context resultTy name localFunction typeArgs 
       bodyEnv <- bindCallArguments env callEnv (lfCapturedEnv localFunction) context allowNestedEvidence name form args
       lowerExpr env bodyEnv context (ffBody form)
 
-lowerDirectFunctionCall :: ProgramEnv -> ExprEnv -> String -> FunctionForm -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
-lowerDirectFunctionCall env exprEnv context form0 typeArgs args = do
+lowerDirectFunctionCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> FunctionForm -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
+lowerDirectFunctionCall env exprEnv context resultTy form0 typeArgs args = do
   (resolvedTypeArgs, form1) <- instantiateFunctionFormWithTypeArgsM context form0 typeArgs args
   let form = qualifyInstantiatedClosureEntries "__mlfp_direct_typeapp" resolvedTypeArgs form1
-  bodyEnv <- bindCallArguments env exprEnv exprEnv context False "lambda" form args
-  lowerExpr env bodyEnv context (ffBody form)
+      arity = length (ffParams form)
+  case compare (length args) arity of
+    GT -> do
+      unless (isClosureRuntimeValueType (ffReturnType form)) $
+        liftEither (BackendLLVMArityMismatch "lambda" arity (length args))
+      let (directArgs, closureArgs) = splitAt arity args
+      callee <- lowerSaturatedDirectFunctionCall form directArgs
+      lowerClosurePointerValueCall env exprEnv context resultTy callee closureArgs
+    LT ->
+      liftEither (BackendLLVMArityMismatch "lambda" arity (length args))
+    EQ ->
+      lowerSaturatedDirectFunctionCall form args
+  where
+    lowerSaturatedDirectFunctionCall form2 args0 = do
+      bodyEnv <- bindCallArguments env exprEnv exprEnv context False "lambda" form2 args0
+      lowerExpr env bodyEnv context (ffBody form2)
 
 lowerGlobalCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> String -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerGlobalCall env exprEnv context resultTy name typeArgs args =
