@@ -2074,18 +2074,24 @@ lowerFunctionWrapper env wrapper =
 
 collectClosureEntries :: [BindingInfo] -> [Specialization] -> [EvidenceWrapper] -> [FunctionWrapper] -> [ClosureEntry]
 collectClosureEntries reachable specializations evidenceWrappers functionWrappers =
-  concatMap (collectClosureEntriesInExpr . ffBody . biForm) (filter (null . ffTypeBinders . biForm) reachable)
-    ++ concatMap (collectClosureEntriesInExpr . ffBody . qualifiedSpecializationForm) specializations
-    ++ concatMap (collectClosureEntriesInExpr . ffBody . qualifiedEvidenceWrapperForm) evidenceWrappers
-    ++ concatMap (collectClosureEntriesInExpr . ffBody . qualifiedFunctionWrapperForm) functionWrappers
+  concatMap (collectClosureEntriesInForm . biForm) (filter (null . ffTypeBinders . biForm) reachable)
+    ++ concatMap (collectClosureEntriesInForm . qualifiedSpecializationForm) specializations
+    ++ concatMap (collectClosureEntriesInForm . qualifiedEvidenceWrapperForm) evidenceWrappers
+    ++ concatMap (collectClosureEntriesInForm . qualifiedFunctionWrapperForm) functionWrappers
 
 requireUniqueClosureEntries :: [ClosureEntry] -> Either BackendLLVMError [ClosureEntry]
 requireUniqueClosureEntries entries =
-  case firstDuplicate (map ceEntryName entries) of
-    Just entryName ->
-      Left (BackendLLVMInternalError ("duplicate closure entry after specialization: " ++ entryName))
-    Nothing ->
-      Right entries
+  reverse <$> foldM includeEntry [] entries
+  where
+    includeEntry kept entry =
+      case filter ((== ceEntryName entry) . ceEntryName) kept of
+        [] ->
+          Right (entry : kept)
+        existing : _
+          | existing == entry ->
+              Right kept
+          | otherwise ->
+              Left (BackendLLVMInternalError ("duplicate closure entry after specialization: " ++ ceEntryName entry))
 
 qualifiedSpecializationForm :: Specialization -> FunctionForm
 qualifiedSpecializationForm specialization =
@@ -2102,6 +2108,11 @@ qualifiedFunctionWrapperForm wrapper =
 qualifyClosureEntriesInForm :: String -> FunctionForm -> FunctionForm
 qualifyClosureEntriesInForm ownerName form =
   form {ffBody = qualifyClosureEntriesInExpr ownerName (ffBody form)}
+
+qualifyInstantiatedClosureEntries :: String -> [BackendType] -> FunctionForm -> FunctionForm
+qualifyInstantiatedClosureEntries ownerName resolvedTypeArgs form
+  | null resolvedTypeArgs = form
+  | otherwise = qualifyClosureEntriesInForm (closureEntryOwnerName ownerName resolvedTypeArgs) form
 
 qualifyClosureEntriesInExpr :: String -> BackendExpr -> BackendExpr
 qualifyClosureEntriesInExpr ownerName =
@@ -2151,21 +2162,37 @@ qualifiedClosureEntryName :: String -> String -> String
 qualifiedClosureEntryName ownerName entryName =
   ownerName ++ "$" ++ entryName
 
-collectClosureEntriesInExpr :: BackendExpr -> [ClosureEntry]
-collectClosureEntriesInExpr =
-  \case
+collectClosureEntriesInForm :: FunctionForm -> [ClosureEntry]
+collectClosureEntriesInForm =
+  collectClosureEntriesInFormWithLocals Map.empty
+
+collectClosureEntriesInFormWithLocals :: LocalFunctionForms -> FunctionForm -> [ClosureEntry]
+collectClosureEntriesInFormWithLocals localForms form =
+  collectClosureEntriesInExpr (shadowLocalFunctionForms paramNames localForms) (ffBody form)
+  where
+    paramNames = Set.fromList (map fst (ffParams form))
+
+collectClosureEntriesInExpr :: LocalFunctionForms -> BackendExpr -> [ClosureEntry]
+collectClosureEntriesInExpr localForms expr =
+  case expr of
     BackendVar {} -> []
     BackendLit {} -> []
-    BackendLam _ _ _ body -> collectClosureEntriesInExpr body
-    BackendApp _ fun arg -> collectClosureEntriesInExpr fun ++ collectClosureEntriesInExpr arg
-    BackendLet _ _ _ rhs body -> collectClosureEntriesInExpr rhs ++ collectClosureEntriesInExpr body
-    BackendTyAbs _ _ _ body -> collectClosureEntriesInExpr body
-    BackendTyApp _ fun _ -> collectClosureEntriesInExpr fun
-    BackendConstruct _ _ args -> concatMap collectClosureEntriesInExpr args
+    BackendLam _ name _ body ->
+      collectClosureEntriesInExpr (Map.delete name localForms) body
+    BackendApp _ fun arg ->
+      collectAppliedLocalClosureEntries
+        ++ collectClosureEntriesInExpr localForms fun
+        ++ collectClosureEntriesInExpr localForms arg
+    BackendLet _ name bindingTy rhs body ->
+      collectClosureEntriesInExpr localForms rhs
+        ++ collectClosureEntriesInExpr (collectLetLocalForm name bindingTy rhs) body
+    BackendTyAbs {} -> []
+    BackendTyApp {} -> collectTypeAppliedClosureEntries
+    BackendConstruct _ _ args -> concatMap (collectClosureEntriesInExpr localForms) args
     BackendCase _ scrutinee alternatives ->
-      collectClosureEntriesInExpr scrutinee ++ concatMap (collectClosureEntriesInExpr . backendAltBody) (NE.toList alternatives)
-    BackendRoll _ payload -> collectClosureEntriesInExpr payload
-    BackendUnroll _ payload -> collectClosureEntriesInExpr payload
+      collectClosureEntriesInExpr localForms scrutinee ++ concatMap collectAlternativeEntries (NE.toList alternatives)
+    BackendRoll _ payload -> collectClosureEntriesInExpr localForms payload
+    BackendUnroll _ payload -> collectClosureEntriesInExpr localForms payload
     BackendClosure resultTy entryName captures params body ->
       ClosureEntry
         { ceFunctionType = resultTy,
@@ -2174,10 +2201,68 @@ collectClosureEntriesInExpr =
           ceParams = params,
           ceBody = body
         }
-        : concatMap (collectClosureEntriesInExpr . backendClosureCaptureExpr) captures
-          ++ collectClosureEntriesInExpr body
+        : concatMap (collectClosureEntriesInExpr localForms . backendClosureCaptureExpr) captures
+          ++ collectClosureEntriesInExpr (shadowLocalFunctionForms closureBound localForms) body
+      where
+        closureBound = Set.fromList (map backendClosureCaptureName captures ++ map fst params)
     BackendClosureCall _ fun args ->
-      collectClosureEntriesInExpr fun ++ concatMap collectClosureEntriesInExpr args
+      collectClosureEntriesInExpr localForms fun ++ concatMap (collectClosureEntriesInExpr localForms) args
+  where
+    collectAppliedLocalClosureEntries =
+      case collectCall expr of
+        Just (BackendVar _ name, typeArgs, args)
+          | Just form <- Map.lookup name localForms ->
+              collectInstantiatedLocalClosureEntries name form typeArgs args
+        _ -> []
+
+    collectTypeAppliedClosureEntries =
+      case collectTyApps expr of
+        (BackendVar _ name, typeArgs)
+          | Just form <- Map.lookup name localForms ->
+              collectInstantiatedLocalClosureEntries name form typeArgs []
+        (fun@BackendTyAbs {}, typeArgs) ->
+          collectInstantiatedClosureEntries
+            "__mlfp_direct_typeapp"
+            (functionFormFromExpr fun)
+            typeArgs
+            []
+        (fun, _) ->
+          collectClosureEntriesInExpr localForms fun
+
+    collectInstantiatedLocalClosureEntries name form typeArgs args =
+      collectInstantiatedClosureEntries name form typeArgs args
+
+    collectInstantiatedClosureEntries ownerName form typeArgs args =
+      case instantiateFunctionFormWithTypeArgs ("closure entry collection " ++ ownerName) form typeArgs args of
+        Right (resolvedTypeArgs, instantiated) ->
+          collectClosureEntriesInFormWithLocals
+            localForms
+            (qualifyInstantiatedClosureEntries ownerName resolvedTypeArgs instantiated)
+        Left _ ->
+          []
+
+    collectLetLocalForm name bindingTy rhs =
+      case functionFormFromExpected bindingTy rhs of
+        form
+          | not (null (ffTypeBinders form)) ->
+              Map.insert name form localForms
+        _ ->
+          Map.delete name localForms
+
+    collectAlternativeEntries alternative =
+      let binders = patternBinders (backendAltPattern alternative)
+       in collectClosureEntriesInExpr
+            (shadowLocalFunctionForms binders localForms)
+            (backendAltBody alternative)
+
+    patternBinders =
+      \case
+        BackendDefaultPattern -> Set.empty
+        BackendConstructorPattern _ binders -> Set.fromList binders
+
+closureEntryOwnerName :: String -> [BackendType] -> String
+closureEntryOwnerName name typeArgs =
+  name ++ concatMap (("$" ++) . backendTypeKey) typeArgs
 
 evidenceWrapperForm :: EvidenceWrapper -> FunctionForm
 evidenceWrapperForm wrapper =
@@ -2562,7 +2647,8 @@ lowerDirectFunctionValue env exprEnv context resultTy fun typeArgs = do
     Right (Just applied) ->
       lowerExpr env exprEnv context applied
     Right Nothing -> do
-      form <- instantiateFunctionFormM context (functionFormFromExpr fun) typeArgs []
+      (resolvedTypeArgs, form0) <- instantiateFunctionFormWithTypeArgsM context (functionFormFromExpr fun) typeArgs []
+      let form = qualifyInstantiatedClosureEntries "__mlfp_direct_typeapp" resolvedTypeArgs form0
       lowerInstantiatedFunctionValue env exprEnv context "type-applied expression" resultTy form
     Left err ->
       liftEither err
@@ -2636,7 +2722,8 @@ applyCallToExpr context expectedTy expr typeArgs args = do
 
 lowerLocalFunctionValue :: ProgramEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> LowerM LowerValue
 lowerLocalFunctionValue env context resultTy name localFunction typeArgs = do
-  form <- instantiateFunctionFormM context (lfForm localFunction) typeArgs []
+  (resolvedTypeArgs, form0) <- instantiateFunctionFormWithTypeArgsM context (lfForm localFunction) typeArgs []
+  let form = qualifyInstantiatedClosureEntries name resolvedTypeArgs form0
   lowerInstantiatedFunctionValue env (lfCapturedEnv localFunction) context name resultTy form
 
 lowerInstantiatedFunctionValue :: ProgramEnv -> ExprEnv -> String -> String -> BackendType -> FunctionForm -> LowerM LowerValue
@@ -2962,10 +3049,11 @@ lowerLocalFunctionReference =
 
 lowerLocalFunctionReferenceWith :: Bool -> ProgramEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> LowerM LowerValue
 lowerLocalFunctionReferenceWith allowStoredReference env context expectedTy name localFunction typeArgs = do
-  form <-
+  (resolvedTypeArgs, form0) <-
     if null typeArgs
-      then pure (lfForm localFunction)
-      else instantiateFunctionFormM context (lfForm localFunction) typeArgs []
+      then pure ([], lfForm localFunction)
+      else instantiateFunctionFormWithTypeArgsM context (lfForm localFunction) typeArgs []
+  let form = qualifyInstantiatedClosureEntries name resolvedTypeArgs form0
   let actualTy = functionTypeFromFormWithBinders form
   requireEvidenceFunctionType context name expectedTy actualTy
   case etaAliasTarget form of
@@ -3177,7 +3265,8 @@ backendTypeVariableNames =
 lowerLocalFunctionCall :: ProgramEnv -> ExprEnv -> String -> String -> LocalFunction -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerLocalFunctionCall env callEnv context name localFunction typeArgs args = do
   let allowNestedEvidence = isEvidenceName name
-  form <- instantiateFunctionFormM context (lfForm localFunction) typeArgs args
+  (resolvedTypeArgs, form0) <- instantiateFunctionFormWithTypeArgsM context (lfForm localFunction) typeArgs args
+  let form = qualifyInstantiatedClosureEntries name resolvedTypeArgs form0
   bodyEnv <- bindCallArguments env callEnv (lfCapturedEnv localFunction) context allowNestedEvidence name form args
   lowerExpr env bodyEnv context (ffBody form)
 

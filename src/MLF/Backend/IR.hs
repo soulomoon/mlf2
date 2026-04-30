@@ -249,6 +249,7 @@ data BackendValidationError
   | BackendDuplicateClosureCapture String
   | BackendDuplicateClosureParameter String
   | BackendClosureCaptureTypeMismatch String BackendType BackendType
+  | BackendClosureExpectedFunction String BackendType
   | BackendClosureTypeMismatch String BackendType BackendType
   | BackendClosureCallExpectedFunction BackendType
   | BackendClosureCallExpectedClosureValue BackendType
@@ -746,6 +747,8 @@ validateBackendExprWith mbContext expr =
         Nothing ->
           Left (BackendUnrollExpectedRecursive (backendExprType payload))
     BackendClosure resultTy entryName captures params body -> do
+      unless (isBackendArrowType resultTy) $
+        Left (BackendClosureExpectedFunction entryName resultTy)
       requireUnique BackendDuplicateClosureCapture (map backendClosureCaptureName captures)
       requireUnique BackendDuplicateClosureParameter (map fst params)
       requireUnique BackendDuplicateClosureParameter (map backendClosureCaptureName captures ++ map fst params)
@@ -882,6 +885,12 @@ collectClosureCallType =
         other
           | null params -> Nothing
           | otherwise -> Just (params, other)
+
+isBackendArrowType :: BackendType -> Bool
+isBackendArrowType =
+  \case
+    BTArrow {} -> True
+    _ -> False
 
 validateBackendVariable :: Maybe BackendValidationContext -> String -> BackendType -> Either BackendValidationError ()
 validateBackendVariable Nothing _ _ =

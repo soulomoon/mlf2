@@ -145,6 +145,13 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unknown backend LLVM function"
     validateLLVMAssembly output
 
+  it "collects local polymorphic closure entries after type application" $ do
+    output <- requireRight (renderBackendProgramLLVM localPolymorphicClosureEntryProgram)
+
+    output `shouldSatisfy` isInfixOf "$__mlfp_closure$local_poly"
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
+    validateLLVMAssembly output
+
   it "instantiates direct polymorphic zero-arity expressions used through type application" $ do
     output <- requireRight (renderBackendProgramLLVM directPolymorphicZeroArityProgram)
 
@@ -1890,6 +1897,70 @@ localPolymorphicZeroArityProgram =
         ],
       backendProgramMain = "main"
     }
+
+localPolymorphicClosureEntryProgram :: BackendProgram
+localPolymorphicClosureEntryProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLet
+                          intTy
+                          "polyLocal"
+                          localPolymorphicClosureEntryTy
+                          localPolymorphicClosureEntryExpr
+                          ( BackendApp
+                              intTy
+                              ( BackendTyApp
+                                  (BTArrow intTy intTy)
+                                  (BackendVar localPolymorphicClosureEntryTy "polyLocal")
+                                  intTy
+                              )
+                              (intLit 3)
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+localPolymorphicClosureEntryTy :: BackendType
+localPolymorphicClosureEntryTy =
+  BTForall "a" Nothing (BTArrow (BTVar "a") (BTVar "a"))
+
+localPolymorphicClosureEntryExpr :: BackendExpr
+localPolymorphicClosureEntryExpr =
+  BackendTyAbs
+    localPolymorphicClosureEntryTy
+    "a"
+    Nothing
+    ( BackendLam
+        (BTArrow (BTVar "a") (BTVar "a"))
+        "x"
+        (BTVar "a")
+        ( BackendLet
+            (BTVar "a")
+            "f"
+            (BTArrow (BTVar "a") (BTVar "a"))
+            ( BackendClosure
+                { backendExprType = BTArrow (BTVar "a") (BTVar "a"),
+                  backendClosureEntryName = "__mlfp_closure$local_poly",
+                  backendClosureCaptures = [],
+                  backendClosureParams = [("y", BTVar "a")],
+                  backendClosureBody = BackendVar (BTVar "a") "y"
+                }
+            )
+            (BackendClosureCall (BTVar "a") (BackendVar (BTArrow (BTVar "a") (BTVar "a")) "f") [BackendVar (BTVar "a") "x"])
+        )
+    )
 
 directPolymorphicZeroArityProgram :: BackendProgram
 directPolymorphicZeroArityProgram =

@@ -242,6 +242,14 @@ spec = describe "MLF.Backend.IR" $ do
               backendClosureParams = [("x", intTy)],
               backendClosureBody = BackendVar intTy "x"
             }
+        nonFunctionClosure =
+          BackendClosure
+            { backendExprType = intTy,
+              backendClosureEntryName = "__mlfp_closure$non_function",
+              backendClosureCaptures = [],
+              backendClosureParams = [],
+              backendClosureBody = intLit 0
+            }
         badCall =
           BackendClosureCall intTy (goodClosure "__mlfp_closure$call") [boolLit True]
         nonClosureCall =
@@ -345,6 +353,8 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` Left (BackendDuplicateClosureEntry "__mlfp_closure$dup")
     validateBackendProgram (programWithMainExpr duplicateCaptureAndParameter)
       `shouldBe` Left (BackendDuplicateClosureParameter "x")
+    validateBackendProgram (programWithMainExpr nonFunctionClosure)
+      `shouldBe` Left (BackendClosureExpectedFunction "__mlfp_closure$non_function" intTy)
     validateBackendProgram (programWithMainExpr badCall)
       `shouldBe` Left (BackendClosureCallArgumentMismatch 0 intTy boolTy)
     validateBackendProgram (programWithMainExpr nonClosureCall)
