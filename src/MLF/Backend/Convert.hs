@@ -1333,14 +1333,23 @@ checkedProgramEvidenceValueArguments context checked = do
       ]
       ( \(checkedModule, binding) -> do
           bindingTy <- checkedBindingBackendValueType context checkedModule binding
-          pure (checkedBindingName binding, bindingTy, checkedBindingTerm binding)
+          pure (checkedBindingName binding, checkedBindingSourceType binding, bindingTy, checkedBindingTerm binding)
       )
   pure $
-    Map.filter (not . Set.null) $
-      Map.fromList
-        [ (name, bindingEvidenceValueArguments bindingTy term)
-        | (name, bindingTy, term) <- sources
-        ]
+    evidenceValueArgumentFixedPoint context sources Map.empty
+
+evidenceValueArgumentFixedPoint :: ConvertContext -> [(String, SrcType, BackendType, ElabTerm)] -> Map String (Set.Set Int) -> Map String (Set.Set Int)
+evidenceValueArgumentFixedPoint context sources demands =
+  let context' = context {ccEvidenceValueArguments = demands}
+      demands' =
+        Map.filter (not . Set.null) $
+          Map.fromList
+            [ (name, checkedBindingEvidenceValueArguments context' emptyClosureScope sourceTy bindingTy term)
+            | (name, sourceTy, bindingTy, term) <- sources
+            ]
+   in if demands' == demands
+        then demands
+        else evidenceValueArgumentFixedPoint context sources demands'
 
 checkedProgramClosureValueArguments :: ConvertContext -> CheckedProgram -> Either BackendConversionError (Map String (Set.Set Int))
 checkedProgramClosureValueArguments context checked = do
@@ -1379,8 +1388,40 @@ bindingClosureValueArguments context scope bindingTy term =
   directClosureValueArguments bindingTy term
     `Set.union` aliasedClosureValueArguments context scope bindingTy term
 
-bindingEvidenceValueArguments :: BackendType -> ElabTerm -> Set.Set Int
-bindingEvidenceValueArguments bindingTy term =
+checkedBindingEvidenceValueArguments :: ConvertContext -> ClosureScope -> SrcType -> BackendType -> ElabTerm -> Set.Set Int
+checkedBindingEvidenceValueArguments context scope sourceTy bindingTy term =
+  declaredEvidenceValueArguments sourceTy bindingTy
+    `Set.union` bindingEvidenceValueArguments context scope bindingTy term
+
+bindingEvidenceValueArguments :: ConvertContext -> ClosureScope -> BackendType -> ElabTerm -> Set.Set Int
+bindingEvidenceValueArguments context scope bindingTy term =
+  directEvidenceValueArguments bindingTy term
+    `Set.union` aliasedEvidenceValueArguments context scope bindingTy term
+
+declaredEvidenceValueArguments :: SrcType -> BackendType -> Set.Set Int
+declaredEvidenceValueArguments sourceTy bindingTy =
+  Set.fromList [0 .. evidenceCount - 1]
+  where
+    evidenceCount =
+      max 0 (runtimeArity - visibleArity)
+    runtimeArity =
+      length runtimeParamTys
+    visibleArity =
+      sourceValueArity sourceTy
+    (_, runtimeValueTy) =
+      splitBackendForalls bindingTy
+    (runtimeParamTys, _) =
+      splitBackendArrows runtimeValueTy
+
+sourceValueArity :: SrcType -> Int
+sourceValueArity sourceTy =
+  length paramTys
+  where
+    (paramTys, _) =
+      splitSourceArrows (dropSourceForalls sourceTy)
+
+directEvidenceValueArguments :: BackendType -> ElabTerm -> Set.Set Int
+directEvidenceValueArguments bindingTy term =
   Set.fromList
     [ index0
     | (index0, (name, _)) <- zip [0 :: Int ..] params,
@@ -1407,11 +1448,25 @@ directClosureValueArguments bindingTy term =
 
 aliasedClosureValueArguments :: ConvertContext -> ClosureScope -> BackendType -> ElabTerm -> Set.Set Int
 aliasedClosureValueArguments context scope bindingTy term =
+  aliasedValueArgumentIndices lookupClosureValueArgumentDemand context scope bindingTy term
+
+aliasedEvidenceValueArguments :: ConvertContext -> ClosureScope -> BackendType -> ElabTerm -> Set.Set Int
+aliasedEvidenceValueArguments context scope bindingTy term =
+  aliasedValueArgumentIndices lookupEvidenceValueArguments context scope bindingTy term
+
+aliasedValueArgumentIndices ::
+  (ConvertContext -> ClosureScope -> String -> Set.Set Int) ->
+  ConvertContext ->
+  ClosureScope ->
+  BackendType ->
+  ElabTerm ->
+  Set.Set Int
+aliasedValueArgumentIndices lookupDemand context scope bindingTy term =
   case stripClosureHeadTypeInsts headTerm of
     EVar name ->
       Set.fromList
         [ paramOffset + exposedIndex
-        | demandedIndex <- Set.toList (lookupClosureValueArgumentDemand context scope name),
+        | demandedIndex <- Set.toList (lookupDemand context scope name),
           let exposedIndex = demandedIndex - suppliedCount,
           demandedIndex >= suppliedCount,
           exposedIndex < exposedCount
@@ -2011,6 +2066,7 @@ convertPartialApplication context env scope term resultTy =
               if suppliedCount < length paramTys
                 && alphaEqBackendType resultTy expectedPartialTy
                 && not (null remainingParamTys)
+                && partialApplicationSuppliesValueArgument context scope headTerm suppliedCount
                 then do
                   suppliedArgExprs <-
                     zipWithM
@@ -2081,6 +2137,12 @@ partialApplicationArgumentNeedsClosureValue context scope headTerm index0 expect
         _ ->
           False
 
+partialApplicationSuppliesValueArgument :: ConvertContext -> ClosureScope -> ElabTerm -> Int -> Bool
+partialApplicationSuppliesValueArgument context scope headTerm suppliedCount =
+  any
+    (not . partialApplicationArgumentIsEvidence context scope headTerm)
+    [0 .. suppliedCount - 1]
+
 convertClosureValueArgument ::
   ConvertContext ->
   Env ->
@@ -2118,7 +2180,7 @@ applicationArgumentNeedsClosureValue context scope expectedArgTy fun =
       _ ->
         False
   where
-    (headTerm, suppliedArgs) = collectApps fun
+    (headTerm, suppliedArgs) = collectAliasedApps fun
     suppliedCount = length suppliedArgs
 
 packageDirectFunctionValue ::
@@ -2529,7 +2591,7 @@ convertOrdinaryTerm mode context env scope term resultTy0 =
           demandedClosureValueArguments =
             bindingClosureValueArguments context scope bindingTy rhs
           evidenceValueArguments =
-            bindingEvidenceValueArguments bindingTy rhs
+            bindingEvidenceValueArguments context scope bindingTy rhs
           bodyScope =
             extendClosureScopeEvidenceArguments name evidenceValueArguments $
               extendClosureScopeValueArguments name demandedClosureValueArguments $
@@ -4365,8 +4427,32 @@ collectAliasedApps =
                            in (rhsHead, rhsArgs ++ bodyArgs)
                     _ ->
                       (term, [])
+        other
+          | Just etaHead <- etaAliasHead other ->
+              resolveHead seen etaHead
         other ->
           (other, [])
+
+    etaAliasHead term =
+      let (params, body) = collectEtaLams [] term
+          (bodyHead, bodyArgs) = collectApps (stripAdministrativeTermWrappers body)
+       in if not (null params) && etaArgsMatch params bodyArgs
+            then Just bodyHead
+            else Nothing
+
+    collectEtaLams params term =
+      case stripAdministrativeTermWrappers term of
+        ELam name _ body -> collectEtaLams (params ++ [name]) body
+        other -> (params, other)
+
+    etaArgsMatch params args =
+      length params == length args
+        && and
+          [ case stripAdministrativeTermWrappers arg of
+              EVar argName -> argName == param
+              _ -> False
+          | (param, arg) <- zip params args
+          ]
 
 inferBackendType :: Env -> ElabTerm -> Either BackendConversionError BackendType
 inferBackendType env term =

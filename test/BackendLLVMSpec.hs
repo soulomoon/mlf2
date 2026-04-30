@@ -734,6 +734,17 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
     assertNativeProgram sourceConstrainedPartialApplicationProgram "1"
 
+  it "packages constrained partial applications through constrained aliases" $ do
+    output <-
+      withTempProgram sourceConstrainedPartialApplicationAliasProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldNotSatisfy` isInfixOf "Backend LLVM arity mismatch"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceConstrainedPartialApplicationAliasProgram "1"
+
   it "freshens generated partial capture names against local binders" $ do
     output <-
       withTempProgram sourcePartialApplicationGeneratedNameCollisionProgram $ \path ->
@@ -756,6 +767,26 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
     assertNativeProgram sourcePartialApplicationDirectFunctionArgumentProgram "4"
+
+  it "wraps closure-demanded arguments for let-headed call aliases" $ do
+    output <-
+      withTempProgram sourceClosureDemandLetHeadedCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceClosureDemandLetHeadedCallProgram "1"
+
+  it "wraps closure-demanded arguments for eta-expanded call heads" $ do
+    output <-
+      withTempProgram sourceClosureDemandEtaCallHeadProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceClosureDemandEtaCallHeadProgram "1"
 
   it "keeps polymorphic supplied partial arguments on the static specialization path" $ do
     output <-
@@ -3414,6 +3445,23 @@ sourceConstrainedPartialApplicationProgram =
       "}"
     ]
 
+sourceConstrainedPartialApplicationAliasProgram :: String
+sourceConstrainedPartialApplicationAliasProgram =
+  unlines
+    [ "module Main export (Pick, main) {",
+      "  class Pick a {",
+      "    pick : a -> a -> a;",
+      "  }",
+      "  instance Pick Int {",
+      "    pick = \\x \\y x;",
+      "  }",
+      "  def keep : Pick Int => Int -> Int -> Int = \\x \\y pick x y;",
+      "  def keepAlias : Pick Int => Int -> Int -> Int = keep;",
+      "  def apply : (Int -> Int) -> Int = \\f f 1;",
+      "  def main : Int = apply (keepAlias 1);",
+      "}"
+    ]
+
 sourcePartialApplicationGeneratedNameCollisionProgram :: String
 sourcePartialApplicationGeneratedNameCollisionProgram =
   unlines
@@ -3433,6 +3481,29 @@ sourcePartialApplicationDirectFunctionArgumentProgram =
       "  def choose : (Int -> Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x ignored;",
       "  def apply : (Int -> Int) -> Int = \\f f 4;",
       "  def main : Int = apply (choose keepLeft 0);",
+      "}"
+    ]
+
+sourceClosureDemandLetHeadedCallProgram :: String
+sourceClosureDemandLetHeadedCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def main : Int =",
+      "    (let f : (Int -> Int -> Int) -> Int = use in f) keepLeft;",
+      "}"
+    ]
+
+sourceClosureDemandEtaCallHeadProgram :: String
+sourceClosureDemandEtaCallHeadProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def main : Int = (\\(u : Int -> Int -> Int) use u) keepLeft;",
       "}"
     ]
 
