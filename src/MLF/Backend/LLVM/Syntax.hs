@@ -31,7 +31,8 @@ data LLVMModule = LLVMModule
 data LLVMDeclaration = LLVMDeclaration
   { llvmDeclarationName :: String,
     llvmDeclarationReturnType :: LLVMType,
-    llvmDeclarationParameters :: [LLVMType]
+    llvmDeclarationParameters :: [LLVMType],
+    llvmDeclarationVarArgs :: Bool
   }
   deriving (Eq, Show)
 
@@ -72,6 +73,7 @@ data LLVMInstruction
 data LLVMExpression
   = LLVMCall String [(LLVMType, LLVMOperand)]
   | LLVMCallOperand LLVMOperand [(LLVMType, LLVMOperand)]
+  | LLVMAnd LLVMOperand LLVMOperand
   | LLVMGetElementPtr LLVMType LLVMOperand [(LLVMType, LLVMOperand)]
   | LLVMLoad LLVMType LLVMOperand
   | LLVMPhi LLVMType [(LLVMOperand, String)]
