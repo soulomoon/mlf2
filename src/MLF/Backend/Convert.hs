@@ -16,6 +16,7 @@ module MLF.Backend.Convert
     convertCheckedProgram,
     convertElabType,
     convertSourceType,
+    renderBackendConversionError,
   )
 where
 
@@ -71,6 +72,22 @@ data BackendConversionError
   | BackendTypeCheckFailed ElabTerm TypeCheckError
   | BackendValidationFailed BackendValidationError
   deriving (Eq, Show)
+
+renderBackendConversionError :: BackendConversionError -> String
+renderBackendConversionError err =
+  case err of
+    BackendUnsupportedSourceType ty ->
+      "Unsupported backend source type: " ++ show ty
+    BackendUnsupportedInstantiation inst ->
+      "Unsupported backend instantiation: " ++ show inst
+    BackendUnsupportedRecursiveLet detail ->
+      "Unsupported backend recursive let: " ++ detail
+    BackendUnsupportedCaseShape detail ->
+      "Unsupported backend conversion shape: " ++ detail
+    BackendTypeCheckFailed term typeErr ->
+      "Backend typecheck failed for converted term " ++ show term ++ ": " ++ show typeErr
+    BackendValidationFailed validationErr ->
+      "Backend IR validation failed: " ++ show validationErr
 
 data ConvertContext = ConvertContext
   { ccModuleScopes :: Map String ElaborateScope,

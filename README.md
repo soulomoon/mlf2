@@ -138,7 +138,10 @@ cabal run mlf2 -- emit-native test/programs/unified/authoritative-let-polymorphi
 ```
 
 `emit-backend` keeps the raw backend contract: the checked `.mlfp` `main`
-binding remains a module-qualified LLVM function such as `Main__main`.
+binding remains a module-qualified LLVM function such as `Main__main`. It is a
+pure LLVM subset contract today: checked `main : IO Unit`, direct `__io_*`
+primitive calls, and pure entrypoints with reachable IO-typed dependencies are
+rejected with an unsupported backend diagnostic before LLVM is emitted.
 `emit-native` adds the process contract used by native execution tests. It emits
 a C ABI `i32 @main()` wrapper that calls the checked zero-argument `.mlfp`
 `main`, renders supported pure results to stdout with the same value text used
@@ -148,7 +151,8 @@ first-order ADT results whose fields are recursively renderable. Function,
 polymorphic, `String`, unknown, and IO-like results are rejected before native
 run assertions use them. Native mode declares libc `malloc` and vararg `printf`
 and defines the backend-owned `__mlfp_and` primitive when no program binding owns
-that runtime name; broader IO behavior remains outside this pure contract.
+that runtime name; broader IO runtime linking remains outside this pure
+contract.
 
 Backend LLVM validation tests use LLVM command-line tools with opaque pointer
 support when available. The test suite looks for `llvm-as` and `llc` on `PATH`,

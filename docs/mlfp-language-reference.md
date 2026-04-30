@@ -342,10 +342,12 @@ stdout, and successful `IO Unit` programs do not render a `Unit` result value.
 The initial runtime contract rejects `main : IO a` for non-`Unit` `a`.
 
 The backend contract is fail-closed for the first IO slice. `emit-backend`
-should reject checked IO programs with a structured unsupported diagnostic until
-the backend IO issue adds a concrete lowering plan for the selected primitives.
-That rejection does not change source typing, pure runtime rendering, or the
-existing first-order LLVM subset.
+rejects checked IO entrypoints with a structured unsupported diagnostic until a
+later backend/runtime issue adds a concrete lowering plan for the selected
+primitives. It also rejects pure entrypoints that depend on IO-typed helpers or
+direct opaque primitives. The backend does not lower `__io_pure`, `__io_bind`,
+or `__io_putStrLn` yet. That rejection does not change source typing, pure
+runtime rendering, or the existing first-order LLVM subset.
 
 ## Backend Boundary
 
@@ -370,10 +372,13 @@ cabal run mlf2 -- emit-backend path/to/file.mlfp
 Like `run-program`, `emit-backend` parses one source file and prepends the
 built-in Prelude as an explicit module before checking. The emitted text is
 LLVM IR for the supported backend subset, not a stable ABI or a promise of
-final executable linking. The source-facing surface remains primarily
-first-order: checked first-order function bindings, saturated direct calls,
-literals, variables, SSA-style lets, type abstraction/application after
-specialization, ADT construction, and ADT case analysis.
+final executable linking. IO values remain outside the LLVM contract: checked
+`main : IO Unit`, direct `__io_*` primitive calls, and pure `main` bindings
+whose reachable dependencies mention IO fail before LLVM is emitted. The
+source-facing surface remains primarily first-order: checked first-order
+function bindings, saturated direct calls, literals, variables, SSA-style lets,
+type abstraction/application after specialization, ADT construction, and ADT
+case analysis.
 
 The typed backend IR can also represent data metadata, constructor nodes, case
 nodes, recursive roll/unroll nodes, and explicit closure construction plus

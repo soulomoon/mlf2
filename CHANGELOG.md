@@ -13,6 +13,10 @@
   explicit `BackendClosure` / `BackendClosureCall` IR for returned local
   functions and indirect calls through aliases while preserving direct
   first-order local calls on the direct application path.
+- Added an explicit `emit-backend` IO contract: checked IO entrypoints,
+  direct `__io_*` primitive use, and pure entrypoints with reachable IO
+  dependencies now fail closed with stable unsupported backend diagnostics,
+  while unused IO-typed bindings remain outside the emitted LLVM subset.
 - Added the checked `.mlfp` source surface for `Unit`, opaque `IO`, initial IO
   primitives, and the built-in `Monad IO` Prelude instance; backend conversion
   remains fail-closed for IO entrypoints until concrete IO lowering is added.
