@@ -28,6 +28,7 @@ import Text.Megaparsec
     , between
     , choice
     , many
+    , manyTill
     , satisfy
     , try
     , (<|>)
@@ -115,4 +116,4 @@ pLit =
         ]
 
 pString :: Parser String
-pString = lexeme (C.char '"' *> many L.charLiteral <* C.char '"')
+pString = lexeme (C.char '"' *> manyTill L.charLiteral (C.char '"'))

@@ -2,6 +2,7 @@
 
 module MLF.Frontend.Program.Finalize
   ( finalizeBinding,
+    finalizeBindingAllowOpaque,
     recoverSourceType,
     sourceForallMatches,
     stripVacuousForallsAndTypeAbs,
@@ -9,6 +10,7 @@ module MLF.Frontend.Program.Finalize
 where
 
 import Control.Monad (foldM)
+import Control.Applicative ((<|>))
 import Data.List (isPrefixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
@@ -32,6 +34,7 @@ import MLF.Elab.Types (ElabTerm, ElabType)
 import qualified MLF.Elab.Types as X
 import MLF.Frontend.ConstraintGen (ExternalBinding (..), ExternalBindingMode (..), ExternalBindings)
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
+import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
@@ -82,6 +85,21 @@ import MLF.Frontend.Program.Types
   )
 import MLF.Frontend.Syntax (Expr (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarsType)
+
+finalizeBindingAllowOpaque :: ElaborateScope -> LoweredBinding -> Either ProgramError CheckedBinding
+finalizeBindingAllowOpaque scope lowered
+  | Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered) = do
+      expectedTy <- srcTypeToElabType (loweredBindingExpectedType lowered)
+      Right
+        CheckedBinding
+          { checkedBindingName = loweredBindingName lowered,
+            checkedBindingSourceType = loweredBindingSourceType lowered,
+            checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
+            checkedBindingTerm = X.EVar (loweredBindingName lowered),
+            checkedBindingType = expectedTy,
+            checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
+          }
+  | otherwise = finalizeBinding scope lowered
 
 finalizeBinding :: ElaborateScope -> LoweredBinding -> Either ProgramError CheckedBinding
 finalizeBinding scope lowered = do
@@ -950,11 +968,9 @@ resolveDeferredMethods scope deferredMethods = go
         else do
           argViews <- mapM (inferDeferredArgType env) (take requiredArgCount args)
           classArgView <-
-            case inferClassArgument (lowerTypeView scope (TypeView (methodType methodInfo) (methodTypeIdentity methodInfo))) (methodParamName methodInfo) (map typeViewDisplay argViews) of
-              Just ty -> Right ty
+            case inferDeferredMethodClassArgument methodInfo argViews (deferredMethodExpectedResult deferred) of
+              Just view -> Right view
               Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-            >>= \displayTy ->
-              Right (sourceTypeViewInScope scope displayTy)
           (instanceInfo, subst) <- resolveMethodInstanceInfoByTypeView scope methodInfo classArgView
           methodValue <- concreteMethodValue instanceInfo methodInfo
           methodSubst <-
@@ -1011,6 +1027,26 @@ resolveDeferredMethods scope deferredMethods = go
           evidenceArgs <- resolveConstraintEvidenceTerms scope (deferredMethodLocalEvidence deferred) Set.empty eagerConstraints
           methodHead <- instantiateMethodValue scope methodSubst methodValue
           Right (reapplyHeadInsts headInsts (foldl X.EApp methodHead evidenceArgs))
+
+    inferDeferredMethodClassArgument methodInfo argViews mbExpectedResult =
+      let methodTy = lowerTypeView scope (TypeView (methodType methodInfo) (methodTypeIdentity methodInfo))
+          argDisplayTypes = map typeViewDisplay argViews
+       in (sourceTypeViewInScope scope <$> inferClassArgument methodTy (methodParamName methodInfo) argDisplayTypes)
+            <|> inferDeferredMethodClassArgumentFromExpected methodInfo methodTy argDisplayTypes mbExpectedResult
+
+    inferDeferredMethodClassArgumentFromExpected _ _ _ Nothing = Nothing
+    inferDeferredMethodClassArgumentFromExpected methodInfo methodTy argDisplayTypes (Just expectedView) = do
+      let (_, bodyTy) = splitForalls methodTy
+          (paramTys, resultTy) = splitArrows bodyTy
+      substFromArgs <-
+        foldM
+          (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy)
+          Map.empty
+          (zip paramTys argDisplayTypes)
+      let resultTy' = Map.foldrWithKey substituteTypeVar resultTy substFromArgs
+      subst <- matchTypesInScope scope substFromArgs resultTy' (typeViewDisplay expectedView)
+      displayTy <- Map.lookup (methodParamName methodInfo) subst
+      pure (sourceTypeViewInScope scope displayTy)
 
     lookupNullaryEvidence deferred methodInfo classArgView =
       case

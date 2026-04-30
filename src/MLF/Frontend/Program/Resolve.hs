@@ -11,6 +11,12 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
+import MLF.Frontend.Program.Builtins
+  ( builtinTypeNames,
+    builtinTypeSymbol,
+    builtinValueSymbol,
+    builtinValues,
+  )
 import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax
   ( ResolvedSrcType,
@@ -141,25 +147,15 @@ buildImportScope priorExports =
             Just items -> foldM (applyImportItem moduleName0 exports) qualifiedScope items
 
 addBuiltinSymbols :: CandidateScope -> CandidateScope
-addBuiltinSymbols =
-  addCandidateValue "__mlfp_and" (builtinSymbol SymbolValue "__mlfp_and")
-    . addCandidateType "Int" (builtinSymbol SymbolType "Int")
-    . addCandidateType "Bool" (builtinSymbol SymbolType "Bool")
-    . addCandidateType "String" (builtinSymbol SymbolType "String")
-
-builtinSymbol :: SymbolNamespace -> String -> ResolvedSymbol
-builtinSymbol namespace name =
-  mkResolvedSymbol
-    ( SymbolIdentity
-        { symbolNamespace = namespace,
-          symbolDefiningModule = "<builtin>",
-          symbolDefiningName = name,
-          symbolOwnerIdentity = Nothing
-        }
+addBuiltinSymbols scope =
+  foldr
+    (\name acc -> addCandidateValue name (builtinValueSymbol name) acc)
+    ( foldr
+        (\name acc -> addCandidateType name (builtinTypeSymbol name) acc)
+        scope
+        (Set.toList builtinTypeNames)
     )
-    name
-    name
-    SymbolBuiltin
+    (Map.keys builtinValues)
 
 addAllExports ::
   SymbolOrigin ->
@@ -277,15 +273,21 @@ buildExports mod0 locals =
   where
     collectExport acc = \case
       P.ExportValue name ->
-        case Map.lookup name (localValues locals) of
-          Just symbols -> pure acc {candidateValues = Map.insertWith (++) name symbols (candidateValues acc)}
-          Nothing -> Left (ProgramExportNotLocal name)
+        case builtinPreludeExportType name of
+          Just symbol -> pure acc {candidateTypes = Map.insertWith (++) name [symbol] (candidateTypes acc)}
+          Nothing ->
+            case Map.lookup name (localValues locals) of
+              Just symbols -> pure acc {candidateValues = Map.insertWith (++) name symbols (candidateValues acc)}
+              Nothing -> Left (ProgramExportNotLocal name)
       P.ExportType typeName ->
         case (Map.lookup typeName (localTypes locals), Map.lookup typeName (localClasses locals)) of
           (Nothing, Nothing) ->
-            case Map.lookup typeName (localValues locals) of
-              Just symbols -> pure acc {candidateValues = Map.insertWith (++) typeName symbols (candidateValues acc)}
-              Nothing -> Left (ProgramExportNotLocal typeName)
+            case builtinPreludeExportType typeName of
+              Just symbol -> pure acc {candidateTypes = Map.insertWith (++) typeName [symbol] (candidateTypes acc)}
+              Nothing ->
+                case Map.lookup typeName (localValues locals) of
+                  Just symbols -> pure acc {candidateValues = Map.insertWith (++) typeName symbols (candidateValues acc)}
+                  Nothing -> Left (ProgramExportNotLocal typeName)
           (mbTypes, mbClasses) ->
             pure
               acc
@@ -330,6 +332,12 @@ buildExports mod0 locals =
     isConstructorOf typeName symbol =
       symbolOwnerIdentity (resolvedSymbolIdentity symbol) == Just (SymbolOwnerType (P.moduleName mod0) typeName)
 
+    builtinPreludeExportType typeName
+      | P.moduleName mod0 == "Prelude",
+        typeName == "IO" =
+          Just (builtinTypeSymbol typeName)
+      | otherwise = Nothing
+
 resolveModuleSyntax ::
   Map P.ModuleName ResolvedScope ->
   LocalSymbols ->
@@ -338,7 +346,7 @@ resolveModuleSyntax ::
   ResolveM (P.ResolvedModuleSyntax, [ResolvedReference])
 resolveModuleSyntax priorExports locals scope mod0 = do
   imports0 <- mapM (resolveImport priorExports) (P.moduleImports mod0)
-  exports0 <- mapM (mapM (resolveExportItem locals)) (P.moduleExports mod0)
+  exports0 <- mapM (mapM (resolveExportItem (P.moduleName mod0) locals)) (P.moduleExports mod0)
   (decls0, refs) <- mapAndRefs resolveDecl (P.moduleDecls mod0)
   pure
     ( P.Module
@@ -392,14 +400,19 @@ resolveImportItem moduleName0 exports item =
             Just ref -> pure (P.ExportTypeWithConstructors ref)
             Nothing -> Left (ProgramImportNotExported moduleName0 typeName)
 
-resolveExportItem :: LocalSymbols -> P.ExportItem -> ResolveM P.ResolvedExportItem
-resolveExportItem locals item =
+resolveExportItem :: P.ModuleName -> LocalSymbols -> P.ExportItem -> ResolveM P.ResolvedExportItem
+resolveExportItem moduleName0 locals item =
   case item of
     P.ExportValue name ->
-      P.ExportValue <$> uniqueLocalSymbol ProgramExportNotLocal name (localValues locals)
+      case builtinPreludeExportType name of
+        Just ref -> pure (P.ExportType ref)
+        Nothing -> P.ExportValue <$> uniqueLocalSymbol ProgramExportNotLocal name (localValues locals)
     P.ExportType typeName ->
       case resolvedLocalExportTypeRef locals typeName of
         Just ref -> pure (P.ExportType ref)
+        Nothing
+          | Just ref <- builtinPreludeExportType typeName ->
+              pure (P.ExportType ref)
         Nothing -> P.ExportValue <$> uniqueLocalSymbol ProgramExportNotLocal typeName (localValues locals)
     P.ExportTypeWithConstructors typeName ->
       case Map.lookup typeName (localTypes locals) of
@@ -408,6 +421,12 @@ resolveExportItem locals item =
           case resolvedLocalExportTypeRef locals typeName of
             Just ref -> pure (P.ExportTypeWithConstructors ref)
             Nothing -> Left (ProgramExportNotLocal typeName)
+  where
+    builtinPreludeExportType typeName
+      | moduleName0 == "Prelude",
+        typeName == "IO" =
+          Just (P.ResolvedExportTypeRef typeName [builtinTypeSymbol typeName])
+      | otherwise = Nothing
 
 resolvedLocalExportTypeRef :: LocalSymbols -> String -> Maybe P.ResolvedExportTypeRef
 resolvedLocalExportTypeRef locals name =
@@ -569,7 +588,7 @@ resolveType scope = \case
 
 resolveTypeName :: CandidateScope -> String -> ResolveM ResolvedReference
 resolveTypeName scope name
-  | name `Set.member` builtinTypeNames = pure (ResolvedReference ResolvedTypeReference name (builtinSymbol SymbolType name))
+  | name `Set.member` builtinTypeNames = pure (ResolvedReference ResolvedTypeReference name (builtinTypeSymbol name))
   | otherwise = resolveReference ResolvedTypeReference ProgramUnknownType candidateTypes scope name
 
 resolveClassRef :: CandidateScope -> P.ClassName -> ResolveM ResolvedReference
@@ -871,9 +890,6 @@ ensureDistinctImportAliases imports0 =
   ensureDistinctPlain
     ProgramDuplicateImportAlias
     [alias | Just alias <- map P.importAlias imports0]
-
-builtinTypeNames :: Set.Set String
-builtinTypeNames = Set.fromList ["Int", "Bool", "String"]
 
 toListNE :: NonEmpty a -> [a]
 toListNE (x :| xs) = x : xs

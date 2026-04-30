@@ -14,6 +14,7 @@ import MLF.Elab.Pipeline (ElabTerm (..), Pretty (..), Ty (..), freeTypeVarsType,
 import MLF.Frontend.Program.Check (checkLocatedProgram, checkProgram)
 import MLF.Frontend.Program.Elaborate (ElaborateScope, mkElaborateScope)
 import MLF.Frontend.Program.Finalize (recoverSourceType)
+import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
@@ -23,6 +24,7 @@ import MLF.Frontend.Program.Types
     ProgramDiagnostic,
     ProgramError (..),
     SymbolIdentity (..),
+    diagnosticForProgramError,
   )
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
@@ -36,12 +38,15 @@ data Value
 runProgram :: ProgramSyntax.Program -> Either ProgramError Value
 runProgram program = do
   checked <- checkProgram program
+  rejectOpaqueMain checked
   pure (toValueWithProgram checked (normalizeProgramTerm (programMainTerm checked)))
 
 runLocatedProgram :: ProgramSyntax.LocatedProgram -> Either ProgramDiagnostic Value
 runLocatedProgram located = do
   checked <- checkLocatedProgram located
-  pure (toValueWithProgram checked (normalizeProgramTerm (programMainTerm checked)))
+  case rejectOpaqueMain checked of
+    Left err -> Left (diagnosticForProgramError (Just located) err)
+    Right () -> pure (toValueWithProgram checked (normalizeProgramTerm (programMainTerm checked)))
 
 programMainTerm :: CheckedProgram -> ElabTerm
 programMainTerm checked =
@@ -50,7 +55,8 @@ programMainTerm checked =
     allBindings =
       [ binding
         | checkedModule <- checkedProgramModules checked,
-          binding <- checkedModuleBindings checkedModule
+          binding <- checkedModuleBindings checkedModule,
+          not (checkedBindingMentionsOpaqueBuiltin binding)
       ]
 
     bindAll binding body =
@@ -59,6 +65,18 @@ programMainTerm checked =
         (schemeFromType (checkedBindingType binding))
         (checkedBindingTerm binding)
         body
+
+rejectOpaqueMain :: CheckedProgram -> Either ProgramError ()
+rejectOpaqueMain checked =
+  case mainSourceType checked of
+    Just ty
+      | Builtins.srcTypeMentionsOpaqueBuiltin ty ->
+          Left (ProgramPipelineError "run-program does not support IO main values yet")
+    _ -> Right ()
+
+checkedBindingMentionsOpaqueBuiltin :: CheckedBinding -> Bool
+checkedBindingMentionsOpaqueBuiltin =
+  Builtins.srcTypeMentionsOpaqueBuiltin . checkedBindingSourceType
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm
 normalizeProgramTerm term =
