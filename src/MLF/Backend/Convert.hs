@@ -128,7 +128,8 @@ type ConvertM = StateT ConvertState (Either BackendConversionError)
 data ClosureScope = ClosureScope
   { closureScopeTerms :: Map String ElabType,
     closureScopeBoundTerms :: Set.Set String,
-    closureScopeLocals :: Set.Set String
+    closureScopeLocals :: Set.Set String,
+    closureScopeClosureValueArguments :: Map String (Set.Set Int)
   }
 
 data LambdaMode
@@ -144,7 +145,8 @@ emptyClosureScope =
   ClosureScope
     { closureScopeTerms = Map.empty,
       closureScopeBoundTerms = Set.empty,
-      closureScopeLocals = Set.empty
+      closureScopeLocals = Set.empty,
+      closureScopeClosureValueArguments = Map.empty
     }
 
 extendClosureScopeTerm :: String -> ElabType -> Bool -> ClosureScope -> ClosureScope
@@ -155,7 +157,18 @@ extendClosureScopeTerm name ty isClosure scope =
       closureScopeLocals =
         if isClosure
           then Set.insert name (closureScopeLocals scope)
-          else Set.delete name (closureScopeLocals scope)
+          else Set.delete name (closureScopeLocals scope),
+      closureScopeClosureValueArguments =
+        Map.delete name (closureScopeClosureValueArguments scope)
+    }
+
+extendClosureScopeValueArguments :: String -> Set.Set Int -> ClosureScope -> ClosureScope
+extendClosureScopeValueArguments name demanded scope =
+  scope
+    { closureScopeClosureValueArguments =
+        if Set.null demanded
+          then Map.delete name (closureScopeClosureValueArguments scope)
+          else Map.insert name demanded (closureScopeClosureValueArguments scope)
     }
 
 extendClosureScopePatternFields :: [((String, ElabType), BackendType)] -> ClosureScope -> ClosureScope
@@ -1291,36 +1304,80 @@ buildConvertContext checked = do
   Right context0 {ccClosureValueArguments = closureValueArguments}
 
 checkedProgramClosureValueArguments :: ConvertContext -> CheckedProgram -> Either BackendConversionError (Map String (Set.Set Int))
-checkedProgramClosureValueArguments context checked =
-  Map.fromList . concat
-    <$> forM
+checkedProgramClosureValueArguments context checked = do
+  sources <-
+    forM
       [ (checkedModule, binding)
       | checkedModule <- checkedProgramModules checked,
         binding <- checkedModuleBindings checkedModule
       ]
       ( \(checkedModule, binding) -> do
-          demanded <- checkedBindingClosureValueArguments context checkedModule binding
-          pure
-            [ (checkedBindingName binding, Set.fromList demanded)
-            | not (null demanded)
-            ]
+          bindingTy <- checkedBindingBackendValueType context checkedModule binding
+          pure (checkedBindingName binding, bindingTy, checkedBindingTerm binding)
       )
+  pure (closureValueArgumentFixedPoint sources Map.empty)
+  where
+    closureValueArgumentFixedPoint sources demands =
+      let context' = context {ccClosureValueArguments = demands}
+          demands' =
+            Map.filter (not . Set.null) $
+              Map.fromList
+                [ (name, bindingClosureValueArguments context' emptyClosureScope bindingTy term)
+                | (name, bindingTy, term) <- sources
+                ]
+       in if demands' == demands
+            then demands
+            else closureValueArgumentFixedPoint sources demands'
 
-checkedBindingClosureValueArguments :: ConvertContext -> CheckedModule -> CheckedBinding -> Either BackendConversionError [Int]
-checkedBindingClosureValueArguments context checkedModule binding = do
+checkedBindingBackendValueType :: ConvertContext -> CheckedModule -> CheckedBinding -> Either BackendConversionError BackendType
+checkedBindingBackendValueType context checkedModule binding = do
   canonicalElabTyOpen <- checkedBindingCanonicalTypeOpen context checkedModule binding
   rawBindingTy <- convertElabType canonicalElabTyOpen
-  let bindingTy = canonicalizeBackendType context rawBindingTy
-      (_, valueTy) = splitBackendForalls bindingTy
-      (paramTys, _) = splitBackendArrows valueTy
-      (params, body) = collectLeadingLams (length paramTys) (checkedBindingTerm binding)
-  pure
+  pure (canonicalizeBackendType context rawBindingTy)
+
+bindingClosureValueArguments :: ConvertContext -> ClosureScope -> BackendType -> ElabTerm -> Set.Set Int
+bindingClosureValueArguments context scope bindingTy term =
+  directClosureValueArguments bindingTy term
+    `Set.union` aliasedClosureValueArguments context scope bindingTy term
+
+directClosureValueArguments :: BackendType -> ElabTerm -> Set.Set Int
+directClosureValueArguments bindingTy term =
+  Set.fromList
     [ index0
     | (index0, ((name, _), paramTy)) <- zip [0 :: Int ..] (zip params paramTys),
       not (isEvidenceCaptureName name),
       isClosureConvertibleFunctionType paramTy,
       termUsesFunctionAsValue paramTy name body
     ]
+  where
+    (_, valueTy) = splitBackendForalls bindingTy
+    (paramTys, _) = splitBackendArrows valueTy
+    (params, body) = collectLeadingLams (length paramTys) term
+
+aliasedClosureValueArguments :: ConvertContext -> ClosureScope -> BackendType -> ElabTerm -> Set.Set Int
+aliasedClosureValueArguments context scope bindingTy term =
+  case stripClosureHeadTypeInsts headTerm of
+    EVar name ->
+      Set.fromList
+        [ demandedIndex - suppliedCount
+        | demandedIndex <- Set.toList (lookupClosureValueArgumentDemand context scope name),
+          demandedIndex >= suppliedCount,
+          demandedIndex - suppliedCount < exposedCount
+        ]
+    _ ->
+      Set.empty
+  where
+    (_, valueTy) = splitBackendForalls bindingTy
+    (paramTys, _) = splitBackendArrows valueTy
+    (params, body) = collectLeadingLams (length paramTys) term
+    exposedCount = length paramTys - length params
+    (headTerm, suppliedArgs) = collectApps body
+    suppliedCount = length suppliedArgs
+
+lookupClosureValueArgumentDemand :: ConvertContext -> ClosureScope -> String -> Set.Set Int
+lookupClosureValueArgumentDemand context scope name =
+  Map.findWithDefault Set.empty name (closureScopeClosureValueArguments scope)
+    `Set.union` Map.findWithDefault Set.empty name (ccClosureValueArguments context)
 
 allDataInfos :: CheckedProgram -> [DataInfo]
 allDataInfos checked =
@@ -1881,26 +1938,41 @@ convertPartialApplication ::
   ConvertM (Maybe BackendExpr)
 convertPartialApplication context env scope term resultTy =
   case collectApps term of
-    (headTerm, suppliedArgs)
-      | not (null suppliedArgs),
-        not (isConstructorHeadTerm context headTerm),
-        not (partialApplicationMentionsEvidence term) -> do
-          headTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (inferBackendType env headTerm)
-          let (paramTys, finalTy) = splitBackendArrows headTy
-              suppliedCount = length suppliedArgs
-              suppliedParamTys = take suppliedCount paramTys
-              remainingParamTys = drop suppliedCount paramTys
-              expectedPartialTy = foldr BTArrow finalTy remainingParamTys
-          if suppliedCount < length paramTys
-            && alphaEqBackendType resultTy expectedPartialTy
-            && not (null remainingParamTys)
-            then do
-              suppliedArgExprs <- zipWithM (convertTermExpectedMode DirectLambda context env scope . Just) suppliedParamTys suppliedArgs
-              if partialApplicationCanCaptureSuppliedArgs context scope (zip suppliedParamTys suppliedArgExprs)
-                then Just <$> packagePartialApplication context env scope resultTy headTerm headTy suppliedParamTys suppliedArgExprs remainingParamTys finalTy
+    (rawHeadTerm, rawSuppliedArgs) ->
+      case normalizePartialApplicationSpine rawHeadTerm rawSuppliedArgs of
+        (headTerm, suppliedArgs)
+          | not (null suppliedArgs),
+            not (isConstructorHeadTerm context headTerm),
+            not (partialApplicationMentionsEvidence term) -> do
+              headTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (inferBackendType env headTerm)
+              let (paramTys, finalTy) = splitBackendArrows headTy
+                  suppliedCount = length suppliedArgs
+                  suppliedParamTys = take suppliedCount paramTys
+                  remainingParamTys = drop suppliedCount paramTys
+                  expectedPartialTy = foldr BTArrow finalTy remainingParamTys
+              if suppliedCount < length paramTys
+                && alphaEqBackendType resultTy expectedPartialTy
+                && not (null remainingParamTys)
+                then do
+                  suppliedArgExprs <- zipWithM (convertTermExpectedMode DirectLambda context env scope . Just) suppliedParamTys suppliedArgs
+                  if partialApplicationCanCaptureSuppliedArgs context scope (zip suppliedParamTys suppliedArgExprs)
+                    then Just <$> packagePartialApplication context env scope resultTy headTerm headTy suppliedParamTys suppliedArgExprs remainingParamTys finalTy
+                    else pure Nothing
                 else pure Nothing
-            else pure Nothing
-    _ -> pure Nothing
+        _ -> pure Nothing
+
+normalizePartialApplicationSpine :: ElabTerm -> [ElabTerm] -> (ElabTerm, [ElabTerm])
+normalizePartialApplicationSpine headTerm suppliedArgs =
+  case (headTerm, suppliedArgs) of
+    (ELam name _ body, arg : rest) ->
+      normalizePartialApplicationSpine (replaceFreeTermVariable name arg body) rest
+    _ ->
+      case collectApps headTerm of
+        (nestedHead, nestedArgs)
+          | not (null nestedArgs) ->
+              normalizePartialApplicationSpine nestedHead (nestedArgs ++ suppliedArgs)
+        _ ->
+          (headTerm, suppliedArgs)
 
 convertClosureValueArgument ::
   ConvertContext ->
@@ -1924,18 +1996,18 @@ convertCallArgument ::
   ElabTerm ->
   ConvertM BackendExpr
 convertCallArgument context env scope fun expectedArgTy arg
-  | applicationArgumentNeedsClosureValue context fun =
+  | applicationArgumentNeedsClosureValue context scope fun =
       convertClosureValueArgument context env scope expectedArgTy arg
   | otherwise =
       convertTermExpectedMode DirectLambda context env scope (Just expectedArgTy) arg
 
-applicationArgumentNeedsClosureValue :: ConvertContext -> ElabTerm -> Bool
-applicationArgumentNeedsClosureValue context fun
+applicationArgumentNeedsClosureValue :: ConvertContext -> ClosureScope -> ElabTerm -> Bool
+applicationArgumentNeedsClosureValue context scope fun
   | partialApplicationMentionsEvidence fun = False
   | otherwise =
       case stripClosureHeadTypeInsts headTerm of
         EVar name ->
-          Set.member suppliedCount (Map.findWithDefault Set.empty name (ccClosureValueArguments context))
+          Set.member suppliedCount (lookupClosureValueArgumentDemand context scope name)
         _ ->
           False
   where
@@ -2075,8 +2147,9 @@ packagePartialApplication context env scope resultTy headTerm headTy suppliedPar
                 bodyExpr <- liftEitherConvert (applyPartialDirectArguments funVar headTy allArgs)
                 pure (funCapture : suppliedCaptures, bodyExpr)
               Nothing -> do
+                calleeCaptures <- localClosureCapturesForTerm context scope headTerm
                 bodyExpr <- liftEitherConvert (applyPartialDirectArguments headExpr headTy allArgs)
-                pure (suppliedCaptures, bodyExpr)
+                pure (calleeCaptures ++ suppliedCaptures, bodyExpr)
   pure
     BackendClosure
       { backendExprType = resultTy,
@@ -2109,6 +2182,31 @@ directLocalCalleeCaptureName context scope expr =
         Set.notMember name (ccGlobalTerms context) ->
           Just name
     _ -> Nothing
+
+localClosureCapturesForTerm :: ConvertContext -> ClosureScope -> ElabTerm -> ConvertM [BackendClosureCapture]
+localClosureCapturesForTerm context scope term =
+  forM localNames $ \name ->
+    case Map.lookup name (closureScopeTerms scope) of
+      Just elabTy -> do
+        captureTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType elabTy)
+        pure
+          BackendClosureCapture
+            { backendClosureCaptureName = name,
+              backendClosureCaptureType = captureTy,
+              backendClosureCaptureExpr = BackendVar captureTy name
+            }
+      Nothing ->
+        liftEitherConvert
+          ( Left
+              ( BackendUnsupportedCaseShape
+                  ("partial application callee references out-of-scope local `" ++ name ++ "`")
+              )
+          )
+  where
+    localNames =
+      Set.toAscList $
+        (freeTermVariables term `Set.intersection` closureScopeBoundTerms scope)
+          `Set.difference` ccGlobalTerms context
 
 stripBackendHeadTypeApps :: BackendExpr -> BackendExpr
 stripBackendHeadTypeApps =
@@ -2227,12 +2325,15 @@ convertOrdinaryTerm mode context env scope term resultTy0 =
             case backendTypeToElabType bindingTy of
               Just canonicalTy -> canonicalTy
               Nothing -> schemeTy
+          demandedClosureValueArguments =
+            bindingClosureValueArguments context scope bindingTy rhs
           bodyScope =
-            extendClosureScopeTerm
-              name
-              bindingEnvTy
-              (bindingClosure || backendExprIsClosureValue context scope rhsExpr)
-              scope
+            extendClosureScopeValueArguments name demandedClosureValueArguments $
+              extendClosureScopeTerm
+                name
+                bindingEnvTy
+                (bindingClosure || backendExprIsClosureValue context scope rhsExpr)
+                scope
           bodyMode =
             if isClosureConvertibleFunctionType resultTy
               then ClosureLambda Nothing

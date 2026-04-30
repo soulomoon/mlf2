@@ -664,6 +664,42 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
     assertNativeProgram sourcePartialApplicationClosureParameterProgram "1"
 
+  it "tracks partial closure-valued argument demand through top-level aliases" $ do
+    output <-
+      withTempProgram sourcePartialApplicationClosureDemandAliasProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationClosureDemandAliasProgram "1"
+
+  it "tracks partial closure-valued argument demand for local helpers" $ do
+    output <-
+      withTempProgram sourcePartialApplicationLocalClosureDemandProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationLocalClosureDemandProgram "1"
+
+  it "captures locals for non-variable partial callees" $ do
+    output <-
+      withTempProgram sourcePartialApplicationNonVariableCalleeProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "Backend LLVM arity mismatch"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationNonVariableCalleeProgram "1"
+
   it "lowers source-level captured closure calls through the explicit closure ABI" $ do
     output <-
       withTempProgram sourceCapturedClosureCallProgram $ \path ->
@@ -3192,6 +3228,42 @@ sourcePartialApplicationClosureParameterProgram =
       "  def apply : (Int -> Int) -> Int = \\f f 2;",
       "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
       "  def main : Int = use keepLeft;",
+      "}"
+    ]
+
+sourcePartialApplicationClosureDemandAliasProgram :: String
+sourcePartialApplicationClosureDemandAliasProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def useAlias : (Int -> Int -> Int) -> Int = use;",
+      "  def main : Int = useAlias keepLeft;",
+      "}"
+    ]
+
+sourcePartialApplicationLocalClosureDemandProgram :: String
+sourcePartialApplicationLocalClosureDemandProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def main : Int =",
+      "    let use : (Int -> Int -> Int) -> Int = \\f apply (f 1)",
+      "    in use keepLeft;",
+      "}"
+    ]
+
+sourcePartialApplicationNonVariableCalleeProgram :: String
+sourcePartialApplicationNonVariableCalleeProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def make : Int -> Int -> Int -> Int = \\base \\ignored \\x base;",
+      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def main : Int =",
+      "    let base : Int = 1 in",
+      "    apply (((\\z make z) base) 2);",
       "}"
     ]
 

@@ -8,6 +8,10 @@
   closure. When a callee parameter is later underapplied, direct function
   arguments are first wrapped as closure values so the generated partial
   closure does not mix raw function pointers with closure-record calls.
+- Closure-value argument demand is propagated through top-level aliases and
+  local let-bound helpers. Non-variable partial callees beta-normalize immediate
+  lambda heads and capture local free variables before their closure entry is
+  emitted, so generated entries do not reference out-of-scope locals.
 - Local function bindings used through underapplication are closure-converted
   so the packaged partial captures a closure pointer instead of referencing a
   local helper from a separate closure entry. Existing typeclass/evidence

@@ -27,8 +27,9 @@
 
 ### Changed
 - Fixed higher-order checked-source partial applications so supplied
-  closure-valued arguments and closure-demanded partial callees stay on the
-  explicit closure ABI instead of falling back to static function lowering.
+  closure-valued arguments, alias-propagated closure-demanded parameters, local
+  helper demands, and non-variable partial callees stay on the explicit closure
+  ABI instead of falling back to static function lowering.
 - LLVM case lowering now treats closure-valued case results as closure
   pointers, so `BackendClosureCall` can use a case-selected closure callee
   without rejecting the callee's arrow result type. Closure-valued let aliases
