@@ -9,6 +9,9 @@
   status while skipping explicitly when tools are unavailable.
 
 ### Changed
+- LLVM case lowering now treats closure-valued case results as closure
+  pointers, so `BackendClosureCall` can use a case-selected closure callee
+  without rejecting the callee's arrow result type.
 - Supported expected-type resolution for nullary overloaded `.mlfp` methods.
   Associated values such as `mempty : a` now resolve from an explicit or
   propagated expected source type while bare uses without such evidence still

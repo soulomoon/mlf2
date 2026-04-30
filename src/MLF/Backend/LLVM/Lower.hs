@@ -3836,7 +3836,7 @@ lowerCase env exprEnv context resultTy scrutinee alternatives =
 lowerHeapCase :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> NonEmpty BackendAlternative -> LowerM LowerValue
 lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
   rejectNonTailDefaultAlternative
-  resultLLVMType <- lowerBackendTypeM env context resultTy
+  resultLLVMType <- lowerCaseResultTypeM env context resultTy
   scrutineeValue <- lowerExpr env exprEnv context scrutinee
   unless (lvLLVMType scrutineeValue == LLVMPtr) $
     liftEither (BackendLLVMUnsupportedType (context ++ " case scrutinee") (lvBackendType scrutineeValue))
@@ -3951,6 +3951,17 @@ lowerClosureStoredTypeM env context fieldTy
   | isFirstOrderFunctionPointerType fieldTy = pure LLVMPtr
   | otherwise = lowerBackendTypeM env context fieldTy
 
+lowerCaseResultTypeM :: ProgramEnv -> String -> BackendType -> LowerM LLVMType
+lowerCaseResultTypeM env context resultTy
+  | isCaseClosureResultType resultTy = pure LLVMPtr
+  | otherwise = lowerBackendTypeM env context resultTy
+
+isCaseClosureResultType :: BackendType -> Bool
+isCaseClosureResultType =
+  \case
+    BTArrow {} -> True
+    _ -> False
+
 lowerImmediateConstructCase ::
   ProgramEnv ->
   ExprEnv ->
@@ -3970,7 +3981,7 @@ lowerImmediateConstructCase env exprEnv context resultTy constructorName args fi
     Just alternative -> do
       exprEnv' <- bindImmediateAlternativePattern alternative
       bodyValue <- lowerExpr env exprEnv' context (backendAltBody alternative)
-      expectedTy <- lowerBackendTypeM env context resultTy
+      expectedTy <- lowerCaseResultTypeM env context resultTy
       unless (lvLLVMType bodyValue == expectedTy) $
         liftEither (BackendLLVMInternalError ("immediate case alternative type mismatch at " ++ context))
       pure bodyValue
@@ -4008,7 +4019,7 @@ lowerImmediateConstructCase env exprEnv context resultTy constructorName args fi
 
     lowerUnmatchedImmediateCase = do
       zipWithM_ evaluateUnusedField fieldTys args
-      expectedTy <- lowerBackendTypeM env context resultTy
+      expectedTy <- lowerCaseResultTypeM env context resultTy
       finishCurrentBlock LLVMUnreachable
       continuationLabel <- freshBlock "case.unreachable.cont"
       startBlock continuationLabel
