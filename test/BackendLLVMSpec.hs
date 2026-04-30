@@ -66,6 +66,9 @@ spec = describe "MLF.Backend.LLVM" $ do
     it "prints nested first-order ADT values with ProgramSpec rendering" $
       assertNativeProgram nativeNestedAdtProgram "Some (Succ Zero)"
 
+    it "preserves user-authored double underscores in constructor names" $
+      assertNativeProgram nativeDoubleUnderscoreConstructorProgram "A__B"
+
     it "links the backend-owned __mlfp_and runtime primitive in native mode" $
       assertNativeProgram preludeAndProgram "false"
 
@@ -712,6 +715,17 @@ nativeNestedAdtProgram =
       "    | Some : a -> Option a;",
       "",
       "  def main : Option Nat = Some (Succ Zero);",
+      "}"
+    ]
+
+nativeDoubleUnderscoreConstructorProgram :: String
+nativeDoubleUnderscoreConstructorProgram =
+  unlines
+    [ "module Main export (Weird(..), main) {",
+      "  data Weird =",
+      "      A__B : Weird;",
+      "",
+      "  def main : Weird = A__B;",
       "}"
     ]
 

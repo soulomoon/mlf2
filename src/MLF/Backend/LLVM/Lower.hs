@@ -18,7 +18,7 @@ import Control.Monad (foldM, unless, when, zipWithM, zipWithM_)
 import Control.Monad.State.Strict (StateT (StateT), evalStateT, get, gets, modify)
 import Data.Bifunctor (first)
 import Data.Char (isAlphaNum, ord)
-import Data.List (intercalate, isPrefixOf, nub, sort, sortOn)
+import Data.List (intercalate, isPrefixOf, nub, sort, sortOn, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -317,9 +317,12 @@ constructorNameGlobals base spec =
   case nativeDataRuntimeForTypeName (nrsType spec) of
     Nothing -> []
     Just dataName ->
-      [ LLVMStringGlobal (nativeConstructorGlobalName spec constructorRuntime) (displayConstructorName (backendConstructorName (crConstructor constructorRuntime)))
-      | constructorRuntime <- maybe [] drConstructors (Map.lookup dataName (pbData base))
-      ]
+      case Map.lookup dataName (pbData base) of
+        Nothing -> []
+        Just dataRuntime0 ->
+          [ LLVMStringGlobal (nativeConstructorGlobalName spec constructorRuntime) (displayConstructorName dataRuntime0 constructorRuntime)
+          | constructorRuntime <- drConstructors dataRuntime0
+          ]
 
 nativeDataRuntimeForTypeName :: BackendType -> Maybe String
 nativeDataRuntimeForTypeName =
@@ -621,28 +624,20 @@ callNativeRenderer renderMap ty llvmTy value parenthesize =
     Nothing ->
       liftEither (BackendLLVMUnsupportedExpression "native result rendering" ("missing renderer for " ++ show ty))
 
-displayConstructorName :: String -> String
-displayConstructorName runtimeName =
-  case stripModulePrefix runtimeName of
-    "" -> runtimeName
-    name -> name
-
-stripModulePrefix :: String -> String
-stripModulePrefix name =
-  go name
+displayConstructorName :: DataRuntime -> ConstructorRuntime -> String
+displayConstructorName dataRuntime0 constructorRuntime =
+  case runtimeModulePrefix (backendDataName (drData dataRuntime0)) >>= (`stripPrefix` runtimeName) of
+    Just displayName
+      | not (null displayName) -> displayName
+    _ -> runtimeName
   where
-    go remaining =
-      case breakDoubleUnderscore remaining of
-        Just rest -> go rest
-        Nothing -> remaining
+    runtimeName = backendConstructorName (crConstructor constructorRuntime)
 
-breakDoubleUnderscore :: String -> Maybe String
-breakDoubleUnderscore =
-  \case
-    [] -> Nothing
-    [_] -> Nothing
-    '_' : '_' : rest -> Just rest
-    _ : rest -> breakDoubleUnderscore rest
+runtimeModulePrefix :: String -> Maybe String
+runtimeModulePrefix qualifiedDataName0 =
+  case break (== '.') (reverse qualifiedDataName0) of
+    (_, []) -> Nothing
+    (_, _ : reversedModuleName) -> Just (reverse reversedModuleName ++ "__")
 
 shouldLowerReachableBinding :: Set String -> BindingInfo -> Bool
 shouldLowerReachableBinding referencedFunctionNames binding =
