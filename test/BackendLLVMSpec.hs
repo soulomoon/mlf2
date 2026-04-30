@@ -612,6 +612,15 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
     validateLLVMAssembly output
 
+  it "lowers case-selected closure callees through the explicit closure ABI" $ do
+    output <- requireRight (renderBackendProgramLLVM caseSelectedClosureCalleeProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$case_some\"(ptr %\"__mlfp_env\", i64 %\"x\")"
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$case_none\"(ptr %\"__mlfp_env\", i64 %\"x\")"
+    output `shouldSatisfy` isInfixOf "phi ptr"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+
   it "qualifies closure entry names emitted from type specializations" $ do
     output <- requireRight (renderBackendProgramLLVM polymorphicClosureSpecializationProgram)
 
@@ -2895,6 +2904,50 @@ capturedClosureProgram =
               backendLetBody = BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 0]
             }
       }
+
+caseSelectedClosureCalleeProgram :: BackendProgram
+caseSelectedClosureCalleeProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendClosureCall
+                          intTy
+                          ( BackendCase
+                              unaryIntTy
+                              (BackendConstruct (optionTy intTy) "Some" [intLit 0])
+                              ( BackendAlternative
+                                  (BackendConstructorPattern "Some" ["n"])
+                                  (caseClosure "__mlfp_closure$case_some" (BackendVar intTy "x"))
+                                  :| [ BackendAlternative
+                                         (BackendConstructorPattern "None" [])
+                                         (caseClosure "__mlfp_closure$case_none" (intLit 0))
+                                     ]
+                              )
+                          )
+                          [intLit 7],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+  where
+    caseClosure entryName body =
+      BackendClosure
+        { backendExprType = unaryIntTy,
+          backendClosureEntryName = entryName,
+          backendClosureCaptures = [],
+          backendClosureParams = [("x", intTy)],
+          backendClosureBody = body
+        }
 
 polymorphicClosureSpecializationProgram :: BackendProgram
 polymorphicClosureSpecializationProgram =
