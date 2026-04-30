@@ -59,6 +59,7 @@ import MLF.Frontend.Program.Types
     applyConstraintInfoSubst,
     diagnosticForProgramError,
     freeTypeVarsTypeView,
+    methodInfoOwnerClassSymbolIdentity,
     specializeMethodType,
     splitArrows,
     splitForalls,
@@ -566,11 +567,9 @@ resolveRuntimeMethodReady ::
   [RuntimeValue] ->
   Either ProgramError RuntimeValue
 resolveRuntimeMethodReady context stack deferredValues env deferred args =
-  case deferredMethodEvidence deferred of
-    Just evidence
-      | null args ->
-          lookupRuntimeValue context stack deferredValues env (deferredMethodEvidenceRuntimeName evidence)
-    _ -> do
+  if null args && deferredMethodArgCount deferred == 0
+    then resolveRuntimeNullaryMethod context stack deferredValues env deferred
+    else do
       argViews <- mapM (runtimeValueTypeView context) args
       classArgView <-
         case inferRuntimeMethodClassArgument context (deferredMethodInfo deferred) argViews (deferredMethodExpectedResult deferred) of
@@ -601,6 +600,149 @@ resolveRuntimeMethodReady context stack deferredValues env deferred args =
       runtimeName <- runtimeMethodValueName (deferredMethodName deferred) methodValueInfo
       methodHead <- lookupRuntimeValue context stack deferredValues env runtimeName
       foldM (applyRuntimeValue context) methodHead (evidenceArgs ++ args)
+
+resolveRuntimeNullaryMethod ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  DeferredMethodCall ->
+  Either ProgramError RuntimeValue
+resolveRuntimeNullaryMethod context stack deferredValues env deferred = do
+  expectedView <-
+    case deferredMethodExpectedResult deferred of
+      Just view -> Right view
+      Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+  classArgView <-
+    case inferRuntimeNullaryMethodClassArgument context (deferredMethodInfo deferred) expectedView of
+      Just view -> Right view
+      Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+  case lookupRuntimeNullaryEvidence context deferred classArgView of
+    Just evidence ->
+      resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence
+    Nothing ->
+      resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred classArgView expectedView
+
+resolveRuntimeNullaryEvidenceMethod ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  DeferredMethodCall ->
+  TypeView ->
+  TypeView ->
+  DeferredMethodEvidence ->
+  Either ProgramError RuntimeValue
+resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence = do
+  methodSubst <-
+    case inferRuntimeNullaryMethodSubst context (deferredMethodInfo deferred) classArgView Map.empty expectedView of
+      Just subst -> Right subst
+      Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+  evidenceArgs <-
+    resolveRuntimeConstraintEvidenceValues
+      context
+      stack
+      deferredValues
+      env
+      (deferredMethodLocalEvidence deferred)
+      Set.empty
+      (runtimeNullaryMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst)
+  methodHead <- lookupRuntimeValue context stack deferredValues env (deferredMethodEvidenceRuntimeName evidence)
+  foldM (applyRuntimeValue context) methodHead evidenceArgs
+
+resolveRuntimeNullaryInstanceMethod ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  DeferredMethodCall ->
+  TypeView ->
+  TypeView ->
+  Either ProgramError RuntimeValue
+resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred classArgView expectedView = do
+  (instanceInfo, instanceSubst) <- resolveMethodInstanceInfoByTypeView (runtimeElaborateScope context) (deferredMethodInfo deferred) classArgView
+  methodValueInfo <-
+    case Map.lookup (deferredMethodName deferred) (instanceMethods instanceInfo) of
+      Just valueInfo@OrdinaryValue {} -> Right valueInfo
+      _ -> Left (ProgramUnknownMethod (deferredMethodName deferred))
+  methodSubst <-
+    case inferRuntimeNullaryMethodSubst context (deferredMethodInfo deferred) classArgView instanceSubst expectedView of
+      Just subst -> Right subst
+      Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+  let eagerConstraints =
+        filter
+          constraintGround
+          (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
+  evidenceArgs <-
+    resolveRuntimeConstraintEvidenceValues
+      context
+      stack
+      deferredValues
+      env
+      (deferredMethodLocalEvidence deferred)
+      Set.empty
+      eagerConstraints
+  runtimeName <- runtimeMethodValueName (deferredMethodName deferred) methodValueInfo
+  methodHead <- lookupRuntimeValue context stack deferredValues env runtimeName
+  foldM (applyRuntimeValue context) methodHead evidenceArgs
+
+lookupRuntimeNullaryEvidence :: RuntimeContext -> DeferredMethodCall -> TypeView -> Maybe DeferredMethodEvidence
+lookupRuntimeNullaryEvidence context deferred classArgView =
+  case
+    lookupEvidenceMethodByClass
+      (runtimeElaborateScope context)
+      (methodInfoOwnerClassSymbolIdentity methodInfo)
+      (typeViewIdentity classArgView)
+      (methodName methodInfo)
+      `orElseRuntimeEvidenceMethod`
+      lookupRuntimeEvidenceMethod
+        (runtimeElaborateScope context)
+        (deferredMethodLocalEvidence deferred)
+        (methodInfoOwnerClassSymbolIdentity methodInfo)
+        (typeViewIdentity classArgView)
+        (methodName methodInfo)
+  of
+    Just (runtimeName, evidenceTy) ->
+      Just
+        DeferredMethodEvidence
+          { deferredMethodEvidenceClassArg = classArgView,
+            deferredMethodEvidenceRuntimeName = runtimeName,
+            deferredMethodEvidenceType = evidenceTy
+          }
+    Nothing -> deferredMethodEvidence deferred
+  where
+    methodInfo = deferredMethodInfo deferred
+
+runtimeNullaryMethodLocalConstraints :: MethodInfo -> TypeView -> Map.Map String TypeView -> [ConstraintInfo]
+runtimeNullaryMethodLocalConstraints methodInfo classArgView methodSubst =
+  let headVars = freeTypeVarsTypeView classArgView
+      specializedForClass =
+        map
+          (specializeRuntimeConstraintInfoType (methodParamName methodInfo) classArgView)
+          (methodConstraintInfos methodInfo)
+      methodLocal =
+        filter
+          (not . constraintDeterminedByTypeVars headVars)
+          specializedForClass
+   in map (applyConstraintInfoSubst methodSubst) methodLocal
+
+specializeRuntimeConstraintInfoType :: String -> TypeView -> ConstraintInfo -> ConstraintInfo
+specializeRuntimeConstraintInfoType paramName headView constraint =
+  constraint
+    { constraintTypeView =
+        TypeView
+          { typeViewDisplay =
+              substituteTypeVar
+                paramName
+                (typeViewDisplay headView)
+                (typeViewDisplay (constraintTypeView constraint)),
+            typeViewIdentity =
+              substituteTypeVar
+                paramName
+                (typeViewIdentity headView)
+                (typeViewIdentity (constraintTypeView constraint))
+          }
+    }
 
 runtimeMethodValueName :: String -> ValueInfo -> Either ProgramError String
 runtimeMethodValueName _ OrdinaryValue {valueRuntimeName = name} = Right name
@@ -706,7 +848,7 @@ resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env loc
       | Map.null (classMethods classInfo) ->
           Right $
             if zeroMethodConstraintCoveredByEvidenceInfo (runtimeElaborateScope context) constraint
-              || zeroMethodConstraintCoveredByRuntimeEvidence localEvidence constraint
+              || zeroMethodConstraintCoveredByRuntimeEvidence (runtimeElaborateScope context) localEvidence constraint
               then Just []
               else Nothing
       | otherwise -> do
@@ -721,6 +863,7 @@ resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env loc
                           (methodName methodInfo)
                           `orElseRuntimeEvidenceMethod`
                           lookupRuntimeEvidenceMethod
+                            (runtimeElaborateScope context)
                             localEvidence
                             (constraintClassSymbol constraint)
                             (typeViewIdentity (constraintTypeView constraint))
@@ -733,29 +876,34 @@ resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env loc
             Just runtimeNames ->
               Just <$> mapM (lookupRuntimeValue context stack deferredValues env) runtimeNames
 
-lookupRuntimeEvidenceMethod :: [EvidenceInfo] -> SymbolIdentity -> SrcType -> String -> Maybe (String, SrcType)
-lookupRuntimeEvidenceMethod evidenceInfos classIdentity headIdentityTy methodName0 =
+lookupRuntimeEvidenceMethod :: ElaborateScope -> [EvidenceInfo] -> SymbolIdentity -> SrcType -> String -> Maybe (String, SrcType)
+lookupRuntimeEvidenceMethod scope evidenceInfos classIdentity headIdentityTy methodName0 =
   case
     [ methodEvidence
       | evidence <- evidenceInfos,
         evidenceClassSymbol evidence == classIdentity,
-        evidenceTypeIdentity evidence == headIdentityTy,
+        runtimeEvidenceTypeMatches scope (evidenceTypeIdentity evidence) headIdentityTy,
         Just methodEvidence <- [Map.lookup methodName0 (evidenceMethods evidence)]
     ]
   of
     methodEvidence : _ -> Just methodEvidence
     [] -> Nothing
 
+runtimeEvidenceTypeMatches :: ElaborateScope -> SrcType -> SrcType -> Bool
+runtimeEvidenceTypeMatches scope left right =
+  matchTypesInScope scope Map.empty left right /= Nothing
+    || matchTypesInScope scope Map.empty right left /= Nothing
+
 orElseRuntimeEvidenceMethod :: Maybe (String, SrcType) -> Maybe (String, SrcType) -> Maybe (String, SrcType)
 orElseRuntimeEvidenceMethod (Just evidence) _ = Just evidence
 orElseRuntimeEvidenceMethod Nothing fallback = fallback
 
-zeroMethodConstraintCoveredByRuntimeEvidence :: [EvidenceInfo] -> ConstraintInfo -> Bool
-zeroMethodConstraintCoveredByRuntimeEvidence evidenceInfos constraint =
+zeroMethodConstraintCoveredByRuntimeEvidence :: ElaborateScope -> [EvidenceInfo] -> ConstraintInfo -> Bool
+zeroMethodConstraintCoveredByRuntimeEvidence scope evidenceInfos constraint =
   any
     ( \evidence ->
         evidenceClassSymbol evidence == constraintClassSymbol constraint
-          && evidenceTypeIdentity evidence == typeViewIdentity (constraintTypeView constraint)
+          && runtimeEvidenceTypeMatches scope (evidenceTypeIdentity evidence) (typeViewIdentity (constraintTypeView constraint))
     )
     evidenceInfos
 
@@ -801,6 +949,31 @@ inferRuntimeMethodClassArgumentFromExpected context methodInfo methodTy argDispl
   displayTy <- Map.lookup (methodParamName methodInfo) subst
   pure (sourceTypeViewInScope scope displayTy)
 
+inferRuntimeNullaryMethodClassArgument :: RuntimeContext -> MethodInfo -> TypeView -> Maybe TypeView
+inferRuntimeNullaryMethodClassArgument context methodInfo expectedView
+  | methodFullArityFromInfo methodInfo /= 0 = Nothing
+  | otherwise = do
+      let scope = runtimeElaborateScope context
+          (_, bodyTy) = splitForalls (methodType methodInfo)
+          (_, resultTy) = splitArrows bodyTy
+      subst <- matchTypesInScope scope Map.empty resultTy (typeViewDisplay expectedView)
+      classArgTy <- Map.lookup (methodParamName methodInfo) subst
+      pure (sourceTypeViewInScope scope classArgTy)
+
+inferRuntimeNullaryMethodSubst :: RuntimeContext -> MethodInfo -> TypeView -> Map.Map String TypeView -> TypeView -> Maybe (Map.Map String TypeView)
+inferRuntimeNullaryMethodSubst context methodInfo classArgView subst expectedView =
+  fmap (Map.map (sourceTypeViewInScope scope)) $
+    matchTypesInScope
+      scope
+      (fmap typeViewDisplay subst)
+      resultTy
+      (typeViewDisplay expectedView)
+  where
+    scope = runtimeElaborateScope context
+    specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) (typeViewDisplay classArgView)
+    (_, bodyTy) = splitForalls specializedMethodTy
+    (_, resultTy) = splitArrows bodyTy
+
 inferRuntimeMethodArgumentSubst :: RuntimeContext -> MethodInfo -> TypeView -> Map.Map String TypeView -> [TypeView] -> Maybe (Map.Map String TypeView)
 inferRuntimeMethodArgumentSubst context methodInfo classArgView subst argViews =
   fmap (Map.map (sourceTypeViewInScope scope)) $
@@ -813,6 +986,10 @@ inferRuntimeMethodArgumentSubst context methodInfo classArgView subst argViews =
     specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) (typeViewDisplay classArgView)
     (_, bodyTy) = splitForalls specializedMethodTy
     (paramTys, _) = splitArrows bodyTy
+
+methodFullArityFromInfo :: MethodInfo -> Int
+methodFullArityFromInfo methodInfo =
+  length (fst (splitArrows (snd (splitForalls (methodType methodInfo)))))
 
 applyRuntimePrimitive :: RuntimePrimitive -> [RuntimeValue] -> Either ProgramError RuntimeValue
 applyRuntimePrimitive prim args

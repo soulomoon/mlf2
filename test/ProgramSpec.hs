@@ -695,6 +695,38 @@ spec = do
                         ]
             (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "eq\n"
 
+        it "applies local evidence arguments for constrained nullary IO methods" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (Eq, Token(..), Pair(..), Pick, eq, pick, selected, main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, pure, putStrLn);"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  instance Eq Bool {"
+                        , "    eq = \\left \\right true;"
+                        , "  }"
+                        , "  data Token a ="
+                        , "      Token : Token a;"
+                        , "  data Pair a b ="
+                        , "      Pair : Token b -> Pair a b;"
+                        , "  class Pick a {"
+                        , "    pick : Eq b => Pair a b;"
+                        , "  }"
+                        , "  instance Pick Bool {"
+                        , "    pick = Pair Token;"
+                        , "  }"
+                        , "  def selected : (Pick Bool, Eq Bool) => Pair Bool Bool = pick;"
+                        , "  def after : Pair Bool Bool -> IO Unit = \\pair case pair of {"
+                        , "    Pair _ -> putStrLn \"picked\""
+                        , "  };"
+                        , "  def action : IO (Pair Bool Bool) = pure selected;"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "picked\n"
+
         it "constructs IO ADT payloads with function fields without runtime type inference" $ do
             located <-
                 requireLocated $
