@@ -688,6 +688,31 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
     assertNativeProgram sourcePartialApplicationLocalClosureDemandProgram "1"
 
+  it "wraps direct function arguments before packaging partial applications" $ do
+    output <-
+      withTempProgram sourcePartialApplicationDirectFunctionArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "unsupported static function argument"
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationDirectFunctionArgumentProgram "4"
+
+  it "captures locals when wrapping demanded inline function arguments" $ do
+    output <-
+      withTempProgram sourceClosureDemandedInlineFunctionArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "unsupported static function argument"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceClosureDemandedInlineFunctionArgumentProgram "41"
+
   it "captures locals for non-variable partial callees" $ do
     output <-
       withTempProgram sourcePartialApplicationNonVariableCalleeProgram $ \path ->
@@ -3252,6 +3277,30 @@ sourcePartialApplicationLocalClosureDemandProgram =
       "  def main : Int =",
       "    let use : (Int -> Int -> Int) -> Int = \\f apply (f 1)",
       "    in use keepLeft;",
+      "}"
+    ]
+
+sourcePartialApplicationDirectFunctionArgumentProgram :: String
+sourcePartialApplicationDirectFunctionArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def choose : (Int -> Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x ignored;",
+      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def main : Int = apply (choose keepLeft 0);",
+      "}"
+    ]
+
+sourceClosureDemandedInlineFunctionArgumentProgram :: String
+sourceClosureDemandedInlineFunctionArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def choose : (Int -> Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x ignored;",
+      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let use : (Int -> Int -> Int) -> Int = \\fn apply (choose fn 0) in",
+      "    use (\\x \\y captured);",
       "}"
     ]
 

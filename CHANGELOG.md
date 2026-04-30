@@ -30,6 +30,9 @@
   closure-valued arguments, alias-propagated closure-demanded parameters, local
   helper demands, and non-variable partial callees stay on the explicit closure
   ABI instead of falling back to static function lowering.
+- Fixed packaged partial-application argument conversion so direct supplied
+  functions are wrapped as closure values before capture, and direct-function
+  closure wrappers capture free locals from inline function expressions.
 - LLVM case lowering now treats closure-valued case results as closure
   pointers, so `BackendClosureCall` can use a case-selected closure callee
   without rejecting the callee's arrow result type. Closure-valued let aliases

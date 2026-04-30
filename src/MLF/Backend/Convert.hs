@@ -80,6 +80,7 @@ data ConvertContext = ConvertContext
     ccGlobalTerms :: Set.Set String,
     ccClosureGlobals :: Set.Set String,
     ccClosureValueArguments :: Map String (Set.Set Int),
+    ccEvidenceValueArguments :: Map String (Set.Set Int),
     ccCurrentModuleName :: Maybe String,
     ccCurrentBindingName :: String
   }
@@ -129,7 +130,8 @@ data ClosureScope = ClosureScope
   { closureScopeTerms :: Map String ElabType,
     closureScopeBoundTerms :: Set.Set String,
     closureScopeLocals :: Set.Set String,
-    closureScopeClosureValueArguments :: Map String (Set.Set Int)
+    closureScopeClosureValueArguments :: Map String (Set.Set Int),
+    closureScopeEvidenceValueArguments :: Map String (Set.Set Int)
   }
 
 data LambdaMode
@@ -146,7 +148,8 @@ emptyClosureScope =
     { closureScopeTerms = Map.empty,
       closureScopeBoundTerms = Set.empty,
       closureScopeLocals = Set.empty,
-      closureScopeClosureValueArguments = Map.empty
+      closureScopeClosureValueArguments = Map.empty,
+      closureScopeEvidenceValueArguments = Map.empty
     }
 
 extendClosureScopeTerm :: String -> ElabType -> Bool -> ClosureScope -> ClosureScope
@@ -159,7 +162,9 @@ extendClosureScopeTerm name ty isClosure scope =
           then Set.insert name (closureScopeLocals scope)
           else Set.delete name (closureScopeLocals scope),
       closureScopeClosureValueArguments =
-        Map.delete name (closureScopeClosureValueArguments scope)
+        Map.delete name (closureScopeClosureValueArguments scope),
+      closureScopeEvidenceValueArguments =
+        Map.delete name (closureScopeEvidenceValueArguments scope)
     }
 
 extendClosureScopeValueArguments :: String -> Set.Set Int -> ClosureScope -> ClosureScope
@@ -169,6 +174,15 @@ extendClosureScopeValueArguments name demanded scope =
         if Set.null demanded
           then Map.delete name (closureScopeClosureValueArguments scope)
           else Map.insert name demanded (closureScopeClosureValueArguments scope)
+    }
+
+extendClosureScopeEvidenceArguments :: String -> Set.Set Int -> ClosureScope -> ClosureScope
+extendClosureScopeEvidenceArguments name evidence scope =
+  scope
+    { closureScopeEvidenceValueArguments =
+        if Set.null evidence
+          then Map.delete name (closureScopeEvidenceValueArguments scope)
+          else Map.insert name evidence (closureScopeEvidenceValueArguments scope)
     }
 
 extendClosureScopePatternFields :: [((String, ElabType), BackendType)] -> ClosureScope -> ClosureScope
@@ -1297,11 +1311,36 @@ buildConvertContext checked = do
             ccGlobalTerms = checkedProgramGlobalTerms checked,
             ccClosureGlobals = Set.empty,
             ccClosureValueArguments = Map.empty,
+            ccEvidenceValueArguments = Map.empty,
             ccCurrentModuleName = Nothing,
             ccCurrentBindingName = ""
           }
+  evidenceValueArguments <- checkedProgramEvidenceValueArguments context0 checked
   closureValueArguments <- checkedProgramClosureValueArguments context0 checked
-  Right context0 {ccClosureValueArguments = closureValueArguments}
+  Right
+    context0
+      { ccClosureValueArguments = closureValueArguments,
+        ccEvidenceValueArguments = evidenceValueArguments
+      }
+
+checkedProgramEvidenceValueArguments :: ConvertContext -> CheckedProgram -> Either BackendConversionError (Map String (Set.Set Int))
+checkedProgramEvidenceValueArguments context checked = do
+  sources <-
+    forM
+      [ (checkedModule, binding)
+      | checkedModule <- checkedProgramModules checked,
+        binding <- checkedModuleBindings checkedModule
+      ]
+      ( \(checkedModule, binding) -> do
+          bindingTy <- checkedBindingBackendValueType context checkedModule binding
+          pure (checkedBindingName binding, bindingTy, checkedBindingTerm binding)
+      )
+  pure $
+    Map.filter (not . Set.null) $
+      Map.fromList
+        [ (name, bindingEvidenceValueArguments bindingTy term)
+        | (name, bindingTy, term) <- sources
+        ]
 
 checkedProgramClosureValueArguments :: ConvertContext -> CheckedProgram -> Either BackendConversionError (Map String (Set.Set Int))
 checkedProgramClosureValueArguments context checked = do
@@ -1339,6 +1378,18 @@ bindingClosureValueArguments :: ConvertContext -> ClosureScope -> BackendType ->
 bindingClosureValueArguments context scope bindingTy term =
   directClosureValueArguments bindingTy term
     `Set.union` aliasedClosureValueArguments context scope bindingTy term
+
+bindingEvidenceValueArguments :: BackendType -> ElabTerm -> Set.Set Int
+bindingEvidenceValueArguments bindingTy term =
+  Set.fromList
+    [ index0
+    | (index0, (name, _)) <- zip [0 :: Int ..] params,
+      isEvidenceCaptureName name
+    ]
+  where
+    (_, valueTy) = splitBackendForalls bindingTy
+    (paramTys, _) = splitBackendArrows valueTy
+    (params, _) = collectLeadingLams (length paramTys) term
 
 directClosureValueArguments :: BackendType -> ElabTerm -> Set.Set Int
 directClosureValueArguments bindingTy term =
@@ -1378,6 +1429,11 @@ lookupClosureValueArgumentDemand :: ConvertContext -> ClosureScope -> String -> 
 lookupClosureValueArgumentDemand context scope name =
   Map.findWithDefault Set.empty name (closureScopeClosureValueArguments scope)
     `Set.union` Map.findWithDefault Set.empty name (ccClosureValueArguments context)
+
+lookupEvidenceValueArguments :: ConvertContext -> ClosureScope -> String -> Set.Set Int
+lookupEvidenceValueArguments context scope name =
+  Map.findWithDefault Set.empty name (closureScopeEvidenceValueArguments scope)
+    `Set.union` Map.findWithDefault Set.empty name (ccEvidenceValueArguments context)
 
 allDataInfos :: CheckedProgram -> [DataInfo]
 allDataInfos checked =
@@ -1587,6 +1643,7 @@ buildDataMeta scope info = do
             ccGlobalTerms = Set.empty,
             ccClosureGlobals = Set.empty,
             ccClosureValueArguments = Map.empty,
+            ccEvidenceValueArguments = Map.empty,
             ccCurrentModuleName = Just (dataModule info),
             ccCurrentBindingName = ""
           }
@@ -1954,7 +2011,13 @@ convertPartialApplication context env scope term resultTy =
                 && alphaEqBackendType resultTy expectedPartialTy
                 && not (null remainingParamTys)
                 then do
-                  suppliedArgExprs <- zipWithM (convertTermExpectedMode DirectLambda context env scope . Just) suppliedParamTys suppliedArgs
+                  suppliedArgExprs <-
+                    zipWithM
+                      ( \index0 (paramTy, arg) ->
+                          convertPartialApplicationArgument context env scope headTerm index0 paramTy arg
+                      )
+                      [0 :: Int ..]
+                      (zip suppliedParamTys suppliedArgs)
                   if partialApplicationCanCaptureSuppliedArgs context scope (zip suppliedParamTys suppliedArgExprs)
                     then Just <$> packagePartialApplication context env scope resultTy headTerm headTy suppliedParamTys suppliedArgExprs remainingParamTys finalTy
                     else pure Nothing
@@ -1973,6 +2036,46 @@ normalizePartialApplicationSpine headTerm suppliedArgs =
               normalizePartialApplicationSpine nestedHead (nestedArgs ++ suppliedArgs)
         _ ->
           (headTerm, suppliedArgs)
+
+convertPartialApplicationArgument ::
+  ConvertContext ->
+  Env ->
+  ClosureScope ->
+  ElabTerm ->
+  Int ->
+  BackendType ->
+  ElabTerm ->
+  ConvertM BackendExpr
+convertPartialApplicationArgument context env scope headTerm index0 expectedTy arg
+  | partialApplicationArgumentNeedsClosureValue context scope headTerm index0 expectedTy =
+      convertClosureValueArgument context env scope expectedTy arg
+  | otherwise =
+      convertTermExpectedMode DirectLambda context env scope (Just expectedTy) arg
+
+partialApplicationArgumentNeedsClosureValue ::
+  ConvertContext ->
+  ClosureScope ->
+  ElabTerm ->
+  Int ->
+  BackendType ->
+  Bool
+partialApplicationArgumentNeedsClosureValue context scope headTerm index0 expectedTy =
+  capturedFunctionArgument || demandedByCallee
+  where
+    capturedFunctionArgument =
+      isClosureConvertibleFunctionType expectedTy && not evidenceArgument
+    evidenceArgument =
+      case stripClosureHeadTypeInsts headTerm of
+        EVar name ->
+          Set.member index0 (lookupEvidenceValueArguments context scope name)
+        _ ->
+          False
+    demandedByCallee =
+      case stripClosureHeadTypeInsts headTerm of
+        EVar name ->
+          Set.member index0 (lookupClosureValueArgumentDemand context scope name)
+        _ ->
+          False
 
 convertClosureValueArgument ::
   ConvertContext ->
@@ -2043,7 +2146,9 @@ packageDirectFunctionValue context scope resultTy headTerm headExpr = do
                 }
         pure ([funCapture], BackendVar resultTy captureName)
       Nothing ->
-        pure ([], headExpr)
+        do
+          calleeCaptures <- localClosureCapturesForTerm context scope headTerm
+          pure (calleeCaptures, headExpr)
   body <- liftEitherConvert (applyPartialDirectArguments functionExpr resultTy paramVars)
   pure
     BackendClosure
@@ -2327,13 +2432,16 @@ convertOrdinaryTerm mode context env scope term resultTy0 =
               Nothing -> schemeTy
           demandedClosureValueArguments =
             bindingClosureValueArguments context scope bindingTy rhs
+          evidenceValueArguments =
+            bindingEvidenceValueArguments bindingTy rhs
           bodyScope =
-            extendClosureScopeValueArguments name demandedClosureValueArguments $
-              extendClosureScopeTerm
-                name
-                bindingEnvTy
-                (bindingClosure || backendExprIsClosureValue context scope rhsExpr)
-                scope
+            extendClosureScopeEvidenceArguments name evidenceValueArguments $
+              extendClosureScopeValueArguments name demandedClosureValueArguments $
+                extendClosureScopeTerm
+                  name
+                  bindingEnvTy
+                  (bindingClosure || backendExprIsClosureValue context scope rhsExpr)
+                  scope
           bodyMode =
             if isClosureConvertibleFunctionType resultTy
               then ClosureLambda Nothing

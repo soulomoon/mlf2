@@ -8,6 +8,9 @@
   closure. When a callee parameter is later underapplied, direct function
   arguments are first wrapped as closure values so the generated partial
   closure does not mix raw function pointers with closure-record calls.
+- Direct function wrappers created for closure-demanded arguments now capture
+  local free variables from inline function expressions, so the generated
+  closure entry does not reference names outside its closure environment.
 - Closure-value argument demand is propagated through top-level aliases and
   local let-bound helpers. Non-variable partial callees beta-normalize immediate
   lambda heads and capture local free variables before their closure entry is
