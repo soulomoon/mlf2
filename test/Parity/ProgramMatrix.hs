@@ -407,7 +407,7 @@ emlfBoundaryMatrix =
         )
         (ExpectRunValue "Box Zero")
     , ProgramMatrixCase
-        "checks parameterized nullary overloaded method through local evidence alias"
+        "runs parameterized nullary overloaded method through local evidence alias"
         ( InlineProgram $
             unlines
                 [ "module Main export (DefaultBox, Nat(..), Box(..), defaultBox, selected, main) {"
@@ -430,7 +430,7 @@ emlfBoundaryMatrix =
                 , "}"
                 ]
         )
-        ExpectCheckSuccess
+        (ExpectRunValue "Box Zero")
     , ProgramMatrixCase
         "rejects nullary overloaded method without expected type evidence"
         ( InlineProgram $

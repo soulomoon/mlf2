@@ -9,6 +9,9 @@
   constrained value uses, matching the existing application path so source
   aliases can instantiate their hidden evidence arguments from the surrounding
   expected type.
+- Retained type-instantiation arguments are recovered back through source ADT
+  identity during finalization, so constrained alias evidence keeps the same
+  `Box Nat` shape through shared interpreter and LLVM parity coverage.
 
 ## 2026-04-29 - Nullary overloaded method expected-type resolution
 
