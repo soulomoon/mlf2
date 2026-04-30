@@ -26,8 +26,8 @@ import MLF.Frontend.Parse.Program
     )
 import MLF.Frontend.Program.Check (checkLocatedProgram)
 import MLF.Frontend.Program.Run
-    ( prettyValue
-    , runLocatedProgram
+    ( programRunOutput
+    , runLocatedProgramOutput
     )
 import MLF.Frontend.Program.Prelude (withPreludeLocated)
 import MLF.Frontend.Program.Types
@@ -56,7 +56,7 @@ programCliUsage =
         , "  mlf2 emit-backend <file.mlfp>"
         , "  mlf2 emit-native <file.mlfp>"
         , ""
-        , "run-program prepends the built-in Prelude and prints the resulting value."
+        , "run-program prepends the built-in Prelude and prints the pure result or IO stdout."
         , "emit-backend prepends the built-in Prelude and prints LLVM IR."
         , "emit-native prepends the built-in Prelude and prints LLVM IR with a native process entrypoint."
         ]
@@ -67,7 +67,7 @@ runProgramFile path = do
     pure $ do
         source <- first show fileResult
         program <- first renderProgramParseError (parseLocatedProgramWithFile path source)
-        first renderProgramDiagnostic (prettyValue <$> runLocatedProgram (withPreludeLocated program))
+        first renderProgramDiagnostic (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated program))
 
 emitBackendFile :: FilePath -> IO (Either String String)
 emitBackendFile path = do

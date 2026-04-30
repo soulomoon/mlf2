@@ -353,7 +353,7 @@ spec = do
     describe "MLF.Program CLI helper" $ do
         it "runs a frozen sample file by path" $ do
             runProgramFile "test/programs/recursive-adt/plain-recursive-nat.mlfp"
-                `shouldReturn` Right "true"
+                `shouldReturn` Right "true\n"
 
         it "prepends the built-in Prelude for explicit imports" $ do
             located <-
@@ -493,7 +493,7 @@ spec = do
                 ((== ProgramAmbiguousMethodUse "pure") . diagnosticError)
                 (const False)
 
-        it "rejects running IO mains until runtime support exists" $ do
+        it "executes putStrLn for main : IO Unit" $ do
             located <-
                 requireLocated $
                     unlines
@@ -502,8 +502,57 @@ spec = do
                         , "  def main : IO Unit = putStrLn \"hello\";"
                         , "}"
                         ]
-            runLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
-                ((== ProgramPipelineError "run-program does not support IO main values yet") . diagnosticError)
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "hello\n"
+
+        it "sequences main IO through Prelude bind" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, putStrLn);"
+                        , "  def after : Unit -> IO Unit = \\_done putStrLn \"world\";"
+                        , "  def main : IO Unit = bind (putStrLn \"hello\") after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "hello\nworld\n"
+
+        it "sequences direct IO primitives without rendering Unit" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = __io_bind (__io_pure Unit) (\\(_n : Unit) __io_putStrLn \"world\");"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "world\n"
+
+        it "runs pure IO Unit actions without stdout or Unit rendering" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, pure);"
+                        , "  def main : IO Unit = pure Unit;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right ""
+
+        it "rejects IO mains whose result type is not Unit" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (IO, pure);"
+                        , "  def main : IO Int = pure 1;"
+                        , "}"
+                        ]
+            runLocatedProgramOutput (withPreludeLocated located) `shouldSatisfy` either
+                ( \diagnostic ->
+                    case diagnosticError diagnostic of
+                        ProgramPipelineError msg -> "run-program supports only main : IO Unit" `isInfixOf` msg
+                        _ -> False
+                )
                 (const False)
 
         it "rejects running pure mains that depend on opaque Prelude helpers" $ do

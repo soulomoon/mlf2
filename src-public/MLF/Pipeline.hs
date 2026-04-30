@@ -77,10 +77,14 @@ module MLF.Pipeline
     , ResolvedProgram(..)
     , sameResolvedSymbol
     , Value(..)
+    , ProgramRunResult(..)
     , checkProgram
     , checkLocatedProgram
     , runProgram
     , runLocatedProgram
+    , runProgramOutput
+    , runLocatedProgramOutput
+    , programRunOutput
     , renderProgramDiagnostic
     , prettyValue
     ) where
@@ -115,7 +119,16 @@ import MLF.Frontend.Program.Check
     ( checkLocatedProgram
     , checkProgram
     )
-import MLF.Frontend.Program.Run (Value(..), prettyValue, runLocatedProgram, runProgram)
+import MLF.Frontend.Program.Run
+    ( ProgramRunResult(..)
+    , Value(..)
+    , prettyValue
+    , programRunOutput
+    , runLocatedProgram
+    , runLocatedProgramOutput
+    , runProgram
+    , runProgramOutput
+    )
 import MLF.Constraint.Types.Graph (BaseTy(..), PolySyms)
 -- Keep legacy elaboration conversion helpers quarantined in MLF.Elab.Legacy.
 import MLF.Elab.Pipeline

@@ -2,14 +2,18 @@
 
 module MLF.Frontend.Program.Run
   ( Value (..),
+    ProgramRunResult (..),
     runProgram,
     runLocatedProgram,
+    runProgramOutput,
+    runLocatedProgramOutput,
+    programRunOutput,
     prettyValue,
   )
 where
 
 import Data.Foldable (toList)
-import Data.List (intercalate)
+import Data.List (intercalate, isPrefixOf)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Elab.Pipeline (ElabTerm (..), Pretty (..), Ty (..), freeTypeVarsType, normalize, schemeFromType, typeCheck)
@@ -28,7 +32,8 @@ import MLF.Frontend.Program.Types
     SymbolIdentity (..),
     diagnosticForProgramError,
   )
-import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
+import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
+import qualified MLF.Frontend.Syntax as Surface
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 
 data Value
@@ -37,18 +42,122 @@ data Value
   | VTerm ElabTerm
   deriving (Eq, Show)
 
+data ProgramRunResult = ProgramRunResult
+  { programRunStdout :: String,
+    programRunValue :: Maybe Value
+  }
+  deriving (Eq, Show)
+
 runProgram :: ProgramSyntax.Program -> Either ProgramError Value
 runProgram program = do
   checked <- checkProgram program
-  rejectOpaqueMain checked
-  pure (toValueWithProgram checked (normalizeProgramTerm (programMainTerm checked)))
+  runCheckedPureProgram checked
 
 runLocatedProgram :: ProgramSyntax.LocatedProgram -> Either ProgramDiagnostic Value
 runLocatedProgram located = do
   checked <- checkLocatedProgram located
-  case rejectOpaqueMain checked of
+  case runCheckedPureProgram checked of
     Left err -> Left (diagnosticForProgramError (Just located) err)
-    Right () -> pure (toValueWithProgram checked (normalizeProgramTerm (programMainTerm checked)))
+    Right value -> pure value
+
+runProgramOutput :: ProgramSyntax.Program -> Either ProgramError ProgramRunResult
+runProgramOutput program = do
+  checked <- checkProgram program
+  runCheckedProgramOutput checked
+
+runLocatedProgramOutput :: ProgramSyntax.LocatedProgram -> Either ProgramDiagnostic ProgramRunResult
+runLocatedProgramOutput located = do
+  checked <- checkLocatedProgram located
+  case runCheckedProgramOutput checked of
+    Left err -> Left (diagnosticForProgramError (Just located) err)
+    Right result -> pure result
+
+programRunOutput :: ProgramRunResult -> String
+programRunOutput result =
+  programRunStdout result
+    ++ maybe "" ((++ "\n") . prettyValue) (programRunValue result)
+
+runCheckedPureProgram :: CheckedProgram -> Either ProgramError Value
+runCheckedPureProgram checked =
+  case classifyMainMode checked of
+    MainPure -> do
+      rejectOpaqueDependencies checked
+      pure (toValueWithProgram checked (normalizeProgramTerm (programMainTerm checked)))
+    MainIOUnit ->
+      Left (ProgramPipelineError "runProgram value API does not return IO main output")
+    MainUnsupportedIO ty ->
+      Left (unsupportedIOMainError ty)
+
+runCheckedProgramOutput :: CheckedProgram -> Either ProgramError ProgramRunResult
+runCheckedProgramOutput checked =
+  case classifyMainMode checked of
+    MainPure -> do
+      value <- runCheckedPureProgram checked
+      pure
+        ProgramRunResult
+          { programRunStdout = "",
+            programRunValue = Just value
+          }
+    MainIOUnit -> do
+      let context = mkRuntimeContext checked
+      action <- mainIOAction checked
+      (stdoutText, result) <- executeIOAction context action
+      if isRuntimeUnit result
+        then
+          pure
+            ProgramRunResult
+              { programRunStdout = stdoutText,
+                programRunValue = Nothing
+              }
+        else Left (ProgramPipelineError "run-program IO main did not finish with Unit")
+    MainUnsupportedIO ty ->
+      Left (unsupportedIOMainError ty)
+
+data MainMode
+  = MainPure
+  | MainIOUnit
+  | MainUnsupportedIO SrcType
+  deriving (Eq, Show)
+
+classifyMainMode :: CheckedProgram -> MainMode
+classifyMainMode checked =
+  case mainSourceType checked of
+    Just ty
+      | isIOUnitSourceType ty -> MainIOUnit
+      | Builtins.srcTypeMentionsOpaqueBuiltin ty -> MainUnsupportedIO ty
+    _ -> MainPure
+
+isIOUnitSourceType :: SrcType -> Bool
+isIOUnitSourceType ty =
+  case ty of
+    STCon name args ->
+      isIOTypeName name && case toList args of
+        [arg] -> isUnitSourceType arg
+        _ -> False
+    _ -> False
+
+isUnitSourceType :: SrcType -> Bool
+isUnitSourceType ty =
+  case ty of
+    STBase name -> isUnitTypeName name
+    STCon name args -> isUnitTypeName name && null (toList args)
+    _ -> False
+
+isIOTypeName :: String -> Bool
+isIOTypeName name = unqualifiedSourceName name == "IO"
+
+isUnitTypeName :: String -> Bool
+isUnitTypeName name = unqualifiedSourceName name == "Unit"
+
+unqualifiedSourceName :: String -> String
+unqualifiedSourceName name =
+  case break (== '.') name of
+    (_, "") -> name
+    _ -> reverse (takeWhile (/= '.') (reverse name))
+
+unsupportedIOMainError :: SrcType -> ProgramError
+unsupportedIOMainError ty =
+  ProgramPipelineError ("run-program supports only main : IO Unit, got " ++ show ty)
 
 programMainTerm :: CheckedProgram -> ElabTerm
 programMainTerm checked =
@@ -61,23 +170,195 @@ programMainTerm checked =
         (checkedBindingTerm binding)
         body
 
-rejectOpaqueMain :: CheckedProgram -> Either ProgramError ()
-rejectOpaqueMain checked =
-  case mainSourceType checked of
-    Just ty
-      | Builtins.srcTypeMentionsOpaqueBuiltin ty ->
-          Left (ProgramPipelineError "run-program does not support IO main values yet")
-    _ ->
-      case reachableOpaqueRuntimeDependencies checked of
-        [] ->
-          Right ()
-        dependencies ->
-          Left
-            ( ProgramPipelineError
-                ( "run-program does not support IO dependencies yet: "
-                    ++ intercalate ", " dependencies
-                )
+rejectOpaqueDependencies :: CheckedProgram -> Either ProgramError ()
+rejectOpaqueDependencies checked =
+  case reachableOpaqueRuntimeDependencies checked of
+    [] ->
+      Right ()
+    dependencies ->
+      Left
+        ( ProgramPipelineError
+            ( "run-program does not support IO dependencies yet: "
+                ++ intercalate ", " dependencies
             )
+        )
+
+data RuntimeContext = RuntimeContext
+  { runtimeBindings :: Map.Map String CheckedBinding,
+    runtimeConstructors :: Map.Map String ConstructorInfo,
+    runtimeUnitConstructors :: Set.Set String
+  }
+
+type RuntimeEnv = Map.Map String RuntimeValue
+
+data RuntimeValue
+  = RuntimeLit Lit
+  | RuntimeUnit
+  | RuntimeData String [RuntimeValue]
+  | RuntimeClosure String SurfaceExpr RuntimeEnv
+  | RuntimeConstructor ConstructorInfo [RuntimeValue]
+  | RuntimePrimitive RuntimePrimitive [RuntimeValue]
+  | RuntimeIO RuntimeIOAction
+
+data RuntimePrimitive
+  = RuntimeIOPure
+  | RuntimeIOBind
+  | RuntimeIOPutStrLn
+  | RuntimeAnd
+  deriving (Eq, Show)
+
+data RuntimeIOAction
+  = RuntimePure RuntimeValue
+  | RuntimeBind RuntimeIOAction RuntimeValue
+  | RuntimePutStrLn String
+
+mainIOAction :: CheckedProgram -> Either ProgramError RuntimeIOAction
+mainIOAction checked = do
+  binding <-
+    case Map.lookup (checkedProgramMain checked) (runtimeBindings context) of
+      Just found -> Right found
+      Nothing -> Left ProgramMainNotFound
+  value <- evalRuntimeExpr context Map.empty (checkedBindingSurfaceExpr binding)
+  case value of
+    RuntimeIO action -> Right action
+    _ -> Left (ProgramPipelineError "run-program IO main did not evaluate to an IO action")
+  where
+    context = mkRuntimeContext checked
+
+mkRuntimeContext :: CheckedProgram -> RuntimeContext
+mkRuntimeContext checked =
+  RuntimeContext
+    { runtimeBindings = Map.fromList [(checkedBindingName binding, binding) | binding <- allCheckedBindings checked],
+      runtimeConstructors = Map.fromList [(ctorRuntimeName ctor, ctor) | dataInfo <- allDataInfos checked, ctor <- dataConstructors dataInfo],
+      runtimeUnitConstructors =
+        Set.fromList
+          [ ctorRuntimeName ctor
+            | dataInfo <- allDataInfos checked,
+              isUnitTypeName (symbolDefiningName (dataInfoSymbol dataInfo)),
+              ctor <- dataConstructors dataInfo,
+              isUnitTypeName (ctorName ctor),
+              null (ctorArgs ctor)
+          ]
+    }
+
+evalRuntimeExpr :: RuntimeContext -> RuntimeEnv -> SurfaceExpr -> Either ProgramError RuntimeValue
+evalRuntimeExpr context env expr =
+  case expr of
+    Surface.EVar name -> lookupRuntimeValue context env name
+    Surface.ELit lit -> Right (RuntimeLit lit)
+    Surface.ELam name body ->
+      Right (RuntimeClosure name body env)
+    Surface.ELamAnn name _ body ->
+      Right (RuntimeClosure name body env)
+    Surface.EApp fun arg -> do
+      funValue <- evalRuntimeExpr context env fun
+      argValue <- evalRuntimeExpr context env arg
+      applyRuntimeValue context funValue argValue
+    Surface.ELet name rhs body -> do
+      rhsValue <- evalRuntimeExpr context env rhs
+      evalRuntimeExpr context (Map.insert name rhsValue env) body
+    Surface.EAnn inner _ ->
+      evalRuntimeExpr context env inner
+
+lookupRuntimeValue :: RuntimeContext -> RuntimeEnv -> String -> Either ProgramError RuntimeValue
+lookupRuntimeValue context env name =
+  case Map.lookup name env of
+    Just value -> Right value
+    Nothing ->
+      case runtimePrimitive name of
+        Just prim -> Right (RuntimePrimitive prim [])
+        Nothing
+          | name `Set.member` runtimeUnitConstructors context || isDeferredUnitConstructorName name -> Right RuntimeUnit
+          | Just ctor <- Map.lookup name (runtimeConstructors context) -> Right (runtimeConstructorValue ctor [])
+          | Just binding <- Map.lookup name (runtimeBindings context) ->
+              evalRuntimeExpr context Map.empty (checkedBindingSurfaceExpr binding)
+          | otherwise -> Left (ProgramUnknownValue name)
+
+runtimePrimitive :: String -> Maybe RuntimePrimitive
+runtimePrimitive name =
+  case name of
+    "__io_pure" -> Just RuntimeIOPure
+    "__io_bind" -> Just RuntimeIOBind
+    "__io_putStrLn" -> Just RuntimeIOPutStrLn
+    "__mlfp_and" -> Just RuntimeAnd
+    _ -> Nothing
+
+isDeferredUnitConstructorName :: String -> Bool
+isDeferredUnitConstructorName name = "$deferred_ctor_Unit_" `isPrefixOf` name
+
+runtimeConstructorValue :: ConstructorInfo -> [RuntimeValue] -> RuntimeValue
+runtimeConstructorValue ctor args
+  | null (ctorArgs ctor) && isUnitTypeName (ctorName ctor) = RuntimeUnit
+  | length args == length (ctorArgs ctor) = RuntimeData (ctorName ctor) args
+  | otherwise = RuntimeConstructor ctor args
+
+applyRuntimeValue :: RuntimeContext -> RuntimeValue -> RuntimeValue -> Either ProgramError RuntimeValue
+applyRuntimeValue context funValue argValue =
+  case funValue of
+    RuntimeClosure name body closureEnv ->
+      evalRuntimeExpr context (Map.insert name argValue closureEnv) body
+    RuntimePrimitive prim args ->
+      applyRuntimePrimitive prim (args ++ [argValue])
+    RuntimeConstructor ctor args
+      | length args < length (ctorArgs ctor) ->
+          Right (runtimeConstructorValue ctor (args ++ [argValue]))
+    _ -> Left (ProgramPipelineError "run-program IO interpreter expected a function")
+
+applyRuntimePrimitive :: RuntimePrimitive -> [RuntimeValue] -> Either ProgramError RuntimeValue
+applyRuntimePrimitive prim args
+  | length args < runtimePrimitiveArity prim = Right (RuntimePrimitive prim args)
+  | length args > runtimePrimitiveArity prim =
+      Left (ProgramPipelineError ("run-program IO primitive over-applied: " ++ show prim))
+  | otherwise =
+      case (prim, args) of
+        (RuntimeIOPure, [value]) ->
+          Right (RuntimeIO (RuntimePure value))
+        (RuntimeIOBind, [RuntimeIO action, continuation]) ->
+          Right (RuntimeIO (RuntimeBind action continuation))
+        (RuntimeIOBind, _) ->
+          Left (ProgramPipelineError "run-program __io_bind expected an IO action and continuation")
+        (RuntimeIOPutStrLn, [RuntimeLit (LString msg)]) ->
+          Right (RuntimeIO (RuntimePutStrLn msg))
+        (RuntimeIOPutStrLn, [_]) ->
+          Left (ProgramPipelineError "run-program __io_putStrLn expected a String argument")
+        (RuntimeAnd, [RuntimeLit (LBool left), RuntimeLit (LBool right)]) ->
+          Right (RuntimeLit (LBool (left && right)))
+        (RuntimeAnd, _) ->
+          Left (ProgramPipelineError "run-program __mlfp_and expected Bool arguments")
+        _ ->
+          Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
+
+runtimePrimitiveArity :: RuntimePrimitive -> Int
+runtimePrimitiveArity prim =
+  case prim of
+    RuntimeIOPure -> 1
+    RuntimeIOBind -> 2
+    RuntimeIOPutStrLn -> 1
+    RuntimeAnd -> 2
+
+executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
+executeIOAction context action =
+  case action of
+    RuntimePure value ->
+      Right ("", value)
+    RuntimePutStrLn msg ->
+      Right (msg ++ "\n", RuntimeUnit)
+    RuntimeBind first continuation -> do
+      (firstStdout, firstValue) <- executeIOAction context first
+      nextValue <- applyRuntimeValue context continuation firstValue
+      nextAction <-
+        case nextValue of
+          RuntimeIO action' -> Right action'
+          _ -> Left (ProgramPipelineError "run-program __io_bind continuation did not return an IO action")
+      (nextStdout, resultValue) <- executeIOAction context nextAction
+      Right (firstStdout ++ nextStdout, resultValue)
+
+isRuntimeUnit :: RuntimeValue -> Bool
+isRuntimeUnit value =
+  case value of
+    RuntimeUnit -> True
+    RuntimeData name [] -> isUnitTypeName name
+    _ -> False
 
 reachableOpaqueRuntimeDependencies :: CheckedProgram -> [String]
 reachableOpaqueRuntimeDependencies checked =

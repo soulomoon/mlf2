@@ -46,7 +46,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Elaborate` — lowers executable `.mlfp` bindings to surface eMLF `SurfaceExpr`
 - `MLF.Frontend.Program.Finalize` — normalizes lowered surface eMLF, calls the internal detailed eMLF pipeline entrypoints with program-owned external binding modes, resolves `.mlfp` deferred obligations, and accepts rewritten terms only after the xMLF typecheck guard
 - `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI/file runner as an explicit import target
-- `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates checked `.mlfp` bindings through the existing xMLF runtime and renders recovered closed ADT values with source constructor syntax
+- `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates pure checked `.mlfp` bindings through the existing xMLF runtime, executes checked `main : IO Unit` actions through the reserved IO primitive boundary, and renders recovered closed ADT values with source constructor syntax
 - `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before LLVM lowering
 - `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion, explicit ADT construct/case recovery, and closure conversion where the checked xMLF shape is unambiguous
 - `MLF.Backend.LLVM` — repo-local LLVM backend facade over a small typed LLVM AST, lowerer, and pretty-printer for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
