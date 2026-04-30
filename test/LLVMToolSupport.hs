@@ -1,26 +1,50 @@
 module LLVMToolSupport
-    ( LLVMRunResult(..)
+    ( LLVMToolchain (..)
+    , NativeRunResult (..)
+    , ToolCommand (..)
+    , discoverNativeLLVMToolchain
+    , parseExecutableCommand
+    , runLLVMNativeExecutable
     , validateLLVMAssembly
     , validateLLVMObjectCode
-    , runLLVMModule
     , withTempLLVM
     , withTempProgram
     ) where
 
 import Control.Exception (bracket)
 import Control.Monad (filterM)
-import System.Directory (doesFileExist, findExecutable, getTemporaryDirectory, removeFile)
+import Data.Char (isSpace)
+import System.Directory
+    ( createDirectory
+    , doesFileExist
+    , findExecutable
+    , getTemporaryDirectory
+    , removeDirectoryRecursive
+    , removeFile
+    )
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
-import System.FilePath (takeFileName)
+import System.FilePath (isPathSeparator, takeFileName, (</>))
 import System.IO (hClose, hPutStr, openTempFile)
 import System.Process (readProcessWithExitCode)
 import Test.Hspec
 
-data LLVMRunResult = LLVMRunResult
-    { llvmRunExitCode :: ExitCode
-    , llvmRunStdout :: String
-    , llvmRunStderr :: String
+data LLVMToolchain = LLVMToolchain
+    { llvmToolchainLlc :: FilePath
+    , llvmToolchainNativeLinker :: ToolCommand
+    }
+    deriving (Eq, Show)
+
+data ToolCommand = ToolCommand
+    { toolCommandExecutable :: FilePath
+    , toolCommandArguments :: [String]
+    }
+    deriving (Eq, Show)
+
+data NativeRunResult = NativeRunResult
+    { nativeRunExitCode :: ExitCode
+    , nativeRunStdout :: String
+    , nativeRunStderr :: String
     }
     deriving (Eq, Show)
 
@@ -50,14 +74,33 @@ validateLLVMObjectCode output = do
                     ExitSuccess -> pure ()
                     ExitFailure _ -> expectationFailure ("llc rejected backend output:\n" ++ stderr)
 
-runLLVMModule :: String -> IO LLVMRunResult
-runLLVMModule output = do
-    mbLli <- findLLVMTool "lli"
-    case mbLli of
-        Nothing ->
-            pendingWith "required LLVM tool not found: lli" >> pure (LLVMRunResult ExitSuccess "" "")
-        Just lli ->
-            withTempLLVM output $ \path -> runLLVMExecutable lli path
+discoverNativeLLVMToolchain :: IO (Either [String] LLVMToolchain)
+discoverNativeLLVMToolchain = do
+    mbLlc <- findLLVMTool "llc"
+    mbNativeLinker <- findNativeLinker
+    pure $
+        case (mbLlc, mbNativeLinker) of
+            (Just llc, Just nativeLinker) ->
+                Right
+                    LLVMToolchain
+                        { llvmToolchainLlc = llc
+                        , llvmToolchainNativeLinker = nativeLinker
+                        }
+            _ ->
+                Left $
+                    missingTool "llc" mbLlc
+                        ++ missingTool
+                            "native C compiler/linker (set CC or install cc, clang, or gcc)"
+                            mbNativeLinker
+
+runLLVMNativeExecutable :: String -> IO NativeRunResult
+runLLVMNativeExecutable output = do
+    discovered <- discoverNativeLLVMToolchain
+    case discovered of
+        Left missing ->
+            skipMissingNativeToolchain missing
+        Right toolchain ->
+            runLLVMNativeExecutableWith toolchain output
 
 withTempLLVM :: String -> (FilePath -> IO a) -> IO a
 withTempLLVM output action = do
@@ -81,6 +124,49 @@ withTempProgram contents action = do
         hClose handle
         pure path
 
+runLLVMNativeExecutableWith :: LLVMToolchain -> String -> IO NativeRunResult
+runLLVMNativeExecutableWith toolchain output =
+    withTempLLVMBuildDirectory $ \buildDir -> do
+        let llvmPath = buildDir </> "program.ll"
+            objectPath = buildDir </> "program.o"
+            executablePath = buildDir </> "program"
+            llc = llvmToolchainLlc toolchain
+            nativeLinker = llvmToolchainNativeLinker toolchain
+
+        writeFile llvmPath output
+
+        (llcExitCode, llcStderr) <-
+            runLLVMTool llc ["-filetype=obj", "-o", objectPath, llvmPath]
+        expectProcessSuccess "llc rejected native-runner LLVM input" llcExitCode "" llcStderr
+
+        (linkExitCode, linkStdout, linkStderr) <-
+            readProcessWithExitCode
+                (toolCommandExecutable nativeLinker)
+                (toolCommandArguments nativeLinker ++ [objectPath, "-o", executablePath])
+                ""
+        expectProcessSuccess "native linker rejected LLVM object" linkExitCode linkStdout linkStderr
+
+        (runExitCode, runStdout, runStderr) <- readProcessWithExitCode executablePath [] ""
+        pure
+            NativeRunResult
+                { nativeRunExitCode = runExitCode
+                , nativeRunStdout = runStdout
+                , nativeRunStderr = runStderr
+                }
+
+withTempLLVMBuildDirectory :: (FilePath -> IO a) -> IO a
+withTempLLVMBuildDirectory action = do
+    tempDir <- getTemporaryDirectory
+    bracket (createTempLLVMBuildDirectory tempDir) removeDirectoryRecursive action
+
+createTempLLVMBuildDirectory :: FilePath -> IO FilePath
+createTempLLVMBuildDirectory tempDir = do
+    (path, handle) <- openTempFile tempDir "mlf2-llvm-native"
+    hClose handle
+    removeFile path
+    createDirectory path
+    pure path
+
 runLLVMTool :: FilePath -> [String] -> IO (ExitCode, String)
 runLLVMTool tool args = do
     (plainExitCode, _plainStdout, plainStderr) <- readProcessWithExitCode tool args ""
@@ -99,47 +185,122 @@ runLLVMTool tool args = do
                             ++ opaqueStderr
                         )
 
-runLLVMExecutable :: FilePath -> FilePath -> IO LLVMRunResult
-runLLVMExecutable tool path = do
-    (plainExitCode, plainStdout, plainStderr) <- readProcessWithExitCode tool [path] ""
-    case plainExitCode of
-        ExitSuccess ->
-            pure (LLVMRunResult plainExitCode plainStdout plainStderr)
-        ExitFailure _ -> do
-            (opaqueExitCode, opaqueStdout, opaqueStderr) <-
-                readProcessWithExitCode tool ["-opaque-pointers", path] ""
-            pure $
-                case opaqueExitCode of
-                    ExitSuccess ->
-                        LLVMRunResult opaqueExitCode opaqueStdout opaqueStderr
-                    ExitFailure _ ->
-                        LLVMRunResult
-                            opaqueExitCode
-                            opaqueStdout
-                            (plainStderr ++ "\nWith -opaque-pointers:\n" ++ opaqueStderr)
-
 findLLVMTool :: String -> IO (Maybe FilePath)
 findLLVMTool name = do
-    envCandidates <- filterM doesFileExist =<< traverseMaybeEnv (toolEnvNames name)
-    case envCandidates of
-        path : _ -> pure (Just path)
-        [] -> do
+    mbEnvCandidate <- findEnvExecutable (toolEnvNames name)
+    case mbEnvCandidate of
+        Just path -> pure (Just path)
+        Nothing -> do
             result <- findExecutable name
             case result of
                 Just path -> pure (Just path)
                 Nothing -> findKnownLLVMTool name knownLLVMToolPaths
 
-traverseMaybeEnv :: [String] -> IO [FilePath]
-traverseMaybeEnv names = do
+findNativeLinker :: IO (Maybe ToolCommand)
+findNativeLinker = do
+    mbEnvCandidate <- findEnvToolCommand ["CC"]
+    case mbEnvCandidate of
+        Just command -> pure (Just command)
+        Nothing -> firstJustM findExecutableToolCommand ["cc", "clang", "gcc"]
+
+findEnvExecutable :: [String] -> IO (Maybe FilePath)
+findEnvExecutable names = do
     values <- traverse lookupEnv names
-    pure [path | Just path <- values]
+    firstJustM resolveExecutableCandidate [path | Just path <- values]
+
+findEnvToolCommand :: [String] -> IO (Maybe ToolCommand)
+findEnvToolCommand names = do
+    values <- traverse lookupEnv names
+    firstJustM resolveExecutableCommandCandidate [path | Just path <- values]
+
+resolveExecutableCommandCandidate :: String -> IO (Maybe ToolCommand)
+resolveExecutableCommandCandidate candidate =
+    case parseExecutableCommand candidate of
+        Nothing -> pure Nothing
+        Just (executable, arguments) -> do
+            mbPath <- resolveExecutableCandidate executable
+            pure $ fmap (`ToolCommand` arguments) mbPath
+
+resolveExecutableCandidate :: FilePath -> IO (Maybe FilePath)
+resolveExecutableCandidate candidate
+    | any isPathSeparator candidate = do
+        exists <- doesFileExist candidate
+        pure $
+            if exists
+                then Just candidate
+                else Nothing
+    | otherwise =
+        findExecutable candidate
+
+findExecutableToolCommand :: FilePath -> IO (Maybe ToolCommand)
+findExecutableToolCommand candidate =
+    fmap (`ToolCommand` []) <$> findExecutable candidate
+
+parseExecutableCommand :: String -> Maybe (FilePath, [String])
+parseExecutableCommand candidate =
+    case parseCommandWords candidate of
+        Just (executable : arguments) -> Just (executable, arguments)
+        _ -> Nothing
+
+parseCommandWords :: String -> Maybe [String]
+parseCommandWords = go False [] [] Unquoted
+  where
+    go inWord current wordsSoFar mode input =
+        case (mode, input) of
+            (Unquoted, []) -> Just (reverse (finishWord inWord current wordsSoFar))
+            (SingleQuoted, []) -> Nothing
+            (DoubleQuoted, []) -> Nothing
+            (Unquoted, char : rest)
+                | isSpace char ->
+                    go False [] (finishWord inWord current wordsSoFar) Unquoted rest
+                | char == '\'' ->
+                    go True current wordsSoFar SingleQuoted rest
+                | char == '"' ->
+                    go True current wordsSoFar DoubleQuoted rest
+                | char == '\\' ->
+                    escaped inWord current wordsSoFar Unquoted rest
+                | otherwise ->
+                    go True (char : current) wordsSoFar Unquoted rest
+            (SingleQuoted, char : rest)
+                | char == '\'' ->
+                    go True current wordsSoFar Unquoted rest
+                | otherwise ->
+                    go True (char : current) wordsSoFar SingleQuoted rest
+            (DoubleQuoted, char : rest)
+                | char == '"' ->
+                    go True current wordsSoFar Unquoted rest
+                | char == '\\' ->
+                    escaped inWord current wordsSoFar DoubleQuoted rest
+                | otherwise ->
+                    go True (char : current) wordsSoFar DoubleQuoted rest
+
+    escaped _ _ _ _ [] = Nothing
+    escaped _ current wordsSoFar mode (char : rest) =
+        go True (char : current) wordsSoFar mode rest
+
+    finishWord inWord current wordsSoFar =
+        if inWord
+            then reverse current : wordsSoFar
+            else wordsSoFar
+
+data QuoteMode
+    = Unquoted
+    | SingleQuoted
+    | DoubleQuoted
+
+firstJustM :: (a -> IO (Maybe b)) -> [a] -> IO (Maybe b)
+firstJustM _ [] = pure Nothing
+firstJustM action (candidate : candidates) = do
+    result <- action candidate
+    case result of
+        Just _ -> pure result
+        Nothing -> firstJustM action candidates
 
 toolEnvNames :: String -> [String]
 toolEnvNames name =
     case name of
         "llvm-as" -> ["LLVM_AS"]
         "llc" -> ["LLC", "LLVM_LLC"]
-        "lli" -> ["LLI", "LLVM_LLI"]
         _ -> []
 
 findKnownLLVMTool :: String -> [FilePath] -> IO (Maybe FilePath)
@@ -149,12 +310,33 @@ findKnownLLVMTool name paths = do
         path : _ -> pure (Just path)
         [] -> pure Nothing
 
+missingTool :: String -> Maybe a -> [String]
+missingTool name mbPath =
+    case mbPath of
+        Just _ -> []
+        Nothing -> [name]
+
+skipMissingNativeToolchain :: [String] -> IO a
+skipMissingNativeToolchain missing = do
+    pendingWith ("required native LLVM toolchain pieces not found: " ++ unwords missing)
+    fail "native LLVM toolchain unavailable"
+
+expectProcessSuccess :: String -> ExitCode -> String -> String -> IO ()
+expectProcessSuccess label exitCode stdout stderr =
+    case exitCode of
+        ExitSuccess -> pure ()
+        ExitFailure _ ->
+            expectationFailure $
+                label
+                    ++ ":\nstdout:\n"
+                    ++ stdout
+                    ++ "\nstderr:\n"
+                    ++ stderr
+
 knownLLVMToolPaths :: [FilePath]
 knownLLVMToolPaths =
     [ "/opt/homebrew/opt/llvm/bin/llvm-as"
     , "/opt/homebrew/opt/llvm/bin/llc"
-    , "/opt/homebrew/opt/llvm/bin/lli"
     , "/usr/local/opt/llvm/bin/llvm-as"
     , "/usr/local/opt/llvm/bin/llc"
-    , "/usr/local/opt/llvm/bin/lli"
     ]

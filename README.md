@@ -149,13 +149,14 @@ and defines the backend-owned `__mlfp_and` primitive when no program binding own
 that runtime name; broader IO behavior remains outside this pure contract.
 
 Backend LLVM validation tests use LLVM command-line tools with opaque pointer
-support when available. The test suite looks for `llvm-as`, `llc`, and `lli` on
-`PATH`, with standard Homebrew LLVM locations also accepted on macOS;
-LLVM-dependent assertions are marked pending when the tools are absent, so
-`cabal test` can run in environments without LLVM while still exercising the
-checks wherever the tools are installed. LLVM 14 tools are run with
-`-opaque-pointers` when needed, while LLVM 15+ tools accept the emitted
-opaque-pointer IR by default.
+support when available. The test suite looks for `llvm-as` and `llc` on `PATH`,
+with standard Homebrew LLVM locations also accepted on macOS. Native executable
+runner tests additionally look for a C compiler/linker via `CC`, then `cc`,
+`clang`, or `gcc` on `PATH`. LLVM-dependent assertions are marked pending when
+required tools are absent, so `cabal test` can run in environments without LLVM
+or a native linker while still exercising the checks wherever the tools are
+installed. LLVM 14 tools are run with `-opaque-pointers` when needed, while LLVM
+15+ tools accept the emitted opaque-pointer IR by default.
 
 ## Syntax and paper alignment
 

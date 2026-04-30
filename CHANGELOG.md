@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- Added native LLVM toolchain runner support to the test harness. LLVM backend
+  tests can now discover `llc` plus a native linker, build a temporary
+  executable from emitted `.ll`, run it, and capture stdout, stderr, and exit
+  status while skipping explicitly when tools are unavailable.
+
 ### Changed
 - Added a native LLVM emission contract for pure `.mlfp` entrypoints. The
   backend can now emit an `i32 @main()` wrapper that renders supported
