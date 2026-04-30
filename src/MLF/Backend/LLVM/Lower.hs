@@ -2996,32 +2996,36 @@ lowerClosureCall env exprEnv context resultTy fun args = do
   where
     lowerClosurePointerCall = do
       callee <- lowerClosureCallee env exprEnv context fun
-      unless (lvLLVMType callee == LLVMPtr) $
-        liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a pointer: " ++ show (lvBackendType callee)))
-      let (paramTys, returnTy) = collectArrowsType (lvBackendType callee)
-      when (null paramTys) $
-        liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a function: " ++ show (lvBackendType callee)))
-      unless (length paramTys == length args) $
-        liftEither (BackendLLVMArityMismatch "closure" (length paramTys) (length args))
-      resultLLVMType <- lowerBackendTypeM env context resultTy
-      returnLLVMType <- lowerBackendTypeM env context returnTy
-      unless (resultLLVMType == returnLLVMType) $
-        liftEither (BackendLLVMInternalError ("closure call result mismatch at " ++ context))
-      callArgs <- zipWithM lowerClosureArg (zip [0 :: Int ..] paramTys) args
-      codePtrField <- emitGep "closure.code.ptr" (lvOperand callee) 0
-      codePtr <- emitAssign "closure.code" LLVMPtr (LLVMLoad LLVMPtr codePtrField)
-      envPtrField <- emitGep "closure.env.ptr" (lvOperand callee) 8
-      closureEnv <- emitAssign "closure.env" LLVMPtr (LLVMLoad LLVMPtr envPtrField)
-      result <-
-        emitAssign
-          "closure.call"
-          resultLLVMType
-          ( LLVMCallOperand
-              codePtr
-              ((LLVMPtr, closureEnv) : [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
-          )
-      pure (LowerValue resultTy resultLLVMType result)
+      lowerClosurePointerValueCall env exprEnv context resultTy callee args
 
+lowerClosurePointerValueCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> LowerValue -> [BackendExpr] -> LowerM LowerValue
+lowerClosurePointerValueCall env exprEnv context resultTy callee args = do
+  unless (lvLLVMType callee == LLVMPtr) $
+    liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a pointer: " ++ show (lvBackendType callee)))
+  let (paramTys, returnTy) = collectArrowsType (lvBackendType callee)
+  when (null paramTys) $
+    liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a function: " ++ show (lvBackendType callee)))
+  unless (length paramTys == length args) $
+    liftEither (BackendLLVMArityMismatch "closure" (length paramTys) (length args))
+  resultLLVMType <- lowerBackendTypeM env context resultTy
+  returnLLVMType <- lowerBackendTypeM env context returnTy
+  unless (resultLLVMType == returnLLVMType) $
+    liftEither (BackendLLVMInternalError ("closure call result mismatch at " ++ context))
+  callArgs <- zipWithM lowerClosureArg (zip [0 :: Int ..] paramTys) args
+  codePtrField <- emitGep "closure.code.ptr" (lvOperand callee) 0
+  codePtr <- emitAssign "closure.code" LLVMPtr (LLVMLoad LLVMPtr codePtrField)
+  envPtrField <- emitGep "closure.env.ptr" (lvOperand callee) 8
+  closureEnv <- emitAssign "closure.env" LLVMPtr (LLVMLoad LLVMPtr envPtrField)
+  result <-
+    emitAssign
+      "closure.call"
+      resultLLVMType
+      ( LLVMCallOperand
+          codePtr
+          ((LLVMPtr, closureEnv) : [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
+      )
+  pure (LowerValue resultTy resultLLVMType result)
+  where
     lowerClosureArg (index0, paramTy) arg =
       lowerExprForIndirectArgument env exprEnv context ("__mlfp_closure_arg" ++ show index0, paramTy) arg
 
@@ -3051,7 +3055,7 @@ lowerCall env exprEnv context expr =
                   | isFunctionLikeBackendType (lvBackendType value) ->
                       lowerIndirectValueCall env exprEnv context name value typeArgs args
                 _ ->
-                  lowerGlobalCall env exprEnv context name typeArgs args
+                  lowerGlobalCall env exprEnv context (backendExprType expr) name typeArgs args
         BackendLam {} ->
           lowerDirectFunctionCall env exprEnv context (functionFormFromExpr headExpr) typeArgs args
         BackendTyAbs {} ->
@@ -3430,14 +3434,37 @@ lowerDirectFunctionCall env exprEnv context form0 typeArgs args = do
   bodyEnv <- bindCallArguments env exprEnv exprEnv context False "lambda" form args
   lowerExpr env bodyEnv context (ffBody form)
 
-lowerGlobalCall :: ProgramEnv -> ExprEnv -> String -> String -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
-lowerGlobalCall env exprEnv context name typeArgs args =
+lowerGlobalCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> String -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
+lowerGlobalCall env exprEnv context resultTy name typeArgs args =
   case Map.lookup name (pbBindings (peBase env)) of
     Just binding -> do
       (resolvedTypeArgs, form0) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs args
       let form = qualifyInstantiatedClosureEntries name resolvedTypeArgs form0
-      unless (length args == length (ffParams form)) $
-        liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
+          arity = length (ffParams form)
+      case compare (length args) arity of
+        GT -> do
+          unless (isClosureRuntimeValueType (ffReturnType form)) $
+            liftEither (BackendLLVMArityMismatch name arity (length args))
+          let (directArgs, closureArgs) = splitAt arity args
+          callee <- lowerGlobalCall env exprEnv context (ffReturnType form) name typeArgs directArgs
+          lowerClosurePointerValueCall env exprEnv context resultTy callee closureArgs
+        LT ->
+          liftEither (BackendLLVMArityMismatch name arity (length args))
+        EQ ->
+          lowerSaturatedGlobalCall binding resolvedTypeArgs form
+    Nothing
+      | name == runtimeAndName -> do
+          unless (length args == 2) $
+            liftEither (BackendLLVMArityMismatch name 2 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          let expectedTypes = [LLVMInt 1, LLVMInt 1]
+          zipWithM_ (requireLLVMType context name) expectedTypes callArgs
+          result <- emitAssign "call" (LLVMInt 1) (LLVMCall runtimeAndName [(LLVMInt 1, lvOperand arg) | arg <- callArgs])
+          pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result)
+    Nothing ->
+      liftEither (BackendLLVMUnknownFunction name)
+  where
+    lowerSaturatedGlobalCall binding resolvedTypeArgs form =
       if requiresInlineCall form
         && Set.member (biName binding) (eeActiveGlobalInlines exprEnv)
         && not (canEmitFunctionForm form)
@@ -3453,21 +3480,10 @@ lowerGlobalCall env exprEnv context name typeArgs args =
         else do
           callArgs <- zipWithM (lowerExprForArgument env exprEnv context False) (ffParams form) args
           bindFunctionArguments env context False name form callArgs
-          resultTy <- lowerRuntimeValueTypeM env context (ffReturnType form)
+          llvmResultTy <- lowerRuntimeValueTypeM env context (ffReturnType form)
           functionName <- globalFunctionName env context binding resolvedTypeArgs
-          result <- emitAssign "call" resultTy (LLVMCall functionName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
-          pure (LowerValue (ffReturnType form) resultTy result)
-    Nothing
-      | name == runtimeAndName -> do
-          unless (length args == 2) $
-            liftEither (BackendLLVMArityMismatch name 2 (length args))
-          callArgs <- traverse (lowerExpr env exprEnv context) args
-          let expectedTypes = [LLVMInt 1, LLVMInt 1]
-          zipWithM_ (requireLLVMType context name) expectedTypes callArgs
-          result <- emitAssign "call" (LLVMInt 1) (LLVMCall runtimeAndName [(LLVMInt 1, lvOperand arg) | arg <- callArgs])
-          pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result)
-    Nothing ->
-      liftEither (BackendLLVMUnknownFunction name)
+          result <- emitAssign "call" llvmResultTy (LLVMCall functionName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
+          pure (LowerValue (ffReturnType form) llvmResultTy result)
 
 shouldInlineGlobalCall :: ProgramEnv -> ExprEnv -> BindingInfo -> [BackendType] -> FunctionForm -> [BackendExpr] -> Bool
 shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args =

@@ -1,7 +1,8 @@
 module Main export (main) {
-  def make : Int -> Int =
-    let captured : Int = 41 in
-    \(x : Int) captured;
+  def make : Int -> (Int -> Int) =
+    \(base : Int)
+      let captured : Int = base in
+      \(x : Int) captured;
 
-  def main : Int = make 0;
+  def main : Int = (make 41) 0;
 }
