@@ -289,6 +289,19 @@ spec = describe "MLF.Backend.IR" $ do
                 (BackendVar idTy "g")
                 (BackendApp intTy (BackendVar idTy "f") (intLit 1))
             )
+        appCalledCaseHeadClosure =
+          BackendApp
+            intTy
+            ( BackendCase
+                idTy
+                (BackendConstruct boxTy "Box" [intLit 0])
+                ( BackendAlternative
+                    (BackendConstructorPattern "Box" ["n"])
+                    (goodClosure "__mlfp_closure$app_case")
+                    :| []
+                )
+            )
+            (intLit 1)
 
     validateBackendProgram (programWithMainExpr captureMismatch)
       `shouldBe` Left (BackendClosureCaptureTypeMismatch "captured" boolTy intTy)
@@ -308,6 +321,8 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
     validateBackendProgram (programWithMainExpr appCalledClosureAlias)
       `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+    validateBackendProgram (programWithMainExpr appCalledCaseHeadClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "__mlfp_closure$app_case")
 
   it "checks type application against forall nodes" $ do
     validateBackendExpr

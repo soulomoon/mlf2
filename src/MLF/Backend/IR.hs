@@ -791,8 +791,27 @@ backendClosureValueName mbContext =
       backendClosureValueName mbContext fun
     BackendLet _ name bindingTy rhs body ->
       backendClosureValueName (extendLetLocalMaybe mbContext name bindingTy rhs) body
+    BackendCase _ scrutinee alternatives ->
+      backendCaseClosureValueName mbContext (backendExprType scrutinee) alternatives
     _ ->
       Nothing
+
+backendCaseClosureValueName :: Maybe BackendValidationContext -> BackendType -> NonEmpty BackendAlternative -> Maybe String
+backendCaseClosureValueName mbContext scrutineeTy =
+  firstClosureValueName . map closureAlternativeName . NE.toList
+  where
+    closureAlternativeName alternative =
+      case validateBackendPattern mbContext scrutineeTy (backendAltPattern alternative) of
+        Right contextForBody -> backendClosureValueName contextForBody (backendAltBody alternative)
+        Left _ -> Nothing
+
+firstClosureValueName :: [Maybe String] -> Maybe String
+firstClosureValueName [] =
+  Nothing
+firstClosureValueName (Nothing : rest) =
+  firstClosureValueName rest
+firstClosureValueName (Just value : _) =
+  Just value
 
 validateBackendClosureCall :: BackendType -> BackendType -> [BackendExpr] -> Either BackendValidationError ()
 validateBackendClosureCall resultTy funTy args =
