@@ -902,53 +902,62 @@ firstClosureValueName (Just value : _) =
 
 backendExprCallsNameAsClosureHead :: String -> BackendExpr -> Bool
 backendExprCallsNameAsClosureHead needle =
-  go
+  go (Set.singleton needle)
   where
-    go =
+    go aliases =
       \case
         BackendVar {} ->
           False
         BackendLit {} ->
           False
         BackendLam _ name _ body
-          | name == needle -> False
-          | otherwise -> go body
+          | Set.member name aliases -> False
+          | otherwise -> go aliases body
         BackendApp _ fun arg ->
-          go fun || go arg
+          go aliases fun || go aliases arg
         BackendLet _ name _ rhs body
-          | name == needle -> go rhs
-          | otherwise -> go rhs || go body
+          | Set.member name aliases -> go aliases rhs
+          | otherwise ->
+              let aliasesForBody =
+                    if closureCallHeadReferencesAny aliases rhs
+                      then Set.insert name aliases
+                      else aliases
+               in go aliases rhs || go aliasesForBody body
         BackendTyAbs _ _ _ body ->
-          go body
+          go aliases body
         BackendTyApp _ fun _ ->
-          go fun
+          go aliases fun
         BackendConstruct _ _ args ->
-          any go args
+          any (go aliases) args
         BackendCase _ scrutinee alternatives ->
-          go scrutinee || any goAlternative (NE.toList alternatives)
+          go aliases scrutinee || any (goAlternative aliases) (NE.toList alternatives)
         BackendRoll _ payload ->
-          go payload
+          go aliases payload
         BackendUnroll _ payload ->
-          go payload
+          go aliases payload
         BackendClosure _ _ captures params body ->
-          any (go . backendClosureCaptureExpr) captures
+          any (go aliases . backendClosureCaptureExpr) captures
             || capturedNeedleFeedsClosureCall
-            || (not (Set.member needle closureBinders) && go body)
+            || (Set.disjoint aliases closureBinders && go aliases body)
           where
             closureBinders = Set.fromList (map backendClosureCaptureName captures ++ map fst params)
             capturedNeedleFeedsClosureCall =
-              any capturesNeedle captures
-                && not (elem needle (map fst params))
-                && backendExprCallsNameAsClosureHead needle body
-            capturesNeedle capture =
-              backendClosureCaptureName capture == needle
-                && backendExprReferencesName needle (backendClosureCaptureExpr capture)
+              any capturesAlias captures
+                && Set.disjoint aliases (Set.fromList (map fst params))
+                && any (`backendExprCallsNameAsClosureHead` body) aliases
+            capturesAlias capture =
+              Set.member (backendClosureCaptureName capture) aliases
+                && any (\alias -> backendExprReferencesName alias (backendClosureCaptureExpr capture)) aliases
         BackendClosureCall _ fun args ->
-          closureCallHeadReferencesName needle fun || go fun || any go args
+          closureCallHeadReferencesAny aliases fun || go aliases fun || any (go aliases) args
 
-    goAlternative (BackendAlternative pattern0 body)
-      | Set.member needle (patternBinders pattern0) = False
-      | otherwise = go body
+    goAlternative aliases (BackendAlternative pattern0 body)
+      | not (Set.disjoint aliases (patternBinders pattern0)) = False
+      | otherwise = go aliases body
+
+closureCallHeadReferencesAny :: Set.Set String -> BackendExpr -> Bool
+closureCallHeadReferencesAny needles expr =
+  any (`closureCallHeadReferencesName` expr) needles
 
 closureCallHeadReferencesName :: String -> BackendExpr -> Bool
 closureCallHeadReferencesName needle =

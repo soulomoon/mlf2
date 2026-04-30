@@ -3564,14 +3564,13 @@ bindCallArguments env callEnv bodyEnv0 context allowNestedEvidence name form arg
   foldM bindOne bodyEnv0 (zip (ffParams form) args)
   where
     bindOne bodyEnv ((paramName, paramTy), arg)
-      | isFirstOrderFunctionPointerType paramTy,
-        Just _ <- closurePointerAliasValue callEnv arg = do
-          value <- lowerExprForArgument env callEnv context allowNestedEvidence (paramName, paramTy) arg
-          pure
-            bodyEnv
-              { eeValues = Map.insert paramName value (eeValues bodyEnv),
-                eeLocalFunctions = Map.delete paramName (eeLocalFunctions bodyEnv)
-              }
+      | isFirstOrderFunctionPointerType paramTy = do
+          mbClosureValue <- lowerClosureRuntimeArgumentMaybe env callEnv context paramTy arg
+          case mbClosureValue of
+            Just value ->
+              bindValue bodyEnv paramName value
+            Nothing ->
+              bindInlineOrValue bodyEnv paramName paramTy arg
       | isInlineFunctionArgument allowNestedEvidence paramName paramTy = do
           localFunction <- lowerStaticFunctionArgument env callEnv context paramName paramTy arg
           pure
@@ -3584,12 +3583,51 @@ bindCallArguments env callEnv bodyEnv0 context allowNestedEvidence name form arg
                 eeValues = Map.delete paramName (eeValues bodyEnv)
               }
       | otherwise = do
-          value <- lowerExprForArgument env callEnv context allowNestedEvidence (paramName, paramTy) arg
+          bindValueFromExpr bodyEnv paramName paramTy arg
+
+    bindInlineOrValue bodyEnv paramName paramTy arg
+      | isInlineFunctionArgument allowNestedEvidence paramName paramTy = do
+          localFunction <- lowerStaticFunctionArgument env callEnv context paramName paramTy arg
           pure
             bodyEnv
-              { eeValues = Map.insert paramName value (eeValues bodyEnv),
-                eeLocalFunctions = Map.delete paramName (eeLocalFunctions bodyEnv)
+              { eeLocalFunctions =
+                  Map.insert
+                    paramName
+                    localFunction
+                    (eeLocalFunctions bodyEnv),
+                eeValues = Map.delete paramName (eeValues bodyEnv)
               }
+      | otherwise =
+          bindValueFromExpr bodyEnv paramName paramTy arg
+
+    bindValueFromExpr bodyEnv paramName paramTy arg = do
+      value <- lowerExprForArgument env callEnv context allowNestedEvidence (paramName, paramTy) arg
+      bindValue bodyEnv paramName value
+
+    bindValue bodyEnv paramName value =
+      pure
+        bodyEnv
+          { eeValues = Map.insert paramName value (eeValues bodyEnv),
+            eeLocalFunctions = Map.delete paramName (eeLocalFunctions bodyEnv)
+          }
+
+lowerClosureRuntimeArgumentMaybe :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> LowerM (Maybe LowerValue)
+lowerClosureRuntimeArgumentMaybe env exprEnv context expectedTy arg =
+  case closurePointerAliasValue exprEnv arg of
+    Just value ->
+      pure (Just value {lvBackendType = expectedTy})
+    Nothing ->
+      case collectTyApps arg of
+        (BackendVar _ name, typeArgs)
+          | Just binding <- Map.lookup name (pbBindings (peBase env)) -> do
+              (_, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs []
+              if null (ffParams form)
+                && alphaEqBackendType expectedTy (ffReturnType form)
+                && isClosureRuntimeValueType (ffReturnType form)
+                then Just <$> lowerGlobalValue env context expectedTy name binding typeArgs
+                else pure Nothing
+        _ ->
+          pure Nothing
 
 isInlineFunctionArgument :: Bool -> String -> BackendType -> Bool
 isInlineFunctionArgument allowNestedEvidence paramName paramTy =

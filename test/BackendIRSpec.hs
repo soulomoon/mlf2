@@ -190,6 +190,19 @@ spec = describe "MLF.Backend.IR" $ do
             idTy
             value
             (BackendClosureCall intTy (BackendVar idTy "f") [intLit 1])
+        callClosureAlias value =
+          BackendLet
+            intTy
+            "f"
+            idTy
+            value
+            ( BackendLet
+                intTy
+                "g"
+                idTy
+                (BackendVar idTy "f")
+                (BackendClosureCall intTy (BackendVar idTy "g") [intLit 1])
+            )
         structuralClosureArgTy =
           BTMu "$Box_self" (singleFieldStructuralBody (BTVar "a"))
         structuralClosure =
@@ -204,6 +217,8 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithMainExpr (callClosure closure))
       `shouldBe` Right ()
     validateBackendProgram (programWithMainExpr (callClosure capturedClosure))
+      `shouldBe` Right ()
+    validateBackendProgram (programWithMainExpr (callClosureAlias closure))
       `shouldBe` Right ()
     validateBackendExpr (BackendClosureCall boolTy structuralClosure [BackendVar structuralBoxTy "box"])
       `shouldBe` Right ()
