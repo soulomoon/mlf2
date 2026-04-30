@@ -3324,7 +3324,8 @@ lowerGlobalCall :: ProgramEnv -> ExprEnv -> String -> String -> [BackendType] ->
 lowerGlobalCall env exprEnv context name typeArgs args =
   case Map.lookup name (pbBindings (peBase env)) of
     Just binding -> do
-      (resolvedTypeArgs, form) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs args
+      (resolvedTypeArgs, form0) <- instantiateFunctionFormWithTypeArgsM context (biForm binding) typeArgs args
+      let form = qualifyInstantiatedClosureEntries name resolvedTypeArgs form0
       unless (length args == length (ffParams form)) $
         liftEither (BackendLLVMArityMismatch name (length (ffParams form)) (length args))
       if requiresInlineCall form
