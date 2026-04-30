@@ -153,6 +153,12 @@ data ClosureCaptureSlot = ClosureCaptureSlot
   }
   deriving (Eq, Show)
 
+data ConstructedValue = ConstructedValue
+  { cvConstructorName :: String,
+    cvFieldValueKinds :: [LowerValueKind]
+  }
+  deriving (Eq, Show)
+
 data LoweredProgram = LoweredProgram
   { lpBase :: ProgramBase,
     lpEnv :: ProgramEnv,
@@ -170,7 +176,8 @@ data LowerValue = LowerValue
   { lvBackendType :: BackendType,
     lvLLVMType :: LLVMType,
     lvOperand :: LLVMOperand,
-    lvValueKind :: LowerValueKind
+    lvValueKind :: LowerValueKind,
+    lvConstructedValue :: Maybe ConstructedValue
   }
   deriving (Eq, Show)
 
@@ -2723,6 +2730,7 @@ lowerClosureEntry env entry = do
                       (llvmParameterType param)
                       (LLVMLocal (llvmParameterType param) paramName)
                       (parameterValueKind paramName paramTy)
+                      Nothing
                   )
                 | ((paramName, paramTy), param) <- zip (ceParams entry) params
                 ],
@@ -2771,7 +2779,7 @@ lowerClosureEntry env entry = do
           { eeValues =
               Map.insert
                 captureName
-                (LowerValue captureTy llvmTy loaded (ccsValueKind capture))
+                (LowerValue captureTy llvmTy loaded (ccsValueKind capture) Nothing)
                 (eeValues exprEnv0)
           }
 
@@ -2973,6 +2981,7 @@ initialFunctionEnv name form params =
                 (llvmParameterType param)
                 (LLVMLocal (llvmParameterType param) paramName)
                 (parameterValueKind paramName paramTy)
+                Nothing
             )
           | ((paramName, paramTy), param) <- zip (ffParams form) params
           ],
@@ -3245,21 +3254,21 @@ lowerGlobalValue env context resultTy name binding typeArgs =
       resultLLVMType <- lowerRuntimeValueTypeM env context expectedTy
       functionName <- globalFunctionName env context binding0 resolvedTypeArgs
       result <- emitAssign "call" resultLLVMType (LLVMCall functionName [])
-      pure (LowerValue expectedTy resultLLVMType result (functionFormReturnValueKind env instantiated))
+      pure (LowerValue expectedTy resultLLVMType result (functionFormReturnValueKind env instantiated) Nothing)
 
 lowerLit :: ProgramEnv -> String -> BackendType -> Lit -> LowerM LowerValue
 lowerLit env context ty lit = do
   llvmTy <- lowerBackendTypeM env context ty
   case lit of
     LInt value ->
-      pure (LowerValue ty llvmTy (LLVMIntLiteral 64 value) LowerRuntimeValue)
+      pure (LowerValue ty llvmTy (LLVMIntLiteral 64 value) LowerRuntimeValue Nothing)
     LBool value ->
-      pure (LowerValue ty llvmTy (LLVMIntLiteral 1 (if value then 1 else 0)) LowerRuntimeValue)
+      pure (LowerValue ty llvmTy (LLVMIntLiteral 1 (if value then 1 else 0)) LowerRuntimeValue Nothing)
     LString value ->
       case Map.lookup value (peStringGlobals env) of
         Just globalName
           | asciiString value ->
-              pure (LowerValue ty llvmTy (LLVMGlobalRef LLVMPtr globalName) LowerRuntimeValue)
+              pure (LowerValue ty llvmTy (LLVMGlobalRef LLVMPtr globalName) LowerRuntimeValue Nothing)
         Just _ ->
           liftEither (BackendLLVMUnsupportedString value)
         Nothing ->
@@ -3274,7 +3283,7 @@ lowerClosureValue env exprEnv context resultTy entryName captures = do
   emitStore LLVMPtr (LLVMGlobalRef LLVMPtr entryName) codePtrField
   envPtrField <- emitGep "closure.env.ptr" closurePointer 8
   emitStore LLVMPtr envPointer envPtrField
-  pure (LowerValue resultTy LLVMPtr closurePointer LowerClosureRecord)
+  pure (LowerValue resultTy LLVMPtr closurePointer LowerClosureRecord Nothing)
   where
     lowerCapture capture = do
       value <-
@@ -3438,7 +3447,7 @@ lowerReturnedPartialClosureValue env exprEnv context resultTy callee paramTys re
   emitStore LLVMPtr (LLVMGlobalRef LLVMPtr entryName) codePtrField
   envPtrField <- emitGep "closure.env.ptr" closurePointer 8
   emitStore LLVMPtr envPointer envPtrField
-  pure (LowerValue resultTy LLVMPtr closurePointer LowerClosureRecord)
+  pure (LowerValue resultTy LLVMPtr closurePointer LowerClosureRecord Nothing)
   where
     lowerPartialArg (index0, paramTy) arg =
       lowerExprForIndirectArgument env exprEnv context (returnedPartialSuppliedArgName index0, paramTy) arg
@@ -3915,7 +3924,7 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
           let expectedTypes = [LLVMInt 1, LLVMInt 1]
           zipWithM_ (requireLLVMType context name) expectedTypes callArgs
           result <- emitAssign "call" (LLVMInt 1) (LLVMCall runtimeAndName [(LLVMInt 1, lvOperand arg) | arg <- callArgs])
-          pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue)
+          pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
     Nothing ->
       liftEither (BackendLLVMUnknownFunction name)
   where
@@ -3938,7 +3947,7 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
           llvmResultTy <- lowerRuntimeValueTypeM env context (ffReturnType form)
           functionName <- globalFunctionName env context binding resolvedTypeArgs
           result <- emitAssign "call" llvmResultTy (LLVMCall functionName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
-          pure (LowerValue (ffReturnType form) llvmResultTy result (functionFormReturnValueKind env form))
+          pure (LowerValue (ffReturnType form) llvmResultTy result (functionFormReturnValueKind env form) Nothing)
 
 shouldInlineGlobalCall :: ProgramEnv -> ExprEnv -> BindingInfo -> [BackendType] -> FunctionForm -> [BackendExpr] -> Bool
 shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args =
@@ -4437,7 +4446,14 @@ lowerConstruct env exprEnv context resultTy name args =
       resultLLVMType <- lowerBackendTypeM env context resultTy
       unless (resultLLVMType == LLVMPtr) $
         liftEither (BackendLLVMUnsupportedType context resultTy)
-      pure (LowerValue resultTy LLVMPtr object LowerRuntimeValue)
+      pure
+        ( LowerValue
+            resultTy
+            LLVMPtr
+            object
+            LowerRuntimeValue
+            (Just (ConstructedValue name (map lvValueKind argValues)))
+        )
   where
     storeField object index0 value = do
       fieldPtr <- emitGep "field.ptr" object (8 * (index0 + 1))
@@ -4563,7 +4579,7 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
                     [ Map.findWithDefault fieldTy binder bodyBinderTypes
                       | (binder, fieldTy) <- zip binders fieldTys
                     ]
-              loadedFields <- mapMaybe id <$> traverse (loadUsedField usedBinders scrutineeValue) (zip3 [0 :: Int ..] binders effectiveFieldTys)
+              loadedFields <- mapMaybe id <$> traverse (loadUsedField name usedBinders scrutineeValue) (zip3 [0 :: Int ..] binders effectiveFieldTys)
               pure
                 exprEnv
                   { eeValues =
@@ -4572,18 +4588,27 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
                         (eeValues exprEnv)
                   }
 
-    loadUsedField usedBinders scrutineeValue (index0, binder, fieldTy)
+    loadUsedField constructorName usedBinders scrutineeValue (index0, binder, fieldTy)
       | Set.member binder usedBinders = do
-          loaded <- loadField scrutineeValue index0 fieldTy
+          loaded <- loadField constructorName scrutineeValue index0 fieldTy
           pure (Just (binder, loaded))
       | otherwise =
           pure Nothing
 
-    loadField scrutineeValue index0 fieldTy = do
+    loadField constructorName scrutineeValue index0 fieldTy = do
       llvmTy <- lowerStoredFieldTypeM env context fieldTy
       fieldPtr <- emitGep "case.field.ptr" (lvOperand scrutineeValue) (8 * (index0 + 1))
       loaded <- emitAssign "case.field" llvmTy (LLVMLoad llvmTy fieldPtr)
-      pure (LowerValue fieldTy llvmTy loaded (valueKindForType fieldTy))
+      pure (LowerValue fieldTy llvmTy loaded (fieldValueKind constructorName scrutineeValue index0 fieldTy) Nothing)
+
+    fieldValueKind constructorName scrutineeValue index0 fieldTy =
+      case lvConstructedValue scrutineeValue of
+        Just constructed
+          | cvConstructorName constructed == constructorName,
+            Just kind <- atMay (cvFieldValueKinds constructed) index0 ->
+              kind
+        _ ->
+          valueKindForType fieldTy
 
 lowerStoredFieldTypeM :: ProgramEnv -> String -> BackendType -> LowerM LLVMType
 lowerStoredFieldTypeM env context fieldTy
@@ -4735,11 +4760,11 @@ localFunctionParameterValueKind name ty
 
 lowerValueForType :: BackendType -> LLVMType -> LLVMOperand -> LowerValue
 lowerValueForType ty llvmTy operand =
-  LowerValue ty llvmTy operand (valueKindForType ty)
+  LowerValue ty llvmTy operand (valueKindForType ty) Nothing
 
 functionPointerValue :: BackendType -> LLVMOperand -> LowerValue
 functionPointerValue ty operand =
-  LowerValue ty LLVMPtr operand LowerFunctionPointer
+  LowerValue ty LLVMPtr operand LowerFunctionPointer Nothing
 
 lowerImmediateConstructCase ::
   ProgramEnv ->
@@ -4803,7 +4828,7 @@ lowerImmediateConstructCase env exprEnv context resultTy constructorName args fi
       continuationLabel <- freshBlock "case.unreachable.cont"
       startBlock continuationLabel
       operand <- dummyOperandAfterUnreachable context expectedTy
-      pure (LowerValue resultTy expectedTy operand (valueKindForType resultTy))
+      pure (LowerValue resultTy expectedTy operand (valueKindForType resultTy) Nothing)
 
     bindImmediateAlternativePattern (BackendAlternative pattern0 body) =
       case pattern0 of

@@ -1230,6 +1230,18 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "preserves closure-valued first-order function fields through case binders" $ do
+    output <- requireRight (renderBackendProgramLLVM closureFunctionFieldCallProgram)
+
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.case.field"
+    output `shouldNotSatisfy` isInfixOf "call i64 %\"__llvm.case.field"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+    nativeOutput <- requireRight (renderBackendProgramNativeLLVM closureFunctionFieldCallProgram)
+    runLLVMNativeExecutable nativeOutput
+      `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
+
   it "captures first-order lambda parameters as raw function pointers" $ do
     output <- requireRight (renderBackendProgramLLVM capturedFirstOrderParameterClosureProgram)
 
@@ -4736,6 +4748,57 @@ rawFunctionPointerFieldCallProgram =
             }
         ],
       backendProgramMain = "main"
+    }
+
+closureFunctionFieldCallProgram :: BackendProgram
+closureFunctionFieldCallProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [fnBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLet
+                          intTy
+                          "captured"
+                          intTy
+                          (intLit 41)
+                          ( BackendLet
+                              intTy
+                              "box"
+                              fnBoxTy
+                              ( BackendConstruct
+                                  fnBoxTy
+                                  "FnBox"
+                                  [ BackendClosure
+                                      { backendExprType = unaryIntTy,
+                                        backendClosureEntryName = "__mlfp_closure$field_case_closure",
+                                        backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
+                                        backendClosureParams = [("x", intTy)],
+                                        backendClosureBody = BackendVar intTy "captured"
+                                      }
+                                  ]
+                              )
+                              ( BackendCase
+                                  intTy
+                                  (BackendVar fnBoxTy "box")
+                                  ( BackendAlternative
+                                      (BackendConstructorPattern "FnBox" ["f"])
+                                      (BackendApp intTy (BackendVar unaryIntTy "f") (intLit 0))
+                                      :| []
+                                  )
+                              )
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
     }
 
 capturedFirstOrderParameterClosureProgram :: BackendProgram
