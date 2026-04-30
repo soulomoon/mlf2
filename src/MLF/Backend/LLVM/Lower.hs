@@ -222,9 +222,16 @@ mergeConstructedValues values =
 
 combineValueKinds :: BackendType -> [LowerValueKind] -> LowerValueKind
 combineValueKinds resultTy kinds =
-  case nub kinds of
+  case uniqueKinds of
     [kind] -> kind
+    _
+      | isFirstOrderFunctionPointerType resultTy,
+        LowerClosureRecord `elem` uniqueKinds,
+        LowerFunctionPointer `elem` uniqueKinds ->
+          LowerClosureRecord
     _ -> valueKindForType resultTy
+  where
+    uniqueKinds = nub kinds
 
 data LocalFunction = LocalFunction
   { lfForm :: FunctionForm,
@@ -239,6 +246,10 @@ data ExprEnv = ExprEnv
     eeActiveGlobalInlines :: Set String
   }
   deriving (Eq, Show)
+
+exprEnvValueKinds :: ExprEnv -> Map String LowerValueKind
+exprEnvValueKinds =
+  Map.map lvValueKind . eeValues
 
 data FunctionState = FunctionState
   { fsNextLocal :: Int,
@@ -2342,8 +2353,10 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
         Just entries -> entries
         Nothing -> collectTypeAppliedClosureEntries
     BackendConstruct _ _ args -> concatMap (collectClosureEntriesInExpr base localForms valueKinds) args
-    BackendCase _ scrutinee alternatives ->
-      collectClosureEntriesInExpr base localForms valueKinds scrutinee ++ concatMap collectAlternativeEntries (NE.toList alternatives)
+    BackendCase resultTy scrutinee alternatives ->
+      collectClosureEntriesInExpr base localForms valueKinds scrutinee
+        ++ concatMap collectAlternativeEntries (NE.toList alternatives)
+        ++ collectCaseResultAdapterEntries resultTy (NE.toList alternatives)
     BackendRoll _ payload -> collectClosureEntriesInExpr base localForms valueKinds payload
     BackendUnroll _ payload -> collectClosureEntriesInExpr base localForms valueKinds payload
     BackendClosure resultTy entryName captures params body ->
@@ -2661,6 +2674,21 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
             (Map.withoutKeys valueKinds binders)
             (backendAltBody alternative)
 
+    collectCaseResultAdapterEntries resultTy alternatives0 =
+      [ returnedPartialEntry LowerFunctionPointer resultTy [] paramTys returnTy [] resultTy
+      | isFirstOrderFunctionPointerType resultTy,
+        not (null paramTys),
+        resultKind == LowerClosureRecord,
+        LowerClosureRecord `elem` branchKinds
+      ]
+      where
+        branchKinds =
+          [ expressionValueKind localForms valueKinds (backendAltBody alternative)
+          | alternative <- alternatives0
+          ]
+        resultKind = combineValueKinds resultTy branchKinds
+        (paramTys, returnTy) = collectArrowsType resultTy
+
     patternBinders =
       \case
         BackendDefaultPattern -> Set.empty
@@ -2721,7 +2749,11 @@ backendExprIsExplicitClosure :: BackendExpr -> Bool
 backendExprIsExplicitClosure =
   \case
     BackendClosure {} -> True
+    BackendTyAbs _ _ _ body -> backendExprIsExplicitClosure body
+    BackendTyApp _ fun _ -> backendExprIsExplicitClosure fun
     BackendLet _ _ _ _ body -> backendExprIsExplicitClosure body
+    BackendCase _ _ alternatives ->
+      all (backendExprIsExplicitClosure . backendAltBody) (NE.toList alternatives)
     _ -> False
 
 lowerFunction :: ProgramEnv -> String -> Bool -> FunctionForm -> Either BackendLLVMError LLVMFunction
@@ -3143,11 +3175,26 @@ pushCallIntoExpression context resultTy fun typeArgs args =
 applyCallToExpr :: String -> BackendType -> BackendExpr -> [BackendType] -> [BackendExpr] -> Either BackendLLVMError BackendExpr
 applyCallToExpr context expectedTy expr typeArgs args = do
   (typedExpr, typedExprTy) <- applyTypeApplicationsToExprWithType context expr typeArgs
-  (applied, actualTy) <- foldM applyOne (typedExpr, typedExprTy) args
-  unless (alphaEqBackendType expectedTy actualTy) $
-    Left (BackendLLVMInternalError ("call result mismatch at " ++ context))
-  pure applied
+  case explicitClosureCall typedExpr typedExprTy of
+    Just applied ->
+      pure applied
+    Nothing -> do
+      (applied, actualTy) <- foldM applyOne (typedExpr, typedExprTy) args
+      unless (alphaEqBackendType expectedTy actualTy) $
+        Left (BackendLLVMInternalError ("call result mismatch at " ++ context))
+      pure applied
   where
+    explicitClosureCall typedExpr typedExprTy
+      | backendExprIsExplicitClosure typedExpr,
+        length args == length paramTys,
+        and (zipWith alphaEqBackendType paramTys (map backendExprType args)),
+        alphaEqBackendType expectedTy returnTy =
+          Just (BackendClosureCall expectedTy typedExpr args)
+      | otherwise =
+          Nothing
+      where
+        (paramTys, returnTy) = collectArrowsType typedExprTy
+
     applyOne (current, currentTy) arg =
       case currentTy of
         BTArrow expectedArgTy resultTy
@@ -4560,9 +4607,10 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
   joinLabel <- freshBlock "case.join"
   let constructorTargets = mapMaybe constructorSwitchTarget (zip (NE.toList alternatives) altLabels)
       switchTargets = [(tag, label) | (tag, label, _) <- constructorTargets]
+      resultValueKind = combineValueKinds resultTy (map (alternativeBodyValueKind scrutineeValue) alternativesList)
   rejectDuplicateSwitchTargets constructorTargets
   finishCurrentBlock (LLVMSwitch (LLVMInt 64) tagValue defaultLabel switchTargets)
-  incoming <- concat <$> zipWithM (lowerAlternative resultLLVMType joinLabel scrutineeValue) (NE.toList alternatives) altLabels
+  incoming <- concat <$> zipWithM (lowerAlternative resultValueKind resultLLVMType joinLabel scrutineeValue) (NE.toList alternatives) altLabels
   when (lookupDefaultLabel altLabels == Nothing) $ do
     startBlock defaultLabel
     finishCurrentBlock LLVMUnreachable
@@ -4573,7 +4621,7 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
         resultTy
         resultLLVMType
         result
-        (combineValueKinds resultTy [kind | (_, _, kind, _) <- incoming])
+        resultValueKind
         (mergeConstructedValues [constructed | (_, _, _, constructed) <- incoming])
     )
   where
@@ -4611,15 +4659,49 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
         Nothing ->
           pure ()
 
-    lowerAlternative resultLLVMType joinLabel scrutineeValue alternative label = do
+    lowerAlternative resultValueKind resultLLVMType joinLabel scrutineeValue alternative label = do
       startBlock label
       exprEnv' <- bindAlternativePattern scrutineeValue alternative
-      bodyValue <- lowerExpr env exprEnv' context (backendAltBody alternative)
+      rawBodyValue <- lowerExpr env exprEnv' context (backendAltBody alternative)
+      bodyValue <- normalizeCaseResultValue resultValueKind rawBodyValue
       unless (lvLLVMType bodyValue == resultLLVMType) $
         liftEither (BackendLLVMInternalError ("case alternative type mismatch at " ++ context))
       sourceLabel <- gets fsCurrentLabel
       finishCurrentBlock (LLVMBr joinLabel)
       pure [(lvOperand bodyValue, sourceLabel, lvValueKind bodyValue, lvConstructedValue bodyValue)]
+
+    normalizeCaseResultValue targetKind value
+      | targetKind == LowerClosureRecord,
+        lvValueKind value == LowerFunctionPointer,
+        isFirstOrderFunctionPointerType (lvBackendType value) =
+          let (paramTys, returnTy) = collectArrowsType (lvBackendType value)
+           in lowerReturnedPartialClosureValue env exprEnv (context ++ " case result") resultTy value paramTys returnTy []
+      | otherwise =
+          pure value
+
+    alternativeBodyValueKind scrutineeValue alternative =
+      backendExprValueKindWith env Set.empty (alternativeValueKinds scrutineeValue alternative) (backendAltBody alternative)
+
+    alternativeValueKinds scrutineeValue (BackendAlternative pattern0 _) =
+      case pattern0 of
+        BackendDefaultPattern ->
+          exprEnvValueKinds exprEnv
+        BackendConstructorPattern constructorName binders ->
+          patternBinderValueKinds scrutineeValue constructorName binders `Map.union` exprEnvValueKinds exprEnv
+
+    patternBinderValueKinds scrutineeValue constructorName binders =
+      Map.fromList
+        [ (binder, binderFieldValueKind index0 fieldTy)
+        | (index0, (binder, fieldTy)) <- zip [0 :: Int ..] (zip binders fieldTys)
+        ]
+      where
+        fieldTys =
+          fromMaybe [] $
+            Map.lookup constructorName (pbConstructors (peBase env)) >>= \constructorRuntime ->
+              constructorRuntimeFieldTypes constructorRuntime (lvBackendType scrutineeValue)
+        binderFieldValueKind index0 fieldTy =
+          fromMaybe (valueKindForType fieldTy) $
+            lvConstructedValue scrutineeValue >>= constructedFieldValueKind constructorName index0
 
     bindAlternativePattern scrutineeValue (BackendAlternative pattern0 body) =
       case pattern0 of

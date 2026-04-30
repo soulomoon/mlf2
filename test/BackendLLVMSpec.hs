@@ -1268,6 +1268,33 @@ spec = describe "MLF.Backend.LLVM" $ do
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
+  it "normalizes mixed callable case results to closure records" $ do
+    output <- requireRight (renderBackendProgramLLVM mixedCallableCaseResultProgram)
+
+    output `shouldSatisfy` isInfixOf "__mlfp_returned_partial$function$0"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_returned_partial$function$0"
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.call"
+    output `shouldNotSatisfy` isInfixOf "call i64 %\"__llvm.call"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+    nativeOutput <- requireRight (renderBackendProgramNativeLLVM mixedCallableCaseResultProgram)
+    runLLVMNativeExecutable nativeOutput
+      `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
+
+  it "lowers BackendApp case heads that select direct closures" $ do
+    output <- requireRight (renderBackendProgramLLVM caseHeadedDirectClosureBackendAppProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$backend_app_case_some\""
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM call"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+    nativeOutput <- requireRight (renderBackendProgramNativeLLVM caseHeadedDirectClosureBackendAppProgram)
+    runLLVMNativeExecutable nativeOutput
+      `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
+
   it "captures first-order lambda parameters as raw function pointers" $ do
     output <- requireRight (renderBackendProgramLLVM capturedFirstOrderParameterClosureProgram)
 
@@ -4928,6 +4955,122 @@ caseReturnedClosureOverApplicationProgram =
                         BackendApp
                           intTy
                           (BackendApp unaryIntTy (BackendVar (BTArrow intTy unaryIntTy) "makeFromCase") (intLit 41))
+                          (intLit 0),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
+    }
+
+mixedCallableCaseResultProgram :: BackendProgram
+mixedCallableCaseResultProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ helperBinding,
+                  BackendBinding
+                    { backendBindingName = "makeMixed",
+                      backendBindingType = BTArrow unaryIntTy (BTArrow intTy unaryIntTy),
+                      backendBindingExpr =
+                        BackendLam
+                          (BTArrow unaryIntTy (BTArrow intTy unaryIntTy))
+                          "$evidence_f"
+                          unaryIntTy
+                          ( BackendLam
+                              (BTArrow intTy unaryIntTy)
+                              "base"
+                              intTy
+                              ( BackendCase
+                                  unaryIntTy
+                                  (BackendConstruct (optionTy intTy) "Some" [BackendVar intTy "base"])
+                                  ( BackendAlternative
+                                      (BackendConstructorPattern "Some" ["captured"])
+                                      ( BackendClosure
+                                          { backendExprType = unaryIntTy,
+                                            backendClosureEntryName = "__mlfp_closure$mixed_case_closure",
+                                            backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
+                                            backendClosureParams = [("x", intTy)],
+                                            backendClosureBody = BackendVar intTy "captured"
+                                          }
+                                      )
+                                      :| [ BackendAlternative
+                                             (BackendConstructorPattern "None" [])
+                                             (BackendVar unaryIntTy "$evidence_f")
+                                         ]
+                                  )
+                              )
+                          ),
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          ( BackendApp
+                              unaryIntTy
+                              ( BackendApp
+                                  (BTArrow intTy unaryIntTy)
+                                  (BackendVar (BTArrow unaryIntTy (BTArrow intTy unaryIntTy)) "makeMixed")
+                                  (BackendVar unaryIntTy "helper")
+                              )
+                              (intLit 41)
+                          )
+                          (intLit 0),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
+    }
+
+caseHeadedDirectClosureBackendAppProgram :: BackendProgram
+caseHeadedDirectClosureBackendAppProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          ( BackendCase
+                              unaryIntTy
+                              (BackendConstruct (optionTy intTy) "Some" [intLit 41])
+                              ( BackendAlternative
+                                  (BackendConstructorPattern "Some" ["captured"])
+                                  ( BackendClosure
+                                      { backendExprType = unaryIntTy,
+                                        backendClosureEntryName = "__mlfp_closure$backend_app_case_some",
+                                        backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
+                                        backendClosureParams = [("x", intTy)],
+                                        backendClosureBody = BackendVar intTy "captured"
+                                      }
+                                  )
+                                  :| [ BackendAlternative
+                                         (BackendConstructorPattern "None" [])
+                                         ( BackendClosure
+                                             { backendExprType = unaryIntTy,
+                                               backendClosureEntryName = "__mlfp_closure$backend_app_case_none",
+                                               backendClosureCaptures = [],
+                                               backendClosureParams = [("x", intTy)],
+                                               backendClosureBody = intLit 0
+                                             }
+                                         )
+                                     ]
+                              )
+                          )
                           (intLit 0),
                       backendBindingExportedAsMain = True
                     }
