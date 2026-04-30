@@ -864,14 +864,14 @@ validateBackendClosureCall mbContext resultTy fun args =
         validateArg
         [0 :: Int ..]
         (zip paramTys args)
-      unless (alphaEqBackendType resultTy expectedResultTy) $
+      unless (backendApplicationTypeMatches mbContext expectedResultTy resultTy) $
         Left (BackendClosureCallResultMismatch resultTy expectedResultTy)
   where
     funTy =
       backendExprType fun
 
     validateArg index0 (expectedArgTy, arg) =
-      unless (alphaEqBackendType expectedArgTy (backendExprType arg)) $
+      unless (backendApplicationTypeMatches mbContext expectedArgTy (backendExprType arg)) $
         Left (BackendClosureCallArgumentMismatch index0 expectedArgTy (backendExprType arg))
 
 collectClosureCallType :: BackendType -> Maybe ([BackendType], BackendType)

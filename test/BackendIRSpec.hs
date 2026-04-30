@@ -190,10 +190,22 @@ spec = describe "MLF.Backend.IR" $ do
             idTy
             value
             (BackendClosureCall intTy (BackendVar idTy "f") [intLit 1])
+        structuralClosureArgTy =
+          BTMu "$Box_self" (singleFieldStructuralBody (BTVar "a"))
+        structuralClosure =
+          BackendClosure
+            { backendExprType = BTArrow structuralClosureArgTy boolTy,
+              backendClosureEntryName = "__mlfp_closure$structural",
+              backendClosureCaptures = [],
+              backendClosureParams = [("box", structuralClosureArgTy)],
+              backendClosureBody = boolLit True
+            }
 
     validateBackendProgram (programWithMainExpr (callClosure closure))
       `shouldBe` Right ()
     validateBackendProgram (programWithMainExpr (callClosure capturedClosure))
+      `shouldBe` Right ()
+    validateBackendExpr (BackendClosureCall boolTy structuralClosure [BackendVar structuralBoxTy "box"])
       `shouldBe` Right ()
 
   it "rejects malformed closure IR" $ do
