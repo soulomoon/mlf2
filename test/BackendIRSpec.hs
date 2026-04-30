@@ -223,6 +223,45 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendExpr (BackendClosureCall boolTy structuralClosure [BackendVar structuralBoxTy "box"])
       `shouldBe` Right ()
 
+  it "lets local non-closure binders shadow closure-valued globals during validation" $ do
+    let globalClosure =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$shadowed_global",
+              backendClosureCaptures = [],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            }
+        shadowedLetCallProgram =
+          programWithBindings
+            [ binding "f" idTy globalClosure,
+              mainBinding
+                ( BackendLet
+                    intTy
+                    "f"
+                    idTy
+                    intIdentityExpr
+                    (BackendApp intTy (BackendVar idTy "f") (intLit 1))
+                )
+            ]
+        shadowedCaseClosureGlobalProgram =
+          programWithDataAndBindings
+            [fnBoxData]
+            [ binding "f" idTy globalClosure,
+              binding
+                "g"
+                idTy
+                ( BackendCase
+                    idTy
+                    (BackendConstruct fnBoxTy "FnBox" [intIdentityExpr])
+                    (BackendAlternative (BackendConstructorPattern "FnBox" ["f"]) (BackendVar idTy "f") :| [])
+                ),
+              mainBinding (BackendApp intTy (BackendVar idTy "g") (intLit 1))
+            ]
+
+    validateBackendProgram shadowedLetCallProgram `shouldBe` Right ()
+    validateBackendProgram shadowedCaseClosureGlobalProgram `shouldBe` Right ()
+
   it "rejects malformed closure IR" $ do
     let goodClosure entryName =
           BackendClosure
@@ -808,6 +847,14 @@ boxData =
       backendDataConstructors = [BackendConstructor "Box" [] [intTy] boxTy]
     }
 
+fnBoxData :: BackendData
+fnBoxData =
+  BackendData
+    { backendDataName = "FnBox",
+      backendDataParameters = [],
+      backendDataConstructors = [BackendConstructor "FnBox" [] [idTy] fnBoxTy]
+    }
+
 optionData :: BackendData
 optionData =
   BackendData
@@ -1313,6 +1360,10 @@ singleFieldStructuralBody fieldTy =
 boxTy :: BackendType
 boxTy =
   BTBase (BaseTy "Box")
+
+fnBoxTy :: BackendType
+fnBoxTy =
+  BTBase (BaseTy "FnBox")
 
 packTy :: BackendType
 packTy =

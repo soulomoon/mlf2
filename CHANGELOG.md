@@ -38,6 +38,8 @@
 - Fixed closure call-head classification so local non-closure binders shadow
   same-named closure-valued globals instead of inheriting the global closure
   ABI.
+- Fixed backend IR validation and closure-global discovery so local non-closure
+  `let` and case-pattern binders shadow same-named closure-valued globals.
 - Supported expected-type resolution for nullary overloaded `.mlfp` methods.
   Associated values such as `mempty : a` now resolve from an explicit or
   propagated expected source type while bare uses without such evidence still

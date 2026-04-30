@@ -653,33 +653,46 @@ backendClosureGlobalNames bindings =
             Set.fromList
               [ backendBindingName binding
                 | binding <- bindings,
-                  backendExprIsGlobalClosureValue globals Set.empty (backendBindingExpr binding)
+                  backendExprIsGlobalClosureValue globals (backendBindingExpr binding)
               ]
        in if globals' == globals
             then globals
             else go globals'
 
-backendExprIsGlobalClosureValue :: Set.Set String -> Set.Set String -> BackendExpr -> Bool
-backendExprIsGlobalClosureValue globals locals =
-  \case
-    BackendClosure {} ->
-      True
-    BackendVar _ name ->
-      Set.member name locals || Set.member name globals
-    BackendTyAbs _ _ _ body ->
-      backendExprIsGlobalClosureValue globals locals body
-    BackendTyApp _ fun _ ->
-      backendExprIsGlobalClosureValue globals locals fun
-    BackendLet _ name _ rhs body ->
-      let locals' =
-            if backendExprIsGlobalClosureValue globals locals rhs
-              then Set.insert name locals
-              else Set.delete name locals
-       in backendExprIsGlobalClosureValue globals locals' body
-    BackendCase {backendAlternatives = alternatives} ->
-      all (backendExprIsGlobalClosureValue globals locals . backendAltBody) (NE.toList alternatives)
-    _ ->
-      False
+backendExprIsGlobalClosureValue :: Set.Set String -> BackendExpr -> Bool
+backendExprIsGlobalClosureValue globals =
+  go Set.empty Set.empty
+  where
+    go closureLocals boundLocals =
+      \case
+        BackendClosure {} ->
+          True
+        BackendVar _ name
+          | Set.member name closureLocals -> True
+          | Set.member name boundLocals -> False
+          | otherwise -> Set.member name globals
+        BackendTyAbs _ _ _ body ->
+          go closureLocals boundLocals body
+        BackendTyApp _ fun _ ->
+          go closureLocals boundLocals fun
+        BackendLet _ name _ rhs body ->
+          let closureLocals' =
+                if go closureLocals boundLocals rhs
+                  then Set.insert name closureLocals
+                  else Set.delete name closureLocals
+              boundLocals' = Set.insert name boundLocals
+           in go closureLocals' boundLocals' body
+        BackendCase {backendAlternatives = alternatives} ->
+          all (goAlternative closureLocals boundLocals) (NE.toList alternatives)
+        _ ->
+          False
+
+    goAlternative closureLocals boundLocals (BackendAlternative pattern0 body) =
+      let binders = patternBinders pattern0
+       in go
+            (closureLocals `Set.difference` binders)
+            (boundLocals <> binders)
+            body
 
 backendRuntimePrimitiveTypes :: Map.Map String BackendType
 backendRuntimePrimitiveTypes =
@@ -842,9 +855,7 @@ backendClosureValueName mbContext =
       Just entryName
     BackendVar _ name
       | Just context0 <- mbContext,
-        Set.member name (bvcClosureGlobals context0)
-          || Set.member name (bvcClosureLocals context0)
-          || Set.member name (bvcPossibleClosureLocals context0) ->
+        backendContextNameIsClosureValue True context0 name ->
           Just name
     BackendTyApp _ fun _ ->
       backendClosureValueName mbContext fun
@@ -862,8 +873,7 @@ backendDefiniteClosureValueName mbContext =
       Just entryName
     BackendVar _ name
       | Just context0 <- mbContext,
-        Set.member name (bvcClosureGlobals context0)
-          || Set.member name (bvcClosureLocals context0) ->
+        backendContextNameIsClosureValue False context0 name ->
           Just name
     BackendTyApp _ fun _ ->
       backendDefiniteClosureValueName mbContext fun
@@ -901,6 +911,13 @@ firstClosureValueName (Nothing : rest) =
   firstClosureValueName rest
 firstClosureValueName (Just value : _) =
   Just value
+
+backendContextNameIsClosureValue :: Bool -> BackendValidationContext -> String -> Bool
+backendContextNameIsClosureValue includePossibleLocals context0 name
+  | Set.member name (bvcClosureLocals context0) = True
+  | includePossibleLocals && Set.member name (bvcPossibleClosureLocals context0) = True
+  | Map.member name (bvcLocals context0) = False
+  | otherwise = Set.member name (bvcClosureGlobals context0)
 
 backendExprCallsNameAsClosureHead :: String -> BackendExpr -> Bool
 backendExprCallsNameAsClosureHead needle =
