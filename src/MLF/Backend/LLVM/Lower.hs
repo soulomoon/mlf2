@@ -2344,7 +2344,7 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
               collectClosureEntriesInExpr base localForms valueKinds rhs
         bodyLocalForms = collectLetLocalForm localForms name bindingTy rhs
         bodyValueKinds =
-          case letBoundValueKind localForms valueKinds bindingTy rhs of
+          case letBoundValueKind Set.empty localForms valueKinds bindingTy rhs of
             Just kind -> Map.insert name kind valueKinds
             Nothing -> Map.delete name valueKinds
     BackendTyAbs {} -> []
@@ -2539,8 +2539,8 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
         _ ->
           Map.delete name localForms0
 
-    letBoundValueKind localForms0 valueKinds0 bindingTy rhs =
-      case aliasValueKind localForms0 valueKinds0 rhs of
+    letBoundValueKind visitedGlobals localForms0 valueKinds0 bindingTy rhs =
+      case aliasValueKind visitedGlobals localForms0 valueKinds0 rhs of
         Just kind ->
           Just kind
         Nothing ->
@@ -2549,7 +2549,7 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
               | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
                   Nothing
             _ ->
-              Just (expressionValueKind localForms0 valueKinds0 rhs)
+              Just (expressionValueKindWith visitedGlobals localForms0 valueKinds0 rhs)
 
     closureCaptureSlot localForms0 valueKinds0 capture =
       ClosureCaptureSlot
@@ -2572,7 +2572,7 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
     shouldStoreFunctionPointerCapture localForms0 valueKinds0 capture =
       isFirstOrderFunctionPointerType (backendClosureCaptureType capture)
         && not (isEvidenceArgument True (backendClosureCaptureName capture) (backendClosureCaptureType capture))
-        && aliasValueKind localForms0 valueKinds0 (backendClosureCaptureExpr capture) /= Just LowerClosureRecord
+        && aliasValueKind Set.empty localForms0 valueKinds0 (backendClosureCaptureExpr capture) /= Just LowerClosureRecord
         && case collectTyApps (backendClosureCaptureExpr capture) of
           (BackendVar {}, _) -> True
           _ -> False
@@ -2590,7 +2590,7 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
           case arg of
             BackendClosure {} -> LowerClosureRecord
             _ ->
-              case aliasValueKind localForms0 valueKinds0 arg of
+              case aliasValueKind Set.empty localForms0 valueKinds0 arg of
                 Just kind -> kind
                 Nothing ->
                   case collectTyApps arg of
@@ -2599,48 +2599,51 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
       | otherwise =
           LowerRuntimeValue
 
-    aliasValueKind localForms0 valueKinds0 expr0 =
+    aliasValueKind visitedGlobals localForms0 valueKinds0 expr0 =
       case expr0 of
         BackendVar ty name
           | isFunctionLikeBackendType ty ->
-              variableValueKind localForms0 valueKinds0 name []
+              variableValueKind visitedGlobals localForms0 valueKinds0 name []
         BackendTyApp ty fun _
           | isFunctionLikeBackendType ty ->
               case collectTyApps expr0 of
                 (BackendVar _ name, typeArgs) ->
-                  variableValueKind localForms0 valueKinds0 name typeArgs
+                  variableValueKind visitedGlobals localForms0 valueKinds0 name typeArgs
                 _ ->
-                  aliasValueKind localForms0 valueKinds0 fun
+                  aliasValueKind visitedGlobals localForms0 valueKinds0 fun
         BackendLet ty name bindingTy rhs body
           | isFunctionLikeBackendType ty ->
               let localForms' = collectLetLocalForm localForms0 name bindingTy rhs
                   valueKinds' =
-                    case letBoundValueKind localForms0 valueKinds0 bindingTy rhs of
+                    case letBoundValueKind visitedGlobals localForms0 valueKinds0 bindingTy rhs of
                       Just kind -> Map.insert name kind valueKinds0
                       Nothing -> Map.delete name valueKinds0
-               in aliasValueKind localForms' valueKinds' body
+               in aliasValueKind visitedGlobals localForms' valueKinds' body
         _ ->
           Nothing
 
-    expressionValueKind localForms0 valueKinds0 expr0
+    expressionValueKind =
+      expressionValueKindWith Set.empty
+
+    expressionValueKindWith visitedGlobals localForms0 valueKinds0 expr0
       | not (isFunctionLikeBackendType (backendExprType expr0)) =
           LowerRuntimeValue
       | otherwise =
           case expr0 of
             BackendVar ty name ->
-              fromMaybe (valueKindForType ty) (variableValueKind localForms0 valueKinds0 name [])
+              fromMaybe (valueKindForType ty) (variableValueKind visitedGlobals localForms0 valueKinds0 name [])
             BackendTyApp ty fun _ ->
               case collectTyApps expr0 of
                 (BackendVar _ name, typeArgs) ->
-                  fromMaybe (valueKindForType ty) (variableValueKind localForms0 valueKinds0 name typeArgs)
+                  fromMaybe (valueKindForType ty) (variableValueKind visitedGlobals localForms0 valueKinds0 name typeArgs)
                 _ ->
-                  expressionValueKind localForms0 valueKinds0 fun
+                  expressionValueKindWith visitedGlobals localForms0 valueKinds0 fun
             BackendLet _ name bindingTy rhs body ->
-              expressionValueKind localForms' valueKinds' body
+              expressionValueKindWith visitedGlobals localForms' valueKinds' body
               where
                 localForms' = collectLetLocalForm localForms0 name bindingTy rhs
                 valueKinds' =
-                  case letBoundValueKind localForms0 valueKinds0 bindingTy rhs of
+                  case letBoundValueKind visitedGlobals localForms0 valueKinds0 bindingTy rhs of
                     Just kind -> Map.insert name kind valueKinds0
                     Nothing -> Map.delete name valueKinds0
             BackendClosure {} ->
@@ -2648,7 +2651,7 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
             _ ->
               valueKindForType (backendExprType expr0)
 
-    variableValueKind localForms0 valueKinds0 name typeArgs =
+    variableValueKind visitedGlobals localForms0 valueKinds0 name typeArgs =
       case Map.lookup name valueKinds0 of
         Just kind ->
           Just kind
@@ -2661,12 +2664,18 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
                   case instantiateFunctionFormWithTypeArgs "closure capture classification" (biForm binding) typeArgs [] of
                     Right (_, form)
                       | null (ffParams form),
-                        isClosureRuntimeValueType (ffReturnType form) ->
-                          Just LowerClosureRecord
+                        isFunctionLikeBackendType (ffReturnType form) ->
+                          Just (nullaryGlobalReturnValueKind visitedGlobals name (ffReturnType form) form)
                     _ ->
                       Just LowerFunctionPointer
                 Nothing ->
                   Just LowerClosureRecord
+
+    nullaryGlobalReturnValueKind visitedGlobals name returnTy form
+      | Set.member name visitedGlobals =
+          valueKindForType returnTy
+      | otherwise =
+          expressionValueKindWith (Set.insert name visitedGlobals) Map.empty Map.empty (ffBody form)
 
     collectAlternativeEntries alternative =
       let binders = patternBinders (backendAltPattern alternative)

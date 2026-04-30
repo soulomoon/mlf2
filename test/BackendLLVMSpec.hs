@@ -1187,6 +1187,19 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "infers captured nullary global callable aliases from their bodies" $ do
+    output <- requireRight (renderBackendProgramLLVM capturedNullaryGlobalFunctionAliasProgram)
+
+    output `shouldSatisfy` isInfixOf "call ptr @\"get\"()"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.env.field"
+    output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.closure.env.field"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+    nativeOutput <- requireRight (renderBackendProgramNativeLLVM capturedNullaryGlobalFunctionAliasProgram)
+    runLLVMNativeExecutable nativeOutput
+      `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
+
   it "routes over-applied raw function-pointer results through indirect calls" $ do
     output <- requireRight (renderBackendProgramLLVM rawReturnedFunctionPointerCallProgram)
 
@@ -4643,6 +4656,61 @@ capturedFunctionPointerCallProgram =
             }
         ],
       backendProgramMain = "main"
+    }
+
+capturedNullaryGlobalFunctionAliasProgram :: BackendProgram
+capturedNullaryGlobalFunctionAliasProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "helper",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr =
+                        BackendLam
+                          { backendExprType = unaryIntTy,
+                            backendParamName = "x",
+                            backendParamType = intTy,
+                            backendBody = BackendVar intTy "x"
+                          },
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "get",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr =
+                        BackendLet
+                          unaryIntTy
+                          "ignored"
+                          intTy
+                          (intLit 0)
+                          (BackendVar unaryIntTy "helper"),
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendClosureCall
+                          intTy
+                          ( BackendClosure
+                              { backendExprType = unaryIntTy,
+                                backendClosureEntryName = "__mlfp_closure$call_captured_nullary_global_alias",
+                                backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "get")],
+                                backendClosureParams = [("x", intTy)],
+                                backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
+                              }
+                          )
+                          [intLit 41],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
     }
 
 rawReturnedFunctionPointerCallProgram :: BackendProgram
