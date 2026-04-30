@@ -1167,6 +1167,28 @@ renderBackendIRExpr level expr =
         indent (level + 2) "payload:"
       ]
         ++ renderBackendIRExpr (level + 4) payload
+    BackendClosure resultTy entryName captures params body ->
+      [ indent level ("closure " ++ entryName ++ " : " ++ renderBackendIRType resultTy),
+        indent (level + 2) ("params: " ++ renderNamedTypeList params),
+        indent (level + 2) "captures:"
+      ]
+        ++ renderListOrEmpty (level + 4) (renderBackendIRCapture (level + 4)) captures
+        ++ [indent (level + 2) "body:"]
+        ++ renderBackendIRExpr (level + 4) body
+    BackendClosureCall resultTy fun args ->
+      [ indent level ("closure-call : " ++ renderBackendIRType resultTy),
+        indent (level + 2) "function:"
+      ]
+        ++ renderBackendIRExpr (level + 4) fun
+        ++ [indent (level + 2) "arguments:"]
+        ++ renderExprList (level + 4) args
+
+renderBackendIRCapture :: Int -> BackendClosureCapture -> [String]
+renderBackendIRCapture level capture =
+  [ indent level (backendClosureCaptureName capture ++ " : " ++ renderBackendIRType (backendClosureCaptureType capture)),
+    indent (level + 2) "expr:"
+  ]
+    ++ renderBackendIRExpr (level + 4) (backendClosureCaptureExpr capture)
 
 renderBackendIRAlternative :: Int -> BackendAlternative -> [String]
 renderBackendIRAlternative level alternative =
@@ -1221,6 +1243,10 @@ renderPlainTypeParameters params =
 renderTypeList :: [BackendType] -> String
 renderTypeList types0 =
   "[" ++ intercalate ", " (map renderBackendIRType types0) ++ "]"
+
+renderNamedTypeList :: [(String, BackendType)] -> String
+renderNamedTypeList params =
+  "[" ++ intercalate ", " [name ++ " : " ++ renderBackendIRType ty | (name, ty) <- params] ++ "]"
 
 renderLit :: Lit -> String
 renderLit lit =
@@ -1385,6 +1411,13 @@ backendExprBinders expr =
       backendExprBinders scrutinee ++ concatMap alternativeBinders (toList alternatives)
     BackendRoll {backendRollPayload = body} -> backendExprBinders body
     BackendUnroll {backendUnrollPayload = body} -> backendExprBinders body
+    BackendClosure {backendClosureCaptures = captures, backendClosureParams = params, backendClosureBody = body} ->
+      concatMap (backendExprBinders . backendClosureCaptureExpr) captures
+        ++ map backendClosureCaptureName captures
+        ++ map fst params
+        ++ backendExprBinders body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      backendExprBinders fun ++ concatMap backendExprBinders args
   where
     alternativeBinders (BackendAlternative pattern0 body) =
       patternBackendBinders pattern0 ++ backendExprBinders body
@@ -1409,6 +1442,10 @@ containsSelfReferentialLetRhs expr =
       containsSelfReferentialLetRhs scrutinee || any (containsSelfReferentialLetRhs . backendAltBody) (toList alternatives)
     BackendRoll {backendRollPayload = body} -> containsSelfReferentialLetRhs body
     BackendUnroll {backendUnrollPayload = body} -> containsSelfReferentialLetRhs body
+    BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
+      any (containsSelfReferentialLetRhs . backendClosureCaptureExpr) captures || containsSelfReferentialLetRhs body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      containsSelfReferentialLetRhs fun || any containsSelfReferentialLetRhs args
   where
     rhsIsSelfReference name rhs =
       case rhs of

@@ -145,6 +145,35 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unknown backend LLVM function"
     validateLLVMAssembly output
 
+  it "collects local polymorphic closure entries after type application" $ do
+    output <- requireRight (renderBackendProgramLLVM localPolymorphicClosureEntryProgram)
+
+    output `shouldSatisfy` isInfixOf "$__mlfp_closure$local_poly"
+    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
+    validateLLVMAssembly output
+
+  it "uses qualified closure entries for directly called type applications" $ do
+    output <- requireRight (renderBackendProgramLLVM directPolymorphicClosureCallProgram)
+
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_direct_typeapp$"
+    output `shouldSatisfy` isInfixOf "$__mlfp_closure$direct_call_poly\""
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"__mlfp_closure$direct_call_poly\""
+    validateLLVMAssembly output
+
+  it "collects closure entries when direct type applications cross let heads" $ do
+    output <- requireRight (renderBackendProgramLLVM letHeadPolymorphicClosureCallProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"polyLocal$"
+    output `shouldSatisfy` isInfixOf "store ptr @\"polyLocal$"
+    output `shouldSatisfy` isInfixOf "$__mlfp_closure$direct_call_poly\""
+    validateLLVMAssembly output
+
+  it "lowers structurally matched closure call results" $ do
+    output <- requireRight (renderBackendProgramLLVM structuralClosureResultProgram)
+
+    output `shouldSatisfy` isInfixOf "__mlfp_closure$result_structural"
+    validateLLVMAssembly output
+
   it "instantiates direct polymorphic zero-arity expressions used through type application" $ do
     output <- requireRight (renderBackendProgramLLVM directPolymorphicZeroArityProgram)
 
@@ -557,13 +586,74 @@ spec = describe "MLF.Backend.LLVM" $ do
 
     mapM_ runLLVMParityCase programSpecToLLVMParityCases
 
-  it "rejects partial applications until closure conversion exists" $ do
+  it "rejects partial applications until closure conversion is explicit in backend IR" $ do
     renderBackendProgramLLVM partialApplicationProgram
       `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
 
-  it "rejects escaping lambdas until closure conversion exists" $ do
+  it "rejects raw escaping lambdas until closure construction is explicit in backend IR" $ do
     renderBackendProgramLLVM escapingLambdaProgram
       `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
+
+  it "lowers zero-capture closures through the explicit closure ABI" $ do
+    output <- requireRight (renderBackendProgramLLVM zeroCaptureClosureProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$identity\"(ptr %\"__mlfp_env\", i64 %\"x\")"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$identity\""
+    output `shouldSatisfy` isInfixOf "load ptr"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+
+  it "lowers captured local values through closure environments" $ do
+    output <- requireRight (renderBackendProgramLLVM capturedClosureProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$constCaptured\"(ptr %\"__mlfp_env\", i64 %\"x\")"
+    output `shouldSatisfy` isInfixOf "store i64 41"
+    output `shouldSatisfy` isInfixOf "load i64"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+
+  it "qualifies closure entry names emitted from type specializations" $ do
+    output <- requireRight (renderBackendProgramLLVM polymorphicClosureSpecializationProgram)
+
+    let closureDefinitions =
+          filter
+            (\line -> "define private i64 @\"poly$t" `isInfixOf` line && "$__mlfp_closure$poly\"" `isInfixOf` line)
+            (lines output)
+    length closureDefinitions `shouldBe` 2
+    output `shouldNotSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$poly\""
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"__mlfp_closure$poly\""
+    validateLLVMAssembly output
+
+  it "keys function wrappers from qualified specialization forms" $ do
+    output <- requireRight (renderBackendProgramLLVM polymorphicClosureFunctionWrapperProgram)
+
+    let wrapperDefinitions =
+          filter
+            (\line -> "define private i64 @\"__mlfp_function_wrapper$" `isInfixOf` line)
+            (lines output)
+    length wrapperDefinitions `shouldSatisfy` (>= 2)
+    output `shouldSatisfy` isInfixOf "$__mlfp_closure$wrapper_key"
+    output `shouldNotSatisfy` isInfixOf "unsupported function argument"
+    validateLLVMAssembly output
+
+  it "qualifies closure entries in inlined polymorphic global calls" $ do
+    output <- requireRight (renderBackendProgramLLVM inlinePolymorphicClosureProgram)
+
+    let qualifiedStores =
+          filter
+            (\line -> "store ptr @\"polyInline$t" `isInfixOf` line && "$__mlfp_closure$inline\"" `isInfixOf` line)
+            (lines output)
+    length qualifiedStores `shouldBe` 1
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"__mlfp_closure$inline\""
+    validateLLVMAssembly output
+
+  it "rejects closure entry names that collide with generated wrapper functions" $
+    renderBackendProgramLLVM closureEntryFunctionWrapperCollisionProgram
+      `shouldSatisfyLeft` isInfixOf "Duplicate backend LLVM symbol: \"__mlfp_function_wrapper$0\""
+
+  it "rejects closure entry names that collide with runtime declarations" $
+    renderBackendProgramLLVM closureEntryRuntimeDeclarationCollisionProgram
+      `shouldSatisfyLeft` isInfixOf "Duplicate backend LLVM symbol: \"malloc\""
 
   it "lowers stored top-level function constructor fields" $ do
     output <- requireRight (renderBackendProgramLLVM functionFieldProgram)
@@ -1849,6 +1939,186 @@ localPolymorphicZeroArityProgram =
       backendProgramMain = "main"
     }
 
+localPolymorphicClosureEntryProgram :: BackendProgram
+localPolymorphicClosureEntryProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLet
+                          intTy
+                          "polyLocal"
+                          localPolymorphicClosureEntryTy
+                          localPolymorphicClosureEntryExpr
+                          ( BackendApp
+                              intTy
+                              ( BackendTyApp
+                                  (BTArrow intTy intTy)
+                                  (BackendVar localPolymorphicClosureEntryTy "polyLocal")
+                                  intTy
+                              )
+                              (intLit 3)
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+localPolymorphicClosureEntryTy :: BackendType
+localPolymorphicClosureEntryTy =
+  BTForall "a" Nothing (BTArrow (BTVar "a") (BTVar "a"))
+
+localPolymorphicClosureEntryExpr :: BackendExpr
+localPolymorphicClosureEntryExpr =
+  BackendTyAbs
+    localPolymorphicClosureEntryTy
+    "a"
+    Nothing
+    ( BackendLam
+        (BTArrow (BTVar "a") (BTVar "a"))
+        "x"
+        (BTVar "a")
+        ( BackendLet
+            (BTVar "a")
+            "f"
+            (BTArrow (BTVar "a") (BTVar "a"))
+            ( BackendClosure
+                { backendExprType = BTArrow (BTVar "a") (BTVar "a"),
+                  backendClosureEntryName = "__mlfp_closure$local_poly",
+                  backendClosureCaptures = [],
+                  backendClosureParams = [("y", BTVar "a")],
+                  backendClosureBody = BackendVar (BTVar "a") "y"
+                }
+            )
+            (BackendClosureCall (BTVar "a") (BackendVar (BTArrow (BTVar "a") (BTVar "a")) "f") [BackendVar (BTVar "a") "x"])
+        )
+    )
+
+directPolymorphicClosureCallProgram :: BackendProgram
+directPolymorphicClosureCallProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          (BackendTyApp (BTArrow intTy intTy) directPolymorphicClosureCallExpr intTy)
+                          (intLit 3),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+directPolymorphicClosureCallExpr :: BackendExpr
+directPolymorphicClosureCallExpr =
+  BackendTyAbs
+    localPolymorphicClosureEntryTy
+    "a"
+    Nothing
+    ( BackendLam
+        (BTArrow (BTVar "a") (BTVar "a"))
+        "x"
+        (BTVar "a")
+        ( BackendLet
+            (BTVar "a")
+            "f"
+            (BTArrow (BTVar "a") (BTVar "a"))
+            ( BackendClosure
+                { backendExprType = BTArrow (BTVar "a") (BTVar "a"),
+                  backendClosureEntryName = "__mlfp_closure$direct_call_poly",
+                  backendClosureCaptures = [],
+                  backendClosureParams = [("y", BTVar "a")],
+                  backendClosureBody = BackendVar (BTVar "a") "y"
+                }
+            )
+            (BackendClosureCall (BTVar "a") (BackendVar (BTArrow (BTVar "a") (BTVar "a")) "f") [BackendVar (BTVar "a") "x"])
+        )
+    )
+
+letHeadPolymorphicClosureCallProgram :: BackendProgram
+letHeadPolymorphicClosureCallProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          ( BackendTyApp
+                              (BTArrow intTy intTy)
+                              ( BackendLet
+                                  localPolymorphicClosureEntryTy
+                                  "polyLocal"
+                                  localPolymorphicClosureEntryTy
+                                  directPolymorphicClosureCallExpr
+                                  (BackendVar localPolymorphicClosureEntryTy "polyLocal")
+                              )
+                              intTy
+                          )
+                          (intLit 3),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+structuralClosureResultProgram :: BackendProgram
+structuralClosureResultProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [resultBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = resultBoxStructuralTy,
+                      backendBindingExpr =
+                        BackendClosureCall
+                          resultBoxStructuralTy
+                          ( BackendClosure
+                              { backendExprType = BTArrow intTy resultBoxTy,
+                                backendClosureEntryName = "__mlfp_closure$result_structural",
+                                backendClosureCaptures = [],
+                                backendClosureParams = [("x", intTy)],
+                                backendClosureBody =
+                                  BackendConstruct resultBoxTy "ResultBox" [BackendVar intTy "x"]
+                              }
+                          )
+                          [intLit 3],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
 directPolymorphicZeroArityProgram :: BackendProgram
 directPolymorphicZeroArityProgram =
   BackendProgram
@@ -2445,6 +2715,14 @@ optionData =
         ]
     }
 
+resultBoxData :: BackendData
+resultBoxData =
+  BackendData
+    { backendDataName = "ResultBox",
+      backendDataParameters = [],
+      backendDataConstructors = [BackendConstructor "ResultBox" [] [intTy] resultBoxTy]
+    }
+
 nonePolyTy :: BackendType
 nonePolyTy =
   BTForall "a" Nothing (optionTy (BTVar "a"))
@@ -2574,6 +2852,301 @@ escapingLambdaProgram =
         backendLetRhs = intIdentityExpr,
         backendLetBody = BackendVar unaryIntTy "f"
       }
+
+zeroCaptureClosureProgram :: BackendProgram
+zeroCaptureClosureProgram =
+  programWithMainExpr intTy $
+    BackendLet
+      { backendExprType = intTy,
+        backendLetName = "f",
+        backendLetType = unaryIntTy,
+        backendLetRhs =
+          BackendClosure
+            { backendExprType = unaryIntTy,
+              backendClosureEntryName = "__mlfp_closure$identity",
+              backendClosureCaptures = [],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            },
+        backendLetBody = BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 7]
+      }
+
+capturedClosureProgram :: BackendProgram
+capturedClosureProgram =
+  programWithMainExpr intTy $
+    BackendLet
+      { backendExprType = intTy,
+        backendLetName = "captured",
+        backendLetType = intTy,
+        backendLetRhs = intLit 41,
+        backendLetBody =
+          BackendLet
+            { backendExprType = intTy,
+              backendLetName = "f",
+              backendLetType = unaryIntTy,
+              backendLetRhs =
+                BackendClosure
+                  { backendExprType = unaryIntTy,
+                    backendClosureEntryName = "__mlfp_closure$constCaptured",
+                    backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
+                    backendClosureParams = [("x", intTy)],
+                    backendClosureBody = BackendVar intTy "captured"
+                  },
+              backendLetBody = BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 0]
+            }
+      }
+
+polymorphicClosureSpecializationProgram :: BackendProgram
+polymorphicClosureSpecializationProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "poly",
+                      backendBindingType = polymorphicClosureSpecializationTy,
+                      backendBindingExpr = polymorphicClosureSpecializationExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLet
+                          intTy
+                          "left"
+                          intTy
+                          (polymorphicClosureSpecializationCall intTy (intLit 7))
+                          ( BackendLet
+                              intTy
+                              "right"
+                              intTy
+                              (polymorphicClosureSpecializationCall boolTy (boolLit True))
+                              (intLit 0)
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+polymorphicClosureSpecializationTy :: BackendType
+polymorphicClosureSpecializationTy =
+  BTForall "a" Nothing (BTArrow (BTVar "a") intTy)
+
+polymorphicClosureSpecializationExpr :: BackendExpr
+polymorphicClosureSpecializationExpr =
+  BackendTyAbs
+    polymorphicClosureSpecializationTy
+    "a"
+    Nothing
+    ( BackendLam
+        (BTArrow (BTVar "a") intTy)
+        "ignored"
+        (BTVar "a")
+        ( BackendLet
+            intTy
+            "f"
+            unaryIntTy
+            ( BackendClosure
+                { backendExprType = unaryIntTy,
+                  backendClosureEntryName = "__mlfp_closure$poly",
+                  backendClosureCaptures = [],
+                  backendClosureParams = [("x", intTy)],
+                  backendClosureBody = BackendVar intTy "x"
+                }
+            )
+            (BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 11])
+        )
+    )
+
+polymorphicClosureSpecializationCall :: BackendType -> BackendExpr -> BackendExpr
+polymorphicClosureSpecializationCall argTy arg =
+  BackendApp
+    intTy
+    (BackendTyApp (BTArrow argTy intTy) (BackendVar polymorphicClosureSpecializationTy "poly") argTy)
+    arg
+
+polymorphicClosureFunctionWrapperProgram :: BackendProgram
+polymorphicClosureFunctionWrapperProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [fnBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "polyWrapper",
+                      backendBindingType = polymorphicClosureFunctionWrapperTy,
+                      backendBindingExpr = polymorphicClosureFunctionWrapperExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLet
+                          intTy
+                          "left"
+                          fnBoxTy
+                          (polymorphicClosureFunctionWrapperCall intTy (intLit 7))
+                          ( BackendLet
+                              intTy
+                              "right"
+                              fnBoxTy
+                              (polymorphicClosureFunctionWrapperCall boolTy (boolLit True))
+                              (intLit 0)
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+polymorphicClosureFunctionWrapperTy :: BackendType
+polymorphicClosureFunctionWrapperTy =
+  BTForall "a" Nothing (BTArrow (BTVar "a") fnBoxTy)
+
+polymorphicClosureFunctionWrapperExpr :: BackendExpr
+polymorphicClosureFunctionWrapperExpr =
+  BackendTyAbs
+    polymorphicClosureFunctionWrapperTy
+    "a"
+    Nothing
+    ( BackendLam
+        (BTArrow (BTVar "a") fnBoxTy)
+        "ignored"
+        (BTVar "a")
+        (BackendConstruct fnBoxTy "FnBox" [closureContainingFunctionExpr])
+    )
+
+closureContainingFunctionExpr :: BackendExpr
+closureContainingFunctionExpr =
+  BackendLet
+    unaryIntTy
+    "unusedClosure"
+    unaryIntTy
+    ( BackendClosure
+        { backendExprType = unaryIntTy,
+          backendClosureEntryName = "__mlfp_closure$wrapper_key",
+          backendClosureCaptures = [],
+          backendClosureParams = [("x", intTy)],
+          backendClosureBody = BackendVar intTy "x"
+        }
+    )
+    intIdentityExpr
+
+polymorphicClosureFunctionWrapperCall :: BackendType -> BackendExpr -> BackendExpr
+polymorphicClosureFunctionWrapperCall argTy arg =
+  BackendApp
+    fnBoxTy
+    (BackendTyApp (BTArrow argTy fnBoxTy) (BackendVar polymorphicClosureFunctionWrapperTy "polyWrapper") argTy)
+    arg
+
+inlinePolymorphicClosureProgram :: BackendProgram
+inlinePolymorphicClosureProgram =
+  programWithBindings
+    [ helperBinding,
+      BackendBinding
+        { backendBindingName = "polyInline",
+          backendBindingType = inlinePolymorphicClosureTy,
+          backendBindingExpr = inlinePolymorphicClosureExpr,
+          backendBindingExportedAsMain = False
+        },
+      BackendBinding
+        { backendBindingName = "main",
+          backendBindingType = intTy,
+          backendBindingExpr =
+            BackendApp
+              intTy
+              ( BackendApp
+                  (BTArrow intTy intTy)
+                  (BackendTyApp (BTArrow unaryIntTy (BTArrow intTy intTy)) (BackendVar inlinePolymorphicClosureTy "polyInline") intTy)
+                  (BackendVar unaryIntTy "helper")
+              )
+              (intLit 0),
+          backendBindingExportedAsMain = True
+        }
+    ]
+
+inlinePolymorphicClosureTy :: BackendType
+inlinePolymorphicClosureTy =
+  BTForall "a" Nothing (BTArrow unaryIntTy (BTArrow (BTVar "a") intTy))
+
+inlinePolymorphicClosureExpr :: BackendExpr
+inlinePolymorphicClosureExpr =
+  BackendTyAbs
+    inlinePolymorphicClosureTy
+    "a"
+    Nothing
+    ( BackendLam
+        (BTArrow unaryIntTy (BTArrow (BTVar "a") intTy))
+        "f"
+        unaryIntTy
+        ( BackendLam
+            (BTArrow (BTVar "a") intTy)
+            "ignored"
+            (BTVar "a")
+            ( BackendLet
+                intTy
+                "closure"
+                unaryIntTy
+                ( BackendClosure
+                    { backendExprType = unaryIntTy,
+                      backendClosureEntryName = "__mlfp_closure$inline",
+                      backendClosureCaptures = [],
+                      backendClosureParams = [("x", intTy)],
+                      backendClosureBody = BackendVar intTy "x"
+                    }
+                )
+                ( BackendApp
+                    intTy
+                    (BackendVar unaryIntTy "f")
+                    (BackendClosureCall intTy (BackendVar unaryIntTy "closure") [intLit 9])
+                )
+            )
+        )
+    )
+
+closureEntryFunctionWrapperCollisionProgram :: BackendProgram
+closureEntryFunctionWrapperCollisionProgram =
+  programWithFnBoxMainExpr $
+    BackendConstruct
+      fnBoxTy
+      "FnBox"
+      [ BackendLet
+          unaryIntTy
+          "unusedClosure"
+          unaryIntTy
+          (closureWithEntry "__mlfp_function_wrapper$0")
+          intIdentityExpr
+      ]
+
+closureEntryRuntimeDeclarationCollisionProgram :: BackendProgram
+closureEntryRuntimeDeclarationCollisionProgram =
+  programWithMainExpr intTy $
+    BackendLet
+      intTy
+      "f"
+      unaryIntTy
+      (closureWithEntry "malloc")
+      (BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 7])
+
+closureWithEntry :: String -> BackendExpr
+closureWithEntry entryName =
+  BackendClosure
+    { backendExprType = unaryIntTy,
+      backendClosureEntryName = entryName,
+      backendClosureCaptures = [],
+      backendClosureParams = [("x", intTy)],
+      backendClosureBody = BackendVar intTy "x"
+    }
 
 functionFieldProgram :: BackendProgram
 functionFieldProgram =
@@ -2905,6 +3478,18 @@ stringTy =
 optionTy :: BackendType -> BackendType
 optionTy ty =
   BTCon (BaseTy "Option") (ty :| [])
+
+resultBoxTy :: BackendType
+resultBoxTy =
+  BTBase (BaseTy "ResultBox")
+
+resultBoxStructuralTy :: BackendType
+resultBoxStructuralTy =
+  BTMu "$ResultBox_self" (singleFieldStructuralBody intTy)
+
+singleFieldStructuralBody :: BackendType -> BackendType
+singleFieldStructuralBody fieldTy =
+  BTForall "r" Nothing (BTArrow (BTArrow fieldTy (BTVar "r")) (BTVar "r"))
 
 unaryIntTy :: BackendType
 unaryIntTy =

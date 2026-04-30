@@ -166,6 +166,247 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendExpr (BackendLet intTy "x" boolTy (intLit 1) (BackendVar intTy "x"))
       `shouldBe` Left (BackendLetTypeMismatch "x" boolTy intTy)
 
+  it "validates explicit closure construction and indirect closure calls" $ do
+    let closure =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$id",
+              backendClosureCaptures = [],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            }
+        capturedClosure =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$captured",
+              backendClosureCaptures = [BackendClosureCapture "captured" intTy (intLit 7)],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "captured"
+            }
+        callClosure value =
+          BackendLet
+            intTy
+            "f"
+            idTy
+            value
+            (BackendClosureCall intTy (BackendVar idTy "f") [intLit 1])
+        structuralClosureArgTy =
+          BTMu "$Box_self" (singleFieldStructuralBody (BTVar "a"))
+        structuralClosure =
+          BackendClosure
+            { backendExprType = BTArrow structuralClosureArgTy boolTy,
+              backendClosureEntryName = "__mlfp_closure$structural",
+              backendClosureCaptures = [],
+              backendClosureParams = [("box", structuralClosureArgTy)],
+              backendClosureBody = boolLit True
+            }
+
+    validateBackendProgram (programWithMainExpr (callClosure closure))
+      `shouldBe` Right ()
+    validateBackendProgram (programWithMainExpr (callClosure capturedClosure))
+      `shouldBe` Right ()
+    validateBackendExpr (BackendClosureCall boolTy structuralClosure [BackendVar structuralBoxTy "box"])
+      `shouldBe` Right ()
+
+  it "rejects malformed closure IR" $ do
+    let goodClosure entryName =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = entryName,
+              backendClosureCaptures = [],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            }
+        captureMismatch =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$bad_capture",
+              backendClosureCaptures = [BackendClosureCapture "captured" boolTy (intLit 7)],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            }
+        resultMismatch =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$bad_result",
+              backendClosureCaptures = [],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = boolLit True
+            }
+        duplicateEntries =
+          BackendLet
+            intTy
+            "f"
+            idTy
+            (goodClosure "__mlfp_closure$dup")
+            ( BackendLet
+                intTy
+                "g"
+                idTy
+                (goodClosure "__mlfp_closure$dup")
+                (intLit 0)
+            )
+        entryNameBindingCollision =
+          programWithBindings
+            [ binding "helper" intTy (intLit 0),
+              mainBinding (goodClosure "helper")
+            ]
+        entryNameRuntimeCollision =
+          programWithMainExpr (goodClosure "__mlfp_and")
+        duplicateCaptureAndParameter =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$duplicate_binder",
+              backendClosureCaptures = [BackendClosureCapture "x" intTy (intLit 7)],
+              backendClosureParams = [("x", intTy)],
+              backendClosureBody = BackendVar intTy "x"
+            }
+        nonFunctionClosure =
+          BackendClosure
+            { backendExprType = intTy,
+              backendClosureEntryName = "__mlfp_closure$non_function",
+              backendClosureCaptures = [],
+              backendClosureParams = [],
+              backendClosureBody = intLit 0
+            }
+        underspecifiedClosureParams =
+          BackendClosure
+            { backendExprType = idTy,
+              backendClosureEntryName = "__mlfp_closure$underspecified_params",
+              backendClosureCaptures = [],
+              backendClosureParams = [],
+              backendClosureBody = intIdentityExpr
+            }
+        badCall =
+          BackendClosureCall intTy (goodClosure "__mlfp_closure$call") [boolLit True]
+        nonClosureCall =
+          BackendLet
+            intTy
+            "f"
+            idTy
+            intIdentityExpr
+            (BackendClosureCall intTy (BackendVar idTy "f") [intLit 1])
+        unlistedLocalCapture =
+          BackendLet
+            idTy
+            "captured"
+            intTy
+            (intLit 7)
+            ( BackendClosure
+                { backendExprType = idTy,
+                  backendClosureEntryName = "__mlfp_closure$unlisted_capture",
+                  backendClosureCaptures = [],
+                  backendClosureParams = [("x", intTy)],
+                  backendClosureBody = BackendVar intTy "captured"
+                }
+            )
+        appCalledClosure =
+          BackendLet
+            intTy
+            "f"
+            idTy
+            (goodClosure "__mlfp_closure$app")
+            (BackendApp intTy (BackendVar idTy "f") (intLit 1))
+        appCalledLetHeadClosure =
+          BackendApp
+            intTy
+            ( BackendLet
+                idTy
+                "f"
+                idTy
+                (goodClosure "__mlfp_closure$app_let_head")
+                (BackendVar idTy "f")
+            )
+            (intLit 1)
+        appCalledClosureAlias =
+          BackendLet
+            intTy
+            "g"
+            idTy
+            (goodClosure "__mlfp_closure$app_alias")
+            ( BackendLet
+                intTy
+                "f"
+                idTy
+                (BackendVar idTy "g")
+                (BackendApp intTy (BackendVar idTy "f") (intLit 1))
+            )
+        appCalledCaseHeadClosure =
+          BackendApp
+            intTy
+            ( BackendCase
+                idTy
+                (BackendConstruct boxTy "Box" [intLit 0])
+                ( BackendAlternative
+                    (BackendConstructorPattern "Box" ["n"])
+                    (goodClosure "__mlfp_closure$app_case")
+                    :| []
+                )
+            )
+            (intLit 1)
+        appCalledCapturedClosure =
+          BackendLet
+            idTy
+            "g"
+            idTy
+            (goodClosure "__mlfp_closure$app_captured_source")
+            ( BackendClosure
+                { backendExprType = idTy,
+                  backendClosureEntryName = "__mlfp_closure$app_captured",
+                  backendClosureCaptures = [BackendClosureCapture "capturedClosure" idTy (BackendVar idTy "g")],
+                  backendClosureParams = [("x", intTy)],
+                  backendClosureBody = BackendApp intTy (BackendVar idTy "capturedClosure") (intLit 1)
+                }
+            )
+        closureCallMixedCaseHead =
+          BackendClosureCall
+            intTy
+            ( BackendCase
+                idTy
+                (BackendConstruct boxTy "Box" [intLit 0])
+                ( BackendAlternative
+                    (BackendConstructorPattern "Box" ["n"])
+                    (goodClosure "__mlfp_closure$closure_call_case")
+                    :| [BackendAlternative BackendDefaultPattern intIdentityExpr]
+                )
+            )
+            [intLit 1]
+
+    validateBackendProgram (programWithMainExpr captureMismatch)
+      `shouldBe` Left (BackendClosureCaptureTypeMismatch "captured" boolTy intTy)
+    validateBackendProgram (programWithMainExpr resultMismatch)
+      `shouldBe` Left (BackendClosureTypeMismatch "__mlfp_closure$bad_result" idTy (BTArrow intTy boolTy))
+    validateBackendProgram (programWithMainExpr duplicateEntries)
+      `shouldBe` Left (BackendDuplicateClosureEntry "__mlfp_closure$dup")
+    validateBackendProgram entryNameBindingCollision
+      `shouldBe` Left (BackendClosureEntryNameCollision "helper")
+    validateBackendProgram entryNameRuntimeCollision
+      `shouldBe` Left (BackendClosureEntryNameCollision "__mlfp_and")
+    validateBackendProgram (programWithMainExpr duplicateCaptureAndParameter)
+      `shouldBe` Left (BackendDuplicateClosureParameter "x")
+    validateBackendProgram (programWithMainExpr nonFunctionClosure)
+      `shouldBe` Left (BackendClosureExpectedFunction "__mlfp_closure$non_function" intTy)
+    validateBackendProgram (programWithMainExpr underspecifiedClosureParams)
+      `shouldBe` Left (BackendClosureParameterArityMismatch "__mlfp_closure$underspecified_params" 0 1)
+    validateBackendProgram (programWithMainExpr badCall)
+      `shouldBe` Left (BackendClosureCallArgumentMismatch 0 intTy boolTy)
+    validateBackendProgram (programWithMainExpr nonClosureCall)
+      `shouldBe` Left (BackendClosureCallExpectedClosureValue idTy)
+    validateBackendProgram (programWithMainExpr unlistedLocalCapture)
+      `shouldBe` Left (BackendUnknownVariable "captured")
+    validateBackendProgram (programWithMainExpr appCalledClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+    validateBackendProgram (programWithMainExpr appCalledLetHeadClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+    validateBackendProgram (programWithMainExpr appCalledClosureAlias)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+    validateBackendProgram (programWithMainExpr appCalledCaseHeadClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "__mlfp_closure$app_case")
+    validateBackendProgram (programWithMainExpr appCalledCapturedClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "capturedClosure")
+    validateBackendProgram (programWithMainExpr closureCallMixedCaseHead)
+      `shouldBe` Left (BackendClosureCallExpectedClosureValue idTy)
+
   it "checks type application against forall nodes" $ do
     validateBackendExpr
       ( BackendTyApp

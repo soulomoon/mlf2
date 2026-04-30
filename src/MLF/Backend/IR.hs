@@ -39,6 +39,7 @@ module MLF.Backend.IR
     BackendBinding (..),
     BackendData (..),
     BackendConstructor (..),
+    BackendClosureCapture (..),
     BackendTypeBinder (..),
     BackendType (..),
     BackendExpr (..),
@@ -56,7 +57,7 @@ module MLF.Backend.IR
   )
 where
 
-import Control.Monad (foldM, unless)
+import Control.Monad (foldM, unless, zipWithM_)
 import Data.Char (isDigit)
 import Data.List (sort)
 import Data.List.NonEmpty (NonEmpty)
@@ -100,6 +101,13 @@ data BackendConstructor = BackendConstructor
     backendConstructorForalls :: [BackendTypeBinder],
     backendConstructorFields :: [BackendType],
     backendConstructorResult :: BackendType
+  }
+  deriving (Eq, Show)
+
+data BackendClosureCapture = BackendClosureCapture
+  { backendClosureCaptureName :: String,
+    backendClosureCaptureType :: BackendType,
+    backendClosureCaptureExpr :: BackendExpr
   }
   deriving (Eq, Show)
 
@@ -188,6 +196,18 @@ data BackendExpr
       { backendExprType :: BackendType,
         backendUnrollPayload :: BackendExpr
       }
+  | BackendClosure
+      { backendExprType :: BackendType,
+        backendClosureEntryName :: String,
+        backendClosureCaptures :: [BackendClosureCapture],
+        backendClosureParams :: [(String, BackendType)],
+        backendClosureBody :: BackendExpr
+      }
+  | BackendClosureCall
+      { backendExprType :: BackendType,
+        backendClosureFunction :: BackendExpr,
+        backendClosureArguments :: [BackendExpr]
+      }
   deriving (Eq, Show)
 
 data BackendAlternative = BackendAlternative
@@ -214,6 +234,7 @@ data BackendValidationError
   | BackendApplicationExpectedFunction BackendType
   | BackendApplicationArgumentMismatch BackendType BackendType
   | BackendApplicationResultMismatch BackendType BackendType
+  | BackendClosureCalledWithBackendApp String
   | BackendLetTypeMismatch String BackendType BackendType
   | BackendLetBodyTypeMismatch BackendType BackendType
   | BackendTypeAbsTypeMismatch String BackendType BackendType
@@ -224,6 +245,19 @@ data BackendValidationError
   | BackendRollPayloadMismatch BackendType BackendType
   | BackendUnrollExpectedRecursive BackendType
   | BackendUnrollResultMismatch BackendType BackendType
+  | BackendDuplicateClosureEntry String
+  | BackendClosureEntryNameCollision String
+  | BackendDuplicateClosureCapture String
+  | BackendDuplicateClosureParameter String
+  | BackendClosureCaptureTypeMismatch String BackendType BackendType
+  | BackendClosureExpectedFunction String BackendType
+  | BackendClosureParameterArityMismatch String Int Int
+  | BackendClosureTypeMismatch String BackendType BackendType
+  | BackendClosureCallExpectedFunction BackendType
+  | BackendClosureCallExpectedClosureValue BackendType
+  | BackendClosureCallArityMismatch Int Int
+  | BackendClosureCallArgumentMismatch Int BackendType BackendType
+  | BackendClosureCallResultMismatch BackendType BackendType
   | BackendUnknownConstructor String
   | BackendConstructorArityMismatch String Int Int
   | BackendConstructorArgumentMismatch String Int BackendType BackendType
@@ -239,6 +273,8 @@ data BackendValidationContext = BackendValidationContext
     bvcData :: Map.Map String BackendData,
     bvcConstructors :: Map.Map String BackendConstructorInfo,
     bvcLocals :: Map.Map String BackendType,
+    bvcClosureLocals :: Set.Set String,
+    bvcPossibleClosureLocals :: Set.Set String,
     bvcTypeBounds :: Map.Map String (Maybe BackendType)
   }
 
@@ -544,11 +580,35 @@ unfoldBackendRecursiveType ty =
     BTMu name body -> Just (substituteBackendType name ty body)
     _ -> Nothing
 
+backendClosureEntryNames :: BackendExpr -> [String]
+backendClosureEntryNames =
+  \case
+    BackendVar {} -> []
+    BackendLit {} -> []
+    BackendLam _ _ _ body -> backendClosureEntryNames body
+    BackendApp _ fun arg -> backendClosureEntryNames fun ++ backendClosureEntryNames arg
+    BackendLet _ _ _ rhs body -> backendClosureEntryNames rhs ++ backendClosureEntryNames body
+    BackendTyAbs _ _ _ body -> backendClosureEntryNames body
+    BackendTyApp _ fun _ -> backendClosureEntryNames fun
+    BackendConstruct _ _ args -> concatMap backendClosureEntryNames args
+    BackendCase _ scrutinee alternatives ->
+      backendClosureEntryNames scrutinee ++ concatMap (backendClosureEntryNames . backendAltBody) (NE.toList alternatives)
+    BackendRoll _ payload -> backendClosureEntryNames payload
+    BackendUnroll _ payload -> backendClosureEntryNames payload
+    BackendClosure _ entryName captures _ body ->
+      entryName
+        : concatMap (backendClosureEntryNames . backendClosureCaptureExpr) captures
+          ++ backendClosureEntryNames body
+    BackendClosureCall _ fun args ->
+      backendClosureEntryNames fun ++ concatMap backendClosureEntryNames args
+
 validateBackendProgram :: BackendProgram -> Either BackendValidationError ()
 validateBackendProgram program = do
   requireUnique BackendDuplicateModule (map backendModuleName modules0)
   requireUnique BackendDuplicateBinding (map backendBindingName bindings)
   requireUnique BackendDuplicateConstructor (map backendConstructorName constructors)
+  requireUnique BackendDuplicateClosureEntry closureEntryNames
+  rejectClosureEntryNameCollisions closureEntryNames (map backendBindingName bindings ++ Map.keys backendRuntimePrimitiveTypes)
   unless (backendProgramMain program `elem` map backendBindingName bindings) $
     Left (BackendMainNotFound (backendProgramMain program))
   mapM_ (validateBackendBindingInContext context0) bindings
@@ -556,6 +616,7 @@ validateBackendProgram program = do
     modules0 = backendProgramModules program
     bindings = concatMap backendModuleBindings modules0
     constructors = concatMap backendDataConstructors (concatMap backendModuleData modules0)
+    closureEntryNames = concatMap (backendClosureEntryNames . backendBindingExpr) bindings
     constructorInfos =
       [ ( backendConstructorName constructor,
           BackendConstructorInfo
@@ -575,6 +636,8 @@ validateBackendProgram program = do
           bvcData = Map.fromList [(backendDataName dataDecl, dataDecl) | dataDecl <- concatMap backendModuleData modules0],
           bvcConstructors = Map.fromList constructorInfos,
           bvcLocals = Map.empty,
+          bvcClosureLocals = Set.empty,
+          bvcPossibleClosureLocals = Set.empty,
           bvcTypeBounds = Map.empty
         }
 
@@ -631,6 +694,9 @@ validateBackendExprWith mbContext expr =
     BackendApp resultTy fun arg -> do
       validateBackendExprWith mbContext fun
       validateBackendExprWith mbContext arg
+      case backendAppClosureHead mbContext fun of
+        Just name -> Left (BackendClosureCalledWithBackendApp name)
+        Nothing -> pure ()
       case backendExprType fun of
         BTArrow expectedArg expectedResult -> do
           unless (backendApplicationTypeMatches mbContext expectedArg (backendExprType arg)) $
@@ -643,7 +709,7 @@ validateBackendExprWith mbContext expr =
       validateBackendExprWith mbContext rhs
       unless (alphaEqBackendType (backendExprType rhs) bindingTy) $
         Left (BackendLetTypeMismatch name bindingTy (backendExprType rhs))
-      validateBackendExprWith (extendLocalMaybe mbContext name bindingTy) body
+      validateBackendExprWith (extendLetLocalMaybe mbContext name bindingTy rhs) body
       unless (alphaEqBackendType (backendExprType body) resultTy) $
         Left (BackendLetBodyTypeMismatch resultTy (backendExprType body))
     BackendTyAbs resultTy name mbBound body -> do
@@ -683,6 +749,153 @@ validateBackendExprWith mbContext expr =
             Left (BackendUnrollResultMismatch resultTy expectedResultTy)
         Nothing ->
           Left (BackendUnrollExpectedRecursive (backendExprType payload))
+    BackendClosure resultTy entryName captures params body -> do
+      requireUnique BackendDuplicateClosureCapture (map backendClosureCaptureName captures)
+      requireUnique BackendDuplicateClosureParameter (map fst params)
+      requireUnique BackendDuplicateClosureParameter (map backendClosureCaptureName captures ++ map fst params)
+      mapM_ (validateBackendClosureCapture mbContext) captures
+      let bodyContext =
+            foldl
+              (extendClosureCaptureLocalMaybe mbContext)
+              (dropTermLocalsMaybe mbContext)
+              captures
+          bodyParamContext =
+            foldl
+              (\context0 (paramName, paramTy) -> extendLocalMaybe context0 paramName paramTy)
+              bodyContext
+              params
+      validateBackendExprWith bodyParamContext body
+      validateBackendClosureFunctionType entryName resultTy params (backendExprType body)
+    BackendClosureCall resultTy fun args -> do
+      validateBackendExprWith mbContext fun
+      mapM_ (validateBackendExprWith mbContext) args
+      validateBackendClosureCall mbContext resultTy fun args
+
+validateBackendClosureCapture :: Maybe BackendValidationContext -> BackendClosureCapture -> Either BackendValidationError ()
+validateBackendClosureCapture mbContext capture = do
+  validateBackendExprWith mbContext expr
+  unless (alphaEqBackendType (backendClosureCaptureType capture) (backendExprType expr)) $
+    Left (BackendClosureCaptureTypeMismatch (backendClosureCaptureName capture) (backendClosureCaptureType capture) (backendExprType expr))
+  where
+    expr = backendClosureCaptureExpr capture
+
+validateBackendClosureFunctionType :: String -> BackendType -> [(String, BackendType)] -> BackendType -> Either BackendValidationError ()
+validateBackendClosureFunctionType entryName resultTy params bodyTy =
+  case collectClosureCallType resultTy of
+    Nothing ->
+      Left (BackendClosureExpectedFunction entryName resultTy)
+    Just (declaredParamTys, declaredResultTy) -> do
+      unless (length declaredParamTys == length params) $
+        Left (BackendClosureParameterArityMismatch entryName (length params) (length declaredParamTys))
+      let expected = foldr BTArrow bodyTy (map snd params)
+      unless (and (zipWith alphaEqBackendType declaredParamTys (map snd params)) && alphaEqBackendType declaredResultTy bodyTy) $
+        Left (BackendClosureTypeMismatch entryName resultTy expected)
+
+backendAppClosureHead :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
+backendAppClosureHead =
+  backendClosureValueName
+
+backendClosureValueName :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
+backendClosureValueName mbContext =
+  \case
+    BackendClosure _ entryName _ _ _ ->
+      Just entryName
+    BackendVar _ name
+      | Just context0 <- mbContext,
+        Set.member name (bvcClosureLocals context0)
+          || Set.member name (bvcPossibleClosureLocals context0) ->
+          Just name
+    BackendTyApp _ fun _ ->
+      backendClosureValueName mbContext fun
+    BackendLet _ name bindingTy rhs body ->
+      backendClosureValueName (extendLetLocalMaybe mbContext name bindingTy rhs) body
+    BackendCase _ scrutinee alternatives ->
+      backendCaseClosureValueName mbContext (backendExprType scrutinee) alternatives
+    _ ->
+      Nothing
+
+backendDefiniteClosureValueName :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
+backendDefiniteClosureValueName mbContext =
+  \case
+    BackendClosure _ entryName _ _ _ ->
+      Just entryName
+    BackendVar _ name
+      | Just context0 <- mbContext,
+        Set.member name (bvcClosureLocals context0) ->
+          Just name
+    BackendTyApp _ fun _ ->
+      backendDefiniteClosureValueName mbContext fun
+    BackendLet _ name bindingTy rhs body ->
+      backendDefiniteClosureValueName (extendLetLocalMaybe mbContext name bindingTy rhs) body
+    BackendCase _ scrutinee alternatives ->
+      backendCaseDefiniteClosureValueName mbContext (backendExprType scrutinee) alternatives
+    _ ->
+      Nothing
+
+backendCaseClosureValueName :: Maybe BackendValidationContext -> BackendType -> NonEmpty BackendAlternative -> Maybe String
+backendCaseClosureValueName mbContext scrutineeTy =
+  firstClosureValueName . map closureAlternativeName . NE.toList
+  where
+    closureAlternativeName alternative =
+      case validateBackendPattern mbContext scrutineeTy (backendAltPattern alternative) of
+        Right contextForBody -> backendClosureValueName contextForBody (backendAltBody alternative)
+        Left _ -> Nothing
+
+backendCaseDefiniteClosureValueName :: Maybe BackendValidationContext -> BackendType -> NonEmpty BackendAlternative -> Maybe String
+backendCaseDefiniteClosureValueName mbContext scrutineeTy alternatives =
+  case traverse closureAlternativeName (NE.toList alternatives) of
+    Just names -> firstClosureValueName (map Just names)
+    Nothing -> Nothing
+  where
+    closureAlternativeName alternative =
+      case validateBackendPattern mbContext scrutineeTy (backendAltPattern alternative) of
+        Right contextForBody -> backendDefiniteClosureValueName contextForBody (backendAltBody alternative)
+        Left _ -> Nothing
+
+firstClosureValueName :: [Maybe String] -> Maybe String
+firstClosureValueName [] =
+  Nothing
+firstClosureValueName (Nothing : rest) =
+  firstClosureValueName rest
+firstClosureValueName (Just value : _) =
+  Just value
+
+validateBackendClosureCall :: Maybe BackendValidationContext -> BackendType -> BackendExpr -> [BackendExpr] -> Either BackendValidationError ()
+validateBackendClosureCall mbContext resultTy fun args =
+  case collectClosureCallType funTy of
+    Nothing ->
+      Left (BackendClosureCallExpectedFunction funTy)
+    Just (paramTys, expectedResultTy) -> do
+      case backendDefiniteClosureValueName mbContext fun of
+        Just _ -> pure ()
+        Nothing -> Left (BackendClosureCallExpectedClosureValue funTy)
+      unless (length paramTys == length args) $
+        Left (BackendClosureCallArityMismatch (length paramTys) (length args))
+      zipWithM_
+        validateArg
+        [0 :: Int ..]
+        (zip paramTys args)
+      unless (backendApplicationTypeMatches mbContext expectedResultTy resultTy) $
+        Left (BackendClosureCallResultMismatch resultTy expectedResultTy)
+  where
+    funTy =
+      backendExprType fun
+
+    validateArg index0 (expectedArgTy, arg) =
+      unless (backendApplicationTypeMatches mbContext expectedArgTy (backendExprType arg)) $
+        Left (BackendClosureCallArgumentMismatch index0 expectedArgTy (backendExprType arg))
+
+collectClosureCallType :: BackendType -> Maybe ([BackendType], BackendType)
+collectClosureCallType =
+  go []
+  where
+    go params =
+      \case
+        BTArrow paramTy resultTy ->
+          go (params ++ [paramTy]) resultTy
+        other
+          | null params -> Nothing
+          | otherwise -> Just (params, other)
 
 validateBackendVariable :: Maybe BackendValidationContext -> String -> BackendType -> Either BackendValidationError ()
 validateBackendVariable Nothing _ _ =
@@ -984,11 +1197,86 @@ extendLocalMaybe mbContext name ty =
 
 extendLocal :: BackendValidationContext -> String -> BackendType -> BackendValidationContext
 extendLocal context0 name ty =
-  context0 {bvcLocals = Map.insert name ty (bvcLocals context0)}
+  context0
+    { bvcLocals = Map.insert name ty (bvcLocals context0),
+      bvcClosureLocals = Set.delete name (bvcClosureLocals context0),
+      bvcPossibleClosureLocals = Set.delete name (bvcPossibleClosureLocals context0)
+    }
+
+extendClosureLocalMaybe :: Maybe BackendValidationContext -> String -> BackendType -> Maybe BackendValidationContext
+extendClosureLocalMaybe mbContext name ty =
+  fmap (\context0 -> extendClosureLocal context0 name ty) mbContext
+
+extendClosureLocal :: BackendValidationContext -> String -> BackendType -> BackendValidationContext
+extendClosureLocal context0 name ty =
+  context0
+    { bvcLocals = Map.insert name ty (bvcLocals context0),
+      bvcClosureLocals = Set.insert name (bvcClosureLocals context0),
+      bvcPossibleClosureLocals = Set.delete name (bvcPossibleClosureLocals context0)
+    }
+
+extendPossibleClosureLocalMaybe :: Maybe BackendValidationContext -> String -> BackendType -> Maybe BackendValidationContext
+extendPossibleClosureLocalMaybe mbContext name ty =
+  fmap (\context0 -> extendPossibleClosureLocal context0 name ty) mbContext
+
+extendPossibleClosureLocal :: BackendValidationContext -> String -> BackendType -> BackendValidationContext
+extendPossibleClosureLocal context0 name ty =
+  context0
+    { bvcLocals = Map.insert name ty (bvcLocals context0),
+      bvcClosureLocals = Set.delete name (bvcClosureLocals context0),
+      bvcPossibleClosureLocals = Set.insert name (bvcPossibleClosureLocals context0)
+    }
+
+extendLetLocalMaybe :: Maybe BackendValidationContext -> String -> BackendType -> BackendExpr -> Maybe BackendValidationContext
+extendLetLocalMaybe mbContext name ty rhs =
+  extendClosureShapeLocalMaybe mbContext mbContext name ty rhs
+
+extendClosureCaptureLocalMaybe ::
+  Maybe BackendValidationContext ->
+  Maybe BackendValidationContext ->
+  BackendClosureCapture ->
+  Maybe BackendValidationContext
+extendClosureCaptureLocalMaybe outerContext bodyContext capture =
+  extendClosureShapeLocalMaybe
+    outerContext
+    bodyContext
+    (backendClosureCaptureName capture)
+    (backendClosureCaptureType capture)
+    (backendClosureCaptureExpr capture)
+
+extendClosureShapeLocalMaybe ::
+  Maybe BackendValidationContext ->
+  Maybe BackendValidationContext ->
+  String ->
+  BackendType ->
+  BackendExpr ->
+  Maybe BackendValidationContext
+extendClosureShapeLocalMaybe sourceContext targetContext name ty rhs
+  | Just _ <- backendDefiniteClosureValueName sourceContext rhs =
+      extendClosureLocalMaybe targetContext name ty
+  | Just _ <- backendClosureValueName sourceContext rhs =
+      extendPossibleClosureLocalMaybe targetContext name ty
+  | otherwise =
+      extendLocalMaybe targetContext name ty
 
 extendLocals :: BackendValidationContext -> [(String, BackendType)] -> BackendValidationContext
 extendLocals context0 bindings =
-  context0 {bvcLocals = foldr (uncurry Map.insert) (bvcLocals context0) bindings}
+  context0
+    { bvcLocals = foldr (uncurry Map.insert) (bvcLocals context0) bindings,
+      bvcClosureLocals = foldr (Set.delete . fst) (bvcClosureLocals context0) bindings,
+      bvcPossibleClosureLocals = foldr (Set.delete . fst) (bvcPossibleClosureLocals context0) bindings
+    }
+
+dropTermLocalsMaybe :: Maybe BackendValidationContext -> Maybe BackendValidationContext
+dropTermLocalsMaybe =
+  fmap
+    ( \context0 ->
+        context0
+          { bvcLocals = Map.empty,
+            bvcClosureLocals = Set.empty,
+            bvcPossibleClosureLocals = Set.empty
+          }
+    )
 
 extendTypeBoundMaybe :: Maybe BackendValidationContext -> String -> Maybe BackendType -> Maybe BackendValidationContext
 extendTypeBoundMaybe mbContext name mbBound =
@@ -1854,6 +2142,14 @@ requireUnique mkError names =
   case duplicates names of
     name : _ -> Left (mkError name)
     [] -> Right ()
+
+rejectClosureEntryNameCollisions :: [String] -> [String] -> Either BackendValidationError ()
+rejectClosureEntryNameCollisions closureEntryNames reservedNames =
+  case [name | name <- sort closureEntryNames, Set.member name reservedNameSet] of
+    name : _ -> Left (BackendClosureEntryNameCollision name)
+    [] -> Right ()
+  where
+    reservedNameSet = Set.fromList reservedNames
 
 zipAllWith :: (a -> b -> Bool) -> [a] -> [b] -> Bool
 zipAllWith _ [] [] =

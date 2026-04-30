@@ -153,17 +153,24 @@ The boundary invariants are:
   program constructor metadata for known constructors, constructor arity,
   constructor-local `forall` bounds, argument/result types, case scrutinee
   type, and alternative result type.
+- closure construction and indirect closure calls are explicit backend nodes:
+  closure entry names must be unique, capture and value-parameter binders must
+  be locally unique, capture expressions must match their declared capture
+  types, the closure body must match the declared function result after value
+  parameters are applied, and `BackendClosureCall` arguments must match the
+  function type carried by the closure expression.
 
 This module intentionally lives in the private `mlf2-internal` library for now.
 Conversion and lowering modules should depend on this IR rather than reaching
 back into `MLF.Frontend.Program.*` internals for backend decisions.
 `MLF.Backend.LLVM` preserves that boundary by validating the IR before
-lowering, rendering only the supported first-order subset, and producing
-explicit unsupported-node diagnostics for backend constructs that do not yet
-have LLVM lowering. The LLVM backend is intentionally repo-local: `Syntax`
-models the small LLVM surface used by mlf2, `Lower` maps backend IR into that
-AST, and `Ppr` emits opaque-pointer LLVM IR text accepted by LLVM 15+ tools or
-LLVM 14-era tools run with `-opaque-pointers`.
+lowering, rendering the supported first-order subset plus explicit closure IR,
+and producing explicit unsupported-node diagnostics for backend constructs that
+do not yet have LLVM lowering. The LLVM backend is intentionally repo-local:
+`Syntax` models the small LLVM surface used by mlf2, `Lower` maps backend IR
+into that AST, and `Ppr` emits opaque-pointer LLVM IR text accepted by LLVM 15+
+tools or LLVM 14-era tools run with `-opaque-pointers`.
+
 The backend has two emission contracts. Raw emission keeps the checked `.mlfp`
 `main` as an ordinary module-qualified LLVM function and is the stable IR
 inspection surface. Native emission adds a C ABI `i32 @main()` wrapper around a
@@ -174,10 +181,22 @@ exit status `0`. Native emission declares libc `malloc`/`printf` and emits
 backend-owned runtime definitions such as `__mlfp_and` when those names are not
 program bindings. Unsupported result types fail before native-run assertions,
 so the native process boundary does not invent source or IO semantics.
-Closure conversion, higher-order constructor fields, escaping lambdas, and
-final executable linking remain outside the current backend boundary. Those
-diagnostics do not weaken source inference, checking, module visibility, or
-runtime semantics; they only describe the current IR-to-LLVM lowering surface.
+
+The explicit closure ABI is private to the backend IR-to-LLVM path. A closure
+value is a heap pointer to a two-word record containing a code pointer and an
+environment pointer or null. Non-empty environments are heap records with one
+machine word per captured runtime value. Closure entry functions are private
+LLVM functions named by the backend IR and take a hidden `ptr env` argument
+before erased monomorphic value parameters. Direct first-order calls still use
+the existing direct-call path; indirect calls must be represented with
+`BackendClosureCall`.
+
+Full source-to-source closure conversion, partial application lowering,
+higher-order constructor fields that require captured environments, recursive
+higher-order flows, and final executable linking remain future extension
+points. Those diagnostics do not weaken source inference, checking, module
+visibility, or runtime semantics; they only describe the current IR-to-LLVM
+lowering surface.
 
 ## `Solved` boundary and thesis-exact cleanup rule
 
