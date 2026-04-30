@@ -100,10 +100,9 @@ finalizeBinding scope lowered = do
       then srcTypeToElabType (loweredBindingExpectedType lowered)
       else Right (stripLeadingVacuousForalls actualTy)
   let acceptedTerm =
-        recoverTermInstantiations scope $
-          if isUncheckedConstructor
-            then acceptedTerm0
-            else stripLeadingVacuousTypeAbs actualTy acceptedTerm0
+        if isUncheckedConstructor
+          then acceptedTerm0
+          else stripLeadingVacuousTypeAbs actualTy acceptedTerm0
   if isUncheckedConstructor
     then
       Right
@@ -1541,42 +1540,6 @@ stripLeadingVacuousTypeAbs ty term =
     (X.TForall _ _ bodyTy, X.ETyAbs termV mb body) ->
       X.ETyAbs termV mb (stripLeadingVacuousTypeAbs bodyTy body)
     _ -> term
-
-recoverTermInstantiations :: ElaborateScope -> ElabTerm -> ElabTerm
-recoverTermInstantiations scope = go
-  where
-    go term =
-      case term of
-        X.EVar {} -> term
-        X.ELit {} -> term
-        X.ELam name ty body ->
-          X.ELam name ty (go body)
-        X.EApp fun arg ->
-          X.EApp (go fun) (go arg)
-        X.ELet name scheme rhs body ->
-          X.ELet name scheme (go rhs) (go body)
-        X.ETyAbs name mb body ->
-          X.ETyAbs name mb (go body)
-        X.ETyInst inner inst ->
-          X.ETyInst (go inner) (recoverInstantiation inst)
-        X.ERoll ty body ->
-          X.ERoll ty (go body)
-        X.EUnroll body ->
-          X.EUnroll (go body)
-
-    recoverInstantiation inst =
-      case inst of
-        X.InstApp ty -> X.InstApp (recoverInstType ty)
-        X.InstBot ty -> X.InstBot (recoverInstType ty)
-        X.InstUnder name inner -> X.InstUnder name (recoverInstantiation inner)
-        X.InstInside inner -> X.InstInside (recoverInstantiation inner)
-        X.InstSeq left right -> X.InstSeq (recoverInstantiation left) (recoverInstantiation right)
-        _ -> inst
-
-    recoverInstType ty =
-      case srcTypeToElabTypeMaybe (lowerType scope (recoverSourceType scope (elabTypeToSrcType (stripVacuousForalls ty)))) of
-        Just recovered -> recovered
-        Nothing -> ty
 
 freeTypeVarsTerm :: ElabTerm -> Set String
 freeTypeVarsTerm term =

@@ -1748,8 +1748,13 @@ convertApplication ::
   ElabTerm ->
   Either BackendConversionError BackendExpr
 convertApplication context env resultTy fun arg =
-  convertApplicationFromFunction context env resultTy fun arg
-    `orElseConversion` convertApplicationFromExpectedResult context env resultTy fun arg
+  if termContainsTypeInstantiation fun
+    then
+      convertApplicationFromExpectedResult context env resultTy fun arg
+        `orElseConversion` convertApplicationFromFunction context env resultTy fun arg
+    else
+      convertApplicationFromFunction context env resultTy fun arg
+        `orElseConversion` convertApplicationFromExpectedResult context env resultTy fun arg
 
 convertApplicationFromFunction ::
   ConvertContext ->
@@ -1849,9 +1854,18 @@ convertTypeInstantiation context env resultTy inner inst =
         Just tyArg -> do
           innerExpr <- convertAppLikeInstantiationFunction context env inner
           case backendExprType innerExpr of
-            BTForall name _ bodyTy -> do
-              backendTyArg <- normalizeBackendTypeForContext context <$> convertElabType tyArg
-              let appliedTy = normalizeBackendTypeForContext context (substituteBackendType name backendTyArg bodyTy)
+            BTForall name mbBound bodyTy -> do
+              backendTyArg0 <- normalizeBackendTypeForContext context <$> convertElabType tyArg
+              let appliedTy0 = normalizeBackendTypeForContext context (substituteBackendType name backendTyArg0 bodyTy)
+                  (backendTyArg, appliedTy) =
+                    expectedTypeInstantiation
+                      context
+                      name
+                      mbBound
+                      bodyTy
+                      resultTy
+                      backendTyArg0
+                      appliedTy0
                   resultTy' =
                     if alphaEqBackendType appliedTy resultTy
                       then resultTy
@@ -1866,6 +1880,44 @@ convertTypeInstantiation context env resultTy inner inst =
               | alphaEqBackendType (backendExprType innerExpr) resultTy -> Right innerExpr
               | otherwise -> Left (BackendUnsupportedInstantiation inst)
         Nothing -> Left (BackendUnsupportedInstantiation inst)
+
+expectedTypeInstantiation ::
+  ConvertContext ->
+  String ->
+  Maybe BackendType ->
+  BackendType ->
+  BackendType ->
+  BackendType ->
+  BackendType ->
+  (BackendType, BackendType)
+expectedTypeInstantiation context name mbBound bodyTy resultTy explicitArg explicitAppliedTy =
+  case inferredExpectedTypeArg of
+    Just inferredArg
+      | not (alphaEqBackendType explicitAppliedTy resultTy),
+        let inferredAppliedTy = normalizeBackendTypeForContext context (substituteBackendType name inferredArg bodyTy),
+        alphaEqBackendType inferredAppliedTy resultTy ->
+          (inferredArg, inferredAppliedTy)
+    _ ->
+      (explicitArg, explicitAppliedTy)
+  where
+    parameterBounds =
+      Map.singleton name mbBound
+    inferredExpectedTypeArg = do
+      substitution <- matchBackendTypeParameters Map.empty [] parameterBounds Map.empty bodyTy resultTy
+      Map.lookup name (completeBackendParameterSubstitution parameterBounds substitution)
+
+termContainsTypeInstantiation :: ElabTerm -> Bool
+termContainsTypeInstantiation =
+  \case
+    EVar {} -> False
+    ELit {} -> False
+    ELam _ _ body -> termContainsTypeInstantiation body
+    EApp fun arg -> termContainsTypeInstantiation fun || termContainsTypeInstantiation arg
+    ELet _ _ rhs body -> termContainsTypeInstantiation rhs || termContainsTypeInstantiation body
+    ETyAbs _ _ body -> termContainsTypeInstantiation body
+    ETyInst {} -> True
+    ERoll _ body -> termContainsTypeInstantiation body
+    EUnroll body -> termContainsTypeInstantiation body
 
 convertAppLikeInstantiationFunction ::
   ConvertContext ->

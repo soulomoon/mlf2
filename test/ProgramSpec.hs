@@ -1528,6 +1528,26 @@ spec = do
             checkProgram program `shouldSatisfy` either
                 (\err -> not ("ProgramCannotInferLambda" `isInfixOf` show err))
                 (const False)
+
+        it "does not rewrite same-shaped ADT instantiations to another nominal head" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (A(..), B(..), keep, main) {"
+                        , "  data A ="
+                        , "      AZ : A;"
+                        , ""
+                        , "  data B ="
+                        , "      BZ : B;"
+                        , ""
+                        , "  def keep : forall a. a -> a = \\x x;"
+                        , "  def main : B = keep BZ;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checked <- requireChecked program
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            show (checkedBindingTerm mainBinding) `shouldNotSatisfy` isInfixOf "Main.A"
+            (prettyValue <$> runProgram program) `shouldBe` Right "BZ"
   where
     roundtripFixture path =
         it ("roundtrips " ++ path) $ do
@@ -1580,6 +1600,22 @@ spec = do
         case source of
             InlineProgram programText -> requireParsed programText
             ProgramFile path -> requireParsed =<< readFile path
+
+    requireChecked program =
+        case checkProgram program of
+            Left err -> expectationFailure ("check failed: " ++ show err) >> fail "check failed"
+            Right checked -> pure checked
+
+    requireCheckedBinding name checked =
+        case
+            [ binding
+            | checkedModule <- checkedProgramModules checked
+            , binding <- checkedModuleBindings checkedModule
+            , checkedBindingName binding == name
+            ]
+        of
+            binding : _ -> pure binding
+            [] -> expectationFailure ("missing checked binding: " ++ name) >> fail "missing checked binding"
 
 requireParsed :: String -> IO Program
 requireParsed input =
