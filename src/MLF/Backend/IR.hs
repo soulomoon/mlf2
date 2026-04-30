@@ -273,6 +273,7 @@ data BackendValidationContext = BackendValidationContext
     bvcData :: Map.Map String BackendData,
     bvcConstructors :: Map.Map String BackendConstructorInfo,
     bvcLocals :: Map.Map String BackendType,
+    bvcClosureGlobals :: Set.Set String,
     bvcClosureLocals :: Set.Set String,
     bvcPossibleClosureLocals :: Set.Set String,
     bvcTypeBounds :: Map.Map String (Maybe BackendType)
@@ -617,6 +618,7 @@ validateBackendProgram program = do
     bindings = concatMap backendModuleBindings modules0
     constructors = concatMap backendDataConstructors (concatMap backendModuleData modules0)
     closureEntryNames = concatMap (backendClosureEntryNames . backendBindingExpr) bindings
+    closureGlobals = backendClosureGlobalNames bindings
     constructorInfos =
       [ ( backendConstructorName constructor,
           BackendConstructorInfo
@@ -636,10 +638,61 @@ validateBackendProgram program = do
           bvcData = Map.fromList [(backendDataName dataDecl, dataDecl) | dataDecl <- concatMap backendModuleData modules0],
           bvcConstructors = Map.fromList constructorInfos,
           bvcLocals = Map.empty,
+          bvcClosureGlobals = closureGlobals,
           bvcClosureLocals = Set.empty,
           bvcPossibleClosureLocals = Set.empty,
           bvcTypeBounds = Map.empty
         }
+
+backendClosureGlobalNames :: [BackendBinding] -> Set.Set String
+backendClosureGlobalNames bindings =
+  go Set.empty
+  where
+    go globals =
+      let globals' =
+            Set.fromList
+              [ backendBindingName binding
+                | binding <- bindings,
+                  backendExprIsGlobalClosureValue globals (backendBindingExpr binding)
+              ]
+       in if globals' == globals
+            then globals
+            else go globals'
+
+backendExprIsGlobalClosureValue :: Set.Set String -> BackendExpr -> Bool
+backendExprIsGlobalClosureValue globals =
+  go Set.empty Set.empty
+  where
+    go closureLocals boundLocals =
+      \case
+        BackendClosure {} ->
+          True
+        BackendVar _ name
+          | Set.member name closureLocals -> True
+          | Set.member name boundLocals -> False
+          | otherwise -> Set.member name globals
+        BackendTyAbs _ _ _ body ->
+          go closureLocals boundLocals body
+        BackendTyApp _ fun _ ->
+          go closureLocals boundLocals fun
+        BackendLet _ name _ rhs body ->
+          let closureLocals' =
+                if go closureLocals boundLocals rhs
+                  then Set.insert name closureLocals
+                  else Set.delete name closureLocals
+              boundLocals' = Set.insert name boundLocals
+           in go closureLocals' boundLocals' body
+        BackendCase {backendAlternatives = alternatives} ->
+          all (goAlternative closureLocals boundLocals) (NE.toList alternatives)
+        _ ->
+          False
+
+    goAlternative closureLocals boundLocals (BackendAlternative pattern0 body) =
+      let binders = patternBinders pattern0
+       in go
+            (closureLocals `Set.difference` binders)
+            (boundLocals <> binders)
+            body
 
 backendRuntimePrimitiveTypes :: Map.Map String BackendType
 backendRuntimePrimitiveTypes =
@@ -687,7 +740,7 @@ validateBackendExprWith mbContext expr =
        in unless (alphaEqBackendType resultTy expected) $
             Left (BackendLiteralTypeMismatch lit expected resultTy)
     BackendLam resultTy paramName paramTy body -> do
-      validateBackendExprWith (extendLocalMaybe mbContext paramName paramTy) body
+      validateBackendExprWith (extendFunctionParamLocalMaybe mbContext paramName paramTy body) body
       let expected = BTArrow paramTy (backendExprType body)
       unless (alphaEqBackendType resultTy expected) $
         Left (BackendLambdaTypeMismatch resultTy expected)
@@ -761,7 +814,7 @@ validateBackendExprWith mbContext expr =
               captures
           bodyParamContext =
             foldl
-              (\context0 (paramName, paramTy) -> extendLocalMaybe context0 paramName paramTy)
+              (\context0 (paramName, paramTy) -> extendFunctionParamLocalMaybe context0 paramName paramTy body)
               bodyContext
               params
       validateBackendExprWith bodyParamContext body
@@ -802,8 +855,7 @@ backendClosureValueName mbContext =
       Just entryName
     BackendVar _ name
       | Just context0 <- mbContext,
-        Set.member name (bvcClosureLocals context0)
-          || Set.member name (bvcPossibleClosureLocals context0) ->
+        backendContextNameIsClosureValue True context0 name ->
           Just name
     BackendTyApp _ fun _ ->
       backendClosureValueName mbContext fun
@@ -821,7 +873,7 @@ backendDefiniteClosureValueName mbContext =
       Just entryName
     BackendVar _ name
       | Just context0 <- mbContext,
-        Set.member name (bvcClosureLocals context0) ->
+        backendContextNameIsClosureValue False context0 name ->
           Just name
     BackendTyApp _ fun _ ->
       backendDefiniteClosureValueName mbContext fun
@@ -859,6 +911,137 @@ firstClosureValueName (Nothing : rest) =
   firstClosureValueName rest
 firstClosureValueName (Just value : _) =
   Just value
+
+backendContextNameIsClosureValue :: Bool -> BackendValidationContext -> String -> Bool
+backendContextNameIsClosureValue includePossibleLocals context0 name
+  | Set.member name (bvcClosureLocals context0) = True
+  | includePossibleLocals && Set.member name (bvcPossibleClosureLocals context0) = True
+  | Map.member name (bvcLocals context0) = False
+  | otherwise = Set.member name (bvcClosureGlobals context0)
+
+backendExprCallsNameAsClosureHead :: String -> BackendExpr -> Bool
+backendExprCallsNameAsClosureHead needle =
+  go (Set.singleton needle)
+  where
+    go aliases =
+      \case
+        BackendVar {} ->
+          False
+        BackendLit {} ->
+          False
+        BackendLam _ name _ body
+          | Set.member name aliases -> False
+          | otherwise -> go aliases body
+        BackendApp _ fun arg ->
+          go aliases fun || go aliases arg
+        BackendLet _ name _ rhs body
+          | Set.member name aliases -> go aliases rhs
+          | otherwise ->
+              let aliasesForBody =
+                    if closureCallHeadReferencesAny aliases rhs
+                      then Set.insert name aliases
+                      else aliases
+               in go aliases rhs || go aliasesForBody body
+        BackendTyAbs _ _ _ body ->
+          go aliases body
+        BackendTyApp _ fun _ ->
+          go aliases fun
+        BackendConstruct _ _ args ->
+          any (go aliases) args
+        BackendCase _ scrutinee alternatives ->
+          go aliases scrutinee || any (goAlternative aliases) (NE.toList alternatives)
+        BackendRoll _ payload ->
+          go aliases payload
+        BackendUnroll _ payload ->
+          go aliases payload
+        BackendClosure _ _ captures params body ->
+          any (go aliases . backendClosureCaptureExpr) captures
+            || capturedNeedleFeedsClosureCall
+            || (Set.disjoint aliases closureBinders && go aliases body)
+          where
+            closureBinders = Set.fromList (map backendClosureCaptureName captures ++ map fst params)
+            capturedNeedleFeedsClosureCall =
+              any capturesAlias captures
+                && Set.disjoint aliases (Set.fromList (map fst params))
+                && any (`backendExprCallsNameAsClosureHead` body) aliases
+            capturesAlias capture =
+              Set.member (backendClosureCaptureName capture) aliases
+                && any (\alias -> backendExprReferencesName alias (backendClosureCaptureExpr capture)) aliases
+        BackendClosureCall _ fun args ->
+          closureCallHeadReferencesAny aliases fun || go aliases fun || any (go aliases) args
+
+    goAlternative aliases (BackendAlternative pattern0 body)
+      | not (Set.disjoint aliases (patternBinders pattern0)) = False
+      | otherwise = go aliases body
+
+closureCallHeadReferencesAny :: Set.Set String -> BackendExpr -> Bool
+closureCallHeadReferencesAny needles expr =
+  closureCallHeadReferencesAnyFrom needles expr
+
+closureCallHeadReferencesAnyFrom :: Set.Set String -> BackendExpr -> Bool
+closureCallHeadReferencesAnyFrom aliases0 =
+  \case
+    BackendVar _ name ->
+      Set.member name aliases0
+    BackendTyApp _ fun _ ->
+      closureCallHeadReferencesAnyFrom aliases0 fun
+    BackendLet _ name _ rhs body ->
+      let aliasesWithoutShadow = Set.delete name aliases0
+          aliasesForBody =
+            if closureCallHeadReferencesAnyFrom aliases0 rhs
+              then Set.insert name aliasesWithoutShadow
+              else aliasesWithoutShadow
+       in closureCallHeadReferencesAnyFrom aliasesForBody body
+    _ ->
+      False
+
+backendExprReferencesName :: String -> BackendExpr -> Bool
+backendExprReferencesName needle =
+  go
+  where
+    go =
+      \case
+        BackendVar _ name ->
+          name == needle
+        BackendLit {} ->
+          False
+        BackendLam _ name _ body
+          | name == needle -> False
+          | otherwise -> go body
+        BackendApp _ fun arg ->
+          go fun || go arg
+        BackendLet _ name _ rhs body
+          | name == needle -> go rhs
+          | otherwise -> go rhs || go body
+        BackendTyAbs _ _ _ body ->
+          go body
+        BackendTyApp _ fun _ ->
+          go fun
+        BackendConstruct _ _ args ->
+          any go args
+        BackendCase _ scrutinee alternatives ->
+          go scrutinee || any goAlternative (NE.toList alternatives)
+        BackendRoll _ payload ->
+          go payload
+        BackendUnroll _ payload ->
+          go payload
+        BackendClosure _ _ captures params body ->
+          any (go . backendClosureCaptureExpr) captures
+            || (not (Set.member needle closureBinders) && go body)
+          where
+            closureBinders = Set.fromList (map backendClosureCaptureName captures ++ map fst params)
+        BackendClosureCall _ fun args ->
+          go fun || any go args
+
+    goAlternative (BackendAlternative pattern0 body)
+      | Set.member needle (patternBinders pattern0) = False
+      | otherwise = go body
+
+patternBinders :: BackendPattern -> Set.Set String
+patternBinders =
+  \case
+    BackendDefaultPattern -> Set.empty
+    BackendConstructorPattern _ binders -> Set.fromList binders
 
 validateBackendClosureCall :: Maybe BackendValidationContext -> BackendType -> BackendExpr -> [BackendExpr] -> Either BackendValidationError ()
 validateBackendClosureCall mbContext resultTy fun args =
@@ -1194,6 +1377,13 @@ lookupBackendVariable context0 name =
 extendLocalMaybe :: Maybe BackendValidationContext -> String -> BackendType -> Maybe BackendValidationContext
 extendLocalMaybe mbContext name ty =
   fmap (\context0 -> extendLocal context0 name ty) mbContext
+
+extendFunctionParamLocalMaybe :: Maybe BackendValidationContext -> String -> BackendType -> BackendExpr -> Maybe BackendValidationContext
+extendFunctionParamLocalMaybe mbContext name ty body
+  | backendExprCallsNameAsClosureHead name body =
+      extendClosureLocalMaybe mbContext name ty
+  | otherwise =
+      extendLocalMaybe mbContext name ty
 
 extendLocal :: BackendValidationContext -> String -> BackendType -> BackendValidationContext
 extendLocal context0 name ty =

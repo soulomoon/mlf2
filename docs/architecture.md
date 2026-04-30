@@ -48,7 +48,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI/file runner as an explicit import target
 - `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates checked `.mlfp` bindings through the existing xMLF runtime and renders recovered closed ADT values with source constructor syntax
 - `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before LLVM lowering
-- `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion and explicit ADT construct/case recovery where the checked xMLF shape is unambiguous
+- `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion, explicit ADT construct/case recovery, and closure conversion where the checked xMLF shape is unambiguous
 - `MLF.Backend.LLVM` — repo-local LLVM backend facade over a small typed LLVM AST, lowerer, and pretty-printer for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
 - `MLF.Binding.*` — binding tree queries + executable χe ops + harmonization
@@ -191,12 +191,15 @@ before erased monomorphic value parameters. Direct first-order calls still use
 the existing direct-call path; indirect calls must be represented with
 `BackendClosureCall`.
 
-Full source-to-source closure conversion, partial application lowering,
-higher-order constructor fields that require captured environments, recursive
-higher-order flows, and final executable linking remain future extension
-points. Those diagnostics do not weaken source inference, checking, module
-visibility, or runtime semantics; they only describe the current IR-to-LLVM
-lowering surface.
+Checked-program conversion now closure-converts ordinary monomorphic escaping
+source lambdas, returned local function values, closure-valued let aliases, and
+indirect calls through those aliases into explicit closure IR. Direct
+first-order local calls remain direct backend applications. Partial application
+lowering, higher-order constructor fields that require captured environments,
+recursive higher-order flows, and final executable linking remain future
+extension points. Those diagnostics do not weaken source inference, checking,
+module visibility, or runtime semantics; they only describe the current
+IR-to-LLVM lowering surface.
 
 ## `Solved` boundary and thesis-exact cleanup rule
 

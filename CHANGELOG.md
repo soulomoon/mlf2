@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Added checked-program closure conversion for ordinary monomorphic escaping
+  `.mlfp` lambdas and closure-valued let aliases. Backend conversion now emits
+  explicit `BackendClosure` / `BackendClosureCall` IR for returned local
+  functions and indirect calls through aliases while preserving direct
+  first-order local calls on the direct application path.
 - Added the checked `.mlfp` source surface for `Unit`, opaque `IO`, initial IO
   primitives, and the built-in `Monad IO` Prelude instance; backend conversion
   remains fail-closed for IO entrypoints until concrete IO lowering is added.
@@ -18,7 +23,25 @@
 ### Changed
 - LLVM case lowering now treats closure-valued case results as closure
   pointers, so `BackendClosureCall` can use a case-selected closure callee
-  without rejecting the callee's arrow result type.
+  without rejecting the callee's arrow result type. Closure-valued let aliases
+  now also stay runtime pointer aliases during lowering instead of being
+  reclassified as raw escaping local functions.
+- Fixed checked-program closure conversion to clear shadowed closure locals when
+  classifying nested `let` values, and to fail closed on closure-valued
+  constructor fields until ADT field lowering has a closure-aware representation.
+- Fixed closure conversion and LLVM lowering for type-abstracted closure-valued
+  globals and nested `let` aliases of closure parameters, keeping both on the
+  explicit closure-call ABI instead of the raw function-pointer path.
+- Fixed backend closure-value classification for case alternatives so
+  constructor pattern binders shadow outer closure locals before let aliases are
+  classified as closure-valued.
+- Fixed closure call-head classification so local non-closure binders shadow
+  same-named closure-valued globals instead of inheriting the global closure
+  ABI.
+- Fixed backend IR validation and closure-global discovery so local non-closure
+  `let` and case-pattern binders shadow same-named closure-valued globals.
+- Fixed closure entry naming for lifted recursive helpers so helper-local
+  closure conversion shares one allocator across the source binding.
 - Supported expected-type resolution for nullary overloaded `.mlfp` methods.
   Associated values such as `mempty : a` now resolve from an explicit or
   propagated expected source type while bare uses without such evidence still
@@ -52,7 +75,8 @@
 - Added LLVM lowering support for first-class polymorphic values at
   non-escaping runtime boundaries. Polymorphic arguments and immediate
   constructor fields are statically specialized/erased at call and case sites,
-  while escaping closures and partial applications remain fail-closed.
+  while raw backend escaping lambdas and partial applications remain
+  fail-closed unless conversion has produced explicit closure IR.
 - Extended LLVM backend support for resolved typeclass evidence and derived
   `Eq`: constrained helper aliases, method-level evidence constraints,
   parameterized instances, recursive `List` deriving, recursive ADT deriving

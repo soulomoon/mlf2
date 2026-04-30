@@ -29,11 +29,12 @@ backend-program
                       body:
                         lam $Succ_k2 : (mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> ((mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1) -> $a1)
                           body:
-                            app : $a1
+                            closure-call : $a1
                               function:
                                 var $Succ_k2 : (mu $Main.Nat_self. forall $$Nat_result. ($$Nat_result -> (($$Main.Nat_self -> $$Nat_result) -> $$Nat_result)) -> $a1)
-                              argument:
-                                var $Succ_arg1 : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
+                              arguments:
+                                arg 0:
+                                  var $Succ_arg1 : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
         binding Main__main : mu $Main.Nat_self. forall $$Main.Nat_result. ($$Main.Nat_result -> (($$Main.Nat_self -> $$Main.Nat_result) -> $$Main.Nat_result))
           exported-main: true
           expr:

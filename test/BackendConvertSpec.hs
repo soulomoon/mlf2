@@ -2,7 +2,7 @@ module BackendConvertSpec (spec) where
 
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
-import Data.List (find, intercalate, isInfixOf)
+import Data.List (find, intercalate, isInfixOf, nub)
 import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Backend.Convert
 import MLF.Backend.IR
@@ -122,7 +122,7 @@ spec = describe "MLF.Backend.Convert" $ do
       Just other -> expectationFailure ("expected backend case, got " ++ show other)
       Nothing -> expectationFailure "expected backend case"
 
-  it "falls back to ordinary application for over-applied case-shaped terms" $ do
+  it "applies over-applied case-shaped terms through the closure-call path" $ do
     checked0 <- requireChecked functionCaseProgram
     let checked =
           mapMainBinding
@@ -139,14 +139,14 @@ spec = describe "MLF.Backend.Convert" $ do
 
     mainBinding <- requireBinding (backendProgramMain backend) backend
     case backendBindingExpr mainBinding of
-      BackendApp
+      BackendClosureCall
         { backendExprType = resultTy,
-          backendFunction = fun,
-          backendArgument = BackendLit {backendLit = LInt 1}
+          backendClosureFunction = fun,
+          backendClosureArguments = [BackendLit {backendLit = LInt 1}]
         } -> do
           resultTy `shouldBe` intTy
           fun `shouldSatisfy` containsBackendCase
-      other -> expectationFailure ("expected backend application of recovered case, got " ++ show other)
+      other -> expectationFailure ("expected backend closure call of recovered case, got " ++ show other)
 
   it "recovers backend cases with type-wrapped handler lambdas" $ do
     checked0 <- requireChecked intCaseProgram
@@ -369,6 +369,8 @@ spec = describe "MLF.Backend.Convert" $ do
     backend <- requireRight (convertCheckedProgram checked)
 
     validateBackendProgram backend `shouldBe` Right ()
+    sameBinding <- requireBinding "Main__same" backend
+    backendBindingExpr sameBinding `shouldNotSatisfy` containsBackendClosureCall
 
   it "converts constrained parameterized Eq evidence without ambiguous ADT recovery" $ do
     checked <- requireChecked parameterizedEqEvidenceProgram
@@ -708,6 +710,165 @@ spec = describe "MLF.Backend.Convert" $ do
   it "converts source type applications into backend applied type variables" $ do
     convertSourceType unsupportedVariableHeadType
       `shouldBe` Right (BTVarApp "f" (intTy :| []))
+
+  it "closure-converts a returned local function value" $ do
+    checked <- requireChecked returnedClosureProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
+
+  it "closure-converts local function aliases that cross let boundaries" $ do
+    checked <- requireChecked closureAliasCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
+
+  it "closure-converts captured lambdas called through let aliases" $ do
+    checked <- requireChecked capturedClosureCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCapture "captured"
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
+
+  it "closure-converts closure-valued function parameters at call sites" $ do
+    checked <- requireChecked functionParameterClosureCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    useBinding <- requireBinding "Main__use" backend
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendClosureCall
+    backendBindingExpr useBinding `shouldNotSatisfy` containsBackendApp
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
+
+  it "closure-converts calls to closure-valued top-level bindings" $ do
+    checked <- requireChecked topLevelClosureCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    makerBinding <- requireBinding "Main__maker" backend
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr makerBinding `shouldSatisfy` containsBackendClosure
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
+    backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendApp
+
+  it "closure-converts calls to type-abstracted closure-valued top-level bindings" $ do
+    checked <- requireChecked polymorphicTopLevelClosureCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    makerBinding <- requireBinding "Main__maker" backend
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr makerBinding `shouldSatisfy` containsBackendClosure
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
+    backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendApp
+
+  it "closure-converts closure-valued function parameters through nested let aliases" $ do
+    checked <- requireChecked functionParameterNestedClosureAliasCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    useBinding <- requireBinding "Main__use" backend
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendClosureCall
+    backendBindingExpr useBinding `shouldNotSatisfy` containsBackendApp
+
+  it "clears shadowed closure locals when classifying let RHS values" $ do
+    checked <- requireChecked shadowedClosureLocalProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    useBinding <- requireBinding "Main__use" backend
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendApp
+    backendBindingExpr useBinding `shouldNotSatisfy` containsBackendClosureCall
+
+  it "clears shadowed closure locals when classifying case pattern results" $ do
+    checked <- requireChecked shadowedCaseClosureLocalProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    useBinding <- requireBinding "Main__use" backend
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendCase
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendApp
+    backendBindingExpr useBinding `shouldNotSatisfy` containsBackendClosureCall
+
+  it "keeps local non-closure binders from inheriting same-named closure globals" $ do
+    checked <- requireChecked shadowedGlobalClosureHeadProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendCase
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendApp
+    backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendClosureCall
+
+  it "rejects closure-valued constructor fields until ADT fields are closure-aware" $ do
+    checked <- requireChecked closureValuedConstructorFieldProgram
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedCaseShape message) ->
+        message `shouldSatisfy` isInfixOf "closure-valued constructor field"
+      other ->
+        expectationFailure ("expected closure-valued constructor field rejection, got " ++ show other)
+
+  it "collects closure parameters through lets before returned lambdas" $ do
+    checked <- requireChecked returnedLetLambdaClosureProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    closureParamCounts (backendBindingExpr mainBinding) `shouldSatisfy` elem 2
+
+  it "alpha-renames returned lambda parameters hoisted across shadowing lets" $ do
+    checked0 <- requireChecked returnedLetLambdaClosureProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding {checkedBindingTerm = returnedLetLambdaShadowingElabTerm}
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsAlphaRenamedShadowingClosure
+
+  it "keeps direct first-order local calls on the direct application path" $ do
+    checked <- requireChecked directLocalCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendApp
+    backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendClosure
+    backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendClosureCall
+
+  it "shares closure entry names across lifted recursive helper conversion" $ do
+    checked0 <- requireChecked liftedRecursiveHelpersClosureNameProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = intElabTy,
+                    checkedBindingSourceType = STBase "Int",
+                    checkedBindingTerm = liftedRecursiveHelpersClosureNameTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    let helperBindings = filter (isInfixOf "$letrec$" . backendBindingName) (backendBindings backend)
+        closureEntryNames = concatMap (collectBackendClosureEntryNames . backendBindingExpr) helperBindings
+    length helperBindings `shouldBe` 2
+    length closureEntryNames `shouldBe` 2
+    closureEntryNames `shouldBe` nub closureEntryNames
 
 simpleFunctionProgram :: String
 simpleFunctionProgram =
@@ -1083,6 +1244,187 @@ unsupportedVariableHeadType :: SrcType
 unsupportedVariableHeadType =
   STVarApp "f" (STBase "Int" :| [])
 
+returnedClosureProgram :: String
+returnedClosureProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int -> Int =",
+      "    let captured : Int = 41 in \\(x : Int) captured;",
+      "}"
+    ]
+
+closureAliasCallProgram :: String
+closureAliasCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int =",
+      "    let f : Int -> Int = \\(x : Int) x in",
+      "    let g : Int -> Int = f in",
+      "    g 7;",
+      "}"
+    ]
+
+capturedClosureCallProgram :: String
+capturedClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let g : Int -> Int = f in",
+      "    g 0;",
+      "}"
+    ]
+
+functionParameterClosureCallProgram :: String
+functionParameterClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
+      "}"
+    ]
+
+topLevelClosureCallProgram :: String
+topLevelClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
+      "  def main : Int = maker 0;",
+      "}"
+    ]
+
+polymorphicTopLevelClosureCallProgram :: String
+polymorphicTopLevelClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def maker : forall a. a -> Int = let captured : Int = 41 in \\(x : a) captured;",
+      "  def main : Int = maker 0;",
+      "}"
+    ]
+
+functionParameterNestedClosureAliasCallProgram :: String
+functionParameterNestedClosureAliasCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "    let g : Int -> Int = (let h : Int -> Int = f in h) in",
+      "    g 1;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
+      "}"
+    ]
+
+shadowedClosureLocalProgram :: String
+shadowedClosureLocalProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def id : Int -> Int = \\(x : Int) x;",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "    let h : Int -> Int = let f : Int -> Int = id in f in",
+      "    h 0;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
+      "}"
+    ]
+
+shadowedCaseClosureLocalProgram :: String
+shadowedCaseClosureLocalProgram =
+  unlines
+    [ "module Main export (FnBox(..), main) {",
+      "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
+      "  def id : Int -> Int = \\(x : Int) x;",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "    let g : Int -> Int = case FnBox id of { FnBox f -> f } in",
+      "    g 0;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
+      "}"
+    ]
+
+shadowedGlobalClosureHeadProgram :: String
+shadowedGlobalClosureHeadProgram =
+  unlines
+    [ "module Main export (FnBox(..), main) {",
+      "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
+      "  def f : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
+      "  def id : Int -> Int = \\(x : Int) x;",
+      "  def main : Int = case FnBox id of { FnBox f -> f 0 };",
+      "}"
+    ]
+
+closureValuedConstructorFieldProgram :: String
+closureValuedConstructorFieldProgram =
+  unlines
+    [ "module Main export (FnBox(..), main) {",
+      "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    case FnBox f of { FnBox g -> g 0 };",
+      "}"
+    ]
+
+returnedLetLambdaClosureProgram :: String
+returnedLetLambdaClosureProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int -> Int -> Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int -> Int = \\(x : Int) let y : Int = captured in \\(z : Int) y in",
+      "    f;",
+      "}"
+    ]
+
+returnedLetLambdaShadowingElabTerm :: Elab.ElabTerm
+returnedLetLambdaShadowingElabTerm =
+  Elab.ELet
+    "captured"
+    (Elab.schemeFromType intElabTy)
+    (Elab.ELit (LInt 41))
+    ( Elab.ELet
+        "f"
+        (Elab.schemeFromType (Elab.TArrow intElabTy (Elab.TArrow intElabTy intElabTy)))
+        ( Elab.ELam
+            "x"
+            intElabTy
+            ( Elab.ELet
+                "y"
+                (Elab.schemeFromType intElabTy)
+                (Elab.ELit (LInt 1))
+                (Elab.ELam "y" intElabTy (Elab.EVar "y"))
+            )
+        )
+        (Elab.EVar "f")
+    )
+
+directLocalCallProgram :: String
+directLocalCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int =",
+      "    let f : Int -> Int = \\(x : Int) x in f 7;",
+      "}"
+    ]
+
+liftedRecursiveHelpersClosureNameProgram :: String
+liftedRecursiveHelpersClosureNameProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def main : Int = 0;",
+      "}"
+    ]
+
 requireChecked :: String -> IO CheckedProgram
 requireChecked input = do
   program <- requireParsed input
@@ -1383,6 +1725,169 @@ containsBackendTyApp expr =
     BackendRoll {backendRollPayload = body} -> containsBackendTyApp body
     BackendUnroll {backendUnrollPayload = body} -> containsBackendTyApp body
     _ -> False
+
+containsBackendApp :: BackendExpr -> Bool
+containsBackendApp expr =
+  case expr of
+    BackendApp {} -> True
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendApp scrutinee || any (containsBackendApp . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsBackendApp body
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsBackendApp rhs || containsBackendApp body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendApp body
+    BackendTyApp {backendTyFunction = fun} -> containsBackendApp fun
+    BackendConstruct {backendConstructArgs = args} -> any containsBackendApp args
+    BackendRoll {backendRollPayload = body} -> containsBackendApp body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendApp body
+    BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
+      any (containsBackendApp . backendClosureCaptureExpr) captures || containsBackendApp body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      containsBackendApp fun || any containsBackendApp args
+    _ -> False
+
+containsBackendClosure :: BackendExpr -> Bool
+containsBackendClosure expr =
+  case expr of
+    BackendClosure {} -> True
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendClosure scrutinee || any (containsBackendClosure . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsBackendClosure body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsBackendClosure fun || containsBackendClosure arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsBackendClosure rhs || containsBackendClosure body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendClosure body
+    BackendTyApp {backendTyFunction = fun} -> containsBackendClosure fun
+    BackendConstruct {backendConstructArgs = args} -> any containsBackendClosure args
+    BackendRoll {backendRollPayload = body} -> containsBackendClosure body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendClosure body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      containsBackendClosure fun || any containsBackendClosure args
+    _ -> False
+
+collectBackendClosureEntryNames :: BackendExpr -> [String]
+collectBackendClosureEntryNames expr =
+  case expr of
+    BackendClosure {backendClosureEntryName = entryName, backendClosureCaptures = captures, backendClosureBody = body} ->
+      entryName : concatMap (collectBackendClosureEntryNames . backendClosureCaptureExpr) captures ++ collectBackendClosureEntryNames body
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      collectBackendClosureEntryNames scrutinee ++ concatMap (collectBackendClosureEntryNames . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> collectBackendClosureEntryNames body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      collectBackendClosureEntryNames fun ++ collectBackendClosureEntryNames arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      collectBackendClosureEntryNames rhs ++ collectBackendClosureEntryNames body
+    BackendTyAbs {backendTyAbsBody = body} -> collectBackendClosureEntryNames body
+    BackendTyApp {backendTyFunction = fun} -> collectBackendClosureEntryNames fun
+    BackendConstruct {backendConstructArgs = args} -> concatMap collectBackendClosureEntryNames args
+    BackendRoll {backendRollPayload = body} -> collectBackendClosureEntryNames body
+    BackendUnroll {backendUnrollPayload = body} -> collectBackendClosureEntryNames body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      collectBackendClosureEntryNames fun ++ concatMap collectBackendClosureEntryNames args
+    _ -> []
+
+containsBackendClosureCall :: BackendExpr -> Bool
+containsBackendClosureCall expr =
+  case expr of
+    BackendClosureCall {} -> True
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendClosureCall scrutinee || any (containsBackendClosureCall . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsBackendClosureCall body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsBackendClosureCall fun || containsBackendClosureCall arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsBackendClosureCall rhs || containsBackendClosureCall body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendClosureCall body
+    BackendTyApp {backendTyFunction = fun} -> containsBackendClosureCall fun
+    BackendConstruct {backendConstructArgs = args} -> any containsBackendClosureCall args
+    BackendRoll {backendRollPayload = body} -> containsBackendClosureCall body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendClosureCall body
+    BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
+      any (containsBackendClosureCall . backendClosureCaptureExpr) captures || containsBackendClosureCall body
+    _ -> False
+
+containsAlphaRenamedShadowingClosure :: BackendExpr -> Bool
+containsAlphaRenamedShadowingClosure expr =
+  case expr of
+    BackendClosure
+      { backendClosureCaptures = captures,
+        backendClosureParams = params,
+        backendClosureBody =
+          BackendLet
+            { backendLetName = "y",
+              backendLetBody = BackendVar {backendVarName = bodyName}
+            }
+      } ->
+        (bodyName /= "y" && bodyName `elem` map fst params)
+          || any (containsAlphaRenamedShadowingClosure . backendClosureCaptureExpr) captures
+    BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
+      any (containsAlphaRenamedShadowingClosure . backendClosureCaptureExpr) captures
+        || containsAlphaRenamedShadowingClosure body
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsAlphaRenamedShadowingClosure scrutinee
+        || any (containsAlphaRenamedShadowingClosure . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsAlphaRenamedShadowingClosure body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsAlphaRenamedShadowingClosure fun || containsAlphaRenamedShadowingClosure arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsAlphaRenamedShadowingClosure rhs || containsAlphaRenamedShadowingClosure body
+    BackendTyAbs {backendTyAbsBody = body} -> containsAlphaRenamedShadowingClosure body
+    BackendTyApp {backendTyFunction = fun} -> containsAlphaRenamedShadowingClosure fun
+    BackendConstruct {backendConstructArgs = args} -> any containsAlphaRenamedShadowingClosure args
+    BackendRoll {backendRollPayload = body} -> containsAlphaRenamedShadowingClosure body
+    BackendUnroll {backendUnrollPayload = body} -> containsAlphaRenamedShadowingClosure body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      containsAlphaRenamedShadowingClosure fun || any containsAlphaRenamedShadowingClosure args
+    _ -> False
+
+closureParamCounts :: BackendExpr -> [Int]
+closureParamCounts expr =
+  case expr of
+    BackendClosure {backendClosureCaptures = captures, backendClosureParams = params, backendClosureBody = body} ->
+      length params : concatMap (closureParamCounts . backendClosureCaptureExpr) captures ++ closureParamCounts body
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      closureParamCounts scrutinee ++ concatMap (closureParamCounts . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> closureParamCounts body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      closureParamCounts fun ++ closureParamCounts arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      closureParamCounts rhs ++ closureParamCounts body
+    BackendTyAbs {backendTyAbsBody = body} -> closureParamCounts body
+    BackendTyApp {backendTyFunction = fun} -> closureParamCounts fun
+    BackendConstruct {backendConstructArgs = args} -> concatMap closureParamCounts args
+    BackendRoll {backendRollPayload = body} -> closureParamCounts body
+    BackendUnroll {backendUnrollPayload = body} -> closureParamCounts body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      closureParamCounts fun ++ concatMap closureParamCounts args
+    _ -> []
+
+containsBackendClosureCapture :: String -> BackendExpr -> Bool
+containsBackendClosureCapture expected expr =
+  case expr of
+    BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
+      any (captureNameMatches expected . backendClosureCaptureName) captures
+        || any (containsBackendClosureCapture expected . backendClosureCaptureExpr) captures
+        || containsBackendClosureCapture expected body
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendClosureCapture expected scrutinee
+        || any (containsBackendClosureCapture expected . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsBackendClosureCapture expected body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsBackendClosureCapture expected fun || containsBackendClosureCapture expected arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsBackendClosureCapture expected rhs || containsBackendClosureCapture expected body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendClosureCapture expected body
+    BackendTyApp {backendTyFunction = fun} -> containsBackendClosureCapture expected fun
+    BackendConstruct {backendConstructArgs = args} -> any (containsBackendClosureCapture expected) args
+    BackendRoll {backendRollPayload = body} -> containsBackendClosureCapture expected body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendClosureCapture expected body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      containsBackendClosureCapture expected fun || any (containsBackendClosureCapture expected) args
+    _ -> False
+  where
+    captureNameMatches expectedName actualName =
+      expectedName == actualName || expectedName `isInfixOf` actualName
 
 containsBackendTyAppArgument :: BackendType -> BackendExpr -> Bool
 containsBackendTyAppArgument expected expr =
@@ -1859,6 +2364,36 @@ recursiveLexicalTypeOrderHelperBackendTy =
         "a"
         Nothing
         unaryIntBackendTy
+    )
+
+liftedRecursiveHelpersClosureNameTerm :: Elab.ElabTerm
+liftedRecursiveHelpersClosureNameTerm =
+  Elab.ELet
+    "left"
+    (Elab.schemeFromType unaryIntElabTy)
+    (liftedRecursiveHelpersClosureNameRhs "left")
+    ( Elab.ELet
+        "right"
+        (Elab.schemeFromType unaryIntElabTy)
+        (liftedRecursiveHelpersClosureNameRhs "right")
+        (Elab.EApp (Elab.EVar "right") (Elab.ELit (LInt 0)))
+    )
+
+liftedRecursiveHelpersClosureNameRhs :: String -> Elab.ElabTerm
+liftedRecursiveHelpersClosureNameRhs selfName =
+  Elab.ELam
+    "n"
+    intElabTy
+    ( Elab.ELet
+        "f"
+        (Elab.schemeFromType unaryIntElabTy)
+        (Elab.ELam "x" intElabTy (Elab.EVar "x"))
+        ( Elab.ELet
+            "ignored"
+            (Elab.schemeFromType intElabTy)
+            (Elab.EApp (Elab.EVar selfName) (Elab.EVar "n"))
+            (Elab.EApp (Elab.EVar "Main__use") (Elab.EVar "f"))
+        )
     )
 
 intIdentityElabTerm :: Elab.ElabTerm

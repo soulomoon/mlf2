@@ -594,11 +594,118 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "rejects partial applications until closure conversion is explicit in backend IR" $ do
     renderBackendProgramLLVM partialApplicationProgram
-      `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
+      `shouldSatisfyLeft` isInfixOf "Backend LLVM arity mismatch"
 
   it "rejects raw escaping lambdas until closure construction is explicit in backend IR" $ do
     renderBackendProgramLLVM escapingLambdaProgram
-      `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
+      `shouldSatisfyLeft` isInfixOf "escaping function"
+
+  it "lowers source-level captured closure calls through the explicit closure ABI" $ do
+    output <-
+      withTempProgram sourceCapturedClosureCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$Main__main$"
+    output `shouldSatisfy` isInfixOf "store i64 41"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "lowers closure-valued function parameters through the explicit closure ABI" $ do
+    output <-
+      withTempProgram sourceFunctionParameterClosureCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$Main__main$"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "call i64 %\"__llvm.malloc"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "lowers closure-valued function parameters through let aliases" $ do
+    output <-
+      withTempProgram sourceFunctionParameterClosureAliasCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$Main__main$"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "BackendClosureCallExpectedClosureValue"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "lowers source-level returned closure values as pointer results" $ do
+    output <-
+      withTempProgram sourceReturnedClosureProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$Main__main$"
+    validateLLVMAssembly output
+
+  it "lowers source-level top-level closure calls through the explicit closure ABI" $ do
+    output <-
+      withTempProgram sourceTopLevelClosureCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"Main__maker\"()"
+    output `shouldSatisfy` isInfixOf "call ptr @\"Main__maker\"()"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "lowers type-abstracted top-level closure calls through the explicit closure ABI" $ do
+    output <-
+      withTempProgram sourcePolymorphicTopLevelClosureCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define private ptr @\"Main__maker"
+    output `shouldSatisfy` isInfixOf "call ptr @\"Main__maker"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "lowers top-level closure values passed as function arguments" $ do
+    output <-
+      withTempProgram sourceTopLevelClosureArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "call ptr @\"Main__maker\"()"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "lowers closure-valued function parameters through nested let aliases" $ do
+    output <-
+      withTempProgram sourceFunctionParameterNestedClosureAliasCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$Main__main$"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "BackendClosureCallExpectedClosureValue"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "lowers returned lambdas behind lets with complete closure parameters" $ do
+    output <-
+      withTempProgram sourceReturnedLetLambdaClosureProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+    output `shouldSatisfy` isInfixOf "(ptr %\"__mlfp_env\", i64 %\""
+    output `shouldSatisfy` isInfixOf "\", i64 %\""
+    validateLLVMAssembly output
+
+  it "preserves shadowed lambda parameters collected through lets" $
+    assertNativeProgram sourceReturnedLetLambdaShadowingProgram "7"
+
+  it "rejects source closure-valued constructor fields before LLVM emission" $ do
+    result <- withTempProgram sourceClosureValuedConstructorFieldProgram emitBackendFile
+
+    case result of
+      Left err ->
+        err `shouldSatisfy` isInfixOf "closure-valued constructor field"
+      Right output ->
+        expectationFailure ("expected closure-valued constructor field rejection, got output:\n" ++ output)
 
   it "lowers zero-capture closures through the explicit closure ABI" $ do
     output <- requireRight (renderBackendProgramLLVM zeroCaptureClosureProgram)
@@ -2875,6 +2982,125 @@ escapingLambdaProgram =
         backendLetRhs = intIdentityExpr,
         backendLetBody = BackendVar unaryIntTy "f"
       }
+
+sourceCapturedClosureCallProgram :: String
+sourceCapturedClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let g : Int -> Int = f in",
+      "    g 0;",
+      "}"
+    ]
+
+sourceFunctionParameterClosureCallProgram :: String
+sourceFunctionParameterClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
+      "}"
+    ]
+
+sourceFunctionParameterClosureAliasCallProgram :: String
+sourceFunctionParameterClosureAliasCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) let g : Int -> Int = f in g 1;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
+      "}"
+    ]
+
+sourceReturnedClosureProgram :: String
+sourceReturnedClosureProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int -> Int =",
+      "    let captured : Int = 41 in \\(x : Int) captured;",
+      "}"
+    ]
+
+sourceTopLevelClosureCallProgram :: String
+sourceTopLevelClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
+      "  def main : Int = maker 0;",
+      "}"
+    ]
+
+sourcePolymorphicTopLevelClosureCallProgram :: String
+sourcePolymorphicTopLevelClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def maker : forall a. a -> Int = let captured : Int = 41 in \\(x : a) captured;",
+      "  def main : Int = maker 0;",
+      "}"
+    ]
+
+sourceTopLevelClosureArgumentProgram :: String
+sourceTopLevelClosureArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def main : Int = use maker;",
+      "}"
+    ]
+
+sourceFunctionParameterNestedClosureAliasCallProgram :: String
+sourceFunctionParameterNestedClosureAliasCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "    let g : Int -> Int = (let h : Int -> Int = f in h) in",
+      "    g 1;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
+      "}"
+    ]
+
+sourceReturnedLetLambdaClosureProgram :: String
+sourceReturnedLetLambdaClosureProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int -> Int -> Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int -> Int = \\(x : Int) let y : Int = captured in \\(z : Int) y in",
+      "    f;",
+      "}"
+    ]
+
+sourceReturnedLetLambdaShadowingProgram :: String
+sourceReturnedLetLambdaShadowingProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def make : Int -> Int = let y : Int = 1 in \\(y : Int) y;",
+      "  def main : Int = make 7;",
+      "}"
+    ]
+
+sourceClosureValuedConstructorFieldProgram :: String
+sourceClosureValuedConstructorFieldProgram =
+  unlines
+    [ "module Main export (FnBox(..), main) {",
+      "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    case FnBox f of { FnBox g -> g 0 };",
+      "}"
+    ]
 
 zeroCaptureClosureProgram :: BackendProgram
 zeroCaptureClosureProgram =
