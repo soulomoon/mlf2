@@ -1428,7 +1428,9 @@ annotateExpectedValueUse scope mbExpected valueInfo applied =
   case mbExpected of
     Just expectedTy
       | not (isLocalOrdinaryValue valueInfo),
-        isRecursiveResultType expectedTy || isRecursiveResultType (lowerType scope expectedTy) ->
+        isRecursiveResultType expectedTy
+          || isRecursiveResultType (lowerType scope expectedTy)
+          || Builtins.srcTypeMentionsOpaqueBuiltin expectedTy ->
           surfaceAnn applied (lowerType scope expectedTy)
     _ -> applied
 
@@ -1786,6 +1788,11 @@ shouldResolveMethodBeforeInference :: ElaborateScope -> MethodInfo -> SrcType ->
 shouldResolveMethodBeforeInference scope methodInfo classArgTy =
   case lookupEvidenceMethodByClass scope (methodInfoClassIdentity methodInfo) (typeViewIdentity (sourceTypeViewInScope scope classArgTy)) (methodName methodInfo) of
     Just _ -> True
+    Nothing
+      | Builtins.srcTypeMentionsOpaqueBuiltin classArgTy ->
+          case resolveMethodInstanceInfoByTypeView scope methodInfo (sourceTypeViewInScope scope classArgTy) of
+            Right _ -> True
+            Left _ -> False
     Nothing -> False
 
 resolveConstraintEvidenceExpr :: ElaborateScope -> Set (SymbolIdentity, String) -> ConstraintInfo -> ElaborateM [SurfaceExpr]
@@ -2100,7 +2107,13 @@ placeholderMethodType scope methodInfo args mbExpectedResult =
       quantifiedMethodTy = quantifiedMethodType methodInfo
       knownClassArg = knownMethodClassArg scope methodInfo args mbExpectedResult
    in case knownClassArg of
-        Just classArgTy -> stripVacuousSrcForalls (specializeMethodType methodTy paramName classArgTy)
+        Just classArgTy ->
+          let specializedTy = stripVacuousSrcForalls (specializeMethodType methodTy paramName classArgTy)
+              callSubst =
+                case inferMethodCallSubst scope methodInfo classArgTy args of
+                  Just subst -> subst
+                  Nothing -> Map.empty
+           in stripVacuousSrcForalls (specializeQuantifiedType callSubst specializedTy)
         Nothing -> quantifiedMethodTy
 
 placeholderResolvedMethodType :: ElaborateScope -> MethodInfo -> [P.ResolvedExpr] -> Maybe SrcType -> SrcType
@@ -2110,7 +2123,13 @@ placeholderResolvedMethodType scope methodInfo args mbExpectedResult =
       quantifiedMethodTy = quantifiedMethodType methodInfo
       knownClassArg = knownResolvedMethodClassArg scope methodInfo args mbExpectedResult
    in case knownClassArg of
-        Just classArgTy -> stripVacuousSrcForalls (specializeMethodType methodTy paramName classArgTy)
+        Just classArgTy ->
+          let specializedTy = stripVacuousSrcForalls (specializeMethodType methodTy paramName classArgTy)
+              callSubst =
+                case inferResolvedMethodCallSubst scope methodInfo classArgTy args of
+                  Just subst -> subst
+                  Nothing -> Map.empty
+           in stripVacuousSrcForalls (specializeQuantifiedType callSubst specializedTy)
         Nothing -> quantifiedMethodTy
 
 knownMethodClassArg :: ElaborateScope -> MethodInfo -> [P.Expr] -> Maybe SrcType -> Maybe SrcType

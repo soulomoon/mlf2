@@ -379,6 +379,30 @@ spec = do
                         ]
             checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isRight
 
+        it "rejects non-IO expressions for Prelude IO annotations" $ do
+            intLocated <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = 1;"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated intLocated) `shouldSatisfy` either
+                (isInfixOf "type mismatch" . renderProgramDiagnostic)
+                (const False)
+            identityLocated <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = \\x x;"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated identityLocated) `shouldSatisfy` either
+                (isInfixOf "type mismatch" . renderProgramDiagnostic)
+                (const False)
+
         it "rejects constructor imports for opaque Prelude IO" $ do
             located <-
                 requireLocated $

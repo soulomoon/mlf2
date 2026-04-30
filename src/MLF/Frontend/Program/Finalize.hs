@@ -83,23 +83,95 @@ import MLF.Frontend.Program.Types
     specializeMethodType,
     substituteTypeVar,
   )
-import MLF.Frontend.Syntax (Expr (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
+import MLF.Frontend.Syntax (Expr (..), Lit (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarsType)
 
 finalizeBindingAllowOpaque :: ElaborateScope -> LoweredBinding -> Either ProgramError CheckedBinding
 finalizeBindingAllowOpaque scope lowered
   | Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered) = do
-      expectedTy <- srcTypeToElabType (loweredBindingExpectedType lowered)
-      Right
-        CheckedBinding
-          { checkedBindingName = loweredBindingName lowered,
-            checkedBindingSourceType = loweredBindingSourceType lowered,
-            checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
-            checkedBindingTerm = X.EVar (loweredBindingName lowered),
-            checkedBindingType = expectedTy,
-            checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
-          }
+      placeholderTy <- srcTypeToElabType (loweredBindingExpectedType lowered)
+      let placeholder checked =
+            checked
+              { checkedBindingTerm = X.EVar (loweredBindingName lowered),
+                checkedBindingType = placeholderTy
+              }
+          uncheckedPlaceholder =
+            CheckedBinding
+              { checkedBindingName = loweredBindingName lowered,
+                checkedBindingSourceType = loweredBindingSourceType lowered,
+                checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
+                checkedBindingTerm = X.EVar (loweredBindingName lowered),
+                checkedBindingType = placeholderTy,
+                checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
+              }
+      case finalizeBinding scope lowered of
+        Right checked -> Right (placeholder checked)
+        Left err ->
+          if validatesOpaqueBindingSurface scope lowered
+            then Right uncheckedPlaceholder
+            else Left err
   | otherwise = finalizeBinding scope lowered
+
+validatesOpaqueBindingSurface :: ElaborateScope -> LoweredBinding -> Bool
+validatesOpaqueBindingSurface scope lowered
+  | not (Map.null (loweredBindingDeferredObligations lowered)) = False
+  | otherwise =
+      case inferOpaqueSurfaceType scope runtimeTypes Map.empty (loweredBindingSurfaceExpr lowered) of
+        Right actualTy -> opaqueSourceCompatible scope actualTy (loweredBindingExpectedType lowered)
+        Left _ -> False
+  where
+    runtimeTypes = loweredBindingExternalTypes lowered `Map.union` elaborateScopeRuntimeTypes scope
+
+inferOpaqueSurfaceType :: ElaborateScope -> Map String SrcType -> Map String SrcType -> SurfaceExpr -> Either ProgramError SrcType
+inferOpaqueSurfaceType scope runtimeTypes localTypes expr =
+  case expr of
+    EVar name ->
+      case Map.lookup name localTypes <|> Map.lookup name runtimeTypes of
+        Just ty -> Right ty
+        Nothing -> Left (ProgramUnknownValue name)
+    ELit lit -> Right (literalSourceType lit)
+    ELamAnn name ty body ->
+      STArrow ty <$> inferOpaqueSurfaceType scope runtimeTypes (Map.insert name ty localTypes) body
+    ELam {} ->
+      Left (ProgramPipelineError "opaque validation needs lambda annotations")
+    EApp fun arg -> do
+      funTy <- inferOpaqueSurfaceType scope runtimeTypes localTypes fun
+      argTy <- inferOpaqueSurfaceType scope runtimeTypes localTypes arg
+      applyOpaqueFunctionType scope funTy argTy
+    ELet name rhs body -> do
+      rhsTy <- inferOpaqueSurfaceType scope runtimeTypes localTypes rhs
+      inferOpaqueSurfaceType scope runtimeTypes (Map.insert name rhsTy localTypes) body
+    EAnn inner annTy -> do
+      actualTy <- inferOpaqueSurfaceType scope runtimeTypes localTypes inner
+      if opaqueSourceCompatible scope actualTy annTy
+        then Right annTy
+        else Left (ProgramTypeMismatch actualTy annTy)
+
+applyOpaqueFunctionType :: ElaborateScope -> SrcType -> SrcType -> Either ProgramError SrcType
+applyOpaqueFunctionType scope funTy argTy =
+  case snd (splitForalls funTy) of
+    STArrow paramTy resultTy ->
+      case matchTypesInScope scope Map.empty paramTy argTy <|> matchTypesInScope scope Map.empty (lowerType scope paramTy) (lowerType scope argTy) of
+        Just subst -> Right (Map.foldrWithKey substituteTypeVar resultTy subst)
+        Nothing
+          | opaqueSourceCompatible scope argTy paramTy -> Right resultTy
+          | otherwise -> Left (ProgramTypeMismatch argTy paramTy)
+    other -> Left (ProgramExpectedFunction other)
+
+opaqueSourceCompatible :: ElaborateScope -> SrcType -> SrcType -> Bool
+opaqueSourceCompatible scope actualTy expectedTy =
+  alphaEqSrcType actualTy expectedTy
+    || alphaEqSrcType (lowerType scope actualTy) (lowerType scope expectedTy)
+    || sourceForallMatches expectedTy actualTy
+    || matchTypesInScope scope Map.empty expectedTy actualTy /= Nothing
+    || matchTypesInScope scope Map.empty actualTy expectedTy /= Nothing
+
+literalSourceType :: Lit -> SrcType
+literalSourceType lit =
+  case lit of
+    LInt _ -> STBase "Int"
+    LBool _ -> STBase "Bool"
+    LString _ -> STBase "String"
 
 finalizeBinding :: ElaborateScope -> LoweredBinding -> Either ProgramError CheckedBinding
 finalizeBinding scope lowered = do
