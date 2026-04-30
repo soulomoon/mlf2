@@ -160,6 +160,20 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "store ptr @\"__mlfp_closure$direct_call_poly\""
     validateLLVMAssembly output
 
+  it "collects closure entries when direct type applications cross let heads" $ do
+    output <- requireRight (renderBackendProgramLLVM letHeadPolymorphicClosureCallProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"polyLocal$"
+    output `shouldSatisfy` isInfixOf "store ptr @\"polyLocal$"
+    output `shouldSatisfy` isInfixOf "$__mlfp_closure$direct_call_poly\""
+    validateLLVMAssembly output
+
+  it "lowers structurally matched closure call results" $ do
+    output <- requireRight (renderBackendProgramLLVM structuralClosureResultProgram)
+
+    output `shouldSatisfy` isInfixOf "__mlfp_closure$result_structural"
+    validateLLVMAssembly output
+
   it "instantiates direct polymorphic zero-arity expressions used through type application" $ do
     output <- requireRight (renderBackendProgramLLVM directPolymorphicZeroArityProgram)
 
@@ -2020,6 +2034,72 @@ directPolymorphicClosureCallExpr =
         )
     )
 
+letHeadPolymorphicClosureCallProgram :: BackendProgram
+letHeadPolymorphicClosureCallProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          ( BackendTyApp
+                              (BTArrow intTy intTy)
+                              ( BackendLet
+                                  localPolymorphicClosureEntryTy
+                                  "polyLocal"
+                                  localPolymorphicClosureEntryTy
+                                  directPolymorphicClosureCallExpr
+                                  (BackendVar localPolymorphicClosureEntryTy "polyLocal")
+                              )
+                              intTy
+                          )
+                          (intLit 3),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+structuralClosureResultProgram :: BackendProgram
+structuralClosureResultProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [resultBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = resultBoxStructuralTy,
+                      backendBindingExpr =
+                        BackendClosureCall
+                          resultBoxStructuralTy
+                          ( BackendClosure
+                              { backendExprType = BTArrow intTy resultBoxTy,
+                                backendClosureEntryName = "__mlfp_closure$result_structural",
+                                backendClosureCaptures = [],
+                                backendClosureParams = [("x", intTy)],
+                                backendClosureBody =
+                                  BackendConstruct resultBoxTy "ResultBox" [BackendVar intTy "x"]
+                              }
+                          )
+                          [intLit 3],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
 directPolymorphicZeroArityProgram :: BackendProgram
 directPolymorphicZeroArityProgram =
   BackendProgram
@@ -2614,6 +2694,14 @@ optionData =
         [ BackendConstructor "None" [] [] (optionTy (BTVar "a")),
           BackendConstructor "Some" [] [BTVar "a"] (optionTy (BTVar "a"))
         ]
+    }
+
+resultBoxData :: BackendData
+resultBoxData =
+  BackendData
+    { backendDataName = "ResultBox",
+      backendDataParameters = [],
+      backendDataConstructors = [BackendConstructor "ResultBox" [] [intTy] resultBoxTy]
     }
 
 nonePolyTy :: BackendType
@@ -3272,6 +3360,18 @@ stringTy =
 optionTy :: BackendType -> BackendType
 optionTy ty =
   BTCon (BaseTy "Option") (ty :| [])
+
+resultBoxTy :: BackendType
+resultBoxTy =
+  BTBase (BaseTy "ResultBox")
+
+resultBoxStructuralTy :: BackendType
+resultBoxStructuralTy =
+  BTMu "$ResultBox_self" (singleFieldStructuralBody intTy)
+
+singleFieldStructuralBody :: BackendType -> BackendType
+singleFieldStructuralBody fieldTy =
+  BTForall "r" Nothing (BTArrow (BTArrow fieldTy (BTVar "r")) (BTVar "r"))
 
 unaryIntTy :: BackendType
 unaryIntTy =

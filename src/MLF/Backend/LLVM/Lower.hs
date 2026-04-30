@@ -2180,14 +2180,20 @@ collectClosureEntriesInExpr localForms expr =
     BackendLam _ name _ body ->
       collectClosureEntriesInExpr (Map.delete name localForms) body
     BackendApp _ fun arg ->
-      collectAppliedLocalClosureEntries
-        ++ collectClosureEntriesInExpr localForms fun
-        ++ collectClosureEntriesInExpr localForms arg
+      case collectAdministrativeCallEntries of
+        Just entries -> entries
+        Nothing ->
+          collectAppliedLocalClosureEntries
+            ++ collectClosureEntriesInExpr localForms fun
+            ++ collectClosureEntriesInExpr localForms arg
     BackendLet _ name bindingTy rhs body ->
       collectClosureEntriesInExpr localForms rhs
         ++ collectClosureEntriesInExpr (collectLetLocalForm name bindingTy rhs) body
     BackendTyAbs {} -> []
-    BackendTyApp {} -> collectTypeAppliedClosureEntries
+    BackendTyApp {} ->
+      case collectAdministrativeTypeAppEntries of
+        Just entries -> entries
+        Nothing -> collectTypeAppliedClosureEntries
     BackendConstruct _ _ args -> concatMap (collectClosureEntriesInExpr localForms) args
     BackendCase _ scrutinee alternatives ->
       collectClosureEntriesInExpr localForms scrutinee ++ concatMap collectAlternativeEntries (NE.toList alternatives)
@@ -2215,6 +2221,14 @@ collectClosureEntriesInExpr localForms expr =
               collectInstantiatedLocalClosureEntries name form typeArgs args
         _ -> []
 
+    collectAdministrativeCallEntries =
+      case collectCall expr of
+        Just (headExpr, typeArgs, args) ->
+          case pushCallIntoExpression "closure entry collection" (backendExprType expr) headExpr typeArgs args of
+            Right (Just applied) -> Just (collectClosureEntriesInExpr localForms applied)
+            _ -> Nothing
+        Nothing -> Nothing
+
     collectTypeAppliedClosureEntries =
       case collectTyApps expr of
         (BackendVar _ name, typeArgs)
@@ -2228,6 +2242,13 @@ collectClosureEntriesInExpr localForms expr =
             []
         (fun, _) ->
           collectClosureEntriesInExpr localForms fun
+
+    collectAdministrativeTypeAppEntries =
+      case collectTyApps expr of
+        (headExpr, typeArgs) ->
+          case pushTypeApplicationsIntoExpression "closure entry collection" (backendExprType expr) headExpr typeArgs of
+            Right (Just applied) -> Just (collectClosureEntriesInExpr localForms applied)
+            _ -> Nothing
 
     collectInstantiatedLocalClosureEntries name form typeArgs args =
       collectInstantiatedClosureEntries name form typeArgs args
@@ -2860,10 +2881,11 @@ lowerClosureCall env exprEnv context resultTy fun args = do
     liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a function: " ++ show (lvBackendType callee)))
   unless (length paramTys == length args) $
     liftEither (BackendLLVMArityMismatch "closure" (length paramTys) (length args))
-  unless (alphaEqBackendType resultTy returnTy) $
+  resultLLVMType <- lowerBackendTypeM env context resultTy
+  returnLLVMType <- lowerBackendTypeM env context returnTy
+  unless (resultLLVMType == returnLLVMType) $
     liftEither (BackendLLVMInternalError ("closure call result mismatch at " ++ context))
   callArgs <- zipWithM lowerClosureArg (zip [0 :: Int ..] paramTys) args
-  resultLLVMType <- lowerBackendTypeM env context resultTy
   codePtrField <- emitGep "closure.code.ptr" (lvOperand callee) 0
   codePtr <- emitAssign "closure.code" LLVMPtr (LLVMLoad LLVMPtr codePtrField)
   envPtrField <- emitGep "closure.env.ptr" (lvOperand callee) 8
