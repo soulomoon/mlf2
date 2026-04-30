@@ -34,6 +34,7 @@ unifiedFixtureExpectations =
     , ("test/programs/unified/authoritative-cross-module-let-polymorphism.mlfp", "1")
     , ("test/programs/unified/authoritative-case-analysis.mlfp", "1")
     , ("test/programs/unified/authoritative-overloaded-method.mlfp", "true")
+    , ("test/programs/unified/authoritative-nullary-overloaded-method.mlfp", "Zero")
     , ("test/programs/unified/authoritative-recursive-let.mlfp", "true")
     , ("test/programs/unified/first-class-polymorphism.mlfp", "true")
     ]
@@ -257,6 +258,175 @@ emlfBoundaryMatrix =
                 ]
         )
         (ExpectCheckFailureContaining "ProgramAmbiguousMethodUse \"eq\"")
+    , ProgramMatrixCase
+        "runs nullary overloaded method from definition expected type"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Monoid, Nat(..), mempty, append, main) {"
+                , "  class Monoid a {"
+                , "    mempty : a;"
+                , "    append : a -> a -> a;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  instance Monoid Nat {"
+                , "    mempty = Zero;"
+                , "    append = \\left \\right left;"
+                , "  }"
+                , ""
+                , "  def main : Nat = mempty;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "Zero")
+    , ProgramMatrixCase
+        "checks generic constrained nullary overloaded method through local evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Monoid, Nat(..), mempty, append, neutral, main) {"
+                , "  class Monoid a {"
+                , "    mempty : a;"
+                , "    append : a -> a -> a;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  instance Monoid Nat {"
+                , "    mempty = Zero;"
+                , "    append = \\left \\right left;"
+                , "  }"
+                , ""
+                , "  def neutral : Monoid a => a = mempty;"
+                , "  def main : Nat = neutral;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
+    , ProgramMatrixCase
+        "checks generic constrained nullary overloaded method with method-local evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Pick, Nat(..), Pair(..), eq, pick, picked, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , ""
+                , "  data Pair a b ="
+                , "      Pair : a -> b -> Pair a b;"
+                , ""
+                , "  instance Eq Nat {"
+                , "    eq = \\left \\right true;"
+                , "  }"
+                , ""
+                , "  class Pick a {"
+                , "    pick : Eq b => Pair a b;"
+                , "  }"
+                , ""
+                , "  def picked : Pick a => Pair a Nat = pick;"
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
+    , ProgramMatrixCase
+        "checks generic constrained nullary overloaded method with polymorphic method-local evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Eq, Pick, Pair(..), eq, pick, picked, main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , ""
+                , "  data Pair a b ="
+                , "      Pair : a -> b -> Pair a b;"
+                , ""
+                , "  class Pick a {"
+                , "    pick : Eq b => Pair a b;"
+                , "  }"
+                , ""
+                , "  def picked : (Pick a, Eq b) => Pair a b = pick;"
+                , "  def main : Bool = true;"
+                , "}"
+                ]
+        )
+        ExpectCheckSuccess
+    , ProgramMatrixCase
+        "runs nullary overloaded method from expected method argument"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Monoid, Nat(..), mempty, append, main) {"
+                , "  class Monoid a {"
+                , "    mempty : a;"
+                , "    append : a -> a -> a;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat"
+                , "    | Succ : Nat -> Nat;"
+                , ""
+                , "  instance Monoid Nat {"
+                , "    mempty = Zero;"
+                , "    append = \\left \\right left;"
+                , "  }"
+                , ""
+                , "  def main : Nat = append mempty Zero;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "Zero")
+    , ProgramMatrixCase
+        "runs parameterized nullary overloaded method from expected result"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (DefaultBox, Nat(..), Box(..), defaultBox, main) {"
+                , "  class DefaultBox a {"
+                , "    defaultBox : Box a;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , ""
+                , "  data Box a ="
+                , "      Box : a -> Box a;"
+                , ""
+                , "  instance DefaultBox Nat {"
+                , "    defaultBox = Box Zero;"
+                , "  }"
+                , ""
+                , "  def main : Box Nat = defaultBox;"
+                , "}"
+                ]
+        )
+        (ExpectRunValue "Box Zero")
+    , ProgramMatrixCase
+        "rejects nullary overloaded method without expected type evidence"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (Monoid, Nat(..), mempty, main) {"
+                , "  class Monoid a {"
+                , "    mempty : a;"
+                , "  }"
+                , ""
+                , "  data Nat ="
+                , "      Zero : Nat;"
+                , ""
+                , "  instance Monoid Nat {"
+                , "    mempty = Zero;"
+                , "  }"
+                , ""
+                , "  def main : Nat = let x = mempty in x;"
+                , "}"
+                ]
+        )
+        (ExpectCheckFailureContaining "ProgramAmbiguousMethodUse \"mempty\"")
     , ProgramMatrixCase
         "rejects deferred overloaded method dispatch with no matching instance"
         ( InlineProgram $

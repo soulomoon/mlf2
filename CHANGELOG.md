@@ -9,6 +9,10 @@
   status while skipping explicitly when tools are unavailable.
 
 ### Changed
+- Supported expected-type resolution for nullary overloaded `.mlfp` methods.
+  Associated values such as `mempty : a` now resolve from an explicit or
+  propagated expected source type while bare uses without such evidence still
+  fail closed as ambiguous.
 - Added a native LLVM emission contract for pure `.mlfp` entrypoints. The
   backend can now emit an `i32 @main()` wrapper that renders supported
   `Int`, `Bool`, and first-order ADT results to stdout, returns exit status
