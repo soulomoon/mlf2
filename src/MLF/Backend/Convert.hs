@@ -1410,10 +1410,11 @@ aliasedClosureValueArguments context scope bindingTy term =
   case stripClosureHeadTypeInsts headTerm of
     EVar name ->
       Set.fromList
-        [ demandedIndex - suppliedCount
+        [ paramOffset + exposedIndex
         | demandedIndex <- Set.toList (lookupClosureValueArgumentDemand context scope name),
+          let exposedIndex = demandedIndex - suppliedCount,
           demandedIndex >= suppliedCount,
-          demandedIndex - suppliedCount < exposedCount
+          exposedIndex < exposedCount
         ]
     _ ->
       Set.empty
@@ -1421,6 +1422,7 @@ aliasedClosureValueArguments context scope bindingTy term =
     (_, valueTy) = splitBackendForalls bindingTy
     (paramTys, _) = splitBackendArrows valueTy
     (params, body) = collectLeadingLams (length paramTys) term
+    paramOffset = length params
     exposedCount = length paramTys - length params
     (headTerm, suppliedArgs) = collectAliasedApps body
     suppliedCount = length suppliedArgs
