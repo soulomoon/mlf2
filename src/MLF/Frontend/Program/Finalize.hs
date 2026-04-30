@@ -105,25 +105,45 @@ finalizeBindingAllowOpaque scope lowered
                 checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
               }
       case finalizeBinding scope lowered of
-        Right checked -> Right (placeholder checked)
+        Right checked
+          | Map.null (loweredBindingDeferredObligations lowered) ->
+              -- Successful elaboration can still satisfy an opaque forall by
+              -- instantiating the expected type. Re-check no-obligation
+              -- surfaces before replacing the checked term with a placeholder.
+              case validateOpaqueBindingSurface scope lowered of
+                Right () -> Right (placeholder checked)
+                Left validationErr -> Left validationErr
+          | otherwise -> Right (placeholder checked)
         Left err ->
-          if validatesOpaqueBindingSurface scope lowered
-            then Right uncheckedPlaceholder
-            else Left err
+          case validateOpaqueBindingSurface scope lowered of
+            Right () -> Right uncheckedPlaceholder
+            Left _ -> Left err
   | otherwise = finalizeBinding scope lowered
 
-validatesOpaqueBindingSurface :: ElaborateScope -> LoweredBinding -> Bool
-validatesOpaqueBindingSurface scope lowered
-  | not (Map.null (loweredBindingDeferredObligations lowered)) = False
+validateOpaqueBindingSurface :: ElaborateScope -> LoweredBinding -> Either ProgramError ()
+validateOpaqueBindingSurface scope lowered
+  | not (Map.null (loweredBindingDeferredObligations lowered)) =
+      Left (ProgramPipelineError "opaque validation does not support deferred obligations")
   | otherwise =
-      case inferOpaqueSurfaceType scope runtimeTypes Map.empty (loweredBindingSurfaceExpr lowered) of
-        Right actualTy -> opaqueSourceCompatible scope actualTy (loweredBindingExpectedType lowered)
-        Left _ -> False
+      case inferOpaqueSurfaceType scope rigidVars runtimeTypes Map.empty (loweredBindingSurfaceExpr lowered) of
+        Right actualTy
+          | opaqueSourceCompatibleWithRigid rigidVars scope actualTy (loweredBindingExpectedType lowered) -> Right ()
+          | otherwise -> Left (ProgramTypeMismatch actualTy (loweredBindingExpectedType lowered))
+        Left err -> Left err
   where
-    runtimeTypes = loweredBindingExternalTypes lowered `Map.union` elaborateScopeRuntimeTypes scope
+    rigidVars = sourceForallBinders (loweredBindingExpectedType lowered)
+    runtimeTypes =
+      Map.withoutKeys (loweredBindingExternalTypes lowered) Builtins.builtinOpaqueValueNames
+        `Map.union` elaborateScopeRuntimeTypes scope
 
-inferOpaqueSurfaceType :: ElaborateScope -> Map String SrcType -> Map String SrcType -> SurfaceExpr -> Either ProgramError SrcType
-inferOpaqueSurfaceType scope runtimeTypes localTypes expr =
+sourceForallBinders :: SrcType -> Set String
+sourceForallBinders ty =
+  case ty of
+    STForall name _ body -> Set.insert name (sourceForallBinders body)
+    _ -> Set.empty
+
+inferOpaqueSurfaceType :: ElaborateScope -> Set String -> Map String SrcType -> Map String SrcType -> SurfaceExpr -> Either ProgramError SrcType
+inferOpaqueSurfaceType scope rigidVars runtimeTypes localTypes expr =
   case expr of
     EVar name ->
       case Map.lookup name localTypes <|> Map.lookup name runtimeTypes of
@@ -131,19 +151,19 @@ inferOpaqueSurfaceType scope runtimeTypes localTypes expr =
         Nothing -> Left (ProgramUnknownValue name)
     ELit lit -> Right (literalSourceType lit)
     ELamAnn name ty body ->
-      STArrow ty <$> inferOpaqueSurfaceType scope runtimeTypes (Map.insert name ty localTypes) body
+      STArrow ty <$> inferOpaqueSurfaceType scope rigidVars runtimeTypes (Map.insert name ty localTypes) body
     ELam {} ->
       Left (ProgramPipelineError "opaque validation needs lambda annotations")
     EApp fun arg -> do
-      funTy <- inferOpaqueSurfaceType scope runtimeTypes localTypes fun
-      argTy <- inferOpaqueSurfaceType scope runtimeTypes localTypes arg
+      funTy <- inferOpaqueSurfaceType scope rigidVars runtimeTypes localTypes fun
+      argTy <- inferOpaqueSurfaceType scope rigidVars runtimeTypes localTypes arg
       applyOpaqueFunctionType scope funTy argTy
     ELet name rhs body -> do
-      rhsTy <- inferOpaqueSurfaceType scope runtimeTypes localTypes rhs
-      inferOpaqueSurfaceType scope runtimeTypes (Map.insert name rhsTy localTypes) body
+      rhsTy <- inferOpaqueSurfaceType scope rigidVars runtimeTypes localTypes rhs
+      inferOpaqueSurfaceType scope rigidVars runtimeTypes (Map.insert name rhsTy localTypes) body
     EAnn inner annTy -> do
-      actualTy <- inferOpaqueSurfaceType scope runtimeTypes localTypes inner
-      if opaqueSourceCompatible scope actualTy annTy
+      actualTy <- inferOpaqueSurfaceType scope rigidVars runtimeTypes localTypes inner
+      if opaqueSourceCompatibleWithRigid rigidVars scope actualTy annTy
         then Right annTy
         else Left (ProgramTypeMismatch actualTy annTy)
 
@@ -159,12 +179,30 @@ applyOpaqueFunctionType scope funTy argTy =
     other -> Left (ProgramExpectedFunction other)
 
 opaqueSourceCompatible :: ElaborateScope -> SrcType -> SrcType -> Bool
-opaqueSourceCompatible scope actualTy expectedTy =
+opaqueSourceCompatible = opaqueSourceCompatibleWithRigid Set.empty
+
+opaqueSourceCompatibleWithRigid :: Set String -> ElaborateScope -> SrcType -> SrcType -> Bool
+opaqueSourceCompatibleWithRigid rigidVars scope actualTy expectedTy =
   alphaEqSrcType actualTy expectedTy
     || alphaEqSrcType (lowerType scope actualTy) (lowerType scope expectedTy)
-    || sourceForallMatches expectedTy actualTy
-    || matchTypesInScope scope Map.empty expectedTy actualTy /= Nothing
-    || matchTypesInScope scope Map.empty actualTy expectedTy /= Nothing
+    || sourceForallMatchesWithRigidForalls expectedTy actualTy
+    || matchTypesInScopePreservingRigid scope rigidVars expectedTy actualTy /= Nothing
+    || matchTypesInScopePreservingRigid scope rigidVars actualTy expectedTy /= Nothing
+
+matchTypesInScopePreservingRigid :: ElaborateScope -> Set String -> SrcType -> SrcType -> Maybe (Map String SrcType)
+matchTypesInScopePreservingRigid scope rigidVars template actual = do
+  subst <- matchTypesInScope scope Map.empty template actual
+  if all preservesRigid (Map.toList subst)
+    then Just subst
+    else Nothing
+  where
+    preservesRigid (name, ty)
+      | name `Set.notMember` rigidVars = True
+      | otherwise =
+          case ty of
+            STVar {} -> True
+            STVarApp {} -> True
+            _ -> False
 
 literalSourceType :: Lit -> SrcType
 literalSourceType lit =
@@ -208,11 +246,15 @@ finalizeBinding scope lowered = do
           recoveredActualSrcTy = recoverSourceType scope (elabTypeToSrcType actualTyForCompare)
       expectedTyForCompare <- stripVacuousForalls <$> srcTypeToElabType (loweredBindingExpectedType lowered)
       recoveredActualTy <- srcTypeToElabType (lowerType scope recoveredActualSrcTy)
+      let sourceForallCompatible =
+            if Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered)
+              then sourceForallMatchesWithRigidForalls (recoverSourceType scope (loweredBindingExpectedType lowered)) recoveredActualSrcTy
+              else sourceForallMatches (recoverSourceType scope (loweredBindingExpectedType lowered)) recoveredActualSrcTy
       if alphaEqType actualTyForCompare expectedTyForCompare
         || churchAwareEqType actualTyForCompare expectedTyForCompare
         || alphaEqType recoveredActualTy expectedTyForCompare
         || churchAwareEqType recoveredActualTy expectedTyForCompare
-        || sourceForallMatches (recoverSourceType scope (loweredBindingExpectedType lowered)) recoveredActualSrcTy
+        || sourceForallCompatible
         then
           Right
             CheckedBinding
@@ -459,11 +501,58 @@ inferRewrittenLetType env rhs fallback =
     Right ty -> inlineTypeEnvBounds env (stripVacuousForalls ty)
     Left _ -> fallback
 
+freeSourceTypeVars :: SrcType -> Set String
+freeSourceTypeVars = go Set.empty
+  where
+    go boundVars ty =
+      case ty of
+        STVar name
+          | name `Set.member` boundVars -> Set.empty
+          | otherwise -> Set.singleton name
+        STArrow dom cod -> go boundVars dom `Set.union` go boundVars cod
+        STBase {} -> Set.empty
+        STCon _ args -> foldMap (go boundVars) args
+        STVarApp name args ->
+          let headVars =
+                if name `Set.member` boundVars
+                  then Set.empty
+                  else Set.singleton name
+           in headVars `Set.union` foldMap (go boundVars) args
+        STForall name mb body ->
+          maybe Set.empty (go boundVars . unSrcBound) mb
+            `Set.union` go (Set.insert name boundVars) body
+        STMu name body -> go (Set.insert name boundVars) body
+        STBottom -> Set.empty
+
+sourceForallMatchesWithRigidForalls :: SrcType -> SrcType -> Bool
+sourceForallMatchesWithRigidForalls expected actual =
+  case sourceForallMatchSubst expected actual of
+    Just subst -> all (forallBinderRemainsPolymorphic subst) (usedLeadingForallNames expected)
+    Nothing -> False
+  where
+    forallBinderRemainsPolymorphic subst name =
+      case Map.lookup name subst of
+        Just STVar {} -> True
+        Just STVarApp {} -> True
+        Just _ -> False
+        Nothing -> True
+
+    usedLeadingForallNames ty =
+      case ty of
+        STForall name _ body
+          | name `Set.member` freeSourceTypeVars body -> name : usedLeadingForallNames body
+          | otherwise -> usedLeadingForallNames body
+        _ -> []
+
 sourceForallMatches :: SrcType -> SrcType -> Bool
 sourceForallMatches expected actual =
-  case match Set.empty Map.empty expected actual of
+  case sourceForallMatchSubst expected actual of
     Just _ -> True
     Nothing -> False
+
+sourceForallMatchSubst :: SrcType -> SrcType -> Maybe (Map String SrcType)
+sourceForallMatchSubst expected actual =
+  match Set.empty Map.empty expected actual
   where
     match bound subst template actualTy =
       case template of
@@ -523,28 +612,6 @@ sourceForallMatches expected actual =
           match bound subst expectedBound actualBound
         _ -> Nothing
 
-    freeTypeVarsSrcTypeLocal = go Set.empty
-      where
-        go boundVars ty =
-          case ty of
-            STVar name
-              | name `Set.member` boundVars -> Set.empty
-              | otherwise -> Set.singleton name
-            STArrow dom cod -> go boundVars dom `Set.union` go boundVars cod
-            STBase {} -> Set.empty
-            STCon _ args -> foldMap (go boundVars) args
-            STVarApp name args ->
-              let headVars =
-                    if name `Set.member` boundVars
-                      then Set.empty
-                      else Set.singleton name
-               in headVars `Set.union` foldMap (go boundVars) args
-            STForall name mb body ->
-              maybe Set.empty (go boundVars . unSrcBound) mb
-                `Set.union` go (Set.insert name boundVars) body
-            STMu name body -> go (Set.insert name boundVars) body
-            STBottom -> Set.empty
-
     matchVarApp bound subst expectedName args actualTy
       | expectedName `Set.member` bound =
           case actualTy of
@@ -591,6 +658,8 @@ sourceForallMatches expected actual =
         Just existing
           | alphaEqSrcType existing actualTy -> Just subst
           | otherwise -> Nothing
+
+    freeTypeVarsSrcTypeLocal = freeSourceTypeVars
 
 alphaEqSrcType :: SrcType -> SrcType -> Bool
 alphaEqSrcType = go Map.empty Map.empty

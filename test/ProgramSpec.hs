@@ -403,6 +403,19 @@ spec = do
                 (isInfixOf "type mismatch" . renderProgramDiagnostic)
                 (const False)
 
+        it "rejects monomorphic IO actions for polymorphic IO annotations" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (IO);"
+                        , "  def main : forall a. IO a = __io_pure 1;"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                (isInfixOf "type mismatch" . renderProgramDiagnostic)
+                (const False)
+
         it "rejects inconsistent Prelude IO bind argument substitutions" $ do
             located <-
                 requireLocated $

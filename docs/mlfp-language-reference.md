@@ -403,10 +403,14 @@ module Main export (main) {
 
 Current prelude contents:
 
+- `Unit(..)` with the `Unit` value constructor
+- opaque `IO`
 - `Nat(..)` with derived `Eq Nat`
 - `Option(..)` with derived `Eq a => Eq (Option a)`
 - `List(..)` with `Nil`, `Cons`, and derived `Eq a => Eq (List a)`
 - `Eq` and `eq`
+- `Monad`, with the built-in `Monad IO` instance
+- `pure`, `bind`, and `putStrLn`
 - `and`
 - `id`
 
