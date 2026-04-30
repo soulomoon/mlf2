@@ -2352,7 +2352,9 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
       case collectAdministrativeTypeAppEntries of
         Just entries -> entries
         Nothing -> collectTypeAppliedClosureEntries
-    BackendConstruct _ _ args -> concatMap (collectClosureEntriesInExpr base localForms valueKinds) args
+    BackendConstruct resultTy name args ->
+      concatMap (collectClosureEntriesInExpr base localForms valueKinds) args
+        ++ collectConstructorFieldAdapterEntries resultTy name args
     BackendCase resultTy scrutinee alternatives ->
       collectClosureEntriesInExpr base localForms valueKinds scrutinee
         ++ concatMap collectAlternativeEntries (NE.toList alternatives)
@@ -2688,6 +2690,15 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
           ]
         resultKind = combineValueKinds resultTy branchKinds
         (paramTys, returnTy) = collectArrowsType resultTy
+
+    collectConstructorFieldAdapterEntries resultTy name args =
+      [ returnedPartialEntry LowerFunctionPointer fieldTy [] paramTys returnTy [] fieldTy
+      | Just fieldTys <- [Map.lookup name (pbConstructors base) >>= \constructorRuntime -> constructorRuntimeFieldTypes constructorRuntime resultTy],
+        fieldTy <- take (length args) fieldTys,
+        isFirstOrderFunctionPointerType fieldTy,
+        let (paramTys, returnTy) = collectArrowsType fieldTy,
+        not (null paramTys)
+      ]
 
     patternBinders =
       \case
@@ -4577,8 +4588,10 @@ lowerConstructField env exprEnv context fieldTy arg
           expectedTy <- lowerRuntimeValueTypeM env context fieldTy
           requireLLVMType context "constructor field" expectedTy value
           pure value {lvBackendType = fieldTy}
-        Nothing ->
-          lowerStoredFunctionArgument env exprEnv context fieldTy arg
+        Nothing -> do
+          value <- lowerStoredFunctionArgument env exprEnv context fieldTy arg
+          let (paramTys, returnTy) = collectArrowsType fieldTy
+          lowerReturnedPartialClosureValue env exprEnv context fieldTy value paramTys returnTy []
   | isClosureRuntimeValueType fieldTy = do
       value <- lowerExpr env exprEnv context arg
       expectedTy <- lowerRuntimeValueTypeM env context fieldTy
@@ -4709,7 +4722,7 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
             Map.lookup constructorName (pbConstructors (peBase env)) >>= \constructorRuntime ->
               constructorRuntimeFieldTypes constructorRuntime (lvBackendType scrutineeValue)
         binderFieldValueKind index0 fieldTy =
-          fromMaybe (valueKindForType fieldTy) $
+          fromMaybe (constructorFieldStoredValueKind fieldTy) $
             lvConstructedValue scrutineeValue >>= constructedFieldValueKind constructorName index0
 
     bindAlternativePattern scrutineeValue (BackendAlternative pattern0 body) =
@@ -4758,7 +4771,12 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
           | Just kind <- constructedFieldValueKind constructorName index0 constructed ->
               kind
         _ ->
-          valueKindForType fieldTy
+          constructorFieldStoredValueKind fieldTy
+
+constructorFieldStoredValueKind :: BackendType -> LowerValueKind
+constructorFieldStoredValueKind fieldTy
+  | isFunctionLikeBackendType fieldTy = LowerClosureRecord
+  | otherwise = LowerRuntimeValue
 
 lowerStoredFieldTypeM :: ProgramEnv -> String -> BackendType -> LowerM LLVMType
 lowerStoredFieldTypeM env context fieldTy
@@ -4843,11 +4861,11 @@ backendExprValueKindWith env visitedGlobals valueKinds expr
                           Map.delete name valueKinds
                     _ ->
                       Map.insert name (backendExprValueKindWith env visitedGlobals valueKinds rhs) valueKinds
-        BackendCase {} ->
+        BackendCase _ scrutinee alternatives ->
           combineValueKinds
             (backendExprType expr)
-            [ backendExprValueKindWith env visitedGlobals valueKinds (backendAltBody alternative)
-            | alternative <- NE.toList (backendAlternatives expr)
+            [ backendExprValueKindWith env visitedGlobals (alternativeValueKinds scrutinee alternative) (backendAltBody alternative)
+            | alternative <- NE.toList alternatives
             ]
         BackendClosure {} ->
           LowerClosureRecord
@@ -4856,6 +4874,24 @@ backendExprValueKindWith env visitedGlobals valueKinds expr
   where
     variableValueKind ty name typeArgs =
       variableValueKindWith valueKinds ty name typeArgs
+
+    alternativeValueKinds scrutinee alternative =
+      patternValueKinds (backendExprType scrutinee) (backendAltPattern alternative) `Map.union` valueKinds
+
+    patternValueKinds scrutineeTy =
+      \case
+        BackendDefaultPattern ->
+          Map.empty
+        BackendConstructorPattern constructorName binders ->
+          Map.fromList
+            [ (binder, constructorFieldStoredValueKind fieldTy)
+            | (binder, fieldTy) <- zip binders fieldTys
+            ]
+          where
+            fieldTys =
+              fromMaybe [] $
+                Map.lookup constructorName (pbConstructors (peBase env)) >>= \constructorRuntime ->
+                  constructorRuntimeFieldTypes constructorRuntime scrutineeTy
 
     functionLikeAliasValueKind kinds =
       \case
@@ -4952,14 +4988,11 @@ backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues 
               constructorRuntimeFieldTypes constructorRuntime resultTy
         fieldKinds =
           zipWith constructFieldValueKind fieldTys args
-        constructFieldValueKind fieldTy arg
-          | isFunctionLikeBackendType fieldTy =
-              backendExprValueKindWith env visitedGlobals valueKinds arg
-          | otherwise =
-              LowerRuntimeValue
-    BackendCase _ _ alternatives ->
+        constructFieldValueKind fieldTy _ =
+          constructorFieldStoredValueKind fieldTy
+    BackendCase _ scrutinee alternatives ->
       mergeConstructedValues
-        [ backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues (backendAltBody alternative)
+        [ backendExprConstructedValueWith env visitedGlobals (alternativeValueKinds scrutinee alternative) constructedValues (backendAltBody alternative)
         | alternative <- NE.toList alternatives
         ]
     BackendRoll _ payload ->
@@ -4997,6 +5030,24 @@ backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues 
                in functionLikeAliasValueKind kindsForBody body
         _ ->
           Nothing
+
+    alternativeValueKinds scrutinee alternative =
+      patternValueKinds (backendExprType scrutinee) (backendAltPattern alternative) `Map.union` valueKinds
+
+    patternValueKinds scrutineeTy =
+      \case
+        BackendDefaultPattern ->
+          Map.empty
+        BackendConstructorPattern constructorName binders ->
+          Map.fromList
+            [ (binder, constructorFieldStoredValueKind fieldTy)
+            | (binder, fieldTy) <- zip binders fieldTys
+            ]
+          where
+            fieldTys =
+              fromMaybe [] $
+                Map.lookup constructorName (pbConstructors (peBase env)) >>= \constructorRuntime ->
+                  constructorRuntimeFieldTypes constructorRuntime scrutineeTy
 
     variableValueKindWith kinds ty name typeArgs =
       case Map.lookup name kinds of

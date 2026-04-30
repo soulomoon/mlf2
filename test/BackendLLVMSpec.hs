@@ -1222,11 +1222,12 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
-  it "loads first-order function fields as raw function pointers" $ do
+  it "normalizes first-order function fields through closure records" $ do
     output <- requireRight (renderBackendProgramLLVM rawFunctionPointerFieldCallProgram)
 
-    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.case.field"
-    output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.case.field"
+    output `shouldSatisfy` isInfixOf "__mlfp_returned_partial$function$0"
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.case.field"
+    output `shouldNotSatisfy` isInfixOf "call i64 %\"__llvm.case.field"
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
@@ -1276,6 +1277,16 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
     assertNativeProgram sourceCaseReturnedGlobalFunctionProgram "41"
+
+  it "preserves closure-valued fields through function-parameter scrutinees" $ do
+    output <- requireRight =<< emitBackendSource sourceCaseParameterClosureFieldProgram
+
+    output `shouldSatisfy` isInfixOf "load ptr, ptr %\"__llvm.case.field.ptr"
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.call"
+    output `shouldNotSatisfy` isInfixOf "call i64 %\"__llvm.case.field"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceCaseParameterClosureFieldProgram "41"
 
   it "normalizes mixed callable case results to closure records" $ do
     output <- requireRight (renderBackendProgramLLVM mixedCallableCaseResultProgram)
@@ -4065,6 +4076,26 @@ sourceCaseReturnedGlobalFunctionProgram =
       "    ChoiceNone -> helper",
       "  };",
       "  def main : Int = (pick ChoiceNone) 41;",
+      "}"
+    ]
+
+sourceCaseParameterClosureFieldProgram :: String
+sourceCaseParameterClosureFieldProgram =
+  unlines
+    [ "module Main export (Choice(..), main) {",
+      "  data Choice =",
+      "      ChoiceSome : (Int -> Int) -> Choice",
+      "    | ChoiceNone : Choice;",
+      "",
+      "  def helper : Int -> Int = \\(x : Int) x;",
+      "  def pick : Choice -> (Int -> Int) = \\(choice : Choice) case choice of {",
+      "    ChoiceSome f -> f;",
+      "    ChoiceNone -> helper",
+      "  };",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let local : Int -> Int = \\(x : Int) captured in",
+      "    (pick (ChoiceSome local)) 0;",
       "}"
     ]
 
