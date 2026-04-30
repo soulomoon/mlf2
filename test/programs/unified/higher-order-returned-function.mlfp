@@ -1,0 +1,7 @@
+module Main export (main) {
+  def make : Int -> Int =
+    let captured : Int = 41 in
+    \(x : Int) captured;
+
+  def main : Int = make 0;
+}

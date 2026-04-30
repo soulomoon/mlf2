@@ -4595,6 +4595,10 @@ llvmObjectCodeParityCases =
       "boundary: runs aliased bulk-imported hidden-owner constructors in one case",
       "boundary: runs exposed constructor with qualified alias type identity",
       "unified fixture: test/programs/unified/first-class-polymorphism.mlfp",
+      "unified fixture: test/programs/unified/higher-order-function-field.mlfp",
+      "unified fixture: test/programs/unified/higher-order-local-function-flow.mlfp",
+      "unified fixture: test/programs/unified/higher-order-partial-application.mlfp",
+      "unified fixture: test/programs/unified/higher-order-returned-function.mlfp",
       "standalone: does not decode typed non-data constructor fields through fallback ADT decoding",
       "standalone: applies captured function-valued constructor fields"
     ]

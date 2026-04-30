@@ -1,0 +1,6 @@
+module Main export (main) {
+  def keepLeft : Int -> Int -> Int = \x \y x;
+  def apply : (Int -> Int) -> Int = \f f 2;
+
+  def main : Int = apply (keepLeft 1);
+}
