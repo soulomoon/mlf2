@@ -2,33 +2,71 @@
 
 module MLF.Frontend.Program.Run
   ( Value (..),
+    ProgramRunResult (..),
     runProgram,
     runLocatedProgram,
+    runProgramOutput,
+    runLocatedProgramOutput,
+    programRunOutput,
     prettyValue,
   )
 where
 
+import Control.Monad (foldM)
 import Data.Foldable (toList)
-import Data.List (intercalate)
+import Data.List (find, intercalate)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Elab.Pipeline (ElabTerm (..), Pretty (..), Ty (..), freeTypeVarsType, normalize, schemeFromType, typeCheck)
 import MLF.Frontend.Program.Check (checkLocatedProgram, checkProgram)
-import MLF.Frontend.Program.Elaborate (ElaborateScope, mkElaborateScope)
+import MLF.Frontend.Program.Elaborate
+  ( ElaborateScope,
+    classInfoForConstraint,
+    inferClassArgument,
+    lookupEvidenceMethodByClass,
+    lowerTypeView,
+    matchTypesInScope,
+    mkElaborateScope,
+    resolveInstanceInfoByConstraint,
+    resolveMethodInstanceInfoByTypeView,
+    sourceTypeViewInScope,
+    zeroMethodConstraintCoveredByEvidenceInfo,
+  )
 import MLF.Frontend.Program.Finalize (recoverSourceType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
+    ClassInfo (..),
     CheckedModule (..),
     CheckedProgram (..),
+    ConstraintInfo (..),
     ConstructorInfo (..),
     DataInfo (..),
+    DeferredCaseCall (..),
+    DeferredConstructorCall (..),
+    DeferredMethodCall (..),
+    DeferredMethodEvidence (..),
+    DeferredProgramObligation (..),
+    EvidenceInfo (..),
+    InstanceInfo (..),
+    MethodInfo (..),
     ProgramDiagnostic,
     ProgramError (..),
     SymbolIdentity (..),
+    SymbolNamespace (..),
+    TypeView (..),
+    ValueInfo (..),
+    applyConstraintInfoSubst,
     diagnosticForProgramError,
+    freeTypeVarsTypeView,
+    methodInfoOwnerClassSymbolIdentity,
+    specializeMethodType,
+    splitArrows,
+    splitForalls,
+    substituteTypeVar,
   )
-import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType)
+import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
+import qualified MLF.Frontend.Syntax as Surface
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 
 data Value
@@ -37,18 +75,116 @@ data Value
   | VTerm ElabTerm
   deriving (Eq, Show)
 
+data ProgramRunResult = ProgramRunResult
+  { programRunStdout :: String,
+    programRunValue :: Maybe Value
+  }
+  deriving (Eq, Show)
+
 runProgram :: ProgramSyntax.Program -> Either ProgramError Value
 runProgram program = do
   checked <- checkProgram program
-  rejectOpaqueMain checked
-  pure (toValueWithProgram checked (normalizeProgramTerm (programMainTerm checked)))
+  runCheckedPureProgram checked
 
 runLocatedProgram :: ProgramSyntax.LocatedProgram -> Either ProgramDiagnostic Value
 runLocatedProgram located = do
   checked <- checkLocatedProgram located
-  case rejectOpaqueMain checked of
+  case runCheckedPureProgram checked of
     Left err -> Left (diagnosticForProgramError (Just located) err)
-    Right () -> pure (toValueWithProgram checked (normalizeProgramTerm (programMainTerm checked)))
+    Right value -> pure value
+
+runProgramOutput :: ProgramSyntax.Program -> Either ProgramError ProgramRunResult
+runProgramOutput program = do
+  checked <- checkProgram program
+  runCheckedProgramOutput checked
+
+runLocatedProgramOutput :: ProgramSyntax.LocatedProgram -> Either ProgramDiagnostic ProgramRunResult
+runLocatedProgramOutput located = do
+  checked <- checkLocatedProgram located
+  case runCheckedProgramOutput checked of
+    Left err -> Left (diagnosticForProgramError (Just located) err)
+    Right result -> pure result
+
+programRunOutput :: ProgramRunResult -> String
+programRunOutput result =
+  programRunStdout result
+    ++ maybe "" ((++ "\n") . prettyValue) (programRunValue result)
+
+runCheckedPureProgram :: CheckedProgram -> Either ProgramError Value
+runCheckedPureProgram checked =
+  case classifyMainMode checked of
+    MainPure -> do
+      rejectOpaqueDependencies checked
+      pure (toValueWithProgram checked (normalizeProgramTerm (programMainTerm checked)))
+    MainIOUnit ->
+      Left (ProgramPipelineError "runProgram value API does not return IO main output")
+    MainUnsupportedIO ty ->
+      Left (unsupportedIOMainError ty)
+
+runCheckedProgramOutput :: CheckedProgram -> Either ProgramError ProgramRunResult
+runCheckedProgramOutput checked =
+  case classifyMainMode checked of
+    MainPure -> do
+      value <- runCheckedPureProgram checked
+      pure
+        ProgramRunResult
+          { programRunStdout = "",
+            programRunValue = Just value
+          }
+    MainIOUnit -> do
+      let context = mkRuntimeContext checked
+      action <- mainIOAction checked
+      (stdoutText, result) <- executeIOAction context action
+      if isRuntimeUnit result
+        then
+          pure
+            ProgramRunResult
+              { programRunStdout = stdoutText,
+                programRunValue = Nothing
+              }
+        else Left (ProgramPipelineError "run-program IO main did not finish with Unit")
+    MainUnsupportedIO ty ->
+      Left (unsupportedIOMainError ty)
+
+data MainMode
+  = MainPure
+  | MainIOUnit
+  | MainUnsupportedIO SrcType
+  deriving (Eq, Show)
+
+classifyMainMode :: CheckedProgram -> MainMode
+classifyMainMode checked =
+  case mainIdentitySourceType checked of
+    Just ty
+      | isIOUnitSourceType ty -> MainIOUnit
+      | Builtins.srcTypeMentionsOpaqueBuiltin ty -> MainUnsupportedIO (recoverMainSourceType checked ty)
+    _ -> MainPure
+
+isIOUnitSourceType :: SrcType -> Bool
+isIOUnitSourceType ty =
+  case ty of
+    STCon name args ->
+      isIOTypeName name && case toList args of
+        [arg] -> isUnitSourceType arg
+        _ -> False
+    _ -> False
+
+isUnitSourceType :: SrcType -> Bool
+isUnitSourceType ty =
+  case ty of
+    STBase name -> isPreludeUnitTypeName name
+    STCon name args -> isPreludeUnitTypeName name && null (toList args)
+    _ -> False
+
+isIOTypeName :: String -> Bool
+isIOTypeName name = name == Builtins.builtinModuleName ++ ".IO"
+
+isPreludeUnitTypeName :: String -> Bool
+isPreludeUnitTypeName name = name == "Prelude.Unit"
+
+unsupportedIOMainError :: SrcType -> ProgramError
+unsupportedIOMainError ty =
+  ProgramPipelineError ("run-program supports only main : IO Unit, got " ++ show ty)
 
 programMainTerm :: CheckedProgram -> ElabTerm
 programMainTerm checked =
@@ -61,23 +197,855 @@ programMainTerm checked =
         (checkedBindingTerm binding)
         body
 
-rejectOpaqueMain :: CheckedProgram -> Either ProgramError ()
-rejectOpaqueMain checked =
-  case mainSourceType checked of
-    Just ty
-      | Builtins.srcTypeMentionsOpaqueBuiltin ty ->
-          Left (ProgramPipelineError "run-program does not support IO main values yet")
-    _ ->
-      case reachableOpaqueRuntimeDependencies checked of
-        [] ->
-          Right ()
-        dependencies ->
-          Left
-            ( ProgramPipelineError
-                ( "run-program does not support IO dependencies yet: "
-                    ++ intercalate ", " dependencies
-                )
+rejectOpaqueDependencies :: CheckedProgram -> Either ProgramError ()
+rejectOpaqueDependencies checked =
+  case reachableOpaqueRuntimeDependencies checked of
+    [] ->
+      Right ()
+    dependencies ->
+      Left
+        ( ProgramPipelineError
+            ( "run-program does not support IO dependencies yet: "
+                ++ intercalate ", " dependencies
             )
+        )
+
+data RuntimeContext = RuntimeContext
+  { runtimeBindings :: Map.Map String CheckedBinding,
+    runtimeConstructors :: Map.Map String ConstructorInfo,
+    runtimeElaborateScope :: ElaborateScope
+  }
+
+type RuntimeDeferredValues = Map.Map String RuntimeDeferredValue
+
+type RuntimeEnv = Map.Map String RuntimeValue
+
+type RuntimeLookupStack = [String]
+
+data RuntimeDeferredValue
+  = RuntimeDeferredConstructor DeferredConstructorCall
+  | RuntimeDeferredCase DeferredCaseCall
+  | RuntimeDeferredMethod DeferredMethodCall
+
+data RuntimeConstructorSpec = RuntimeConstructorSpec
+  { runtimeConstructorInfo :: ConstructorInfo,
+    runtimeConstructorDeferred :: Maybe DeferredConstructorCall
+  }
+
+data RuntimeValue
+  = RuntimeLit Lit
+  | RuntimeUnit
+  | RuntimeData ConstructorInfo SrcType [RuntimeValue]
+  | RuntimeClosure String SurfaceExpr RuntimeEnv RuntimeLookupStack RuntimeDeferredValues
+  | RuntimeConstructor RuntimeConstructorSpec [RuntimeValue]
+  | RuntimeCase DeferredCaseCall [RuntimeValue]
+  | RuntimeMethod RuntimeLookupStack RuntimeDeferredValues RuntimeEnv DeferredMethodCall [RuntimeValue]
+  | RuntimePrimitive RuntimePrimitive [RuntimeValue]
+  | RuntimeIO RuntimeIOAction
+
+data RuntimePrimitive
+  = RuntimeIOPure
+  | RuntimeIOBind
+  | RuntimeIOPutStrLn
+  | RuntimeAnd
+  deriving (Eq, Show)
+
+data RuntimeIOAction
+  = RuntimePure RuntimeValue
+  | RuntimeBind RuntimeIOAction RuntimeValue
+  | RuntimePutStrLn String
+
+mainIOAction :: CheckedProgram -> Either ProgramError RuntimeIOAction
+mainIOAction checked = do
+  binding <-
+    case Map.lookup (checkedProgramMain checked) (runtimeBindings context) of
+      Just found -> Right found
+      Nothing -> Left ProgramMainNotFound
+  value <- evalRuntimeBinding context [] binding
+  case value of
+    RuntimeIO action -> Right action
+    _ -> Left (ProgramPipelineError "run-program IO main did not evaluate to an IO action")
+  where
+    context = mkRuntimeContext checked
+
+mkRuntimeContext :: CheckedProgram -> RuntimeContext
+mkRuntimeContext checked =
+  RuntimeContext
+    { runtimeBindings = Map.fromList [(checkedBindingName binding, binding) | binding <- allCheckedBindings checked],
+      runtimeConstructors = Map.fromList [(ctorRuntimeName ctor, ctor) | dataInfo <- allDataInfos checked, ctor <- dataConstructors dataInfo],
+      runtimeElaborateScope = programElaborateScope checked
+    }
+
+evalRuntimeBinding :: RuntimeContext -> RuntimeLookupStack -> CheckedBinding -> Either ProgramError RuntimeValue
+evalRuntimeBinding context stack binding =
+  evalRuntimeExprWithStack
+    context
+    stack
+    (bindingDeferredValues binding)
+    Map.empty
+    (checkedBindingSurfaceExpr binding)
+
+bindingDeferredValues :: CheckedBinding -> RuntimeDeferredValues
+bindingDeferredValues binding =
+  Map.fromList
+    [ (placeholder, runtimeDeferredValue obligation)
+      | (placeholder, obligation) <- Map.toList (checkedBindingDeferredObligations binding)
+    ]
+
+runtimeDeferredValue :: DeferredProgramObligation -> RuntimeDeferredValue
+runtimeDeferredValue obligation =
+  case obligation of
+    DeferredConstructor deferred -> RuntimeDeferredConstructor deferred
+    DeferredCase deferred -> RuntimeDeferredCase deferred
+    DeferredMethod deferred -> RuntimeDeferredMethod deferred
+
+evalRuntimeExprWithStack ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  SurfaceExpr ->
+  Either ProgramError RuntimeValue
+evalRuntimeExprWithStack context stack deferredValues env expr =
+  case expr of
+    Surface.EVar name -> lookupRuntimeValue context stack deferredValues env name
+    Surface.ELit lit -> Right (RuntimeLit lit)
+    Surface.ELam name body ->
+      Right (RuntimeClosure name body env stack deferredValues)
+    Surface.ELamAnn name _ body ->
+      Right (RuntimeClosure name body env stack deferredValues)
+    Surface.EApp fun arg -> do
+      funValue <- evalRuntimeExprWithStack context stack deferredValues env fun
+      argValue <- evalRuntimeExprWithStack context stack deferredValues env arg
+      applyRuntimeValue context funValue argValue
+    Surface.ELet name rhs body -> do
+      rhsValue <- evalRuntimeExprWithStack context stack deferredValues env rhs
+      evalRuntimeExprWithStack context stack deferredValues (Map.insert name rhsValue env) body
+    Surface.EAnn inner _ ->
+      evalRuntimeExprWithStack context stack deferredValues env inner
+
+lookupRuntimeValue ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  String ->
+  Either ProgramError RuntimeValue
+lookupRuntimeValue context stack deferredValues env name =
+  case Map.lookup name env of
+    Just value -> Right value
+    Nothing ->
+      case runtimePrimitive name of
+        Just prim -> Right (RuntimePrimitive prim [])
+        Nothing
+          | Just deferred <- Map.lookup name deferredValues ->
+              lookupRuntimeDeferredValue context stack deferredValues env deferred
+          | Just ctor <- Map.lookup name (runtimeConstructors context) ->
+              runtimeConstructorValue context (RuntimeConstructorSpec ctor Nothing) []
+          | name `elem` stack -> Left (recursiveRuntimeBindingError name stack)
+          | Just binding <- Map.lookup name (runtimeBindings context) ->
+              evalRuntimeBinding context (name : stack) binding
+          | otherwise -> Left (ProgramUnknownValue name)
+
+lookupRuntimeDeferredValue ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  RuntimeDeferredValue ->
+  Either ProgramError RuntimeValue
+lookupRuntimeDeferredValue context stack deferredValues env deferred =
+  case deferred of
+    RuntimeDeferredConstructor deferredConstructor ->
+      runtimeConstructorValue
+        context
+        (RuntimeConstructorSpec (deferredConstructorInfo deferredConstructor) (Just deferredConstructor))
+        []
+    RuntimeDeferredCase deferredCase ->
+      Right (RuntimeCase deferredCase [])
+    RuntimeDeferredMethod deferredMethod ->
+      resolveRuntimeMethod context stack deferredValues env deferredMethod []
+
+recursiveRuntimeBindingError :: String -> RuntimeLookupStack -> ProgramError
+recursiveRuntimeBindingError name stack =
+  ProgramPipelineError
+    ( "run-program IO runtime encountered recursive top-level binding lookup: "
+        ++ intercalate " -> " cyclePath
+    )
+  where
+    cyclePath = dropWhile (/= name) (reverse stack) ++ [name]
+
+runtimePrimitive :: String -> Maybe RuntimePrimitive
+runtimePrimitive name =
+  case name of
+    "__io_pure" -> Just RuntimeIOPure
+    "__io_bind" -> Just RuntimeIOBind
+    "__io_putStrLn" -> Just RuntimeIOPutStrLn
+    "__mlfp_and" -> Just RuntimeAnd
+    _ -> Nothing
+
+runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
+runtimeConstructorValue context spec args
+  | isPreludeUnitConstructor ctor && null args = Right RuntimeUnit
+  | length args == length (ctorArgs ctor) = do
+      resultTy <- runtimeConstructorResultType context spec args
+      Right (RuntimeData ctor resultTy args)
+  | length args < length (ctorArgs ctor) = Right (RuntimeConstructor spec args)
+  | otherwise =
+      Left (ProgramPipelineError ("run-program constructor over-applied: " ++ ctorName ctor))
+  where
+    ctor = runtimeConstructorInfo spec
+
+runtimeConstructorResultType :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError SrcType
+runtimeConstructorResultType context spec args =
+  Right (Map.foldrWithKey substituteTypeVar resultTy subst)
+  where
+    scope = runtimeElaborateScope context
+    ctor = runtimeConstructorInfo spec
+    startSubst = maybe Map.empty deferredConstructorInitialSubst (runtimeConstructorDeferred spec)
+    resultTy = runtimeConstructorOccurrenceResultType spec
+    resultTyFromDeferred = Map.foldrWithKey substituteTypeVar resultTy startSubst
+    subst
+      | Set.null (freeTypeVarsRuntimeSrcType resultTyFromDeferred) = startSubst
+      | otherwise = foldl refineFromRuntimeArg startSubst (zip (ctorArgs ctor) args)
+
+    refineFromRuntimeArg acc (templateTy, arg) =
+      case runtimeValueTypeView context arg of
+        Left _ -> acc
+        Right actualView ->
+          case matchTypesInScope scope acc templateTy (typeViewDisplay actualView) of
+            Just acc' -> acc'
+            Nothing -> acc
+
+runtimeConstructorOccurrenceResultType :: RuntimeConstructorSpec -> SrcType
+runtimeConstructorOccurrenceResultType spec =
+  case runtimeConstructorDeferred spec of
+    Just deferred ->
+      dropSourceArrows
+        (length (ctorArgs ctor) - deferredConstructorArgCount deferred)
+        (deferredConstructorOccurrenceType deferred)
+    Nothing -> ctorResult ctor
+  where
+    ctor = runtimeConstructorInfo spec
+
+dropSourceArrows :: Int -> SrcType -> SrcType
+dropSourceArrows count ty
+  | count <= 0 = ty
+dropSourceArrows count ty =
+  case ty of
+    STArrow _ resultTy -> dropSourceArrows (count - 1) resultTy
+    _ -> ty
+
+freeTypeVarsRuntimeSrcType :: SrcType -> Set.Set String
+freeTypeVarsRuntimeSrcType = go Set.empty
+  where
+    go bound ty =
+      case ty of
+        STVar name
+          | name `Set.member` bound -> Set.empty
+          | otherwise -> Set.singleton name
+        STArrow dom cod -> go bound dom `Set.union` go bound cod
+        STBase {} -> Set.empty
+        STCon _ args -> foldMap (go bound) args
+        STVarApp name args ->
+          let headVars =
+                if name `Set.member` bound
+                  then Set.empty
+                  else Set.singleton name
+           in headVars `Set.union` foldMap (go bound) args
+        STForall name mb body ->
+          maybe Set.empty (go bound . unSrcBound) mb
+            `Set.union` go (Set.insert name bound) body
+        STMu name body -> go (Set.insert name bound) body
+        STBottom -> Set.empty
+
+isPreludeUnitConstructor :: ConstructorInfo -> Bool
+isPreludeUnitConstructor ctor =
+  null (ctorArgs ctor)
+    && isPreludeUnitTypeIdentity (ctorOwningTypeIdentity ctor)
+    && symbolNamespace (ctorInfoSymbol ctor) == SymbolConstructor
+    && symbolDefiningModule (ctorInfoSymbol ctor) == "Prelude"
+    && symbolDefiningName (ctorInfoSymbol ctor) == "Unit"
+
+isPreludeUnitTypeIdentity :: SymbolIdentity -> Bool
+isPreludeUnitTypeIdentity identity =
+  symbolNamespace identity == SymbolType
+    && symbolDefiningModule identity == "Prelude"
+    && symbolDefiningName identity == "Unit"
+
+applyRuntimeValue :: RuntimeContext -> RuntimeValue -> RuntimeValue -> Either ProgramError RuntimeValue
+applyRuntimeValue context funValue argValue =
+  case funValue of
+    RuntimeClosure name body closureEnv closureStack closureDeferredValues ->
+      evalRuntimeExprWithStack context closureStack closureDeferredValues (Map.insert name argValue closureEnv) body
+    RuntimePrimitive prim args ->
+      applyRuntimePrimitive prim (args ++ [argValue])
+    RuntimeConstructor spec args
+      | length args < length (ctorArgs (runtimeConstructorInfo spec)) ->
+          runtimeConstructorValue context spec (args ++ [argValue])
+    RuntimeCase deferred args ->
+      applyRuntimeCase context deferred (args ++ [argValue])
+    RuntimeMethod stack deferredValues env deferred args ->
+      resolveRuntimeMethod context stack deferredValues env deferred (args ++ [argValue])
+    _ -> Left (ProgramPipelineError "run-program IO interpreter expected a function")
+
+applyRuntimeCase :: RuntimeContext -> DeferredCaseCall -> [RuntimeValue] -> Either ProgramError RuntimeValue
+applyRuntimeCase context deferred args
+  | length args < expectedArgCount = Right (RuntimeCase deferred args)
+  | otherwise = do
+      let (caseArgs, extraArgs) = splitAt expectedArgCount args
+      result <- evaluateRuntimeCase context deferred caseArgs
+      foldM (applyRuntimeValue context) result extraArgs
+  where
+    expectedArgCount = deferredCaseExpectedArgCount deferred
+
+evaluateRuntimeCase :: RuntimeContext -> DeferredCaseCall -> [RuntimeValue] -> Either ProgramError RuntimeValue
+evaluateRuntimeCase context deferred args =
+  case args of
+    scrutinee : handlers
+      | length args == deferredCaseExpectedArgCount deferred -> do
+          (ctor, fields) <- runtimeCaseScrutinee deferred scrutinee
+          handler <- runtimeCaseHandler deferred ctor handlers
+          foldM (applyRuntimeValue context) handler fields
+    _ ->
+      Left (ProgramPipelineError "run-program deferred case received malformed arguments")
+
+runtimeCaseScrutinee :: DeferredCaseCall -> RuntimeValue -> Either ProgramError (ConstructorInfo, [RuntimeValue])
+runtimeCaseScrutinee deferred value =
+  case value of
+    RuntimeData ctor _ fields
+      | constructorBelongsToCase deferred ctor -> Right (ctor, fields)
+    RuntimeUnit ->
+      case find isPreludeUnitConstructor (dataConstructors (deferredCaseDataInfo deferred)) of
+        Just ctor -> Right (ctor, [])
+        Nothing -> Left (ProgramPipelineError "run-program deferred case expected a data constructor scrutinee")
+    _ -> Left (ProgramPipelineError "run-program deferred case expected a data constructor scrutinee")
+
+constructorBelongsToCase :: DeferredCaseCall -> ConstructorInfo -> Bool
+constructorBelongsToCase deferred ctor =
+  any (sameRuntimeConstructor ctor) (dataConstructors (deferredCaseDataInfo deferred))
+
+sameRuntimeConstructor :: ConstructorInfo -> ConstructorInfo -> Bool
+sameRuntimeConstructor left right =
+  ctorInfoSymbol left == ctorInfoSymbol right
+
+runtimeCaseHandler :: DeferredCaseCall -> ConstructorInfo -> [RuntimeValue] -> Either ProgramError RuntimeValue
+runtimeCaseHandler deferred ctor handlers
+  | length handlers /= length constructors =
+      Left (ProgramPipelineError "run-program deferred case received the wrong number of handlers")
+  | otherwise =
+      case [handler | (ctorInfo, handler) <- zip constructors handlers, sameRuntimeConstructor ctor ctorInfo] of
+        handler : _ -> Right handler
+        [] -> Left (ProgramPipelineError "run-program deferred case constructor does not belong to its data type")
+  where
+    constructors = dataConstructors (deferredCaseDataInfo deferred)
+
+resolveRuntimeMethod ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  DeferredMethodCall ->
+  [RuntimeValue] ->
+  Either ProgramError RuntimeValue
+resolveRuntimeMethod context stack deferredValues env deferred args
+  | length args < requiredArgCount =
+      Right (RuntimeMethod stack deferredValues env deferred args)
+  | otherwise = do
+      let (methodArgs, extraArgs) = splitAt requiredArgCount args
+      methodValue <- resolveRuntimeMethodReady context stack deferredValues env deferred methodArgs
+      foldM (applyRuntimeValue context) methodValue extraArgs
+  where
+    requiredArgCount = deferredMethodArgCount deferred
+
+resolveRuntimeMethodReady ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  DeferredMethodCall ->
+  [RuntimeValue] ->
+  Either ProgramError RuntimeValue
+resolveRuntimeMethodReady context stack deferredValues env deferred args =
+  if null args && deferredMethodArgCount deferred == 0
+    then resolveRuntimeNullaryMethod context stack deferredValues env deferred
+    else do
+      argViews <- mapM (runtimeValueTypeView context) args
+      classArgView <-
+        case inferRuntimeMethodClassArgument context (deferredMethodInfo deferred) argViews (deferredMethodExpectedResult deferred) of
+          Just view -> Right view
+          Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+      (instanceInfo, instanceSubst) <- resolveMethodInstanceInfoByTypeView (runtimeElaborateScope context) (deferredMethodInfo deferred) classArgView
+      methodValueInfo <-
+        case Map.lookup (deferredMethodName deferred) (instanceMethods instanceInfo) of
+          Just valueInfo@OrdinaryValue {} -> Right valueInfo
+          _ -> Left (ProgramUnknownMethod (deferredMethodName deferred))
+      methodSubst <-
+        case inferRuntimeMethodArgumentSubst context (deferredMethodInfo deferred) classArgView instanceSubst argViews of
+          Just subst -> Right subst
+          Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+      let eagerConstraints =
+            filter
+              constraintGround
+              (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
+      evidenceArgs <-
+        resolveRuntimeConstraintEvidenceValues
+          context
+          stack
+          deferredValues
+          env
+          (deferredMethodLocalEvidence deferred)
+          Set.empty
+          eagerConstraints
+      runtimeName <- runtimeMethodValueName (deferredMethodName deferred) methodValueInfo
+      methodHead <- lookupRuntimeValue context stack deferredValues env runtimeName
+      foldM (applyRuntimeValue context) methodHead (evidenceArgs ++ args)
+
+resolveRuntimeNullaryMethod ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  DeferredMethodCall ->
+  Either ProgramError RuntimeValue
+resolveRuntimeNullaryMethod context stack deferredValues env deferred = do
+  expectedView <-
+    case deferredMethodExpectedResult deferred of
+      Just view -> Right view
+      Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+  classArgView <-
+    case inferRuntimeNullaryMethodClassArgument context (deferredMethodInfo deferred) expectedView of
+      Just view -> Right view
+      Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+  case lookupRuntimeNullaryEvidence context deferred classArgView of
+    Just evidence ->
+      resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence
+    Nothing ->
+      resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred classArgView expectedView
+
+resolveRuntimeNullaryEvidenceMethod ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  DeferredMethodCall ->
+  TypeView ->
+  TypeView ->
+  DeferredMethodEvidence ->
+  Either ProgramError RuntimeValue
+resolveRuntimeNullaryEvidenceMethod context stack deferredValues env deferred classArgView expectedView evidence = do
+  methodSubst <-
+    case inferRuntimeNullaryMethodSubst context (deferredMethodInfo deferred) classArgView Map.empty expectedView of
+      Just subst -> Right subst
+      Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+  evidenceArgs <-
+    resolveRuntimeConstraintEvidenceValues
+      context
+      stack
+      deferredValues
+      env
+      (deferredMethodLocalEvidence deferred)
+      Set.empty
+      (runtimeNullaryMethodLocalConstraints (deferredMethodInfo deferred) classArgView methodSubst)
+  methodHead <- lookupRuntimeValue context stack deferredValues env (deferredMethodEvidenceRuntimeName evidence)
+  foldM (applyRuntimeValue context) methodHead evidenceArgs
+
+resolveRuntimeNullaryInstanceMethod ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  DeferredMethodCall ->
+  TypeView ->
+  TypeView ->
+  Either ProgramError RuntimeValue
+resolveRuntimeNullaryInstanceMethod context stack deferredValues env deferred classArgView expectedView = do
+  (instanceInfo, instanceSubst) <- resolveMethodInstanceInfoByTypeView (runtimeElaborateScope context) (deferredMethodInfo deferred) classArgView
+  methodValueInfo <-
+    case Map.lookup (deferredMethodName deferred) (instanceMethods instanceInfo) of
+      Just valueInfo@OrdinaryValue {} -> Right valueInfo
+      _ -> Left (ProgramUnknownMethod (deferredMethodName deferred))
+  methodSubst <-
+    case inferRuntimeNullaryMethodSubst context (deferredMethodInfo deferred) classArgView instanceSubst expectedView of
+      Just subst -> Right subst
+      Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+  let eagerConstraints =
+        filter
+          constraintGround
+          (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
+  evidenceArgs <-
+    resolveRuntimeConstraintEvidenceValues
+      context
+      stack
+      deferredValues
+      env
+      (deferredMethodLocalEvidence deferred)
+      Set.empty
+      eagerConstraints
+  runtimeName <- runtimeMethodValueName (deferredMethodName deferred) methodValueInfo
+  methodHead <- lookupRuntimeValue context stack deferredValues env runtimeName
+  foldM (applyRuntimeValue context) methodHead evidenceArgs
+
+lookupRuntimeNullaryEvidence :: RuntimeContext -> DeferredMethodCall -> TypeView -> Maybe DeferredMethodEvidence
+lookupRuntimeNullaryEvidence context deferred classArgView =
+  case
+    lookupEvidenceMethodByClass
+      (runtimeElaborateScope context)
+      (methodInfoOwnerClassSymbolIdentity methodInfo)
+      (typeViewIdentity classArgView)
+      (methodName methodInfo)
+      `orElseRuntimeEvidenceMethod`
+      lookupRuntimeEvidenceMethod
+        (runtimeElaborateScope context)
+        (deferredMethodLocalEvidence deferred)
+        (methodInfoOwnerClassSymbolIdentity methodInfo)
+        (typeViewIdentity classArgView)
+        (methodName methodInfo)
+  of
+    Just (runtimeName, evidenceTy) ->
+      Just
+        DeferredMethodEvidence
+          { deferredMethodEvidenceClassArg = classArgView,
+            deferredMethodEvidenceRuntimeName = runtimeName,
+            deferredMethodEvidenceType = evidenceTy
+          }
+    Nothing -> deferredMethodEvidence deferred
+  where
+    methodInfo = deferredMethodInfo deferred
+
+runtimeNullaryMethodLocalConstraints :: MethodInfo -> TypeView -> Map.Map String TypeView -> [ConstraintInfo]
+runtimeNullaryMethodLocalConstraints methodInfo classArgView methodSubst =
+  let headVars = freeTypeVarsTypeView classArgView
+      specializedForClass =
+        map
+          (specializeRuntimeConstraintInfoType (methodParamName methodInfo) classArgView)
+          (methodConstraintInfos methodInfo)
+      methodLocal =
+        filter
+          (not . constraintDeterminedByTypeVars headVars)
+          specializedForClass
+   in map (applyConstraintInfoSubst methodSubst) methodLocal
+
+specializeRuntimeConstraintInfoType :: String -> TypeView -> ConstraintInfo -> ConstraintInfo
+specializeRuntimeConstraintInfoType paramName headView constraint =
+  constraint
+    { constraintTypeView =
+        TypeView
+          { typeViewDisplay =
+              substituteTypeVar
+                paramName
+                (typeViewDisplay headView)
+                (typeViewDisplay (constraintTypeView constraint)),
+            typeViewIdentity =
+              substituteTypeVar
+                paramName
+                (typeViewIdentity headView)
+                (typeViewIdentity (constraintTypeView constraint))
+          }
+    }
+
+runtimeMethodValueName :: String -> ValueInfo -> Either ProgramError String
+runtimeMethodValueName _ OrdinaryValue {valueRuntimeName = name} = Right name
+runtimeMethodValueName methodName0 _ = Left (ProgramUnknownMethod methodName0)
+
+methodValueConstraints :: ValueInfo -> [ConstraintInfo]
+methodValueConstraints OrdinaryValue {valueConstraintInfos = constraints} = constraints
+methodValueConstraints _ = []
+
+constraintGround :: ConstraintInfo -> Bool
+constraintGround constraint =
+  Set.null (freeTypeVarsTypeView (constraintTypeView constraint))
+
+resolveRuntimeConstraintEvidenceValues ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  [EvidenceInfo] ->
+  Set.Set (SymbolIdentity, String) ->
+  [ConstraintInfo] ->
+  Either ProgramError [RuntimeValue]
+resolveRuntimeConstraintEvidenceValues context stack deferredValues env localEvidence seen constraints =
+  concat <$> mapM (resolveRuntimeConstraintEvidenceValue context stack deferredValues env localEvidence seen) constraints
+
+resolveRuntimeConstraintEvidenceValue ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  [EvidenceInfo] ->
+  Set.Set (SymbolIdentity, String) ->
+  ConstraintInfo ->
+  Either ProgramError [RuntimeValue]
+resolveRuntimeConstraintEvidenceValue context stack deferredValues env localEvidence seen constraint = do
+  let key = (constraintClassSymbol constraint, show (typeViewIdentity (constraintTypeView constraint)))
+  if key `Set.member` seen
+    then Left (ProgramNoMatchingInstance (constraintDisplayClass constraint) (typeViewDisplay (constraintTypeView constraint)))
+    else do
+      mbLocalEvidence <- resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env localEvidence constraint
+      case mbLocalEvidence of
+        Just evidenceValues -> Right evidenceValues
+        Nothing -> do
+          (instanceInfo, subst) <- resolveInstanceInfoByConstraint (runtimeElaborateScope context) constraint
+          let seen' = Set.insert key seen
+              methodValues = [valueInfo | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethods instanceInfo)]
+          if null methodValues
+            then do
+              _ <-
+                resolveRuntimeConstraintEvidenceValues
+                  context
+                  stack
+                  deferredValues
+                  env
+                  localEvidence
+                  seen'
+                  (map (applyConstraintInfoSubst subst) (instanceConstraintInfos instanceInfo))
+              Right []
+            else mapM (materializeRuntimeMethodEvidence context stack deferredValues env localEvidence seen' subst constraint) methodValues
+
+materializeRuntimeMethodEvidence ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  [EvidenceInfo] ->
+  Set.Set (SymbolIdentity, String) ->
+  Map.Map String TypeView ->
+  ConstraintInfo ->
+  ValueInfo ->
+  Either ProgramError RuntimeValue
+materializeRuntimeMethodEvidence context stack deferredValues env localEvidence seen subst constraint valueInfo = do
+  let headVars = freeTypeVarsTypeView (constraintTypeView constraint)
+      eagerConstraints =
+        filter
+          (constraintDeterminedByTypeVars headVars)
+          (map (applyConstraintInfoSubst subst) (methodValueConstraints valueInfo))
+  nestedEvidence <-
+    resolveRuntimeConstraintEvidenceValues
+      context
+      stack
+      deferredValues
+      env
+      localEvidence
+      seen
+      eagerConstraints
+  runtimeName <- runtimeMethodValueName (constraintDisplayClass constraint) valueInfo
+  methodHead <- lookupRuntimeValue context stack deferredValues env runtimeName
+  foldM (applyRuntimeValue context) methodHead nestedEvidence
+
+resolveRuntimeLocalConstraintEvidenceValues ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  [EvidenceInfo] ->
+  ConstraintInfo ->
+  Either ProgramError (Maybe [RuntimeValue])
+resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env localEvidence constraint =
+  case classInfoForConstraint (runtimeElaborateScope context) constraint of
+    Nothing -> Right Nothing
+    Just classInfo
+      | Map.null (classMethods classInfo) ->
+          Right $
+            if zeroMethodConstraintCoveredByEvidenceInfo (runtimeElaborateScope context) constraint
+              || zeroMethodConstraintCoveredByRuntimeEvidence (runtimeElaborateScope context) localEvidence constraint
+              then Just []
+              else Nothing
+      | otherwise -> do
+          let localMethodEvidence =
+                mapM
+                  ( \methodInfo -> do
+                      (runtimeName, _evidenceTy) <-
+                        lookupEvidenceMethodByClass
+                          (runtimeElaborateScope context)
+                          (constraintClassSymbol constraint)
+                          (typeViewIdentity (constraintTypeView constraint))
+                          (methodName methodInfo)
+                          `orElseRuntimeEvidenceMethod`
+                          lookupRuntimeEvidenceMethod
+                            (runtimeElaborateScope context)
+                            localEvidence
+                            (constraintClassSymbol constraint)
+                            (typeViewIdentity (constraintTypeView constraint))
+                            (methodName methodInfo)
+                      pure runtimeName
+                  )
+                  (Map.elems (classMethods classInfo))
+          case localMethodEvidence of
+            Nothing -> Right Nothing
+            Just runtimeNames ->
+              Just <$> mapM (lookupRuntimeValue context stack deferredValues env) runtimeNames
+
+lookupRuntimeEvidenceMethod :: ElaborateScope -> [EvidenceInfo] -> SymbolIdentity -> SrcType -> String -> Maybe (String, SrcType)
+lookupRuntimeEvidenceMethod scope evidenceInfos classIdentity headIdentityTy methodName0 =
+  case
+    [ methodEvidence
+      | evidence <- evidenceInfos,
+        evidenceClassSymbol evidence == classIdentity,
+        runtimeEvidenceTypeMatches scope (evidenceTypeIdentity evidence) headIdentityTy,
+        Just methodEvidence <- [Map.lookup methodName0 (evidenceMethods evidence)]
+    ]
+  of
+    methodEvidence : _ -> Just methodEvidence
+    [] -> Nothing
+
+runtimeEvidenceTypeMatches :: ElaborateScope -> SrcType -> SrcType -> Bool
+runtimeEvidenceTypeMatches scope left right =
+  matchTypesInScope scope Map.empty left right /= Nothing
+    || matchTypesInScope scope Map.empty right left /= Nothing
+
+orElseRuntimeEvidenceMethod :: Maybe (String, SrcType) -> Maybe (String, SrcType) -> Maybe (String, SrcType)
+orElseRuntimeEvidenceMethod (Just evidence) _ = Just evidence
+orElseRuntimeEvidenceMethod Nothing fallback = fallback
+
+zeroMethodConstraintCoveredByRuntimeEvidence :: ElaborateScope -> [EvidenceInfo] -> ConstraintInfo -> Bool
+zeroMethodConstraintCoveredByRuntimeEvidence scope evidenceInfos constraint =
+  any
+    ( \evidence ->
+        evidenceClassSymbol evidence == constraintClassSymbol constraint
+          && runtimeEvidenceTypeMatches scope (evidenceTypeIdentity evidence) (typeViewIdentity (constraintTypeView constraint))
+    )
+    evidenceInfos
+
+constraintDeterminedByTypeVars :: Set.Set String -> ConstraintInfo -> Bool
+constraintDeterminedByTypeVars typeVars constraint =
+  freeTypeVarsTypeView (constraintTypeView constraint) `Set.isSubsetOf` typeVars
+
+runtimeValueTypeView :: RuntimeContext -> RuntimeValue -> Either ProgramError TypeView
+runtimeValueTypeView context value =
+  case value of
+    RuntimeLit (LInt _) -> Right (sourceTypeViewInScope scope (STBase "Int"))
+    RuntimeLit (LBool _) -> Right (sourceTypeViewInScope scope (STBase "Bool"))
+    RuntimeLit (LString _) -> Right (sourceTypeViewInScope scope (STBase "String"))
+    RuntimeUnit -> Right (sourceTypeViewInScope scope (STBase "Prelude.Unit"))
+    RuntimeData _ resultTy _ -> Right (sourceTypeViewInScope scope resultTy)
+    _ -> Left (ProgramPipelineError "run-program IO runtime cannot infer deferred method argument type")
+  where
+    scope = runtimeElaborateScope context
+
+inferRuntimeMethodClassArgument :: RuntimeContext -> MethodInfo -> [TypeView] -> Maybe TypeView -> Maybe TypeView
+inferRuntimeMethodClassArgument context methodInfo argViews mbExpectedResult =
+  case inferClassArgument methodTy (methodParamName methodInfo) argDisplayTypes of
+    Just classArgTy -> Just (sourceTypeViewInScope scope classArgTy)
+    Nothing -> inferRuntimeMethodClassArgumentFromExpected context methodInfo methodTy argDisplayTypes mbExpectedResult
+  where
+    scope = runtimeElaborateScope context
+    methodTy = lowerTypeView scope (TypeView (methodType methodInfo) (methodTypeIdentity methodInfo))
+    argDisplayTypes = map typeViewDisplay argViews
+
+inferRuntimeMethodClassArgumentFromExpected :: RuntimeContext -> MethodInfo -> SrcType -> [SrcType] -> Maybe TypeView -> Maybe TypeView
+inferRuntimeMethodClassArgumentFromExpected _ _ _ _ Nothing = Nothing
+inferRuntimeMethodClassArgumentFromExpected context methodInfo methodTy argDisplayTypes (Just expectedView) = do
+  let scope = runtimeElaborateScope context
+      (_, bodyTy) = splitForalls methodTy
+      (paramTys, resultTy) = splitArrows bodyTy
+  substFromArgs <-
+    foldM
+      (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy)
+      Map.empty
+      (zip paramTys argDisplayTypes)
+  let resultTy' = Map.foldrWithKey substituteTypeVar resultTy substFromArgs
+  subst <- matchTypesInScope scope substFromArgs resultTy' (typeViewDisplay expectedView)
+  displayTy <- Map.lookup (methodParamName methodInfo) subst
+  pure (sourceTypeViewInScope scope displayTy)
+
+inferRuntimeNullaryMethodClassArgument :: RuntimeContext -> MethodInfo -> TypeView -> Maybe TypeView
+inferRuntimeNullaryMethodClassArgument context methodInfo expectedView
+  | methodFullArityFromInfo methodInfo /= 0 = Nothing
+  | otherwise = do
+      let scope = runtimeElaborateScope context
+          (_, bodyTy) = splitForalls (methodType methodInfo)
+          (_, resultTy) = splitArrows bodyTy
+      subst <- matchTypesInScope scope Map.empty resultTy (typeViewDisplay expectedView)
+      classArgTy <- Map.lookup (methodParamName methodInfo) subst
+      pure (sourceTypeViewInScope scope classArgTy)
+
+inferRuntimeNullaryMethodSubst :: RuntimeContext -> MethodInfo -> TypeView -> Map.Map String TypeView -> TypeView -> Maybe (Map.Map String TypeView)
+inferRuntimeNullaryMethodSubst context methodInfo classArgView subst expectedView =
+  fmap (Map.map (sourceTypeViewInScope scope)) $
+    matchTypesInScope
+      scope
+      (fmap typeViewDisplay subst)
+      resultTy
+      (typeViewDisplay expectedView)
+  where
+    scope = runtimeElaborateScope context
+    specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) (typeViewDisplay classArgView)
+    (_, bodyTy) = splitForalls specializedMethodTy
+    (_, resultTy) = splitArrows bodyTy
+
+inferRuntimeMethodArgumentSubst :: RuntimeContext -> MethodInfo -> TypeView -> Map.Map String TypeView -> [TypeView] -> Maybe (Map.Map String TypeView)
+inferRuntimeMethodArgumentSubst context methodInfo classArgView subst argViews =
+  fmap (Map.map (sourceTypeViewInScope scope)) $
+    foldM
+      (\acc (templateTy, actualView) -> matchTypesInScope scope acc templateTy (typeViewDisplay actualView))
+      (fmap typeViewDisplay subst)
+      (zip paramTys argViews)
+  where
+    scope = runtimeElaborateScope context
+    specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) (typeViewDisplay classArgView)
+    (_, bodyTy) = splitForalls specializedMethodTy
+    (paramTys, _) = splitArrows bodyTy
+
+methodFullArityFromInfo :: MethodInfo -> Int
+methodFullArityFromInfo methodInfo =
+  length (fst (splitArrows (snd (splitForalls (methodType methodInfo)))))
+
+applyRuntimePrimitive :: RuntimePrimitive -> [RuntimeValue] -> Either ProgramError RuntimeValue
+applyRuntimePrimitive prim args
+  | length args < runtimePrimitiveArity prim = Right (RuntimePrimitive prim args)
+  | length args > runtimePrimitiveArity prim =
+      Left (ProgramPipelineError ("run-program IO primitive over-applied: " ++ show prim))
+  | otherwise =
+      case (prim, args) of
+        (RuntimeIOPure, [value]) ->
+          Right (RuntimeIO (RuntimePure value))
+        (RuntimeIOBind, [RuntimeIO action, continuation]) ->
+          Right (RuntimeIO (RuntimeBind action continuation))
+        (RuntimeIOBind, _) ->
+          Left (ProgramPipelineError "run-program __io_bind expected an IO action and continuation")
+        (RuntimeIOPutStrLn, [RuntimeLit (LString msg)]) ->
+          Right (RuntimeIO (RuntimePutStrLn msg))
+        (RuntimeIOPutStrLn, [_]) ->
+          Left (ProgramPipelineError "run-program __io_putStrLn expected a String argument")
+        (RuntimeAnd, [RuntimeLit (LBool left), RuntimeLit (LBool right)]) ->
+          Right (RuntimeLit (LBool (left && right)))
+        (RuntimeAnd, _) ->
+          Left (ProgramPipelineError "run-program __mlfp_and expected Bool arguments")
+        _ ->
+          Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
+
+runtimePrimitiveArity :: RuntimePrimitive -> Int
+runtimePrimitiveArity prim =
+  case prim of
+    RuntimeIOPure -> 1
+    RuntimeIOBind -> 2
+    RuntimeIOPutStrLn -> 1
+    RuntimeAnd -> 2
+
+executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
+executeIOAction context action =
+  case action of
+    RuntimePure value ->
+      Right ("", value)
+    RuntimePutStrLn msg ->
+      Right (msg ++ "\n", RuntimeUnit)
+    RuntimeBind first continuation -> do
+      (firstStdout, firstValue) <- executeIOAction context first
+      nextValue <- applyRuntimeValue context continuation firstValue
+      nextAction <-
+        case nextValue of
+          RuntimeIO action' -> Right action'
+          _ -> Left (ProgramPipelineError "run-program __io_bind continuation did not return an IO action")
+      (nextStdout, resultValue) <- executeIOAction context nextAction
+      Right (firstStdout ++ nextStdout, resultValue)
+
+isRuntimeUnit :: RuntimeValue -> Bool
+isRuntimeUnit value =
+  case value of
+    RuntimeUnit -> True
+    RuntimeData ctor _ [] -> isPreludeUnitConstructor ctor
+    _ -> False
 
 reachableOpaqueRuntimeDependencies :: CheckedProgram -> [String]
 reachableOpaqueRuntimeDependencies checked =
@@ -241,6 +1209,10 @@ prettyValueArg value = case value of
 
 mainSourceType :: CheckedProgram -> Maybe SrcType
 mainSourceType checked =
+  recoverMainSourceType checked <$> mainIdentitySourceType checked
+
+mainIdentitySourceType :: CheckedProgram -> Maybe SrcType
+mainIdentitySourceType checked =
   case
     [ checkedBindingSourceType binding
       | checkedModule <- checkedProgramModules checked,
@@ -248,7 +1220,7 @@ mainSourceType checked =
         checkedBindingName binding == checkedProgramMain checked
     ]
   of
-    ty : _ -> Just (recoverMainSourceType checked ty)
+    ty : _ -> Just ty
     [] -> Nothing
 
 recoverMainSourceType :: CheckedProgram -> SrcType -> SrcType
@@ -259,7 +1231,11 @@ recoverMainSourceType checked ty =
 
 programElaborateScope :: CheckedProgram -> ElaborateScope
 programElaborateScope checked =
-  mkElaborateScope Map.empty (Map.fromList [(qualifiedDataName info, info) | info <- allDataInfos checked]) Map.empty []
+  mkElaborateScope
+    Map.empty
+    (Map.fromList [(qualifiedDataName info, info) | info <- allDataInfos checked])
+    (Map.fromList [(qualifiedClassName info, info) | info <- allClassInfos checked])
+    (allInstanceInfos checked)
 
 decodeSourceValue :: CheckedProgram -> SrcType -> ElabTerm -> Maybe Value
 decodeSourceValue checked srcTy term =
@@ -311,12 +1287,27 @@ qualifiedDataName :: DataInfo -> String
 qualifiedDataName dataInfo =
   symbolDefiningModule (dataInfoSymbol dataInfo) ++ "." ++ symbolDefiningName (dataInfoSymbol dataInfo)
 
+qualifiedClassName :: ClassInfo -> String
+qualifiedClassName classInfo =
+  symbolDefiningModule (classInfoSymbol classInfo) ++ "." ++ symbolDefiningName (classInfoSymbol classInfo)
+
 allDataInfos :: CheckedProgram -> [DataInfo]
 allDataInfos checked =
   [ dataInfo
     | checkedModule <- checkedProgramModules checked,
       dataInfo <- map snd (Map.toList (checkedModuleData checkedModule))
   ]
+
+allClassInfos :: CheckedProgram -> [ClassInfo]
+allClassInfos checked =
+  [ classInfo
+    | checkedModule <- checkedProgramModules checked,
+      classInfo <- map snd (Map.toList (checkedModuleClasses checkedModule))
+  ]
+
+allInstanceInfos :: CheckedProgram -> [InstanceInfo]
+allInstanceInfos checked =
+  concatMap checkedModuleInstances (checkedProgramModules checked)
 
 decodeAnyData :: CheckedProgram -> ElabTerm -> Maybe Value
 decodeAnyData checked term =

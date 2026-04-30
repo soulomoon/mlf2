@@ -353,7 +353,7 @@ spec = do
     describe "MLF.Program CLI helper" $ do
         it "runs a frozen sample file by path" $ do
             runProgramFile "test/programs/recursive-adt/plain-recursive-nat.mlfp"
-                `shouldReturn` Right "true"
+                `shouldReturn` Right "true\n"
 
         it "prepends the built-in Prelude for explicit imports" $ do
             located <-
@@ -493,7 +493,7 @@ spec = do
                 ((== ProgramAmbiguousMethodUse "pure") . diagnosticError)
                 (const False)
 
-        it "rejects running IO mains until runtime support exists" $ do
+        it "executes putStrLn for main : IO Unit" $ do
             located <-
                 requireLocated $
                     unlines
@@ -502,8 +502,284 @@ spec = do
                         , "  def main : IO Unit = putStrLn \"hello\";"
                         , "}"
                         ]
-            runLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
-                ((== ProgramPipelineError "run-program does not support IO main values yet") . diagnosticError)
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "hello\n"
+
+        it "sequences main IO through Prelude bind" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, putStrLn);"
+                        , "  def after : Unit -> IO Unit = \\_done putStrLn \"world\";"
+                        , "  def main : IO Unit = bind (putStrLn \"hello\") after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "hello\nworld\n"
+
+        it "sequences direct IO primitives without rendering Unit" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = __io_bind (__io_pure Unit) (\\(_n : Unit) __io_putStrLn \"world\");"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "world\n"
+
+        it "runs pure IO Unit actions without stdout or Unit rendering" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, pure);"
+                        , "  def main : IO Unit = pure Unit;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right ""
+
+        it "does not classify qualified non-Prelude Unit results as runtime IO Unit" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module A export (Unit(..)) {"
+                        , "  data Unit ="
+                        , "      Unit : Unit;"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  import A as A;"
+                        , "  def main : IO A.Unit = __io_pure A.Unit;"
+                        , "}"
+                        ]
+            runLocatedProgramOutput located `shouldSatisfy` either
+                ( \diagnostic ->
+                    case diagnosticError diagnostic of
+                        ProgramPipelineError msg ->
+                            all
+                                (`isInfixOf` msg)
+                                [ "run-program supports only main : IO Unit"
+                                , "A.Unit"
+                                ]
+                        _ -> False
+                )
+                (const False)
+
+        it "resolves deferred non-Unit constructors passed through IO bind" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Nat(..), bind, pure, putStrLn);"
+                        , "  def after : Nat -> IO Unit = \\_n putStrLn \"nat\";"
+                        , "  def action : IO Nat = pure Zero;"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "nat\n"
+
+        it "resolves deferred non-nullary constructors named Unit as functions" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (Foo(..), main) {"
+                        , "  import Prelude as P exposing (Unit, IO, bind, pure, putStrLn);"
+                        , "  data Foo ="
+                        , "      Unit : Int -> Foo;"
+                        , "  def after : Foo -> IO P.Unit = \\_foo putStrLn \"foo\";"
+                        , "  def action : IO Foo = pure (Unit 1);"
+                        , "  def main : IO P.Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "foo\n"
+
+        it "keeps deferred constructor lookup scoped to the binding that created the placeholder" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module A export (Foo, mkAction) {"
+                        , "  import Prelude exposing (IO, pure);"
+                        , "  data Foo ="
+                        , "      Unit : Int -> Foo;"
+                        , "  def mkAction : Int -> IO Foo = \\n pure (Unit n);"
+                        , "}"
+                        , ""
+                        , "module B export (Bar(..), unused) {"
+                        , "  data Bar ="
+                        , "      Unit : Bar;"
+                        , "  def unused : Bar = Unit;"
+                        , "}"
+                        , ""
+                        , "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, putStrLn);"
+                        , "  import A exposing (Foo, mkAction);"
+                        , "  def action : IO Foo = mkAction 1;"
+                        , "  def after : Foo -> IO Unit = \\_foo putStrLn \"scoped\";"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "scoped\n"
+
+        it "resolves deferred case placeholders inside IO continuations" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Nat(..), bind, pure, putStrLn);"
+                        , "  def after : Nat -> IO Unit = \\n case n of {"
+                        , "    Zero -> putStrLn \"zero\";"
+                        , "    Succ rest -> putStrLn \"succ\""
+                        , "  };"
+                        , "  def action : IO Nat = pure (Succ Zero);"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "succ\n"
+
+        it "resolves deferred method placeholders inside IO continuations" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Nat(..), bind, pure, putStrLn);"
+                        , "  class Speak a {"
+                        , "    speak : a -> IO Unit;"
+                        , "  }"
+                        , "  instance Speak Nat {"
+                        , "    speak = \\n case n of {"
+                        , "      Zero -> putStrLn \"zero\";"
+                        , "      Succ rest -> putStrLn \"succ\""
+                        , "    };"
+                        , "  }"
+                        , "  def after : Nat -> IO Unit = \\n speak n;"
+                        , "  def action : IO Nat = pure (Succ Zero);"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "succ\n"
+
+        it "preserves parameterized constructor instantiations for IO method dispatch" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, pure, putStrLn);"
+                        , "  data Wrap a ="
+                        , "      Wrap : a -> Wrap a;"
+                        , "  class Speak a {"
+                        , "    speak : a -> IO Unit;"
+                        , "  }"
+                        , "  instance Speak (Wrap Int) {"
+                        , "    speak = \\w putStrLn \"int\";"
+                        , "  }"
+                        , "  instance Speak (Wrap Bool) {"
+                        , "    speak = \\w putStrLn \"bool\";"
+                        , "  }"
+                        , "  def after : Wrap Int -> IO Unit = \\w speak w;"
+                        , "  def action : IO (Wrap Int) = pure (Wrap 1);"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "int\n"
+
+        it "resolves constrained instance evidence for IO method dispatch" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Nat(..), Option(..), Eq, bind, eq, pure, putStrLn);"
+                        , "  def after : Option Nat -> IO Unit = \\opt (\\(same : Bool) putStrLn \"eq\") (eq opt opt);"
+                        , "  def action : IO (Option Nat) = pure (Some Zero);"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "eq\n"
+
+        it "applies local evidence arguments for constrained nullary IO methods" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (Eq, Token(..), Pair(..), Pick, eq, pick, selected, main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, pure, putStrLn);"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  instance Eq Bool {"
+                        , "    eq = \\left \\right true;"
+                        , "  }"
+                        , "  data Token a ="
+                        , "      Token : Token a;"
+                        , "  data Pair a b ="
+                        , "      Pair : Token b -> Pair a b;"
+                        , "  class Pick a {"
+                        , "    pick : Eq b => Pair a b;"
+                        , "  }"
+                        , "  instance Pick Bool {"
+                        , "    pick = Pair Token;"
+                        , "  }"
+                        , "  def selected : (Pick Bool, Eq Bool) => Pair Bool Bool = pick;"
+                        , "  def after : Pair Bool Bool -> IO Unit = \\pair case pair of {"
+                        , "    Pair _ -> putStrLn \"picked\""
+                        , "  };"
+                        , "  def action : IO (Pair Bool Bool) = pure selected;"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "picked\n"
+
+        it "constructs IO ADT payloads with function fields without runtime type inference" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, pure, putStrLn);"
+                        , "  data Box ="
+                        , "      Box : (Int -> Int) -> Box;"
+                        , "  def idFn : Int -> Int = \\(n : Int) n;"
+                        , "  def after : Box -> IO Unit = \\_box putStrLn \"boxed\";"
+                        , "  def action : IO Box = pure (Box idFn);"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "boxed\n"
+
+        it "rejects recursive IO main lookup without hanging" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = main;"
+                        , "}"
+                        ]
+            runLocatedProgramOutput (withPreludeLocated located) `shouldSatisfy` either
+                ( \diagnostic ->
+                    case diagnosticError diagnostic of
+                        ProgramPipelineError msg ->
+                            all
+                                (`isInfixOf` msg)
+                                [ "recursive top-level binding lookup"
+                                , "Main__main -> Main__main"
+                                ]
+                        _ -> False
+                )
+                (const False)
+
+        it "rejects IO mains whose result type is not Unit" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (IO, pure);"
+                        , "  def main : IO Int = pure 1;"
+                        , "}"
+                        ]
+            runLocatedProgramOutput (withPreludeLocated located) `shouldSatisfy` either
+                ( \diagnostic ->
+                    case diagnosticError diagnostic of
+                        ProgramPipelineError msg -> "run-program supports only main : IO Unit" `isInfixOf` msg
+                        _ -> False
+                )
                 (const False)
 
         it "rejects running pure mains that depend on opaque Prelude helpers" $ do

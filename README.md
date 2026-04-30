@@ -105,7 +105,7 @@ Internally, `.mlfp` now reuses the old MLF ownership boundary:
 - `MLF.Frontend.Program.Elaborate` lowers executable `.mlfp` bindings to `SurfaceExpr`
 - `MLF.Frontend.Program.Finalize` normalizes those surface eMLF terms and calls the internal detailed eMLF pipeline entrypoint
 - `MLF.Elab.TypeCheck` remains the typing-judgment owner for checked `.mlfp` / xMLF terms
-- `MLF.Frontend.Program.Run` evaluates checked bindings through the existing xMLF reducer; static module/import/data/class validation may still fail before the eMLF pipeline
+- `MLF.Frontend.Program.Run` evaluates pure checked bindings through the existing xMLF reducer and executes checked `main : IO Unit` actions through the reserved IO primitive boundary; static module/import/data/class validation may still fail before the eMLF pipeline
 - `MLF.Backend.IR` defines the private typed backend IR boundary and local invariant validator for checked `.mlfp` programs before LLVM lowering
 - `MLF.Backend.LLVM` lowers supported first-order backend IR programs to real LLVM IR text
 

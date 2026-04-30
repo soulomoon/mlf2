@@ -20,7 +20,7 @@ main = do
     args <- getArgs
     case args of
         ["run-program", path] ->
-            runProgramFile path >>= either die putStrLn
+            runProgramFile path >>= either die putStr
         ["run-program"] ->
             die programCliUsage
         ["emit-backend", path] ->

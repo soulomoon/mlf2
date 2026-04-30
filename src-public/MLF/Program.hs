@@ -26,6 +26,7 @@ module MLF.Program
     , ResolvedProgram (..)
     , sameResolvedSymbol
     , Value (..)
+    , ProgramRunResult (..)
     , renderProgramParseError
     , renderProgramDiagnostic
     , parseRawProgram
@@ -41,6 +42,9 @@ module MLF.Program
     , checkLocatedProgram
     , runProgram
     , runLocatedProgram
+    , runProgramOutput
+    , runLocatedProgramOutput
+    , programRunOutput
     , prettyValue
     ) where
 
@@ -79,10 +83,14 @@ import MLF.Pipeline
     , SymbolOwnerIdentity (..)
     , SymbolSpelling (..)
     , Value (..)
+    , ProgramRunResult (..)
     , checkLocatedProgram
     , checkProgram
     , prettyValue
+    , programRunOutput
     , renderProgramDiagnostic
     , runLocatedProgram
+    , runLocatedProgramOutput
     , runProgram
+    , runProgramOutput
     )

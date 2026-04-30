@@ -334,11 +334,12 @@ module Main export (main) {
 ```
 
 An `IO` action is still an opaque value while the program is checked and
-normalized. The current `run-program` implementation fails closed for `IO`
-entrypoints until the runtime IO issue adds concrete primitive interpretation.
-When runtime support exists, sequencing is determined by `bind` through that
-opaque primitive boundary, and the initial runtime contract should not render
-`main : IO a` results for non-`Unit` `a`.
+normalized. `run-program` executes a checked `main : IO Unit` by interpreting
+the reserved `__io_pure`, `__io_bind`, and `__io_putStrLn` primitive boundary.
+Effects occur only when the final `main` action is run. Sequencing is
+determined by `bind`, `putStrLn` appends its text argument plus a newline to
+stdout, and successful `IO Unit` programs do not render a `Unit` result value.
+The initial runtime contract rejects `main : IO a` for non-`Unit` `a`.
 
 The backend contract is fail-closed for the first IO slice. `emit-backend`
 should reject checked IO programs with a structured unsupported diagnostic until
