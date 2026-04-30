@@ -251,6 +251,7 @@ data BackendValidationError
   | BackendClosureCaptureTypeMismatch String BackendType BackendType
   | BackendClosureTypeMismatch String BackendType BackendType
   | BackendClosureCallExpectedFunction BackendType
+  | BackendClosureCallExpectedClosureValue BackendType
   | BackendClosureCallArityMismatch Int Int
   | BackendClosureCallArgumentMismatch Int BackendType BackendType
   | BackendClosureCallResultMismatch BackendType BackendType
@@ -764,7 +765,7 @@ validateBackendExprWith mbContext expr =
     BackendClosureCall resultTy fun args -> do
       validateBackendExprWith mbContext fun
       mapM_ (validateBackendExprWith mbContext) args
-      validateBackendClosureCall resultTy (backendExprType fun) args
+      validateBackendClosureCall mbContext resultTy fun args
 
 validateBackendClosureCapture :: Maybe BackendValidationContext -> BackendClosureCapture -> Either BackendValidationError ()
 validateBackendClosureCapture mbContext capture = do
@@ -813,12 +814,15 @@ firstClosureValueName (Nothing : rest) =
 firstClosureValueName (Just value : _) =
   Just value
 
-validateBackendClosureCall :: BackendType -> BackendType -> [BackendExpr] -> Either BackendValidationError ()
-validateBackendClosureCall resultTy funTy args =
+validateBackendClosureCall :: Maybe BackendValidationContext -> BackendType -> BackendExpr -> [BackendExpr] -> Either BackendValidationError ()
+validateBackendClosureCall mbContext resultTy fun args =
   case collectClosureCallType funTy of
     Nothing ->
       Left (BackendClosureCallExpectedFunction funTy)
     Just (paramTys, expectedResultTy) -> do
+      case backendClosureValueName mbContext fun of
+        Just _ -> pure ()
+        Nothing -> Left (BackendClosureCallExpectedClosureValue funTy)
       unless (length paramTys == length args) $
         Left (BackendClosureCallArityMismatch (length paramTys) (length args))
       zipWithM_
@@ -828,6 +832,9 @@ validateBackendClosureCall resultTy funTy args =
       unless (alphaEqBackendType resultTy expectedResultTy) $
         Left (BackendClosureCallResultMismatch resultTy expectedResultTy)
   where
+    funTy =
+      backendExprType fun
+
     validateArg index0 (expectedArgTy, arg) =
       unless (alphaEqBackendType expectedArgTy (backendExprType arg)) $
         Left (BackendClosureCallArgumentMismatch index0 expectedArgTy (backendExprType arg))

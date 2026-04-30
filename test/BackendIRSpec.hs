@@ -244,6 +244,13 @@ spec = describe "MLF.Backend.IR" $ do
             }
         badCall =
           BackendClosureCall intTy (goodClosure "__mlfp_closure$call") [boolLit True]
+        nonClosureCall =
+          BackendLet
+            intTy
+            "f"
+            idTy
+            intIdentityExpr
+            (BackendClosureCall intTy (BackendVar idTy "f") [intLit 1])
         unlistedLocalCapture =
           BackendLet
             idTy
@@ -313,6 +320,8 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` Left (BackendDuplicateClosureParameter "x")
     validateBackendProgram (programWithMainExpr badCall)
       `shouldBe` Left (BackendClosureCallArgumentMismatch 0 intTy boolTy)
+    validateBackendProgram (programWithMainExpr nonClosureCall)
+      `shouldBe` Left (BackendClosureCallExpectedClosureValue idTy)
     validateBackendProgram (programWithMainExpr unlistedLocalCapture)
       `shouldBe` Left (BackendUnknownVariable "captured")
     validateBackendProgram (programWithMainExpr appCalledClosure)
