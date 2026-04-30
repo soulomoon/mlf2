@@ -628,6 +628,30 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
     assertNativeProgram sourceLocalPartialApplicationProgram "1"
 
+  it "packages partial applications with closure-valued supplied arguments" $ do
+    output <-
+      withTempProgram sourcePartialApplicationClosureArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "unsupported static function argument"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationClosureArgumentProgram "41"
+
+  it "packages partial applications headed by closure-valued parameters" $ do
+    output <-
+      withTempProgram sourcePartialApplicationClosureParameterProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "BackendClosureCallExpectedClosureValue"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationClosureParameterProgram "1"
+
   it "lowers source-level captured closure calls through the explicit closure ABI" $ do
     output <-
       withTempProgram sourceCapturedClosureCallProgram $ \path ->
@@ -3107,6 +3131,30 @@ sourceLocalPartialApplicationProgram =
       "  def main : Int =",
       "    let keepLeft : Int -> Int -> Int = \\x \\y x",
       "    in apply (keepLeft 1);",
+      "}"
+    ]
+
+sourcePartialApplicationClosureArgumentProgram :: String
+sourcePartialApplicationClosureArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def choose : (Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let inc : Int -> Int = \\(x : Int) captured in",
+      "    apply (choose inc 0);",
+      "}"
+    ]
+
+sourcePartialApplicationClosureParameterProgram :: String
+sourcePartialApplicationClosureParameterProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def main : Int = use keepLeft;",
       "}"
     ]
 

@@ -849,6 +849,21 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendClosure
     backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendClosureCall
 
+  it "captures local direct callees when packaging partial applications" $ do
+    checked0 <- requireChecked localDirectAliasPartialApplicationBaseProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding {checkedBindingTerm = localDirectAliasPartialApplicationTerm}
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCapture "keep"
+
   it "shares closure entry names across lifted recursive helper conversion" $ do
     checked0 <- requireChecked liftedRecursiveHelpersClosureNameProgram
     let checked =
@@ -1415,6 +1430,27 @@ directLocalCallProgram =
       "    let f : Int -> Int = \\(x : Int) x in f 7;",
       "}"
     ]
+
+localDirectAliasPartialApplicationBaseProgram :: String
+localDirectAliasPartialApplicationBaseProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def main : Int = apply (keepLeft 1);",
+      "}"
+    ]
+
+localDirectAliasPartialApplicationTerm :: Elab.ElabTerm
+localDirectAliasPartialApplicationTerm =
+  Elab.ELet
+    "keep"
+    (Elab.schemeFromType binaryIntElabTy)
+    (Elab.EVar "Main__keepLeft")
+    ( Elab.EApp
+        (Elab.EVar "Main__apply")
+        (Elab.EApp (Elab.EVar "keep") (Elab.ELit (LInt 1)))
+    )
 
 liftedRecursiveHelpersClosureNameProgram :: String
 liftedRecursiveHelpersClosureNameProgram =
@@ -2116,6 +2152,10 @@ staleSomeInPolymorphicOptionTerm =
 unaryIntElabTy :: Elab.ElabType
 unaryIntElabTy =
   Elab.TArrow intElabTy intElabTy
+
+binaryIntElabTy :: Elab.ElabType
+binaryIntElabTy =
+  Elab.TArrow intElabTy (Elab.TArrow intElabTy intElabTy)
 
 recursiveCaptureAvoidingElabTy :: Elab.ElabType
 recursiveCaptureAvoidingElabTy =

@@ -4,6 +4,10 @@
   calls as explicit `BackendClosure` values that capture supplied arguments and
   apply the remaining value parameters later. Saturated calls stay on the
   existing direct or closure-call paths.
+- Higher-order partials keep function-typed supplied arguments in the packaged
+  closure. When a callee parameter is later underapplied, direct function
+  arguments are first wrapped as closure values so the generated partial
+  closure does not mix raw function pointers with closure-record calls.
 - Local function bindings used through underapplication are closure-converted
   so the packaged partial captures a closure pointer instead of referencing a
   local helper from a separate closure entry. Existing typeclass/evidence

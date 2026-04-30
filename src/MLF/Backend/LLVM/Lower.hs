@@ -2914,10 +2914,30 @@ lowerClosureValue env exprEnv context resultTy entryName captures = do
   pure (LowerValue resultTy LLVMPtr closurePointer)
   where
     lowerCapture capture = do
-      value <- lowerExpr env exprEnv (context ++ ", closure capture " ++ show (backendClosureCaptureName capture)) (backendClosureCaptureExpr capture)
+      value <-
+        if shouldLowerStoredFunctionCapture capture
+          then
+            lowerStoredFunctionArgument
+              env
+              exprEnv
+              (context ++ ", closure capture " ++ show (backendClosureCaptureName capture))
+              (backendClosureCaptureType capture)
+              (backendClosureCaptureExpr capture)
+          else
+            lowerExpr env exprEnv (context ++ ", closure capture " ++ show (backendClosureCaptureName capture)) (backendClosureCaptureExpr capture)
       expectedTy <- lowerClosureStoredTypeM env context (backendClosureCaptureType capture)
       requireLLVMType context (backendClosureCaptureName capture) expectedTy value
       pure (expectedTy, value)
+
+    shouldLowerStoredFunctionCapture capture =
+      isFirstOrderFunctionPointerType (backendClosureCaptureType capture)
+        && not (isEvidenceArgument True (backendClosureCaptureName capture) (backendClosureCaptureType capture))
+        && case closurePointerAliasValue exprEnv (backendClosureCaptureExpr capture) of
+          Just _ -> False
+          Nothing ->
+            case collectTyApps (backendClosureCaptureExpr capture) of
+              (BackendVar {}, _) -> True
+              _ -> False
 
     lowerClosureEnvironment [] =
       pure LLVMNull
