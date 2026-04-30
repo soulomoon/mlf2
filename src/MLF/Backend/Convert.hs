@@ -125,7 +125,9 @@ data LiftedRecursiveLet = LiftedRecursiveLet
   { lrlName :: String,
     lrlElabType :: ElabType,
     lrlBackendType :: BackendType,
-    lrlTerm :: ElabTerm
+    lrlTerm :: ElabTerm,
+    lrlClosureValueArguments :: Set.Set Int,
+    lrlEvidenceValueArguments :: Set.Set Int
   }
 
 data LiftState = LiftState
@@ -428,6 +430,8 @@ convertCheckedBinding context env checkedModule binding = do
               Right (constructorBindingTy, expr, [])
       _ -> do
         (liftedTerm, liftedSpecs) <- liftRecursiveLetsInBinding bindingContext checkedBindingTermClosed
+        let bindingContextWithLifted =
+              extendContextWithLiftedRecursiveLets bindingContext liftedSpecs
         let envWithLifted =
               foldr
                 (\lifted acc -> extendTermEnv (lrlName lifted) (lrlElabType lifted) acc)
@@ -435,8 +439,8 @@ convertCheckedBinding context env checkedModule binding = do
                 liftedSpecs
         (liftedBindings, expr) <-
           runConvertM $ do
-            liftedBindings <- mapM (convertLiftedRecursiveLet bindingContext envWithLifted) liftedSpecs
-            expr <- convertTermExpectedMode DirectLambda bindingContext envWithLifted emptyClosureScope (Just bindingTy) liftedTerm
+            liftedBindings <- mapM (convertLiftedRecursiveLet bindingContextWithLifted envWithLifted) liftedSpecs
+            expr <- convertTermExpectedMode DirectLambda bindingContextWithLifted envWithLifted emptyClosureScope (Just bindingTy) liftedTerm
             pure (liftedBindings, expr)
         Right (bindingTy, expr, liftedBindings)
   let convertedBinding =
@@ -447,6 +451,24 @@ convertCheckedBinding context env checkedModule binding = do
             backendBindingExportedAsMain = checkedBindingExportedAsMain binding
           }
   Right (convertedBinding : liftedBindings)
+
+extendContextWithLiftedRecursiveLets :: ConvertContext -> [LiftedRecursiveLet] -> ConvertContext
+extendContextWithLiftedRecursiveLets context liftedSpecs =
+  context
+    { ccClosureValueArguments =
+        mergeDemands liftedClosureValueArguments (ccClosureValueArguments context),
+      ccEvidenceValueArguments =
+        mergeDemands liftedEvidenceValueArguments (ccEvidenceValueArguments context)
+    }
+  where
+    mergeDemands build =
+      Map.unionWith Set.union (Map.filter (not . Set.null) (Map.fromList (map build liftedSpecs)))
+
+    liftedClosureValueArguments lifted =
+      (lrlName lifted, lrlClosureValueArguments lifted)
+
+    liftedEvidenceValueArguments lifted =
+      (lrlName lifted, lrlEvidenceValueArguments lifted)
 
 liftRecursiveLetsInBinding :: ConvertContext -> ElabTerm -> Either BackendConversionError (ElabTerm, [LiftedRecursiveLet])
 liftRecursiveLetsInBinding context term = do
@@ -510,12 +532,18 @@ liftRecursiveLetsInTerm context lexicalTerms lexicalTypes term =
                   wrapHelperTermCaptures termCaptures $
                     replaceFreeTermVariable name helperRef rhs'
           helperBackendType <- liftEitherConversion (canonicalizeBackendType context <$> convertElabType helperElabType)
+          let helperClosureValueArguments =
+                bindingClosureValueArguments context emptyClosureScope helperBackendType helperTerm
+              helperEvidenceValueArguments =
+                bindingEvidenceValueArguments context emptyClosureScope helperBackendType helperTerm
           emitLiftedRecursiveLet
             LiftedRecursiveLet
               { lrlName = helperName,
                 lrlElabType = helperElabType,
                 lrlBackendType = helperBackendType,
-                lrlTerm = helperTerm
+                lrlTerm = helperTerm,
+                lrlClosureValueArguments = helperClosureValueArguments,
+                lrlEvidenceValueArguments = helperEvidenceValueArguments
               }
           body' <- liftRecursiveLetsInTerm context bodyTerms lexicalTypes body
           pure (ELet name scheme helperRef body')
@@ -607,8 +635,8 @@ ensureLiftableRecursiveLet name bindingTy captures rhs = do
       ( unsupported
           ("captures lexical bindings: " ++ intercalate ", " (map fst captures))
       )
-  unless (isMonomorphicFirstOrderFunctionType bindingTy) $
-    throwLiftError (unsupported "expected a monomorphic first-order function type")
+  unless (isLiftableRecursiveFunctionType bindingTy) $
+    throwLiftError (unsupported "expected a monomorphic runtime-representable function type")
   unless (isFunctionValueTerm rhs) $
     throwLiftError (unsupported "expected a function-valued recursive right-hand side")
 
@@ -664,28 +692,28 @@ throwLiftError :: BackendConversionError -> LiftM a
 throwLiftError err =
   StateT (const (Left err))
 
-isMonomorphicFirstOrderFunctionType :: BackendType -> Bool
-isMonomorphicFirstOrderFunctionType ty =
+isLiftableRecursiveFunctionType :: BackendType -> Bool
+isLiftableRecursiveFunctionType ty =
   case ty of
     BTForall {} ->
       False
     _ ->
       let (args, resultTy) = splitBackendArrows ty
-       in not (null args) && all (isFirstOrderValueType Set.empty) (resultTy : args)
+       in not (null args) && all isLiftableRecursiveValueType (resultTy : args)
 
-isFirstOrderValueType :: Set.Set String -> BackendType -> Bool
-isFirstOrderValueType bound =
+isLiftableRecursiveValueType :: BackendType -> Bool
+isLiftableRecursiveValueType =
   \case
-    BTVar name ->
-      Set.member name bound
-    BTArrow {} ->
+    BTVar {} ->
       False
+    ty@BTArrow {} ->
+      isFirstOrderFunctionCaptureType ty
     BTBase {} ->
       True
     BTCon _ args ->
-      all (isFirstOrderValueType bound) args
-    BTVarApp name args ->
-      Set.member name bound && all (isFirstOrderValueType bound) args
+      all isLiftableRecursiveValueType args
+    BTVarApp {} ->
+      False
     BTForall {} ->
       False
     BTMu {} ->

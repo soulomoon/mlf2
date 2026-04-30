@@ -34,6 +34,10 @@
   rows are explicitly classified with diagnostic fragments.
 
 ### Changed
+- Fixed checked-source recursive higher-order LLVM flows so monomorphic
+  top-level functions and closed lifted local helpers pass function-valued
+  arguments through the explicit closure ABI, while unspecialized polymorphic
+  runtime escapes remain structured unsupported cases.
 - Fixed higher-order checked-source partial applications so supplied
   closure-valued arguments, alias-propagated closure-demanded parameters, local
   helper demands, and non-variable partial callees stay on the explicit closure

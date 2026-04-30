@@ -312,6 +312,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
     validateLLVMAssembly output
 
+  it "rejects source-level escaping polymorphic main values with a stable diagnostic" $ do
+    result <- withTempProgram sourceEscapingPolymorphicMainProgram emitBackendFile
+
+    result
+      `shouldSatisfy` either
+        (isInfixOf "polymorphic main binding")
+        (const False)
+
   it "statically lowers first-class function-typed arguments" $ do
     output <-
       withTempProgram firstClassFunctionArgumentProgram $ \path ->
@@ -430,6 +438,29 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "phi ptr"
     validateLLVMAssembly output
     validateLLVMObjectCode output
+
+  it "lowers top-level recursive higher-order functions through closure arguments" $ do
+    output <-
+      withTempProgram sourceTopLevelRecursiveHigherOrderProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define i64 @\"Main__loop\"(ptr %\"$f#"
+    output `shouldSatisfy` isInfixOf "ptr %\"$n#"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceTopLevelRecursiveHigherOrderProgram "1"
+
+  it "lowers local recursive higher-order helpers through closure arguments" $ do
+    output <-
+      withTempProgram sourceLocalRecursiveHigherOrderProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "Main__main$letrec$"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceLocalRecursiveHigherOrderProgram "1"
 
   it "emits first-order recursive ADT parity fixtures through LLVM" $ do
     mapM_
@@ -1385,6 +1416,14 @@ localFirstClassPolymorphismProgram =
       "}"
     ]
 
+sourceEscapingPolymorphicMainProgram :: String
+sourceEscapingPolymorphicMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : forall a. a -> a = \\x x;",
+      "}"
+    ]
+
 firstClassFunctionArgumentProgram :: String
 firstClassFunctionArgumentProgram =
   unlines
@@ -1467,6 +1506,41 @@ ordinaryFunctionEvidenceMethodProgram =
       "  def idInt : Int -> Int = \\x x;",
       "  def use : C a => (a -> a) -> a -> a = \\f \\x apply f x;",
       "  def main : Int = use idInt 1;",
+      "}"
+    ]
+
+sourceTopLevelRecursiveHigherOrderProgram :: String
+sourceTopLevelRecursiveHigherOrderProgram =
+  unlines
+    [ "module Main export (Nat(..), loop, idInt, main) {",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat;",
+      "",
+      "  def idInt : Int -> Int = \\(x : Int) x;",
+      "  def loop : (Int -> Int) -> Nat -> Int = \\(f : Int -> Int) \\(n : Nat) case n of {",
+      "    Zero -> f 1;",
+      "    Succ inner -> loop f inner",
+      "  };",
+      "  def main : Int = loop idInt (Succ Zero);",
+      "}"
+    ]
+
+sourceLocalRecursiveHigherOrderProgram :: String
+sourceLocalRecursiveHigherOrderProgram =
+  unlines
+    [ "module Main export (Nat(..), main) {",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat;",
+      "",
+      "  def main : Int =",
+      "    let idInt : Int -> Int = \\(x : Int) x in",
+      "    let loop : (Int -> Int) -> Nat -> Int = \\(f : Int -> Int) \\(n : Nat) case n of {",
+      "      Zero -> f 1;",
+      "      Succ inner -> loop f inner",
+      "    } in",
+      "    loop idInt (Succ Zero);",
       "}"
     ]
 
