@@ -1268,6 +1268,15 @@ spec = describe "MLF.Backend.LLVM" $ do
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
+  it "returns global functions from source-level case branches" $ do
+    output <- requireRight =<< emitBackendSource sourceCaseReturnedGlobalFunctionProgram
+
+    output `shouldSatisfy` isInfixOf "@\"Main__helper\""
+    output `shouldNotSatisfy` isInfixOf "escaping function \"Main__helper\""
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceCaseReturnedGlobalFunctionProgram "41"
+
   it "normalizes mixed callable case results to closure records" $ do
     output <- requireRight (renderBackendProgramLLVM mixedCallableCaseResultProgram)
 
@@ -4039,6 +4048,23 @@ sourceClosureValuedConstructorFieldProgram =
       "    let captured : Int = 41 in",
       "    let f : Int -> Int = \\(x : Int) captured in",
       "    case FnBox f of { FnBox g -> g 0 };",
+      "}"
+    ]
+
+sourceCaseReturnedGlobalFunctionProgram :: String
+sourceCaseReturnedGlobalFunctionProgram =
+  unlines
+    [ "module Main export (Choice(..), main) {",
+      "  data Choice =",
+      "      ChoiceSome : (Int -> Int) -> Choice",
+      "    | ChoiceNone : Choice;",
+      "",
+      "  def helper : Int -> Int = \\(x : Int) x;",
+      "  def pick : Choice -> (Int -> Int) = \\(choice : Choice) case choice of {",
+      "    ChoiceSome f -> f;",
+      "    ChoiceNone -> helper",
+      "  };",
+      "  def main : Int = (pick ChoiceNone) 41;",
       "}"
     ]
 

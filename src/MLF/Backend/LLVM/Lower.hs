@@ -3332,22 +3332,31 @@ lowerGlobalValue env context resultTy name binding typeArgs =
   where
     form = biForm binding
 
-    lowerInstantiatedGlobalValue expectedTy functionContext binding0 resolvedTypeArgs instantiated = do
-      unless (null (ffParams instantiated)) $
+    lowerInstantiatedGlobalValue expectedTy functionContext binding0 resolvedTypeArgs instantiated
+      | not (null (ffParams instantiated)) =
+          lowerInstantiatedGlobalFunctionValue expectedTy functionContext binding0 resolvedTypeArgs instantiated
+      | otherwise = do
+          unless (alphaEqBackendType expectedTy (ffReturnType instantiated)) $
+            liftEither (BackendLLVMInternalError ("global value type mismatch for " ++ functionContext ++ " at " ++ context))
+          resultLLVMType <- lowerRuntimeValueTypeM env context expectedTy
+          functionName <- globalFunctionName env context binding0 resolvedTypeArgs
+          result <- emitAssign "call" resultLLVMType (LLVMCall functionName [])
+          pure
+            ( LowerValue
+                expectedTy
+                resultLLVMType
+                result
+                (functionFormReturnValueKind env instantiated)
+                (functionFormReturnConstructedValue env instantiated)
+            )
+
+    lowerInstantiatedGlobalFunctionValue expectedTy functionContext binding0 resolvedTypeArgs instantiated = do
+      unless (isFirstOrderFunctionPointerType expectedTy) $
         liftEither (BackendLLVMUnsupportedExpression context ("escaping function " ++ show functionContext))
-      unless (alphaEqBackendType expectedTy (ffReturnType instantiated)) $
-        liftEither (BackendLLVMInternalError ("global value type mismatch for " ++ functionContext ++ " at " ++ context))
-      resultLLVMType <- lowerRuntimeValueTypeM env context expectedTy
+      let actualTy = functionTypeFromForm instantiated
+      requireEvidenceFunctionType context functionContext expectedTy actualTy
       functionName <- globalFunctionName env context binding0 resolvedTypeArgs
-      result <- emitAssign "call" resultLLVMType (LLVMCall functionName [])
-      pure
-        ( LowerValue
-            expectedTy
-            resultLLVMType
-            result
-            (functionFormReturnValueKind env instantiated)
-            (functionFormReturnConstructedValue env instantiated)
-        )
+      pure (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr functionName))
 
 lowerLit :: ProgramEnv -> String -> BackendType -> Lit -> LowerM LowerValue
 lowerLit env context ty lit = do
