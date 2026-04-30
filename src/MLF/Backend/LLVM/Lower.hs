@@ -2681,11 +2681,20 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
                 Nothing ->
                   Just LowerClosureRecord
 
+    valueKindEnv =
+      ProgramEnv
+        { peBase = base,
+          peSpecializations = Map.empty,
+          peEvidenceWrappers = Map.empty,
+          peFunctionWrappers = Map.empty,
+          peStringGlobals = Map.empty
+        }
+
     nullaryGlobalReturnValueKind visitedGlobals name returnTy form
       | Set.member name visitedGlobals =
           valueKindForType returnTy
       | otherwise =
-          expressionValueKindWith (Set.insert name visitedGlobals) Map.empty Map.empty (ffBody form)
+          backendExprValueKindWith valueKindEnv (Set.insert name visitedGlobals) Map.empty (ffBody form)
 
     collectAlternativeEntries alternative =
       let binders = patternBinders (backendAltPattern alternative)

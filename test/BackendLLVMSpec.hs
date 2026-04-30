@@ -4739,18 +4739,28 @@ capturedNullaryGlobalCaseClosureProgram =
                       backendBindingExpr =
                         BackendCase
                           unaryIntTy
-                          (BackendConstruct (optionTy intTy) "Some" [intLit 0])
+                          (BackendConstruct (optionTy intTy) "Some" [intLit 41])
                           ( BackendAlternative
-                              (BackendConstructorPattern "Some" ["ignored"])
+                              (BackendConstructorPattern "Some" ["n"])
                               ( BackendClosure
                                   { backendExprType = unaryIntTy,
-                                    backendClosureEntryName = "__mlfp_closure$nullary_global_case_result",
-                                    backendClosureCaptures = [],
+                                    backendClosureEntryName = "__mlfp_closure$nullary_global_case_some",
+                                    backendClosureCaptures = [BackendClosureCapture "n" intTy (BackendVar intTy "n")],
                                     backendClosureParams = [("x", intTy)],
-                                    backendClosureBody = BackendVar intTy "x"
+                                    backendClosureBody = BackendVar intTy "n"
                                   }
                               )
-                              :| []
+                              :| [ BackendAlternative
+                                     (BackendConstructorPattern "None" [])
+                                     ( BackendClosure
+                                         { backendExprType = unaryIntTy,
+                                           backendClosureEntryName = "__mlfp_closure$nullary_global_case_none",
+                                           backendClosureCaptures = [],
+                                           backendClosureParams = [("x", intTy)],
+                                           backendClosureBody = intLit 0
+                                         }
+                                     )
+                                 ]
                           ),
                       backendBindingExportedAsMain = False
                     },
@@ -4768,7 +4778,7 @@ capturedNullaryGlobalCaseClosureProgram =
                                 backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
                               }
                           )
-                          [intLit 41],
+                          [intLit 999],
                       backendBindingExportedAsMain = True
                     }
                 ]
