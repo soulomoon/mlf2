@@ -273,6 +273,7 @@ data BackendValidationContext = BackendValidationContext
     bvcData :: Map.Map String BackendData,
     bvcConstructors :: Map.Map String BackendConstructorInfo,
     bvcLocals :: Map.Map String BackendType,
+    bvcClosureGlobals :: Set.Set String,
     bvcClosureLocals :: Set.Set String,
     bvcPossibleClosureLocals :: Set.Set String,
     bvcTypeBounds :: Map.Map String (Maybe BackendType)
@@ -617,6 +618,7 @@ validateBackendProgram program = do
     bindings = concatMap backendModuleBindings modules0
     constructors = concatMap backendDataConstructors (concatMap backendModuleData modules0)
     closureEntryNames = concatMap (backendClosureEntryNames . backendBindingExpr) bindings
+    closureGlobals = backendClosureGlobalNames bindings
     constructorInfos =
       [ ( backendConstructorName constructor,
           BackendConstructorInfo
@@ -636,10 +638,46 @@ validateBackendProgram program = do
           bvcData = Map.fromList [(backendDataName dataDecl, dataDecl) | dataDecl <- concatMap backendModuleData modules0],
           bvcConstructors = Map.fromList constructorInfos,
           bvcLocals = Map.empty,
+          bvcClosureGlobals = closureGlobals,
           bvcClosureLocals = Set.empty,
           bvcPossibleClosureLocals = Set.empty,
           bvcTypeBounds = Map.empty
         }
+
+backendClosureGlobalNames :: [BackendBinding] -> Set.Set String
+backendClosureGlobalNames bindings =
+  go Set.empty
+  where
+    go globals =
+      let globals' =
+            Set.fromList
+              [ backendBindingName binding
+                | binding <- bindings,
+                  backendExprIsGlobalClosureValue globals Set.empty (backendBindingExpr binding)
+              ]
+       in if globals' == globals
+            then globals
+            else go globals'
+
+backendExprIsGlobalClosureValue :: Set.Set String -> Set.Set String -> BackendExpr -> Bool
+backendExprIsGlobalClosureValue globals locals =
+  \case
+    BackendClosure {} ->
+      True
+    BackendVar _ name ->
+      Set.member name locals || Set.member name globals
+    BackendTyApp _ fun _ ->
+      backendExprIsGlobalClosureValue globals locals fun
+    BackendLet _ name _ rhs body ->
+      let locals' =
+            if backendExprIsGlobalClosureValue globals locals rhs
+              then Set.insert name locals
+              else Set.delete name locals
+       in backendExprIsGlobalClosureValue globals locals' body
+    BackendCase {backendAlternatives = alternatives} ->
+      all (backendExprIsGlobalClosureValue globals locals . backendAltBody) (NE.toList alternatives)
+    _ ->
+      False
 
 backendRuntimePrimitiveTypes :: Map.Map String BackendType
 backendRuntimePrimitiveTypes =
@@ -802,7 +840,8 @@ backendClosureValueName mbContext =
       Just entryName
     BackendVar _ name
       | Just context0 <- mbContext,
-        Set.member name (bvcClosureLocals context0)
+        Set.member name (bvcClosureGlobals context0)
+          || Set.member name (bvcClosureLocals context0)
           || Set.member name (bvcPossibleClosureLocals context0) ->
           Just name
     BackendTyApp _ fun _ ->
@@ -821,7 +860,8 @@ backendDefiniteClosureValueName mbContext =
       Just entryName
     BackendVar _ name
       | Just context0 <- mbContext,
-        Set.member name (bvcClosureLocals context0) ->
+        Set.member name (bvcClosureGlobals context0)
+          || Set.member name (bvcClosureLocals context0) ->
           Just name
     BackendTyApp _ fun _ ->
       backendDefiniteClosureValueName mbContext fun

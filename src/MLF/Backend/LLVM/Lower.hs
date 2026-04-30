@@ -2864,7 +2864,7 @@ lowerGlobalValue env context resultTy name binding typeArgs =
         liftEither (BackendLLVMUnsupportedExpression context ("escaping function " ++ show functionContext))
       unless (alphaEqBackendType expectedTy (ffReturnType instantiated)) $
         liftEither (BackendLLVMInternalError ("global value type mismatch for " ++ functionContext ++ " at " ++ context))
-      resultLLVMType <- lowerBackendTypeM env context expectedTy
+      resultLLVMType <- lowerRuntimeValueTypeM env context expectedTy
       functionName <- globalFunctionName env context binding0 resolvedTypeArgs
       result <- emitAssign "call" resultLLVMType (LLVMCall functionName [])
       pure (LowerValue expectedTy resultLLVMType result)

@@ -688,6 +688,25 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCapture "captured"
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
 
+  it "closure-converts calls to closure-valued top-level bindings" $ do
+    checked <- requireChecked topLevelClosureCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    makerBinding <- requireBinding "Main__maker" backend
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr makerBinding `shouldSatisfy` containsBackendClosure
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
+    backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendApp
+
+  it "collects closure parameters through lets before returned lambdas" $ do
+    checked <- requireChecked returnedLetLambdaClosureProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    closureParamCounts (backendBindingExpr mainBinding) `shouldSatisfy` elem 2
+
   it "keeps direct first-order local calls on the direct application path" $ do
     checked <- requireChecked directLocalCallProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -1104,6 +1123,26 @@ capturedClosureCallProgram =
       "}"
     ]
 
+topLevelClosureCallProgram :: String
+topLevelClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
+      "  def main : Int = maker 0;",
+      "}"
+    ]
+
+returnedLetLambdaClosureProgram :: String
+returnedLetLambdaClosureProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int -> Int -> Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int -> Int = \\(x : Int) let y : Int = captured in \\(z : Int) y in",
+      "    f;",
+      "}"
+    ]
+
 directLocalCallProgram :: String
 directLocalCallProgram =
   unlines
@@ -1473,6 +1512,27 @@ containsBackendClosureCall expr =
     BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
       any (containsBackendClosureCall . backendClosureCaptureExpr) captures || containsBackendClosureCall body
     _ -> False
+
+closureParamCounts :: BackendExpr -> [Int]
+closureParamCounts expr =
+  case expr of
+    BackendClosure {backendClosureCaptures = captures, backendClosureParams = params, backendClosureBody = body} ->
+      length params : concatMap (closureParamCounts . backendClosureCaptureExpr) captures ++ closureParamCounts body
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      closureParamCounts scrutinee ++ concatMap (closureParamCounts . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> closureParamCounts body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      closureParamCounts fun ++ closureParamCounts arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      closureParamCounts rhs ++ closureParamCounts body
+    BackendTyAbs {backendTyAbsBody = body} -> closureParamCounts body
+    BackendTyApp {backendTyFunction = fun} -> closureParamCounts fun
+    BackendConstruct {backendConstructArgs = args} -> concatMap closureParamCounts args
+    BackendRoll {backendRollPayload = body} -> closureParamCounts body
+    BackendUnroll {backendUnrollPayload = body} -> closureParamCounts body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      closureParamCounts fun ++ concatMap closureParamCounts args
+    _ -> []
 
 containsBackendClosureCapture :: String -> BackendExpr -> Bool
 containsBackendClosureCapture expected expr =

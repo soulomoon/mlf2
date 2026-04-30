@@ -614,6 +614,27 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$Main__main$"
     validateLLVMAssembly output
 
+  it "lowers source-level top-level closure calls through the explicit closure ABI" $ do
+    output <-
+      withTempProgram sourceTopLevelClosureCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"Main__maker\"()"
+    output `shouldSatisfy` isInfixOf "call ptr @\"Main__maker\"()"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "lowers returned lambdas behind lets with complete closure parameters" $ do
+    output <-
+      withTempProgram sourceReturnedLetLambdaClosureProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+    output `shouldSatisfy` isInfixOf "(ptr %\"__mlfp_env\", i64 %\""
+    output `shouldSatisfy` isInfixOf "\", i64 %\""
+    validateLLVMAssembly output
+
   it "lowers zero-capture closures through the explicit closure ABI" $ do
     output <- requireRight (renderBackendProgramLLVM zeroCaptureClosureProgram)
 
@@ -2900,6 +2921,26 @@ sourceReturnedClosureProgram =
     [ "module Main export (main) {",
       "  def main : Int -> Int =",
       "    let captured : Int = 41 in \\(x : Int) captured;",
+      "}"
+    ]
+
+sourceTopLevelClosureCallProgram :: String
+sourceTopLevelClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
+      "  def main : Int = maker 0;",
+      "}"
+    ]
+
+sourceReturnedLetLambdaClosureProgram :: String
+sourceReturnedLetLambdaClosureProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int -> Int -> Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int -> Int = \\(x : Int) let y : Int = captured in \\(z : Int) y in",
+      "    f;",
       "}"
     ]
 

@@ -77,6 +77,7 @@ data ConvertContext = ConvertContext
     ccBindingData :: Map String DataMeta,
     ccData :: [DataMeta],
     ccGlobalTerms :: Set.Set String,
+    ccClosureGlobals :: Set.Set String,
     ccCurrentModuleName :: Maybe String,
     ccCurrentBindingName :: String
   }
@@ -170,8 +171,10 @@ liftEitherConvert result =
 
 convertCheckedProgram :: CheckedProgram -> Either BackendConversionError BackendProgram
 convertCheckedProgram checked = do
-  context <- buildConvertContext checked
-  initialEnv <- buildInitialEnv context checked
+  context0 <- buildConvertContext checked
+  initialEnv <- buildInitialEnv context0 checked
+  closureGlobals <- convertedProgramClosureGlobals context0 initialEnv checked
+  let context = context0 {ccClosureGlobals = closureGlobals}
   modules0 <- mapM (convertCheckedModule context initialEnv) (checkedProgramModules checked)
   let program =
         BackendProgram
@@ -181,6 +184,29 @@ convertCheckedProgram checked = do
   case validateBackendProgram program of
     Right () -> Right program
     Left err -> Left (BackendValidationFailed err)
+
+convertedProgramClosureGlobals :: ConvertContext -> Env -> CheckedProgram -> Either BackendConversionError (Set.Set String)
+convertedProgramClosureGlobals context0 env checked =
+  closureGlobalFixedPoint Set.empty
+  where
+    closureGlobalFixedPoint globals = do
+      let context = context0 {ccClosureGlobals = globals}
+      convertedBindings <-
+        concat
+          <$> mapM
+            ( \checkedModule ->
+                concat <$> mapM (convertCheckedBinding context env checkedModule) (checkedModuleBindings checkedModule)
+            )
+            (checkedProgramModules checked)
+      let globals' =
+            Set.fromList
+              [ backendBindingName binding
+                | binding <- convertedBindings,
+                  backendExprIsClosureValue context emptyClosureScope (backendBindingExpr binding)
+              ]
+      if globals' == globals
+        then pure globals
+        else closureGlobalFixedPoint globals'
 
 buildInitialEnv :: ConvertContext -> CheckedProgram -> Either BackendConversionError Env
 buildInitialEnv context checked = do
@@ -1173,6 +1199,7 @@ buildConvertContext checked = do
         ccBindingData = bindingData,
         ccData = dataMetas,
         ccGlobalTerms = checkedProgramGlobalTerms checked,
+        ccClosureGlobals = Set.empty,
         ccCurrentModuleName = Nothing,
         ccCurrentBindingName = ""
       }
@@ -1383,6 +1410,7 @@ buildDataMeta scope info = do
             ccBindingData = Map.empty,
             ccData = [rawMeta],
             ccGlobalTerms = Set.empty,
+            ccClosureGlobals = Set.empty,
             ccCurrentModuleName = Just (dataModule info),
             ccCurrentBindingName = ""
           }
@@ -1756,7 +1784,7 @@ convertOrdinaryTerm mode context env scope term resultTy0 =
       when (termMentionsFreeVariable name rhs) $
         liftEitherConvert (Left (BackendUnsupportedRecursiveLet name))
       bindingTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType schemeTy)
-      let bindingClosure = letBindingNeedsClosure scope name bindingTy rhs body
+      let bindingClosure = letBindingNeedsClosure context scope name bindingTy rhs body
           rhsMode =
             if bindingClosure
               then ClosureLambda (Just name)
@@ -1770,7 +1798,7 @@ convertOrdinaryTerm mode context env scope term resultTy0 =
             extendClosureScopeTerm
               name
               bindingEnvTy
-              (bindingClosure || backendExprIsClosureValue scope rhsExpr)
+              (bindingClosure || backendExprIsClosureValue context scope rhsExpr)
               scope
           bodyMode =
             if isClosureConvertibleFunctionType resultTy
@@ -1847,7 +1875,7 @@ convertApplicationTerm context env scope resultTy term =
   case collectApps term of
     (headTerm, args)
       | not (null args),
-        isClosureHeadTerm scope headTerm -> do
+        isClosureHeadTerm context scope headTerm -> do
           funTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (inferBackendType env headTerm)
           let (paramTys, expectedResultTy) = splitBackendArrows funTy
           if length paramTys == length args && not (null paramTys)
@@ -1960,37 +1988,37 @@ isImmediateLambda =
     ETyInst inner _ -> isImmediateLambda inner
     _ -> False
 
-letBindingNeedsClosure :: ClosureScope -> String -> BackendType -> ElabTerm -> ElabTerm -> Bool
-letBindingNeedsClosure scope name bindingTy rhs body =
+letBindingNeedsClosure :: ConvertContext -> ClosureScope -> String -> BackendType -> ElabTerm -> ElabTerm -> Bool
+letBindingNeedsClosure context scope name bindingTy rhs body =
   isClosureConvertibleFunctionType bindingTy
-    && (isClosureAliasTerm scope rhs || (isFunctionValueTerm rhs && termUsesVariableAsValue name body))
+    && (isClosureAliasTerm context scope rhs || (isFunctionValueTerm rhs && termUsesVariableAsValue name body))
 
-isClosureAliasTerm :: ClosureScope -> ElabTerm -> Bool
-isClosureAliasTerm scope term =
+isClosureAliasTerm :: ConvertContext -> ClosureScope -> ElabTerm -> Bool
+isClosureAliasTerm context scope term =
   case stripClosureHeadTypeInsts term of
-    EVar name -> Set.member name (closureScopeLocals scope)
+    EVar name -> Set.member name (closureScopeLocals scope) || Set.member name (ccClosureGlobals context)
     _ -> False
 
-backendExprIsClosureValue :: ClosureScope -> BackendExpr -> Bool
-backendExprIsClosureValue scope =
+backendExprIsClosureValue :: ConvertContext -> ClosureScope -> BackendExpr -> Bool
+backendExprIsClosureValue context scope =
   \case
     BackendClosure {} -> True
-    BackendVar _ name -> Set.member name (closureScopeLocals scope)
-    BackendTyApp _ fun _ -> backendExprIsClosureValue scope fun
+    BackendVar _ name -> Set.member name (closureScopeLocals scope) || Set.member name (ccClosureGlobals context)
+    BackendTyApp _ fun _ -> backendExprIsClosureValue context scope fun
     BackendLet _ name _ rhs body ->
       let bodyScope =
-            if backendExprIsClosureValue scope rhs
+            if backendExprIsClosureValue context scope rhs
               then scope {closureScopeLocals = Set.insert name (closureScopeLocals scope)}
               else scope
-       in backendExprIsClosureValue bodyScope body
+       in backendExprIsClosureValue context bodyScope body
     BackendCase {backendAlternatives = alternatives} ->
-      all (backendExprIsClosureValue scope . backendAltBody) (NE.toList alternatives)
+      all (backendExprIsClosureValue context scope . backendAltBody) (NE.toList alternatives)
     _ -> False
 
-isClosureHeadTerm :: ClosureScope -> ElabTerm -> Bool
-isClosureHeadTerm scope term =
+isClosureHeadTerm :: ConvertContext -> ClosureScope -> ElabTerm -> Bool
+isClosureHeadTerm context scope term =
   case stripClosureHeadTypeInsts term of
-    EVar name -> Set.member name (closureScopeLocals scope)
+    EVar name -> Set.member name (closureScopeLocals scope) || Set.member name (ccClosureGlobals context)
     _ -> False
 
 stripClosureHeadTypeInsts :: ElabTerm -> ElabTerm
@@ -2035,8 +2063,20 @@ termUsesVariableAsValue needle =
 convertLambdaClosure :: LambdaMode -> ConvertContext -> Env -> ClosureScope -> BackendType -> ElabTerm -> ConvertM BackendExpr
 convertLambdaClosure mode context env scope resultTy term = do
   let (rawParams, body) = collectClosureLams term
+      (declaredParamTys, _) = splitBackendArrows resultTy
   when (null rawParams) $
     liftEitherConvert (Left (BackendUnsupportedCaseShape "closure conversion expected a lambda"))
+  unless (length rawParams == length declaredParamTys) $
+    liftEitherConvert
+      ( Left
+          ( BackendUnsupportedCaseShape
+              ( "closure conversion expected "
+                  ++ show (length declaredParamTys)
+                  ++ " lambda parameters, collected "
+                  ++ show (length rawParams)
+              )
+          )
+      )
   (params, bodyExpected) <- closureBackendParams context resultTy rawParams
   let paramEnvBindings =
         [ (name, maybe rawTy id (backendTypeToElabType backendTy))
@@ -2094,6 +2134,10 @@ collectClosureLams =
     go params =
       \case
         ELam name ty body -> go (params ++ [(name, ty)]) body
+        ELet name scheme rhs body ->
+          case go [] body of
+            ([], _) -> (params, ELet name scheme rhs body)
+            (bodyParams, bodyCore) -> (params ++ bodyParams, ELet name scheme rhs bodyCore)
         other -> (params, other)
 
 closureBackendParams :: ConvertContext -> BackendType -> [(String, ElabType)] -> ConvertM ([(String, BackendType)], BackendType)
@@ -2806,7 +2850,7 @@ convertCaseApplication mode context env scope term resultTy =
                 caseResultTy : appliedResultTys -> do
                   caseExpr <- convertCaseWithHandlers mode context env scope caseResultTy scrutineeExpr dataMeta constructors handlers
                   Just
-                    <$> ( if backendExprIsClosureValue scope caseExpr
+                    <$> ( if backendExprIsClosureValue context scope caseExpr
                             then applyCaseClosureArguments context env scope resultTy caseExpr (zip extraArgs extraArgTys)
                             else
                               foldM
