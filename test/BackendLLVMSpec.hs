@@ -636,6 +636,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "unsupported function argument"
     validateLLVMAssembly output
 
+  it "rejects closure entry names that collide with generated wrapper functions" $
+    renderBackendProgramLLVM closureEntryFunctionWrapperCollisionProgram
+      `shouldSatisfyLeft` isInfixOf "Duplicate backend LLVM symbol: \"__mlfp_function_wrapper$0\""
+
+  it "rejects closure entry names that collide with runtime declarations" $
+    renderBackendProgramLLVM closureEntryRuntimeDeclarationCollisionProgram
+      `shouldSatisfyLeft` isInfixOf "Duplicate backend LLVM symbol: \"malloc\""
+
   it "lowers stored top-level function constructor fields" $ do
     output <- requireRight (renderBackendProgramLLVM functionFieldProgram)
 
@@ -3029,6 +3037,40 @@ polymorphicClosureFunctionWrapperCall argTy arg =
     fnBoxTy
     (BackendTyApp (BTArrow argTy fnBoxTy) (BackendVar polymorphicClosureFunctionWrapperTy "polyWrapper") argTy)
     arg
+
+closureEntryFunctionWrapperCollisionProgram :: BackendProgram
+closureEntryFunctionWrapperCollisionProgram =
+  programWithFnBoxMainExpr $
+    BackendConstruct
+      fnBoxTy
+      "FnBox"
+      [ BackendLet
+          unaryIntTy
+          "unusedClosure"
+          unaryIntTy
+          (closureWithEntry "__mlfp_function_wrapper$0")
+          intIdentityExpr
+      ]
+
+closureEntryRuntimeDeclarationCollisionProgram :: BackendProgram
+closureEntryRuntimeDeclarationCollisionProgram =
+  programWithMainExpr intTy $
+    BackendLet
+      intTy
+      "f"
+      unaryIntTy
+      (closureWithEntry "malloc")
+      (BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 7])
+
+closureWithEntry :: String -> BackendExpr
+closureWithEntry entryName =
+  BackendClosure
+    { backendExprType = unaryIntTy,
+      backendClosureEntryName = entryName,
+      backendClosureCaptures = [],
+      backendClosureParams = [("x", intTy)],
+      backendClosureBody = BackendVar intTy "x"
+    }
 
 functionFieldProgram :: BackendProgram
 functionFieldProgram =

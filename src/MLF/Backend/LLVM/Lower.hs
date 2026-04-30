@@ -60,6 +60,7 @@ data BackendLLVMError
   | BackendLLVMUnknownConstructor String
   | BackendLLVMArityMismatch String Int Int
   | BackendLLVMUnsupportedString String
+  | BackendLLVMDuplicateSymbol String
   | BackendLLVMInternalError String
   deriving (Eq, Show)
 
@@ -193,7 +194,7 @@ type LowerM = StateT FunctionState (Either BackendLLVMError)
 lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
 lowerBackendProgram program = do
   lowered <- lowerBackendProgramCore program
-  pure
+  validateLLVMModuleSymbols
     LLVMModule
       { llvmModuleGlobals = rawLLVMGlobals lowered,
         llvmModuleDeclarations = runtimeDeclarations (lpBase lowered),
@@ -262,7 +263,7 @@ lowerNativeProgram lowered = do
   let renderMap = Map.fromList [(backendTypeKey (nrsType spec), nrsFunctionName spec) | spec <- renderSpecs]
   renderers <- traverse (lowerNativeRenderer env renderMap) renderSpecs
   entrypoint <- lowerNativeEntrypoint env mainBinding renderMap
-  pure
+  validateLLVMModuleSymbols
     LLVMModule
       { llvmModuleGlobals = rawLLVMGlobals lowered ++ nativeGlobals base renderSpecs,
         llvmModuleDeclarations = nativeRuntimeDeclarations base,
@@ -272,6 +273,26 @@ lowerNativeProgram lowered = do
             ++ renderers
             ++ [entrypoint]
       }
+
+validateLLVMModuleSymbols :: LLVMModule -> Either BackendLLVMError LLVMModule
+validateLLVMModuleSymbols module0 =
+  case duplicateSymbols symbolNames of
+    name : _ -> Left (BackendLLVMDuplicateSymbol name)
+    [] -> Right module0
+  where
+    symbolNames =
+      map llvmGlobalName (llvmModuleGlobals module0)
+        ++ map llvmDeclarationName (llvmModuleDeclarations module0)
+        ++ map llvmFunctionName (llvmModuleFunctions module0)
+
+    duplicateSymbols =
+      go . sort
+
+    go [] = []
+    go [_] = []
+    go (x : y : rest)
+      | x == y = x : go (dropWhile (== x) rest)
+      | otherwise = go (y : rest)
 
 nativeRuntimeDeclarations :: ProgramBase -> [LLVMDeclaration]
 nativeRuntimeDeclarations base =
@@ -4465,5 +4486,7 @@ renderBackendLLVMError =
       "Backend LLVM arity mismatch for " ++ name ++ ": expected " ++ show expected ++ ", got " ++ show actual
     BackendLLVMUnsupportedString value ->
       "Unsupported backend LLVM string literal: " ++ show value
+    BackendLLVMDuplicateSymbol name ->
+      "Duplicate backend LLVM symbol: " ++ show name
     BackendLLVMInternalError detail ->
       "Internal backend LLVM error: " ++ detail

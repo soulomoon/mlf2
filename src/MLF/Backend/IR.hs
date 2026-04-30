@@ -246,6 +246,7 @@ data BackendValidationError
   | BackendUnrollExpectedRecursive BackendType
   | BackendUnrollResultMismatch BackendType BackendType
   | BackendDuplicateClosureEntry String
+  | BackendClosureEntryNameCollision String
   | BackendDuplicateClosureCapture String
   | BackendDuplicateClosureParameter String
   | BackendClosureCaptureTypeMismatch String BackendType BackendType
@@ -607,6 +608,7 @@ validateBackendProgram program = do
   requireUnique BackendDuplicateBinding (map backendBindingName bindings)
   requireUnique BackendDuplicateConstructor (map backendConstructorName constructors)
   requireUnique BackendDuplicateClosureEntry closureEntryNames
+  rejectClosureEntryNameCollisions closureEntryNames (map backendBindingName bindings ++ Map.keys backendRuntimePrimitiveTypes)
   unless (backendProgramMain program `elem` map backendBindingName bindings) $
     Left (BackendMainNotFound (backendProgramMain program))
   mapM_ (validateBackendBindingInContext context0) bindings
@@ -2140,6 +2142,14 @@ requireUnique mkError names =
   case duplicates names of
     name : _ -> Left (mkError name)
     [] -> Right ()
+
+rejectClosureEntryNameCollisions :: [String] -> [String] -> Either BackendValidationError ()
+rejectClosureEntryNameCollisions closureEntryNames reservedNames =
+  case [name | name <- sort closureEntryNames, Set.member name reservedNameSet] of
+    name : _ -> Left (BackendClosureEntryNameCollision name)
+    [] -> Right ()
+  where
+    reservedNameSet = Set.fromList reservedNames
 
 zipAllWith :: (a -> b -> Bool) -> [a] -> [b] -> Bool
 zipAllWith _ [] [] =

@@ -246,6 +246,13 @@ spec = describe "MLF.Backend.IR" $ do
                 (goodClosure "__mlfp_closure$dup")
                 (intLit 0)
             )
+        entryNameBindingCollision =
+          programWithBindings
+            [ binding "helper" intTy (intLit 0),
+              mainBinding (goodClosure "helper")
+            ]
+        entryNameRuntimeCollision =
+          programWithMainExpr (goodClosure "__mlfp_and")
         duplicateCaptureAndParameter =
           BackendClosure
             { backendExprType = idTy,
@@ -371,6 +378,10 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` Left (BackendClosureTypeMismatch "__mlfp_closure$bad_result" idTy (BTArrow intTy boolTy))
     validateBackendProgram (programWithMainExpr duplicateEntries)
       `shouldBe` Left (BackendDuplicateClosureEntry "__mlfp_closure$dup")
+    validateBackendProgram entryNameBindingCollision
+      `shouldBe` Left (BackendClosureEntryNameCollision "helper")
+    validateBackendProgram entryNameRuntimeCollision
+      `shouldBe` Left (BackendClosureEntryNameCollision "__mlfp_and")
     validateBackendProgram (programWithMainExpr duplicateCaptureAndParameter)
       `shouldBe` Left (BackendDuplicateClosureParameter "x")
     validateBackendProgram (programWithMainExpr nonFunctionClosure)
