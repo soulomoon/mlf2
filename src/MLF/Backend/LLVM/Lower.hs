@@ -975,15 +975,16 @@ functionFormType form =
 
 backendTypeHasRuntimeRepresentation :: ProgramEnv -> BackendType -> Bool
 backendTypeHasRuntimeRepresentation env ty =
-  case lowerBackendType env "runtime representation check" ty of
-    Right _ -> True
-    Left _ -> False
+  isClosureRuntimeValueType ty
+    || case lowerBackendType env "runtime representation check" ty of
+      Right _ -> True
+      Left _ -> False
 
 backendTypeRequiresStaticSpecialization :: BackendType -> Bool
 backendTypeRequiresStaticSpecialization =
   \case
     BTVar {} -> False
-    BTArrow {} -> True
+    BTArrow {} -> False
     BTBase {} -> False
     BTCon {} -> False
     BTVarApp {} -> True
@@ -1642,6 +1643,7 @@ collectFunctionWrappersInExpr base substitution localFunctions bound expr =
                 let fieldTy' = substituteBackendTypes substitution fieldTy,
                 let arg' = substituteExprTypes substitution arg,
                 isFirstOrderFunctionPointerType fieldTy',
+                not (isClosureRuntimeValueType fieldTy'),
                 Just request <- [functionWrapperRequest fieldTy' arg']
               ]
             Nothing -> []
@@ -3914,6 +3916,11 @@ lowerConstruct env exprEnv context resultTy name args =
 
 lowerConstructField :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> LowerM LowerValue
 lowerConstructField env exprEnv context fieldTy arg
+  | isClosureRuntimeValueType fieldTy = do
+      value <- lowerExpr env exprEnv context arg
+      expectedTy <- lowerRuntimeValueTypeM env context fieldTy
+      requireLLVMType context "constructor field" expectedTy value
+      pure value {lvBackendType = fieldTy}
   | isFirstOrderFunctionPointerType fieldTy =
       lowerStoredFunctionArgument env exprEnv context fieldTy arg
   | otherwise =
@@ -4044,11 +4051,13 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
 
 lowerStoredFieldTypeM :: ProgramEnv -> String -> BackendType -> LowerM LLVMType
 lowerStoredFieldTypeM env context fieldTy
+  | isClosureRuntimeValueType fieldTy = pure LLVMPtr
   | isFirstOrderFunctionPointerType fieldTy = pure LLVMPtr
   | otherwise = lowerBackendTypeM env context fieldTy
 
 lowerClosureStoredTypeM :: ProgramEnv -> String -> BackendType -> LowerM LLVMType
 lowerClosureStoredTypeM env context fieldTy
+  | isClosureRuntimeValueType fieldTy = pure LLVMPtr
   | isFirstOrderFunctionPointerType fieldTy = pure LLVMPtr
   | otherwise = lowerBackendTypeM env context fieldTy
 
@@ -4164,8 +4173,8 @@ lowerImmediateConstructCase env exprEnv context resultTy constructorName args fi
             then pure acc {eeLocalFunctions = Map.insert binder localFunction (eeLocalFunctions acc)}
             else pure acc
       | backendTypeHasRuntimeRepresentation env fieldTy = do
-          value <- lowerExpr env exprEnv context arg
-          expectedTy <- lowerBackendTypeM env context fieldTy
+          value <- lowerConstructField env exprEnv context fieldTy arg
+          expectedTy <- lowerRuntimeValueTypeM env context fieldTy
           requireLLVMType context constructorName expectedTy value
           if Set.member binder usedBinders
             then pure acc {eeValues = Map.insert binder value (eeValues acc)}
@@ -4178,8 +4187,8 @@ lowerImmediateConstructCase env exprEnv context resultTy constructorName args fi
           _ <- lowerStaticFunctionArgument env exprEnv context "_" fieldTy arg
           pure ()
       | backendTypeHasRuntimeRepresentation env fieldTy = do
-          value <- lowerExpr env exprEnv context arg
-          expectedTy <- lowerBackendTypeM env context fieldTy
+          value <- lowerConstructField env exprEnv context fieldTy arg
+          expectedTy <- lowerRuntimeValueTypeM env context fieldTy
           requireLLVMType context constructorName expectedTy value
       | otherwise =
           liftEither (BackendLLVMUnsupportedType ("field at " ++ context) fieldTy)

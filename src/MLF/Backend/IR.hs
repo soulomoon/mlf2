@@ -618,7 +618,6 @@ validateBackendProgram program = do
     bindings = concatMap backendModuleBindings modules0
     constructors = concatMap backendDataConstructors (concatMap backendModuleData modules0)
     closureEntryNames = concatMap (backendClosureEntryNames . backendBindingExpr) bindings
-    closureGlobals = backendClosureGlobalNames bindings
     constructorInfos =
       [ ( backendConstructorName constructor,
           BackendConstructorInfo
@@ -630,7 +629,7 @@ validateBackendProgram program = do
         | dataDecl <- concatMap backendModuleData modules0,
           constructor <- backendDataConstructors dataDecl
       ]
-    context0 =
+    baseContext =
       BackendValidationContext
         { bvcGlobals =
             Map.fromList [(backendBindingName binding, backendBindingType binding) | binding <- bindings]
@@ -638,14 +637,17 @@ validateBackendProgram program = do
           bvcData = Map.fromList [(backendDataName dataDecl, dataDecl) | dataDecl <- concatMap backendModuleData modules0],
           bvcConstructors = Map.fromList constructorInfos,
           bvcLocals = Map.empty,
-          bvcClosureGlobals = closureGlobals,
+          bvcClosureGlobals = Set.empty,
           bvcClosureLocals = Set.empty,
           bvcPossibleClosureLocals = Set.empty,
           bvcTypeBounds = Map.empty
         }
+    closureGlobals = backendClosureGlobalNames baseContext bindings
+    context0 =
+      baseContext {bvcClosureGlobals = closureGlobals}
 
-backendClosureGlobalNames :: [BackendBinding] -> Set.Set String
-backendClosureGlobalNames bindings =
+backendClosureGlobalNames :: BackendValidationContext -> [BackendBinding] -> Set.Set String
+backendClosureGlobalNames baseContext bindings =
   go Set.empty
   where
     go globals =
@@ -653,46 +655,11 @@ backendClosureGlobalNames bindings =
             Set.fromList
               [ backendBindingName binding
                 | binding <- bindings,
-                  backendExprIsGlobalClosureValue globals (backendBindingExpr binding)
+                  Just _ <- [backendDefiniteClosureValueName (Just (baseContext {bvcClosureGlobals = globals})) (backendBindingExpr binding)]
               ]
        in if globals' == globals
             then globals
             else go globals'
-
-backendExprIsGlobalClosureValue :: Set.Set String -> BackendExpr -> Bool
-backendExprIsGlobalClosureValue globals =
-  go Set.empty Set.empty
-  where
-    go closureLocals boundLocals =
-      \case
-        BackendClosure {} ->
-          True
-        BackendVar _ name
-          | Set.member name closureLocals -> True
-          | Set.member name boundLocals -> False
-          | otherwise -> Set.member name globals
-        BackendTyAbs _ _ _ body ->
-          go closureLocals boundLocals body
-        BackendTyApp _ fun _ ->
-          go closureLocals boundLocals fun
-        BackendLet _ name _ rhs body ->
-          let closureLocals' =
-                if go closureLocals boundLocals rhs
-                  then Set.insert name closureLocals
-                  else Set.delete name closureLocals
-              boundLocals' = Set.insert name boundLocals
-           in go closureLocals' boundLocals' body
-        BackendCase {backendAlternatives = alternatives} ->
-          all (goAlternative closureLocals boundLocals) (NE.toList alternatives)
-        _ ->
-          False
-
-    goAlternative closureLocals boundLocals (BackendAlternative pattern0 body) =
-      let binders = patternBinders pattern0
-       in go
-            (closureLocals `Set.difference` binders)
-            (boundLocals <> binders)
-            body
 
 backendRuntimePrimitiveTypes :: Map.Map String BackendType
 backendRuntimePrimitiveTypes =
@@ -857,6 +824,8 @@ backendClosureValueName mbContext =
       | Just context0 <- mbContext,
         backendContextNameIsClosureValue True context0 name ->
           Just name
+    BackendTyAbs _ _ _ body ->
+      backendClosureValueName mbContext body
     BackendTyApp _ fun _ ->
       backendClosureValueName mbContext fun
     BackendLet _ name bindingTy rhs body ->
@@ -875,6 +844,8 @@ backendDefiniteClosureValueName mbContext =
       | Just context0 <- mbContext,
         backendContextNameIsClosureValue False context0 name ->
           Just name
+    BackendTyAbs _ _ _ body ->
+      backendDefiniteClosureValueName mbContext body
     BackendTyApp _ fun _ ->
       backendDefiniteClosureValueName mbContext fun
     BackendLet _ name bindingTy rhs body ->
@@ -1449,13 +1420,19 @@ extendClosureShapeLocalMaybe sourceContext targetContext name ty rhs
   | otherwise =
       extendLocalMaybe targetContext name ty
 
-extendLocals :: BackendValidationContext -> [(String, BackendType)] -> BackendValidationContext
-extendLocals context0 bindings =
-  context0
-    { bvcLocals = foldr (uncurry Map.insert) (bvcLocals context0) bindings,
-      bvcClosureLocals = foldr (Set.delete . fst) (bvcClosureLocals context0) bindings,
-      bvcPossibleClosureLocals = foldr (Set.delete . fst) (bvcPossibleClosureLocals context0) bindings
-    }
+extendPatternLocals :: BackendValidationContext -> [(String, BackendType)] -> BackendValidationContext
+extendPatternLocals =
+  foldr extendOne
+  where
+    extendOne (name, ty) context0
+      | backendTypeIsClosureValue ty = extendClosureLocal context0 name ty
+      | otherwise = extendLocal context0 name ty
+
+backendTypeIsClosureValue :: BackendType -> Bool
+backendTypeIsClosureValue =
+  \case
+    BTArrow {} -> True
+    _ -> False
 
 dropTermLocalsMaybe :: Maybe BackendValidationContext -> Maybe BackendValidationContext
 dropTermLocalsMaybe =
@@ -1730,7 +1707,7 @@ validateBackendPattern (Just context0) scrutineeTy (BackendConstructorPattern na
             extendTypeBounds
               context0
               (constructorPatternTypeBounds substitution fresheningSubstitution constructor)
-      pure (Just (extendLocals contextForBody (zip binders instantiatedFields)))
+      pure (Just (extendPatternLocals contextForBody (zip binders instantiatedFields)))
 
 constructorPatternFresheningSubstitution ::
   BackendValidationContext ->

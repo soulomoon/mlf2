@@ -192,14 +192,15 @@ the existing direct-call path; indirect calls must be represented with
 `BackendClosureCall`.
 
 Checked-program conversion now closure-converts ordinary monomorphic escaping
-source lambdas, returned local function values, closure-valued let aliases, and
-indirect calls through those aliases into explicit closure IR. Direct
-first-order local calls remain direct backend applications. Partial application
-lowering, higher-order constructor fields that require captured environments,
-recursive higher-order flows, and final executable linking remain future
-extension points. Those diagnostics do not weaken source inference, checking,
-module visibility, or runtime semantics; they only describe the current
-IR-to-LLVM lowering surface.
+source lambdas, returned local function values, closure-valued let aliases,
+monomorphic function-valued constructor fields, and indirect calls through
+those aliases or projected fields into explicit closure IR. Direct first-order
+local calls remain direct backend applications. Partial application lowering,
+polymorphic or type-parameter-headed higher-order constructor fields, recursive
+higher-order flows, and final executable linking remain future extension
+points. Those diagnostics do not weaken source inference, checking, module
+visibility, or runtime semantics; they only describe the current IR-to-LLVM
+lowering surface.
 
 ## `Solved` boundary and thesis-exact cleanup rule
 
