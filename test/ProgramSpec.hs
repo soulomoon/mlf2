@@ -1,6 +1,6 @@
 module ProgramSpec (spec) where
 
-import Data.Either (isRight)
+import Data.Either (isLeft, isRight)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
@@ -378,6 +378,28 @@ spec = do
                         , "}"
                         ]
             checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isRight
+
+        it "typechecks direct IO bind primitive uses with consistent arguments" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = __io_bind (__io_pure Unit) (\\(_n : Unit) __io_putStrLn \"world\");"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isRight
+
+        it "rejects inconsistent direct IO bind primitive arguments" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO);"
+                        , "  def main : IO Unit = __io_bind (__io_pure 1) (\\(_n : Unit) __io_putStrLn \"world\");"
+                        , "}"
+                        ]
+            checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isLeft
 
         it "rejects non-IO expressions for Prelude IO annotations" $ do
             intLocated <-

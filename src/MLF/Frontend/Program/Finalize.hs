@@ -122,7 +122,7 @@ finalizeBindingAllowOpaque scope lowered
 
 validateOpaqueBindingSurface :: ElaborateScope -> LoweredBinding -> Either ProgramError ()
 validateOpaqueBindingSurface scope lowered
-  | not (Map.null (loweredBindingDeferredObligations lowered)) =
+  | any (not . opaqueSurfaceObligationSupported) (Map.elems (loweredBindingDeferredObligations lowered)) =
       Left (ProgramPipelineError "opaque validation does not support deferred obligations")
   | otherwise =
       case inferOpaqueSurfaceType scope rigidVars runtimeTypes Map.empty (loweredBindingSurfaceExpr lowered) of
@@ -135,6 +135,15 @@ validateOpaqueBindingSurface scope lowered
     runtimeTypes =
       Map.withoutKeys (loweredBindingExternalTypes lowered) Builtins.builtinOpaqueValueNames
         `Map.union` elaborateScopeRuntimeTypes scope
+
+-- Opaque placeholders discard the checked term, so constructor rewrites are
+-- harmless after source-level retyping. Method and case obligations still carry
+-- evidence or inspection behavior and must not be skipped here.
+opaqueSurfaceObligationSupported :: DeferredProgramObligation -> Bool
+opaqueSurfaceObligationSupported obligation =
+  case obligation of
+    DeferredConstructor {} -> True
+    _ -> False
 
 sourceForallBinders :: SrcType -> Set String
 sourceForallBinders ty =
