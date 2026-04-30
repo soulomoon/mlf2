@@ -2,7 +2,7 @@ module BackendConvertSpec (spec) where
 
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
-import Data.List (find, intercalate, isInfixOf)
+import Data.List (find, intercalate, isInfixOf, nub)
 import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Backend.Convert
 import MLF.Backend.IR
@@ -849,6 +849,27 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendClosure
     backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendClosureCall
 
+  it "shares closure entry names across lifted recursive helper conversion" $ do
+    checked0 <- requireChecked liftedRecursiveHelpersClosureNameProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding
+                  { checkedBindingType = intElabTy,
+                    checkedBindingSourceType = STBase "Int",
+                    checkedBindingTerm = liftedRecursiveHelpersClosureNameTerm
+                  }
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    let helperBindings = filter (isInfixOf "$letrec$" . backendBindingName) (backendBindings backend)
+        closureEntryNames = concatMap (collectBackendClosureEntryNames . backendBindingExpr) helperBindings
+    length helperBindings `shouldBe` 2
+    length closureEntryNames `shouldBe` 2
+    closureEntryNames `shouldBe` nub closureEntryNames
+
 simpleFunctionProgram :: String
 simpleFunctionProgram =
   unlines
@@ -1395,6 +1416,15 @@ directLocalCallProgram =
       "}"
     ]
 
+liftedRecursiveHelpersClosureNameProgram :: String
+liftedRecursiveHelpersClosureNameProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def main : Int = 0;",
+      "}"
+    ]
+
 requireChecked :: String -> IO CheckedProgram
 requireChecked input = do
   program <- requireParsed input
@@ -1735,6 +1765,27 @@ containsBackendClosure expr =
     BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
       containsBackendClosure fun || any containsBackendClosure args
     _ -> False
+
+collectBackendClosureEntryNames :: BackendExpr -> [String]
+collectBackendClosureEntryNames expr =
+  case expr of
+    BackendClosure {backendClosureEntryName = entryName, backendClosureCaptures = captures, backendClosureBody = body} ->
+      entryName : concatMap (collectBackendClosureEntryNames . backendClosureCaptureExpr) captures ++ collectBackendClosureEntryNames body
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      collectBackendClosureEntryNames scrutinee ++ concatMap (collectBackendClosureEntryNames . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> collectBackendClosureEntryNames body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      collectBackendClosureEntryNames fun ++ collectBackendClosureEntryNames arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      collectBackendClosureEntryNames rhs ++ collectBackendClosureEntryNames body
+    BackendTyAbs {backendTyAbsBody = body} -> collectBackendClosureEntryNames body
+    BackendTyApp {backendTyFunction = fun} -> collectBackendClosureEntryNames fun
+    BackendConstruct {backendConstructArgs = args} -> concatMap collectBackendClosureEntryNames args
+    BackendRoll {backendRollPayload = body} -> collectBackendClosureEntryNames body
+    BackendUnroll {backendUnrollPayload = body} -> collectBackendClosureEntryNames body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      collectBackendClosureEntryNames fun ++ concatMap collectBackendClosureEntryNames args
+    _ -> []
 
 containsBackendClosureCall :: BackendExpr -> Bool
 containsBackendClosureCall expr =
@@ -2313,6 +2364,36 @@ recursiveLexicalTypeOrderHelperBackendTy =
         "a"
         Nothing
         unaryIntBackendTy
+    )
+
+liftedRecursiveHelpersClosureNameTerm :: Elab.ElabTerm
+liftedRecursiveHelpersClosureNameTerm =
+  Elab.ELet
+    "left"
+    (Elab.schemeFromType unaryIntElabTy)
+    (liftedRecursiveHelpersClosureNameRhs "left")
+    ( Elab.ELet
+        "right"
+        (Elab.schemeFromType unaryIntElabTy)
+        (liftedRecursiveHelpersClosureNameRhs "right")
+        (Elab.EApp (Elab.EVar "right") (Elab.ELit (LInt 0)))
+    )
+
+liftedRecursiveHelpersClosureNameRhs :: String -> Elab.ElabTerm
+liftedRecursiveHelpersClosureNameRhs selfName =
+  Elab.ELam
+    "n"
+    intElabTy
+    ( Elab.ELet
+        "f"
+        (Elab.schemeFromType unaryIntElabTy)
+        (Elab.ELam "x" intElabTy (Elab.EVar "x"))
+        ( Elab.ELet
+            "ignored"
+            (Elab.schemeFromType intElabTy)
+            (Elab.EApp (Elab.EVar selfName) (Elab.EVar "n"))
+            (Elab.EApp (Elab.EVar "Main__use") (Elab.EVar "f"))
+        )
     )
 
 intIdentityElabTerm :: Elab.ElabTerm

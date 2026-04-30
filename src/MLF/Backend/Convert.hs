@@ -379,8 +379,11 @@ convertCheckedBinding context env checkedModule binding = do
                 (\lifted acc -> extendTermEnv (lrlName lifted) (lrlElabType lifted) acc)
                 env
                 liftedSpecs
-        liftedBindings <- mapM (convertLiftedRecursiveLet bindingContext envWithLifted) liftedSpecs
-        expr <- runConvertM (convertTermExpectedMode DirectLambda bindingContext envWithLifted emptyClosureScope (Just bindingTy) liftedTerm)
+        (liftedBindings, expr) <-
+          runConvertM $ do
+            liftedBindings <- mapM (convertLiftedRecursiveLet bindingContext envWithLifted) liftedSpecs
+            expr <- convertTermExpectedMode DirectLambda bindingContext envWithLifted emptyClosureScope (Just bindingTy) liftedTerm
+            pure (liftedBindings, expr)
         Right (bindingTy, expr, liftedBindings)
   let convertedBinding =
         BackendBinding
@@ -403,11 +406,11 @@ liftRecursiveLetsInBinding context term = do
         }
   Right (term', lsLiftedRecursiveLets state')
 
-convertLiftedRecursiveLet :: ConvertContext -> Env -> LiftedRecursiveLet -> Either BackendConversionError BackendBinding
+convertLiftedRecursiveLet :: ConvertContext -> Env -> LiftedRecursiveLet -> ConvertM BackendBinding
 convertLiftedRecursiveLet context env lifted = do
   let bindingTy = canonicalizeBackendType context (lrlBackendType lifted)
-  expr <- runConvertM (convertTermExpectedMode DirectLambda context env emptyClosureScope (Just bindingTy) (lrlTerm lifted))
-  Right
+  expr <- convertTermExpectedMode DirectLambda context env emptyClosureScope (Just bindingTy) (lrlTerm lifted)
+  pure
     BackendBinding
       { backendBindingName = lrlName lifted,
         backendBindingType = bindingTy,

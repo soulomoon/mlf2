@@ -40,6 +40,8 @@
   ABI.
 - Fixed backend IR validation and closure-global discovery so local non-closure
   `let` and case-pattern binders shadow same-named closure-valued globals.
+- Fixed closure entry naming for lifted recursive helpers so helper-local
+  closure conversion shares one allocator across the source binding.
 - Supported expected-type resolution for nullary overloaded `.mlfp` methods.
   Associated values such as `mempty : a` now resolve from an explicit or
   propagated expected source type while bare uses without such evidence still
