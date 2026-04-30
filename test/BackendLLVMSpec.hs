@@ -640,6 +640,18 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
     assertNativeProgram sourcePartialApplicationClosureArgumentProgram "41"
 
+  it "packages partial applications with global closure-valued supplied arguments" $ do
+    output <-
+      withTempProgram sourcePartialApplicationGlobalClosureArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "unsupported static function argument"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationGlobalClosureArgumentProgram "41"
+
   it "packages partial applications headed by closure-valued parameters" $ do
     output <-
       withTempProgram sourcePartialApplicationClosureParameterProgram $ \path ->
@@ -3156,6 +3168,19 @@ sourcePartialApplicationClosureArgumentProgram =
       "    let captured : Int = 41 in",
       "    let inc : Int -> Int = \\(x : Int) captured in",
       "    apply (choose inc 0);",
+      "}"
+    ]
+
+sourcePartialApplicationGlobalClosureArgumentProgram :: String
+sourcePartialApplicationGlobalClosureArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def choose : (Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def globalInc : Int -> Int =",
+      "    let captured : Int = 41 in",
+      "    \\(x : Int) captured;",
+      "  def main : Int = apply (choose globalInc 0);",
       "}"
     ]
 

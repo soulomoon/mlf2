@@ -2934,12 +2934,29 @@ lowerClosureValue env exprEnv context resultTy entryName captures = do
     shouldLowerStoredFunctionCapture capture =
       isFirstOrderFunctionPointerType (backendClosureCaptureType capture)
         && not (isEvidenceArgument True (backendClosureCaptureName capture) (backendClosureCaptureType capture))
-        && case closurePointerAliasValue exprEnv (backendClosureCaptureExpr capture) of
-          Just _ -> False
-          Nothing ->
-            case collectTyApps (backendClosureCaptureExpr capture) of
-              (BackendVar {}, _) -> True
-              _ -> False
+        && not (captureExprIsRuntimeClosureValue capture)
+        && case collectTyApps (backendClosureCaptureExpr capture) of
+          (BackendVar {}, _) -> True
+          _ -> False
+
+    captureExprIsRuntimeClosureValue capture =
+      case closurePointerAliasValue exprEnv (backendClosureCaptureExpr capture) of
+        Just _ ->
+          True
+        Nothing ->
+          captureExprNamesGlobalClosureValue capture
+
+    captureExprNamesGlobalClosureValue capture =
+      case collectTyApps (backendClosureCaptureExpr capture) of
+        (BackendVar _ name, typeArgs)
+          | Just binding <- Map.lookup name (pbBindings (peBase env)),
+            Right (_, form) <- instantiateFunctionFormWithTypeArgs context (biForm binding) typeArgs [],
+            null (ffParams form),
+            alphaEqBackendType (backendClosureCaptureType capture) (ffReturnType form),
+            isClosureRuntimeValueType (ffReturnType form) ->
+              True
+        _ ->
+          False
 
     lowerClosureEnvironment [] =
       pure LLVMNull
