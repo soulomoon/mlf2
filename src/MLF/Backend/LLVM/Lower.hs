@@ -2894,7 +2894,7 @@ lowerClosureValue env exprEnv context resultTy entryName captures = do
 
 lowerClosureCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> [BackendExpr] -> LowerM LowerValue
 lowerClosureCall env exprEnv context resultTy fun args = do
-  callee <- lowerExpr env exprEnv context fun
+  callee <- lowerClosureCallee env exprEnv context fun
   unless (lvLLVMType callee == LLVMPtr) $
     liftEither (BackendLLVMUnsupportedExpression context ("closure callee is not a pointer: " ++ show (lvBackendType callee)))
   let (paramTys, returnTy) = collectArrowsType (lvBackendType callee)
@@ -2923,6 +2923,15 @@ lowerClosureCall env exprEnv context resultTy fun args = do
   where
     lowerClosureArg (index0, paramTy) arg =
       lowerExprForIndirectArgument env exprEnv context ("__mlfp_closure_arg" ++ show index0, paramTy) arg
+
+lowerClosureCallee :: ProgramEnv -> ExprEnv -> String -> BackendExpr -> LowerM LowerValue
+lowerClosureCallee env exprEnv context =
+  \case
+    BackendLet _ name _ rhs body -> do
+      exprEnv' <- bindLet env exprEnv context name rhs
+      lowerClosureCallee env exprEnv' context body
+    expr ->
+      lowerExpr env exprEnv context expr
 
 lowerCall :: ProgramEnv -> ExprEnv -> String -> BackendExpr -> LowerM LowerValue
 lowerCall env exprEnv context expr =

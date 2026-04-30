@@ -627,6 +627,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
     validateLLVMAssembly output
 
+  it "lowers let-selected closure callees through the explicit closure ABI" $ do
+    output <- requireRight (renderBackendProgramLLVM letSelectedClosureCalleeProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$let_callee\"(ptr %\"__mlfp_env\", i64 %\"x\")"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$let_callee\""
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+
   it "qualifies closure entry names emitted from type specializations" $ do
     output <- requireRight (renderBackendProgramLLVM polymorphicClosureSpecializationProgram)
 
@@ -2954,6 +2962,27 @@ caseSelectedClosureCalleeProgram =
           backendClosureParams = [("x", intTy)],
           backendClosureBody = body
         }
+
+letSelectedClosureCalleeProgram :: BackendProgram
+letSelectedClosureCalleeProgram =
+  programWithMainExpr intTy $
+    BackendClosureCall
+      intTy
+      ( BackendLet
+          unaryIntTy
+          "f"
+          unaryIntTy
+          ( BackendClosure
+              { backendExprType = unaryIntTy,
+                backendClosureEntryName = "__mlfp_closure$let_callee",
+                backendClosureCaptures = [],
+                backendClosureParams = [("x", intTy)],
+                backendClosureBody = BackendVar intTy "x"
+              }
+          )
+          (BackendVar unaryIntTy "f")
+      )
+      [intLit 7]
 
 polymorphicClosureSpecializationProgram :: BackendProgram
 polymorphicClosureSpecializationProgram =
