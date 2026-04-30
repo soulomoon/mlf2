@@ -712,6 +712,17 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
     assertNativeProgram sourcePartialApplicationPolymorphicArgumentProgram "true"
 
+  it "keeps higher-rank supplied partial functions on the static specialization path" $ do
+    output <-
+      withTempProgram sourcePartialApplicationHigherRankFunctionArgumentProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "escaping function value"
+    output `shouldNotSatisfy` isInfixOf "Main__useHigher$partial"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourcePartialApplicationHigherRankFunctionArgumentProgram "1"
+
   it "captures locals when wrapping demanded inline function arguments" $ do
     output <-
       withTempProgram sourceClosureDemandedInlineFunctionArgumentProgram $ \path ->
@@ -3311,6 +3322,19 @@ sourcePartialApplicationPolymorphicArgumentProgram =
       "    \\poly \\ignored let keepInt : Int = poly 1 in poly true;",
       "  def apply : (Int -> Bool) -> Bool = \\f f 0;",
       "  def main : Bool = apply (usePoly id);",
+      "}"
+    ]
+
+sourcePartialApplicationHigherRankFunctionArgumentProgram :: String
+sourcePartialApplicationHigherRankFunctionArgumentProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def id : forall a. a -> a = \\x x;",
+      "  def idScore : (forall a. a -> a) -> Int = \\poly poly 1;",
+      "  def useHigher : ((forall a. a -> a) -> Int) -> Int -> Int =",
+      "    \\score \\ignored score id;",
+      "  def apply : (Int -> Int) -> Int = \\f f 0;",
+      "  def main : Int = apply (useHigher idScore);",
       "}"
     ]
 

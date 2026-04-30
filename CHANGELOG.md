@@ -33,6 +33,9 @@
 - Fixed checked-source partial applications with supplied polymorphic function
   values so they stay on the static specialization path instead of being
   captured into runtime closure environments.
+- Fixed checked-source partial applications with supplied higher-rank function
+  values so non-first-order function parameters also stay on static lowering
+  instead of being captured into unsupported closure entries.
 - Fixed packaged partial-application argument conversion so direct supplied
   functions are wrapped as closure values before capture, and direct-function
   closure wrappers capture free locals from inline function expressions.

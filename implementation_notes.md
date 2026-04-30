@@ -22,6 +22,9 @@
 - Supplied polymorphic function values remain on the existing static
   specialization path instead of becoming partial-closure captures, because
   runtime closure environments do not store `forall` values directly.
+- Supplied higher-rank function values follow the same boundary: only
+  first-order function-pointer shapes are wrapped and captured in partial
+  closures, matching the LLVM lowerer's stored-function representation.
 - LLVM parity coverage now includes top-level and local partial application
   rows, with `llvm-as`, object-code smoke, and native execution coverage when
   the local LLVM toolchain is available.

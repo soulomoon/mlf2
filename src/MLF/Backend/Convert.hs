@@ -2063,7 +2063,7 @@ partialApplicationArgumentNeedsClosureValue context scope headTerm index0 expect
   capturedFunctionArgument || demandedByCallee
   where
     capturedFunctionArgument =
-      isClosureConvertibleFunctionType expectedTy && not evidenceArgument
+      isFirstOrderFunctionCaptureType expectedTy && not evidenceArgument
     evidenceArgument =
       case stripClosureHeadTypeInsts headTerm of
         EVar name ->
@@ -2071,6 +2071,9 @@ partialApplicationArgumentNeedsClosureValue context scope headTerm index0 expect
         _ ->
           False
     demandedByCallee =
+      isFirstOrderFunctionCaptureType expectedTy
+        && demandedByCalleeName
+    demandedByCalleeName =
       case stripClosureHeadTypeInsts headTerm of
         EVar name ->
           Set.member index0 (lookupClosureValueArgumentDemand context scope name)
@@ -2365,18 +2368,50 @@ partialApplicationCanCaptureSuppliedArgs context scope =
   where
     canCapture (argTy, argExpr)
       | isClosureConvertibleFunctionType argTy =
-          backendExprIsClosureValue context scope argExpr
-      | isPolymorphicFunctionCaptureType argTy =
+          isFirstOrderFunctionCaptureType argTy
+            && backendExprIsClosureValue context scope argExpr
+      | isFunctionLikeBackendType argTy =
           False
       | otherwise =
           True
 
-isPolymorphicFunctionCaptureType :: BackendType -> Bool
-isPolymorphicFunctionCaptureType =
+isFunctionLikeBackendType :: BackendType -> Bool
+isFunctionLikeBackendType =
   \case
     BTForall _ _ body ->
-      isClosureConvertibleFunctionType body || isPolymorphicFunctionCaptureType body
+      isFunctionLikeBackendType body
+    BTArrow {} ->
+      True
     _ ->
+      False
+
+isFirstOrderFunctionCaptureType :: BackendType -> Bool
+isFirstOrderFunctionCaptureType ty =
+  case ty of
+    BTArrow {} ->
+      let (paramTys, returnTy) = splitBackendArrows ty
+       in all isFirstOrderCaptureValueType (returnTy : paramTys)
+    _ ->
+      False
+
+isFirstOrderCaptureValueType :: BackendType -> Bool
+isFirstOrderCaptureValueType =
+  \case
+    BTVar {} ->
+      False
+    BTArrow {} ->
+      False
+    BTBase {} ->
+      True
+    BTCon _ args ->
+      all isFirstOrderCaptureValueType args
+    BTVarApp {} ->
+      False
+    BTForall {} ->
+      False
+    BTMu {} ->
+      True
+    BTBottom ->
       False
 
 convertOrdinaryTerm :: LambdaMode -> ConvertContext -> Env -> ClosureScope -> ElabTerm -> BackendType -> ConvertM BackendExpr
