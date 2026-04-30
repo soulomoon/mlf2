@@ -21,7 +21,8 @@ where
 
 import Control.Applicative ((<|>))
 import Control.Monad (foldM, forM, unless, when, zipWithM)
-import Control.Monad.State.Strict (StateT (StateT), get, modify, runStateT)
+import Control.Monad.State.Strict (StateT (StateT), evalStateT, get, modify, runStateT)
+import Data.Char (isAlphaNum)
 import Data.List (find, intercalate, nub, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -113,6 +114,59 @@ data LiftState = LiftState
   }
 
 type LiftM = StateT LiftState (Either BackendConversionError)
+
+data ConvertState = ConvertState
+  { csNextClosureIndex :: Int,
+    csGeneratedClosureNames :: Set.Set String
+  }
+
+type ConvertM = StateT ConvertState (Either BackendConversionError)
+
+data ClosureScope = ClosureScope
+  { closureScopeTerms :: Map String ElabType,
+    closureScopeLocals :: Set.Set String
+  }
+
+data LambdaMode
+  = DirectLambda
+  | ClosureLambda (Maybe String)
+
+emptyClosureScope :: ClosureScope
+emptyClosureScope =
+  ClosureScope
+    { closureScopeTerms = Map.empty,
+      closureScopeLocals = Set.empty
+    }
+
+extendClosureScopeTerm :: String -> ElabType -> Bool -> ClosureScope -> ClosureScope
+extendClosureScopeTerm name ty isClosure scope =
+  scope
+    { closureScopeTerms = Map.insert name ty (closureScopeTerms scope),
+      closureScopeLocals =
+        if isClosure
+          then Set.insert name (closureScopeLocals scope)
+          else Set.delete name (closureScopeLocals scope)
+    }
+
+extendClosureScopeTerms :: [(String, ElabType)] -> ClosureScope -> ClosureScope
+extendClosureScopeTerms bindings scope =
+  foldr (\(name, ty) acc -> extendClosureScopeTerm name ty False acc) scope bindings
+
+runConvertM :: ConvertM a -> Either BackendConversionError a
+runConvertM action =
+  evalStateT
+    action
+    ConvertState
+      { csNextClosureIndex = 0,
+        csGeneratedClosureNames = Set.empty
+      }
+
+liftEitherConvert :: Either BackendConversionError a -> ConvertM a
+liftEitherConvert result =
+  StateT $ \state0 ->
+    case result of
+      Right value -> Right (value, state0)
+      Left err -> Left err
 
 convertCheckedProgram :: CheckedProgram -> Either BackendConversionError BackendProgram
 convertCheckedProgram checked = do
@@ -230,7 +284,7 @@ convertCheckedBinding context env checkedModule binding = do
                 env
                 liftedSpecs
         liftedBindings <- mapM (convertLiftedRecursiveLet bindingContext envWithLifted) liftedSpecs
-        expr <- convertTermExpected bindingContext envWithLifted (Just bindingTy) liftedTerm
+        expr <- runConvertM (convertTermExpectedMode DirectLambda bindingContext envWithLifted emptyClosureScope (Just bindingTy) liftedTerm)
         Right (bindingTy, expr, liftedBindings)
   let convertedBinding =
         BackendBinding
@@ -256,7 +310,7 @@ liftRecursiveLetsInBinding context term = do
 convertLiftedRecursiveLet :: ConvertContext -> Env -> LiftedRecursiveLet -> Either BackendConversionError BackendBinding
 convertLiftedRecursiveLet context env lifted = do
   let bindingTy = canonicalizeBackendType context (lrlBackendType lifted)
-  expr <- convertTermExpected context env (Just bindingTy) (lrlTerm lifted)
+  expr <- runConvertM (convertTermExpectedMode DirectLambda context env emptyClosureScope (Just bindingTy) (lrlTerm lifted))
   Right
     BackendBinding
       { backendBindingName = lrlName lifted,
@@ -327,11 +381,14 @@ liftRecursiveLetsInTerm context lexicalTerms lexicalTypes term =
 
 capturedTermBindings :: Map String ElabType -> ElabTerm -> LiftM [(String, ElabType)]
 capturedTermBindings lexicalTerms rhs =
-  pure
-    [ (name, ty)
-    | (name, ty) <- Map.toAscList lexicalTerms,
-      Set.member name freeVars
-    ]
+  pure (capturedTermBindingsIn lexicalTerms rhs)
+
+capturedTermBindingsIn :: Map String ElabType -> ElabTerm -> [(String, ElabType)]
+capturedTermBindingsIn lexicalTerms rhs =
+  [ (name, ty)
+  | (name, ty) <- Map.toAscList lexicalTerms,
+    Set.member name freeVars
+  ]
   where
     freeVars = freeTermVariables rhs
 
@@ -1618,87 +1675,109 @@ candidateDataResultTypes context ty =
       let completed = completeBackendParameterSubstitution parameters substitution
     ]
 
-convertTerm :: ConvertContext -> Env -> ElabTerm -> Either BackendConversionError BackendExpr
-convertTerm context env =
-  convertTermExpected context env Nothing
+convertTerm :: ConvertContext -> Env -> ClosureScope -> ElabTerm -> ConvertM BackendExpr
+convertTerm context env scope =
+  convertTermExpectedMode DirectLambda context env scope Nothing
 
-convertTermExpected :: ConvertContext -> Env -> Maybe BackendType -> ElabTerm -> Either BackendConversionError BackendExpr
-convertTermExpected context env mbExpectedTy term =
+convertTermExpectedMode :: LambdaMode -> ConvertContext -> Env -> ClosureScope -> Maybe BackendType -> ElabTerm -> ConvertM BackendExpr
+convertTermExpectedMode mode context env scope mbExpectedTy term =
   case mbExpectedTy of
     Just resultTy0 ->
       let resultTy = canonicalizeBackendType context resultTy0
-       in convertSpecialTerm context env term resultTy
+       in convertSpecialTerm mode context env scope term resultTy
             >>= \case
-              Just expr -> Right expr
-              Nothing -> convertOrdinaryTerm context env term resultTy
+              Just expr -> pure expr
+              Nothing -> convertOrdinaryTerm mode context env scope term resultTy
     Nothing -> do
-      resultTy <- canonicalizeBackendType context <$> inferBackendType env term
-      convertSpecialTerm context env term resultTy
+      resultTy <- canonicalizeBackendType context <$> liftEitherConvert (inferBackendType env term)
+      convertSpecialTerm mode context env scope term resultTy
         >>= \case
-          Just expr -> Right expr
-          Nothing -> convertOrdinaryTerm context env term resultTy
+          Just expr -> pure expr
+          Nothing -> convertOrdinaryTerm mode context env scope term resultTy
 
 convertSpecialTerm ::
+  LambdaMode ->
   ConvertContext ->
   Env ->
+  ClosureScope ->
   ElabTerm ->
   BackendType ->
-  Either BackendConversionError (Maybe BackendExpr)
-convertSpecialTerm context env term resultTy =
-  convertCaseApplication context env term resultTy
+  ConvertM (Maybe BackendExpr)
+convertSpecialTerm mode context env scope term resultTy =
+  convertCaseApplication mode context env scope term resultTy
     >>= \case
-      Just expr -> Right (Just expr)
+      Just expr -> pure (Just expr)
       Nothing ->
-        convertConstructorApplication context env term resultTy
+        convertConstructorApplication mode context env scope term resultTy
 
-convertOrdinaryTerm :: ConvertContext -> Env -> ElabTerm -> BackendType -> Either BackendConversionError BackendExpr
-convertOrdinaryTerm context env term resultTy0 =
+convertOrdinaryTerm :: LambdaMode -> ConvertContext -> Env -> ClosureScope -> ElabTerm -> BackendType -> ConvertM BackendExpr
+convertOrdinaryTerm mode context env scope term resultTy0 =
   let resultTy = normalizeBackendTypeForContext context resultTy0
    in case term of
     EVar name ->
-      Right
+      pure
         BackendVar
           { backendExprType = resultTy,
             backendVarName = name
           }
     ELit lit ->
-      Right
+      pure
         BackendLit
           { backendExprType = resultTy,
             backendLit = lit
           }
+    ELam {}
+      | shouldClosureConvertLambda mode resultTy ->
+          convertLambdaClosure mode context env scope resultTy term
     ELam name paramTy body -> do
-      rawParamBackendTy <- convertElabType paramTy
+      rawParamBackendTy <- liftEitherConvert (convertElabType paramTy)
       let (paramBackendTy, bodyExpected) =
             case resultTy of
               BTArrow expectedParam cod -> (expectedParam, Just cod)
               _ -> (normalizeBackendTypeForContext context rawParamBackendTy, Nothing)
-      let paramEnvTy =
+          paramEnvTy =
             case backendTypeToElabType paramBackendTy of
               Just canonicalTy -> canonicalTy
               Nothing -> paramTy
-      bodyExpr <- convertTermExpected context (extendTermEnv name paramEnvTy env) bodyExpected body
-      Right
+          bodyMode = directLambdaBodyMode bodyExpected body
+          bodyScope = extendClosureScopeTerm name paramEnvTy False scope
+      bodyExpr <- convertTermExpectedMode bodyMode context (extendTermEnv name paramEnvTy env) bodyScope bodyExpected body
+      pure
         BackendLam
           { backendExprType = resultTy,
             backendParamName = name,
             backendParamType = paramBackendTy,
             backendBody = bodyExpr
           }
-    EApp fun arg ->
-      convertApplication context env resultTy fun arg
+    EApp {} ->
+      convertApplicationTerm context env scope resultTy term
     ELet name scheme rhs body -> do
       let schemeTy = schemeToType scheme
       when (termMentionsFreeVariable name rhs) $
-        Left (BackendUnsupportedRecursiveLet name)
-      bindingTy <- normalizeBackendTypeForContext context <$> convertElabType schemeTy
-      rhsExpr <- convertTermExpected context env (Just bindingTy) rhs
+        liftEitherConvert (Left (BackendUnsupportedRecursiveLet name))
+      bindingTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType schemeTy)
+      let bindingClosure = letBindingNeedsClosure scope name bindingTy rhs body
+          rhsMode =
+            if bindingClosure
+              then ClosureLambda (Just name)
+              else DirectLambda
+      rhsExpr <- convertTermExpectedMode rhsMode context env scope (Just bindingTy) rhs
       let bindingEnvTy =
             case backendTypeToElabType bindingTy of
               Just canonicalTy -> canonicalTy
               Nothing -> schemeTy
-      bodyExpr <- convertTermExpected context (extendTermEnv name bindingEnvTy env) (Just resultTy) body
-      Right
+          bodyScope =
+            extendClosureScopeTerm
+              name
+              bindingEnvTy
+              (bindingClosure || backendExprIsClosureValue scope rhsExpr)
+              scope
+          bodyMode =
+            if isClosureConvertibleFunctionType resultTy
+              then ClosureLambda Nothing
+              else mode
+      bodyExpr <- convertTermExpectedMode bodyMode context (extendTermEnv name bindingEnvTy env) bodyScope (Just resultTy) body
+      pure
         BackendLet
           { backendExprType = resultTy,
             backendLetName = name,
@@ -1709,11 +1788,11 @@ convertOrdinaryTerm context env term resultTy0 =
     ETyAbs name mbBound body ->
       case resultTy of
         BTForall expectedName _ bodyTy -> do
-          mbBackendBound <- traverse (fmap (normalizeBackendTypeForContext context) . convertElabType . tyToElab) mbBound
+          mbBackendBound <- liftEitherConvert (traverse (fmap (normalizeBackendTypeForContext context) . convertElabType . tyToElab) mbBound)
           let boundTy = maybe TBottom tyToElab mbBound
               bodyExpected = Just (substituteBackendType expectedName (BTVar name) bodyTy)
-          bodyExpr <- convertTermExpected context (extendTypeEnv name boundTy env) bodyExpected body
-          Right
+          bodyExpr <- convertTermExpectedMode mode context (extendTypeEnv name boundTy env) scope bodyExpected body
+          pure
             BackendTyAbs
               { backendExprType = resultTy,
                 backendTyParamName = name,
@@ -1721,20 +1800,20 @@ convertOrdinaryTerm context env term resultTy0 =
                 backendTyAbsBody = bodyExpr
               }
         _ ->
-          convertTermExpected context env (Just resultTy) body
+          convertTermExpectedMode mode context env scope (Just resultTy) body
     ETyInst inner inst ->
-      convertTypeInstantiation context env resultTy inner inst
+      convertTypeInstantiation context env scope resultTy inner inst
     ERoll _ body -> do
       let bodyExpected = unfoldBackendRecursiveType resultTy
-      bodyExpr <- convertTermExpected context env bodyExpected body
-      Right
+      bodyExpr <- convertTermExpectedMode mode context env scope bodyExpected body
+      pure
         BackendRoll
           { backendExprType = resultTy,
             backendRollPayload = bodyExpr
           }
     EUnroll body -> do
-      bodyExpr <- convertTerm context env body
-      Right
+      bodyExpr <- convertTerm context env scope body
+      pure
         BackendUnroll
           { backendExprType = resultTy,
             backendUnrollPayload = bodyExpr
@@ -1743,49 +1822,86 @@ convertOrdinaryTerm context env term resultTy0 =
 convertApplication ::
   ConvertContext ->
   Env ->
+  ClosureScope ->
   BackendType ->
   ElabTerm ->
   ElabTerm ->
-  Either BackendConversionError BackendExpr
-convertApplication context env resultTy fun arg =
+  ConvertM BackendExpr
+convertApplication context env scope resultTy fun arg =
   if termContainsTypeInstantiation fun
     then
-      convertApplicationFromExpectedResult context env resultTy fun arg
-        `orElseConversion` convertApplicationFromFunction context env resultTy fun arg
+      convertApplicationFromExpectedResult context env scope resultTy fun arg
+        `orElseConvertM` convertApplicationFromFunction context env scope resultTy fun arg
     else
-      convertApplicationFromFunction context env resultTy fun arg
-        `orElseConversion` convertApplicationFromExpectedResult context env resultTy fun arg
+      convertApplicationFromFunction context env scope resultTy fun arg
+        `orElseConvertM` convertApplicationFromExpectedResult context env scope resultTy fun arg
+
+convertApplicationTerm ::
+  ConvertContext ->
+  Env ->
+  ClosureScope ->
+  BackendType ->
+  ElabTerm ->
+  ConvertM BackendExpr
+convertApplicationTerm context env scope resultTy term =
+  case collectApps term of
+    (headTerm, args)
+      | not (null args),
+        isClosureHeadTerm scope headTerm -> do
+          funTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (inferBackendType env headTerm)
+          let (paramTys, expectedResultTy) = splitBackendArrows funTy
+          if length paramTys == length args && not (null paramTys)
+            then do
+              funExpr <- convertTermExpectedMode DirectLambda context env scope (Just funTy) headTerm
+              argExprs <- zipWithM (convertTermExpectedMode DirectLambda context env scope . Just) paramTys args
+              let callResultTy =
+                    if alphaEqBackendType resultTy expectedResultTy
+                      then resultTy
+                      else expectedResultTy
+              pure
+                BackendClosureCall
+                  { backendExprType = callResultTy,
+                    backendClosureFunction = funExpr,
+                    backendClosureArguments = argExprs
+                  }
+            else convertApplicationFallback
+    _ -> convertApplicationFallback
+  where
+    convertApplicationFallback =
+      case term of
+        EApp fun arg -> convertApplication context env scope resultTy fun arg
+        _ -> liftEitherConvert (Left (BackendUnsupportedCaseShape "expected application term"))
 
 convertApplicationFromFunction ::
   ConvertContext ->
   Env ->
+  ClosureScope ->
   BackendType ->
   ElabTerm ->
   ElabTerm ->
-  Either BackendConversionError BackendExpr
-convertApplicationFromFunction context env resultTy fun arg = do
-  funExpr <- convertTerm context env fun
+  ConvertM BackendExpr
+convertApplicationFromFunction context env scope resultTy fun arg = do
+  funExpr <- convertTerm context env scope fun
   argExpr <-
     case backendExprType funExpr of
-      BTArrow expectedArg _ -> convertTermExpected context env (Just expectedArg) arg
-      _ -> convertTerm context env arg
-  Right (backendApplication (applicationResultType resultTy funExpr) funExpr argExpr)
+      BTArrow expectedArg _ -> convertTermExpectedMode DirectLambda context env scope (Just expectedArg) arg
+      _ -> convertTerm context env scope arg
+  pure (backendApplication (applicationResultType resultTy funExpr) funExpr argExpr)
 
 convertApplicationFromExpectedResult ::
   ConvertContext ->
   Env ->
+  ClosureScope ->
   BackendType ->
   ElabTerm ->
   ElabTerm ->
-  Either BackendConversionError BackendExpr
-convertApplicationFromExpectedResult context env resultTy fun arg =
-  case inferBackendType env arg of
-    Right rawArgTy -> do
-      let argTy = canonicalizeBackendType context rawArgTy
-      funExpr <- convertTermExpected context env (Just (BTArrow argTy resultTy)) fun
-      argExpr <- convertTermExpected context env (Just argTy) arg
-      Right (backendApplication resultTy funExpr argExpr)
-    Left err -> Left err
+  ConvertM BackendExpr
+convertApplicationFromExpectedResult context env scope resultTy fun arg = do
+  rawArgTy <- liftEitherConvert (inferBackendType env arg)
+  let argTy = canonicalizeBackendType context rawArgTy
+  funExpr <- convertTermExpectedMode DirectLambda context env scope (Just (BTArrow argTy resultTy)) fun
+  argExpr <- convertTermExpectedMode DirectLambda context env scope (Just argTy) arg
+  pure (backendApplication resultTy funExpr argExpr)
 
 backendApplication :: BackendType -> BackendExpr -> BackendExpr -> BackendExpr
 backendApplication resultTy funExpr argExpr =
@@ -1802,11 +1918,231 @@ applicationResultType resultTy funExpr =
       | not (alphaEqBackendType actualResultTy resultTy) -> actualResultTy
     _ -> resultTy
 
-orElseConversion :: Either BackendConversionError a -> Either BackendConversionError a -> Either BackendConversionError a
-orElseConversion primary fallback =
-  case primary of
-    Right value -> Right value
-    Left _ -> fallback
+orElseConvertM :: ConvertM a -> ConvertM a -> ConvertM a
+orElseConvertM primary fallback =
+  StateT $ \state0 ->
+    case runStateT primary state0 of
+      Right value -> Right value
+      Left _ -> runStateT fallback state0
+
+shouldClosureConvertLambda :: LambdaMode -> BackendType -> Bool
+shouldClosureConvertLambda mode resultTy =
+  case mode of
+    ClosureLambda {} -> isClosureConvertibleFunctionType resultTy
+    DirectLambda -> False
+
+isClosureConvertibleFunctionType :: BackendType -> Bool
+isClosureConvertibleFunctionType =
+  \case
+    BTArrow {} -> True
+    _ -> False
+
+isClosureConvertibleElabType :: ElabType -> Bool
+isClosureConvertibleElabType =
+  \case
+    TArrow {} -> True
+    _ -> False
+
+directLambdaBodyMode :: Maybe BackendType -> ElabTerm -> LambdaMode
+directLambdaBodyMode bodyExpected body =
+  case bodyExpected of
+    Just bodyTy
+      | isClosureConvertibleFunctionType bodyTy,
+        not (isImmediateLambda body) ->
+          ClosureLambda Nothing
+    _ -> DirectLambda
+
+isImmediateLambda :: ElabTerm -> Bool
+isImmediateLambda =
+  \case
+    ELam {} -> True
+    ETyAbs _ _ body -> isImmediateLambda body
+    ETyInst inner _ -> isImmediateLambda inner
+    _ -> False
+
+letBindingNeedsClosure :: ClosureScope -> String -> BackendType -> ElabTerm -> ElabTerm -> Bool
+letBindingNeedsClosure scope name bindingTy rhs body =
+  isClosureConvertibleFunctionType bindingTy
+    && (isClosureAliasTerm scope rhs || (isFunctionValueTerm rhs && termUsesVariableAsValue name body))
+
+isClosureAliasTerm :: ClosureScope -> ElabTerm -> Bool
+isClosureAliasTerm scope term =
+  case stripClosureHeadTypeInsts term of
+    EVar name -> Set.member name (closureScopeLocals scope)
+    _ -> False
+
+backendExprIsClosureValue :: ClosureScope -> BackendExpr -> Bool
+backendExprIsClosureValue scope =
+  \case
+    BackendClosure {} -> True
+    BackendVar _ name -> Set.member name (closureScopeLocals scope)
+    BackendTyApp _ fun _ -> backendExprIsClosureValue scope fun
+    BackendLet _ name _ rhs body ->
+      let bodyScope =
+            if backendExprIsClosureValue scope rhs
+              then scope {closureScopeLocals = Set.insert name (closureScopeLocals scope)}
+              else scope
+       in backendExprIsClosureValue bodyScope body
+    BackendCase {backendAlternatives = alternatives} ->
+      all (backendExprIsClosureValue scope . backendAltBody) (NE.toList alternatives)
+    _ -> False
+
+isClosureHeadTerm :: ClosureScope -> ElabTerm -> Bool
+isClosureHeadTerm scope term =
+  case stripClosureHeadTypeInsts term of
+    EVar name -> Set.member name (closureScopeLocals scope)
+    _ -> False
+
+stripClosureHeadTypeInsts :: ElabTerm -> ElabTerm
+stripClosureHeadTypeInsts =
+  \case
+    ETyInst inner _ -> stripClosureHeadTypeInsts inner
+    other -> other
+
+termUsesVariableAsValue :: String -> ElabTerm -> Bool
+termUsesVariableAsValue needle =
+  go False
+  where
+    go underLambda term =
+      case term of
+        EVar name ->
+          name == needle
+        ELit {} ->
+          False
+        ELam name _ body
+          | name == needle -> False
+          | otherwise -> go True body
+        EApp {} ->
+          let (headTerm, args) = collectApps term
+              headUse =
+                case stripClosureHeadTypeInsts headTerm of
+                  EVar name
+                    | name == needle -> underLambda
+                  _ -> go underLambda headTerm
+           in headUse || any (go underLambda) args
+        ELet name _ rhs body
+          | name == needle -> go underLambda rhs
+          | otherwise -> go underLambda rhs || go underLambda body
+        ETyAbs _ _ body ->
+          go underLambda body
+        ETyInst inner _ ->
+          go underLambda inner
+        ERoll _ body ->
+          go underLambda body
+        EUnroll body ->
+          go underLambda body
+
+convertLambdaClosure :: LambdaMode -> ConvertContext -> Env -> ClosureScope -> BackendType -> ElabTerm -> ConvertM BackendExpr
+convertLambdaClosure mode context env scope resultTy term = do
+  let (rawParams, body) = collectClosureLams term
+  when (null rawParams) $
+    liftEitherConvert (Left (BackendUnsupportedCaseShape "closure conversion expected a lambda"))
+  (params, bodyExpected) <- closureBackendParams context resultTy rawParams
+  let paramEnvBindings =
+        [ (name, maybe rawTy id (backendTypeToElabType backendTy))
+        | ((name, rawTy), backendTy) <- zip rawParams (map snd params)
+        ]
+      captures = capturedTermBindingsIn (closureScopeTerms scope) term
+  captureExprs <- traverse convertCapture captures
+  entryName <- freshClosureEntryName context (closureHint mode rawParams)
+  let captureScope =
+        foldr
+          ( \(name, ty) acc ->
+              extendClosureScopeTerm name ty (Set.member name (closureScopeLocals scope) || isClosureConvertibleElabType ty) acc
+          )
+          emptyClosureScope
+          captures
+      bodyScope = extendClosureScopeTerms paramEnvBindings captureScope
+      bodyEnv =
+        foldr
+          (uncurry extendTermEnv)
+          env
+          (captures ++ paramEnvBindings)
+  bodyExpr <- convertTermExpectedMode (ClosureLambda Nothing) context bodyEnv bodyScope (Just bodyExpected) body
+  pure
+    BackendClosure
+      { backendExprType = resultTy,
+        backendClosureEntryName = entryName,
+        backendClosureCaptures = captureExprs,
+        backendClosureParams = params,
+        backendClosureBody = bodyExpr
+      }
+  where
+    convertCapture (name, ty) = do
+      backendTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType ty)
+      expr <- convertTermExpectedMode DirectLambda context env scope (Just backendTy) (EVar name)
+      pure
+        BackendClosureCapture
+          { backendClosureCaptureName = name,
+            backendClosureCaptureType = backendTy,
+            backendClosureCaptureExpr = expr
+          }
+
+closureHint :: LambdaMode -> [(String, ElabType)] -> String
+closureHint mode params =
+  case mode of
+    ClosureLambda (Just hint) -> hint
+    _ ->
+      case params of
+        (name, _) : _ -> name
+        [] -> "lambda"
+
+collectClosureLams :: ElabTerm -> ([(String, ElabType)], ElabTerm)
+collectClosureLams =
+  go []
+  where
+    go params =
+      \case
+        ELam name ty body -> go (params ++ [(name, ty)]) body
+        other -> (params, other)
+
+closureBackendParams :: ConvertContext -> BackendType -> [(String, ElabType)] -> ConvertM ([(String, BackendType)], BackendType)
+closureBackendParams context resultTy rawParams =
+  go resultTy rawParams
+  where
+    go bodyTy [] =
+      pure ([], bodyTy)
+    go (BTArrow expectedParam restTy) ((name, _) : rest) = do
+      (params, finalTy) <- go restTy rest
+      pure ((name, expectedParam) : params, finalTy)
+    go otherTy ((name, rawTy) : rest) = do
+      rawBackendTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType rawTy)
+      (params, finalTy) <- go otherTy rest
+      pure ((name, rawBackendTy) : params, finalTy)
+
+freshClosureEntryName :: ConvertContext -> String -> ConvertM String
+freshClosureEntryName context hint = do
+  state0 <- get
+  let generatedNames = csGeneratedClosureNames state0
+      (name, nextIndex) = pickName generatedNames (csNextClosureIndex state0)
+  modify
+    ( \state1 ->
+        state1
+          { csNextClosureIndex = nextIndex,
+            csGeneratedClosureNames = Set.insert name (csGeneratedClosureNames state1)
+          }
+    )
+  pure name
+  where
+    pickName generatedNames index0 =
+      let candidate =
+            "__mlfp_closure$"
+              ++ sanitizeClosureName (ccCurrentBindingName context)
+              ++ "$"
+              ++ sanitizeClosureName hint
+              ++ "$"
+              ++ show index0
+       in if Set.member candidate (ccGlobalTerms context) || Set.member candidate generatedNames
+            then pickName generatedNames (index0 + 1)
+            else (candidate, index0 + 1)
+
+sanitizeClosureName :: String -> String
+sanitizeClosureName =
+  map sanitizeChar
+  where
+    sanitizeChar c
+      | isAlphaNum c || c == '_' || c == '$' || c == '.' = c
+      | otherwise = '_'
 
 termMentionsFreeVariable :: String -> ElabTerm -> Bool
 termMentionsFreeVariable needle =
@@ -1838,24 +2174,25 @@ termMentionsFreeVariable needle =
 convertTypeInstantiation ::
   ConvertContext ->
   Env ->
+  ClosureScope ->
   BackendType ->
   ElabTerm ->
   Instantiation ->
-  Either BackendConversionError BackendExpr
-convertTypeInstantiation context env resultTy inner inst =
+  ConvertM BackendExpr
+convertTypeInstantiation context env scope resultTy inner inst =
   case inst of
     InstId -> do
-      innerExpr <- convertTerm context env inner
+      innerExpr <- convertTerm context env scope inner
       if alphaEqBackendType (backendExprType innerExpr) resultTy
-        then Right innerExpr
-        else Left (BackendUnsupportedInstantiation inst)
+        then pure innerExpr
+        else liftEitherConvert (Left (BackendUnsupportedInstantiation inst))
     _ ->
       case appLikeInstantiationType inst of
         Just tyArg -> do
-          innerExpr <- convertAppLikeInstantiationFunction context env inner
+          innerExpr <- convertAppLikeInstantiationFunction context env scope inner
           case backendExprType innerExpr of
             BTForall name mbBound bodyTy -> do
-              backendTyArg0 <- normalizeBackendTypeForContext context <$> convertElabType tyArg
+              backendTyArg0 <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType tyArg)
               let appliedTy0 = normalizeBackendTypeForContext context (substituteBackendType name backendTyArg0 bodyTy)
                   (backendTyArg, appliedTy) =
                     expectedTypeInstantiation
@@ -1870,16 +2207,16 @@ convertTypeInstantiation context env resultTy inner inst =
                     if alphaEqBackendType appliedTy resultTy
                       then resultTy
                       else appliedTy
-              Right
+              pure
                 BackendTyApp
                   { backendExprType = resultTy',
                     backendTyFunction = innerExpr,
                     backendTyArgument = backendTyArg
                   }
             _
-              | alphaEqBackendType (backendExprType innerExpr) resultTy -> Right innerExpr
-              | otherwise -> Left (BackendUnsupportedInstantiation inst)
-        Nothing -> Left (BackendUnsupportedInstantiation inst)
+              | alphaEqBackendType (backendExprType innerExpr) resultTy -> pure innerExpr
+              | otherwise -> liftEitherConvert (Left (BackendUnsupportedInstantiation inst))
+        Nothing -> liftEitherConvert (Left (BackendUnsupportedInstantiation inst))
 
 expectedTypeInstantiation ::
   ConvertContext ->
@@ -1922,22 +2259,25 @@ termContainsTypeInstantiation =
 convertAppLikeInstantiationFunction ::
   ConvertContext ->
   Env ->
+  ClosureScope ->
   ElabTerm ->
-  Either BackendConversionError BackendExpr
-convertAppLikeInstantiationFunction context env inner =
-  case convertTerm context env inner of
-    Right expr
-      | hasForallResult expr -> Right expr
-    Right expr ->
-      case convertStrippedElim of
-        Right strippedExpr
-          | hasForallResult strippedExpr -> Right strippedExpr
-        _ -> Right expr
-    Left err ->
-      case convertStrippedElim of
-        Right strippedExpr -> Right strippedExpr
-        Left _ -> Left err
+  ConvertM BackendExpr
+convertAppLikeInstantiationFunction context env scope inner =
+  convertInner `orElseConvertM` convertStrippedElim
   where
+    convertInner = do
+      expr <- convertTerm context env scope inner
+      if hasForallResult expr
+        then pure expr
+        else
+          ( do
+              strippedExpr <- convertStrippedElim
+              if hasForallResult strippedExpr
+                then pure strippedExpr
+                else pure expr
+          )
+            `orElseConvertM` pure expr
+
     hasForallResult expr =
       case backendExprType expr of
         BTForall {} -> True
@@ -1946,8 +2286,8 @@ convertAppLikeInstantiationFunction context env inner =
     convertStrippedElim =
       let stripped = dropLeadingElimInstantiations inner
        in if stripped == inner
-            then Left (BackendUnsupportedInstantiation InstElim)
-            else convertTerm context env stripped
+            then liftEitherConvert (Left (BackendUnsupportedInstantiation InstElim))
+            else convertTerm context env scope stripped
 
 dropLeadingElimInstantiations :: ElabTerm -> ElabTerm
 dropLeadingElimInstantiations term =
@@ -1964,13 +2304,15 @@ appLikeInstantiationType inst =
     _ -> Nothing
 
 convertConstructorApplication ::
+  LambdaMode ->
   ConvertContext ->
   Env ->
+  ClosureScope ->
   ElabTerm ->
   BackendType ->
-  Either BackendConversionError (Maybe BackendExpr)
-convertConstructorApplication context env term resultTy =
-  constructorApplicationTerm context term >>= \case
+  ConvertM (Maybe BackendExpr)
+convertConstructorApplication _mode context env scope term resultTy =
+  liftEitherConvert (constructorApplicationTerm context term) >>= \case
     Just (ConstructorApplication constructorMeta headTypeArgs args) -> do
       let constructor = cmBackend constructorMeta
           ownerContext = contextForDataMeta context (cmData constructorMeta)
@@ -1979,30 +2321,31 @@ convertConstructorApplication context env term resultTy =
           rawFields = backendConstructorFields constructor
           effectiveResultTy = constructorExpectedResultType context ownerContext constructorMeta resultTy
           constructorResultTy = canonicalizeStructuralMuNames ownerContext (backendConstructorResult constructor)
-      typeBounds <- backendTypeBoundsFromEnv env
-      initialSubstitutions <- constructorTypeApplicationSubstitutions env constructorMeta headTypeArgs
+      typeBounds <- liftEitherConvert (backendTypeBoundsFromEnv env)
+      initialSubstitutions <- liftEitherConvert (constructorTypeApplicationSubstitutions env constructorMeta headTypeArgs)
       substitution <-
-        firstRightOr
-          (constructorResultMismatch constructor)
-          [ do
-              resultSubstitution <-
-                case constructorResultSubstitution
-                  context
-                  ownerContext
-                  typeBounds
-                  dataParameters
-                  parameters
-                  initialSubstitution
-                  constructorResultTy
-                  effectiveResultTy of
-                  Just substitution -> Right substitution
-                  Nothing -> Left (constructorResultMismatch constructor)
-              foldM
-                (matchConstructorApplicationArgument context env typeBounds dataParameters parameters)
-                resultSubstitution
-                (zip rawFields args)
-            | initialSubstitution <- initialSubstitutions
-          ]
+        liftEitherConvert $
+          firstRightOr
+            (constructorResultMismatch constructor)
+            [ do
+                resultSubstitution <-
+                  case constructorResultSubstitution
+                    context
+                    ownerContext
+                    typeBounds
+                    dataParameters
+                    parameters
+                    initialSubstitution
+                    constructorResultTy
+                    effectiveResultTy of
+                    Just substitution -> Right substitution
+                    Nothing -> Left (constructorResultMismatch constructor)
+                foldM
+                  (matchConstructorApplicationArgument context env typeBounds dataParameters parameters)
+                  resultSubstitution
+                  (zip rawFields args)
+              | initialSubstitution <- initialSubstitutions
+            ]
       let completedSubstitution = completeBackendParameterSubstitution parameters substitution
           fields = map (substituteBackendTypes completedSubstitution) rawFields
           substitutedResultTy0 = substituteBackendTypes completedSubstitution constructorResultTy
@@ -2015,16 +2358,18 @@ convertConstructorApplication context env term resultTy =
             || constructorBoundaryTypesMatch context ownerContext typeBounds substitutedResultTy0 effectiveResultTy
         )
         $
-        Left
-          ( BackendUnsupportedCaseShape
-              ( "constructor result type does not match expected result for `"
-                  ++ backendConstructorName constructor
-                  ++ "`"
+        liftEitherConvert
+          ( Left
+              ( BackendUnsupportedCaseShape
+                  ( "constructor result type does not match expected result for `"
+                      ++ backendConstructorName constructor
+                      ++ "`"
+                  )
               )
           )
-      argExprs <- zipWithM (convertTermExpected context env . Just) fields args
-      mapM_ (checkConstructorArgumentType context ownerContext typeBounds constructor) (zip [0 :: Int ..] (zip fields argExprs))
-      Right
+      argExprs <- zipWithM (convertTermExpectedMode DirectLambda context env scope . Just) fields args
+      liftEitherConvert (mapM_ (checkConstructorArgumentType context ownerContext typeBounds constructor) (zip [0 :: Int ..] (zip fields argExprs)))
+      pure
         ( Just
             BackendConstruct
               { backendExprType = effectiveResultTy,
@@ -2032,7 +2377,7 @@ convertConstructorApplication context env term resultTy =
                 backendConstructArgs = argExprs
               }
         )
-    Nothing -> Right Nothing
+    Nothing -> pure Nothing
   where
     constructorResultMismatch constructor =
       BackendUnsupportedCaseShape
@@ -2430,69 +2775,98 @@ structuralConstructorHeadTypeArgs context =
       normalizeBackendTypeForContext context <$> convertElabType ty
 
 convertCaseApplication ::
+  LambdaMode ->
   ConvertContext ->
   Env ->
+  ClosureScope ->
   ElabTerm ->
   BackendType ->
-  Either BackendConversionError (Maybe BackendExpr)
-convertCaseApplication context env term resultTy =
+  ConvertM (Maybe BackendExpr)
+convertCaseApplication mode context env scope term resultTy =
   case collectApps term of
     (headTerm, args) ->
       case caseScrutinee headTerm of
-        Nothing -> Right Nothing
+        Nothing -> pure Nothing
         Just scrutineeTerm -> do
-          (backendScrutineeTy, mbScrutineeData) <- caseScrutineeInfo context env scrutineeTerm
-          scrutineeExpr <- convertTermExpected context env (Just backendScrutineeTy) scrutineeTerm
+          (backendScrutineeTy, mbScrutineeData) <- liftEitherConvert (caseScrutineeInfo context env scrutineeTerm)
+          scrutineeExpr <- convertTermExpectedMode DirectLambda context env scope (Just backendScrutineeTy) scrutineeTerm
           dataMeta <-
             case mbScrutineeData of
-              Just scrutineeData -> Right scrutineeData
+              Just scrutineeData -> pure scrutineeData
               Nothing -> do
-                typeBounds <- backendTypeBoundsFromEnv env
-                requireCaseData context typeBounds (backendExprType scrutineeExpr)
+                typeBounds <- liftEitherConvert (backendTypeBoundsFromEnv env)
+                liftEitherConvert (requireCaseData context typeBounds (backendExprType scrutineeExpr))
           let constructors = backendDataConstructors (dmBackend dataMeta)
           case compare (length args) (length constructors) of
-            EQ -> Just <$> convertCaseWithHandlers context env resultTy scrutineeExpr dataMeta constructors args
+            EQ -> Just <$> convertCaseWithHandlers mode context env scope resultTy scrutineeExpr dataMeta constructors args
             GT -> do
               let (handlers, extraArgs) = splitAt (length constructors) args
-              extraArgTys <- mapM (inferBackendType env) extraArgs
+              extraArgTys <- liftEitherConvert (mapM (inferBackendType env) extraArgs)
               case scanr BTArrow resultTy extraArgTys of
                 caseResultTy : appliedResultTys -> do
-                  caseExpr <- convertCaseWithHandlers context env caseResultTy scrutineeExpr dataMeta constructors handlers
+                  caseExpr <- convertCaseWithHandlers mode context env scope caseResultTy scrutineeExpr dataMeta constructors handlers
                   Just
-                    <$> foldM
-                      (applyCaseExtraArgument context env)
-                      caseExpr
-                      (zip3 extraArgs extraArgTys appliedResultTys)
-                [] -> Right Nothing
-            LT -> Right Nothing
+                    <$> ( if backendExprIsClosureValue scope caseExpr
+                            then applyCaseClosureArguments context env scope resultTy caseExpr (zip extraArgs extraArgTys)
+                            else
+                              foldM
+                                (applyCaseExtraArgument context env scope)
+                                caseExpr
+                                (zip3 extraArgs extraArgTys appliedResultTys)
+                        )
+                [] -> pure Nothing
+            LT -> pure Nothing
 
 convertCaseWithHandlers ::
+  LambdaMode ->
   ConvertContext ->
   Env ->
+  ClosureScope ->
   BackendType ->
   BackendExpr ->
   DataMeta ->
   [BackendConstructor] ->
   [ElabTerm] ->
-  Either BackendConversionError BackendExpr
-convertCaseWithHandlers context env resultTy scrutineeExpr dataMeta constructors handlers = do
-  alternatives <- zipWithMCase (convertCaseAlternative context env resultTy dataMeta (backendExprType scrutineeExpr)) constructors handlers
-  Right
+  ConvertM BackendExpr
+convertCaseWithHandlers mode context env scope resultTy scrutineeExpr dataMeta constructors handlers = do
+  alternatives <- zipWithMCase (convertCaseAlternative mode context env scope resultTy dataMeta (backendExprType scrutineeExpr)) constructors handlers
+  pure
     BackendCase
       { backendExprType = resultTy,
         backendScrutinee = scrutineeExpr,
         backendAlternatives = alternatives
       }
 
+applyCaseClosureArguments ::
+  ConvertContext ->
+  Env ->
+  ClosureScope ->
+  BackendType ->
+  BackendExpr ->
+  [(ElabTerm, BackendType)] ->
+  ConvertM BackendExpr
+applyCaseClosureArguments context env scope resultTy funExpr args = do
+  argExprs <-
+    traverse
+      (\(arg, argTy) -> convertTermExpectedMode DirectLambda context env scope (Just argTy) arg)
+      args
+  pure
+    BackendClosureCall
+      { backendExprType = resultTy,
+        backendClosureFunction = funExpr,
+        backendClosureArguments = argExprs
+      }
+
 applyCaseExtraArgument ::
   ConvertContext ->
   Env ->
+  ClosureScope ->
   BackendExpr ->
   (ElabTerm, BackendType, BackendType) ->
-  Either BackendConversionError BackendExpr
-applyCaseExtraArgument context env funExpr (arg, argTy, resultTy) = do
-  argExpr <- convertTermExpected context env (Just argTy) arg
-  Right
+  ConvertM BackendExpr
+applyCaseExtraArgument context env scope funExpr (arg, argTy, resultTy) = do
+  argExpr <- convertTermExpectedMode DirectLambda context env scope (Just argTy) arg
+  pure
     BackendApp
       { backendExprType = resultTy,
         backendFunction = funExpr,
@@ -2896,42 +3270,54 @@ dataMatchesScrutinee typeBounds scrutineeTy dataMeta =
     (backendDataConstructors (dmBackend dataMeta))
 
 convertCaseAlternative ::
+  LambdaMode ->
   ConvertContext ->
   Env ->
+  ClosureScope ->
   BackendType ->
   DataMeta ->
   BackendType ->
   BackendConstructor ->
   ElabTerm ->
-  Either BackendConversionError BackendAlternative
-convertCaseAlternative context env resultTy dataMeta scrutineeTy constructor handler = do
-  fields <- caseAlternativeFieldTypes env dataMeta scrutineeTy constructor
+  ConvertM BackendAlternative
+convertCaseAlternative mode context env scope resultTy dataMeta scrutineeTy constructor handler = do
+  fields <- liftEitherConvert (caseAlternativeFieldTypes env dataMeta scrutineeTy constructor)
   let (params, body) = collectLeadingLams (length fields) handler
   when (length params /= length fields) $
-    Left
-      ( BackendUnsupportedCaseShape
-          ("handler arity does not match constructor `" ++ backendConstructorName constructor ++ "`")
+    liftEitherConvert
+      ( Left
+          ( BackendUnsupportedCaseShape
+              ("handler arity does not match constructor `" ++ backendConstructorName constructor ++ "`")
+          )
       )
   fieldEnvTypes <-
-    traverse
-      ( \((name, paramTy), ty) ->
-          case backendTypeToElabType ty of
-            Just elabTy -> Right (name, elabTy)
-            Nothing -> Right (name, paramTy)
-      )
-      (zip params fields)
+    liftEitherConvert $
+      traverse
+        ( \((name, paramTy), ty) ->
+            case backendTypeToElabType ty of
+              Just elabTy -> Right (name, elabTy)
+              Nothing -> Right (name, paramTy)
+        )
+        (zip params fields)
   let env' =
         foldr
           (\(name, ty) acc -> extendTermEnv name ty acc)
           env
           fieldEnvTypes
-  bodyExpr <- convertTermExpected context env' (Just resultTy) body
+      scope' = extendClosureScopeTerms fieldEnvTypes scope
+      bodyMode =
+        if isClosureConvertibleFunctionType resultTy
+          then ClosureLambda Nothing
+          else mode
+  bodyExpr <- convertTermExpectedMode bodyMode context env' scope' (Just resultTy) body
   unless (alphaEqBackendType (backendExprType bodyExpr) resultTy) $
-    Left
-      ( BackendUnsupportedCaseShape
-          ("handler result type does not match case result for `" ++ backendConstructorName constructor ++ "`")
+    liftEitherConvert
+      ( Left
+          ( BackendUnsupportedCaseShape
+              ("handler result type does not match case result for `" ++ backendConstructorName constructor ++ "`")
+          )
       )
-  Right
+  pure
     BackendAlternative
       { backendAltPattern = BackendConstructorPattern (backendConstructorName constructor) (map fst params),
         backendAltBody = bodyExpr
@@ -3001,16 +3387,16 @@ backendTypeBoundsFromEnv env =
     convertTypeBound boundTy = Just <$> convertElabType boundTy
 
 zipWithMCase ::
-  (BackendConstructor -> ElabTerm -> Either BackendConversionError BackendAlternative) ->
+  (BackendConstructor -> ElabTerm -> ConvertM BackendAlternative) ->
   [BackendConstructor] ->
   [ElabTerm] ->
-  Either BackendConversionError (NonEmpty BackendAlternative)
+  ConvertM (NonEmpty BackendAlternative)
 zipWithMCase f constructors handlers =
   case zipWith f constructors handlers of
     firstAlt : restAlts ->
       (:|) <$> firstAlt <*> sequence restAlts
     [] ->
-      Left (BackendUnsupportedCaseShape "case expression has no alternatives")
+      liftEitherConvert (Left (BackendUnsupportedCaseShape "case expression has no alternatives"))
 
 matchBackendTypeParameters ::
   BackendTypeBounds ->

@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Added
+- Added checked-program closure conversion for ordinary monomorphic escaping
+  `.mlfp` lambdas and closure-valued let aliases. Backend conversion now emits
+  explicit `BackendClosure` / `BackendClosureCall` IR for returned local
+  functions and indirect calls through aliases while preserving direct
+  first-order local calls on the direct application path.
 - Added native LLVM toolchain runner support to the test harness. LLVM backend
   tests can now discover `llc` plus a native linker, build a temporary
   executable from emitted `.ll`, run it, and capture stdout, stderr, and exit
@@ -11,7 +16,9 @@
 ### Changed
 - LLVM case lowering now treats closure-valued case results as closure
   pointers, so `BackendClosureCall` can use a case-selected closure callee
-  without rejecting the callee's arrow result type.
+  without rejecting the callee's arrow result type. Closure-valued let aliases
+  now also stay runtime pointer aliases during lowering instead of being
+  reclassified as raw escaping local functions.
 - Supported expected-type resolution for nullary overloaded `.mlfp` methods.
   Associated values such as `mempty : a` now resolve from an explicit or
   propagated expected source type while bare uses without such evidence still
@@ -45,7 +52,8 @@
 - Added LLVM lowering support for first-class polymorphic values at
   non-escaping runtime boundaries. Polymorphic arguments and immediate
   constructor fields are statically specialized/erased at call and case sites,
-  while escaping closures and partial applications remain fail-closed.
+  while raw backend escaping lambdas and partial applications remain
+  fail-closed unless conversion has produced explicit closure IR.
 - Extended LLVM backend support for resolved typeclass evidence and derived
   `Eq`: constrained helper aliases, method-level evidence constraints,
   parameterized instances, recursive `List` deriving, recursive ADT deriving

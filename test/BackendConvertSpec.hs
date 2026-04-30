@@ -75,7 +75,7 @@ spec = describe "MLF.Backend.Convert" $ do
       Just other -> expectationFailure ("expected backend case, got " ++ show other)
       Nothing -> expectationFailure "expected backend case"
 
-  it "falls back to ordinary application for over-applied case-shaped terms" $ do
+  it "applies over-applied case-shaped terms through the closure-call path" $ do
     checked0 <- requireChecked functionCaseProgram
     let checked =
           mapMainBinding
@@ -92,14 +92,14 @@ spec = describe "MLF.Backend.Convert" $ do
 
     mainBinding <- requireBinding (backendProgramMain backend) backend
     case backendBindingExpr mainBinding of
-      BackendApp
+      BackendClosureCall
         { backendExprType = resultTy,
-          backendFunction = fun,
-          backendArgument = BackendLit {backendLit = LInt 1}
+          backendClosureFunction = fun,
+          backendClosureArguments = [BackendLit {backendLit = LInt 1}]
         } -> do
           resultTy `shouldBe` intTy
           fun `shouldSatisfy` containsBackendCase
-      other -> expectationFailure ("expected backend application of recovered case, got " ++ show other)
+      other -> expectationFailure ("expected backend closure call of recovered case, got " ++ show other)
 
   it "recovers backend cases with type-wrapped handler lambdas" $ do
     checked0 <- requireChecked intCaseProgram
@@ -662,6 +662,42 @@ spec = describe "MLF.Backend.Convert" $ do
     convertSourceType unsupportedVariableHeadType
       `shouldBe` Right (BTVarApp "f" (intTy :| []))
 
+  it "closure-converts a returned local function value" $ do
+    checked <- requireChecked returnedClosureProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
+
+  it "closure-converts local function aliases that cross let boundaries" $ do
+    checked <- requireChecked closureAliasCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
+
+  it "closure-converts captured lambdas called through let aliases" $ do
+    checked <- requireChecked capturedClosureCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCapture "captured"
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
+
+  it "keeps direct first-order local calls on the direct application path" $ do
+    checked <- requireChecked directLocalCallProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendApp
+    backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendClosure
+    backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendClosureCall
+
 simpleFunctionProgram :: String
 simpleFunctionProgram =
   unlines
@@ -1036,6 +1072,47 @@ unsupportedVariableHeadType :: SrcType
 unsupportedVariableHeadType =
   STVarApp "f" (STBase "Int" :| [])
 
+returnedClosureProgram :: String
+returnedClosureProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int -> Int =",
+      "    let captured : Int = 41 in \\(x : Int) captured;",
+      "}"
+    ]
+
+closureAliasCallProgram :: String
+closureAliasCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int =",
+      "    let f : Int -> Int = \\(x : Int) x in",
+      "    let g : Int -> Int = f in",
+      "    g 7;",
+      "}"
+    ]
+
+capturedClosureCallProgram :: String
+capturedClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let g : Int -> Int = f in",
+      "    g 0;",
+      "}"
+    ]
+
+directLocalCallProgram :: String
+directLocalCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int =",
+      "    let f : Int -> Int = \\(x : Int) x in f 7;",
+      "}"
+    ]
+
 requireChecked :: String -> IO CheckedProgram
 requireChecked input = do
   program <- requireParsed input
@@ -1336,6 +1413,93 @@ containsBackendTyApp expr =
     BackendRoll {backendRollPayload = body} -> containsBackendTyApp body
     BackendUnroll {backendUnrollPayload = body} -> containsBackendTyApp body
     _ -> False
+
+containsBackendApp :: BackendExpr -> Bool
+containsBackendApp expr =
+  case expr of
+    BackendApp {} -> True
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendApp scrutinee || any (containsBackendApp . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsBackendApp body
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsBackendApp rhs || containsBackendApp body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendApp body
+    BackendTyApp {backendTyFunction = fun} -> containsBackendApp fun
+    BackendConstruct {backendConstructArgs = args} -> any containsBackendApp args
+    BackendRoll {backendRollPayload = body} -> containsBackendApp body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendApp body
+    BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
+      any (containsBackendApp . backendClosureCaptureExpr) captures || containsBackendApp body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      containsBackendApp fun || any containsBackendApp args
+    _ -> False
+
+containsBackendClosure :: BackendExpr -> Bool
+containsBackendClosure expr =
+  case expr of
+    BackendClosure {} -> True
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendClosure scrutinee || any (containsBackendClosure . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsBackendClosure body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsBackendClosure fun || containsBackendClosure arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsBackendClosure rhs || containsBackendClosure body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendClosure body
+    BackendTyApp {backendTyFunction = fun} -> containsBackendClosure fun
+    BackendConstruct {backendConstructArgs = args} -> any containsBackendClosure args
+    BackendRoll {backendRollPayload = body} -> containsBackendClosure body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendClosure body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      containsBackendClosure fun || any containsBackendClosure args
+    _ -> False
+
+containsBackendClosureCall :: BackendExpr -> Bool
+containsBackendClosureCall expr =
+  case expr of
+    BackendClosureCall {} -> True
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendClosureCall scrutinee || any (containsBackendClosureCall . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsBackendClosureCall body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsBackendClosureCall fun || containsBackendClosureCall arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsBackendClosureCall rhs || containsBackendClosureCall body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendClosureCall body
+    BackendTyApp {backendTyFunction = fun} -> containsBackendClosureCall fun
+    BackendConstruct {backendConstructArgs = args} -> any containsBackendClosureCall args
+    BackendRoll {backendRollPayload = body} -> containsBackendClosureCall body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendClosureCall body
+    BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
+      any (containsBackendClosureCall . backendClosureCaptureExpr) captures || containsBackendClosureCall body
+    _ -> False
+
+containsBackendClosureCapture :: String -> BackendExpr -> Bool
+containsBackendClosureCapture expected expr =
+  case expr of
+    BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
+      any (captureNameMatches expected . backendClosureCaptureName) captures
+        || any (containsBackendClosureCapture expected . backendClosureCaptureExpr) captures
+        || containsBackendClosureCapture expected body
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendClosureCapture expected scrutinee
+        || any (containsBackendClosureCapture expected . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsBackendClosureCapture expected body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsBackendClosureCapture expected fun || containsBackendClosureCapture expected arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsBackendClosureCapture expected rhs || containsBackendClosureCapture expected body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendClosureCapture expected body
+    BackendTyApp {backendTyFunction = fun} -> containsBackendClosureCapture expected fun
+    BackendConstruct {backendConstructArgs = args} -> any (containsBackendClosureCapture expected) args
+    BackendRoll {backendRollPayload = body} -> containsBackendClosureCapture expected body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendClosureCapture expected body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      containsBackendClosureCapture expected fun || any (containsBackendClosureCapture expected) args
+    _ -> False
+  where
+    captureNameMatches expectedName actualName =
+      expectedName == actualName || expectedName `isInfixOf` actualName
 
 containsBackendTyAppArgument :: BackendType -> BackendExpr -> Bool
 containsBackendTyAppArgument expected expr =

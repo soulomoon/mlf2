@@ -588,11 +588,31 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "rejects partial applications until closure conversion is explicit in backend IR" $ do
     renderBackendProgramLLVM partialApplicationProgram
-      `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
+      `shouldSatisfyLeft` isInfixOf "Backend LLVM arity mismatch"
 
   it "rejects raw escaping lambdas until closure construction is explicit in backend IR" $ do
     renderBackendProgramLLVM escapingLambdaProgram
-      `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
+      `shouldSatisfyLeft` isInfixOf "escaping function"
+
+  it "lowers source-level captured closure calls through the explicit closure ABI" $ do
+    output <-
+      withTempProgram sourceCapturedClosureCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$Main__main$"
+    output `shouldSatisfy` isInfixOf "store i64 41"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "lowers source-level returned closure values as pointer results" $ do
+    output <-
+      withTempProgram sourceReturnedClosureProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$Main__main$"
+    validateLLVMAssembly output
 
   it "lowers zero-capture closures through the explicit closure ABI" $ do
     output <- requireRight (renderBackendProgramLLVM zeroCaptureClosureProgram)
@@ -2861,6 +2881,27 @@ escapingLambdaProgram =
         backendLetRhs = intIdentityExpr,
         backendLetBody = BackendVar unaryIntTy "f"
       }
+
+sourceCapturedClosureCallProgram :: String
+sourceCapturedClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let g : Int -> Int = f in",
+      "    g 0;",
+      "}"
+    ]
+
+sourceReturnedClosureProgram :: String
+sourceReturnedClosureProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int -> Int =",
+      "    let captured : Int = 41 in \\(x : Int) captured;",
+      "}"
+    ]
 
 zeroCaptureClosureProgram :: BackendProgram
 zeroCaptureClosureProgram =
