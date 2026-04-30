@@ -1242,6 +1242,32 @@ spec = describe "MLF.Backend.LLVM" $ do
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
+  it "preserves closure-valued fields from returned constructors through case binders" $ do
+    output <- requireRight (renderBackendProgramLLVM returnedClosureFunctionFieldCallProgram)
+
+    output `shouldSatisfy` isInfixOf "call ptr @\"makeBox\""
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.case.field"
+    output `shouldNotSatisfy` isInfixOf "call i64 %\"__llvm.case.field"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+    nativeOutput <- requireRight (renderBackendProgramNativeLLVM returnedClosureFunctionFieldCallProgram)
+    runLLVMNativeExecutable nativeOutput
+      `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
+
+  it "classifies case-returned closures for over-applied global calls" $ do
+    output <- requireRight (renderBackendProgramLLVM caseReturnedClosureOverApplicationProgram)
+
+    output `shouldSatisfy` isInfixOf "call ptr @\"makeFromCase\""
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.call"
+    output `shouldNotSatisfy` isInfixOf "call i64 %\"__llvm.call"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+    nativeOutput <- requireRight (renderBackendProgramNativeLLVM caseReturnedClosureOverApplicationProgram)
+    runLLVMNativeExecutable nativeOutput
+      `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
+
   it "captures first-order lambda parameters as raw function pointers" $ do
     output <- requireRight (renderBackendProgramLLVM capturedFirstOrderParameterClosureProgram)
 
@@ -4793,6 +4819,116 @@ closureFunctionFieldCallProgram =
                                   )
                               )
                           ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
+    }
+
+returnedClosureFunctionFieldCallProgram :: BackendProgram
+returnedClosureFunctionFieldCallProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [fnBoxData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "makeBox",
+                      backendBindingType = BTArrow intTy fnBoxTy,
+                      backendBindingExpr =
+                        BackendLam
+                          (BTArrow intTy fnBoxTy)
+                          "base"
+                          intTy
+                          ( BackendConstruct
+                              fnBoxTy
+                              "FnBox"
+                              [ BackendClosure
+                                  { backendExprType = unaryIntTy,
+                                    backendClosureEntryName = "__mlfp_closure$returned_field_case_closure",
+                                    backendClosureCaptures = [BackendClosureCapture "base" intTy (BackendVar intTy "base")],
+                                    backendClosureParams = [("x", intTy)],
+                                    backendClosureBody = BackendVar intTy "base"
+                                  }
+                              ]
+                          ),
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendCase
+                          intTy
+                          (BackendApp fnBoxTy (BackendVar (BTArrow intTy fnBoxTy) "makeBox") (intLit 41))
+                          ( BackendAlternative
+                              (BackendConstructorPattern "FnBox" ["f"])
+                              (BackendApp intTy (BackendVar unaryIntTy "f") (intLit 0))
+                              :| []
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
+    }
+
+caseReturnedClosureOverApplicationProgram :: BackendProgram
+caseReturnedClosureOverApplicationProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "makeFromCase",
+                      backendBindingType = BTArrow intTy unaryIntTy,
+                      backendBindingExpr =
+                        BackendLam
+                          (BTArrow intTy unaryIntTy)
+                          "base"
+                          intTy
+                          ( BackendCase
+                              unaryIntTy
+                              (BackendConstruct (optionTy intTy) "Some" [BackendVar intTy "base"])
+                              ( BackendAlternative
+                                  (BackendConstructorPattern "Some" ["captured"])
+                                  ( BackendClosure
+                                      { backendExprType = unaryIntTy,
+                                        backendClosureEntryName = "__mlfp_closure$case_returned_some",
+                                        backendClosureCaptures = [BackendClosureCapture "captured" intTy (BackendVar intTy "captured")],
+                                        backendClosureParams = [("x", intTy)],
+                                        backendClosureBody = BackendVar intTy "captured"
+                                      }
+                                  )
+                                  :| [ BackendAlternative
+                                         (BackendConstructorPattern "None" [])
+                                         ( BackendClosure
+                                             { backendExprType = unaryIntTy,
+                                               backendClosureEntryName = "__mlfp_closure$case_returned_none",
+                                               backendClosureCaptures = [],
+                                               backendClosureParams = [("x", intTy)],
+                                               backendClosureBody = intLit 0
+                                             }
+                                         )
+                                     ]
+                              )
+                          ),
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          (BackendApp unaryIntTy (BackendVar (BTArrow intTy unaryIntTy) "makeFromCase") (intLit 41))
+                          (intLit 0),
                       backendBindingExportedAsMain = True
                     }
                 ]

@@ -154,8 +154,7 @@ data ClosureCaptureSlot = ClosureCaptureSlot
   deriving (Eq, Show)
 
 data ConstructedValue = ConstructedValue
-  { cvConstructorName :: String,
-    cvFieldValueKinds :: [LowerValueKind]
+  { cvFieldValueKindsByConstructor :: Map String [LowerValueKind]
   }
   deriving (Eq, Show)
 
@@ -186,6 +185,46 @@ data LowerValueKind
   | LowerClosureRecord
   | LowerFunctionPointer
   deriving (Eq, Show)
+
+constructedValueForConstructor :: String -> [LowerValueKind] -> ConstructedValue
+constructedValueForConstructor name fieldKinds =
+  ConstructedValue (Map.singleton name fieldKinds)
+
+constructedFieldValueKind :: String -> Int -> ConstructedValue -> Maybe LowerValueKind
+constructedFieldValueKind constructorName index0 constructed =
+  Map.lookup constructorName (cvFieldValueKindsByConstructor constructed) >>= flip atMay index0
+
+mergeConstructedValues :: [Maybe ConstructedValue] -> Maybe ConstructedValue
+mergeConstructedValues values =
+  case foldM mergeValue Map.empty constructedFields of
+    Just fieldsByConstructor
+      | length constructedFields == length values,
+        not (Map.null fieldsByConstructor) ->
+          Just (ConstructedValue fieldsByConstructor)
+    _ ->
+      Nothing
+  where
+    constructedFields =
+      [fieldsByConstructor | Just (ConstructedValue fieldsByConstructor) <- values]
+
+    mergeValue acc fieldsByConstructor =
+      foldM mergeConstructor acc (Map.toList fieldsByConstructor)
+
+    mergeConstructor acc (constructorName, fieldKinds) =
+      case Map.lookup constructorName acc of
+        Nothing ->
+          Just (Map.insert constructorName fieldKinds acc)
+        Just existingKinds
+          | existingKinds == fieldKinds ->
+              Just acc
+        Just _ ->
+          Nothing
+
+combineValueKinds :: BackendType -> [LowerValueKind] -> LowerValueKind
+combineValueKinds resultTy kinds =
+  case nub kinds of
+    [kind] -> kind
+    _ -> valueKindForType resultTy
 
 data LocalFunction = LocalFunction
   { lfForm :: FunctionForm,
@@ -3254,7 +3293,14 @@ lowerGlobalValue env context resultTy name binding typeArgs =
       resultLLVMType <- lowerRuntimeValueTypeM env context expectedTy
       functionName <- globalFunctionName env context binding0 resolvedTypeArgs
       result <- emitAssign "call" resultLLVMType (LLVMCall functionName [])
-      pure (LowerValue expectedTy resultLLVMType result (functionFormReturnValueKind env instantiated) Nothing)
+      pure
+        ( LowerValue
+            expectedTy
+            resultLLVMType
+            result
+            (functionFormReturnValueKind env instantiated)
+            (functionFormReturnConstructedValue env instantiated)
+        )
 
 lowerLit :: ProgramEnv -> String -> BackendType -> Lit -> LowerM LowerValue
 lowerLit env context ty lit = do
@@ -3947,7 +3993,14 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
           llvmResultTy <- lowerRuntimeValueTypeM env context (ffReturnType form)
           functionName <- globalFunctionName env context binding resolvedTypeArgs
           result <- emitAssign "call" llvmResultTy (LLVMCall functionName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
-          pure (LowerValue (ffReturnType form) llvmResultTy result (functionFormReturnValueKind env form) Nothing)
+          pure
+            ( LowerValue
+                (ffReturnType form)
+                llvmResultTy
+                result
+                (functionFormReturnValueKind env form)
+                (functionFormReturnConstructedValue env form)
+            )
 
 shouldInlineGlobalCall :: ProgramEnv -> ExprEnv -> BindingInfo -> [BackendType] -> FunctionForm -> [BackendExpr] -> Bool
 shouldInlineGlobalCall env exprEnv binding resolvedTypeArgs form args =
@@ -4452,7 +4505,7 @@ lowerConstruct env exprEnv context resultTy name args =
             LLVMPtr
             object
             LowerRuntimeValue
-            (Just (ConstructedValue name (map lvValueKind argValues)))
+            (Just (constructedValueForConstructor name (map lvValueKind argValues)))
         )
   where
     storeField object index0 value = do
@@ -4514,8 +4567,15 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
     startBlock defaultLabel
     finishCurrentBlock LLVMUnreachable
   startBlock joinLabel
-  result <- emitAssign "case.result" resultLLVMType (LLVMPhi resultLLVMType incoming)
-  pure (lowerValueForType resultTy resultLLVMType result)
+  result <- emitAssign "case.result" resultLLVMType (LLVMPhi resultLLVMType [(operand, label) | (operand, label, _, _) <- incoming])
+  pure
+    ( LowerValue
+        resultTy
+        resultLLVMType
+        result
+        (combineValueKinds resultTy [kind | (_, _, kind, _) <- incoming])
+        (mergeConstructedValues [constructed | (_, _, _, constructed) <- incoming])
+    )
   where
     alternativesList = NE.toList alternatives
 
@@ -4559,7 +4619,7 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
         liftEither (BackendLLVMInternalError ("case alternative type mismatch at " ++ context))
       sourceLabel <- gets fsCurrentLabel
       finishCurrentBlock (LLVMBr joinLabel)
-      pure [(lvOperand bodyValue, sourceLabel)]
+      pure [(lvOperand bodyValue, sourceLabel, lvValueKind bodyValue, lvConstructedValue bodyValue)]
 
     bindAlternativePattern scrutineeValue (BackendAlternative pattern0 body) =
       case pattern0 of
@@ -4604,8 +4664,7 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
     fieldValueKind constructorName scrutineeValue index0 fieldTy =
       case lvConstructedValue scrutineeValue of
         Just constructed
-          | cvConstructorName constructed == constructorName,
-            Just kind <- atMay (cvFieldValueKinds constructed) index0 ->
+          | Just kind <- constructedFieldValueKind constructorName index0 constructed ->
               kind
         _ ->
           valueKindForType fieldTy
@@ -4660,6 +4719,12 @@ functionFormReturnValueKindWith env visitedGlobals form =
   where
     paramKinds = Map.fromList [(paramName, parameterValueKind paramName paramTy) | (paramName, paramTy) <- ffParams form]
 
+functionFormReturnConstructedValue :: ProgramEnv -> FunctionForm -> Maybe ConstructedValue
+functionFormReturnConstructedValue env form =
+  backendExprConstructedValueWith env Set.empty paramKinds Map.empty (ffBody form)
+  where
+    paramKinds = Map.fromList [(paramName, parameterValueKind paramName paramTy) | (paramName, paramTy) <- ffParams form]
+
 backendExprValueKindWith :: ProgramEnv -> Set String -> Map String LowerValueKind -> BackendExpr -> LowerValueKind
 backendExprValueKindWith env visitedGlobals valueKinds expr
   | not (isFunctionLikeBackendType (backendExprType expr)) = LowerRuntimeValue
@@ -4687,6 +4752,12 @@ backendExprValueKindWith env visitedGlobals valueKinds expr
                           Map.delete name valueKinds
                     _ ->
                       Map.insert name (backendExprValueKindWith env visitedGlobals valueKinds rhs) valueKinds
+        BackendCase {} ->
+          combineValueKinds
+            (backendExprType expr)
+            [ backendExprValueKindWith env visitedGlobals valueKinds (backendAltBody alternative)
+            | alternative <- NE.toList (backendAlternatives expr)
+            ]
         BackendClosure {} ->
           LowerClosureRecord
         _ ->
@@ -4743,6 +4814,135 @@ backendExprValueKindWith env visitedGlobals valueKinds expr
                   LowerFunctionPointer
             Nothing ->
               valueKindForType ty
+
+backendExprConstructedValueWith ::
+  ProgramEnv ->
+  Set String ->
+  Map String LowerValueKind ->
+  Map String ConstructedValue ->
+  BackendExpr ->
+  Maybe ConstructedValue
+backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues =
+  \case
+    BackendVar _ name ->
+      variableConstructedValue name []
+    expr@(BackendTyApp _ fun _) ->
+      case collectTyApps expr of
+        (BackendVar _ name, typeArgs) ->
+          variableConstructedValue name typeArgs
+        _ ->
+          backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues fun
+    BackendLet _ name bindingTy rhs body ->
+      backendExprConstructedValueWith env visitedGlobals valueKindsForBody constructedValuesForBody body
+      where
+        valueKindsForBody =
+          case functionLikeAliasValueKind valueKinds rhs of
+            Just kind ->
+              Map.insert name kind valueKinds
+            Nothing ->
+              case functionFormFromExpected bindingTy rhs of
+                form
+                  | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+                      Map.delete name valueKinds
+                _ ->
+                  Map.insert name (backendExprValueKindWith env visitedGlobals valueKinds rhs) valueKinds
+        constructedValuesForBody =
+          case backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues rhs of
+            Just constructed ->
+              Map.insert name constructed constructedValues
+            Nothing ->
+              Map.delete name constructedValues
+    BackendConstruct resultTy name args ->
+      Just (constructedValueForConstructor name fieldKinds)
+      where
+        fieldTys =
+          fromMaybe (map backendExprType args) $
+            Map.lookup name (pbConstructors (peBase env)) >>= \constructorRuntime ->
+              constructorRuntimeFieldTypes constructorRuntime resultTy
+        fieldKinds =
+          zipWith constructFieldValueKind fieldTys args
+        constructFieldValueKind fieldTy arg
+          | isFunctionLikeBackendType fieldTy =
+              backendExprValueKindWith env visitedGlobals valueKinds arg
+          | otherwise =
+              LowerRuntimeValue
+    BackendCase _ _ alternatives ->
+      mergeConstructedValues
+        [ backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues (backendAltBody alternative)
+        | alternative <- NE.toList alternatives
+        ]
+    BackendRoll _ payload ->
+      backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues payload
+    BackendUnroll _ payload ->
+      backendExprConstructedValueWith env visitedGlobals valueKinds constructedValues payload
+    _ ->
+      Nothing
+  where
+    functionLikeAliasValueKind kinds =
+      \case
+        BackendVar ty name
+          | isFunctionLikeBackendType ty ->
+              Just (variableValueKindWith kinds ty name [])
+        expr@(BackendTyApp ty fun _)
+          | isFunctionLikeBackendType ty ->
+              case collectTyApps expr of
+                (BackendVar varTy name, typeArgs) ->
+                  Just (variableValueKindWith kinds varTy name typeArgs)
+                _ ->
+                  functionLikeAliasValueKind kinds fun
+        BackendLet ty name bindingTy rhs body
+          | isFunctionLikeBackendType ty ->
+              let kindsForBody =
+                    case functionLikeAliasValueKind kinds rhs of
+                      Just kind ->
+                        Map.insert name kind kinds
+                      Nothing ->
+                        case functionFormFromExpected bindingTy rhs of
+                          form
+                            | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
+                                Map.delete name kinds
+                          _ ->
+                            Map.insert name (backendExprValueKindWith env visitedGlobals kinds rhs) kinds
+               in functionLikeAliasValueKind kindsForBody body
+        _ ->
+          Nothing
+
+    variableValueKindWith kinds ty name typeArgs =
+      case Map.lookup name kinds of
+        Just kind ->
+          kind
+        Nothing ->
+          case Map.lookup name (pbBindings (peBase env)) of
+            Just binding ->
+              case instantiateFunctionFormWithTypeArgs "value-kind classification" (biForm binding) typeArgs [] of
+                Right (_, form)
+                  | not (null (ffParams form)) ->
+                      LowerFunctionPointer
+                  | Set.member name visitedGlobals ->
+                      valueKindForType ty
+                  | otherwise ->
+                      functionFormReturnValueKindWith env (Set.insert name visitedGlobals) form
+                _ ->
+                  LowerFunctionPointer
+            Nothing ->
+              valueKindForType ty
+
+    variableConstructedValue name typeArgs =
+      case Map.lookup name constructedValues of
+        Just constructed ->
+          Just constructed
+        Nothing ->
+          case Map.lookup name (pbBindings (peBase env)) of
+            Just binding ->
+              case instantiateFunctionFormWithTypeArgs "constructed-value classification" (biForm binding) typeArgs [] of
+                Right (_, form)
+                  | null (ffParams form),
+                    Set.notMember name visitedGlobals ->
+                      backendExprConstructedValueWith env (Set.insert name visitedGlobals) valueKinds constructedValues (ffBody form)
+                _ ->
+                  Nothing
+            Nothing ->
+              Nothing
 
 parameterValueKind :: String -> BackendType -> LowerValueKind
 parameterValueKind name ty
