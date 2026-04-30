@@ -2142,13 +2142,39 @@ closureHint mode params =
 
 collectClosureLams :: ElabTerm -> ([(String, ElabType)], ElabTerm)
 collectClosureLams =
-  go []
+  go Set.empty []
   where
-    go params =
+    go avoid params =
       \case
-        ELam name ty body -> go (params ++ [(name, ty)]) body
+        ELam name ty body ->
+          let paramNames = Set.fromList (map fst params)
+              needsFreshName =
+                Set.member name avoid || Set.member name paramNames
+              used =
+                Set.unions
+                  [ avoid,
+                    paramNames,
+                    termVariableNames body,
+                    Set.singleton name
+                  ]
+              name' =
+                if needsFreshName
+                  then freshNameLike name used
+                  else name
+              body' =
+                if name' == name
+                  then body
+                  else renameBoundTermVariable name name' body
+           in go avoid (params ++ [(name', ty)]) body'
         ELet name scheme rhs body ->
-          case go [] body of
+          let avoidForBody =
+                Set.insert name $
+                  Set.unions
+                    [ avoid,
+                      Set.fromList (map fst params),
+                      termVariableNames rhs
+                    ]
+           in case go avoidForBody [] body of
             ([], _) -> (params, ELet name scheme rhs body)
             (bodyParams, bodyCore) -> (params ++ bodyParams, ELet name scheme rhs bodyCore)
         other -> (params, other)

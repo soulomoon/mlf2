@@ -673,6 +673,9 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "\", i64 %\""
     validateLLVMAssembly output
 
+  it "preserves shadowed lambda parameters collected through lets" $
+    assertNativeProgram sourceReturnedLetLambdaShadowingProgram "7"
+
   it "lowers zero-capture closures through the explicit closure ABI" $ do
     output <- requireRight (renderBackendProgramLLVM zeroCaptureClosureProgram)
 
@@ -3021,6 +3024,15 @@ sourceReturnedLetLambdaClosureProgram =
       "    let captured : Int = 41 in",
       "    let f : Int -> Int -> Int = \\(x : Int) let y : Int = captured in \\(z : Int) y in",
       "    f;",
+      "}"
+    ]
+
+sourceReturnedLetLambdaShadowingProgram :: String
+sourceReturnedLetLambdaShadowingProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def make : Int -> Int = let y : Int = 1 in \\(y : Int) y;",
+      "  def main : Int = make 7;",
       "}"
     ]
 

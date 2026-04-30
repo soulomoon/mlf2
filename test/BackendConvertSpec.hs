@@ -720,6 +720,20 @@ spec = describe "MLF.Backend.Convert" $ do
     mainBinding <- requireBinding (backendProgramMain backend) backend
     closureParamCounts (backendBindingExpr mainBinding) `shouldSatisfy` elem 2
 
+  it "alpha-renames returned lambda parameters hoisted across shadowing lets" $ do
+    checked0 <- requireChecked returnedLetLambdaClosureProgram
+    let checked =
+          mapMainBinding
+            ( \binding ->
+                binding {checkedBindingTerm = returnedLetLambdaShadowingElabTerm}
+            )
+            checked0
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr mainBinding `shouldSatisfy` containsAlphaRenamedShadowingClosure
+
   it "keeps direct first-order local calls on the direct application path" $ do
     checked <- requireChecked directLocalCallProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -1168,6 +1182,28 @@ returnedLetLambdaClosureProgram =
       "}"
     ]
 
+returnedLetLambdaShadowingElabTerm :: Elab.ElabTerm
+returnedLetLambdaShadowingElabTerm =
+  Elab.ELet
+    "captured"
+    (Elab.schemeFromType intElabTy)
+    (Elab.ELit (LInt 41))
+    ( Elab.ELet
+        "f"
+        (Elab.schemeFromType (Elab.TArrow intElabTy (Elab.TArrow intElabTy intElabTy)))
+        ( Elab.ELam
+            "x"
+            intElabTy
+            ( Elab.ELet
+                "y"
+                (Elab.schemeFromType intElabTy)
+                (Elab.ELit (LInt 1))
+                (Elab.ELam "y" intElabTy (Elab.EVar "y"))
+            )
+        )
+        (Elab.EVar "f")
+    )
+
 directLocalCallProgram :: String
 directLocalCallProgram =
   unlines
@@ -1536,6 +1572,40 @@ containsBackendClosureCall expr =
     BackendUnroll {backendUnrollPayload = body} -> containsBackendClosureCall body
     BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
       any (containsBackendClosureCall . backendClosureCaptureExpr) captures || containsBackendClosureCall body
+    _ -> False
+
+containsAlphaRenamedShadowingClosure :: BackendExpr -> Bool
+containsAlphaRenamedShadowingClosure expr =
+  case expr of
+    BackendClosure
+      { backendClosureCaptures = captures,
+        backendClosureParams = params,
+        backendClosureBody =
+          BackendLet
+            { backendLetName = "y",
+              backendLetBody = BackendVar {backendVarName = bodyName}
+            }
+      } ->
+        (bodyName /= "y" && bodyName `elem` map fst params)
+          || any (containsAlphaRenamedShadowingClosure . backendClosureCaptureExpr) captures
+    BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
+      any (containsAlphaRenamedShadowingClosure . backendClosureCaptureExpr) captures
+        || containsAlphaRenamedShadowingClosure body
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsAlphaRenamedShadowingClosure scrutinee
+        || any (containsAlphaRenamedShadowingClosure . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsAlphaRenamedShadowingClosure body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsAlphaRenamedShadowingClosure fun || containsAlphaRenamedShadowingClosure arg
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsAlphaRenamedShadowingClosure rhs || containsAlphaRenamedShadowingClosure body
+    BackendTyAbs {backendTyAbsBody = body} -> containsAlphaRenamedShadowingClosure body
+    BackendTyApp {backendTyFunction = fun} -> containsAlphaRenamedShadowingClosure fun
+    BackendConstruct {backendConstructArgs = args} -> any containsAlphaRenamedShadowingClosure args
+    BackendRoll {backendRollPayload = body} -> containsAlphaRenamedShadowingClosure body
+    BackendUnroll {backendUnrollPayload = body} -> containsAlphaRenamedShadowingClosure body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      containsAlphaRenamedShadowingClosure fun || any containsAlphaRenamedShadowingClosure args
     _ -> False
 
 closureParamCounts :: BackendExpr -> [Int]
