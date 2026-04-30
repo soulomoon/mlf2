@@ -7,7 +7,11 @@ import qualified Data.Map.Strict as Map
 import MLF.API (Lit (..), SrcTy (..))
 import MLF.Frontend.Program.Check (checkResolvedProgram)
 import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope)
-import MLF.Frontend.Program.Finalize (recoverSourceType, sourceForallMatches)
+import MLF.Frontend.Program.Finalize
+    ( recoverSourceType
+    , sourceForallMatches
+    , stripVacuousForallsAndTypeAbs
+    )
 import MLF.Frontend.Program.Types
     ( ConstructorInfo (..)
     , ConstructorShape (..)
@@ -17,6 +21,7 @@ import MLF.Frontend.Program.Types
     )
 import MLF.Frontend.Syntax (ResolvedSrcTy (..), mkSrcBound)
 import MLF.Program
+import qualified MLF.Types.Elab as Elab
 import MLF.Program.CLI (runProgramFile)
 import Test.Hspec
 
@@ -131,6 +136,17 @@ spec = do
                             (STVarApp "g" (STVar "a" :| []))
                         )
             sourceForallMatches expected actual `shouldBe` False
+
+        it "keeps vacuous foralls when matching type abstractions still carry instantiations" $ do
+            let ty = Elab.TForall "a" Nothing (Elab.TVar "result")
+                retainedTerm =
+                    Elab.ETyAbs
+                        "a"
+                        Nothing
+                        (Elab.ETyInst (Elab.EVar "poly") (Elab.InstApp (Elab.TVar "a")))
+                strippedTerm = Elab.ETyAbs "a" Nothing (Elab.EVar "value")
+            stripVacuousForallsAndTypeAbs ty retainedTerm `shouldBe` (ty, retainedTerm)
+            stripVacuousForallsAndTypeAbs ty strippedTerm `shouldBe` (Elab.TVar "result", Elab.EVar "value")
 
         it "recovers higher-kinded data heads with partially applied constructor parameters" $ do
             let typeIdentity =
@@ -1528,6 +1544,26 @@ spec = do
             checkProgram program `shouldSatisfy` either
                 (\err -> not ("ProgramCannotInferLambda" `isInfixOf` show err))
                 (const False)
+
+        it "does not rewrite same-shaped ADT instantiations to another nominal head" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (A(..), B(..), keep, main) {"
+                        , "  data A ="
+                        , "      AZ : A;"
+                        , ""
+                        , "  data B ="
+                        , "      BZ : B;"
+                        , ""
+                        , "  def keep : forall a. a -> a = \\x x;"
+                        , "  def main : B = keep BZ;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checked <- requireChecked program
+            mainBinding <- requireCheckedBinding "Main__main" checked
+            show (checkedBindingTerm mainBinding) `shouldNotSatisfy` isInfixOf "Main.A"
+            (prettyValue <$> runProgram program) `shouldBe` Right "BZ"
   where
     roundtripFixture path =
         it ("roundtrips " ++ path) $ do
@@ -1580,6 +1616,22 @@ spec = do
         case source of
             InlineProgram programText -> requireParsed programText
             ProgramFile path -> requireParsed =<< readFile path
+
+    requireChecked program =
+        case checkProgram program of
+            Left err -> expectationFailure ("check failed: " ++ show err) >> fail "check failed"
+            Right checked -> pure checked
+
+    requireCheckedBinding name checked =
+        case
+            [ binding
+            | checkedModule <- checkedProgramModules checked
+            , binding <- checkedModuleBindings checkedModule
+            , checkedBindingName binding == name
+            ]
+        of
+            binding : _ -> pure binding
+            [] -> expectationFailure ("missing checked binding: " ++ name) >> fail "missing checked binding"
 
 requireParsed :: String -> IO Program
 requireParsed input =

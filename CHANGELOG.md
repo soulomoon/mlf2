@@ -12,7 +12,13 @@
 - Supported expected-type resolution for nullary overloaded `.mlfp` methods.
   Associated values such as `mempty : a` now resolve from an explicit or
   propagated expected source type while bare uses without such evidence still
-  fail closed as ambiguous.
+  fail closed as ambiguous. Parameterized associated values used through
+  constrained aliases, such as `DefaultBox a => Box a`, now preserve local
+  evidence and expected result annotations without over-instantiating the
+  rewrite; backend conversion preserves nominal ADT instantiation identity from
+  expected-result context instead of rewriting checked terms. Finalization now
+  strips vacuous checked `forall` binders only together with their matching
+  term type abstractions, preserving binder scope for retained instantiations.
 - Added a native LLVM emission contract for pure `.mlfp` entrypoints. The
   backend can now emit an `i32 @main()` wrapper that renders supported
   `Int`, `Bool`, and first-order ADT results to stdout, returns exit status
