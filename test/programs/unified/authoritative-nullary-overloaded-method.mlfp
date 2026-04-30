@@ -1,0 +1,17 @@
+module Main export (Monoid, Nat(..), mempty, append, main) {
+  class Monoid a {
+    mempty : a;
+    append : a -> a -> a;
+  }
+
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  instance Monoid Nat {
+    mempty = Zero;
+    append = \left \right left;
+  }
+
+  def main : Nat = append (mempty : Nat) Zero;
+}
