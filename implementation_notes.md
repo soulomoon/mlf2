@@ -25,6 +25,9 @@
 - Supplied higher-rank function values follow the same boundary: only
   first-order function-pointer shapes are wrapped and captured in partial
   closures, matching the LLVM lowerer's stored-function representation.
+- Ordinary call conversion treats hidden evidence arguments by their exact
+  argument index, so evidence already supplied in a call spine does not suppress
+  closure wrapping for a later closure-demanded function argument.
 - LLVM parity coverage now includes top-level and local partial application
   rows, with `llvm-as`, object-code smoke, and native execution coverage when
   the local LLVM toolchain is available.

@@ -2102,20 +2102,20 @@ convertCallArgument ::
   ElabTerm ->
   ConvertM BackendExpr
 convertCallArgument context env scope fun expectedArgTy arg
-  | applicationArgumentNeedsClosureValue context scope fun =
+  | applicationArgumentNeedsClosureValue context scope expectedArgTy fun =
       convertClosureValueArgument context env scope expectedArgTy arg
   | otherwise =
       convertTermExpectedMode DirectLambda context env scope (Just expectedArgTy) arg
 
-applicationArgumentNeedsClosureValue :: ConvertContext -> ClosureScope -> ElabTerm -> Bool
-applicationArgumentNeedsClosureValue context scope fun
-  | partialApplicationMentionsEvidence fun = False
-  | otherwise =
-      case stripClosureHeadTypeInsts headTerm of
-        EVar name ->
-          Set.member suppliedCount (lookupClosureValueArgumentDemand context scope name)
-        _ ->
-          False
+applicationArgumentNeedsClosureValue :: ConvertContext -> ClosureScope -> BackendType -> ElabTerm -> Bool
+applicationArgumentNeedsClosureValue context scope expectedArgTy fun =
+  isFirstOrderFunctionCaptureType expectedArgTy
+    && case stripClosureHeadTypeInsts headTerm of
+      EVar name ->
+        Set.notMember suppliedCount (lookupEvidenceValueArguments context scope name)
+          && Set.member suppliedCount (lookupClosureValueArgumentDemand context scope name)
+      _ ->
+        False
   where
     (headTerm, suppliedArgs) = collectApps fun
     suppliedCount = length suppliedArgs

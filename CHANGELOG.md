@@ -39,6 +39,9 @@
 - Fixed packaged partial-application argument conversion so direct supplied
   functions are wrapped as closure values before capture, and direct-function
   closure wrappers capture free locals from inline function expressions.
+- Fixed closure-demanded call argument conversion after hidden evidence
+  arguments so later direct function arguments are still wrapped before
+  entering the closure ABI.
 - LLVM case lowering now treats closure-valued case results as closure
   pointers, so `BackendClosureCall` can use a case-selected closure callee
   without rejecting the callee's arrow result type. Closure-valued let aliases

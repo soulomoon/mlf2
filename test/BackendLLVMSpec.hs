@@ -688,6 +688,17 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
     assertNativeProgram sourcePartialApplicationLocalClosureDemandProgram "1"
 
+  it "wraps closure-demanded arguments after evidence arguments" $ do
+    output <-
+      withTempProgram sourceClosureDemandAfterEvidenceProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldNotSatisfy` isInfixOf "store ptr @\"Main__keepLeft\""
+    output `shouldNotSatisfy` isInfixOf "BackendClosureCallExpectedClosureValue"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceClosureDemandAfterEvidenceProgram "1"
+
   it "wraps direct function arguments before packaging partial applications" $ do
     output <-
       withTempProgram sourcePartialApplicationDirectFunctionArgumentProgram $ \path ->
@@ -3299,6 +3310,21 @@ sourcePartialApplicationLocalClosureDemandProgram =
       "  def main : Int =",
       "    let use : (Int -> Int -> Int) -> Int = \\f apply (f 1)",
       "    in use keepLeft;",
+      "}"
+    ]
+
+sourceClosureDemandAfterEvidenceProgram :: String
+sourceClosureDemandAfterEvidenceProgram =
+  unlines
+    [ "module Main export (Marker, main) {",
+      "  class Marker a {",
+      "  }",
+      "  instance Marker Bool {",
+      "  }",
+      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
+      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def use : Marker Bool => (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def main : Int = use keepLeft;",
       "}"
     ]
 
