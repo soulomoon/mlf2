@@ -171,6 +171,17 @@ do not yet have LLVM lowering. The LLVM backend is intentionally repo-local:
 into that AST, and `Ppr` emits opaque-pointer LLVM IR text accepted by LLVM 15+
 tools or LLVM 14-era tools run with `-opaque-pointers`.
 
+The backend has two emission contracts. Raw emission keeps the checked `.mlfp`
+`main` as an ordinary module-qualified LLVM function and is the stable IR
+inspection surface. Native emission adds a C ABI `i32 @main()` wrapper around a
+zero-argument checked `.mlfp` `main`, renders supported pure `Int`, `Bool`, and
+first-order ADT results to stdout using the same value text as `ProgramSpec`,
+prints one trailing newline, writes no stderr on success, and returns process
+exit status `0`. Native emission declares libc `malloc`/`printf` and emits
+backend-owned runtime definitions such as `__mlfp_and` when those names are not
+program bindings. Unsupported result types fail before native-run assertions,
+so the native process boundary does not invent source or IO semantics.
+
 The explicit closure ABI is private to the backend IR-to-LLVM path. A closure
 value is a heap pointer to a two-word record containing a code pointer and an
 environment pointer or null. Non-empty environments are heap records with one

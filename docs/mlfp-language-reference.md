@@ -265,6 +265,80 @@ constraint, or an existing closed instance. For example, `Option a` derives
 If deriving cannot resolve the first required field instance, it fails with a
 field-specific deriving diagnostic.
 
+## IO And Monad Contract
+
+This section freezes the initial IO contract for the #87 work. Source typing,
+runner execution, and backend behavior remain separate ownership boundaries;
+this contract defines the surface they implement without changing the pure
+eMLF/xMLF core.
+
+The initial standard-library surface is deliberately small:
+
+```mlf
+data Unit =
+    Unit : Unit;
+
+class Monad (m :: * -> *) {
+  pure : forall a. a -> m a;
+  bind : forall a b. m a -> (a -> m b) -> m b;
+}
+```
+
+`Unit` is the unit result type for completed effects. It has one inhabitant,
+`Unit`, and is the only supported result type for effectful program entrypoints
+in the initial IO surface. `Functor` and `Applicative` are explicitly deferred:
+the first IO slice exposes `Monad` directly and does not require the broader
+Haskell class hierarchy.
+
+`IO` is an opaque source type constructor with kind `* -> *`. It is owned by the
+program/runtime boundary rather than declared as an ordinary source ADT. User
+programs may mention `IO a` in types and use the standard-library operations
+below, but they cannot construct, deconstruct, derive, or pattern match on an
+`IO` representation. The standard library provides a coherent `Monad IO`
+instance backed by implementation-reserved primitives such as `__io_pure` and
+`__io_bind`; those primitive names are not the user-facing API.
+
+The initial text operation is:
+
+```mlf
+putStrLn : String -> IO Unit
+```
+
+`putStrLn` uses the existing source `String` base type and string literals.
+There is no narrower byte/character primitive in the first contract, and input
+operations such as `readLine : IO String` are deferred.
+
+Pure program entrypoints remain accepted:
+
+```mlf
+module Main export (main) {
+  def main : Bool = true;
+}
+```
+
+The effectful entrypoint mode is `main : IO Unit`:
+
+```mlf
+module Main export (main) {
+  import Prelude exposing (Unit(..), IO, Monad, bind, pure, putStrLn);
+
+  def main : IO Unit =
+    bind (putStrLn "hello") (\(_done : Unit) putStrLn "world");
+}
+```
+
+An `IO` action is still a pure value while the program is checked and normalized.
+Effects occur only when the runner executes the final checked `main` action, and
+sequencing is determined by `bind` through the runtime interpretation of the
+opaque `IO` primitive boundary. The initial runner contract does not render
+`main : IO a` results for non-`Unit` `a`.
+
+The backend contract is fail-closed for the first IO slice. `emit-backend`
+should reject checked IO programs with a structured unsupported diagnostic until
+the backend IO issue adds a concrete lowering plan for the selected primitives.
+That rejection does not change source typing, pure runtime rendering, or the
+existing first-order LLVM subset.
+
 ## Backend Boundary
 
 Successful `.mlfp` checking may be followed by conversion into the internal

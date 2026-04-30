@@ -5,6 +5,7 @@ import System.Exit (die)
 
 import MLF.Program.CLI
     ( emitBackendFile
+    , emitNativeFile
     , programCliUsage
     , runProgramFile
     )
@@ -25,6 +26,10 @@ main = do
         ["emit-backend", path] ->
             emitBackendFile path >>= either die putStr
         ["emit-backend"] ->
+            die programCliUsage
+        ["emit-native", path] ->
+            emitNativeFile path >>= either die putStr
+        ["emit-native"] ->
             die programCliUsage
         ["--help"] ->
             putStrLn programCliUsage

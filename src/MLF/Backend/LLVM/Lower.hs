@@ -26,6 +26,7 @@ module MLF.Backend.LLVM.Lower
     evidenceFunctionTypesCompatible,
     inferTypeArgumentsForTest,
     lowerBackendProgram,
+    lowerBackendProgramNative,
     renderBackendLLVMError,
   )
 where
@@ -34,7 +35,7 @@ import Control.Monad (foldM, unless, when, zipWithM, zipWithM_)
 import Control.Monad.State.Strict (StateT (StateT), evalStateT, get, gets, modify)
 import Data.Bifunctor (first)
 import Data.Char (isAlphaNum, ord)
-import Data.List (intercalate, isPrefixOf, nub, sort, sortOn)
+import Data.List (intercalate, isPrefixOf, nub, sort, sortOn, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -66,8 +67,15 @@ data ProgramBase = ProgramBase
   { pbBindings :: Map String BindingInfo,
     pbBindingOrder :: [String],
     pbConstructors :: Map String ConstructorRuntime,
+    pbData :: Map String DataRuntime,
     pbDataNames :: Set String
   }
+
+data DataRuntime = DataRuntime
+  { drData :: BackendData,
+    drConstructors :: [ConstructorRuntime]
+  }
+  deriving (Eq, Show)
 
 data ProgramEnv = ProgramEnv
   { peBase :: ProgramBase,
@@ -137,6 +145,19 @@ data ClosureEntry = ClosureEntry
   }
   deriving (Eq, Show)
 
+data LoweredProgram = LoweredProgram
+  { lpBase :: ProgramBase,
+    lpEnv :: ProgramEnv,
+    lpMainBinding :: BindingInfo,
+    lpFunctions :: [LLVMFunction]
+  }
+
+data NativeRenderSpec = NativeRenderSpec
+  { nrsType :: BackendType,
+    nrsFunctionName :: String
+  }
+  deriving (Eq, Show)
+
 data LowerValue = LowerValue
   { lvBackendType :: BackendType,
     lvLLVMType :: LLVMType,
@@ -171,6 +192,21 @@ type LowerM = StateT FunctionState (Either BackendLLVMError)
 
 lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
 lowerBackendProgram program = do
+  lowered <- lowerBackendProgramCore program
+  pure
+    LLVMModule
+      { llvmModuleGlobals = rawLLVMGlobals lowered,
+        llvmModuleDeclarations = runtimeDeclarations (lpBase lowered),
+        llvmModuleFunctions = lpFunctions lowered
+      }
+
+lowerBackendProgramNative :: BackendProgram -> Either BackendLLVMError LLVMModule
+lowerBackendProgramNative program = do
+  lowered <- lowerBackendProgramCore program
+  lowerNativeProgram lowered
+
+lowerBackendProgramCore :: BackendProgram -> Either BackendLLVMError LoweredProgram
+lowerBackendProgramCore program = do
   first BackendLLVMValidationFailed (validateBackendProgram program)
   base <- buildProgramBase program
   reachable <- reachableBindings base (backendProgramMain program)
@@ -202,12 +238,435 @@ lowerBackendProgram program = do
   when (not (null (ffTypeBinders (biForm mainBinding)))) $
     Left (BackendLLVMUnsupportedExpression "program main" "polymorphic main binding")
   pure
-    LLVMModule
-      { llvmModuleGlobals =
-          [LLVMStringGlobal globalName value | (value, globalName) <- Map.toAscList stringGlobals],
-        llvmModuleDeclarations = runtimeDeclarations base,
-        llvmModuleFunctions = functions
+    LoweredProgram
+      { lpBase = base,
+        lpEnv = env,
+        lpMainBinding = mainBinding,
+        lpFunctions = functions
       }
+
+rawLLVMGlobals :: LoweredProgram -> [LLVMGlobal]
+rawLLVMGlobals lowered =
+  [LLVMStringGlobal globalName value | (value, globalName) <- Map.toAscList (peStringGlobals (lpEnv lowered))]
+
+lowerNativeProgram :: LoweredProgram -> Either BackendLLVMError LLVMModule
+lowerNativeProgram lowered = do
+  let base = lpBase lowered
+      env = lpEnv lowered
+      mainBinding = lpMainBinding lowered
+      mainForm = biForm mainBinding
+  unless (null (ffParams mainForm)) $
+    Left (BackendLLVMUnsupportedExpression "native process main" "main must be a zero-argument pure value")
+  renderSpecs <- collectNativeRenderSpecs base (ffReturnType mainForm)
+  rejectNativeSymbolConflicts base renderSpecs
+  let renderMap = Map.fromList [(backendTypeKey (nrsType spec), nrsFunctionName spec) | spec <- renderSpecs]
+  renderers <- traverse (lowerNativeRenderer env renderMap) renderSpecs
+  entrypoint <- lowerNativeEntrypoint env mainBinding renderMap
+  pure
+    LLVMModule
+      { llvmModuleGlobals = rawLLVMGlobals lowered ++ nativeGlobals base renderSpecs,
+        llvmModuleDeclarations = nativeRuntimeDeclarations base,
+        llvmModuleFunctions =
+          lpFunctions lowered
+            ++ nativeRuntimeFunctions base
+            ++ renderers
+            ++ [entrypoint]
+      }
+
+nativeRuntimeDeclarations :: ProgramBase -> [LLVMDeclaration]
+nativeRuntimeDeclarations base =
+  [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
+    | Map.notMember runtimeMallocName (pbBindings base)
+  ]
+    ++ [LLVMDeclaration nativePrintfName (LLVMInt 32) [LLVMPtr] True]
+
+nativeRuntimeFunctions :: ProgramBase -> [LLVMFunction]
+nativeRuntimeFunctions base =
+  [nativeAndFunction | Map.notMember runtimeAndName (pbBindings base)]
+
+nativeCMainName :: String
+nativeCMainName =
+  "main"
+
+nativePrintfName :: String
+nativePrintfName =
+  "printf"
+
+nativeRenderPrefix :: String
+nativeRenderPrefix =
+  "__mlfp_native_render$"
+
+nativeFmtIntName :: String
+nativeFmtIntName =
+  "__mlfp_native_fmt_i64"
+
+nativeFmtStringName :: String
+nativeFmtStringName =
+  "__mlfp_native_fmt_str"
+
+nativeStrTrueName :: String
+nativeStrTrueName =
+  "__mlfp_native_str_true"
+
+nativeStrFalseName :: String
+nativeStrFalseName =
+  "__mlfp_native_str_false"
+
+nativeStrNewlineName :: String
+nativeStrNewlineName =
+  "__mlfp_native_str_newline"
+
+nativeStrSpaceName :: String
+nativeStrSpaceName =
+  "__mlfp_native_str_space"
+
+nativeStrOpenParenName :: String
+nativeStrOpenParenName =
+  "__mlfp_native_str_open_paren"
+
+nativeStrCloseParenName :: String
+nativeStrCloseParenName =
+  "__mlfp_native_str_close_paren"
+
+nativeGlobals :: ProgramBase -> [NativeRenderSpec] -> [LLVMGlobal]
+nativeGlobals base renderSpecs =
+  [ LLVMStringGlobal nativeFmtIntName "%ld",
+    LLVMStringGlobal nativeFmtStringName "%s",
+    LLVMStringGlobal nativeStrTrueName "true",
+    LLVMStringGlobal nativeStrFalseName "false",
+    LLVMStringGlobal nativeStrNewlineName "\n",
+    LLVMStringGlobal nativeStrSpaceName " ",
+    LLVMStringGlobal nativeStrOpenParenName "(",
+    LLVMStringGlobal nativeStrCloseParenName ")"
+  ]
+    ++ concatMap (constructorNameGlobals base) renderSpecs
+
+constructorNameGlobals :: ProgramBase -> NativeRenderSpec -> [LLVMGlobal]
+constructorNameGlobals base spec =
+  case nativeDataRuntimeForTypeName (nrsType spec) of
+    Nothing -> []
+    Just dataName ->
+      case Map.lookup dataName (pbData base) of
+        Nothing -> []
+        Just dataRuntime0 ->
+          [ LLVMStringGlobal (nativeConstructorGlobalName spec constructorRuntime) (displayConstructorName dataRuntime0 constructorRuntime)
+          | constructorRuntime <- drConstructors dataRuntime0
+          ]
+
+nativeDataRuntimeForTypeName :: BackendType -> Maybe String
+nativeDataRuntimeForTypeName =
+  \case
+    BTBase (BaseTy name) -> Just name
+    BTCon (BaseTy name) _ -> Just name
+    BTMu name _ -> structuralMuDataName name
+    _ -> Nothing
+
+nativeConstructorGlobalName :: NativeRenderSpec -> ConstructorRuntime -> String
+nativeConstructorGlobalName spec constructorRuntime =
+  "__mlfp_native_ctor$" ++ backendTypeKey (nrsType spec) ++ "$" ++ show (crTag constructorRuntime)
+
+nativeRendererName :: BackendType -> String
+nativeRendererName ty =
+  nativeRenderPrefix ++ backendTypeKey ty
+
+rejectNativeSymbolConflicts :: ProgramBase -> [NativeRenderSpec] -> Either BackendLLVMError ()
+rejectNativeSymbolConflicts base renderSpecs =
+  case [name | name <- Map.keys (pbBindings base), nativeNameConflicts name] of
+    name : _ ->
+      Left (BackendLLVMUnsupportedExpression "native process" ("reserved native LLVM symbol " ++ show name))
+    [] -> Right ()
+  where
+    reservedNames =
+      Set.fromList
+        ( [ nativeCMainName,
+            nativePrintfName,
+            nativeFmtIntName,
+            nativeFmtStringName,
+            nativeStrTrueName,
+            nativeStrFalseName,
+            nativeStrNewlineName,
+            nativeStrSpaceName,
+            nativeStrOpenParenName,
+            nativeStrCloseParenName
+          ]
+            ++ map nrsFunctionName renderSpecs
+        )
+
+    nativeNameConflicts name =
+      Set.member name reservedNames
+        || nativeRenderPrefix `isPrefixOf` name
+        || "__mlfp_native_" `isPrefixOf` name
+
+collectNativeRenderSpecs :: ProgramBase -> BackendType -> Either BackendLLVMError [NativeRenderSpec]
+collectNativeRenderSpecs base rootTy =
+  reverse . fst <$> go Set.empty [] rootTy
+  where
+    go seen specs ty
+      | Set.member key seen = Right (specs, seen)
+      | otherwise =
+          case nativeRenderableKind base ty of
+            NativeScalar ->
+              Right (NativeRenderSpec ty (nativeRendererName ty) : specs, Set.insert key seen)
+            NativeData dataRuntime0 -> do
+              let seen' = Set.insert key seen
+                  spec = NativeRenderSpec ty (nativeRendererName ty)
+              foldM (collectConstructorFields ty) (spec : specs, seen') (drConstructors dataRuntime0)
+            NativeUnsupported detail ->
+              Left (BackendLLVMUnsupportedExpression "native result rendering" detail)
+      where
+        key = backendTypeKey ty
+
+    collectConstructorFields resultTy (specs, seen) constructorRuntime = do
+      fieldTys <-
+        case constructorRuntimeFieldTypes constructorRuntime resultTy of
+          Just tys -> Right tys
+          Nothing ->
+            Left
+              ( BackendLLVMUnsupportedExpression
+                  "native result rendering"
+                  ("could not match constructor result for " ++ backendConstructorName (crConstructor constructorRuntime))
+              )
+      foldM
+        ( \(specsAcc, seenAcc) fieldTy -> do
+            go seenAcc specsAcc fieldTy
+        )
+        (specs, seen)
+        fieldTys
+
+data NativeRenderableKind
+  = NativeScalar
+  | NativeData DataRuntime
+  | NativeUnsupported String
+
+nativeRenderableKind :: ProgramBase -> BackendType -> NativeRenderableKind
+nativeRenderableKind base ty =
+  case ty of
+    BTBase (BaseTy "Int") -> NativeScalar
+    BTBase (BaseTy "Bool") -> NativeScalar
+    BTBase (BaseTy "String") -> NativeUnsupported "String main values are not supported by native result rendering yet"
+    BTBase (BaseTy name) ->
+      maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (Map.lookup name (pbData base))
+    BTCon (BaseTy name) _ ->
+      maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (Map.lookup name (pbData base))
+    BTArrow {} -> NativeUnsupported "function main values are not native-renderable"
+    BTForall {} -> NativeUnsupported "polymorphic main values are not native-renderable"
+    BTVar {} -> NativeUnsupported "type-variable main values are not native-renderable"
+    BTVarApp {} -> NativeUnsupported "variable-headed main values are not native-renderable"
+    BTMu name _ ->
+      case structuralMuDataName name >>= (`Map.lookup` pbData base) of
+        Just dataRuntime0 -> NativeData dataRuntime0
+        Nothing -> NativeUnsupported "structural recursive main values are not native-renderable"
+    BTBottom -> NativeUnsupported "bottom main values are not native-renderable"
+
+lowerNativeRenderer :: ProgramEnv -> Map String String -> NativeRenderSpec -> Either BackendLLVMError LLVMFunction
+lowerNativeRenderer env renderMap spec =
+  case nativeRenderableKind (peBase env) (nrsType spec) of
+    NativeScalar ->
+      lowerNativeScalarRenderer spec
+    NativeData dataRuntime0 ->
+      lowerNativeDataRenderer env renderMap spec dataRuntime0
+    NativeUnsupported detail ->
+      Left (BackendLLVMUnsupportedExpression "native result rendering" detail)
+
+lowerNativeScalarRenderer :: NativeRenderSpec -> Either BackendLLVMError LLVMFunction
+lowerNativeScalarRenderer spec =
+  case nrsType spec of
+    BTBase (BaseTy "Int") ->
+      lowerNativeFunction
+        (nrsFunctionName spec)
+        (LLVMInt 32)
+        [(LLVMInt 64, "value"), (LLVMInt 1, "parenthesize")]
+        $ \params -> do
+          let value = requireNativeParam "value" params
+          _ <- emitPrintf nativeFmtIntName [(LLVMInt 64, value)]
+          finishNativeSuccess
+    BTBase (BaseTy "Bool") ->
+      lowerNativeFunction
+        (nrsFunctionName spec)
+        (LLVMInt 32)
+        [(LLVMInt 1, "value"), (LLVMInt 1, "parenthesize")]
+        $ \params -> do
+          let value = requireNativeParam "value" params
+          trueLabel <- freshBlock "bool.true"
+          falseLabel <- freshBlock "bool.false"
+          finishCurrentBlock (LLVMSwitch (LLVMInt 1) value falseLabel [(1, trueLabel)])
+          startBlock trueLabel
+          _ <- emitPrintStringGlobal nativeStrTrueName
+          finishNativeSuccess
+          startBlock falseLabel
+          _ <- emitPrintStringGlobal nativeStrFalseName
+          finishNativeSuccess
+    _ ->
+      Left (BackendLLVMUnsupportedExpression "native result rendering" ("unsupported scalar renderer " ++ show (nrsType spec)))
+
+lowerNativeDataRenderer :: ProgramEnv -> Map String String -> NativeRenderSpec -> DataRuntime -> Either BackendLLVMError LLVMFunction
+lowerNativeDataRenderer env renderMap spec dataRuntime0 =
+  lowerNativeFunction
+    (nrsFunctionName spec)
+    (LLVMInt 32)
+    [(LLVMPtr, "value"), (LLVMInt 1, "parenthesize")]
+    $ \params -> do
+      let value = requireNativeParam "value" params
+          parenthesize = requireNativeParam "parenthesize" params
+      tagPtr <- emitGep "native.tag.ptr" value 0
+      tagValue <- emitAssign "native.tag" (LLVMInt 64) (LLVMLoad (LLVMInt 64) tagPtr)
+      altLabels <- traverse (const (freshBlock "native.ctor")) (drConstructors dataRuntime0)
+      defaultLabel <- freshBlock "native.unknown"
+      let switchTargets = [(crTag constructorRuntime, label) | (constructorRuntime, label) <- zip (drConstructors dataRuntime0) altLabels]
+      finishCurrentBlock (LLVMSwitch (LLVMInt 64) tagValue defaultLabel switchTargets)
+      zipWithM_ (lowerNativeConstructorRenderer env renderMap spec value parenthesize) (drConstructors dataRuntime0) altLabels
+      startBlock defaultLabel
+      finishCurrentBlock LLVMUnreachable
+
+lowerNativeConstructorRenderer ::
+  ProgramEnv ->
+  Map String String ->
+  NativeRenderSpec ->
+  LLVMOperand ->
+  LLVMOperand ->
+  ConstructorRuntime ->
+  String ->
+  LowerM ()
+lowerNativeConstructorRenderer env renderMap spec value parenthesize constructorRuntime label = do
+  fieldTys <-
+    case constructorRuntimeFieldTypes constructorRuntime (nrsType spec) of
+      Just tys -> pure tys
+      Nothing ->
+        liftEither
+          ( BackendLLVMUnsupportedExpression
+              "native result rendering"
+              ("could not match constructor result for " ++ backendConstructorName (crConstructor constructorRuntime))
+          )
+  startBlock label
+  if null fieldTys
+    then do
+      _ <- emitPrintStringGlobal (nativeConstructorGlobalName spec constructorRuntime)
+      finishNativeSuccess
+    else do
+      openLabel <- freshBlock "native.open"
+      bodyLabel <- freshBlock "native.body"
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) parenthesize bodyLabel [(1, openLabel)])
+      startBlock openLabel
+      _ <- emitPrintStringGlobal nativeStrOpenParenName
+      finishCurrentBlock (LLVMBr bodyLabel)
+      startBlock bodyLabel
+      _ <- emitPrintStringGlobal (nativeConstructorGlobalName spec constructorRuntime)
+      zipWithM_ (printField fieldTys) [0 :: Int ..] fieldTys
+      closeLabel <- freshBlock "native.close"
+      doneLabel <- freshBlock "native.done"
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) parenthesize doneLabel [(1, closeLabel)])
+      startBlock closeLabel
+      _ <- emitPrintStringGlobal nativeStrCloseParenName
+      finishNativeSuccess
+      startBlock doneLabel
+      finishNativeSuccess
+  where
+    printField _ index0 fieldTy = do
+      _ <- emitPrintStringGlobal nativeStrSpaceName
+      fieldLLVMType <- lowerBackendTypeM env "native result field" fieldTy
+      fieldPtr <- emitGep "native.field.ptr" value (8 * (index0 + 1))
+      fieldValue <- emitAssign "native.field" fieldLLVMType (LLVMLoad fieldLLVMType fieldPtr)
+      callNativeRenderer renderMap fieldTy fieldLLVMType fieldValue (nativeFieldParenthesize (peBase env) fieldTy)
+
+nativeFieldParenthesize :: ProgramBase -> BackendType -> Bool
+nativeFieldParenthesize base ty =
+  case nativeRenderableKind base ty of
+    NativeData {} -> True
+    _ -> False
+
+lowerNativeEntrypoint :: ProgramEnv -> BindingInfo -> Map String String -> Either BackendLLVMError LLVMFunction
+lowerNativeEntrypoint env mainBinding renderMap =
+  lowerNativeFunction nativeCMainName (LLVMInt 32) [] $ \_ -> do
+    let mainForm = biForm mainBinding
+    mainLLVMType <- lowerBackendTypeM env "native process main result" (ffReturnType mainForm)
+    mainValue <- emitAssign "native.main" mainLLVMType (LLVMCall (biName mainBinding) [])
+    callNativeRenderer renderMap (ffReturnType mainForm) mainLLVMType mainValue False
+    _ <- emitPrintStringGlobal nativeStrNewlineName
+    finishNativeSuccess
+
+nativeAndFunction :: LLVMFunction
+nativeAndFunction =
+  case
+    lowerNativeFunction runtimeAndName (LLVMInt 1) [(LLVMInt 1, "left"), (LLVMInt 1, "right")] $ \params -> do
+      result <- emitAssign "and" (LLVMInt 1) (LLVMAnd (requireNativeParam "left" params) (requireNativeParam "right" params))
+      finishCurrentBlock (LLVMRet (LLVMInt 1) result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __mlfp_and lowering failed: " ++ renderBackendLLVMError err)
+
+lowerNativeFunction ::
+  String ->
+  LLVMType ->
+  [(LLVMType, String)] ->
+  (Map String LLVMOperand -> LowerM ()) ->
+  Either BackendLLVMError LLVMFunction
+lowerNativeFunction name returnTy params buildBody = do
+  blocks <- evalStateT (buildBody paramOperands >> gets (reverse . fsCompletedBlocks)) initialFunctionState
+  pure
+    LLVMFunction
+      { llvmFunctionName = name,
+        llvmFunctionPrivate = name /= nativeCMainName && name /= runtimeAndName,
+        llvmFunctionReturnType = returnTy,
+        llvmFunctionParameters = [LLVMParameter ty paramName | (ty, paramName) <- params],
+        llvmFunctionBlocks = blocks
+      }
+  where
+    paramOperands =
+      Map.fromList [(paramName, LLVMLocal ty paramName) | (ty, paramName) <- params]
+
+finishNativeSuccess :: LowerM ()
+finishNativeSuccess =
+  finishCurrentBlock (LLVMRet (LLVMInt 32) (LLVMIntLiteral 32 0))
+
+requireNativeParam :: String -> Map String LLVMOperand -> LLVMOperand
+requireNativeParam name params =
+  case Map.lookup name params of
+    Just operand -> operand
+    Nothing -> error ("internal native parameter missing: " ++ name)
+
+emitPrintf :: String -> [(LLVMType, LLVMOperand)] -> LowerM LLVMOperand
+emitPrintf formatGlobal args =
+  emitAssign
+    "printf"
+    (LLVMInt 32)
+    (LLVMCall nativePrintfName ((LLVMPtr, LLVMGlobalRef LLVMPtr formatGlobal) : args))
+
+emitPrintStringGlobal :: String -> LowerM LLVMOperand
+emitPrintStringGlobal globalName =
+  emitPrintf nativeFmtStringName [(LLVMPtr, LLVMGlobalRef LLVMPtr globalName)]
+
+callNativeRenderer :: Map String String -> BackendType -> LLVMType -> LLVMOperand -> Bool -> LowerM ()
+callNativeRenderer renderMap ty llvmTy value parenthesize =
+  case Map.lookup (backendTypeKey ty) renderMap of
+    Just renderName -> do
+      _ <-
+        emitAssign
+          "render"
+          (LLVMInt 32)
+          ( LLVMCall
+              renderName
+              [ (llvmTy, value),
+                (LLVMInt 1, LLVMIntLiteral 1 (if parenthesize then 1 else 0))
+              ]
+          )
+      pure ()
+    Nothing ->
+      liftEither (BackendLLVMUnsupportedExpression "native result rendering" ("missing renderer for " ++ show ty))
+
+displayConstructorName :: DataRuntime -> ConstructorRuntime -> String
+displayConstructorName dataRuntime0 constructorRuntime =
+  case runtimeModulePrefix (backendDataName (drData dataRuntime0)) >>= (`stripPrefix` runtimeName) of
+    Just displayName
+      | not (null displayName) -> displayName
+    _ -> runtimeName
+  where
+    runtimeName = backendConstructorName (crConstructor constructorRuntime)
+
+runtimeModulePrefix :: String -> Maybe String
+runtimeModulePrefix qualifiedDataName0 =
+  case break (== '.') (reverse qualifiedDataName0) of
+    (_, []) -> Nothing
+    (_, _ : reversedModuleName) -> Just (reverse reversedModuleName ++ "__")
 
 shouldLowerReachableBinding :: Set String -> BindingInfo -> Bool
 shouldLowerReachableBinding referencedFunctionNames binding =
@@ -308,10 +767,10 @@ runtimeMallocName =
 
 runtimeDeclarations :: ProgramBase -> [LLVMDeclaration]
 runtimeDeclarations base =
-  [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64]
+  [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
-    ++ [ LLVMDeclaration runtimeAndName (LLVMInt 1) [LLVMInt 1, LLVMInt 1]
+    ++ [ LLVMDeclaration runtimeAndName (LLVMInt 1) [LLVMInt 1, LLVMInt 1] False
          | Map.notMember runtimeAndName (pbBindings base)
        ]
 
@@ -331,11 +790,14 @@ buildProgramBase program = do
       bindingInfos = map bindingInfo bindings
       constructors =
         concatMap constructorRuntimes dataDecls
+      dataRuntimes =
+        map dataRuntime dataDecls
   pure
         ProgramBase
           { pbBindings = Map.fromList [(biName info, info) | info <- bindingInfos],
             pbBindingOrder = map biName bindingInfos,
             pbConstructors = Map.fromList [(backendConstructorName (crConstructor ctor), ctor) | ctor <- constructors],
+            pbData = Map.fromList [(backendDataName (drData dataRuntime0), dataRuntime0) | dataRuntime0 <- dataRuntimes],
             pbDataNames = Set.fromList (map backendDataName dataDecls)
           }
 
@@ -356,6 +818,13 @@ constructorRuntimes dataDecl =
       }
   | (tag, constructor) <- zip [0 ..] (backendDataConstructors dataDecl)
   ]
+
+dataRuntime :: BackendData -> DataRuntime
+dataRuntime dataDecl =
+  DataRuntime
+    { drData = dataDecl,
+      drConstructors = constructorRuntimes dataDecl
+    }
 
 functionFormFromExpr :: BackendExpr -> FunctionForm
 functionFormFromExpr expr =

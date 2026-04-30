@@ -7,10 +7,14 @@ import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import System.Exit (ExitCode (..))
 import Test.Hspec
 
 import LLVMToolSupport
-  ( validateLLVMAssembly,
+  ( NativeRunResult (..),
+    parseExecutableCommand,
+    runLLVMNativeExecutable,
+    validateLLVMAssembly,
     validateLLVMObjectCode,
     withTempProgram,
   )
@@ -26,7 +30,7 @@ import MLF.Program
     parseRawProgram,
     renderProgramParseError,
   )
-import MLF.Program.CLI (emitBackendFile)
+import MLF.Program.CLI (emitBackendFile, emitNativeFile)
 import Parity.ProgramMatrix
   ( ProgramMatrixCase (..),
     ProgramMatrixExpectation (..),
@@ -52,6 +56,49 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
     output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
     validateLLVMAssembly output
+
+  describe "native process entrypoint" $ do
+    it "prints an Int main value to stdout and exits successfully" $
+      assertNativeProgram simpleFunctionProgram "1"
+
+    it "prints a Bool main value to stdout and exits successfully" $
+      assertNativeProgram boolMainProgram "true"
+
+    it "prints nested first-order ADT values with ProgramSpec rendering" $
+      assertNativeProgram nativeNestedAdtProgram "Some (Succ Zero)"
+
+    it "preserves user-authored double underscores in constructor names" $
+      assertNativeProgram nativeDoubleUnderscoreConstructorProgram "A__B"
+
+    it "links the backend-owned __mlfp_and runtime primitive in native mode" $
+      assertNativeProgram preludeAndProgram "false"
+
+    it "rejects unsupported native string result rendering before native assertions use it" $
+      renderBackendProgramNativeLLVM nativeStringResultProgram
+        `shouldSatisfyLeft` isInfixOf "String main values are not supported"
+
+    it "rejects source/native entrypoint symbol collisions" $
+      renderBackendProgramNativeLLVM nativeMainNameCollisionProgram
+        `shouldSatisfyLeft` isInfixOf "reserved native LLVM symbol \"main\""
+
+  it "runs a linked native executable and captures process output" $ do
+    result <- runLLVMNativeExecutable nativeOutputCaptureLLVM
+
+    nativeRunExitCode result `shouldBe` ExitFailure 7
+    nativeRunStdout result `shouldBe` "native stdout\n"
+    nativeRunStderr result `shouldBe` "native stderr\n"
+
+  it "parses CC launchers and flags before executable lookup" $ do
+    parseExecutableCommand "ccache clang -m64"
+      `shouldBe` Just ("ccache", ["clang", "-m64"])
+    parseExecutableCommand "xcrun clang"
+      `shouldBe` Just ("xcrun", ["clang"])
+    parseExecutableCommand "\"/opt/LLVM Tools/bin/clang\" -fuse-ld=lld"
+      `shouldBe` Just ("/opt/LLVM Tools/bin/clang", ["-fuse-ld=lld"])
+    parseExecutableCommand "'/opt/LLVM Tools/bin/clang' '-Wl,-dead_strip'"
+      `shouldBe` Just ("/opt/LLVM Tools/bin/clang", ["-Wl,-dead_strip"])
+    parseExecutableCommand "\"unterminated"
+      `shouldBe` Nothing
 
   describe "shared ProgramSpec first-order parity" $ do
     it "keeps the selected shared first-order parity rows wired" $
@@ -657,6 +704,20 @@ runLLVMUnifiedFixture path =
         validateLLVMObjectCode output
       _ -> validateLLVMAssembly output
 
+assertNativeProgram :: String -> String -> Expectation
+assertNativeProgram programText expectedValue = do
+  output <- requireRight =<< emitNativeSource programText
+  output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+  output `shouldSatisfy` isInfixOf "declare i32 @\"printf\"(ptr, ...)"
+  validateLLVMAssembly output
+  validateLLVMObjectCode output
+  runLLVMNativeExecutable output
+    `shouldReturn` NativeRunResult ExitSuccess (expectedValue ++ "\n") ""
+
+emitNativeSource :: String -> IO (Either String String)
+emitNativeSource programText =
+  withTempProgram programText emitNativeFile
+
 renderProgramMatrixSourceLLVM :: ProgramMatrixSource -> IO String
 renderProgramMatrixSourceLLVM source =
   case source of
@@ -674,12 +735,66 @@ simpleFunctionProgram =
       "}"
     ]
 
+nativeOutputCaptureLLVM :: String
+nativeOutputCaptureLLVM =
+  unlines
+    [ "; mlf2 native runner smoke",
+      "source_filename = \"mlf2-native-runner-smoke\"",
+      "@\"stdout_text\" = private unnamed_addr constant [14 x i8] c\"native stdout\\0A\"",
+      "@\"stderr_text\" = private unnamed_addr constant [14 x i8] c\"native stderr\\0A\"",
+      "declare i64 @\"write\"(i32, ptr, i64)",
+      "",
+      "define i32 @\"main\"() {",
+      "entry:",
+      "  %\"stdout.ptr\" = getelementptr inbounds [14 x i8], ptr @\"stdout_text\", i64 0, i64 0",
+      "  %\"stderr.ptr\" = getelementptr inbounds [14 x i8], ptr @\"stderr_text\", i64 0, i64 0",
+      "  call i64 @\"write\"(i32 1, ptr %\"stdout.ptr\", i64 14)",
+      "  call i64 @\"write\"(i32 2, ptr %\"stderr.ptr\", i64 14)",
+      "  ret i32 7",
+      "}"
+    ]
+
 preludeAndProgram :: String
 preludeAndProgram =
   unlines
     [ "module Main export (main) {",
       "  import Prelude exposing (and);",
       "  def main : Bool = and true false;",
+      "}"
+    ]
+
+boolMainProgram :: String
+boolMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Bool = true;",
+      "}"
+    ]
+
+nativeNestedAdtProgram :: String
+nativeNestedAdtProgram =
+  unlines
+    [ "module Main export (Nat(..), Option(..), main) {",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat;",
+      "",
+      "  data Option a =",
+      "      None : Option a",
+      "    | Some : a -> Option a;",
+      "",
+      "  def main : Option Nat = Some (Succ Zero);",
+      "}"
+    ]
+
+nativeDoubleUnderscoreConstructorProgram :: String
+nativeDoubleUnderscoreConstructorProgram =
+  unlines
+    [ "module Main export (Weird(..), main) {",
+      "  data Weird =",
+      "      A__B : Weird;",
+      "",
+      "  def main : Weird = A__B;",
       "}"
     ]
 
@@ -1615,6 +1730,46 @@ stringProgram =
                     { backendBindingName = "main",
                       backendBindingType = stringTy,
                       backendBindingExpr = BackendLit stringTy (LString "hello"),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+nativeStringResultProgram :: BackendProgram
+nativeStringResultProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "Main__main",
+                      backendBindingType = stringTy,
+                      backendBindingExpr = BackendLit stringTy (LString "hello"),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "Main__main"
+    }
+
+nativeMainNameCollisionProgram :: BackendProgram
+nativeMainNameCollisionProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr = intLit 1,
                       backendBindingExportedAsMain = True
                     }
                 ]
