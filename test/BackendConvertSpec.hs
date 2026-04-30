@@ -2,7 +2,7 @@ module BackendConvertSpec (spec) where
 
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
-import Data.List (find, intercalate, isInfixOf, nub)
+import Data.List (find, intercalate, isInfixOf, isPrefixOf, nub)
 import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Backend.Convert
 import MLF.Backend.IR
@@ -385,6 +385,27 @@ spec = describe "MLF.Backend.Convert" $ do
 
     validateBackendProgram backend `shouldBe` Right ()
     map backendBindingName (backendBindings backend) `shouldSatisfy` any (isInfixOf "$letrec$")
+
+  it "closure-converts top-level recursive higher-order function parameters" $ do
+    checked <- requireChecked topLevelRecursiveHigherOrderProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    loopBinding <- requireBinding "Main__loop" backend
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingExpr loopBinding `shouldSatisfy` containsBackendClosureCallFunction "f"
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
+
+  it "lifts closed local recursive higher-order helpers with closure-demanded arguments" $ do
+    checked <- requireChecked localRecursiveHigherOrderProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    helper <- requireSingleLiftedHelper backend
+    mainBinding <- requireBinding (backendProgramMain backend) backend
+    backendBindingType helper `shouldSatisfy` isBackendFunctionType
+    backendBindingExpr helper `shouldSatisfy` containsBackendClosureCallFunction "f"
+    backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosure
 
   it "rejects constructor head type instantiations with no matching constructor parameter" $ do
     checked0 <- requireChecked constructorForallApplicationProgram
@@ -1110,6 +1131,41 @@ recursiveListDerivingEqProgram =
       "    deriving Eq;",
       "",
       "  def main : Bool = eq (Cons Zero Nil) (Cons Zero Nil);",
+      "}"
+    ]
+
+topLevelRecursiveHigherOrderProgram :: String
+topLevelRecursiveHigherOrderProgram =
+  unlines
+    [ "module Main export (Nat(..), loop, idInt, main) {",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat;",
+      "",
+      "  def idInt : Int -> Int = \\(x : Int) x;",
+      "  def loop : (Int -> Int) -> Nat -> Int = \\(f : Int -> Int) \\(n : Nat) case n of {",
+      "    Zero -> f 1;",
+      "    Succ inner -> loop f inner",
+      "  };",
+      "  def main : Int = loop idInt (Succ Zero);",
+      "}"
+    ]
+
+localRecursiveHigherOrderProgram :: String
+localRecursiveHigherOrderProgram =
+  unlines
+    [ "module Main export (Nat(..), main) {",
+      "  data Nat =",
+      "      Zero : Nat",
+      "    | Succ : Nat -> Nat;",
+      "",
+      "  def main : Int =",
+      "    let idInt : Int -> Int = \\(x : Int) x in",
+      "    let loop : (Int -> Int) -> Nat -> Int = \\(f : Int -> Int) \\(n : Nat) case n of {",
+      "      Zero -> f 1;",
+      "      Succ inner -> loop f inner",
+      "    } in",
+      "    loop idInt (Succ Zero);",
       "}"
     ]
 
@@ -1844,6 +1900,45 @@ containsBackendClosureCall expr =
     BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
       any (containsBackendClosureCall . backendClosureCaptureExpr) captures || containsBackendClosureCall body
     _ -> False
+
+containsBackendClosureCallFunction :: String -> BackendExpr -> Bool
+containsBackendClosureCallFunction expected expr =
+  case expr of
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      closureFunctionMatches fun || any (containsBackendClosureCallFunction expected) args
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendClosureCallFunction expected scrutinee
+        || any (containsBackendClosureCallFunction expected . backendAltBody) (toList alternatives)
+    BackendLam {backendParamName = name, backendBody = body}
+      | name == expected -> False
+      | otherwise -> containsBackendClosureCallFunction expected body
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      containsBackendClosureCallFunction expected fun || containsBackendClosureCallFunction expected arg
+    BackendLet {backendLetName = name, backendLetRhs = rhs, backendLetBody = body}
+      | name == expected -> containsBackendClosureCallFunction expected rhs
+      | otherwise ->
+          containsBackendClosureCallFunction expected rhs || containsBackendClosureCallFunction expected body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendClosureCallFunction expected body
+    BackendTyApp {backendTyFunction = fun} -> containsBackendClosureCallFunction expected fun
+    BackendConstruct {backendConstructArgs = args} -> any (containsBackendClosureCallFunction expected) args
+    BackendRoll {backendRollPayload = body} -> containsBackendClosureCallFunction expected body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendClosureCallFunction expected body
+    BackendClosure {backendClosureCaptures = captures, backendClosureParams = params, backendClosureBody = body}
+      | expected `elem` map fst params || expected `elem` map backendClosureCaptureName captures ->
+          any (containsBackendClosureCallFunction expected . backendClosureCaptureExpr) captures
+      | otherwise ->
+          any (containsBackendClosureCallFunction expected . backendClosureCaptureExpr) captures
+            || containsBackendClosureCallFunction expected body
+    _ -> False
+  where
+    closureFunctionMatches fun =
+      case fun of
+        BackendVar {backendVarName = name} -> generatedBackendNameMatches expected name
+        BackendTyApp {backendTyFunction = inner} -> closureFunctionMatches inner
+        _ -> containsBackendClosureCallFunction expected fun
+
+    generatedBackendNameMatches plain name =
+      name == plain || ("$" ++ plain ++ "#") `isPrefixOf` name
 
 containsAlphaRenamedShadowingClosure :: BackendExpr -> Bool
 containsAlphaRenamedShadowingClosure expr =
