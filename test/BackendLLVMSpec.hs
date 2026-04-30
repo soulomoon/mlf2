@@ -711,6 +711,17 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMObjectCode output
     assertNativeProgram sourceClosureDemandAfterEvidenceProgram "1"
 
+  it "packages constrained partial applications after hidden evidence" $ do
+    output <-
+      withTempProgram sourceConstrainedPartialApplicationProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "$partial"
+    output `shouldNotSatisfy` isInfixOf "unsupported static function argument"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceConstrainedPartialApplicationProgram "1"
+
   it "freshens generated partial capture names against local binders" $ do
     output <-
       withTempProgram sourcePartialApplicationGeneratedNameCollisionProgram $ \path ->
@@ -3360,6 +3371,22 @@ sourceClosureDemandAfterEvidenceProgram =
       "  def apply : (Int -> Int) -> Int = \\f f 2;",
       "  def use : Marker Bool => (Int -> Int -> Int) -> Int = \\f apply (f 1);",
       "  def main : Int = use keepLeft;",
+      "}"
+    ]
+
+sourceConstrainedPartialApplicationProgram :: String
+sourceConstrainedPartialApplicationProgram =
+  unlines
+    [ "module Main export (Pick, main) {",
+      "  class Pick a {",
+      "    pick : a -> a -> a;",
+      "  }",
+      "  instance Pick Int {",
+      "    pick = \\x \\y x;",
+      "  }",
+      "  def keep : Pick Int => Int -> Int -> Int = \\x \\y pick x y;",
+      "  def apply : (Int -> Int) -> Int = \\f f 1;",
+      "  def main : Int = apply (keep 1);",
       "}"
     ]
 

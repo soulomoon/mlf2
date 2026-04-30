@@ -2339,12 +2339,28 @@ functionWrapperForm wrapper =
 applyEvidenceWrapperArgs :: BackendExpr -> BackendType -> [BackendExpr] -> BackendExpr
 applyEvidenceWrapperArgs expr _ [] =
   expr
+applyEvidenceWrapperArgs expr ty args
+  | backendExprIsExplicitClosure expr =
+      BackendClosureCall
+        { backendExprType = returnTy,
+          backendClosureFunction = expr,
+          backendClosureArguments = args
+        }
+  where
+    (_, returnTy) = collectArrowsType ty
 applyEvidenceWrapperArgs expr ty (arg : rest) =
   case ty of
     BTArrow _ resultTy ->
       applyEvidenceWrapperArgs (BackendApp resultTy expr arg) resultTy rest
     _ ->
       expr
+
+backendExprIsExplicitClosure :: BackendExpr -> Bool
+backendExprIsExplicitClosure =
+  \case
+    BackendClosure {} -> True
+    BackendLet _ _ _ _ body -> backendExprIsExplicitClosure body
+    _ -> False
 
 lowerFunction :: ProgramEnv -> String -> Bool -> FunctionForm -> Either BackendLLVMError LLVMFunction
 lowerFunction env name private form = do

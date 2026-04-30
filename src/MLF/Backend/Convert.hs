@@ -1999,8 +1999,7 @@ convertPartialApplication context env scope term resultTy =
       case normalizePartialApplicationSpine rawHeadTerm rawSuppliedArgs of
         (headTerm, suppliedArgs)
           | not (null suppliedArgs),
-            not (isConstructorHeadTerm context headTerm),
-            not (partialApplicationMentionsEvidence term) -> do
+            not (isConstructorHeadTerm context headTerm) -> do
               headTy <- normalizeBackendTypeForContext context <$> liftEitherConvert (inferBackendType env headTerm)
               let (paramTys, finalTy) = splitBackendArrows headTy
                   suppliedCount = length suppliedArgs
@@ -2018,7 +2017,7 @@ convertPartialApplication context env scope term resultTy =
                       )
                       [0 :: Int ..]
                       (zip suppliedParamTys suppliedArgs)
-                  if partialApplicationCanCaptureSuppliedArgs context scope (zip suppliedParamTys suppliedArgExprs)
+                  if partialApplicationCanCaptureSuppliedArgs context scope headTerm (zip3 [0 :: Int ..] suppliedParamTys suppliedArgExprs)
                     then Just <$> packagePartialApplication context env scope resultTy headTerm headTy suppliedParamTys suppliedArgExprs remainingParamTys finalTy
                     else pure Nothing
                 else pure Nothing
@@ -2388,15 +2387,13 @@ isConstructorHeadTerm context term =
     EVar name -> Map.member name (ccConstructors context)
     _ -> False
 
-partialApplicationMentionsEvidence :: ElabTerm -> Bool
-partialApplicationMentionsEvidence term =
-  any isEvidenceCaptureName (Set.toList (freeTermVariables term))
-
-partialApplicationCanCaptureSuppliedArgs :: ConvertContext -> ClosureScope -> [(BackendType, BackendExpr)] -> Bool
-partialApplicationCanCaptureSuppliedArgs context scope =
+partialApplicationCanCaptureSuppliedArgs :: ConvertContext -> ClosureScope -> ElabTerm -> [(Int, BackendType, BackendExpr)] -> Bool
+partialApplicationCanCaptureSuppliedArgs context scope headTerm =
   all canCapture
   where
-    canCapture (argTy, argExpr)
+    canCapture (index0, argTy, argExpr)
+      | partialApplicationArgumentIsEvidence context scope headTerm index0 =
+          canCaptureEvidence argTy argExpr
       | isClosureConvertibleFunctionType argTy =
           isFirstOrderFunctionCaptureType argTy
             && backendExprIsClosureValue context scope argExpr
@@ -2404,6 +2401,28 @@ partialApplicationCanCaptureSuppliedArgs context scope =
           False
       | otherwise =
           True
+
+    canCaptureEvidence argTy argExpr
+      | isFunctionLikeBackendType argTy =
+          isFirstOrderFunctionCaptureType argTy
+            && backendExprCanStoreFunctionReference context scope argExpr
+      | otherwise =
+          True
+
+partialApplicationArgumentIsEvidence :: ConvertContext -> ClosureScope -> ElabTerm -> Int -> Bool
+partialApplicationArgumentIsEvidence context scope headTerm index0 =
+  case stripClosureHeadTypeInsts headTerm of
+    EVar name ->
+      Set.member index0 (lookupEvidenceValueArguments context scope name)
+    _ ->
+      False
+
+backendExprCanStoreFunctionReference :: ConvertContext -> ClosureScope -> BackendExpr -> Bool
+backendExprCanStoreFunctionReference context scope expr =
+  backendExprIsClosureValue context scope expr
+    || case stripBackendHeadTypeApps expr of
+      BackendVar {} -> True
+      _ -> False
 
 isFunctionLikeBackendType :: BackendType -> Bool
 isFunctionLikeBackendType =
