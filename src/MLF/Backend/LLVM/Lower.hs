@@ -3029,6 +3029,14 @@ lowerClosurePointerValueCall env exprEnv context resultTy callee args = do
     lowerClosureArg (index0, paramTy) arg =
       lowerExprForIndirectArgument env exprEnv context ("__mlfp_closure_arg" ++ show index0, paramTy) arg
 
+lowerClosureValueCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> LowerValue -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
+lowerClosureValueCall env exprEnv context resultTy callee typeArgs args = do
+  calleeTy <-
+    if null typeArgs
+      then pure (lvBackendType callee)
+      else instantiateCallableTypeM context (lvBackendType callee) typeArgs []
+  lowerClosurePointerValueCall env exprEnv context resultTy callee {lvBackendType = calleeTy} args
+
 lowerClosureCallee :: ProgramEnv -> ExprEnv -> String -> BackendExpr -> LowerM LowerValue
 lowerClosureCallee env exprEnv context =
   \case
@@ -3051,6 +3059,10 @@ lowerCall env exprEnv context expr =
               lowerLocalFunctionCall env exprEnv context (backendExprType expr) name localFunction typeArgs args
             Nothing ->
               case Map.lookup name (eeValues exprEnv) of
+                Just value
+                  | isFunctionLikeBackendType (lvBackendType value),
+                    not (isEvidenceCallableName name) ->
+                      lowerClosureValueCall env exprEnv context (backendExprType expr) value typeArgs args
                 Just value
                   | isFunctionLikeBackendType (lvBackendType value) ->
                       lowerIndirectValueCall env exprEnv context name value typeArgs args
