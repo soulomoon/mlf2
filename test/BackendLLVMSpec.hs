@@ -957,6 +957,18 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "lowers source-level local returned closure calls through the explicit closure ABI" $ do
+    output <-
+      withTempProgram sourceLocalReturnedClosureCallProgram $ \path ->
+        requireRight =<< emitBackendFile path
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$Main__main$"
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
+    output `shouldNotSatisfy` isInfixOf "Backend LLVM arity mismatch"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+    assertNativeProgram sourceLocalReturnedClosureCallProgram "41"
+
   it "lowers type-abstracted top-level closure calls through the explicit closure ABI" $ do
     output <-
       withTempProgram sourcePolymorphicTopLevelClosureCallProgram $ \path ->
@@ -3492,6 +3504,17 @@ sourceTopLevelClosureCallProgram =
     [ "module Main export (main) {",
       "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
       "  def main : Int = maker 0;",
+      "}"
+    ]
+
+sourceLocalReturnedClosureCallProgram :: String
+sourceLocalReturnedClosureCallProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : Int =",
+      "    let make : Int -> (Int -> Int) =",
+      "      \\(base : Int) let captured : Int = base in \\(x : Int) captured in",
+      "    (make 41) 0;",
       "}"
     ]
 

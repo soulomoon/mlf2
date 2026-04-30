@@ -2990,7 +2990,7 @@ lowerClosureCall env exprEnv context resultTy fun args = do
   case collectTyApps fun of
     (BackendVar _ name, typeArgs)
       | Just localFunction <- Map.lookup name (eeLocalFunctions exprEnv) ->
-          lowerLocalFunctionCall env exprEnv context name localFunction typeArgs args
+          lowerLocalFunctionCall env exprEnv context resultTy name localFunction typeArgs args
     _ ->
       lowerClosurePointerCall
   where
@@ -3048,7 +3048,7 @@ lowerCall env exprEnv context expr =
         BackendVar _ name ->
           case Map.lookup name (eeLocalFunctions exprEnv) of
             Just localFunction ->
-              lowerLocalFunctionCall env exprEnv context name localFunction typeArgs args
+              lowerLocalFunctionCall env exprEnv context (backendExprType expr) name localFunction typeArgs args
             Nothing ->
               case Map.lookup name (eeValues exprEnv) of
                 Just value
@@ -3419,13 +3419,24 @@ backendTypeVariableNames =
     BTBottom ->
       Set.empty
 
-lowerLocalFunctionCall :: ProgramEnv -> ExprEnv -> String -> String -> LocalFunction -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
-lowerLocalFunctionCall env callEnv context name localFunction typeArgs args = do
+lowerLocalFunctionCall :: ProgramEnv -> ExprEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
+lowerLocalFunctionCall env callEnv context resultTy name localFunction typeArgs args = do
   let allowNestedEvidence = isEvidenceName name
   (resolvedTypeArgs, form0) <- instantiateFunctionFormWithTypeArgsM context (lfForm localFunction) typeArgs args
   let form = qualifyInstantiatedClosureEntries name resolvedTypeArgs form0
-  bodyEnv <- bindCallArguments env callEnv (lfCapturedEnv localFunction) context allowNestedEvidence name form args
-  lowerExpr env bodyEnv context (ffBody form)
+      arity = length (ffParams form)
+  case compare (length args) arity of
+    GT -> do
+      unless (isClosureRuntimeValueType (ffReturnType form)) $
+        liftEither (BackendLLVMArityMismatch name arity (length args))
+      let (directArgs, closureArgs) = splitAt arity args
+      callee <- lowerLocalFunctionCall env callEnv context (ffReturnType form) name localFunction typeArgs directArgs
+      lowerClosurePointerValueCall env callEnv context resultTy callee closureArgs
+    LT ->
+      liftEither (BackendLLVMArityMismatch name arity (length args))
+    EQ -> do
+      bodyEnv <- bindCallArguments env callEnv (lfCapturedEnv localFunction) context allowNestedEvidence name form args
+      lowerExpr env bodyEnv context (ffBody form)
 
 lowerDirectFunctionCall :: ProgramEnv -> ExprEnv -> String -> FunctionForm -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerDirectFunctionCall env exprEnv context form0 typeArgs args = do
