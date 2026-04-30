@@ -294,6 +294,16 @@ spec = describe "MLF.Backend.IR" $ do
               backendClosureParams = [("x", intTy)],
               backendClosureBody = BackendVar intTy "x"
             }
+        higherOrderTy =
+          BTArrow idTy intTy
+        higherOrderClosure entryName =
+          BackendClosure
+            { backendExprType = higherOrderTy,
+              backendClosureEntryName = entryName,
+              backendClosureCaptures = [],
+              backendClosureParams = [("f", idTy)],
+              backendClosureBody = BackendApp intTy (BackendVar idTy "f") (intLit 1)
+            }
         captureMismatch =
           BackendClosure
             { backendExprType = idTy,
@@ -381,58 +391,59 @@ spec = describe "MLF.Backend.IR" $ do
           BackendLet
             intTy
             "f"
-            idTy
-            (goodClosure "__mlfp_closure$app")
-            (BackendApp intTy (BackendVar idTy "f") (intLit 1))
+            higherOrderTy
+            (higherOrderClosure "__mlfp_closure$app")
+            (BackendApp intTy (BackendVar higherOrderTy "f") intIdentityExpr)
         appCalledLetHeadClosure =
           BackendApp
             intTy
             ( BackendLet
-                idTy
+                higherOrderTy
                 "f"
-                idTy
-                (goodClosure "__mlfp_closure$app_let_head")
-                (BackendVar idTy "f")
+                higherOrderTy
+                (higherOrderClosure "__mlfp_closure$app_let_head")
+                (BackendVar higherOrderTy "f")
             )
-            (intLit 1)
+            intIdentityExpr
         appCalledClosureAlias =
           BackendLet
             intTy
             "g"
-            idTy
-            (goodClosure "__mlfp_closure$app_alias")
+            higherOrderTy
+            (higherOrderClosure "__mlfp_closure$app_alias")
             ( BackendLet
                 intTy
                 "f"
-                idTy
-                (BackendVar idTy "g")
-                (BackendApp intTy (BackendVar idTy "f") (intLit 1))
+                higherOrderTy
+                (BackendVar higherOrderTy "g")
+                (BackendApp intTy (BackendVar higherOrderTy "f") intIdentityExpr)
             )
         appCalledCaseHeadClosure =
           BackendApp
             intTy
             ( BackendCase
-                idTy
+                higherOrderTy
                 (BackendConstruct boxTy "Box" [intLit 0])
                 ( BackendAlternative
                     (BackendConstructorPattern "Box" ["n"])
-                    (goodClosure "__mlfp_closure$app_case")
+                    (higherOrderClosure "__mlfp_closure$app_case")
                     :| []
                 )
             )
-            (intLit 1)
+            intIdentityExpr
         appCalledCapturedClosure =
           BackendLet
             idTy
             "g"
-            idTy
-            (goodClosure "__mlfp_closure$app_captured_source")
+            higherOrderTy
+            (higherOrderClosure "__mlfp_closure$app_captured_source")
             ( BackendClosure
                 { backendExprType = idTy,
                   backendClosureEntryName = "__mlfp_closure$app_captured",
-                  backendClosureCaptures = [BackendClosureCapture "capturedClosure" idTy (BackendVar idTy "g")],
+                  backendClosureCaptures = [BackendClosureCapture "capturedClosure" higherOrderTy (BackendVar higherOrderTy "g")],
                   backendClosureParams = [("x", intTy)],
-                  backendClosureBody = BackendApp intTy (BackendVar idTy "capturedClosure") (intLit 1)
+                  backendClosureBody =
+                    BackendApp intTy (BackendVar higherOrderTy "capturedClosure") intIdentityExpr
                 }
             )
         closureCallMixedCaseHead =

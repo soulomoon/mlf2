@@ -40,7 +40,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (mapMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Numeric (showHex)
@@ -2237,9 +2237,24 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
             ++ collectClosureEntriesInExpr base localForms valueKinds fun
             ++ collectClosureEntriesInExpr base localForms valueKinds arg
     BackendLet _ name bindingTy rhs body ->
-      collectClosureEntriesInExpr base localForms valueKinds rhs
-        ++ collectClosureEntriesInExpr base bodyLocalForms bodyValueKinds body
+      rhsEntries ++ collectClosureEntriesInExpr base bodyLocalForms bodyValueKinds body
       where
+        rhsEntries =
+          case functionFormFromExpected bindingTy rhs of
+            form
+              | null (ffTypeBinders form),
+                not (null (ffParams form)) ->
+                  collectClosureEntriesInFormWithParamKinds
+                    base
+                    localForms
+                    ( Map.fromList
+                        [ (paramName, localFunctionBodyFallbackParameterValueKind paramName paramTy)
+                        | (paramName, paramTy) <- ffParams form
+                        ]
+                    )
+                    form
+            _ ->
+              collectClosureEntriesInExpr base localForms valueKinds rhs
         bodyLocalForms = collectLetLocalForm localForms name bindingTy rhs
         bodyValueKinds =
           case letBoundValueKind localForms valueKinds bindingTy rhs of
@@ -2345,7 +2360,7 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
               | not (null (ffTypeBinders form)) || not (null (ffParams form)) ->
                   Nothing
             _ ->
-              Just (valueKindForType bindingTy)
+              Just (expressionValueKind localForms0 valueKinds0 rhs)
 
     closureCaptureSlot localForms0 valueKinds0 capture =
       ClosureCaptureSlot
@@ -2388,7 +2403,10 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
             _ ->
               case aliasValueKind localForms0 valueKinds0 arg of
                 Just kind -> kind
-                Nothing -> valueKindForType paramTy
+                Nothing ->
+                  case collectTyApps arg of
+                    (BackendVar {}, _) -> valueKindForType paramTy
+                    _ -> LowerClosureRecord
       | otherwise =
           LowerRuntimeValue
 
@@ -2414,6 +2432,32 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
                in aliasValueKind localForms' valueKinds' body
         _ ->
           Nothing
+
+    expressionValueKind localForms0 valueKinds0 expr0
+      | not (isFunctionLikeBackendType (backendExprType expr0)) =
+          LowerRuntimeValue
+      | otherwise =
+          case expr0 of
+            BackendVar ty name ->
+              fromMaybe (valueKindForType ty) (variableValueKind localForms0 valueKinds0 name [])
+            BackendTyApp ty fun _ ->
+              case collectTyApps expr0 of
+                (BackendVar _ name, typeArgs) ->
+                  fromMaybe (valueKindForType ty) (variableValueKind localForms0 valueKinds0 name typeArgs)
+                _ ->
+                  expressionValueKind localForms0 valueKinds0 fun
+            BackendLet _ name bindingTy rhs body ->
+              expressionValueKind localForms' valueKinds' body
+              where
+                localForms' = collectLetLocalForm localForms0 name bindingTy rhs
+                valueKinds' =
+                  case letBoundValueKind localForms0 valueKinds0 bindingTy rhs of
+                    Just kind -> Map.insert name kind valueKinds0
+                    Nothing -> Map.delete name valueKinds0
+            BackendClosure {} ->
+              LowerClosureRecord
+            _ ->
+              valueKindForType (backendExprType expr0)
 
     variableValueKind localForms0 valueKinds0 name typeArgs =
       case Map.lookup name valueKinds0 of
@@ -4210,13 +4254,20 @@ lowerConstruct env exprEnv context resultTy name args =
 
 lowerConstructField :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> LowerM LowerValue
 lowerConstructField env exprEnv context fieldTy arg
+  | isFirstOrderFunctionPointerType fieldTy = do
+      mbClosureValue <- lowerClosureRuntimeArgumentMaybe env exprEnv context fieldTy arg
+      case mbClosureValue of
+        Just value -> do
+          expectedTy <- lowerRuntimeValueTypeM env context fieldTy
+          requireLLVMType context "constructor field" expectedTy value
+          pure value {lvBackendType = fieldTy}
+        Nothing ->
+          lowerStoredFunctionArgument env exprEnv context fieldTy arg
   | isClosureRuntimeValueType fieldTy = do
       value <- lowerExpr env exprEnv context arg
       expectedTy <- lowerRuntimeValueTypeM env context fieldTy
       requireLLVMType context "constructor field" expectedTy value
       pure value {lvBackendType = fieldTy}
-  | isFirstOrderFunctionPointerType fieldTy =
-      lowerStoredFunctionArgument env exprEnv context fieldTy arg
   | otherwise =
       lowerExpr env exprEnv context arg
 
@@ -4379,6 +4430,7 @@ isClosureRuntimeValueType =
 
 valueKindForType :: BackendType -> LowerValueKind
 valueKindForType ty
+  | isFirstOrderFunctionPointerType ty = LowerFunctionPointer
   | isClosureRuntimeValueType ty = LowerClosureRecord
   | otherwise = LowerRuntimeValue
 
@@ -4485,6 +4537,13 @@ parameterValueKind name ty
 
 localFunctionParameterValueKind :: String -> BackendType -> LowerValueKind
 localFunctionParameterValueKind name ty
+  | isEvidenceParameter name ty = LowerFunctionPointer
+  | isFirstOrderFunctionPointerType ty = LowerFunctionPointer
+  | isClosureRuntimeValueType ty = LowerClosureRecord
+  | otherwise = LowerRuntimeValue
+
+localFunctionBodyFallbackParameterValueKind :: String -> BackendType -> LowerValueKind
+localFunctionBodyFallbackParameterValueKind name ty
   | isEvidenceParameter name ty = LowerFunctionPointer
   | isClosureRuntimeValueType ty = LowerClosureRecord
   | otherwise = LowerRuntimeValue

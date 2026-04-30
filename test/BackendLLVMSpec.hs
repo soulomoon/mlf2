@@ -1222,6 +1222,23 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
     validateLLVMObjectCode output
 
+  it "loads first-order function fields as raw function pointers" $ do
+    output <- requireRight (renderBackendProgramLLVM rawFunctionPointerFieldCallProgram)
+
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.case.field"
+    output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.case.field"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+  it "captures first-order lambda parameters as raw function pointers" $ do
+    output <- requireRight (renderBackendProgramLLVM capturedFirstOrderParameterClosureProgram)
+
+    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$capture_first_order_param\""
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.env.field"
+    output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.closure.env.field"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
   it "guards nullary global value-kind cycles" $ do
     result <- timeout 1000000 (evaluate (renderBackendProgramLLVM nullaryGlobalValueKindCycleProgram))
     case result of
@@ -4652,6 +4669,85 @@ closureFirstOrderFunctionParameterCallProgram =
                               }
                           )
                           [BackendVar unaryIntTy "helper", intLit 41],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+rawFunctionPointerFieldCallProgram :: BackendProgram
+rawFunctionPointerFieldCallProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [fnBoxData],
+              backendModuleBindings =
+                [ helperBinding,
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendLet
+                          intTy
+                          "box"
+                          fnBoxTy
+                          (BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "helper"])
+                          ( BackendCase
+                              intTy
+                              (BackendVar fnBoxTy "box")
+                              ( BackendAlternative
+                                  (BackendConstructorPattern "FnBox" ["f"])
+                                  (BackendApp intTy (BackendVar unaryIntTy "f") (intLit 41))
+                                  :| []
+                              )
+                          ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+capturedFirstOrderParameterClosureProgram :: BackendProgram
+capturedFirstOrderParameterClosureProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ helperBinding,
+                  BackendBinding
+                    { backendBindingName = "makeCaller",
+                      backendBindingType = BTArrow unaryIntTy unaryIntTy,
+                      backendBindingExpr =
+                        BackendLam
+                          { backendExprType = BTArrow unaryIntTy unaryIntTy,
+                            backendParamName = "f",
+                            backendParamType = unaryIntTy,
+                            backendBody =
+                              BackendClosure
+                                { backendExprType = unaryIntTy,
+                                  backendClosureEntryName = "__mlfp_closure$capture_first_order_param",
+                                  backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "f")],
+                                  backendClosureParams = [("x", intTy)],
+                                  backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
+                                }
+                          },
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendApp
+                          intTy
+                          (BackendApp unaryIntTy (BackendVar (BTArrow unaryIntTy unaryIntTy) "makeCaller") (BackendVar unaryIntTy "helper"))
+                          (intLit 41),
                       backendBindingExportedAsMain = True
                     }
                 ]
