@@ -23,6 +23,9 @@
   without rejecting the callee's arrow result type. Closure-valued let aliases
   now also stay runtime pointer aliases during lowering instead of being
   reclassified as raw escaping local functions.
+- Fixed checked-program closure conversion to clear shadowed closure locals when
+  classifying nested `let` values, and to fail closed on closure-valued
+  constructor fields until ADT field lowering has a closure-aware representation.
 - Supported expected-type resolution for nullary overloaded `.mlfp` methods.
   Associated values such as `mempty : a` now resolve from an explicit or
   propagated expected source type while bare uses without such evidence still

@@ -712,6 +712,24 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr mainBinding `shouldSatisfy` containsBackendClosureCall
     backendBindingExpr mainBinding `shouldNotSatisfy` containsBackendApp
 
+  it "clears shadowed closure locals when classifying let RHS values" $ do
+    checked <- requireChecked shadowedClosureLocalProgram
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    useBinding <- requireBinding "Main__use" backend
+    backendBindingExpr useBinding `shouldSatisfy` containsBackendApp
+    backendBindingExpr useBinding `shouldNotSatisfy` containsBackendClosureCall
+
+  it "rejects closure-valued constructor fields until ADT fields are closure-aware" $ do
+    checked <- requireChecked closureValuedConstructorFieldProgram
+
+    case convertCheckedProgram checked of
+      Left (BackendUnsupportedCaseShape message) ->
+        message `shouldSatisfy` isInfixOf "closure-valued constructor field"
+      other ->
+        expectationFailure ("expected closure-valued constructor field rejection, got " ++ show other)
+
   it "collects closure parameters through lets before returned lambdas" $ do
     checked <- requireChecked returnedLetLambdaClosureProgram
     backend <- requireRight (convertCheckedProgram checked)
@@ -1168,6 +1186,33 @@ topLevelClosureCallProgram =
     [ "module Main export (main) {",
       "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
       "  def main : Int = maker 0;",
+      "}"
+    ]
+
+shadowedClosureLocalProgram :: String
+shadowedClosureLocalProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def id : Int -> Int = \\(x : Int) x;",
+      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "    let h : Int -> Int = let f : Int -> Int = id in f in",
+      "    h 0;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    use f;",
+      "}"
+    ]
+
+closureValuedConstructorFieldProgram :: String
+closureValuedConstructorFieldProgram =
+  unlines
+    [ "module Main export (FnBox(..), main) {",
+      "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    case FnBox f of { FnBox g -> g 0 };",
       "}"
     ]
 

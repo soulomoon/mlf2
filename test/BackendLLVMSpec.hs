@@ -676,6 +676,15 @@ spec = describe "MLF.Backend.LLVM" $ do
   it "preserves shadowed lambda parameters collected through lets" $
     assertNativeProgram sourceReturnedLetLambdaShadowingProgram "7"
 
+  it "rejects source closure-valued constructor fields before LLVM emission" $ do
+    result <- withTempProgram sourceClosureValuedConstructorFieldProgram emitBackendFile
+
+    case result of
+      Left err ->
+        err `shouldSatisfy` isInfixOf "closure-valued constructor field"
+      Right output ->
+        expectationFailure ("expected closure-valued constructor field rejection, got output:\n" ++ output)
+
   it "lowers zero-capture closures through the explicit closure ABI" $ do
     output <- requireRight (renderBackendProgramLLVM zeroCaptureClosureProgram)
 
@@ -3033,6 +3042,18 @@ sourceReturnedLetLambdaShadowingProgram =
     [ "module Main export (main) {",
       "  def make : Int -> Int = let y : Int = 1 in \\(y : Int) y;",
       "  def main : Int = make 7;",
+      "}"
+    ]
+
+sourceClosureValuedConstructorFieldProgram :: String
+sourceClosureValuedConstructorFieldProgram =
+  unlines
+    [ "module Main export (FnBox(..), main) {",
+      "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
+      "  def main : Int =",
+      "    let captured : Int = 41 in",
+      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    case FnBox f of { FnBox g -> g 0 };",
       "}"
     ]
 

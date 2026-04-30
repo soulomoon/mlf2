@@ -2020,9 +2020,15 @@ backendExprIsClosureValue context scope =
     BackendTyApp _ fun _ -> backendExprIsClosureValue context scope fun
     BackendLet _ name _ rhs body ->
       let bodyScope =
-            if backendExprIsClosureValue context scope rhs
-              then scope {closureScopeLocals = Set.insert name (closureScopeLocals scope)}
-              else scope
+            scope
+              { closureScopeLocals =
+                  ( if backendExprIsClosureValue context scope rhs
+                      then Set.insert
+                      else Set.delete
+                  )
+                    name
+                    (closureScopeLocals scope)
+              }
        in backendExprIsClosureValue context bodyScope body
     BackendCase {backendAlternatives = alternatives} ->
       all (backendExprIsClosureValue context scope . backendAltBody) (NE.toList alternatives)
@@ -2451,6 +2457,7 @@ convertConstructorApplication _mode context env scope term resultTy =
               )
           )
       argExprs <- zipWithM (convertTermExpectedMode DirectLambda context env scope . Just) fields args
+      liftEitherConvert (mapM_ (rejectClosureValuedConstructorField constructor) (zip3 [0 :: Int ..] fields argExprs))
       liftEitherConvert (mapM_ (checkConstructorArgumentType context ownerContext typeBounds constructor) (zip [0 :: Int ..] (zip fields argExprs)))
       pure
         ( Just
@@ -2468,6 +2475,20 @@ convertConstructorApplication _mode context env scope term resultTy =
             ++ backendConstructorName constructor
             ++ "`"
         )
+
+    rejectClosureValuedConstructorField constructor (index0, fieldTy, argExpr)
+      | isClosureConvertibleFunctionType fieldTy,
+        backendExprIsClosureValue context scope argExpr =
+          Left
+            ( BackendUnsupportedCaseShape
+                ( "closure-valued constructor field `"
+                    ++ backendConstructorName constructor
+                    ++ "` argument "
+                    ++ show index0
+                    ++ " requires closure-aware ADT field lowering"
+                )
+            )
+      | otherwise = Right ()
 
     constructorResultSubstitution globalContext ownerContext typeBounds dataParameters parameters explicitSubstitution constructorResultTy effectiveResultTy =
       matchConstructorResult constructorResultTy effectiveResultTy normalizedExplicitSubstitution
