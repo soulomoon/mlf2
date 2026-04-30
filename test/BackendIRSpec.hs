@@ -309,6 +309,33 @@ spec = describe "MLF.Backend.IR" $ do
                 )
             )
             (intLit 1)
+        appCalledCapturedClosure =
+          BackendLet
+            idTy
+            "g"
+            idTy
+            (goodClosure "__mlfp_closure$app_captured_source")
+            ( BackendClosure
+                { backendExprType = idTy,
+                  backendClosureEntryName = "__mlfp_closure$app_captured",
+                  backendClosureCaptures = [BackendClosureCapture "capturedClosure" idTy (BackendVar idTy "g")],
+                  backendClosureParams = [("x", intTy)],
+                  backendClosureBody = BackendApp intTy (BackendVar idTy "capturedClosure") (intLit 1)
+                }
+            )
+        closureCallMixedCaseHead =
+          BackendClosureCall
+            intTy
+            ( BackendCase
+                idTy
+                (BackendConstruct boxTy "Box" [intLit 0])
+                ( BackendAlternative
+                    (BackendConstructorPattern "Box" ["n"])
+                    (goodClosure "__mlfp_closure$closure_call_case")
+                    :| [BackendAlternative BackendDefaultPattern intIdentityExpr]
+                )
+            )
+            [intLit 1]
 
     validateBackendProgram (programWithMainExpr captureMismatch)
       `shouldBe` Left (BackendClosureCaptureTypeMismatch "captured" boolTy intTy)
@@ -332,6 +359,10 @@ spec = describe "MLF.Backend.IR" $ do
       `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
     validateBackendProgram (programWithMainExpr appCalledCaseHeadClosure)
       `shouldBe` Left (BackendClosureCalledWithBackendApp "__mlfp_closure$app_case")
+    validateBackendProgram (programWithMainExpr appCalledCapturedClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "capturedClosure")
+    validateBackendProgram (programWithMainExpr closureCallMixedCaseHead)
+      `shouldBe` Left (BackendClosureCallExpectedClosureValue idTy)
 
   it "checks type application against forall nodes" $ do
     validateBackendExpr

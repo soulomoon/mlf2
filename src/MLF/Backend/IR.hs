@@ -271,6 +271,7 @@ data BackendValidationContext = BackendValidationContext
     bvcConstructors :: Map.Map String BackendConstructorInfo,
     bvcLocals :: Map.Map String BackendType,
     bvcClosureLocals :: Set.Set String,
+    bvcPossibleClosureLocals :: Set.Set String,
     bvcTypeBounds :: Map.Map String (Maybe BackendType)
   }
 
@@ -632,6 +633,7 @@ validateBackendProgram program = do
           bvcConstructors = Map.fromList constructorInfos,
           bvcLocals = Map.empty,
           bvcClosureLocals = Set.empty,
+          bvcPossibleClosureLocals = Set.empty,
           bvcTypeBounds = Map.empty
         }
 
@@ -750,7 +752,7 @@ validateBackendExprWith mbContext expr =
       mapM_ (validateBackendClosureCapture mbContext) captures
       let bodyContext =
             foldl
-              (\context0 capture -> extendLocalMaybe context0 (backendClosureCaptureName capture) (backendClosureCaptureType capture))
+              (extendClosureCaptureLocalMaybe mbContext)
               (dropTermLocalsMaybe mbContext)
               captures
           bodyParamContext =
@@ -786,7 +788,8 @@ backendClosureValueName mbContext =
       Just entryName
     BackendVar _ name
       | Just context0 <- mbContext,
-        Set.member name (bvcClosureLocals context0) ->
+        Set.member name (bvcClosureLocals context0)
+          || Set.member name (bvcPossibleClosureLocals context0) ->
           Just name
     BackendTyApp _ fun _ ->
       backendClosureValueName mbContext fun
@@ -797,6 +800,24 @@ backendClosureValueName mbContext =
     _ ->
       Nothing
 
+backendDefiniteClosureValueName :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
+backendDefiniteClosureValueName mbContext =
+  \case
+    BackendClosure _ entryName _ _ _ ->
+      Just entryName
+    BackendVar _ name
+      | Just context0 <- mbContext,
+        Set.member name (bvcClosureLocals context0) ->
+          Just name
+    BackendTyApp _ fun _ ->
+      backendDefiniteClosureValueName mbContext fun
+    BackendLet _ name bindingTy rhs body ->
+      backendDefiniteClosureValueName (extendLetLocalMaybe mbContext name bindingTy rhs) body
+    BackendCase _ scrutinee alternatives ->
+      backendCaseDefiniteClosureValueName mbContext (backendExprType scrutinee) alternatives
+    _ ->
+      Nothing
+
 backendCaseClosureValueName :: Maybe BackendValidationContext -> BackendType -> NonEmpty BackendAlternative -> Maybe String
 backendCaseClosureValueName mbContext scrutineeTy =
   firstClosureValueName . map closureAlternativeName . NE.toList
@@ -804,6 +825,17 @@ backendCaseClosureValueName mbContext scrutineeTy =
     closureAlternativeName alternative =
       case validateBackendPattern mbContext scrutineeTy (backendAltPattern alternative) of
         Right contextForBody -> backendClosureValueName contextForBody (backendAltBody alternative)
+        Left _ -> Nothing
+
+backendCaseDefiniteClosureValueName :: Maybe BackendValidationContext -> BackendType -> NonEmpty BackendAlternative -> Maybe String
+backendCaseDefiniteClosureValueName mbContext scrutineeTy alternatives =
+  case traverse closureAlternativeName (NE.toList alternatives) of
+    Just names -> firstClosureValueName (map Just names)
+    Nothing -> Nothing
+  where
+    closureAlternativeName alternative =
+      case validateBackendPattern mbContext scrutineeTy (backendAltPattern alternative) of
+        Right contextForBody -> backendDefiniteClosureValueName contextForBody (backendAltBody alternative)
         Left _ -> Nothing
 
 firstClosureValueName :: [Maybe String] -> Maybe String
@@ -820,7 +852,7 @@ validateBackendClosureCall mbContext resultTy fun args =
     Nothing ->
       Left (BackendClosureCallExpectedFunction funTy)
     Just (paramTys, expectedResultTy) -> do
-      case backendClosureValueName mbContext fun of
+      case backendDefiniteClosureValueName mbContext fun of
         Just _ -> pure ()
         Nothing -> Left (BackendClosureCallExpectedClosureValue funTy)
       unless (length paramTys == length args) $
@@ -1153,7 +1185,8 @@ extendLocal :: BackendValidationContext -> String -> BackendType -> BackendValid
 extendLocal context0 name ty =
   context0
     { bvcLocals = Map.insert name ty (bvcLocals context0),
-      bvcClosureLocals = Set.delete name (bvcClosureLocals context0)
+      bvcClosureLocals = Set.delete name (bvcClosureLocals context0),
+      bvcPossibleClosureLocals = Set.delete name (bvcPossibleClosureLocals context0)
     }
 
 extendClosureLocalMaybe :: Maybe BackendValidationContext -> String -> BackendType -> Maybe BackendValidationContext
@@ -1164,24 +1197,72 @@ extendClosureLocal :: BackendValidationContext -> String -> BackendType -> Backe
 extendClosureLocal context0 name ty =
   context0
     { bvcLocals = Map.insert name ty (bvcLocals context0),
-      bvcClosureLocals = Set.insert name (bvcClosureLocals context0)
+      bvcClosureLocals = Set.insert name (bvcClosureLocals context0),
+      bvcPossibleClosureLocals = Set.delete name (bvcPossibleClosureLocals context0)
+    }
+
+extendPossibleClosureLocalMaybe :: Maybe BackendValidationContext -> String -> BackendType -> Maybe BackendValidationContext
+extendPossibleClosureLocalMaybe mbContext name ty =
+  fmap (\context0 -> extendPossibleClosureLocal context0 name ty) mbContext
+
+extendPossibleClosureLocal :: BackendValidationContext -> String -> BackendType -> BackendValidationContext
+extendPossibleClosureLocal context0 name ty =
+  context0
+    { bvcLocals = Map.insert name ty (bvcLocals context0),
+      bvcClosureLocals = Set.delete name (bvcClosureLocals context0),
+      bvcPossibleClosureLocals = Set.insert name (bvcPossibleClosureLocals context0)
     }
 
 extendLetLocalMaybe :: Maybe BackendValidationContext -> String -> BackendType -> BackendExpr -> Maybe BackendValidationContext
-extendLetLocalMaybe mbContext name ty rhs
-  | Just _ <- backendClosureValueName mbContext rhs = extendClosureLocalMaybe mbContext name ty
-  | otherwise = extendLocalMaybe mbContext name ty
+extendLetLocalMaybe mbContext name ty rhs =
+  extendClosureShapeLocalMaybe mbContext mbContext name ty rhs
+
+extendClosureCaptureLocalMaybe ::
+  Maybe BackendValidationContext ->
+  Maybe BackendValidationContext ->
+  BackendClosureCapture ->
+  Maybe BackendValidationContext
+extendClosureCaptureLocalMaybe outerContext bodyContext capture =
+  extendClosureShapeLocalMaybe
+    outerContext
+    bodyContext
+    (backendClosureCaptureName capture)
+    (backendClosureCaptureType capture)
+    (backendClosureCaptureExpr capture)
+
+extendClosureShapeLocalMaybe ::
+  Maybe BackendValidationContext ->
+  Maybe BackendValidationContext ->
+  String ->
+  BackendType ->
+  BackendExpr ->
+  Maybe BackendValidationContext
+extendClosureShapeLocalMaybe sourceContext targetContext name ty rhs
+  | Just _ <- backendDefiniteClosureValueName sourceContext rhs =
+      extendClosureLocalMaybe targetContext name ty
+  | Just _ <- backendClosureValueName sourceContext rhs =
+      extendPossibleClosureLocalMaybe targetContext name ty
+  | otherwise =
+      extendLocalMaybe targetContext name ty
 
 extendLocals :: BackendValidationContext -> [(String, BackendType)] -> BackendValidationContext
 extendLocals context0 bindings =
   context0
     { bvcLocals = foldr (uncurry Map.insert) (bvcLocals context0) bindings,
-      bvcClosureLocals = foldr (Set.delete . fst) (bvcClosureLocals context0) bindings
+      bvcClosureLocals = foldr (Set.delete . fst) (bvcClosureLocals context0) bindings,
+      bvcPossibleClosureLocals = foldr (Set.delete . fst) (bvcPossibleClosureLocals context0) bindings
     }
 
 dropTermLocalsMaybe :: Maybe BackendValidationContext -> Maybe BackendValidationContext
 dropTermLocalsMaybe =
-  fmap (\context0 -> context0 {bvcLocals = Map.empty, bvcClosureLocals = Set.empty})
+  fmap
+    ( \context0 ->
+        context0
+          { bvcLocals = Map.empty,
+            bvcClosureLocals = Set.empty,
+            bvcPossibleClosureLocals = Set.empty
+          }
+    )
 
 extendTypeBoundMaybe :: Maybe BackendValidationContext -> String -> Maybe BackendType -> Maybe BackendValidationContext
 extendTypeBoundMaybe mbContext name mbBound =
