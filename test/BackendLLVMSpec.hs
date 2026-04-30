@@ -1200,6 +1200,18 @@ spec = describe "MLF.Backend.LLVM" $ do
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
+  it "infers captured nullary global case closures from their bodies" $ do
+    output <- requireRight (renderBackendProgramLLVM capturedNullaryGlobalCaseClosureProgram)
+
+    output `shouldSatisfy` isInfixOf "call ptr @\"getCaseClosure\"()"
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.closure.env.field"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
+    nativeOutput <- requireRight (renderBackendProgramNativeLLVM capturedNullaryGlobalCaseClosureProgram)
+    runLLVMNativeExecutable nativeOutput
+      `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
+
   it "routes over-applied raw function-pointer results through indirect calls" $ do
     output <- requireRight (renderBackendProgramLLVM rawReturnedFunctionPointerCallProgram)
 
@@ -4700,6 +4712,58 @@ capturedNullaryGlobalFunctionAliasProgram =
                               { backendExprType = unaryIntTy,
                                 backendClosureEntryName = "__mlfp_closure$call_captured_nullary_global_alias",
                                 backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "get")],
+                                backendClosureParams = [("x", intTy)],
+                                backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
+                              }
+                          )
+                          [intLit 41],
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "entry"
+    }
+
+capturedNullaryGlobalCaseClosureProgram :: BackendProgram
+capturedNullaryGlobalCaseClosureProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "getCaseClosure",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr =
+                        BackendCase
+                          unaryIntTy
+                          (BackendConstruct (optionTy intTy) "Some" [intLit 0])
+                          ( BackendAlternative
+                              (BackendConstructorPattern "Some" ["ignored"])
+                              ( BackendClosure
+                                  { backendExprType = unaryIntTy,
+                                    backendClosureEntryName = "__mlfp_closure$nullary_global_case_result",
+                                    backendClosureCaptures = [],
+                                    backendClosureParams = [("x", intTy)],
+                                    backendClosureBody = BackendVar intTy "x"
+                                  }
+                              )
+                              :| []
+                          ),
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "entry",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendClosureCall
+                          intTy
+                          ( BackendClosure
+                              { backendExprType = unaryIntTy,
+                                backendClosureEntryName = "__mlfp_closure$call_captured_nullary_global_case",
+                                backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "getCaseClosure")],
                                 backendClosureParams = [("x", intTy)],
                                 backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
                               }

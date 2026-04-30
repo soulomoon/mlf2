@@ -2646,6 +2646,16 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
                   case letBoundValueKind visitedGlobals localForms0 valueKinds0 bindingTy rhs of
                     Just kind -> Map.insert name kind valueKinds0
                     Nothing -> Map.delete name valueKinds0
+            BackendCase _ scrutinee alternatives ->
+              combineValueKinds
+                (backendExprType expr0)
+                [ expressionValueKindWith
+                    visitedGlobals
+                    localForms0
+                    (alternativeValueKinds valueKinds0 scrutinee alternative)
+                    (backendAltBody alternative)
+                | alternative <- NE.toList alternatives
+                ]
             BackendClosure {} ->
               LowerClosureRecord
             _ ->
@@ -2684,6 +2694,24 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
             (shadowLocalFunctionForms binders localForms)
             (Map.withoutKeys valueKinds binders)
             (backendAltBody alternative)
+
+    alternativeValueKinds valueKinds0 scrutinee alternative =
+      patternValueKinds (backendExprType scrutinee) (backendAltPattern alternative) `Map.union` valueKinds0
+
+    patternValueKinds scrutineeTy =
+      \case
+        BackendDefaultPattern ->
+          Map.empty
+        BackendConstructorPattern constructorName binders ->
+          Map.fromList
+            [ (binder, constructorFieldStoredValueKind fieldTy)
+            | (binder, fieldTy) <- zip binders fieldTys
+            ]
+          where
+            fieldTys =
+              fromMaybe [] $
+                Map.lookup constructorName (pbConstructors base) >>= \constructorRuntime ->
+                  constructorRuntimeFieldTypes constructorRuntime scrutineeTy
 
     collectCaseResultAdapterEntries resultTy alternatives0 =
       [ returnedPartialEntry LowerFunctionPointer resultTy [] paramTys returnTy [] resultTy
