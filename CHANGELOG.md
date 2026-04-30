@@ -8,6 +8,9 @@
   explicit `BackendClosure` / `BackendClosureCall` IR for returned local
   functions and indirect calls through aliases while preserving direct
   first-order local calls on the direct application path.
+- Added the checked `.mlfp` source surface for `Unit`, opaque `IO`, initial IO
+  primitives, and the built-in `Monad IO` Prelude instance; backend conversion
+  remains fail-closed for IO entrypoints until concrete IO lowering is added.
 - Added native LLVM toolchain runner support to the test harness. LLVM backend
   tests can now discover `llc` plus a native linker, build a temporary
   executable from emitted `.ll`, run it, and capture stdout, stderr, and exit

@@ -252,11 +252,13 @@ instance Eq a => Eq (Option a) {
 
 Method calls lower to deferred obligations and resolve after eMLF inference.
 Partial overloaded method application is supported by eta-expanding the missing
-arguments. Nullary overloaded methods / associated values can also resolve from
-an explicit or propagated expected source type when the method result determines
-the class parameter; for example, `(mempty : Nat)` can select a `Monoid Nat`
-instance. Bare overloaded method names without enough term arguments or
-expected-type evidence remain ambiguous and are rejected.
+arguments. Overloaded methods can also resolve from an explicit or propagated
+expected source type when the supplied term arguments alone do not determine the
+class parameter but the method result does; for example, `(mempty : Nat)` can
+select a `Monoid Nat` instance, and `pure Unit` can select `Monad IO` under an
+expected result type of `IO Unit`. Bare overloaded method names or applications
+without enough term arguments or expected-type evidence remain ambiguous and are
+rejected.
 
 Instance resolution is coherent and fail-closed: duplicate and overlapping
 instance heads are rejected by unification, and a missing instance remains a
@@ -320,7 +322,7 @@ module Main export (main) {
 }
 ```
 
-The effectful entrypoint mode is `main : IO Unit`:
+The checked effectful entrypoint mode is `main : IO Unit`:
 
 ```mlf
 module Main export (main) {
@@ -331,10 +333,11 @@ module Main export (main) {
 }
 ```
 
-An `IO` action is still a pure value while the program is checked and normalized.
-Effects occur only when the runner executes the final checked `main` action, and
-sequencing is determined by `bind` through the runtime interpretation of the
-opaque `IO` primitive boundary. The initial runner contract does not render
+An `IO` action is still an opaque value while the program is checked and
+normalized. The current `run-program` implementation fails closed for `IO`
+entrypoints until the runtime IO issue adds concrete primitive interpretation.
+When runtime support exists, sequencing is determined by `bind` through that
+opaque primitive boundary, and the initial runtime contract should not render
 `main : IO a` results for non-`Unit` `a`.
 
 The backend contract is fail-closed for the first IO slice. `emit-backend`
@@ -400,10 +403,14 @@ module Main export (main) {
 
 Current prelude contents:
 
+- `Unit(..)` with the `Unit` value constructor
+- opaque `IO`
 - `Nat(..)` with derived `Eq Nat`
 - `Option(..)` with derived `Eq a => Eq (Option a)`
 - `List(..)` with `Nil`, `Cons`, and derived `Eq a => Eq (List a)`
 - `Eq` and `eq`
+- `Monad`, with the built-in `Monad IO` instance
+- `pure`, `bind`, and `putStrLn`
 - `and`
 - `id`
 

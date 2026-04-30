@@ -2,6 +2,7 @@
 
 module MLF.Frontend.Program.Finalize
   ( finalizeBinding,
+    finalizeBindingAllowOpaque,
     recoverSourceType,
     sourceForallMatches,
     stripVacuousForallsAndTypeAbs,
@@ -9,6 +10,7 @@ module MLF.Frontend.Program.Finalize
 where
 
 import Control.Monad (foldM)
+import Control.Applicative ((<|>))
 import Data.List (isPrefixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
 import Data.Map.Strict (Map)
@@ -32,6 +34,7 @@ import MLF.Elab.Types (ElabTerm, ElabType)
 import qualified MLF.Elab.Types as X
 import MLF.Frontend.ConstraintGen (ExternalBinding (..), ExternalBindingMode (..), ExternalBindings)
 import MLF.Frontend.Normalize (normalizeExpr, normalizeType)
+import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     elaborateScopeDataTypes,
@@ -80,8 +83,142 @@ import MLF.Frontend.Program.Types
     specializeMethodType,
     substituteTypeVar,
   )
-import MLF.Frontend.Syntax (Expr (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
+import MLF.Frontend.Syntax (Expr (..), Lit (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarsType)
+
+finalizeBindingAllowOpaque :: ElaborateScope -> LoweredBinding -> Either ProgramError CheckedBinding
+finalizeBindingAllowOpaque scope lowered
+  | Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered) = do
+      placeholderTy <- srcTypeToElabType (loweredBindingExpectedType lowered)
+      let placeholder checked =
+            checked
+              { checkedBindingTerm = X.EVar (loweredBindingName lowered),
+                checkedBindingType = placeholderTy
+              }
+          uncheckedPlaceholder =
+            CheckedBinding
+              { checkedBindingName = loweredBindingName lowered,
+                checkedBindingSourceType = loweredBindingSourceType lowered,
+                checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
+                checkedBindingTerm = X.EVar (loweredBindingName lowered),
+                checkedBindingType = placeholderTy,
+                checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
+              }
+      case finalizeBinding scope lowered of
+        Right checked
+          | Map.null (loweredBindingDeferredObligations lowered) ->
+              -- Successful elaboration can still satisfy an opaque forall by
+              -- instantiating the expected type. Re-check no-obligation
+              -- surfaces before replacing the checked term with a placeholder.
+              case validateOpaqueBindingSurface scope lowered of
+                Right () -> Right (placeholder checked)
+                Left validationErr -> Left validationErr
+          | otherwise -> Right (placeholder checked)
+        Left err ->
+          case validateOpaqueBindingSurface scope lowered of
+            Right () -> Right uncheckedPlaceholder
+            Left _ -> Left err
+  | otherwise = finalizeBinding scope lowered
+
+validateOpaqueBindingSurface :: ElaborateScope -> LoweredBinding -> Either ProgramError ()
+validateOpaqueBindingSurface scope lowered
+  | any (not . opaqueSurfaceObligationSupported) (Map.elems (loweredBindingDeferredObligations lowered)) =
+      Left (ProgramPipelineError "opaque validation does not support deferred obligations")
+  | otherwise =
+      case inferOpaqueSurfaceType scope rigidVars runtimeTypes Map.empty (loweredBindingSurfaceExpr lowered) of
+        Right actualTy
+          | opaqueSourceCompatibleWithRigid rigidVars scope actualTy (loweredBindingExpectedType lowered) -> Right ()
+          | otherwise -> Left (ProgramTypeMismatch actualTy (loweredBindingExpectedType lowered))
+        Left err -> Left err
+  where
+    rigidVars = sourceForallBinders (loweredBindingExpectedType lowered)
+    runtimeTypes =
+      Map.withoutKeys (loweredBindingExternalTypes lowered) Builtins.builtinOpaqueValueNames
+        `Map.union` elaborateScopeRuntimeTypes scope
+
+-- Opaque placeholders discard the checked term, so constructor rewrites are
+-- harmless after source-level retyping. Method and case obligations still carry
+-- evidence or inspection behavior and must not be skipped here.
+opaqueSurfaceObligationSupported :: DeferredProgramObligation -> Bool
+opaqueSurfaceObligationSupported obligation =
+  case obligation of
+    DeferredConstructor {} -> True
+    _ -> False
+
+sourceForallBinders :: SrcType -> Set String
+sourceForallBinders ty =
+  case ty of
+    STForall name _ body -> Set.insert name (sourceForallBinders body)
+    _ -> Set.empty
+
+inferOpaqueSurfaceType :: ElaborateScope -> Set String -> Map String SrcType -> Map String SrcType -> SurfaceExpr -> Either ProgramError SrcType
+inferOpaqueSurfaceType scope rigidVars runtimeTypes localTypes expr =
+  case expr of
+    EVar name ->
+      case Map.lookup name localTypes <|> Map.lookup name runtimeTypes of
+        Just ty -> Right ty
+        Nothing -> Left (ProgramUnknownValue name)
+    ELit lit -> Right (literalSourceType lit)
+    ELamAnn name ty body ->
+      STArrow ty <$> inferOpaqueSurfaceType scope rigidVars runtimeTypes (Map.insert name ty localTypes) body
+    ELam {} ->
+      Left (ProgramPipelineError "opaque validation needs lambda annotations")
+    EApp fun arg -> do
+      funTy <- inferOpaqueSurfaceType scope rigidVars runtimeTypes localTypes fun
+      argTy <- inferOpaqueSurfaceType scope rigidVars runtimeTypes localTypes arg
+      applyOpaqueFunctionType scope funTy argTy
+    ELet name rhs body -> do
+      rhsTy <- inferOpaqueSurfaceType scope rigidVars runtimeTypes localTypes rhs
+      inferOpaqueSurfaceType scope rigidVars runtimeTypes (Map.insert name rhsTy localTypes) body
+    EAnn inner annTy -> do
+      actualTy <- inferOpaqueSurfaceType scope rigidVars runtimeTypes localTypes inner
+      if opaqueSourceCompatibleWithRigid rigidVars scope actualTy annTy
+        then Right annTy
+        else Left (ProgramTypeMismatch actualTy annTy)
+
+applyOpaqueFunctionType :: ElaborateScope -> SrcType -> SrcType -> Either ProgramError SrcType
+applyOpaqueFunctionType scope funTy argTy =
+  case snd (splitForalls funTy) of
+    STArrow paramTy resultTy ->
+      case matchTypesInScope scope Map.empty paramTy argTy <|> matchTypesInScope scope Map.empty (lowerType scope paramTy) (lowerType scope argTy) of
+        Just subst -> Right (Map.foldrWithKey substituteTypeVar resultTy subst)
+        Nothing
+          | opaqueSourceCompatible scope argTy paramTy -> Right resultTy
+          | otherwise -> Left (ProgramTypeMismatch argTy paramTy)
+    other -> Left (ProgramExpectedFunction other)
+
+opaqueSourceCompatible :: ElaborateScope -> SrcType -> SrcType -> Bool
+opaqueSourceCompatible = opaqueSourceCompatibleWithRigid Set.empty
+
+opaqueSourceCompatibleWithRigid :: Set String -> ElaborateScope -> SrcType -> SrcType -> Bool
+opaqueSourceCompatibleWithRigid rigidVars scope actualTy expectedTy =
+  alphaEqSrcType actualTy expectedTy
+    || alphaEqSrcType (lowerType scope actualTy) (lowerType scope expectedTy)
+    || sourceForallMatchesWithRigidForalls expectedTy actualTy
+    || matchTypesInScopePreservingRigid scope rigidVars expectedTy actualTy /= Nothing
+    || matchTypesInScopePreservingRigid scope rigidVars actualTy expectedTy /= Nothing
+
+matchTypesInScopePreservingRigid :: ElaborateScope -> Set String -> SrcType -> SrcType -> Maybe (Map String SrcType)
+matchTypesInScopePreservingRigid scope rigidVars template actual = do
+  subst <- matchTypesInScope scope Map.empty template actual
+  if all preservesRigid (Map.toList subst)
+    then Just subst
+    else Nothing
+  where
+    preservesRigid (name, ty)
+      | name `Set.notMember` rigidVars = True
+      | otherwise =
+          case ty of
+            STVar {} -> True
+            STVarApp {} -> True
+            _ -> False
+
+literalSourceType :: Lit -> SrcType
+literalSourceType lit =
+  case lit of
+    LInt _ -> STBase "Int"
+    LBool _ -> STBase "Bool"
+    LString _ -> STBase "String"
 
 finalizeBinding :: ElaborateScope -> LoweredBinding -> Either ProgramError CheckedBinding
 finalizeBinding scope lowered = do
@@ -118,11 +255,15 @@ finalizeBinding scope lowered = do
           recoveredActualSrcTy = recoverSourceType scope (elabTypeToSrcType actualTyForCompare)
       expectedTyForCompare <- stripVacuousForalls <$> srcTypeToElabType (loweredBindingExpectedType lowered)
       recoveredActualTy <- srcTypeToElabType (lowerType scope recoveredActualSrcTy)
+      let sourceForallCompatible =
+            if Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered)
+              then sourceForallMatchesWithRigidForalls (recoverSourceType scope (loweredBindingExpectedType lowered)) recoveredActualSrcTy
+              else sourceForallMatches (recoverSourceType scope (loweredBindingExpectedType lowered)) recoveredActualSrcTy
       if alphaEqType actualTyForCompare expectedTyForCompare
         || churchAwareEqType actualTyForCompare expectedTyForCompare
         || alphaEqType recoveredActualTy expectedTyForCompare
         || churchAwareEqType recoveredActualTy expectedTyForCompare
-        || sourceForallMatches (recoverSourceType scope (loweredBindingExpectedType lowered)) recoveredActualSrcTy
+        || sourceForallCompatible
         then
           Right
             CheckedBinding
@@ -369,11 +510,58 @@ inferRewrittenLetType env rhs fallback =
     Right ty -> inlineTypeEnvBounds env (stripVacuousForalls ty)
     Left _ -> fallback
 
+freeSourceTypeVars :: SrcType -> Set String
+freeSourceTypeVars = go Set.empty
+  where
+    go boundVars ty =
+      case ty of
+        STVar name
+          | name `Set.member` boundVars -> Set.empty
+          | otherwise -> Set.singleton name
+        STArrow dom cod -> go boundVars dom `Set.union` go boundVars cod
+        STBase {} -> Set.empty
+        STCon _ args -> foldMap (go boundVars) args
+        STVarApp name args ->
+          let headVars =
+                if name `Set.member` boundVars
+                  then Set.empty
+                  else Set.singleton name
+           in headVars `Set.union` foldMap (go boundVars) args
+        STForall name mb body ->
+          maybe Set.empty (go boundVars . unSrcBound) mb
+            `Set.union` go (Set.insert name boundVars) body
+        STMu name body -> go (Set.insert name boundVars) body
+        STBottom -> Set.empty
+
+sourceForallMatchesWithRigidForalls :: SrcType -> SrcType -> Bool
+sourceForallMatchesWithRigidForalls expected actual =
+  case sourceForallMatchSubst expected actual of
+    Just subst -> all (forallBinderRemainsPolymorphic subst) (usedLeadingForallNames expected)
+    Nothing -> False
+  where
+    forallBinderRemainsPolymorphic subst name =
+      case Map.lookup name subst of
+        Just STVar {} -> True
+        Just STVarApp {} -> True
+        Just _ -> False
+        Nothing -> True
+
+    usedLeadingForallNames ty =
+      case ty of
+        STForall name _ body
+          | name `Set.member` freeSourceTypeVars body -> name : usedLeadingForallNames body
+          | otherwise -> usedLeadingForallNames body
+        _ -> []
+
 sourceForallMatches :: SrcType -> SrcType -> Bool
 sourceForallMatches expected actual =
-  case match Set.empty Map.empty expected actual of
+  case sourceForallMatchSubst expected actual of
     Just _ -> True
     Nothing -> False
+
+sourceForallMatchSubst :: SrcType -> SrcType -> Maybe (Map String SrcType)
+sourceForallMatchSubst expected actual =
+  match Set.empty Map.empty expected actual
   where
     match bound subst template actualTy =
       case template of
@@ -433,28 +621,6 @@ sourceForallMatches expected actual =
           match bound subst expectedBound actualBound
         _ -> Nothing
 
-    freeTypeVarsSrcTypeLocal = go Set.empty
-      where
-        go boundVars ty =
-          case ty of
-            STVar name
-              | name `Set.member` boundVars -> Set.empty
-              | otherwise -> Set.singleton name
-            STArrow dom cod -> go boundVars dom `Set.union` go boundVars cod
-            STBase {} -> Set.empty
-            STCon _ args -> foldMap (go boundVars) args
-            STVarApp name args ->
-              let headVars =
-                    if name `Set.member` boundVars
-                      then Set.empty
-                      else Set.singleton name
-               in headVars `Set.union` foldMap (go boundVars) args
-            STForall name mb body ->
-              maybe Set.empty (go boundVars . unSrcBound) mb
-                `Set.union` go (Set.insert name boundVars) body
-            STMu name body -> go (Set.insert name boundVars) body
-            STBottom -> Set.empty
-
     matchVarApp bound subst expectedName args actualTy
       | expectedName `Set.member` bound =
           case actualTy of
@@ -501,6 +667,8 @@ sourceForallMatches expected actual =
         Just existing
           | alphaEqSrcType existing actualTy -> Just subst
           | otherwise -> Nothing
+
+    freeTypeVarsSrcTypeLocal = freeSourceTypeVars
 
 alphaEqSrcType :: SrcType -> SrcType -> Bool
 alphaEqSrcType = go Map.empty Map.empty
@@ -950,11 +1118,9 @@ resolveDeferredMethods scope deferredMethods = go
         else do
           argViews <- mapM (inferDeferredArgType env) (take requiredArgCount args)
           classArgView <-
-            case inferClassArgument (lowerTypeView scope (TypeView (methodType methodInfo) (methodTypeIdentity methodInfo))) (methodParamName methodInfo) (map typeViewDisplay argViews) of
-              Just ty -> Right ty
+            case inferDeferredMethodClassArgument methodInfo argViews (deferredMethodExpectedResult deferred) of
+              Just view -> Right view
               Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-            >>= \displayTy ->
-              Right (sourceTypeViewInScope scope displayTy)
           (instanceInfo, subst) <- resolveMethodInstanceInfoByTypeView scope methodInfo classArgView
           methodValue <- concreteMethodValue instanceInfo methodInfo
           methodSubst <-
@@ -1011,6 +1177,26 @@ resolveDeferredMethods scope deferredMethods = go
           evidenceArgs <- resolveConstraintEvidenceTerms scope (deferredMethodLocalEvidence deferred) Set.empty eagerConstraints
           methodHead <- instantiateMethodValue scope methodSubst methodValue
           Right (reapplyHeadInsts headInsts (foldl X.EApp methodHead evidenceArgs))
+
+    inferDeferredMethodClassArgument methodInfo argViews mbExpectedResult =
+      let methodTy = lowerTypeView scope (TypeView (methodType methodInfo) (methodTypeIdentity methodInfo))
+          argDisplayTypes = map typeViewDisplay argViews
+       in (sourceTypeViewInScope scope <$> inferClassArgument methodTy (methodParamName methodInfo) argDisplayTypes)
+            <|> inferDeferredMethodClassArgumentFromExpected methodInfo methodTy argDisplayTypes mbExpectedResult
+
+    inferDeferredMethodClassArgumentFromExpected _ _ _ Nothing = Nothing
+    inferDeferredMethodClassArgumentFromExpected methodInfo methodTy argDisplayTypes (Just expectedView) = do
+      let (_, bodyTy) = splitForalls methodTy
+          (paramTys, resultTy) = splitArrows bodyTy
+      substFromArgs <-
+        foldM
+          (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy)
+          Map.empty
+          (zip paramTys argDisplayTypes)
+      let resultTy' = Map.foldrWithKey substituteTypeVar resultTy substFromArgs
+      subst <- matchTypesInScope scope substFromArgs resultTy' (typeViewDisplay expectedView)
+      displayTy <- Map.lookup (methodParamName methodInfo) subst
+      pure (sourceTypeViewInScope scope displayTy)
 
     lookupNullaryEvidence deferred methodInfo classArgView =
       case
