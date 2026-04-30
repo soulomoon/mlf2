@@ -775,7 +775,11 @@ validateBackendClosureCapture mbContext capture = do
     expr = backendClosureCaptureExpr capture
 
 backendAppClosureHead :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
-backendAppClosureHead mbContext =
+backendAppClosureHead =
+  backendClosureValueName
+
+backendClosureValueName :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
+backendClosureValueName mbContext =
   \case
     BackendClosure _ entryName _ _ _ ->
       Just entryName
@@ -784,15 +788,11 @@ backendAppClosureHead mbContext =
         Set.member name (bvcClosureLocals context0) ->
           Just name
     BackendTyApp _ fun _ ->
-      backendAppClosureHead mbContext fun
+      backendClosureValueName mbContext fun
+    BackendLet _ name bindingTy rhs body ->
+      backendClosureValueName (extendLetLocalMaybe mbContext name bindingTy rhs) body
     _ ->
       Nothing
-
-isBackendClosureValue :: BackendExpr -> Bool
-isBackendClosureValue =
-  \case
-    BackendClosure {} -> True
-    _ -> False
 
 validateBackendClosureCall :: BackendType -> BackendType -> [BackendExpr] -> Either BackendValidationError ()
 validateBackendClosureCall resultTy funTy args =
@@ -1143,7 +1143,7 @@ extendClosureLocal context0 name ty =
 
 extendLetLocalMaybe :: Maybe BackendValidationContext -> String -> BackendType -> BackendExpr -> Maybe BackendValidationContext
 extendLetLocalMaybe mbContext name ty rhs
-  | isBackendClosureValue rhs = extendClosureLocalMaybe mbContext name ty
+  | Just _ <- backendClosureValueName mbContext rhs = extendClosureLocalMaybe mbContext name ty
   | otherwise = extendLocalMaybe mbContext name ty
 
 extendLocals :: BackendValidationContext -> [(String, BackendType)] -> BackendValidationContext

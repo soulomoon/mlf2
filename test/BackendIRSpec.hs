@@ -265,6 +265,30 @@ spec = describe "MLF.Backend.IR" $ do
             idTy
             (goodClosure "__mlfp_closure$app")
             (BackendApp intTy (BackendVar idTy "f") (intLit 1))
+        appCalledLetHeadClosure =
+          BackendApp
+            intTy
+            ( BackendLet
+                idTy
+                "f"
+                idTy
+                (goodClosure "__mlfp_closure$app_let_head")
+                (BackendVar idTy "f")
+            )
+            (intLit 1)
+        appCalledClosureAlias =
+          BackendLet
+            intTy
+            "g"
+            idTy
+            (goodClosure "__mlfp_closure$app_alias")
+            ( BackendLet
+                intTy
+                "f"
+                idTy
+                (BackendVar idTy "g")
+                (BackendApp intTy (BackendVar idTy "f") (intLit 1))
+            )
 
     validateBackendProgram (programWithMainExpr captureMismatch)
       `shouldBe` Left (BackendClosureCaptureTypeMismatch "captured" boolTy intTy)
@@ -279,6 +303,10 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithMainExpr unlistedLocalCapture)
       `shouldBe` Left (BackendUnknownVariable "captured")
     validateBackendProgram (programWithMainExpr appCalledClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+    validateBackendProgram (programWithMainExpr appCalledLetHeadClosure)
+      `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
+    validateBackendProgram (programWithMainExpr appCalledClosureAlias)
       `shouldBe` Left (BackendClosureCalledWithBackendApp "f")
 
   it "checks type application against forall nodes" $ do
