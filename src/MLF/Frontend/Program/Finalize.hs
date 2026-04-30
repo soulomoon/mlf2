@@ -897,10 +897,10 @@ resolveDeferredMethods scope deferredMethods = go
   where
     go env term =
       case deferredPlaceholderHeadWithInsts term of
-        Just (name, _)
+        Just (name, headInsts)
           | Just deferred <- Map.lookup name deferredMethods,
             deferredMethodArgCount deferred == 0 ->
-              resolveDeferredNullaryMethod deferred
+              reapplyHeadInsts headInsts <$> resolveDeferredNullaryMethod deferred
         _ ->
           case term of
             X.EVar {} -> Right term
@@ -1276,6 +1276,10 @@ deferredPlaceholderHeadWithInsts = go []
         X.ETyInst inner (X.InstApp ty) -> go (ty : insts) inner
         X.ETyInst inner _ -> go insts inner
         _ -> Nothing
+
+reapplyHeadInsts :: [ElabType] -> ElabTerm -> ElabTerm
+reapplyHeadInsts insts term =
+  foldl X.ETyInst term (map X.InstApp insts)
 
 dataInfoHeadNames :: ElaborateScope -> DataInfo -> [String]
 dataInfoHeadNames scope info =
