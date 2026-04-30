@@ -1,3 +1,15 @@
+## 2026-04-29 - Native LLVM toolchain runner harness
+
+- Extended `LLVMToolSupport` with native toolchain discovery for `llc` plus a
+  C compiler/linker selected from `CC`, `cc`, `clang`, or `gcc`. The `CC`
+  value may be a command line such as `ccache clang` or `xcrun clang`, with
+  launcher arguments preserved after executable lookup. Missing pieces mark the
+  relevant Hspec examples pending instead of failing unrelated backend tests.
+- Added a temporary-build runner that lowers `.ll` to an object, links a native
+  executable, runs it, captures stdout/stderr/exit status, and removes build
+  products. The coverage is harness-only and does not define `.mlfp` result
+  rendering semantics.
+
 ## 2026-04-29 - Final ProgramSpec-to-LLVM parity closure
 
 - Removed the last temporary LLVM unsupported classification from the shared
