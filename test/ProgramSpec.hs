@@ -658,6 +658,43 @@ spec = do
                         ]
             (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "succ\n"
 
+        it "preserves parameterized constructor instantiations for IO method dispatch" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, bind, pure, putStrLn);"
+                        , "  data Wrap a ="
+                        , "      Wrap : a -> Wrap a;"
+                        , "  class Speak a {"
+                        , "    speak : a -> IO Unit;"
+                        , "  }"
+                        , "  instance Speak (Wrap Int) {"
+                        , "    speak = \\w putStrLn \"int\";"
+                        , "  }"
+                        , "  instance Speak (Wrap Bool) {"
+                        , "    speak = \\w putStrLn \"bool\";"
+                        , "  }"
+                        , "  def after : Wrap Int -> IO Unit = \\w speak w;"
+                        , "  def action : IO (Wrap Int) = pure (Wrap 1);"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "int\n"
+
+        it "resolves constrained instance evidence for IO method dispatch" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Nat(..), Option(..), Eq, bind, eq, pure, putStrLn);"
+                        , "  def after : Option Nat -> IO Unit = \\opt (\\(same : Bool) putStrLn \"eq\") (eq opt opt);"
+                        , "  def action : IO (Option Nat) = pure (Some Zero);"
+                        , "  def main : IO Unit = bind action after;"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "eq\n"
+
         it "rejects recursive IO main lookup without hanging" $ do
             located <-
                 requireLocated $

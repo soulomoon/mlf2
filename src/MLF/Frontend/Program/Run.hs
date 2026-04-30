@@ -21,12 +21,16 @@ import MLF.Elab.Pipeline (ElabTerm (..), Pretty (..), Ty (..), freeTypeVarsType,
 import MLF.Frontend.Program.Check (checkLocatedProgram, checkProgram)
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
+    classInfoForConstraint,
     inferClassArgument,
+    lookupEvidenceMethodByClass,
     lowerTypeView,
     matchTypesInScope,
     mkElaborateScope,
+    resolveInstanceInfoByConstraint,
     resolveMethodInstanceInfoByTypeView,
     sourceTypeViewInScope,
+    zeroMethodConstraintCoveredByEvidenceInfo,
   )
 import MLF.Frontend.Program.Finalize (recoverSourceType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
@@ -35,6 +39,7 @@ import MLF.Frontend.Program.Types
     ClassInfo (..),
     CheckedModule (..),
     CheckedProgram (..),
+    ConstraintInfo (..),
     ConstructorInfo (..),
     DataInfo (..),
     DeferredCaseCall (..),
@@ -42,6 +47,7 @@ import MLF.Frontend.Program.Types
     DeferredMethodCall (..),
     DeferredMethodEvidence (..),
     DeferredProgramObligation (..),
+    EvidenceInfo (..),
     InstanceInfo (..),
     MethodInfo (..),
     ProgramDiagnostic,
@@ -50,7 +56,10 @@ import MLF.Frontend.Program.Types
     SymbolNamespace (..),
     TypeView (..),
     ValueInfo (..),
+    applyConstraintInfoSubst,
     diagnosticForProgramError,
+    freeTypeVarsTypeView,
+    specializeMethodType,
     splitArrows,
     splitForalls,
     substituteTypeVar,
@@ -213,16 +222,21 @@ type RuntimeEnv = Map.Map String RuntimeValue
 type RuntimeLookupStack = [String]
 
 data RuntimeDeferredValue
-  = RuntimeDeferredConstructor ConstructorInfo
+  = RuntimeDeferredConstructor DeferredConstructorCall
   | RuntimeDeferredCase DeferredCaseCall
   | RuntimeDeferredMethod DeferredMethodCall
+
+data RuntimeConstructorSpec = RuntimeConstructorSpec
+  { runtimeConstructorInfo :: ConstructorInfo,
+    runtimeConstructorDeferred :: Maybe DeferredConstructorCall
+  }
 
 data RuntimeValue
   = RuntimeLit Lit
   | RuntimeUnit
-  | RuntimeData ConstructorInfo [RuntimeValue]
+  | RuntimeData ConstructorInfo SrcType [RuntimeValue]
   | RuntimeClosure String SurfaceExpr RuntimeEnv RuntimeLookupStack RuntimeDeferredValues
-  | RuntimeConstructor ConstructorInfo [RuntimeValue]
+  | RuntimeConstructor RuntimeConstructorSpec [RuntimeValue]
   | RuntimeCase DeferredCaseCall [RuntimeValue]
   | RuntimeMethod RuntimeLookupStack RuntimeDeferredValues RuntimeEnv DeferredMethodCall [RuntimeValue]
   | RuntimePrimitive RuntimePrimitive [RuntimeValue]
@@ -280,7 +294,7 @@ bindingDeferredValues binding =
 runtimeDeferredValue :: DeferredProgramObligation -> RuntimeDeferredValue
 runtimeDeferredValue obligation =
   case obligation of
-    DeferredConstructor deferred -> RuntimeDeferredConstructor (deferredConstructorInfo deferred)
+    DeferredConstructor deferred -> RuntimeDeferredConstructor deferred
     DeferredCase deferred -> RuntimeDeferredCase deferred
     DeferredMethod deferred -> RuntimeDeferredMethod deferred
 
@@ -325,7 +339,8 @@ lookupRuntimeValue context stack deferredValues env name =
         Nothing
           | Just deferred <- Map.lookup name deferredValues ->
               lookupRuntimeDeferredValue context stack deferredValues env deferred
-          | Just ctor <- Map.lookup name (runtimeConstructors context) -> Right (runtimeConstructorValue ctor [])
+          | Just ctor <- Map.lookup name (runtimeConstructors context) ->
+              runtimeConstructorValue context (RuntimeConstructorSpec ctor Nothing) []
           | name `elem` stack -> Left (recursiveRuntimeBindingError name stack)
           | Just binding <- Map.lookup name (runtimeBindings context) ->
               evalRuntimeBinding context (name : stack) binding
@@ -340,8 +355,11 @@ lookupRuntimeDeferredValue ::
   Either ProgramError RuntimeValue
 lookupRuntimeDeferredValue context stack deferredValues env deferred =
   case deferred of
-    RuntimeDeferredConstructor ctor ->
-      Right (runtimeConstructorValue ctor [])
+    RuntimeDeferredConstructor deferredConstructor ->
+      runtimeConstructorValue
+        context
+        (RuntimeConstructorSpec (deferredConstructorInfo deferredConstructor) (Just deferredConstructor))
+        []
     RuntimeDeferredCase deferredCase ->
       Right (RuntimeCase deferredCase [])
     RuntimeDeferredMethod deferredMethod ->
@@ -365,11 +383,54 @@ runtimePrimitive name =
     "__mlfp_and" -> Just RuntimeAnd
     _ -> Nothing
 
-runtimeConstructorValue :: ConstructorInfo -> [RuntimeValue] -> RuntimeValue
-runtimeConstructorValue ctor args
-  | isPreludeUnitConstructor ctor && null args = RuntimeUnit
-  | length args == length (ctorArgs ctor) = RuntimeData ctor args
-  | otherwise = RuntimeConstructor ctor args
+runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
+runtimeConstructorValue context spec args
+  | isPreludeUnitConstructor ctor && null args = Right RuntimeUnit
+  | length args == length (ctorArgs ctor) = do
+      resultTy <- runtimeConstructorResultType context spec args
+      Right (RuntimeData ctor resultTy args)
+  | length args < length (ctorArgs ctor) = Right (RuntimeConstructor spec args)
+  | otherwise =
+      Left (ProgramPipelineError ("run-program constructor over-applied: " ++ ctorName ctor))
+  where
+    ctor = runtimeConstructorInfo spec
+
+runtimeConstructorResultType :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError SrcType
+runtimeConstructorResultType context spec args = do
+  argViews <- mapM (runtimeValueTypeView context) args
+  let scope = runtimeElaborateScope context
+      ctor = runtimeConstructorInfo spec
+      startSubst = maybe Map.empty deferredConstructorInitialSubst (runtimeConstructorDeferred spec)
+      resultTy = runtimeConstructorOccurrenceResultType spec
+      subst =
+        case
+          foldM
+            (\acc (templateTy, actualView) -> matchTypesInScope scope acc templateTy (typeViewDisplay actualView))
+            startSubst
+            (zip (ctorArgs ctor) argViews)
+        of
+          Just subst' -> subst'
+          Nothing -> startSubst
+  Right (Map.foldrWithKey substituteTypeVar resultTy subst)
+
+runtimeConstructorOccurrenceResultType :: RuntimeConstructorSpec -> SrcType
+runtimeConstructorOccurrenceResultType spec =
+  case runtimeConstructorDeferred spec of
+    Just deferred ->
+      dropSourceArrows
+        (length (ctorArgs ctor) - deferredConstructorArgCount deferred)
+        (deferredConstructorOccurrenceType deferred)
+    Nothing -> ctorResult ctor
+  where
+    ctor = runtimeConstructorInfo spec
+
+dropSourceArrows :: Int -> SrcType -> SrcType
+dropSourceArrows count ty
+  | count <= 0 = ty
+dropSourceArrows count ty =
+  case ty of
+    STArrow _ resultTy -> dropSourceArrows (count - 1) resultTy
+    _ -> ty
 
 isPreludeUnitConstructor :: ConstructorInfo -> Bool
 isPreludeUnitConstructor ctor =
@@ -392,9 +453,9 @@ applyRuntimeValue context funValue argValue =
       evalRuntimeExprWithStack context closureStack closureDeferredValues (Map.insert name argValue closureEnv) body
     RuntimePrimitive prim args ->
       applyRuntimePrimitive prim (args ++ [argValue])
-    RuntimeConstructor ctor args
-      | length args < length (ctorArgs ctor) ->
-          Right (runtimeConstructorValue ctor (args ++ [argValue]))
+    RuntimeConstructor spec args
+      | length args < length (ctorArgs (runtimeConstructorInfo spec)) ->
+          runtimeConstructorValue context spec (args ++ [argValue])
     RuntimeCase deferred args ->
       applyRuntimeCase context deferred (args ++ [argValue])
     RuntimeMethod stack deferredValues env deferred args ->
@@ -425,7 +486,7 @@ evaluateRuntimeCase context deferred args =
 runtimeCaseScrutinee :: DeferredCaseCall -> RuntimeValue -> Either ProgramError (ConstructorInfo, [RuntimeValue])
 runtimeCaseScrutinee deferred value =
   case value of
-    RuntimeData ctor fields
+    RuntimeData ctor _ fields
       | constructorBelongsToCase deferred ctor -> Right (ctor, fields)
     RuntimeUnit ->
       case find isPreludeUnitConstructor (dataConstructors (deferredCaseDataInfo deferred)) of
@@ -489,19 +550,192 @@ resolveRuntimeMethodReady context stack deferredValues env deferred args =
         case inferRuntimeMethodClassArgument context (deferredMethodInfo deferred) argViews (deferredMethodExpectedResult deferred) of
           Just view -> Right view
           Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
-      (instanceInfo, _) <- resolveMethodInstanceInfoByTypeView (runtimeElaborateScope context) (deferredMethodInfo deferred) classArgView
+      (instanceInfo, instanceSubst) <- resolveMethodInstanceInfoByTypeView (runtimeElaborateScope context) (deferredMethodInfo deferred) classArgView
       methodValueInfo <-
         case Map.lookup (deferredMethodName deferred) (instanceMethods instanceInfo) of
           Just valueInfo@OrdinaryValue {} -> Right valueInfo
           _ -> Left (ProgramUnknownMethod (deferredMethodName deferred))
-      runtimeName <-
-        case methodValueInfo of
-          OrdinaryValue {valueRuntimeName = name, valueConstraintInfos = []} -> Right name
-          OrdinaryValue {valueConstraintInfos = _ : _} ->
-            Left (ProgramPipelineError "run-program IO runtime does not support deferred constrained method evidence")
-          _ -> Left (ProgramUnknownMethod (deferredMethodName deferred))
+      methodSubst <-
+        case inferRuntimeMethodArgumentSubst context (deferredMethodInfo deferred) classArgView instanceSubst argViews of
+          Just subst -> Right subst
+          Nothing -> Left (ProgramAmbiguousMethodUse (deferredMethodName deferred))
+      let eagerConstraints =
+            filter
+              constraintGround
+              (map (applyConstraintInfoSubst methodSubst) (methodValueConstraints methodValueInfo))
+      evidenceArgs <-
+        resolveRuntimeConstraintEvidenceValues
+          context
+          stack
+          deferredValues
+          env
+          (deferredMethodLocalEvidence deferred)
+          Set.empty
+          eagerConstraints
+      runtimeName <- runtimeMethodValueName (deferredMethodName deferred) methodValueInfo
       methodHead <- lookupRuntimeValue context stack deferredValues env runtimeName
-      foldM (applyRuntimeValue context) methodHead args
+      foldM (applyRuntimeValue context) methodHead (evidenceArgs ++ args)
+
+runtimeMethodValueName :: String -> ValueInfo -> Either ProgramError String
+runtimeMethodValueName _ OrdinaryValue {valueRuntimeName = name} = Right name
+runtimeMethodValueName methodName0 _ = Left (ProgramUnknownMethod methodName0)
+
+methodValueConstraints :: ValueInfo -> [ConstraintInfo]
+methodValueConstraints OrdinaryValue {valueConstraintInfos = constraints} = constraints
+methodValueConstraints _ = []
+
+constraintGround :: ConstraintInfo -> Bool
+constraintGround constraint =
+  Set.null (freeTypeVarsTypeView (constraintTypeView constraint))
+
+resolveRuntimeConstraintEvidenceValues ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  [EvidenceInfo] ->
+  Set.Set (SymbolIdentity, String) ->
+  [ConstraintInfo] ->
+  Either ProgramError [RuntimeValue]
+resolveRuntimeConstraintEvidenceValues context stack deferredValues env localEvidence seen constraints =
+  concat <$> mapM (resolveRuntimeConstraintEvidenceValue context stack deferredValues env localEvidence seen) constraints
+
+resolveRuntimeConstraintEvidenceValue ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  [EvidenceInfo] ->
+  Set.Set (SymbolIdentity, String) ->
+  ConstraintInfo ->
+  Either ProgramError [RuntimeValue]
+resolveRuntimeConstraintEvidenceValue context stack deferredValues env localEvidence seen constraint = do
+  let key = (constraintClassSymbol constraint, show (typeViewIdentity (constraintTypeView constraint)))
+  if key `Set.member` seen
+    then Left (ProgramNoMatchingInstance (constraintDisplayClass constraint) (typeViewDisplay (constraintTypeView constraint)))
+    else do
+      mbLocalEvidence <- resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env localEvidence constraint
+      case mbLocalEvidence of
+        Just evidenceValues -> Right evidenceValues
+        Nothing -> do
+          (instanceInfo, subst) <- resolveInstanceInfoByConstraint (runtimeElaborateScope context) constraint
+          let seen' = Set.insert key seen
+              methodValues = [valueInfo | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethods instanceInfo)]
+          if null methodValues
+            then do
+              _ <-
+                resolveRuntimeConstraintEvidenceValues
+                  context
+                  stack
+                  deferredValues
+                  env
+                  localEvidence
+                  seen'
+                  (map (applyConstraintInfoSubst subst) (instanceConstraintInfos instanceInfo))
+              Right []
+            else mapM (materializeRuntimeMethodEvidence context stack deferredValues env localEvidence seen' subst constraint) methodValues
+
+materializeRuntimeMethodEvidence ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  [EvidenceInfo] ->
+  Set.Set (SymbolIdentity, String) ->
+  Map.Map String TypeView ->
+  ConstraintInfo ->
+  ValueInfo ->
+  Either ProgramError RuntimeValue
+materializeRuntimeMethodEvidence context stack deferredValues env localEvidence seen subst constraint valueInfo = do
+  let headVars = freeTypeVarsTypeView (constraintTypeView constraint)
+      eagerConstraints =
+        filter
+          (constraintDeterminedByTypeVars headVars)
+          (map (applyConstraintInfoSubst subst) (methodValueConstraints valueInfo))
+  nestedEvidence <-
+    resolveRuntimeConstraintEvidenceValues
+      context
+      stack
+      deferredValues
+      env
+      localEvidence
+      seen
+      eagerConstraints
+  runtimeName <- runtimeMethodValueName (constraintDisplayClass constraint) valueInfo
+  methodHead <- lookupRuntimeValue context stack deferredValues env runtimeName
+  foldM (applyRuntimeValue context) methodHead nestedEvidence
+
+resolveRuntimeLocalConstraintEvidenceValues ::
+  RuntimeContext ->
+  RuntimeLookupStack ->
+  RuntimeDeferredValues ->
+  RuntimeEnv ->
+  [EvidenceInfo] ->
+  ConstraintInfo ->
+  Either ProgramError (Maybe [RuntimeValue])
+resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env localEvidence constraint =
+  case classInfoForConstraint (runtimeElaborateScope context) constraint of
+    Nothing -> Right Nothing
+    Just classInfo
+      | Map.null (classMethods classInfo) ->
+          Right $
+            if zeroMethodConstraintCoveredByEvidenceInfo (runtimeElaborateScope context) constraint
+              || zeroMethodConstraintCoveredByRuntimeEvidence localEvidence constraint
+              then Just []
+              else Nothing
+      | otherwise -> do
+          let localMethodEvidence =
+                mapM
+                  ( \methodInfo -> do
+                      (runtimeName, _evidenceTy) <-
+                        lookupEvidenceMethodByClass
+                          (runtimeElaborateScope context)
+                          (constraintClassSymbol constraint)
+                          (typeViewIdentity (constraintTypeView constraint))
+                          (methodName methodInfo)
+                          `orElseRuntimeEvidenceMethod`
+                          lookupRuntimeEvidenceMethod
+                            localEvidence
+                            (constraintClassSymbol constraint)
+                            (typeViewIdentity (constraintTypeView constraint))
+                            (methodName methodInfo)
+                      pure runtimeName
+                  )
+                  (Map.elems (classMethods classInfo))
+          case localMethodEvidence of
+            Nothing -> Right Nothing
+            Just runtimeNames ->
+              Just <$> mapM (lookupRuntimeValue context stack deferredValues env) runtimeNames
+
+lookupRuntimeEvidenceMethod :: [EvidenceInfo] -> SymbolIdentity -> SrcType -> String -> Maybe (String, SrcType)
+lookupRuntimeEvidenceMethod evidenceInfos classIdentity headIdentityTy methodName0 =
+  case
+    [ methodEvidence
+      | evidence <- evidenceInfos,
+        evidenceClassSymbol evidence == classIdentity,
+        evidenceTypeIdentity evidence == headIdentityTy,
+        Just methodEvidence <- [Map.lookup methodName0 (evidenceMethods evidence)]
+    ]
+  of
+    methodEvidence : _ -> Just methodEvidence
+    [] -> Nothing
+
+orElseRuntimeEvidenceMethod :: Maybe (String, SrcType) -> Maybe (String, SrcType) -> Maybe (String, SrcType)
+orElseRuntimeEvidenceMethod (Just evidence) _ = Just evidence
+orElseRuntimeEvidenceMethod Nothing fallback = fallback
+
+zeroMethodConstraintCoveredByRuntimeEvidence :: [EvidenceInfo] -> ConstraintInfo -> Bool
+zeroMethodConstraintCoveredByRuntimeEvidence evidenceInfos constraint =
+  any
+    ( \evidence ->
+        evidenceClassSymbol evidence == constraintClassSymbol constraint
+          && evidenceTypeIdentity evidence == typeViewIdentity (constraintTypeView constraint)
+    )
+    evidenceInfos
+
+constraintDeterminedByTypeVars :: Set.Set String -> ConstraintInfo -> Bool
+constraintDeterminedByTypeVars typeVars constraint =
+  freeTypeVarsTypeView (constraintTypeView constraint) `Set.isSubsetOf` typeVars
 
 runtimeValueTypeView :: RuntimeContext -> RuntimeValue -> Either ProgramError TypeView
 runtimeValueTypeView context value =
@@ -510,24 +744,10 @@ runtimeValueTypeView context value =
     RuntimeLit (LBool _) -> Right (sourceTypeViewInScope scope (STBase "Bool"))
     RuntimeLit (LString _) -> Right (sourceTypeViewInScope scope (STBase "String"))
     RuntimeUnit -> Right (sourceTypeViewInScope scope (STBase "Prelude.Unit"))
-    RuntimeData ctor _ -> Right (sourceTypeViewInScope scope (qualifiedConstructorResult ctor))
+    RuntimeData _ resultTy _ -> Right (sourceTypeViewInScope scope resultTy)
     _ -> Left (ProgramPipelineError "run-program IO runtime cannot infer deferred method argument type")
   where
     scope = runtimeElaborateScope context
-
-qualifiedConstructorResult :: ConstructorInfo -> SrcType
-qualifiedConstructorResult ctor =
-  replaceHead (qualifiedTypeIdentityName (ctorOwningTypeIdentity ctor)) (ctorResult ctor)
-  where
-    replaceHead qualifiedName ty =
-      case ty of
-        STBase _ -> STBase qualifiedName
-        STCon _ args -> STCon qualifiedName args
-        _ -> ty
-
-qualifiedTypeIdentityName :: SymbolIdentity -> String
-qualifiedTypeIdentityName identity =
-  symbolDefiningModule identity ++ "." ++ symbolDefiningName identity
 
 inferRuntimeMethodClassArgument :: RuntimeContext -> MethodInfo -> [TypeView] -> Maybe TypeView -> Maybe TypeView
 inferRuntimeMethodClassArgument context methodInfo argViews mbExpectedResult =
@@ -554,6 +774,19 @@ inferRuntimeMethodClassArgumentFromExpected context methodInfo methodTy argDispl
   subst <- matchTypesInScope scope substFromArgs resultTy' (typeViewDisplay expectedView)
   displayTy <- Map.lookup (methodParamName methodInfo) subst
   pure (sourceTypeViewInScope scope displayTy)
+
+inferRuntimeMethodArgumentSubst :: RuntimeContext -> MethodInfo -> TypeView -> Map.Map String TypeView -> [TypeView] -> Maybe (Map.Map String TypeView)
+inferRuntimeMethodArgumentSubst context methodInfo classArgView subst argViews =
+  fmap (Map.map (sourceTypeViewInScope scope)) $
+    foldM
+      (\acc (templateTy, actualView) -> matchTypesInScope scope acc templateTy (typeViewDisplay actualView))
+      (fmap typeViewDisplay subst)
+      (zip paramTys argViews)
+  where
+    scope = runtimeElaborateScope context
+    specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) (typeViewDisplay classArgView)
+    (_, bodyTy) = splitForalls specializedMethodTy
+    (paramTys, _) = splitArrows bodyTy
 
 applyRuntimePrimitive :: RuntimePrimitive -> [RuntimeValue] -> Either ProgramError RuntimeValue
 applyRuntimePrimitive prim args
@@ -608,7 +841,7 @@ isRuntimeUnit :: RuntimeValue -> Bool
 isRuntimeUnit value =
   case value of
     RuntimeUnit -> True
-    RuntimeData ctor [] -> isPreludeUnitConstructor ctor
+    RuntimeData ctor _ [] -> isPreludeUnitConstructor ctor
     _ -> False
 
 reachableOpaqueRuntimeDependencies :: CheckedProgram -> [String]
