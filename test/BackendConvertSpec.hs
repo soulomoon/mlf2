@@ -37,6 +37,30 @@ spec = describe "MLF.Backend.Convert" $ do
           resultTy `shouldBe` intTy
       other -> expectationFailure ("expected backend application, got " ++ show other)
 
+  it "rejects backend conversion when pure bindings reference opaque Prelude helpers" $ do
+    program <-
+      requireParsed $
+        unlines
+          [ "module Main export (main) {",
+            "  import Prelude exposing (Unit(..), IO, pure);",
+            "  def discard : IO Unit -> Unit = \\(_action : IO Unit) Unit;",
+            "  def main : Unit = discard (pure Unit);",
+            "}"
+          ]
+    checked <- requireRight (checkProgram (withPrelude program))
+    convertCheckedProgram checked
+      `shouldSatisfy` either
+        ( \err -> case err of
+            BackendUnsupportedCaseShape message ->
+              all
+                (`isInfixOf` message)
+                [ "IO dependencies are not supported by backend conversion yet",
+                  "Main__main -> Main__discard"
+                ]
+            _ -> False
+        )
+        (const False)
+
   it "matches the checked backend IR snapshot for a primitive function program" $ do
     checked <- requireChecked simpleFunctionProgram
     backend <- requireRight (convertCheckedProgram checked)

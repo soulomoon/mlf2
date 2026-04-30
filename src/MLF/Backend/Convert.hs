@@ -210,7 +210,38 @@ rejectOpaqueBuiltinMain checked =
     binding : _
       | checkedBindingMentionsOpaqueBuiltin binding ->
           Left (BackendUnsupportedCaseShape "IO programs are not supported by backend conversion yet")
-    _ -> Right ()
+    _ ->
+      case referencedOpaqueBuiltinBindings checked of
+        [] -> Right ()
+        refs ->
+          Left
+            ( BackendUnsupportedCaseShape
+                ( "IO dependencies are not supported by backend conversion yet: "
+                    ++ intercalate ", " [owner ++ " -> " ++ opaque | (owner, opaque) <- refs]
+                )
+            )
+
+referencedOpaqueBuiltinBindings :: CheckedProgram -> [(String, String)]
+referencedOpaqueBuiltinBindings checked =
+  [ (checkedBindingName binding, opaqueName)
+    | binding <- allCheckedBindings checked,
+      not (checkedBindingMentionsOpaqueBuiltin binding),
+      opaqueName <- Set.toList (freeTermVariables (checkedBindingTerm binding) `Set.intersection` opaqueNames)
+  ]
+  where
+    opaqueNames =
+      Set.fromList
+        [ checkedBindingName binding
+          | binding <- allCheckedBindings checked,
+            checkedBindingMentionsOpaqueBuiltin binding
+        ]
+
+allCheckedBindings :: CheckedProgram -> [CheckedBinding]
+allCheckedBindings checked =
+  [ binding
+    | checkedModule <- checkedProgramModules checked,
+      binding <- checkedModuleBindings checkedModule
+  ]
 
 checkedBindingMentionsOpaqueBuiltin :: CheckedBinding -> Bool
 checkedBindingMentionsOpaqueBuiltin =

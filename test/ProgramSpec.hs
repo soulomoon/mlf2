@@ -471,6 +471,26 @@ spec = do
                 ((== ProgramPipelineError "run-program does not support IO main values yet") . diagnosticError)
                 (const False)
 
+        it "rejects running pure mains that depend on opaque Prelude helpers" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, pure);"
+                        , "  def discard : IO Unit -> Unit = \\(_action : IO Unit) Unit;"
+                        , "  def main : Unit = discard (pure Unit);"
+                        , "}"
+                        ]
+            runLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
+                ( \diagnostic ->
+                    all
+                        (`isInfixOf` renderProgramDiagnostic diagnostic)
+                        [ "run-program does not support IO dependencies yet"
+                        , "Main__discard"
+                        ]
+                )
+                (const False)
+
         it "rejects a user module named Prelude when the built-in Prelude is active" $ do
             located <-
                 requireLocated $

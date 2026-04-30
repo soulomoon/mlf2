@@ -9,7 +9,9 @@ module MLF.Frontend.Program.Run
 where
 
 import Data.Foldable (toList)
+import Data.List (intercalate)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import MLF.Elab.Pipeline (ElabTerm (..), Pretty (..), Ty (..), freeTypeVarsType, normalize, schemeFromType, typeCheck)
 import MLF.Frontend.Program.Check (checkLocatedProgram, checkProgram)
 import MLF.Frontend.Program.Elaborate (ElaborateScope, mkElaborateScope)
@@ -50,15 +52,8 @@ runLocatedProgram located = do
 
 programMainTerm :: CheckedProgram -> ElabTerm
 programMainTerm checked =
-  foldr bindAll (EVar (checkedProgramMain checked)) allBindings
+  foldr bindAll (EVar (checkedProgramMain checked)) (reachableRuntimeBindings checked)
   where
-    allBindings =
-      [ binding
-        | checkedModule <- checkedProgramModules checked,
-          binding <- checkedModuleBindings checkedModule,
-          not (checkedBindingMentionsOpaqueBuiltin binding)
-      ]
-
     bindAll binding body =
       ELet
         (checkedBindingName binding)
@@ -72,11 +67,82 @@ rejectOpaqueMain checked =
     Just ty
       | Builtins.srcTypeMentionsOpaqueBuiltin ty ->
           Left (ProgramPipelineError "run-program does not support IO main values yet")
-    _ -> Right ()
+    _ ->
+      case reachableOpaqueRuntimeBindings checked of
+        [] -> Right ()
+        bindings ->
+          Left
+            ( ProgramPipelineError
+                ( "run-program does not support IO dependencies yet: "
+                    ++ intercalate ", " (map checkedBindingName bindings)
+                )
+            )
+
+reachableRuntimeBindings :: CheckedProgram -> [CheckedBinding]
+reachableRuntimeBindings checked =
+  [ binding
+    | binding <- allCheckedBindings checked,
+      checkedBindingName binding `Set.member` reachableNames,
+      not (checkedBindingMentionsOpaqueBuiltin binding)
+  ]
+  where
+    reachableNames = reachableBindingNames checked (Set.singleton (checkedProgramMain checked))
+
+reachableOpaqueRuntimeBindings :: CheckedProgram -> [CheckedBinding]
+reachableOpaqueRuntimeBindings checked =
+  [ binding
+    | binding <- allCheckedBindings checked,
+      checkedBindingName binding `Set.member` reachableNames,
+      checkedBindingMentionsOpaqueBuiltin binding
+  ]
+  where
+    reachableNames = reachableBindingNames checked (Set.singleton (checkedProgramMain checked))
+
+reachableBindingNames :: CheckedProgram -> Set.Set String -> Set.Set String
+reachableBindingNames checked roots =
+  go Set.empty roots
+  where
+    bindingMap = Map.fromList [(checkedBindingName binding, binding) | binding <- allCheckedBindings checked]
+    topLevelNames = Map.keysSet bindingMap
+
+    go visited pending =
+      case Set.minView pending of
+        Nothing -> visited
+        Just (name, rest)
+          | name `Set.member` visited -> go visited rest
+          | Just binding <- Map.lookup name bindingMap ->
+              let deps = freeTermVariables (checkedBindingTerm binding) `Set.intersection` topLevelNames
+               in go (Set.insert name visited) (rest `Set.union` deps)
+          | otherwise -> go visited rest
+
+allCheckedBindings :: CheckedProgram -> [CheckedBinding]
+allCheckedBindings checked =
+  [ binding
+    | checkedModule <- checkedProgramModules checked,
+      binding <- checkedModuleBindings checkedModule
+  ]
 
 checkedBindingMentionsOpaqueBuiltin :: CheckedBinding -> Bool
 checkedBindingMentionsOpaqueBuiltin =
   Builtins.srcTypeMentionsOpaqueBuiltin . checkedBindingSourceType
+
+freeTermVariables :: ElabTerm -> Set.Set String
+freeTermVariables =
+  go Set.empty
+  where
+    go bound term =
+      case term of
+        EVar name
+          | name `Set.member` bound -> Set.empty
+          | otherwise -> Set.singleton name
+        ELit {} -> Set.empty
+        ELam name _ body -> go (Set.insert name bound) body
+        EApp fun arg -> go bound fun `Set.union` go bound arg
+        ELet name _ rhs body -> go bound rhs `Set.union` go (Set.insert name bound) body
+        ETyAbs _ _ body -> go bound body
+        ETyInst inner _ -> go bound inner
+        ERoll _ body -> go bound body
+        EUnroll body -> go bound body
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm
 normalizeProgramTerm term =
