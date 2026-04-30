@@ -1177,6 +1177,14 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldNotSatisfy` isInfixOf "unsupported function argument"
     validateLLVMAssembly output
 
+  it "preserves stored function-pointer captures on the indirect call path" $ do
+    output <- requireRight (renderBackendProgramLLVM capturedFunctionPointerCallProgram)
+
+    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.env.field"
+    output `shouldNotSatisfy` isInfixOf "closure.code.ptr\" %\"__llvm.closure.env.field"
+    validateLLVMAssembly output
+    validateLLVMObjectCode output
+
   it "rejects unknown base types" $ do
     renderBackendProgramLLVM unknownBaseProgram
       `shouldSatisfyLeft` isInfixOf "Unsupported backend LLVM type"
@@ -4346,6 +4354,49 @@ capturedFunctionFieldProgram =
                                   }
                               ]
                           ),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+capturedFunctionPointerCallProgram :: BackendProgram
+capturedFunctionPointerCallProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "inc",
+                      backendBindingType = unaryIntTy,
+                      backendBindingExpr =
+                        BackendLam
+                          { backendExprType = unaryIntTy,
+                            backendParamName = "x",
+                            backendParamType = intTy,
+                            backendBody = BackendVar intTy "x"
+                          },
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = intTy,
+                      backendBindingExpr =
+                        BackendClosureCall
+                          intTy
+                          ( BackendClosure
+                              { backendExprType = unaryIntTy,
+                                backendClosureEntryName = "__mlfp_closure$call_captured_function",
+                                backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "inc")],
+                                backendClosureParams = [("x", intTy)],
+                                backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
+                              }
+                          )
+                          [intLit 41],
                       backendBindingExportedAsMain = True
                     }
                 ]
