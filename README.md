@@ -39,10 +39,10 @@ cabal repl mlf2-test
 GitHub Actions runs two matrix-parameterized jobs on every push and pull
 request, defined in `.github/workflows/thesis-conformance.yml`:
 
-| Job                  | What it runs                                      |
-|----------------------|---------------------------------------------------|
-| `build-and-test`     | `cabal build all` then `cabal test`               |
-| `thesis-conformance` | `./scripts/thesis-conformance-gate.sh` (after build) |
+| Job                  | What it runs                                                           |
+|----------------------|------------------------------------------------------------------------|
+| `build-and-test`     | installs LLVM tools, then `cabal build all` and `cabal test`           |
+| `thesis-conformance` | installs LLVM tools, builds all targets, then runs the thesis gate     |
 
 **Supported matrix lane:** `ubuntu-latest` / GHC 9.14.1.
 
@@ -156,14 +156,12 @@ contract. The full test pipeline is documented in
 `docs/backend-native-pipeline.md`.
 
 Backend LLVM validation tests use LLVM command-line tools with opaque pointer
-support when available. The test suite looks for `llvm-as` and `llc` on `PATH`,
-with standard Homebrew LLVM locations also accepted on macOS. Native executable
-runner tests additionally look for a C compiler/linker via `CC`, then `cc`,
-`clang`, or `gcc` on `PATH`. LLVM-dependent assertions are marked pending when
-required tools are absent, so `cabal test` can run in environments without LLVM
-or a native linker while still exercising the checks wherever the tools are
-installed. LLVM 14 tools are run with `-opaque-pointers` when needed, while LLVM
-15+ tools accept the emitted opaque-pointer IR by default.
+support. The test suite requires `llvm-as` and `llc` on `PATH`, with standard
+Homebrew LLVM locations also accepted on macOS. Native executable runner tests
+additionally require a C compiler/linker via `CC`, then `cc`, `clang`, or `gcc`
+on `PATH`. CI installs Ubuntu `llvm` and `clang` packages before running these
+checks. LLVM 14 tools are run with `-opaque-pointers` when needed, while LLVM 15+
+tools accept the emitted opaque-pointer IR by default.
 
 ## Syntax and paper alignment
 

@@ -23,6 +23,11 @@ jobs:
           ghc-version: ${{ matrix.ghc }}
           enable-stack: false
 
+      - name: Install LLVM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+
       - name: Update package index
         run: cabal update
 
@@ -50,6 +55,11 @@ jobs:
         with:
           ghc-version: ${{ matrix.ghc }}
           enable-stack: false
+
+      - name: Install LLVM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
 
       - name: Update package index
         run: cabal update
