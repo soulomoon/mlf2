@@ -136,7 +136,7 @@ runLLVMNativeExecutableWith toolchain output =
         writeFile llvmPath output
 
         (llcExitCode, llcStderr) <-
-            runLLVMTool llc ["-filetype=obj", "-o", objectPath, llvmPath]
+            runLLVMTool llc ["-relocation-model=pic", "-filetype=obj", "-o", objectPath, llvmPath]
         expectProcessSuccess "llc rejected native-runner LLVM input" llcExitCode "" llcStderr
 
         (linkExitCode, linkStdout, linkStderr) <-
