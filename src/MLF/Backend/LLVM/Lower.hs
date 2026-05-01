@@ -721,7 +721,7 @@ emitPrintf formatGlobal args =
   emitAssign
     "printf"
     (LLVMInt 32)
-    (LLVMCall nativePrintfName ((LLVMPtr, LLVMGlobalRef LLVMPtr formatGlobal) : args))
+    (LLVMCallVarArgs nativePrintfName [LLVMPtr] ((LLVMPtr, LLVMGlobalRef LLVMPtr formatGlobal) : args))
 
 emitPrintStringGlobal :: String -> LowerM LLVMOperand
 emitPrintStringGlobal globalName =

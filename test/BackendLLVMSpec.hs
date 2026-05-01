@@ -1503,6 +1503,7 @@ assertNativeProgram programText expectedValue = do
   output <- requireRight =<< emitNativeSource programText
   output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
   output `shouldSatisfy` isInfixOf "declare i32 @\"printf\"(ptr, ...)"
+  output `shouldSatisfy` isInfixOf "call i32 (ptr, ...) @\"printf\"("
   validateLLVMAssembly output
   validateLLVMObjectCode output
   runLLVMNativeExecutable output

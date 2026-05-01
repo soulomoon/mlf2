@@ -53,7 +53,7 @@ validateLLVMAssembly output = do
     mbLlvmAs <- findLLVMTool "llvm-as"
     case mbLlvmAs of
         Nothing ->
-            pendingWith "required LLVM tool not found: llvm-as"
+            expectationFailure "required LLVM tool not found: llvm-as"
         Just llvmAs ->
             withTempLLVM output $ \path -> do
                 (exitCode, stderr) <- runLLVMTool llvmAs ["-o", "/dev/null", path]
@@ -66,7 +66,7 @@ validateLLVMObjectCode output = do
     mbLlc <- findLLVMTool "llc"
     case mbLlc of
         Nothing ->
-            pendingWith "required LLVM tool not found: llc"
+            expectationFailure "required LLVM tool not found: llc"
         Just llc ->
             withTempLLVM output $ \path -> do
                 (exitCode, stderr) <- runLLVMTool llc ["-filetype=obj", "-o", "/dev/null", path]
@@ -98,7 +98,7 @@ runLLVMNativeExecutable output = do
     discovered <- discoverNativeLLVMToolchain
     case discovered of
         Left missing ->
-            skipMissingNativeToolchain missing
+            failMissingNativeToolchain missing
         Right toolchain ->
             runLLVMNativeExecutableWith toolchain output
 
@@ -316,9 +316,9 @@ missingTool name mbPath =
         Just _ -> []
         Nothing -> [name]
 
-skipMissingNativeToolchain :: [String] -> IO a
-skipMissingNativeToolchain missing = do
-    pendingWith ("required native LLVM toolchain pieces not found: " ++ unwords missing)
+failMissingNativeToolchain :: [String] -> IO a
+failMissingNativeToolchain missing = do
+    expectationFailure ("required native LLVM toolchain pieces not found: " ++ unwords missing)
     fail "native LLVM toolchain unavailable"
 
 expectProcessSuccess :: String -> ExitCode -> String -> String -> IO ()

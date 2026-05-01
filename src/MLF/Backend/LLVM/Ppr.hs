@@ -119,6 +119,14 @@ renderLLVMExpression resultTy expression =
         ++ "("
         ++ intercalate ", " (map renderLLVMArgument args)
         ++ ")"
+    LLVMCallVarArgs name fixedArgTys args ->
+      "call "
+        ++ renderLLVMFunctionType resultTy fixedArgTys True
+        ++ " "
+        ++ renderLLVMGlobalName name
+        ++ "("
+        ++ intercalate ", " (map renderLLVMArgument args)
+        ++ ")"
     LLVMCallOperand callee args ->
       "call "
         ++ renderLLVMType resultTy
@@ -149,6 +157,17 @@ renderLLVMExpression resultTy expression =
 renderLLVMArgument :: (LLVMType, LLVMOperand) -> String
 renderLLVMArgument (ty, operand) =
   renderLLVMType ty ++ " " ++ renderLLVMOperand operand
+
+renderLLVMFunctionType :: LLVMType -> [LLVMType] -> Bool -> String
+renderLLVMFunctionType resultTy fixedArgTys varArgs =
+  renderLLVMType resultTy
+    ++ " ("
+    ++ intercalate ", " (map renderLLVMType fixedArgTys ++ varArgParameter)
+    ++ ")"
+  where
+    varArgParameter
+      | varArgs = ["..."]
+      | otherwise = []
 
 renderLLVMIndex :: (LLVMType, LLVMOperand) -> String
 renderLLVMIndex (ty, operand) =

@@ -72,6 +72,7 @@ data LLVMInstruction
 
 data LLVMExpression
   = LLVMCall String [(LLVMType, LLVMOperand)]
+  | LLVMCallVarArgs String [LLVMType] [(LLVMType, LLVMOperand)]
   | LLVMCallOperand LLVMOperand [(LLVMType, LLVMOperand)]
   | LLVMAnd LLVMOperand LLVMOperand
   | LLVMGetElementPtr LLVMType LLVMOperand [(LLVMType, LLVMOperand)]
