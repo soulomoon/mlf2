@@ -152,7 +152,8 @@ polymorphic, `String`, unknown, and IO-like results are rejected before native
 run assertions use them. Native mode declares libc `malloc` and vararg `printf`
 and defines the backend-owned `__mlfp_and` primitive when no program binding owns
 that runtime name; broader IO runtime linking remains outside this pure
-contract.
+contract. The full test pipeline is documented in
+`docs/backend-native-pipeline.md`.
 
 Backend LLVM validation tests use LLVM command-line tools with opaque pointer
 support when available. The test suite looks for `llvm-as` and `llc` on `PATH`,

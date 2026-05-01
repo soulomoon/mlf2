@@ -1,0 +1,98 @@
+# Backend Native Pipeline
+
+This document describes the native executable path used by the LLVM backend
+tests. It is a test and inspection contract for checked pure `.mlfp` programs;
+it is not a separate source-language runtime or an IO implementation.
+
+## Emission Modes
+
+`emit-backend` prints the raw backend LLVM module. The checked `.mlfp` `main`
+binding remains a module-qualified LLVM function such as `Main__main`, and the
+output is used for backend inspection, `llvm-as` validation, and selected
+`llc -filetype=obj` smoke checks.
+
+`emit-native` starts from the same checked backend program, then adds a C ABI
+`i32 @main()` process entrypoint. The entrypoint calls the checked zero-argument
+`.mlfp` `main`, renders the pure result to stdout, prints exactly one trailing
+newline, writes no stderr on success, and returns exit status `0`.
+
+## Generated Artifacts
+
+The Hspec helper writes temporary files only under the system temporary
+directory:
+
+- `program.ll` is the emitted LLVM module.
+- `program.o` is produced by `llc -filetype=obj`.
+- `program` is the linked native executable.
+
+The temporary build directory is removed after the test action finishes.
+
+## Toolchain
+
+Assembly validation looks for `llvm-as`. Object-code and native execution look
+for `llc`. Tool discovery checks tool-specific environment variables first,
+then `PATH`, then standard local LLVM installation paths used by Homebrew LLVM.
+LLVM 14-era tools are retried with `-opaque-pointers`; LLVM 15 and newer accept
+the emitted opaque-pointer IR directly.
+
+Native linking looks for a C compiler/linker through `CC`, then `cc`, `clang`,
+or `gcc` on `PATH`. `CC` may include launcher arguments, for example
+`ccache clang` or `xcrun clang`.
+
+When a required LLVM or native linker tool is absent, the relevant Hspec
+assertion is marked pending. The row remains part of the mechanical coverage
+matrix; it is not silently removed from the native pipeline.
+
+## Runtime Support
+
+Native emission owns the small process/runtime surface it needs:
+
+- `main`: the C ABI wrapper added only by `emit-native`.
+- `printf`: declared for deterministic result printing.
+- `malloc`: declared when heap-allocated constructors or closure records need
+  allocation.
+- `__mlfp_and`: emitted as a backend-owned boolean primitive when no program
+  binding owns that name.
+- `__mlfp_native_render$...`: private renderer functions generated for each
+  native-renderable result type reachable from the program `main` result.
+- `__mlfp_native_*` string globals: format strings, booleans, punctuation, and
+  constructor names used by generated renderers.
+
+Source bindings that collide with native-owned runtime symbols are rejected
+before native LLVM is emitted.
+
+## Result Comparison
+
+Native run-result checks compare the executable process output with the same
+runtime expectations used by the shared `ProgramSpec` interpreter matrix.
+Supported result shapes are:
+
+- `Int`
+- `Bool`
+- first-order ADT values whose fields are recursively native-renderable
+
+The native renderer uses the same value text expected by `run-program`, adds one
+newline, and requires empty stderr plus `ExitSuccess`.
+
+Unsupported result shapes fail before native execution instead of becoming
+assembly-only rows. Current unsupported shapes include function-valued,
+polymorphic, variable-headed, `String`, IO-like, and structurally recursive main
+results that have no named data runtime. These rows stay named in
+`BackendLLVMSpec` with the expected diagnostic fragment.
+
+## Coverage Contract
+
+`BackendLLVMSpec` drives the shared `programSpecToLLVMParityCases` matrix
+through one explicit coverage classification per interpreter-success row. Each
+row is exactly one of:
+
+- native-run checked, with raw LLVM assembly validation and native
+  compile/link/run/result comparison;
+- native-unsupported, with raw LLVM assembly validation and a required
+  `emit-native` diagnostic; or
+- object-code smoke in addition to either native classification.
+
+Advanced rows added by the typeclass/evidence, first-class polymorphism, and
+higher-order backend slices are required native-run rows when their result is
+native-renderable. This prevents supported LLVM parity rows from silently
+remaining unlinked or unexecuted.

@@ -181,6 +181,9 @@ exit status `0`. Native emission declares libc `malloc`/`printf` and emits
 backend-owned runtime definitions such as `__mlfp_and` when those names are not
 program bindings. Unsupported result types fail before native-run assertions,
 so the native process boundary does not invent source or IO semantics.
+`docs/backend-native-pipeline.md` records the linked-executable test pipeline,
+toolchain discovery, generated artifacts, runtime support, and row coverage
+classification.
 
 The explicit closure ABI is private to the backend IR-to-LLVM path. A closure
 value is a heap pointer to a two-word record containing a code pointer and an

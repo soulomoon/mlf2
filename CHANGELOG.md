@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Broadened native LLVM run-result coverage accounting so every shared
+  `ProgramSpec`-to-LLVM runtime-success row is explicitly classified as
+  native-run checked or native-unsupported with a diagnostic, with advanced
+  typeclass, first-class polymorphism, and higher-order rows required to stay on
+  the native-run path when renderable. Added backend native pipeline
+  documentation for tool discovery, generated artifacts, runtime support, and
+  result comparison.
 - Added LLVM backend support for checked-source partial applications by
   packaging supplied arguments into explicit closure values. Top-level and local
   function partials now participate in the shared ProgramSpec-to-LLVM parity

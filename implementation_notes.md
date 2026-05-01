@@ -1,3 +1,18 @@
+## 2026-05-01 - Native LLVM parity coverage closeout
+
+- `BackendLLVMSpec` now classifies every shared `ProgramSpec`-to-LLVM
+  runtime-success row with one explicit coverage record: native-run checked or
+  native-unsupported with a required diagnostic, plus object-code smoke where
+  selected.
+- The coverage guard requires advanced renderable rows from the typeclass,
+  first-class polymorphism, and higher-order backend slices to remain on the
+  native-run path, preventing supported parity rows from quietly staying
+  assembly-only.
+- Added `docs/backend-native-pipeline.md` to document the raw/native emission
+  split, temporary `.ll`/object/executable artifacts, LLVM and linker discovery,
+  backend-owned runtime support, result comparison, unsupported result shapes,
+  and Hspec pending behavior when tools are absent.
+
 ## 2026-04-30 - Partial applications lower as closure values
 
 - Checked-program conversion now packages underapplied monomorphic function
