@@ -37,6 +37,10 @@ unifiedFixtureExpectations =
     , ("test/programs/unified/authoritative-nullary-overloaded-method.mlfp", "Zero")
     , ("test/programs/unified/authoritative-recursive-let.mlfp", "true")
     , ("test/programs/unified/first-class-polymorphism.mlfp", "true")
+    , ("test/programs/unified/higher-order-function-field.mlfp", "41")
+    , ("test/programs/unified/higher-order-local-function-flow.mlfp", "41")
+    , ("test/programs/unified/higher-order-partial-application.mlfp", "1")
+    , ("test/programs/unified/higher-order-returned-function.mlfp", "41")
     ]
 
 data ProgramMatrixSource

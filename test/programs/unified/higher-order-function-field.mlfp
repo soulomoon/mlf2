@@ -1,0 +1,9 @@
+module Main export (FnBox(..), main) {
+  data FnBox =
+      FnBox : (Int -> Int) -> FnBox;
+
+  def main : Int =
+    let captured : Int = 41 in
+    let f : Int -> Int = \(x : Int) captured in
+    case FnBox f of { FnBox g -> g 0 };
+}

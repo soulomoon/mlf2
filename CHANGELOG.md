@@ -32,6 +32,9 @@
   parity rows. The backend LLVM spec now compiles, links, runs, and compares
   supported rows against their interpreter result text, while native-unsupported
   rows are explicitly classified with diagnostic fragments.
+- Added unified `.mlfp` fixtures for higher-order LLVM backend coverage:
+  local function flows, returned closures, function-valued ADT fields, and
+  partial applications now run through shared backend parity.
 
 ### Changed
 - Fixed checked-source recursive higher-order LLVM flows so monomorphic

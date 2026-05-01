@@ -812,8 +812,12 @@ validateBackendClosureFunctionType entryName resultTy params bodyTy =
         Left (BackendClosureTypeMismatch entryName resultTy expected)
 
 backendAppClosureHead :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
-backendAppClosureHead =
-  backendClosureValueName
+backendAppClosureHead mbContext fun
+  | backendExprMayDispatchByValueKind fun,
+    backendTypeIsFirstOrderFunctionPointer (backendExprType fun) =
+      Nothing
+  | otherwise =
+      backendClosureValueName mbContext fun
 
 backendClosureValueName :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
 backendClosureValueName mbContext =
@@ -1433,6 +1437,44 @@ backendTypeIsClosureValue =
   \case
     BTArrow {} -> True
     _ -> False
+
+backendExprMayDispatchByValueKind :: BackendExpr -> Bool
+backendExprMayDispatchByValueKind =
+  \case
+    BackendVar {} -> True
+    BackendTyApp {} -> True
+    BackendLet {} -> True
+    BackendCase {} -> True
+    _ -> False
+
+backendTypeIsFirstOrderFunctionPointer :: BackendType -> Bool
+backendTypeIsFirstOrderFunctionPointer ty =
+  case ty of
+    BTArrow {} ->
+      let (params, returnTy) = collectArrows ty
+       in all backendTypeIsFirstOrderPointerValue (returnTy : params)
+    _ ->
+      False
+  where
+    collectArrows =
+      \case
+        BTArrow param result ->
+          let (params, returnTy) = collectArrows result
+           in (param : params, returnTy)
+        other ->
+          ([], other)
+
+backendTypeIsFirstOrderPointerValue :: BackendType -> Bool
+backendTypeIsFirstOrderPointerValue =
+  \case
+    BTVar {} -> False
+    BTArrow {} -> False
+    BTBase {} -> True
+    BTCon _ args -> all backendTypeIsFirstOrderPointerValue args
+    BTVarApp {} -> False
+    BTForall {} -> False
+    BTMu {} -> True
+    BTBottom -> False
 
 dropTermLocalsMaybe :: Maybe BackendValidationContext -> Maybe BackendValidationContext
 dropTermLocalsMaybe =
