@@ -44,6 +44,7 @@
   partial applications now run through shared backend parity.
 
 ### Changed
+- Closed the backend IR executable-boundary family on merged `710c92eb`: all seven backend-boundary mechanism-table rows are now explicitly settled, row 7 is owned by the dedicated `backend-boundary mechanism table and closeout ledger stay synchronized` repository guard plus repo-facing note sync, the preserved boundary remains one executable eager backend IR with no public `LowerableBackend.IR` and no lazy STG machinery, and no new backend feature or public boundary was introduced.
 - Fixed checked-source recursive higher-order LLVM flows so monomorphic
   top-level functions and closed lifted local helpers pass function-valued
   arguments through the explicit closure ABI, while unspecialized polymorphic

@@ -305,6 +305,44 @@ spec = describe "Repository guardrails" $ do
       $ \(path, src, markers) ->
         assertMarkersPresent path src markers
 
+  it "backend-boundary mechanism table and closeout ledger stay synchronized" $ do
+    repoGuardSrc <- readFile "test/RepoGuardSpec.hs"
+    tableSrc <- readFile "docs/plans/2026-05-02-backend-ir-executable-boundary-mechanism-table.md"
+    todoSrc <- readFile "TODO.md"
+    notesSrc <- readFile "implementation_notes.md"
+    changelogSrc <- readFile "CHANGELOG.md"
+
+    rows <-
+      case parseBackendBoundaryMechanismTable tableSrc of
+        Left err -> expectationFailure err >> pure []
+        Right parsedRows -> pure parsedRows
+
+    map mechanismTableRowName rows `shouldBe` backendBoundaryMechanismNames
+    map mechanismTableRowGate rows `shouldSatisfy` all (`elem` ["YES", "NO"])
+    map mechanismTableRowGate rows `shouldBe` replicate 7 "YES"
+
+    case rows of
+      [_, _, _, _, _, _, row7] -> do
+        mechanismTableRowGapSummary row7
+          `shouldSatisfy` (not . isInfixOf "Some goals are currently design intent rather than verified mechanism.")
+        mechanismTableRowEvidence row7
+          `shouldSatisfy` (not . isInfixOf "backend tests referenced by cabal/test stanzas")
+        mechanismTableRowNextAction row7
+          `shouldSatisfy` (not . isInfixOf "Add or update focused tests and docs with each mechanism improvement")
+        assertMarkersPresent "row-7 evidence" (mechanismTableRowEvidence row7) backendBoundaryRow7EvidenceMarkers
+        mechanismTableRowNextAction row7
+          `shouldSatisfy` isInfixOf "later accepted roadmap revision"
+      _ ->
+        expectationFailure
+          ( "expected 7 backend-boundary mechanism-table rows, found "
+              ++ show (length rows)
+          )
+
+    assertMarkersPresent "test/RepoGuardSpec.hs" repoGuardSrc backendBoundaryFocusedGuardNames
+    assertMarkersPresent "TODO.md" todoSrc backendBoundaryCloseoutTodoMarkers
+    assertMarkersPresent "implementation_notes.md" notesSrc backendBoundaryCloseoutImplementationNoteMarkers
+    assertMarkersPresent "CHANGELOG.md" changelogSrc backendBoundaryCloseoutChangelogMarkers
+
 discoverSpecModules :: FilePath -> IO [String]
 discoverSpecModules root = do
   hsFiles <- collectHsFiles root
@@ -506,6 +544,78 @@ splitChildModules =
     "MLF.Elab.Phi.Omega.Domain",
     "MLF.Elab.Phi.Omega.Interpret",
     "MLF.Elab.Phi.Omega.Normalize"
+  ]
+
+backendBoundaryMechanismNames :: [String]
+backendBoundaryMechanismNames =
+  [ "IR role separation and non-duplication",
+    "Eager runtime lowering contract",
+    "Direct calls, closure values, and callable shapes",
+    "ADT/case semantics versus layout",
+    "Primitive operations and eager evaluation order",
+    "Polymorphism erasure and lowerability",
+    "Validation, evidence, and guidance synchronization"
+  ]
+
+backendBoundaryFocusedGuardNames :: [String]
+backendBoundaryFocusedGuardNames =
+  [ "one-backend-IR contract stays explicit and no public lower IR leaks",
+    "eager-runtime lowering contract stays explicit and lazy STG machinery stays out of scope",
+    "callable-shape contract stays explicit and direct-vs-closure call heads stay unambiguous",
+    "ADT and case semantic boundary stays explicit while lowerer-owned layout policy stays private and frozen",
+    "primitive-operation and eager-evaluation-order contract stays explicit without widening the backend boundary",
+    "polymorphism-erasure and lowerability contract stays explicit without widening the backend boundary",
+    "backend-boundary mechanism table and closeout ledger stay synchronized"
+  ]
+
+backendBoundaryRow7EvidenceMarkers :: [String]
+backendBoundaryRow7EvidenceMarkers =
+  [ "docs/architecture.md",
+    "docs/backend-native-pipeline.md",
+    "src/MLF/Backend/IR.hs",
+    "src/MLF/Backend/Convert.hs",
+    "src/MLF/Backend/LLVM/Lower.hs",
+    "test/BackendIRSpec.hs",
+    "test/BackendConvertSpec.hs",
+    "test/BackendLLVMSpec.hs",
+    "test/RepoGuardSpec.hs",
+    "backend-boundary mechanism table and closeout ledger stay synchronized"
+  ]
+
+backendBoundaryCloseoutTodoMarkers :: [String]
+backendBoundaryCloseoutTodoMarkers =
+  [ "## Task 110 backend IR executable-boundary family closeout (completed 2026-05-03)",
+    "rows 1 through 6 of the backend IR executable-boundary",
+    "`710c92eb`",
+    "Row 7 now closes the mechanism table and guidance ledger",
+    "one executable eager backend IR",
+    "no public `LowerableBackend.IR`",
+    "no lazy STG machinery",
+    "No new backend implementation feature was added by this closeout."
+  ]
+
+backendBoundaryCloseoutImplementationNoteMarkers :: [String]
+backendBoundaryCloseoutImplementationNoteMarkers =
+  [ "## 2026-05-03 - Backend IR executable-boundary family closed on the merged 710c92eb baseline",
+    "rows 1 through 7 closed on the merged `710c92eb` baseline",
+    "one executable eager backend IR",
+    "eager runtime lowering only",
+    "no lazy STG machinery",
+    "no public `LowerableBackend.IR`",
+    "no fallback/runtime-rescue widening",
+    "no new backend implementation feature"
+  ]
+
+backendBoundaryCloseoutChangelogMarkers :: [String]
+backendBoundaryCloseoutChangelogMarkers =
+  [ "Closed the backend IR executable-boundary family on merged `710c92eb`",
+    "seven backend-boundary mechanism-table rows are now explicitly settled",
+    "`backend-boundary mechanism table and closeout ledger stay synchronized`",
+    "repo-facing note sync",
+    "one executable eager backend IR",
+    "no public `LowerableBackend.IR`",
+    "no lazy STG",
+    "no new backend feature or public boundary was introduced"
   ]
 
 architectureContractMarkers :: [String]
@@ -718,6 +828,60 @@ countModuleEntries moduleName src =
     | line <- lines src,
       normalizeModuleToken (dropFieldPrefix (trim line)) == moduleName
     ]
+
+data MechanismTableRow = MechanismTableRow
+  { mechanismTableRowName :: String,
+    mechanismTableRowGapSummary :: String,
+    mechanismTableRowEvidence :: String,
+    mechanismTableRowGate :: String,
+    mechanismTableRowNextAction :: String
+  }
+
+parseBackendBoundaryMechanismTable :: String -> Either String [MechanismTableRow]
+parseBackendBoundaryMechanismTable src =
+  traverse parseMechanismTableRow rowLines
+  where
+    rowLines =
+      [ line
+      | line <- lines src,
+        isPrefixOf "| " line,
+        not (isPrefixOf "|---" line),
+        not (isPrefixOf "| Mechanism " line)
+      ]
+
+parseMechanismTableRow :: String -> Either String MechanismTableRow
+parseMechanismTableRow line =
+  case map trim (stripTableEdgeCells (splitOn '|' line)) of
+    [name, _currentBehavior, _targetBehavior, gapSummary, evidence, gate, nextAction] ->
+      Right
+        MechanismTableRow
+          { mechanismTableRowName = name,
+            mechanismTableRowGapSummary = gapSummary,
+            mechanismTableRowEvidence = evidence,
+            mechanismTableRowGate = gate,
+            mechanismTableRowNextAction = nextAction
+          }
+    parts ->
+      Left
+        ( "could not parse backend-boundary mechanism-table row: "
+            ++ show line
+            ++ "\nparsed cells: "
+            ++ show parts
+        )
+
+stripTableEdgeCells :: [String] -> [String]
+stripTableEdgeCells cells =
+  case cells of
+    [] -> []
+    (_ : rest) -> reverse (drop 1 (reverse rest))
+
+splitOn :: (Eq a) => a -> [a] -> [[a]]
+splitOn delimiter = go []
+  where
+    go acc [] = [reverse acc]
+    go acc (x : xs)
+      | x == delimiter = reverse acc : go [] xs
+      | otherwise = go (x : acc) xs
 
 extractPublicLibraryStanza :: String -> String
 extractPublicLibraryStanza src =

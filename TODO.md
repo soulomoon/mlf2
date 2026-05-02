@@ -4,6 +4,18 @@ See [roadmap.md](roadmap.md) for the full algorithm description and paper refere
 
 ---
 
+## Task 110 backend IR executable-boundary family closeout (completed 2026-05-03)
+
+- Completed:
+  - Accepted rounds `round-222` through `round-227`, now merged through
+    `710c92eb`, froze rows 1 through 6 of the backend IR executable-boundary
+    mechanism table.
+  - Row 7 now closes the mechanism table and guidance ledger on that merged
+    baseline, so the backend-boundary family has explicit evidence owners
+    instead of generic backend-test references.
+  - The final boundary remains one executable eager backend IR with no public `LowerableBackend.IR` and no lazy STG machinery.
+  - No new backend implementation feature was added by this closeout.
+
 ## Task 109 representative-family readiness refresh (completed 2026-04-11)
 
 - Completed:

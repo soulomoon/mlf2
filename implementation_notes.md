@@ -1,3 +1,9 @@
+## 2026-05-03 - Backend IR executable-boundary family closed on the merged 710c92eb baseline
+
+- The backend IR executable-boundary family now has rows 1 through 7 closed on the merged `710c92eb` baseline.
+- The final backend contract remains one executable eager backend IR, eager runtime lowering only, no lazy STG machinery, no public `LowerableBackend.IR`, and no fallback/runtime-rescue widening.
+- This round closes the evidence/guidance ledger without changing backend implementation behavior; it adds no new backend implementation feature.
+
 ## 2026-05-01 - Native LLVM parity coverage closeout
 
 - `BackendLLVMSpec` now classifies every shared `ProgramSpec`-to-LLVM
