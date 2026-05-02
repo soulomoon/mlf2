@@ -27,6 +27,14 @@ native-entrypoint/runtime support only. There are no thunks, no update frames,
 no CAF update semantics, no graph reduction, and no implicit laziness rescue
 in the native path.
 
+Row-4 ADT/case ownership is part of the raw/native inspection contract:
+semantic constructor/case nodes stay in `MLF.Backend.IR`, while runtime tags, field slots, closure-record storage for function-like fields, and nullary tag-only representation stay private to LLVM/native lowering. Raw LLVM output
+may be inspected for the current lowerer-owned policy: declaration-order
+zero-based constructor tags drive emitted `switch` targets, object offset `0`
+stores the tag word, field slots follow the tag word, function-like constructor fields store explicit closure records, and nullary constructors
+emit tag-only heap objects. This is evidence for private lowering policy, not
+a second IR or public lowering interface.
+
 ## Emission Modes
 
 `emit-backend` prints the raw LLVM module lowered from that same

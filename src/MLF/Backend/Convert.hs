@@ -20,6 +20,13 @@ unsupported checked shapes must fail here instead of being rerouted through a se
 Unsupported checked shapes fail here instead of being normalized into lazy runtime artifacts, lowerer-private
 layout forms, or native-wrapper-specific machinery. There are no thunks, no update frames, no CAF update semantics,
 no graph reduction, and no implicit laziness rescue at this conversion boundary.
+Row-4 ADT/case ownership keeps semantic constructor/case nodes in
+`MLF.Backend.IR`: conversion emits `BackendData`, `BackendConstructor`,
+`BackendConstruct`, and `BackendCase` metadata/use/alternative nodes only.
+Runtime tags, field slots, closure-record storage for function-like fields,
+and nullary tag-only representation stay private to LLVM/native lowering, so
+checked-program conversion must not assign tag numbers, field offsets, boxing
+or storage policy, nullary layout, or layout-only witnesses.
 Any ANF-like normalization, layout-only structure, or lowerability-only
 representation stays private to backend-owned lowering helpers rather than
 becoming a second executable IR, a public `LowerableBackend.IR`, or a second

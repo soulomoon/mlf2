@@ -163,6 +163,15 @@ aliases, captured closures, constructor-field projections, and case/let-
 selected closure values stay on this explicit path instead of relying on
 lowerer recovery.
 
+The ADT/case ownership split is explicit. Row-4 ADT/case ownership means
+semantic constructor/case nodes stay in `MLF.Backend.IR`:
+`BackendData`, `BackendConstructor`, `BackendConstruct`, and `BackendCase`
+preserve constructor metadata, constructor use, and case alternatives only.
+Runtime tags, field slots, closure-record storage for function-like fields,
+and nullary tag-only representation stay private to LLVM/native lowering.
+Checked-program conversion must not assign runtime tag values, field offsets,
+boxing/storage policy, or layout-only witnesses.
+
 LLVM/native lowering owns only downstream private lowering/runtime details for
 that same `MLF.Backend.IR` program: closure-record layout and closure ABI
 details, environment-record layout, layout-only lowering helpers, native

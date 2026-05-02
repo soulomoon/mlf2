@@ -1,0 +1,105 @@
+{
+  "round_id": "round-225",
+  "attempt": 1,
+  "status": "authoritative",
+  "decision": "approved",
+  "implemented_stage_result": "accepted",
+  "attempt_verdict": "accepted",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "not needed",
+  "merge_readiness": "satisfied",
+  "controller_merge_hygiene": "satisfied",
+  "base_branch": "master",
+  "branch": "orchestrator/round-225-freeze-adt-layout-ownership",
+  "base_commit": "2c1661b3a21fea0065c6f68c57bac2d5b2585f23",
+  "head_commit": "2c1661b3a21fea0065c6f68c57bac2d5b2585f23",
+  "merge_base": "2c1661b3a21fea0065c6f68c57bac2d5b2585f23",
+  "roadmap_id": "2026-05-02-00-backend-ir-executable-boundary-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-02-00-backend-ir-executable-boundary-roadmap/rev-001",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-freeze-adt-layout-ownership",
+  "extracted_item_id": null,
+  "review_path": "orchestrator/rounds/round-225/review.md",
+  "review_snapshot": "orchestrator/rounds/round-225/reviews/attempt-1.md",
+  "merge_payload_files": [
+    "docs/architecture.md",
+    "docs/backend-native-pipeline.md",
+    "src/MLF/Backend/IR.hs",
+    "src/MLF/Backend/Convert.hs",
+    "src/MLF/Backend/LLVM/Lower.hs",
+    "docs/plans/2026-05-02-backend-ir-executable-boundary-mechanism-table.md",
+    "test/BackendLLVMSpec.hs",
+    "test/RepoGuardSpec.hs"
+  ],
+  "residual_risks": [
+    "Milestone-5 through milestone-7 remain intentionally open and rows 5-7 stay NO in the mechanism table.",
+    "The accepted result freezes the current private lowerer-owned layout policy rather than evaluating alternate runtime layouts, so any later representation redesign will need new evidence and a new accepted round."
+  ],
+  "mechanism_table": {
+    "row_1_ir_role_separation_and_non_duplication": "YES",
+    "row_2_eager_runtime_lowering_contract": "YES",
+    "row_3_direct_calls_closure_values_and_callable_shapes": "YES",
+    "row_4_adt_case_semantics_versus_layout": "YES",
+    "row_5_primitive_operations_and_eager_evaluation_order": "NO",
+    "row_6_polymorphism_erasure_and_lowerability": "NO",
+    "row_7_validation_evidence_and_guidance_synchronization": "NO"
+  },
+  "verification_results": {
+    "diff_hygiene": "passed",
+    "focused_row_4_guard": {
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "focused_backend_ir_adt_case_baseline": {
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "focused_backend_convert_adt_case_baseline": {
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "focused_backend_llvm_tags_and_switch": {
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "focused_backend_llvm_tag_skipping_field_offsets": {
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "focused_backend_llvm_closure_field_abi": {
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "focused_backend_llvm_nullary_tag_only_representation": {
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "mechanism_table_gate": {
+      "result": "passed",
+      "row_1": "YES",
+      "row_2": "YES",
+      "row_3": "YES",
+      "row_4": "YES",
+      "row_5": "NO",
+      "row_6": "NO",
+      "row_7": "NO"
+    },
+    "full_gate": {
+      "command": "cabal build all && cabal test",
+      "result": "passed",
+      "examples": 2341,
+      "failures": 0,
+      "duration_seconds": 329.0688
+    }
+  },
+  "evidence_summary": "Reviewed the canonical round-225 worktree against master commit 2c1661b3a21fea0065c6f68c57bac2d5b2585f23, where HEAD, master, and merge-base all match and the live round exists as an uncommitted worktree diff. The implementation-owned merge payload stays limited to docs/architecture.md, docs/backend-native-pipeline.md, src/MLF/Backend/IR.hs, src/MLF/Backend/Convert.hs, src/MLF/Backend/LLVM/Lower.hs, docs/plans/2026-05-02-backend-ir-executable-boundary-mechanism-table.md, test/BackendLLVMSpec.hs, and test/RepoGuardSpec.hs, while orchestrator/state.json, the pointer stubs, the active rev-001 roadmap bundle, and the round-225 lineage/review files are controller-owned activation and review bookkeeping. The round makes the ADT/case semantic-versus-layout ownership split explicit across the synchronized contract surfaces, keeps runtime tag values, field layout, closure-field storage, and nullary representation private to MLF.Backend.LLVM.Lower, flips only mechanism-table row 4 to YES while preserving rows 1-3 at YES and rows 5-7 at NO, passes all focused row-4 slices, and passes cabal build all && cabal test with 2341 examples and 0 failures. The inherited one-backend-IR, eager-runtime, no-lazy-STG, and no-public-lower-IR boundaries remain intact, and the round does not widen into milestone-5/6/7 claims, fallback runtime paths, or a second lowering surface."
+}

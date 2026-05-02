@@ -56,6 +56,13 @@ A later lower IR may be introduced only when all of the following hold:
   lowerer does not have to inspect source syntax or Church-encoded runtime
   terms to find the intended control/data boundary; constructor uses and case
   alternatives are checked against backend constructor metadata.
+* Row-4 ADT/case ownership keeps semantic constructor/case nodes in
+  `MLF.Backend.IR`: `BackendData`, `BackendConstructor`, `BackendConstruct`,
+  and `BackendCase` preserve metadata, constructor use, and alternatives
+  only. Runtime tags, field slots, closure-record storage for function-like
+  fields, and nullary tag-only representation stay private to LLVM/native
+  lowering. The IR does not carry tag numbers, field offsets, nullary layout
+  witnesses, or layout-only forms.
 * `BackendClosureCall` is the indirect closure-call node, so closure-valued
   aliases, captured closures, constructor-field projections, and case/let-
   selected closure values stay on this explicit path, and confused direct-call

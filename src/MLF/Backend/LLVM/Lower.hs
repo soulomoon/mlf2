@@ -55,6 +55,29 @@ closure ABI, plus native wrapper/runtime symbol emission and executable
 rendering support, stays downstream of that IR rather than becoming a second
 executable IR or a lazy runtime.
 -}
+{- Note [ADT constructor runtime layout]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Row-4 ADT/case ownership keeps semantic constructor/case nodes in
+`MLF.Backend.IR`; runtime tags, field slots, closure-record storage for
+function-like fields, and nullary tag-only representation stay private to
+LLVM/native lowering.
+
+The current private lowerer-owned policy is intentionally small and frozen by
+focused tests:
+
+* declaration-order zero-based constructor tags are assigned by
+  `constructorRuntimes`;
+* the tag word is stored at object offset `0`;
+* field slots start after that tag word, one machine word per constructor
+  field;
+* function-like constructor fields are stored as explicit closure records
+  using the private closure ABI; and
+* nullary constructors use tag-only heap objects.
+
+These layout facts are not a second executable IR or public lowering surface.
+Checked-program conversion and `MLF.Backend.IR` keep only semantic ADT/case
+metadata and term nodes.
+-}
 module MLF.Backend.LLVM.Lower
   ( BackendLLVMError (..),
     evidenceFunctionTypesCompatible,
@@ -141,6 +164,20 @@ data ConstructorRuntime = ConstructorRuntime
     crTag :: Integer
   }
   deriving (Eq, Show)
+
+constructorWordBytes :: Int
+constructorWordBytes = 8
+
+constructorTagOffset :: Int
+constructorTagOffset = 0
+
+constructorObjectBytes :: Int -> Int
+constructorObjectBytes fieldCount =
+  constructorWordBytes * (1 + fieldCount)
+
+constructorFieldOffset :: Int -> Int
+constructorFieldOffset index0 =
+  constructorWordBytes * (index0 + 1)
 
 data SpecRequest = SpecRequest
   { srBindingName :: String,
@@ -792,7 +829,7 @@ lowerNativeDataRenderer env renderMap spec dataRuntime0 =
     $ \params -> do
       let value = requireNativeParam "value" params
           parenthesize = requireNativeParam "parenthesize" params
-      tagPtr <- emitGep "native.tag.ptr" value 0
+      tagPtr <- emitGep "native.tag.ptr" value constructorTagOffset
       tagValue <- emitAssign "native.tag" (LLVMInt 64) (LLVMLoad (LLVMInt 64) tagPtr)
       altLabels <- traverse (const (freshBlock "native.ctor")) (drConstructors dataRuntime0)
       defaultLabel <- freshBlock "native.unknown"
@@ -848,7 +885,7 @@ lowerNativeConstructorRenderer env renderMap spec value parenthesize constructor
     printField _ index0 fieldTy = do
       _ <- emitPrintStringGlobal nativeStrSpaceName
       fieldLLVMType <- lowerBackendTypeM env "native result field" fieldTy
-      fieldPtr <- emitGep "native.field.ptr" value (8 * (index0 + 1))
+      fieldPtr <- emitGep "native.field.ptr" value (constructorFieldOffset index0)
       fieldValue <- emitAssign "native.field" fieldLLVMType (LLVMLoad fieldLLVMType fieldPtr)
       callNativeRenderer renderMap fieldTy fieldLLVMType fieldValue (nativeFieldParenthesize (peBase env) fieldTy)
 
@@ -919,6 +956,7 @@ nativeIOFunctions :: ProgramBase -> [LLVMFunction]
 nativeIOFunctions _base =
   [ioPureEntry, ioPureWrapper, ioBindEntry, ioBindWrapper, ioPutStrLnEntry, ioPutStrLnWrapper]
   where
+    emitMallocLocal :: String -> Int -> LowerM LLVMOperand
     emitMallocLocal prefix size =
       emitAssign prefix LLVMPtr (LLVMCall runtimeMallocName [(LLVMInt 64, LLVMIntLiteral 64 (toInteger size))])
 
@@ -5047,8 +5085,8 @@ lowerConstruct env exprEnv context resultTy name args =
       unless (length args == length fieldTys) $
         liftEither (BackendLLVMArityMismatch name (length fieldTys) (length args))
       argValues <- zipWithM (lowerConstructField env exprEnv context) fieldTys args
-      object <- emitMalloc env context (8 * (1 + length args))
-      tagPtr <- emitGep "tag.ptr" object 0
+      object <- emitMalloc env context (constructorObjectBytes (length args))
+      tagPtr <- emitGep "tag.ptr" object constructorTagOffset
       emitStore (LLVMInt 64) (LLVMIntLiteral 64 (crTag constructorRuntime)) tagPtr
       zipWithM_ (storeField object) [0 ..] argValues
       resultLLVMType <- lowerBackendTypeM env context resultTy
@@ -5064,7 +5102,7 @@ lowerConstruct env exprEnv context resultTy name args =
         )
   where
     storeField object index0 value = do
-      fieldPtr <- emitGep "field.ptr" object (8 * (index0 + 1))
+      fieldPtr <- emitGep "field.ptr" object (constructorFieldOffset index0)
       emitStore (lvLLVMType value) (lvOperand value) fieldPtr
 
 lowerConstructField :: ProgramEnv -> ExprEnv -> String -> BackendType -> BackendExpr -> LowerM LowerValue
@@ -5110,7 +5148,7 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
   scrutineeValue <- lowerExpr env exprEnv context scrutinee
   unless (lvLLVMType scrutineeValue == LLVMPtr) $
     liftEither (BackendLLVMUnsupportedType (context ++ " case scrutinee") (lvBackendType scrutineeValue))
-  tagPtr <- emitGep "case.tag.ptr" (lvOperand scrutineeValue) 0
+  tagPtr <- emitGep "case.tag.ptr" (lvOperand scrutineeValue) constructorTagOffset
   tagValue <- emitAssign "case.tag" (LLVMInt 64) (LLVMLoad (LLVMInt 64) tagPtr)
   altLabels <- traverse (const (freshBlock "case.alt")) (NE.toList alternatives)
   defaultLabel <- maybe (freshBlock "case.default") pure (lookupDefaultLabel altLabels)
@@ -5249,7 +5287,7 @@ lowerHeapCase env exprEnv context resultTy scrutinee alternatives = do
 
     loadField constructorName scrutineeValue index0 fieldTy = do
       llvmTy <- lowerStoredFieldTypeM env context fieldTy
-      fieldPtr <- emitGep "case.field.ptr" (lvOperand scrutineeValue) (8 * (index0 + 1))
+      fieldPtr <- emitGep "case.field.ptr" (lvOperand scrutineeValue) (constructorFieldOffset index0)
       loaded <- emitAssign "case.field" llvmTy (LLVMLoad llvmTy fieldPtr)
       pure (LowerValue fieldTy llvmTy loaded (fieldValueKind constructorName scrutineeValue index0 fieldTy) Nothing)
 

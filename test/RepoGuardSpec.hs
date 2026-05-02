@@ -257,6 +257,22 @@ spec = describe "Repository guardrails" $ do
       $ \(path, src, markers) ->
         assertMarkersPresent path src markers
 
+  it "ADT and case semantic boundary stays explicit while lowerer-owned layout policy stays private and frozen" $ do
+    architectureSrc <- readFile "docs/architecture.md"
+    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
+    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
+    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
+    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
+    forM_
+      [ ("docs/architecture.md", architectureSrc, backendADTCaseOwnershipMarkers),
+        ("docs/backend-native-pipeline.md", nativePipelineSrc, backendADTCaseOwnershipMarkers ++ nativePipelineADTCaseLayoutMarkers),
+        ("src/MLF/Backend/IR.hs", backendIRSrc, backendADTCaseOwnershipMarkers),
+        ("src/MLF/Backend/Convert.hs", backendConvertSrc, backendADTCaseOwnershipMarkers),
+        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, backendADTCaseOwnershipMarkers ++ backendLowerADTCaseLayoutMarkers)
+      ]
+      $ \(path, src, markers) ->
+        assertMarkersPresent path src markers
+
 discoverSpecModules :: FilePath -> IO [String]
 discoverSpecModules root = do
   hsFiles <- collectHsFiles root
@@ -592,6 +608,34 @@ backendLowerCallableShapeMarkers =
     "Lowering consumes that same callable",
     "`BackendApp` remains the direct first-order call path",
     "case/let-selected closure values must"
+  ]
+
+backendADTCaseOwnershipMarkers :: [String]
+backendADTCaseOwnershipMarkers =
+  [ "Row-4 ADT/case ownership",
+    "semantic constructor/case nodes",
+    "`MLF.Backend.IR`",
+    "field slots, closure-record storage for",
+    "nullary tag-only representation stay private to"
+  ]
+
+nativePipelineADTCaseLayoutMarkers :: [String]
+nativePipelineADTCaseLayoutMarkers =
+  [ "declaration-order",
+    "zero-based constructor tags drive emitted `switch` targets",
+    "object offset `0`",
+    "function-like constructor fields store explicit closure records",
+    "nullary constructors",
+    "tag-only heap objects"
+  ]
+
+backendLowerADTCaseLayoutMarkers :: [String]
+backendLowerADTCaseLayoutMarkers =
+  [ "declaration-order zero-based constructor tags",
+    "the tag word is stored at object offset `0`",
+    "field slots start after that tag word",
+    "function-like constructor fields are stored as explicit closure records",
+    "nullary constructors use tag-only heap objects"
   ]
 
 futureLowerIRCriteriaMarkers :: [String]

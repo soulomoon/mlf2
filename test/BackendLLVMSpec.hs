@@ -425,7 +425,17 @@ spec = describe "MLF.Backend.LLVM" $ do
     output <- requireRight =<< emitBackendFile "test/programs/unified/authoritative-case-analysis.mlfp"
 
     output `shouldSatisfy` isInfixOf "call ptr @\"malloc\""
+    output `shouldSatisfy` isInfixOf "call ptr @\"malloc\"(i64 8)"
+    output `shouldSatisfy` isInfixOf "call ptr @\"malloc\"(i64 16)"
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.malloc.0\", i64 0"
+    output `shouldSatisfy` isInfixOf "store i64 0, ptr %\"__llvm.tag.ptr.1\""
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.malloc.2\", i64 0"
+    output `shouldSatisfy` isInfixOf "store i64 1, ptr %\"__llvm.tag.ptr.3\""
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.malloc.2\", i64 8"
     output `shouldSatisfy` isInfixOf "switch i64"
+    output
+      `shouldSatisfy` isInfixOf
+        "switch i64 %\"__llvm.case.tag.6\", label %case.default.2 [ i64 0, label %case.alt.0 i64 1, label %case.alt.1 ]"
     output `shouldSatisfy` isInfixOf "phi i64"
     validateLLVMAssembly output
     validateLLVMObjectCode output
@@ -483,7 +493,10 @@ spec = describe "MLF.Backend.LLVM" $ do
     output <- requireRight (renderBackendProgramLLVM unusedPolymorphicPatternFieldProgram)
 
     output `shouldSatisfy` isInfixOf "define i64 @\"main\"(ptr %\"box\")"
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"box\", i64 0"
+    output `shouldSatisfy` isInfixOf "load i64, ptr %\"__llvm.case.tag.ptr."
     output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"box\", i64 16"
+    output `shouldSatisfy` isInfixOf "load i64, ptr %\"__llvm.case.field.ptr."
     output `shouldNotSatisfy` isInfixOf "getelementptr i8, ptr %\"box\", i64 8"
     validateLLVMAssembly output
 
@@ -517,9 +530,22 @@ spec = describe "MLF.Backend.LLVM" $ do
   it "lowers nullary and recursive-list constructors through case" $ do
     checked <- requireChecked recursiveListProgram
     output <- requireRight (renderCheckedProgramLLVM checked)
+    let nullaryTagOnlyBlock =
+          unlines
+            [ "  %\"__llvm.malloc.2\" = call ptr @\"malloc\"(i64 8)",
+              "  %\"__llvm.tag.ptr.3\" = getelementptr i8, ptr %\"__llvm.malloc.2\", i64 0",
+              "  store i64 0, ptr %\"__llvm.tag.ptr.3\""
+            ]
 
     output `shouldSatisfy` isInfixOf "define ptr @\"Main__tailOrNil\""
     output `shouldSatisfy` isInfixOf "define i1 @\"Main__isNil\""
+    output `shouldSatisfy` isInfixOf nullaryTagOnlyBlock
+    output `shouldSatisfy` isInfixOf "call ptr @\"malloc\"(i64 24)"
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.malloc.4\", i64 8"
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.malloc.4\", i64 16"
+    output
+      `shouldSatisfy` isInfixOf
+        "switch i64 %\"__llvm.case.tag.1\", label %case.default.2 [ i64 0, label %case.alt.0 i64 1, label %case.alt.1 ]"
     output `shouldSatisfy` isInfixOf "phi ptr"
     validateLLVMAssembly output
 
@@ -1043,6 +1069,10 @@ spec = describe "MLF.Backend.LLVM" $ do
         requireRight =<< emitBackendFile path
 
     output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$Main__main$"
+    output `shouldSatisfy` isInfixOf "store ptr @\"__mlfp_closure$Main__main$"
+    output `shouldSatisfy` isInfixOf "getelementptr i8, ptr %\"__llvm.malloc.5\", i64 8"
+    output `shouldSatisfy` isInfixOf "store ptr %\"__llvm.malloc.2\", ptr %\"__llvm.field.ptr."
+    output `shouldSatisfy` isInfixOf "load ptr, ptr %\"__llvm.case.field.ptr."
     output `shouldSatisfy` isInfixOf "store i64 41"
     output `shouldSatisfy` isInfixOf "load ptr"
     output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
