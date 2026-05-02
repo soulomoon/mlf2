@@ -148,6 +148,25 @@ The current one-backend-IR contract is:
   becoming a second executable IR, a public `LowerableBackend.IR`, or a second
   checked-program authority.
 
+Within that single backend IR, `MLF.Backend.IR` owns the eager executable
+representation consumed by the rest of the backend. The owned executable term
+shapes are typed direct application, explicit closures and
+`BackendClosureCall`, ADT construction and case analysis, lets, lambdas, type
+abstraction/application, and recursive roll/unroll. The validation-visible
+invariants for those executable shapes live at this boundary so conversion and
+lowering share one executable contract.
+
+LLVM/native lowering owns only downstream private lowering/runtime details for
+that same `MLF.Backend.IR` program: closure-record layout and closure ABI
+details, environment-record layout, layout-only lowering helpers, native
+wrapper/runtime symbol emission, and executable rendering support. Those
+concerns do not create a second executable IR, and they do not move executable
+ownership out of `MLF.Backend.IR`.
+
+Lazy STG-like machinery stays out of scope for the current backend boundary:
+no thunks, no update frames, no CAF update semantics, no graph reduction, and
+no implicit laziness rescue.
+
 A later lower IR may be introduced only when all of the following hold:
 
 - distinct backend-owned executable invariants that cannot live in
@@ -191,7 +210,8 @@ do not yet have LLVM lowering. The LLVM backend is intentionally repo-local:
 into that AST, and `Ppr` emits opaque-pointer LLVM IR text accepted by LLVM 15+
 tools or LLVM 14-era tools run with `-opaque-pointers`.
 
-The backend has two emission contracts. Raw emission keeps the checked `.mlfp`
+The backend has two emission contracts. Both raw and native emission still
+consume the same backend IR program. Raw emission keeps the checked `.mlfp`
 `main` as an ordinary module-qualified LLVM function and is the stable IR
 inspection surface. Native emission adds a C ABI `i32 @main()` wrapper around a
 zero-argument checked `.mlfp` `main`, renders supported pure `Int`, `Bool`, and

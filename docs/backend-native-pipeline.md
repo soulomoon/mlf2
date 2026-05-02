@@ -21,6 +21,12 @@ A later lower IR may be introduced only when all of the following hold:
 - a later accepted roadmap revision before any new durable or public surface
   is added.
 
+`emit-backend` is the raw inspection/lowering output from that same
+`MLF.Backend.IR` program. `emit-native` is that same eager IR plus private
+native-entrypoint/runtime support only. There are no thunks, no update frames,
+no CAF update semantics, no graph reduction, and no implicit laziness rescue
+in the native path.
+
 ## Emission Modes
 
 `emit-backend` prints the raw LLVM module lowered from that same
@@ -34,7 +40,9 @@ for backend inspection, `llvm-as` validation, and selected
 checked zero-argument `.mlfp` `main`, renders the pure result to stdout, prints
 exactly one trailing newline, writes no stderr on success, and returns exit
 status `0`. For `IO` mains, the entrypoint calls the main closure to execute
-the IO action and returns exit status `0` without rendering.
+the IO action and returns exit status `0` without rendering. The added support
+is limited to the private native-entrypoint/runtime symbols described below; it
+does not create a second executable IR or a lazy runtime.
 
 ## Generated Artifacts
 

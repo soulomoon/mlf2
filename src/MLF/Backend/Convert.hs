@@ -9,8 +9,13 @@ Description : Convert checked .mlfp programs to typed backend IR
 This module is the backend-owned cut from checked `.mlfp` artifacts into the
 typed IR from "MLF.Backend.IR". xMLF remains the thesis-faithful typed
 elaboration IR, and `MLF.Backend.IR` is the single executable eager backend
-IR. Checked-program conversion stops at `MLF.Backend.IR`; unsupported checked
-shapes must fail here instead of being rerouted through a second IR layer.
+IR. Checked-program conversion publishes that eager executable representation
+into `MLF.Backend.IR`: direct application, explicit closures and
+`BackendClosureCall`, ADT construction and case analysis, lets, lambdas, type
+abstraction/application, and roll/unroll. Checked-program conversion stops at `MLF.Backend.IR`;
+unsupported checked shapes must fail here instead of being rerouted through a second IR layer.
+Unsupported checked shapes fail here instead of being normalized into lazy runtime artifacts, lowerer-private
+layout forms, or native-wrapper-specific machinery. There are no thunks, no update frames, no CAF update semantics, no graph reduction, and no implicit laziness rescue at this conversion boundary.
 Any ANF-like normalization, layout-only structure, or lowerability-only
 representation stays private to backend-owned lowering helpers rather than
 becoming a second executable IR, a public `LowerableBackend.IR`, or a second

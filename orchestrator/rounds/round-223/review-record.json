@@ -1,0 +1,61 @@
+{
+  "round_id": "round-223",
+  "attempt": 1,
+  "status": "authoritative",
+  "decision": "approved",
+  "implemented_stage_result": "accepted",
+  "attempt_verdict": "accepted",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "not needed",
+  "merge_readiness": "satisfied",
+  "controller_merge_hygiene": "satisfied",
+  "base_branch": "master",
+  "branch": "orchestrator/round-223-pin-eager-runtime-contract",
+  "base_commit": "5365d9752c3d2c426369d0b709de48224d741bb4",
+  "head_commit": "5365d9752c3d2c426369d0b709de48224d741bb4",
+  "merge_base": "5365d9752c3d2c426369d0b709de48224d741bb4",
+  "roadmap_id": "2026-05-02-00-backend-ir-executable-boundary-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-02-00-backend-ir-executable-boundary-roadmap/rev-001",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-pin-eager-runtime-contract",
+  "extracted_item_id": null,
+  "review_path": "orchestrator/rounds/round-223/review.md",
+  "review_snapshot": "orchestrator/rounds/round-223/reviews/attempt-1.md",
+  "mechanism_table": {
+    "row_1_ir_role_separation_and_non_duplication": "YES",
+    "row_2_eager_runtime_lowering_contract": "YES",
+    "row_3_direct_calls_closure_values_and_callable_shapes": "NO",
+    "row_4_adt_case_semantics_versus_layout": "NO",
+    "row_5_primitive_operations_and_eager_evaluation_order": "NO",
+    "row_6_polymorphism_erasure_and_lowerability": "NO",
+    "row_7_validation_evidence_and_guidance_synchronization": "NO"
+  },
+  "verification_results": {
+    "diff_hygiene": "passed",
+    "focused_row_2_guard": {
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "focused_backend_ir_slice": {
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "focused_backend_llvm_native_entrypoint_slice": {
+      "result": "passed",
+      "examples": 7,
+      "failures": 0
+    },
+    "full_gate": {
+      "command": "cabal build all && cabal test",
+      "result": "passed",
+      "examples": 2340,
+      "failures": 0,
+      "duration_seconds": 324.644
+    }
+  },
+  "evidence_summary": "Reviewed the canonical round-223 worktree against master commit 5365d9752c3d2c426369d0b709de48224d741bb4, where HEAD, master, and merge-base all match and the live round exists as an uncommitted worktree diff. The implementation-owned repo-facing scope stays limited to docs/architecture.md, docs/backend-native-pipeline.md, docs/plans/2026-05-02-backend-ir-executable-boundary-mechanism-table.md, src/MLF/Backend/Convert.hs, src/MLF/Backend/IR.hs, src/MLF/Backend/LLVM/Lower.hs, and test/RepoGuardSpec.hs, while orchestrator/state.json, the pointer stubs, the active rev-001 roadmap bundle, and the round-223 lineage files are controller-owned activation bookkeeping. The eager-runtime contract is synchronized across the planned surfaces, the mechanism-table gate leaves rows 3 through 7 at NO while keeping rows 1 and 2 at YES, the focused row-2 repo guard passed, the focused backend IR and LLVM/native slices passed, and cabal build all && cabal test passed with 2340 examples and 0 failures. The round preserves the inherited explicit-only / non-equi-recursive / non-cyclic-graph / no-fallback predecessor boundary as bounded context only and does not introduce a second public backend IR, lazy STG machinery, cyclic search, multi-SCC search, or roadmap-scope widening."
+}

@@ -10,6 +10,13 @@ Description : Lower typed backend IR into real LLVM IR syntax
 xMLF remains the thesis-faithful typed elaboration IR, and `MLF.Backend.IR`
 is the single executable eager backend IR. Both 'lowerBackendProgram' and
 'lowerBackendProgramNative' lower the same `MLF.Backend.IR` program.
+LLVM lowering and native emission own only the downstream private
+lowering/runtime details for that program: closure ABI details,
+environment-record layout, layout-only lowering helpers, native
+wrapper/runtime symbol emission, and executable rendering support. Those
+details do not create a second executable IR, and they do not introduce a
+lazy runtime. There are no thunks, no update frames, no CAF update semantics,
+no graph reduction, and no implicit laziness rescue in this lowering layer.
 
 Any ANF-like normalization, layout-only structure, or lowerability-only
 representation in this module stays private to backend-owned lowering helpers
@@ -38,7 +45,11 @@ entry functions are private LLVM functions with debug-friendly names supplied
 by `BackendClosure`; they take a hidden `ptr env` parameter before the erased
 monomorphic runtime arguments. Direct first-order backend calls keep using
 their existing first-order function symbols; indirect closure calls must use
-the explicit `BackendClosureCall` node.
+the explicit `BackendClosureCall` node. Raw LLVM emission and native emission
+both start from the same `MLF.Backend.IR` program; this private closure ABI,
+plus native wrapper/runtime symbol emission and executable rendering support,
+stays downstream of that IR rather than becoming a second executable IR or a
+lazy runtime.
 -}
 module MLF.Backend.LLVM.Lower
   ( BackendLLVMError (..),

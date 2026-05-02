@@ -227,6 +227,22 @@ spec = describe "Repository guardrails" $ do
       $ \(path, src, markers) ->
         assertMarkersPresent path src markers
 
+  it "eager-runtime lowering contract stays explicit and lazy STG machinery stays out of scope" $ do
+    architectureSrc <- readFile "docs/architecture.md"
+    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
+    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
+    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
+    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
+    forM_
+      [ ("docs/architecture.md", architectureSrc, architectureEagerRuntimeMarkers ++ eagerRuntimeExclusionMarkers),
+        ("src/MLF/Backend/IR.hs", backendIRSrc, backendIREagerRuntimeMarkers ++ eagerRuntimeExclusionMarkers),
+        ("src/MLF/Backend/Convert.hs", backendConvertSrc, backendConvertEagerRuntimeMarkers ++ eagerRuntimeExclusionMarkers),
+        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, backendLowerEagerRuntimeMarkers ++ eagerRuntimeExclusionMarkers),
+        ("docs/backend-native-pipeline.md", nativePipelineSrc, nativePipelineEagerRuntimeMarkers ++ eagerRuntimeExclusionMarkers)
+      ]
+      $ \(path, src, markers) ->
+        assertMarkersPresent path src markers
+
 discoverSpecModules :: FilePath -> IO [String]
 discoverSpecModules root = do
   hsFiles <- collectHsFiles root
@@ -472,6 +488,64 @@ nativePipelineContractMarkers =
     "`emit-backend` and `emit-native` consume the same `MLF.Backend.IR` program",
     "it is not a second executable IR,",
     "becoming a public `LowerableBackend.IR`"
+  ]
+
+architectureEagerRuntimeMarkers :: [String]
+architectureEagerRuntimeMarkers =
+  [ "`MLF.Backend.IR` owns the eager executable",
+    "typed direct application, explicit closures and",
+    "`BackendClosureCall`, ADT construction and case analysis, lets, lambdas, type",
+    "LLVM/native lowering owns only downstream private lowering/runtime details",
+    "Both raw and native emission still",
+    "consume the same backend IR program."
+  ]
+
+backendIREagerRuntimeMarkers :: [String]
+backendIREagerRuntimeMarkers =
+  [ "`MLF.Backend.IR` owns the eager executable representation consumed by the",
+    "typed direct application, explicit closures and",
+    "`BackendClosureCall`, ADT construction and case analysis, lets, lambdas,",
+    "validation-visible invariants for those executable shapes live at this",
+    "closure-record layout, native process entrypoints, renderer helpers, native"
+  ]
+
+backendConvertEagerRuntimeMarkers :: [String]
+backendConvertEagerRuntimeMarkers =
+  [ "Checked-program conversion publishes that eager executable representation",
+    "direct application, explicit closures and",
+    "`BackendClosureCall`, ADT construction and case analysis, lets, lambdas, type",
+    "Unsupported checked shapes fail here",
+    "lazy runtime artifacts, lowerer-private",
+    "native-wrapper-specific machinery."
+  ]
+
+backendLowerEagerRuntimeMarkers :: [String]
+backendLowerEagerRuntimeMarkers =
+  [ "Both 'lowerBackendProgram' and",
+    "'lowerBackendProgramNative' lower the same `MLF.Backend.IR` program.",
+    "LLVM lowering and native emission own only the downstream private",
+    "wrapper/runtime symbol emission, and executable rendering support.",
+    "Raw LLVM emission and native emission",
+    "both start from the same `MLF.Backend.IR` program"
+  ]
+
+nativePipelineEagerRuntimeMarkers :: [String]
+nativePipelineEagerRuntimeMarkers =
+  [ "`emit-backend` and `emit-native` consume the same `MLF.Backend.IR` program",
+    "`emit-backend` is the raw inspection/lowering output from that same",
+    "`emit-native` is that same eager IR plus private",
+    "native-entrypoint/runtime support only.",
+    "The added support",
+    "does not create a second executable IR or a lazy runtime."
+  ]
+
+eagerRuntimeExclusionMarkers :: [String]
+eagerRuntimeExclusionMarkers =
+  [ "no thunks",
+    "no update frames",
+    "no CAF update semantics",
+    "no graph reduction",
+    "no implicit laziness rescue"
   ]
 
 futureLowerIRCriteriaMarkers :: [String]

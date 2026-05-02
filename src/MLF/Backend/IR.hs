@@ -18,6 +18,17 @@ narrow:
 
 * xMLF remains the thesis-faithful typed elaboration IR;
 * `MLF.Backend.IR` is the single executable eager backend IR;
+* `MLF.Backend.IR` owns the eager executable representation consumed by the
+  rest of the backend: typed direct application, explicit closures and
+  `BackendClosureCall`, ADT construction and case analysis, lets, lambdas,
+  type abstraction/application, and roll/unroll;
+* validation-visible invariants for those executable shapes live at this
+  boundary;
+* closure-record layout, native process entrypoints, renderer helpers, native
+  wrapper/runtime symbol emission, and other lowering-only runtime details
+  stay downstream of this IR;
+* no thunks, no update frames, no CAF update semantics, no graph reduction,
+  and no implicit laziness rescue;
 * no second executable backend IR, no public `LowerableBackend.IR`, and no
   second checked-program authority inside this family;
 * any ANF-like normalization, layout-only structure, or lowerability-only
