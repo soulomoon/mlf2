@@ -5,6 +5,25 @@ Module      : MLF.Backend.LLVM.Lower
 Description : Lower typed backend IR into real LLVM IR syntax
 -}
 
+{- Note [One backend IR lowering boundary]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+xMLF remains the thesis-faithful typed elaboration IR, and `MLF.Backend.IR`
+is the single executable eager backend IR. Both 'lowerBackendProgram' and
+'lowerBackendProgramNative' lower the same `MLF.Backend.IR` program.
+
+Any ANF-like normalization, layout-only structure, or lowerability-only
+representation in this module stays private to backend-owned lowering helpers
+rather than becoming a second executable IR, a public `LowerableBackend.IR`,
+or a second checked-program authority.
+
+A later lower IR may be introduced only when all of the following hold:
+
+* distinct backend-owned executable invariants that cannot live in
+  `MLF.Backend.IR` or a private lowering helper;
+* a dedicated validation/evidence owner for that new boundary; and
+* a later accepted roadmap revision before any new durable or public surface
+  is added.
+-}
 {- Note [Closure ABI]
 ~~~~~~~~~~~~~~~~~~~~~
 Backend closure values are heap pointers to a two-word record:

@@ -7,9 +7,22 @@ Module      : MLF.Backend.Convert
 Description : Convert checked .mlfp programs to typed backend IR
 
 This module is the backend-owned cut from checked `.mlfp` artifacts into the
-typed IR from "MLF.Backend.IR". It does not infer or repair programs: inputs
-must already have passed the `.mlfp` checker and xMLF typecheck guard, and the
-converter reports unsupported checked shapes explicitly.
+typed IR from "MLF.Backend.IR". xMLF remains the thesis-faithful typed
+elaboration IR, and `MLF.Backend.IR` is the single executable eager backend
+IR. Checked-program conversion stops at `MLF.Backend.IR`; unsupported checked
+shapes must fail here instead of being rerouted through a second IR layer.
+Any ANF-like normalization, layout-only structure, or lowerability-only
+representation stays private to backend-owned lowering helpers rather than
+becoming a second executable IR, a public `LowerableBackend.IR`, or a second
+checked-program authority.
+
+A later lower IR may be introduced only when all of the following hold:
+
+* distinct backend-owned executable invariants that cannot live in
+  `MLF.Backend.IR` or a private lowering helper;
+* a dedicated validation/evidence owner for that new boundary; and
+* a later accepted roadmap revision before any new durable or public surface
+  is added.
 -}
 module MLF.Backend.Convert
   ( BackendConversionError (..),

@@ -207,6 +207,26 @@ spec = describe "Repository guardrails" $ do
       countModuleEntries moduleName cabalSrc `shouldBe` 1
       publicLibrarySrc `shouldSatisfy` (not . isInfixOf moduleName)
 
+  it "one-backend-IR contract stays explicit and no public lower IR leaks" $ do
+    architectureSrc <- readFile "docs/architecture.md"
+    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
+    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
+    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
+    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
+    cabalSrc <- readFile "mlf2.cabal"
+    let publicLibrarySrc = extractPublicLibraryStanza cabalSrc
+    publicLibrarySrc `shouldSatisfy` (not . isInfixOf "MLF.Backend.")
+    publicLibrarySrc `shouldSatisfy` (not . isInfixOf "LowerableBackend.")
+    forM_
+      [ ("docs/architecture.md", architectureSrc, architectureContractMarkers ++ futureLowerIRCriteriaMarkers),
+        ("src/MLF/Backend/IR.hs", backendIRSrc, backendIRContractMarkers ++ futureLowerIRCriteriaMarkers),
+        ("src/MLF/Backend/Convert.hs", backendConvertSrc, backendConvertContractMarkers ++ futureLowerIRCriteriaMarkers),
+        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, backendLowerContractMarkers ++ futureLowerIRCriteriaMarkers),
+        ("docs/backend-native-pipeline.md", nativePipelineSrc, nativePipelineContractMarkers ++ futureLowerIRCriteriaMarkers)
+      ]
+      $ \(path, src, markers) ->
+        assertMarkersPresent path src markers
+
 discoverSpecModules :: FilePath -> IO [String]
 discoverSpecModules root = do
   hsFiles <- collectHsFiles root
@@ -409,6 +429,68 @@ splitChildModules =
     "MLF.Elab.Phi.Omega.Interpret",
     "MLF.Elab.Phi.Omega.Normalize"
   ]
+
+architectureContractMarkers :: [String]
+architectureContractMarkers =
+  [ "xMLF remains the thesis-faithful typed elaboration IR.",
+    "`MLF.Backend.IR` is the single executable eager backend IR in the current",
+    "`MLF.Backend.Convert` is the only checked-program to backend-IR conversion",
+    "layout-only structure, or lowerability-only",
+    "public `LowerableBackend.IR`"
+  ]
+
+backendIRContractMarkers :: [String]
+backendIRContractMarkers =
+  [ "xMLF remains the thesis-faithful typed elaboration IR;",
+    "`MLF.Backend.IR` is the single executable eager backend IR;",
+    "no second executable backend IR, no public `LowerableBackend.IR`, and no",
+    "layout-only structure, or lowerability-only"
+  ]
+
+backendConvertContractMarkers :: [String]
+backendConvertContractMarkers =
+  [ "xMLF remains the thesis-faithful typed",
+    "`MLF.Backend.IR` is the single executable eager backend",
+    "Checked-program conversion stops at `MLF.Backend.IR`;",
+    "unsupported checked",
+    "must fail here instead of being rerouted through a second IR layer.",
+    "public `LowerableBackend.IR`"
+  ]
+
+backendLowerContractMarkers :: [String]
+backendLowerContractMarkers =
+  [ "xMLF remains the thesis-faithful typed elaboration IR, and `MLF.Backend.IR`",
+    "Both 'lowerBackendProgram' and",
+    "'lowerBackendProgramNative' lower the same `MLF.Backend.IR` program.",
+    "public `LowerableBackend.IR`"
+  ]
+
+nativePipelineContractMarkers :: [String]
+nativePipelineContractMarkers =
+  [ "xMLF remains the thesis-faithful typed elaboration IR, and",
+    "`MLF.Backend.IR` is the single executable eager backend IR.",
+    "`emit-backend` and `emit-native` consume the same `MLF.Backend.IR` program",
+    "it is not a second executable IR,",
+    "becoming a public `LowerableBackend.IR`"
+  ]
+
+futureLowerIRCriteriaMarkers :: [String]
+futureLowerIRCriteriaMarkers =
+  [ "distinct backend-owned executable invariants that cannot live in",
+    "`MLF.Backend.IR` or a private lowering helper",
+    "a dedicated validation/evidence owner for that new boundary",
+    "a later accepted roadmap revision before any new durable or public surface",
+    "is added."
+  ]
+
+assertMarkersPresent :: FilePath -> String -> [String] -> Expectation
+assertMarkersPresent path src markers =
+  forM_ markers assertMarker
+  where
+    assertMarker marker =
+      if marker `isInfixOf` src
+        then pure ()
+        else expectationFailure (path ++ " missing marker: " ++ show marker)
 
 countModuleEntries :: String -> String -> Int
 countModuleEntries moduleName src =

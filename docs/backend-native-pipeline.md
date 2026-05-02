@@ -1,22 +1,40 @@
 # Backend Native Pipeline
 
 This document describes the native executable path used by the LLVM backend
-tests. It is a test and inspection contract for checked pure `.mlfp` programs;
-it is not a separate source-language runtime or an IO implementation.
+tests. xMLF remains the thesis-faithful typed elaboration IR, and
+`MLF.Backend.IR` is the single executable eager backend IR. Both
+`emit-backend` and `emit-native` consume the same `MLF.Backend.IR` program
+produced by `MLF.Backend.Convert`. This document is a test and inspection
+contract for checked pure `.mlfp` programs; it is not a second executable IR,
+not a second checked-program authority, and not a separate source-language
+runtime or an IO implementation.
+
+Any ANF-like normalization, layout-only structure, or lowerability-only
+representation stays private to backend-owned lowering helpers rather than
+becoming a public `LowerableBackend.IR`.
+
+A later lower IR may be introduced only when all of the following hold:
+
+- distinct backend-owned executable invariants that cannot live in
+  `MLF.Backend.IR` or a private lowering helper;
+- a dedicated validation/evidence owner for that new boundary; and
+- a later accepted roadmap revision before any new durable or public surface
+  is added.
 
 ## Emission Modes
 
-`emit-backend` prints the raw backend LLVM module. The checked `.mlfp` `main`
-binding remains a module-qualified LLVM function such as `Main__main`, and the
-output is used for backend inspection, `llvm-as` validation, and selected
+`emit-backend` prints the raw LLVM module lowered from that same
+`MLF.Backend.IR` program. The checked `.mlfp` `main` binding remains a
+module-qualified LLVM function such as `Main__main`, and the output is used
+for backend inspection, `llvm-as` validation, and selected
 `llc -filetype=obj` smoke checks.
 
-`emit-native` starts from the same checked backend program, then adds a C ABI
+`emit-native` starts from the same `MLF.Backend.IR` program, then adds a C ABI
 `i32 @main()` process entrypoint. For pure mains, the entrypoint calls the
 checked zero-argument `.mlfp` `main`, renders the pure result to stdout, prints
 exactly one trailing newline, writes no stderr on success, and returns exit
-status `0`. For `IO` mains, the entrypoint calls the main closure to execute the
-IO action and returns exit status `0` without rendering.
+status `0`. For `IO` mains, the entrypoint calls the main closure to execute
+the IO action and returns exit status `0` without rendering.
 
 ## Generated Artifacts
 

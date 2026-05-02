@@ -136,6 +136,26 @@ authority: if the checked artifact cannot be represented faithfully, conversion
 must report an unsupported checked shape instead of inventing frontend
 semantics or repairing types.
 
+The current one-backend-IR contract is:
+
+- xMLF remains the thesis-faithful typed elaboration IR.
+- `MLF.Backend.IR` is the single executable eager backend IR in the current
+  repo architecture.
+- `MLF.Backend.Convert` is the only checked-program to backend-IR conversion
+  boundary.
+- Any ANF-like normalization, layout-only structure, or lowerability-only
+  representation stays private to backend-owned lowering helpers rather than
+  becoming a second executable IR, a public `LowerableBackend.IR`, or a second
+  checked-program authority.
+
+A later lower IR may be introduced only when all of the following hold:
+
+- distinct backend-owned executable invariants that cannot live in
+  `MLF.Backend.IR` or a private lowering helper;
+- a dedicated validation/evidence owner for that new boundary; and
+- a later accepted roadmap revision before any new durable or public surface
+  is added.
+
 The boundary invariants are:
 
 - every backend expression node carries its result `BackendType`;

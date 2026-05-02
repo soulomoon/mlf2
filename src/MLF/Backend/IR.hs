@@ -16,6 +16,21 @@ The backend IR sits after `MLF.Frontend.Program.Check` and the xMLF
 typechecking guard, and before LLVM lowering. The boundary is intentionally
 narrow:
 
+* xMLF remains the thesis-faithful typed elaboration IR;
+* `MLF.Backend.IR` is the single executable eager backend IR;
+* no second executable backend IR, no public `LowerableBackend.IR`, and no
+  second checked-program authority inside this family;
+* any ANF-like normalization, layout-only structure, or lowerability-only
+  representation stays private to backend-owned lowering helpers.
+
+A later lower IR may be introduced only when all of the following hold:
+
+* distinct backend-owned executable invariants that cannot live in
+  `MLF.Backend.IR` or a private lowering helper;
+* a dedicated validation/evidence owner for that new boundary; and
+* a later accepted roadmap revision before any new durable or public surface
+  is added.
+
 * every expression node carries its result type;
 * module-level binding names are runtime names and must be globally unique;
 * a program `main` names one of those checked bindings;
