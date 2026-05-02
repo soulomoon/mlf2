@@ -350,12 +350,35 @@ checkSchemeClosureUnder canonical c0 = do
                     case bindingPathToRootLocal bindParents (GenRef gid') of
                         Right path -> IntSet.fromList [ getGenNodeId pathGid | GenRef pathGid <- path ]
                         Left _ -> IntSet.singleton (getGenNodeId gid')
-                allowedGens' = IntSet.unions [allowedGens, ancestorGens]
+                enclosingSchemeGens =
+                    IntSet.unions
+                        [ IntMap.findWithDefault
+                            IntSet.empty
+                            (getNodeId (canonical outerRoot))
+                            schemeGensByRoot
+                        | outerRoot <- schemeRoots
+                        , canonical outerRoot /= canonical root
+                        , IntSet.member
+                            (getNodeId (canonical root))
+                            (reachableFromWithBounds outerRoot)
+                        ]
+                allowedGens' = IntSet.unions [allowedGens, ancestorGens, enclosingSchemeGens]
+                {- A solved outer-binder mention can appear as a flex-named TyVar
+                whose bound is already in the scheme body.  The scheme is closed
+                over the reachable bound, so treating the alias itself as a free
+                named node is too strict for nested polymorphic builtin schemes
+                such as __io_bind. -}
+                boundedAliasClosedByReachability reachable0 nid =
+                    case lookupNodeIn nodes (canonical nid) of
+                        Just TyVar { tnBound = Just bnd } ->
+                            IntSet.member (getNodeId (canonical bnd)) reachable0
+                        _ -> False
                 freeNodes0 =
                     [ n
                     | n <- namedNodes
                     , IntSet.member (getNodeId (canonical n)) reachable
                     , not (IntSet.member (getNodeId (canonical n)) nestedReachable)
+                    , not (boundedAliasClosedByReachability reachable n)
                     , not (boundUnderGen allowedGens' n)
                     ]
             unless (null freeNodes0) $
@@ -367,7 +390,39 @@ checkSchemeClosureUnder canonical c0 = do
                         }
   where
     buildTypeEdges nodes0 =
-        buildTypeEdgesFrom (getNodeId . canonical) nodes0
+        foldl' addOne IntMap.empty (map snd (toListNode nodes0))
+      where
+        addOne m node
+            | isOpaqueTypeConstructor node = m
+            | otherwise =
+                let parentKey = getNodeId (canonical (tnId node))
+                    childKeys =
+                        IntSet.fromList
+                            [ getNodeId (canonical child)
+                            | child <- structuralChildrenWithBounds node
+                            ]
+                    childKeys' = IntSet.delete parentKey childKeys
+                in if IntSet.null childKeys'
+                    then m
+                    else IntMap.insertWith IntSet.union parentKey childKeys' m
+
+    {- Note [Opaque type constructors in scheme closure]
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    checkSchemeClosureUnder guards scheme roots against named free variables
+    that leak from outside the owning gen.  Opaque builtins such as IO are not
+    structural data in this graph: their parameter is a representation token for
+    the opaque runtime action, not a constructor field that exposes a free named
+    node to the scheme body.  Therefore the closure walk stops at opaque
+    constructor nodes while ordinary TyCon nodes remain transparent.
+    -}
+    isOpaqueTypeConstructor node =
+        case node of
+            TyBase { tnBase = base } -> isOpaqueBuiltinBase base
+            TyCon { tnCon = con } -> isOpaqueBuiltinBase con
+            _ -> False
+
+    isOpaqueBuiltinBase (BaseTy name) =
+        name == "IO" || name == "<builtin>.IO"
 
     softenBindParents canonical' constraint =
         let weakened = cWeakenedVars constraint

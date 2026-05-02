@@ -12,9 +12,11 @@ output is used for backend inspection, `llvm-as` validation, and selected
 `llc -filetype=obj` smoke checks.
 
 `emit-native` starts from the same checked backend program, then adds a C ABI
-`i32 @main()` process entrypoint. The entrypoint calls the checked zero-argument
-`.mlfp` `main`, renders the pure result to stdout, prints exactly one trailing
-newline, writes no stderr on success, and returns exit status `0`.
+`i32 @main()` process entrypoint. For pure mains, the entrypoint calls the
+checked zero-argument `.mlfp` `main`, renders the pure result to stdout, prints
+exactly one trailing newline, writes no stderr on success, and returns exit
+status `0`. For `IO` mains, the entrypoint calls the main closure to execute the
+IO action and returns exit status `0` without rendering.
 
 ## Generated Artifacts
 
@@ -51,8 +53,11 @@ Native emission owns the small process/runtime surface it needs:
 - `printf`: declared for deterministic result printing.
 - `malloc`: declared when heap-allocated constructors or closure records need
   allocation.
+- `putchar`: declared for character-by-character String rendering.
 - `__mlfp_and`: emitted as a backend-owned boolean primitive when no program
   binding owns that name.
+- `__io_pure`, `__io_bind`, `__io_putStrLn`: IO runtime primitives emitted as
+  closure-allocating wrapper functions with entry-point implementations.
 - `__mlfp_native_render$...`: private renderer functions generated for each
   native-renderable result type reachable from the program `main` result.
 - `__mlfp_native_*` string globals: format strings, booleans, punctuation, and
@@ -69,16 +74,21 @@ Supported result shapes are:
 
 - `Int`
 - `Bool`
+- `String` (rendered with quoted escaping via `putchar`)
+- `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 
 The native renderer uses the same value text expected by `run-program`, adds one
 newline, and requires empty stderr plus `ExitSuccess`.
 
+For `IO` mains, the native entrypoint calls the main closure to execute the IO
+action and exits with status 0 without rendering any result value.
+
 Unsupported result shapes fail before native execution instead of becoming
 assembly-only rows. Current unsupported shapes include function-valued,
-polymorphic, variable-headed, `String`, IO-like, and structurally recursive main
-results that have no named data runtime. These rows stay named in
-`BackendLLVMSpec` with the expected diagnostic fragment.
+polymorphic, variable-headed, and structurally recursive main results that have
+no named data runtime. These rows stay named in `BackendLLVMSpec` with the
+expected diagnostic fragment.
 
 ## Coverage Contract
 
@@ -91,6 +101,9 @@ row is exactly one of:
 - native-unsupported, with raw LLVM assembly validation and a required
   `emit-native` diagnostic; or
 - object-code smoke in addition to either native classification.
+
+The current `ProgramSpec` parity matrix has no native-unsupported exceptions;
+every interpreter-success row is expected to emit, link, and execute natively.
 
 Advanced rows added by the typeclass/evidence, first-class polymorphism, and
 higher-order backend slices are required native-run rows when their result is

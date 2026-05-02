@@ -10,6 +10,7 @@ module MLF.Elab.TypeCheck
 where
 
 import qualified Data.Map.Strict as Map
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Elab.Inst (InstEvalSpec (..), evalInstantiationWith, renameInstBound, schemeToType)
@@ -97,7 +98,11 @@ typeCheckWithEnv env term = case term of
                         || churchAwareEqType expectedBodyPeeled actualTy
                         || maybe False (\ty -> alphaEqType ty actualTy || churchAwareEqType ty actualTy) instantiatedExpected
                 _ -> False
-         in if argTy' == TBottom || alphaEqType argTy' aTy' || churchAwareEqType argTy' aTy' || muCompatible
+         in if argTy' == TBottom
+              || alphaEqType argTy' aTy'
+              || churchAwareEqType argTy' aTy'
+              || opaqueIOCompatible argTy' aTy'
+              || muCompatible
               then Right resTy
               else Left (TCArgumentMismatch argTy' aTy')
       _ -> Left (TCExpectedArrow fTy)
@@ -302,6 +307,26 @@ stripVacuousForallsDeepBound bound = case bound of
     TForall name (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
   TMu name body -> TMu name (stripVacuousForallsDeep body)
   _ -> bound
+
+opaqueIOCompatible :: ElabType -> ElabType -> Bool
+opaqueIOCompatible expected actual =
+  case (expected, actual) of
+    (TCon expectedName (_ :| []), TCon actualName (_ :| [])) ->
+      isOpaqueIOName expectedName && isOpaqueIOName actualName
+    (TArrow expectedDom expectedCod, TArrow actualDom actualCod) ->
+      opaqueIODomainCompatible expectedDom actualDom
+        && opaqueIOCompatible expectedCod actualCod
+    _ -> False
+  where
+    isOpaqueIOName (BaseTy name) =
+      name == "IO" || name == "<builtin>.IO"
+
+    opaqueIODomainCompatible expectedDom actualDom =
+      alphaEqType expectedDom actualDom
+        || churchAwareEqType expectedDom actualDom
+        || case (expectedDom, actualDom) of
+          (TVar {}, TVar {}) -> True
+          _ -> False
 
 rebuildForalls :: [(String, Maybe BoundType)] -> ElabType -> ElabType
 rebuildForalls binds body = foldr (\(v, bnd) t -> TForall v bnd t) body binds

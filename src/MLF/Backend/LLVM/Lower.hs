@@ -265,11 +265,18 @@ type LowerM = StateT FunctionState (Either BackendLLVMError)
 lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
 lowerBackendProgram program = do
   lowered <- lowerBackendProgramCore program
+  let base = lpBase lowered
+      needsIO = any functionReferencesIOWrapper (lpFunctions lowered)
+      existingDecls = runtimeDeclarations base
+      existingNames = Set.fromList (map llvmDeclarationName existingDecls)
+      extraDecls
+        | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
+        | otherwise = []
   validateLLVMModuleSymbols
     LLVMModule
       { llvmModuleGlobals = rawLLVMGlobals lowered,
-        llvmModuleDeclarations = runtimeDeclarations (lpBase lowered),
-        llvmModuleFunctions = lpFunctions lowered
+        llvmModuleDeclarations = existingDecls ++ extraDecls,
+        llvmModuleFunctions = lpFunctions lowered ++ if needsIO then nativeIOFunctions base else []
       }
 
 lowerBackendProgramNative :: BackendProgram -> Either BackendLLVMError LLVMModule
@@ -327,8 +334,14 @@ lowerNativeProgram lowered = do
       env = lpEnv lowered
       mainBinding = lpMainBinding lowered
       mainForm = biForm mainBinding
-  unless (null (ffParams mainForm)) $
-    Left (BackendLLVMUnsupportedExpression "native process main" "main must be a zero-argument pure value")
+  -- Reject self-referencing main bindings (from opaque placeholder fallback)
+  -- which would cause infinite recursion in the native executable.
+  case ffBody mainForm of
+    BackendVar _ v | v == biName mainBinding ->
+      Left (BackendLLVMUnsupportedExpression "native process main"
+        ("opaque main binding `" ++ biName mainBinding
+         ++ "` could not be elaborated; its body is a self-reference placeholder"))
+    _ -> pure ()
   renderSpecs <- collectNativeRenderSpecs base (ffReturnType mainForm)
   rejectNativeSymbolConflicts base renderSpecs
   let renderMap = Map.fromList [(backendTypeKey (nrsType spec), nrsFunctionName spec) | spec <- renderSpecs]
@@ -371,10 +384,12 @@ nativeRuntimeDeclarations base =
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
     ++ [LLVMDeclaration nativePrintfName (LLVMInt 32) [LLVMPtr] True]
+    ++ [LLVMDeclaration nativePutcharName (LLVMInt 32) [LLVMInt 32] False]
 
 nativeRuntimeFunctions :: ProgramBase -> [LLVMFunction]
 nativeRuntimeFunctions base =
   [nativeAndFunction | Map.notMember runtimeAndName (pbBindings base)]
+    ++ nativeIOFunctions base
 
 nativeCMainName :: String
 nativeCMainName =
@@ -420,6 +435,14 @@ nativeStrCloseParenName :: String
 nativeStrCloseParenName =
   "__mlfp_native_str_close_paren"
 
+nativeStrFunctionName :: String
+nativeStrFunctionName =
+  "__mlfp_native_str_function"
+
+nativePutcharName :: String
+nativePutcharName =
+  "putchar"
+
 nativeGlobals :: ProgramBase -> [NativeRenderSpec] -> [LLVMGlobal]
 nativeGlobals base renderSpecs =
   [ LLVMStringGlobal nativeFmtIntName "%ld",
@@ -429,7 +452,8 @@ nativeGlobals base renderSpecs =
     LLVMStringGlobal nativeStrNewlineName "\n",
     LLVMStringGlobal nativeStrSpaceName " ",
     LLVMStringGlobal nativeStrOpenParenName "(",
-    LLVMStringGlobal nativeStrCloseParenName ")"
+    LLVMStringGlobal nativeStrCloseParenName ")",
+    LLVMStringGlobal nativeStrFunctionName "<function>"
   ]
     ++ concatMap (constructorNameGlobals base) renderSpecs
 
@@ -499,6 +523,12 @@ collectNativeRenderSpecs base rootTy =
           case nativeRenderableKind base ty of
             NativeScalar ->
               Right (NativeRenderSpec ty (nativeRendererName ty) : specs, Set.insert key seen)
+            NativeString ->
+              Right (NativeRenderSpec ty (nativeRendererName ty) : specs, Set.insert key seen)
+            NativeIO ->
+              Right (specs, Set.insert key seen)
+            NativeFunction ->
+              Right (NativeRenderSpec ty (nativeRendererName ty) : specs, Set.insert key seen)
             NativeData dataRuntime0 -> do
               let seen' = Set.insert key seen
                   spec = NativeRenderSpec ty (nativeRendererName ty)
@@ -527,7 +557,10 @@ collectNativeRenderSpecs base rootTy =
 
 data NativeRenderableKind
   = NativeScalar
+  | NativeString
   | NativeData DataRuntime
+  | NativeIO
+  | NativeFunction
   | NativeUnsupported String
 
 nativeRenderableKind :: ProgramBase -> BackendType -> NativeRenderableKind
@@ -535,12 +568,16 @@ nativeRenderableKind base ty =
   case ty of
     BTBase (BaseTy "Int") -> NativeScalar
     BTBase (BaseTy "Bool") -> NativeScalar
-    BTBase (BaseTy "String") -> NativeUnsupported "String main values are not supported by native result rendering yet"
-    BTBase (BaseTy name) ->
-      maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (Map.lookup name (pbData base))
-    BTCon (BaseTy name) _ ->
-      maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (Map.lookup name (pbData base))
-    BTArrow {} -> NativeUnsupported "function main values are not native-renderable"
+    BTBase (BaseTy "String") -> NativeString
+    BTBase (BaseTy name)
+      | name == ioTypeName -> NativeIO
+      | otherwise ->
+          maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (Map.lookup name (pbData base))
+    BTCon (BaseTy name) _
+      | name == ioTypeName -> NativeIO
+      | otherwise ->
+          maybe (NativeUnsupported ("unknown native result type " ++ show name)) NativeData (Map.lookup name (pbData base))
+    BTArrow {} -> NativeFunction
     BTForall {} -> NativeUnsupported "polymorphic main values are not native-renderable"
     BTVar {} -> NativeUnsupported "type-variable main values are not native-renderable"
     BTVarApp {} -> NativeUnsupported "variable-headed main values are not native-renderable"
@@ -550,11 +587,21 @@ nativeRenderableKind base ty =
         Nothing -> NativeUnsupported "structural recursive main values are not native-renderable"
     BTBottom -> NativeUnsupported "bottom main values are not native-renderable"
 
+ioTypeName :: String
+ioTypeName =
+  "IO"
+
 lowerNativeRenderer :: ProgramEnv -> Map String String -> NativeRenderSpec -> Either BackendLLVMError LLVMFunction
 lowerNativeRenderer env renderMap spec =
   case nativeRenderableKind (peBase env) (nrsType spec) of
     NativeScalar ->
       lowerNativeScalarRenderer spec
+    NativeString ->
+      lowerNativeStringRenderer spec
+    NativeIO ->
+      Left (BackendLLVMUnsupportedExpression "native result rendering" "IO values are not renderable directly")
+    NativeFunction ->
+      lowerNativeFunctionRenderer spec
     NativeData dataRuntime0 ->
       lowerNativeDataRenderer env renderMap spec dataRuntime0
     NativeUnsupported detail ->
@@ -590,6 +637,117 @@ lowerNativeScalarRenderer spec =
           finishNativeSuccess
     _ ->
       Left (BackendLLVMUnsupportedExpression "native result rendering" ("unsupported scalar renderer " ++ show (nrsType spec)))
+
+lowerNativeStringRenderer :: NativeRenderSpec -> Either BackendLLVMError LLVMFunction
+lowerNativeStringRenderer spec =
+  lowerNativeFunction
+    (nrsFunctionName spec)
+    (LLVMInt 32)
+    [(LLVMPtr, "value"), (LLVMInt 1, "parenthesize")]
+    $ \params -> do
+      let value = requireNativeParam "value" params
+      let i8Ty = LLVMInt 8
+      let i32Ty = LLVMInt 32
+      let i64Ty = LLVMInt 64
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '"')))
+      -- Allocate a stack slot for the current pointer
+      curSlot <- emitAssign "str.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitStore LLVMPtr value curSlot
+      loopHeader <- freshBlock "str.header"
+      chkBsl <- freshBlock "str.chk.bsl"
+      escBsl <- freshBlock "str.esc.bsl"
+      chkQuo <- freshBlock "str.chk.quo"
+      escQuo <- freshBlock "str.esc.quo"
+      chkNl <- freshBlock "str.chk.nl"
+      escNl <- freshBlock "str.esc.nl"
+      chkCr <- freshBlock "str.chk.cr"
+      escCr <- freshBlock "str.esc.cr"
+      chkTab <- freshBlock "str.chk.tab"
+      escTab <- freshBlock "str.esc.tab"
+      chkPrint <- freshBlock "str.chk.print"
+      printNormal <- freshBlock "str.normal"
+      printNp <- freshBlock "str.np"
+      loopNext <- freshBlock "str.next"
+      loopDone <- freshBlock "str.done"
+      -- Entry
+      finishCurrentBlock (LLVMBr loopHeader)
+      -- Loop header: load current pointer from slot, load char, check null
+      startBlock loopHeader
+      curPtr <- emitAssign "str.cur" LLVMPtr (LLVMLoad LLVMPtr curSlot)
+      charPtr <- emitAssign "str.cptr" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 0)])
+      charVal <- emitAssign "str.c" i8Ty (LLVMLoad i8Ty charPtr)
+      isNull <- emitAssign "str.end" (LLVMInt 1) (LLVMICmpEq charVal (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isNull loopDone [(0, chkBsl)])
+      -- Check: backslash
+      startBlock chkBsl
+      isBsl <- emitAssign "str.v.bsl" (LLVMInt 1) (LLVMICmpEq charVal (LLVMIntLiteral 8 (toInteger (ord '\\'))))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isBsl chkQuo [(1, escBsl)])
+      startBlock escBsl
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\\')))
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\\')))
+      finishCurrentBlock (LLVMBr loopNext)
+      -- Check: double-quote
+      startBlock chkQuo
+      isQuo <- emitAssign "str.v.quo" (LLVMInt 1) (LLVMICmpEq charVal (LLVMIntLiteral 8 (toInteger (ord '"'))))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isQuo chkNl [(1, escQuo)])
+      startBlock escQuo
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\\')))
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '"')))
+      finishCurrentBlock (LLVMBr loopNext)
+      -- Check: newline
+      startBlock chkNl
+      isNl <- emitAssign "str.v.nl" (LLVMInt 1) (LLVMICmpEq charVal (LLVMIntLiteral 8 10))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isNl chkCr [(1, escNl)])
+      startBlock escNl
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\\')))
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord 'n')))
+      finishCurrentBlock (LLVMBr loopNext)
+      -- Check: carriage return
+      startBlock chkCr
+      isCr <- emitAssign "str.v.cr" (LLVMInt 1) (LLVMICmpEq charVal (LLVMIntLiteral 8 13))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isCr chkTab [(1, escCr)])
+      startBlock escCr
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\\')))
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord 'r')))
+      finishCurrentBlock (LLVMBr loopNext)
+      -- Check: tab
+      startBlock chkTab
+      isTab <- emitAssign "str.v.tab" (LLVMInt 1) (LLVMICmpEq charVal (LLVMIntLiteral 8 9))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isTab chkPrint [(1, escTab)])
+      startBlock escTab
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\\')))
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord 't')))
+      finishCurrentBlock (LLVMBr loopNext)
+      -- Check: printable (> 31)
+      startBlock chkPrint
+      isPrint <- emitAssign "str.v.pr" (LLVMInt 1) (LLVMICmpUgt charVal (LLVMIntLiteral 8 31))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isPrint printNp [(1, printNormal)])
+      startBlock printNormal
+      charZext <- emitAssign "str.zc" i32Ty (LLVMZext charVal i32Ty)
+      _ <- emitPutchar charZext
+      finishCurrentBlock (LLVMBr loopNext)
+      startBlock printNp
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '?')))
+      finishCurrentBlock (LLVMBr loopNext)
+      -- Advance pointer
+      startBlock loopNext
+      nextPtr <- emitAssign "str.next" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 1)])
+      emitStore LLVMPtr nextPtr curSlot
+      finishCurrentBlock (LLVMBr loopHeader)
+      -- Done
+      startBlock loopDone
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '"')))
+      finishNativeSuccess
+
+lowerNativeFunctionRenderer :: NativeRenderSpec -> Either BackendLLVMError LLVMFunction
+lowerNativeFunctionRenderer spec =
+  lowerNativeFunction
+    (nrsFunctionName spec)
+    (LLVMInt 32)
+    [(LLVMPtr, "value"), (LLVMInt 1, "parenthesize")]
+    $ \_params -> do
+      _ <- emitPrintStringGlobal nativeStrFunctionName
+      finishNativeSuccess
 
 lowerNativeDataRenderer :: ProgramEnv -> Map String String -> NativeRenderSpec -> DataRuntime -> Either BackendLLVMError LLVMFunction
 lowerNativeDataRenderer env renderMap spec dataRuntime0 =
@@ -668,13 +826,33 @@ nativeFieldParenthesize base ty =
 
 lowerNativeEntrypoint :: ProgramEnv -> BindingInfo -> Map String String -> Either BackendLLVMError LLVMFunction
 lowerNativeEntrypoint env mainBinding renderMap =
-  lowerNativeFunction nativeCMainName (LLVMInt 32) [] $ \_ -> do
-    let mainForm = biForm mainBinding
-    mainLLVMType <- lowerBackendTypeM env "native process main result" (ffReturnType mainForm)
-    mainValue <- emitAssign "native.main" mainLLVMType (LLVMCall (biName mainBinding) [])
-    callNativeRenderer renderMap (ffReturnType mainForm) mainLLVMType mainValue False
-    _ <- emitPrintStringGlobal nativeStrNewlineName
-    finishNativeSuccess
+  case nativeRenderableKind (peBase env) (ffReturnType mainForm) of
+    NativeIO ->
+      lowerNativeFunction nativeCMainName (LLVMInt 32) [] $ \_ -> do
+        mainValue <- emitAssign "native.main" LLVMPtr (LLVMCall (biName mainBinding) [])
+        -- Execute the IO action closure: load code+env, call
+        codePtrField <- emitGep "io.main.code.ptr" mainValue 0
+        codePtr <- emitAssign "io.main.code" LLVMPtr (LLVMLoad LLVMPtr codePtrField)
+        envPtrField <- emitGep "io.main.env.ptr" mainValue 8
+        envPtr <- emitAssign "io.main.env" LLVMPtr (LLVMLoad LLVMPtr envPtrField)
+        _ <- emitAssign "io.main.exec" LLVMPtr (LLVMCallOperand codePtr [(LLVMPtr, envPtr)])
+        finishNativeSuccess
+    _ -> do
+      lowerNativeFunction nativeCMainName (LLVMInt 32) [] $ \_ -> do
+        if not (null (ffParams mainForm))
+          then do
+            -- Parameterized main (e.g. Bool -> Bool): render as <function>
+            _ <- emitPrintStringGlobal nativeStrFunctionName
+            _ <- emitPrintStringGlobal nativeStrNewlineName
+            finishNativeSuccess
+          else do
+            mainLLVMType <- lowerBackendTypeM env "native process main result" (ffReturnType mainForm)
+            mainValue <- emitAssign "native.main" mainLLVMType (LLVMCall (biName mainBinding) [])
+            callNativeRenderer renderMap (ffReturnType mainForm) mainLLVMType mainValue False
+            _ <- emitPrintStringGlobal nativeStrNewlineName
+            finishNativeSuccess
+  where
+    mainForm = biForm mainBinding
 
 nativeAndFunction :: LLVMFunction
 nativeAndFunction =
@@ -685,6 +863,196 @@ nativeAndFunction =
   of
     Right function -> function
     Left err -> error ("internal native __mlfp_and lowering failed: " ++ renderBackendLLVMError err)
+
+-- IO runtime primitives
+
+ioPureName :: String
+ioPureName = "__io_pure"
+
+ioBindName :: String
+ioBindName = "__io_bind"
+
+ioPutStrLnName :: String
+ioPutStrLnName = "__io_putStrLn"
+
+nativeIOEntryName :: String -> String
+nativeIOEntryName prim = prim ++ ".entry"
+
+nativeIOWrapperName :: String -> String
+nativeIOWrapperName prim = prim ++ ".wrapper"
+
+nativeIOFunctions :: ProgramBase -> [LLVMFunction]
+nativeIOFunctions _base =
+  [ioPureEntry, ioPureWrapper, ioBindEntry, ioBindWrapper, ioPutStrLnEntry, ioPutStrLnWrapper]
+  where
+    emitMallocLocal prefix size =
+      emitAssign prefix LLVMPtr (LLVMCall runtimeMallocName [(LLVMInt 64, LLVMIntLiteral 64 (toInteger size))])
+
+    ioPureEntry =
+      case lowerNativeFunction (nativeIOEntryName ioPureName) LLVMPtr [(LLVMPtr, "env")] $ \params -> do
+        let envPtr = requireNativeParam "env" params
+        valPtr <- emitGep "pure.val.ptr" envPtr 0
+        val <- emitAssign "pure.val" LLVMPtr (LLVMLoad LLVMPtr valPtr)
+        finishCurrentBlock (LLVMRet LLVMPtr val)
+        of
+        Right fn -> fn { llvmFunctionPrivate = True }
+        Left err -> error ("internal native __io_pure entry lowering failed: " ++ renderBackendLLVMError err)
+
+    ioPureWrapper =
+      case lowerNativeFunction (nativeIOWrapperName ioPureName) LLVMPtr [(LLVMPtr, "value")] $ \params -> do
+        let value = requireNativeParam "value" params
+        closure <- emitMallocLocal "io_pure.closure" 16
+        envPtr <- emitMallocLocal "io_pure.env" 8
+        emitStore LLVMPtr value envPtr
+        codePtr <- emitGep "io_pure.code.ptr" closure 0
+        emitStore LLVMPtr (LLVMGlobalRef LLVMPtr (nativeIOEntryName ioPureName)) codePtr
+        envSlot <- emitGep "io_pure.env.ptr" closure 8
+        emitStore LLVMPtr envPtr envSlot
+        finishCurrentBlock (LLVMRet LLVMPtr closure)
+        of
+        Right fn -> fn { llvmFunctionPrivate = True }
+        Left err -> error ("internal native __io_pure wrapper lowering failed: " ++ renderBackendLLVMError err)
+
+    ioBindEntry =
+      case lowerNativeFunction (nativeIOEntryName ioBindName) LLVMPtr [(LLVMPtr, "env")] $ \params -> do
+        let envPtr = requireNativeParam "env" params
+        actionPtr <- emitGep "bind.action.ptr" envPtr 0
+        action <- emitAssign "bind.action" LLVMPtr (LLVMLoad LLVMPtr actionPtr)
+        contPtr <- emitGep "bind.cont.ptr" envPtr 8
+        cont <- emitAssign "bind.cont" LLVMPtr (LLVMLoad LLVMPtr contPtr)
+        -- Call action: load code+env, indirect call
+        actionCodePtrField <- emitGep "bind.action.code.ptr" action 0
+        actionCode <- emitAssign "bind.action.code" LLVMPtr (LLVMLoad LLVMPtr actionCodePtrField)
+        actionEnvField <- emitGep "bind.action.env.ptr" action 8
+        actionEnv <- emitAssign "bind.action.env" LLVMPtr (LLVMLoad LLVMPtr actionEnvField)
+        actionResult <- emitAssign "bind.action.result" LLVMPtr (LLVMCallOperand actionCode [(LLVMPtr, actionEnv)])
+        -- Call continuation with result
+        contCodePtrField <- emitGep "bind.cont.code.ptr" cont 0
+        contCode <- emitAssign "bind.cont.code" LLVMPtr (LLVMLoad LLVMPtr contCodePtrField)
+        contEnvField <- emitGep "bind.cont.env.ptr" cont 8
+        contEnv <- emitAssign "bind.cont.env" LLVMPtr (LLVMLoad LLVMPtr contEnvField)
+        nextAction <- emitAssign "bind.next" LLVMPtr (LLVMCallOperand contCode [(LLVMPtr, contEnv), (LLVMPtr, actionResult)])
+        -- Call nextAction
+        nextCodePtrField <- emitGep "bind.next.code.ptr" nextAction 0
+        nextCode <- emitAssign "bind.next.code" LLVMPtr (LLVMLoad LLVMPtr nextCodePtrField)
+        nextEnvField <- emitGep "bind.next.env.ptr" nextAction 8
+        nextEnv <- emitAssign "bind.next.env" LLVMPtr (LLVMLoad LLVMPtr nextEnvField)
+        result <- emitAssign "bind.result" LLVMPtr (LLVMCallOperand nextCode [(LLVMPtr, nextEnv)])
+        finishCurrentBlock (LLVMRet LLVMPtr result)
+        of
+        Right fn -> fn { llvmFunctionPrivate = True }
+        Left err -> error ("internal native __io_bind entry lowering failed: " ++ renderBackendLLVMError err)
+
+    ioBindWrapper =
+      case lowerNativeFunction (nativeIOWrapperName ioBindName) LLVMPtr [(LLVMPtr, "action"), (LLVMPtr, "cont")] $ \params -> do
+        let action = requireNativeParam "action" params
+        let cont = requireNativeParam "cont" params
+        closure <- emitMallocLocal "io_bind.closure" 16
+        envPtr <- emitMallocLocal "io_bind.env" 16
+        emitStore LLVMPtr action envPtr
+        contSlot <- emitGep "io_bind.cont.slot" envPtr 8
+        emitStore LLVMPtr cont contSlot
+        codePtr <- emitGep "io_bind.code.ptr" closure 0
+        emitStore LLVMPtr (LLVMGlobalRef LLVMPtr (nativeIOEntryName ioBindName)) codePtr
+        envSlot <- emitGep "io_bind.env.ptr" closure 8
+        emitStore LLVMPtr envPtr envSlot
+        finishCurrentBlock (LLVMRet LLVMPtr closure)
+        of
+        Right fn -> fn { llvmFunctionPrivate = True }
+        Left err -> error ("internal native __io_bind wrapper lowering failed: " ++ renderBackendLLVMError err)
+
+    ioPutStrLnEntry =
+      case lowerNativeFunction (nativeIOEntryName ioPutStrLnName) LLVMPtr [(LLVMPtr, "env")] $ \params -> do
+        let envPtr = requireNativeParam "env" params
+        strPtr <- emitGep "putStrLn.str.ptr" envPtr 0
+        str <- emitAssign "putStrLn.str" LLVMPtr (LLVMLoad LLVMPtr strPtr)
+        -- Print string character by character
+        let i8Ty = LLVMInt 8
+        let i64Ty = LLVMInt 64
+        curSlot <- emitAssign "putStrLn.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+        emitStore LLVMPtr str curSlot
+        loopHeader <- freshBlock "putStrLn.header"
+        loopBody <- freshBlock "putStrLn.body"
+        loopNext <- freshBlock "putStrLn.next"
+        loopDone <- freshBlock "putStrLn.done"
+        finishCurrentBlock (LLVMBr loopHeader)
+        startBlock loopHeader
+        curPtr <- emitAssign "putStrLn.cur" LLVMPtr (LLVMLoad LLVMPtr curSlot)
+        charPtr <- emitAssign "putStrLn.cptr" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 0)])
+        charVal <- emitAssign "putStrLn.c" i8Ty (LLVMLoad i8Ty charPtr)
+        isNull <- emitAssign "putStrLn.end" (LLVMInt 1) (LLVMICmpEq charVal (LLVMIntLiteral 8 0))
+        finishCurrentBlock (LLVMSwitch (LLVMInt 1) isNull loopBody [(1, loopDone)])
+        startBlock loopBody
+        charI32 <- emitAssign "putStrLn.c32" (LLVMInt 32) (LLVMZext charVal (LLVMInt 32))
+        _ <- emitPutchar charI32
+        finishCurrentBlock (LLVMBr loopNext)
+        startBlock loopNext
+        nextPtr <- emitAssign "putStrLn.next" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 1)])
+        emitStore LLVMPtr nextPtr curSlot
+        finishCurrentBlock (LLVMBr loopHeader)
+        startBlock loopDone
+        _ <- emitPutchar (LLVMIntLiteral 32 10) -- newline
+        -- Return Unit (as null pointer)
+        finishCurrentBlock (LLVMRet LLVMPtr LLVMNull)
+        of
+        Right fn -> fn { llvmFunctionPrivate = True }
+        Left err -> error ("internal native __io_putStrLn entry lowering failed: " ++ renderBackendLLVMError err)
+
+    ioPutStrLnWrapper =
+      case lowerNativeFunction (nativeIOWrapperName ioPutStrLnName) LLVMPtr [(LLVMPtr, "str")] $ \params -> do
+        let str = requireNativeParam "str" params
+        closure <- emitMallocLocal "io_putStrLn.closure" 16
+        envPtr <- emitMallocLocal "io_putStrLn.env" 8
+        emitStore LLVMPtr str envPtr
+        codePtr <- emitGep "io_putStrLn.code.ptr" closure 0
+        emitStore LLVMPtr (LLVMGlobalRef LLVMPtr (nativeIOEntryName ioPutStrLnName)) codePtr
+        envSlot <- emitGep "io_putStrLn.env.ptr" closure 8
+        emitStore LLVMPtr envPtr envSlot
+        finishCurrentBlock (LLVMRet LLVMPtr closure)
+        of
+        Right fn -> fn { llvmFunctionPrivate = True }
+        Left err -> error ("internal native __io_putStrLn wrapper lowering failed: " ++ renderBackendLLVMError err)
+
+-- | Names of IO runtime primitives that are handled specially.
+ioPrimitiveNames :: Set.Set String
+ioPrimitiveNames = Set.fromList [ioPureName, ioBindName, ioPutStrLnName]
+
+-- | LLVM-level names of IO wrapper functions generated by 'nativeIOFunctions'.
+ioWrapperNames :: Set.Set String
+ioWrapperNames = Set.map nativeIOWrapperName ioPrimitiveNames
+
+-- | Check whether an LLVM function references any IO wrapper function.
+functionReferencesIOWrapper :: LLVMFunction -> Bool
+functionReferencesIOWrapper fn =
+  any blockReferencesIO (llvmFunctionBlocks fn)
+  where
+    blockReferencesIO block =
+      any instrReferencesIO (llvmBlockInstructions block)
+        || terminatorReferencesIO (llvmBlockTerminator block)
+    instrReferencesIO (LLVMAssign _ _ expr) = exprReferencesIO expr
+    instrReferencesIO (LLVMStore _ src dst) = opReferencesIO src || opReferencesIO dst
+    instrReferencesIO (LLVMComment _) = False
+    exprReferencesIO (LLVMCall name args) =
+      Set.member name ioWrapperNames || any (opReferencesIO . snd) args
+    exprReferencesIO (LLVMCallVarArgs name _ args) =
+      Set.member name ioWrapperNames || any (opReferencesIO . snd) args
+    exprReferencesIO (LLVMCallOperand op args) =
+      opReferencesIO op || any (opReferencesIO . snd) args
+    exprReferencesIO (LLVMGetElementPtr _ base idxs) =
+      opReferencesIO base || any (opReferencesIO . snd) idxs
+    exprReferencesIO (LLVMLoad _ op) = opReferencesIO op
+    exprReferencesIO (LLVMAlloca _ op) = opReferencesIO op
+    exprReferencesIO (LLVMAnd a b) = opReferencesIO a || opReferencesIO b
+    exprReferencesIO (LLVMICmpEq a b) = opReferencesIO a || opReferencesIO b
+    exprReferencesIO (LLVMICmpUgt a b) = opReferencesIO a || opReferencesIO b
+    exprReferencesIO (LLVMZext op _) = opReferencesIO op
+    exprReferencesIO (LLVMPhi _ arms) = any (opReferencesIO . fst) arms
+    opReferencesIO (LLVMGlobalRef _ name) = Set.member name ioWrapperNames
+    opReferencesIO _ = False
+    terminatorReferencesIO (LLVMRet _ op) = opReferencesIO op
+    terminatorReferencesIO (LLVMBr _) = False
+    terminatorReferencesIO (LLVMSwitch _ op _ _) = opReferencesIO op
+    terminatorReferencesIO LLVMUnreachable = False
 
 lowerNativeFunction ::
   String ->
@@ -726,6 +1094,10 @@ emitPrintf formatGlobal args =
 emitPrintStringGlobal :: String -> LowerM LLVMOperand
 emitPrintStringGlobal globalName =
   emitPrintf nativeFmtStringName [(LLVMPtr, LLVMGlobalRef LLVMPtr globalName)]
+
+emitPutchar :: LLVMOperand -> LowerM LLVMOperand
+emitPutchar charOperand =
+  emitAssign "putchar" (LLVMInt 32) (LLVMCall nativePutcharName [(LLVMInt 32, charOperand)])
 
 callNativeRenderer :: Map String String -> BackendType -> LLVMType -> LLVMOperand -> Bool -> LowerM ()
 callNativeRenderer renderMap ty llvmTy value parenthesize =
@@ -3186,6 +3558,9 @@ lowerTyApp env exprEnv context expr =
       | Just binding <- Map.lookup name (pbBindings (peBase env)),
         not (null (ffTypeBinders (biForm binding))) ->
           lowerGlobalValue env context (backendExprType expr) name binding typeArgs
+      | Set.member name ioPrimitiveNames ->
+          let result = LLVMGlobalRef LLVMPtr (nativeIOWrapperName name)
+           in pure (LowerValue (backendExprType expr) LLVMPtr result LowerRuntimeValue Nothing)
     (fun, typeArgs) ->
       lowerDirectFunctionValue env exprEnv context (backendExprType expr) fun typeArgs
 
@@ -3392,6 +3767,11 @@ lowerVar env exprEnv context ty name =
           case Map.lookup name (pbBindings (peBase env)) of
             Just binding ->
               lowerGlobalValue env context ty name binding []
+            Nothing
+              | Set.member name ioPrimitiveNames -> do
+                  let wrapperName = nativeIOWrapperName name
+                  let result = LLVMGlobalRef LLVMPtr wrapperName
+                  pure (LowerValue ty LLVMPtr result LowerRuntimeValue Nothing)
             Nothing ->
               liftEither (BackendLLVMUnknownFunction name)
 
@@ -4118,6 +4498,12 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
           zipWithM_ (requireLLVMType context name) expectedTypes callArgs
           result <- emitAssign "call" (LLVMInt 1) (LLVMCall runtimeAndName [(LLVMInt 1, lvOperand arg) | arg <- callArgs])
           pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+    Nothing
+      | Set.member name ioPrimitiveNames -> do
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          let wrapperName = nativeIOWrapperName name
+          result <- emitAssign "io.call" LLVMPtr (LLVMCall wrapperName [(LLVMPtr, lvOperand arg) | arg <- callArgs])
+          pure (LowerValue resultTy LLVMPtr result LowerRuntimeValue Nothing)
     Nothing ->
       liftEither (BackendLLVMUnknownFunction name)
   where
@@ -5565,6 +5951,8 @@ lowerBackendType env context ty =
     BTBase (BaseTy "Int") -> Right (LLVMInt 64)
     BTBase (BaseTy "Bool") -> Right (LLVMInt 1)
     BTBase (BaseTy "String") -> Right LLVMPtr
+    BTBase (BaseTy "IO") -> Right LLVMPtr
+    BTCon (BaseTy "IO") _ -> Right LLVMPtr
     BTBase (BaseTy name)
       | Set.member name (pbDataNames (peBase env)) -> Right LLVMPtr
       | otherwise -> Left (BackendLLVMUnsupportedType context ty)
@@ -5574,7 +5962,7 @@ lowerBackendType env context ty =
     BTMu {} -> Right LLVMPtr
     BTVar {} -> Left (BackendLLVMUnsupportedType context ty)
     BTVarApp {} -> Left (BackendLLVMUnsupportedType context ty)
-    BTArrow {} -> Left (BackendLLVMUnsupportedType context ty)
+    BTArrow {} -> Right LLVMPtr
     BTForall {} -> Left (BackendLLVMUnsupportedType context ty)
     BTBottom -> Left (BackendLLVMUnsupportedType context ty)
 

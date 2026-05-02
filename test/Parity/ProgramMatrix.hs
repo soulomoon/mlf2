@@ -3002,6 +3002,38 @@ programSpecStandaloneRuntimeSuccessCases =
         "standalone: evaluates a recursive Nat equality example at representative depth"
         (InlineProgram (recursiveNatEqualityProgram 24))
         (ExpectRuntimeValue "true")
+    , ProgramRuntimeCase
+        "standalone: renders String main values with quoted escaping"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  def main : String = \"hello\";"
+                , "}"
+                ]
+        )
+        (ExpectRuntimeValue "\"hello\"")
+    , ProgramRuntimeCase
+        "standalone: executes IO Unit main with putStrLn"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  import Prelude exposing (Unit(..), IO);"
+                , "  def main : IO Unit = __io_putStrLn \"hello\";"
+                , "}"
+                ]
+        )
+        (ExpectRuntimeValue "hello")
+    , ProgramRuntimeCase
+        "standalone: executes IO Unit main with bind and pure"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  import Prelude exposing (Unit(..), IO);"
+                , "  def main : IO Unit = __io_bind (__io_pure Unit) (\\(_done : Unit) __io_putStrLn \"world\");"
+                , "}"
+                ]
+        )
+        (ExpectRuntimeValue "world")
     ]
 
 recursiveNatEqualityProgram :: Int -> String

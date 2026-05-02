@@ -8,6 +8,7 @@ module MLF.Backend.LLVM.Ppr
     renderLLVMOperand,
     renderLLVMGlobalName,
     renderLLVMLocalName,
+    operandLLVMType,
   )
 where
 
@@ -137,6 +138,14 @@ renderLLVMExpression resultTy expression =
         ++ ")"
     LLVMAnd left right ->
       "and " ++ renderLLVMType resultTy ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
+    LLVMICmpEq left right ->
+      "icmp eq " ++ renderLLVMType (operandLLVMType left) ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
+    LLVMICmpUgt left right ->
+      "icmp ugt " ++ renderLLVMType (operandLLVMType left) ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
+    LLVMZext operand destTy ->
+      "zext " ++ renderLLVMType (operandLLVMType operand) ++ " " ++ renderLLVMOperand operand ++ " to " ++ renderLLVMType destTy
+    LLVMAlloca elemTy count ->
+      "alloca " ++ renderLLVMType elemTy ++ ", i64 " ++ renderLLVMOperand count
     LLVMGetElementPtr elementTy base indexes ->
       "getelementptr "
         ++ renderLLVMType elementTy
@@ -219,6 +228,14 @@ renderLLVMOperand operand =
     LLVMIntLiteral 1 1 -> "true"
     LLVMIntLiteral _ value -> show value
     LLVMNull -> "null"
+
+operandLLVMType :: LLVMOperand -> LLVMType
+operandLLVMType operand =
+  case operand of
+    LLVMLocal ty _ -> ty
+    LLVMGlobalRef ty _ -> ty
+    LLVMIntLiteral bits _ -> LLVMInt bits
+    LLVMNull -> LLVMPtr
 
 renderLLVMGlobalName :: String -> String
 renderLLVMGlobalName name =

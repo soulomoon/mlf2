@@ -60,7 +60,7 @@ where
 import Control.Monad (foldM, unless, zipWithM_)
 import Data.Char (isDigit)
 import Data.List (sort)
-import Data.List.NonEmpty (NonEmpty)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -438,8 +438,15 @@ structuralMuAsActualDataType muName actual =
 structuralMuNameMatches :: String -> String -> Bool
 structuralMuNameMatches dataName muName =
   case structuralMuDataName muName of
-    Just structuralName -> dataName == structuralName
+    Just structuralName ->
+      dataName == structuralName
+        || dataName == dropModulePrefix structuralName
     Nothing -> False
+  where
+    dropModulePrefix name =
+      case break (== '.') name of
+        (_, '.' : rest) -> dropModulePrefix rest
+        _ -> name
 
 structuralMuDataName :: String -> Maybe String
 structuralMuDataName name =
@@ -668,6 +675,24 @@ backendRuntimePrimitiveTypes =
         BTArrow
           (BTBase (BaseTy "Bool"))
           (BTArrow (BTBase (BaseTy "Bool")) (BTBase (BaseTy "Bool")))
+      ),
+      ( "__io_pure",
+        BTForall "a" Nothing
+          (BTArrow (BTVar "a") (BTCon (BaseTy "IO") (BTVar "a" :| [])))
+      ),
+      ( "__io_bind",
+        BTForall "a" Nothing
+          (BTForall "b" Nothing
+            (BTArrow
+              (BTCon (BaseTy "IO") (BTVar "a" :| []))
+              (BTArrow
+                (BTArrow (BTVar "a") (BTCon (BaseTy "IO") (BTVar "b" :| [])))
+                (BTCon (BaseTy "IO") (BTVar "b" :| [])))))
+      ),
+      ( "__io_putStrLn",
+        BTArrow
+          (BTBase (BaseTy "String"))
+          (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| []))
       )
     ]
 
@@ -1112,6 +1137,9 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
         || typeVariableBoundMatches bound expected actual
         || typeVariableBoundMatches bound actual expected
         || case (expected, actual) of
+          (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod)
+            | opaqueIOFunctionCompatible bound expectedDom expectedCod actualDom actualCod ->
+                True
           (BTArrow expectedDom expectedCod, BTArrow actualDom actualCod) ->
             go bound expectedDom actualDom && go bound expectedCod actualCod
           (BTBase expectedBase, BTBase actualBase) ->
@@ -1122,6 +1150,9 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
             structuralMuMatchesKnownData actualBase [] expectedName expectedBody
           (BTVar expectedName, BTVar actualName)
             | freshenedTypeVariablesMayMatch bound expectedName actualName ->
+                True
+          (BTCon expectedCon (_ :| []), BTCon actualCon (_ :| []))
+            | isOpaqueIOBackendName expectedCon && isOpaqueIOBackendName actualCon ->
                 True
           (BTCon expectedCon expectedArgs, BTCon actualCon actualArgs) ->
             expectedCon == actualCon
@@ -1170,6 +1201,18 @@ backendTypeMatchesWith typeVariableInstantiation typeBounds mbDataDecls expected
       go bound expectedBound actualBound
     maybeBoundMatches _ _ _ =
       False
+
+    opaqueIOFunctionCompatible bound expectedDom expectedCod actualDom actualCod =
+      opaqueIODomainCompatible bound expectedDom actualDom
+        && go bound expectedCod actualCod
+
+    opaqueIODomainCompatible bound expected actual =
+      alphaEqBackendType expected actual
+        || typeVariableBoundMatches bound expected actual
+        || typeVariableBoundMatches bound actual expected
+        || case (expected, actual) of
+          (BTVar {}, BTVar {}) -> True
+          _ -> False
 
     -- Conversion may alpha-freshen generated case/evidence binders while their
     -- lexical variable names stay fixed. Keep that escape hatch scoped to
@@ -1437,6 +1480,10 @@ backendTypeIsClosureValue =
   \case
     BTArrow {} -> True
     _ -> False
+
+isOpaqueIOBackendName :: BaseTy -> Bool
+isOpaqueIOBackendName (BaseTy name) =
+  name == "IO" || name == "<builtin>.IO"
 
 backendExprMayDispatchByValueKind :: BackendExpr -> Bool
 backendExprMayDispatchByValueKind =

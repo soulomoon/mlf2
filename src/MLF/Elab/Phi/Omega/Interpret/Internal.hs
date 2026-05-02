@@ -625,32 +625,37 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
       if vSpineLength vs0 < 2
         then Right (InstId, ty, ids)
         else do
-          let missingIdPositions =
+          let schemeArity = case siScheme si of
+                Forall binds _ -> length binds
+              missingIdPositions =
                 [ i
                   | (i, Nothing) <- zip [(0 :: Int) ..] ids,
                     i < schemeArity
                 ]
-                where
-                  schemeArity = case siScheme si of
-                    Forall binds _ -> length binds
-              sourceBinders = [canonicalNode nid | Just nid <- ids, isSchemeBinder nid]
-              orderKeysActive = orderKeysForBinders sourceBinders
-              missingKeyBinders =
-                [ nid
-                  | Just nid <- ids,
-                    isSchemeBinder nid,
-                    not (IntMap.member (getNodeId (canonicalNode nid)) orderKeysActive)
-                ]
-          unless (null missingIdPositions) $
-            Left $
-              PhiInvariantError $
-                "PhiReorder: missing binder identity at positions " ++ show missingIdPositions
-          let orderKeysForSort =
-                if null missingKeyBinders
-                  then orderKeysActive
-                  else orderKeys
-          desired <- desiredBinderOrder orderKeysForSort vs0 ids
-          reorderTo vs0 ty ids desired
+          -- Builtin type schemes (e.g. __io_bind) have synthetic binder names
+          -- that never flow through the generalizer, so all identities are
+          -- Nothing.  Treat this as "no reordering information available".
+          if length missingIdPositions == schemeArity
+            then Right (InstId, ty, ids)
+            else do
+              let sourceBinders = [canonicalNode nid | Just nid <- ids, isSchemeBinder nid]
+                  orderKeysActive = orderKeysForBinders sourceBinders
+                  missingKeyBinders =
+                    [ nid
+                      | Just nid <- ids,
+                        isSchemeBinder nid,
+                        not (IntMap.member (getNodeId (canonicalNode nid)) orderKeysActive)
+                    ]
+              unless (null missingIdPositions) $
+                Left $
+                  PhiInvariantError $
+                    "PhiReorder: missing binder identity at positions " ++ show missingIdPositions
+              let orderKeysForSort =
+                    if null missingKeyBinders
+                      then orderKeysActive
+                      else orderKeys
+              desired <- desiredBinderOrder orderKeysForSort vs0 ids
+              reorderTo vs0 ty ids desired
 
     desiredBinderOrder :: IntMap.IntMap Order.OrderKey -> VSpine -> [Maybe NodeId] -> Either ElabError [Maybe NodeId]
     desiredBinderOrder orderKeysActive vs0 ids = do

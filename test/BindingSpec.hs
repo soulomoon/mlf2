@@ -3,6 +3,7 @@ module BindingSpec (spec) where
 
 import Control.Monad (foldM, forM, forM_)
 import Data.List (isInfixOf, nub)
+import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
@@ -731,6 +732,102 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
             case checkBindingTree c of
                 Left (InvalidBindingTree msg) | "multiple roots" `isInfixOf` msg -> return ()
                 other -> expectationFailure $ "Expected multiple roots error, got: " ++ show other
+
+        it "checkSchemeClosure treats opaque IO constructors as closed boundaries" $ do
+            let rootGen = GenNodeId 0
+                foreignGen = GenNodeId 1
+                ioRoot = NodeId 1
+                arg = NodeId 2
+                c =
+                    emptyConstraint
+                        { cNodes =
+                            nodeMapFromList
+                                [ (getNodeId ioRoot, TyCon ioRoot (BaseTy "IO") (arg :| []))
+                                , (getNodeId arg, TyVar { tnId = arg, tnBound = Nothing })
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef ioRoot), (genRef rootGen, BindFlex))
+                                , (nodeRefKey (typeRef arg), (genRef foreignGen, BindFlex))
+                                , (nodeRefKey (genRef foreignGen), (genRef rootGen, BindFlex))
+                                ]
+                        , cGenNodes =
+                            fromListGen
+                                [ (rootGen, GenNode rootGen [ioRoot])
+                                , (foreignGen, GenNode foreignGen [])
+                                ]
+                        }
+
+            checkSchemeClosure c `shouldBe` Right ()
+
+        it "checkSchemeClosure allows variables from enclosing scheme roots" $ do
+            let rootGen = GenNodeId 0
+                outerGen = GenNodeId 1
+                innerGen = GenNodeId 2
+                outerRoot = NodeId 1
+                innerRoot = NodeId 2
+                outerVar = NodeId 3
+                unitTy = NodeId 4
+                c =
+                    emptyConstraint
+                        { cNodes =
+                            nodeMapFromList
+                                [ (getNodeId outerRoot, TyArrow outerRoot outerVar innerRoot)
+                                , (getNodeId innerRoot, TyArrow innerRoot outerVar unitTy)
+                                , (getNodeId outerVar, TyVar { tnId = outerVar, tnBound = Nothing })
+                                , (getNodeId unitTy, TyBase unitTy (BaseTy "Unit"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef outerRoot), (genRef rootGen, BindFlex))
+                                , (nodeRefKey (typeRef innerRoot), (genRef innerGen, BindFlex))
+                                , (nodeRefKey (typeRef outerVar), (genRef outerGen, BindFlex))
+                                , (nodeRefKey (genRef outerGen), (genRef rootGen, BindFlex))
+                                , (nodeRefKey (genRef innerGen), (genRef rootGen, BindFlex))
+                                ]
+                        , cGenNodes =
+                            fromListGen
+                                [ (rootGen, GenNode rootGen [])
+                                , (outerGen, GenNode outerGen [outerRoot])
+                                , (innerGen, GenNode innerGen [innerRoot])
+                                ]
+                        }
+
+            checkSchemeClosure c `shouldBe` Right ()
+
+        it "checkSchemeClosure treats reachable bounded aliases as closed" $ do
+            let rootGen = GenNodeId 0
+                aliasGen = GenNodeId 1
+                schemeRootGen = GenNodeId 2
+                root = NodeId 1
+                alias = NodeId 2
+                bound = NodeId 3
+                result = NodeId 4
+                c =
+                    emptyConstraint
+                        { cNodes =
+                            nodeMapFromList
+                                [ (getNodeId root, TyArrow root alias result)
+                                , (getNodeId alias, TyVar { tnId = alias, tnBound = Just bound })
+                                , (getNodeId bound, TyVar { tnId = bound, tnBound = Nothing })
+                                , (getNodeId result, TyBase result (BaseTy "Unit"))
+                                ]
+                        , cBindParents =
+                            IntMap.fromList
+                                [ (nodeRefKey (typeRef root), (genRef schemeRootGen, BindFlex))
+                                , (nodeRefKey (typeRef alias), (genRef aliasGen, BindFlex))
+                                , (nodeRefKey (genRef aliasGen), (genRef rootGen, BindFlex))
+                                , (nodeRefKey (genRef schemeRootGen), (genRef rootGen, BindFlex))
+                                ]
+                        , cGenNodes =
+                            fromListGen
+                                [ (rootGen, GenNode rootGen [])
+                                , (aliasGen, GenNode aliasGen [])
+                                , (schemeRootGen, GenNode schemeRootGen [root])
+                                ]
+                        }
+
+            checkSchemeClosure c `shouldBe` Right ()
 
     describe "isUpper predicate" $ do
         it "isUpper returns True for reflexive case (node is upper than itself)" $ do

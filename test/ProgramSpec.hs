@@ -2028,7 +2028,7 @@ spec = do
     runProgramRuntimeCase runtimeCase =
         it (runtimeCaseName runtimeCase) $ do
             program <- loadProgramMatrixSource (runtimeCaseSource runtimeCase)
-            let result = prettyValue <$> runProgram program
+            let result = stripNewline . programRunOutput <$> runProgramOutput program
             case runtimeCaseExpectation runtimeCase of
                 ExpectRuntimeValue expectedValue ->
                     result `shouldBe` Right expectedValue
@@ -2068,9 +2068,13 @@ spec = do
                         (const False)
 
     loadProgramMatrixSource source =
-        case source of
+        withPrelude <$> case source of
             InlineProgram programText -> requireParsed programText
             ProgramFile path -> requireParsed =<< readFile path
+
+    stripNewline s = case reverse s of
+        '\n' : rest -> reverse rest
+        _ -> s
 
     requireChecked program =
         case checkProgram program of

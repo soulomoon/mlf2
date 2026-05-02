@@ -47,7 +47,8 @@ import MLF.Elab.Types
     schemeFromType,
     tyToElab,
   )
-import qualified MLF.Frontend.Program.Builtins as Builtins
+
+import MLF.Frontend.Program.Builtins (srcTypeMentionsOpaqueBuiltin)
 import MLF.Frontend.Program.Elaborate (ElaborateScope, elaborateScopeDataTypes, lowerType, mkElaborateScope)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -267,7 +268,7 @@ convertedProgramClosureGlobals context0 env checked =
                 concat
                   <$> mapM
                     (convertCheckedBinding context env checkedModule)
-                    (filter (not . checkedBindingMentionsOpaqueBuiltin) (checkedModuleBindings checkedModule))
+                    (checkedModuleBindings checkedModule)
             )
             (checkedProgramModules checked)
       let globals' =
@@ -330,6 +331,23 @@ backendBuiltinTermTypes =
         TArrow
           (TBase (BaseTy "Bool"))
           (TArrow (TBase (BaseTy "Bool")) (TBase (BaseTy "Bool")))
+      ),
+      ( "__io_pure",
+        TForall "a" Nothing
+          (TArrow (TVar "a") (TCon (BaseTy "IO") (TVar "a" :| [])))
+      ),
+      ( "__io_bind",
+        TForall "a" Nothing
+          (TForall "b" Nothing
+            (TArrow
+              (TCon (BaseTy "IO") (TVar "a" :| []))
+              (TArrow
+                (TArrow (TVar "a") (TCon (BaseTy "IO") (TVar "b" :| [])))
+                (TCon (BaseTy "IO") (TVar "b" :| [])))))
+      ),
+      ( "__io_putStrLn",
+        TArrow (TBase (BaseTy "String"))
+          (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| []))
       )
     ]
 
@@ -340,7 +358,7 @@ convertCheckedModule context env checkedModule = do
     concat
       <$> mapM
         (convertCheckedBinding context env checkedModule)
-        (filter (not . checkedBindingMentionsOpaqueBuiltin) (checkedModuleBindings checkedModule))
+        (checkedModuleBindings checkedModule)
   Right
     BackendModule
       { backendModuleName = checkedModuleName checkedModule,
@@ -349,54 +367,8 @@ convertCheckedModule context env checkedModule = do
       }
 
 rejectOpaqueBuiltinMain :: CheckedProgram -> Either BackendConversionError ()
-rejectOpaqueBuiltinMain checked =
-  case
-    [ binding
-      | checkedModule <- checkedProgramModules checked,
-        binding <- checkedModuleBindings checkedModule,
-        checkedBindingName binding == checkedProgramMain checked
-    ]
-  of
-    binding : _
-      | checkedBindingMentionsOpaqueBuiltin binding ->
-          Left (BackendUnsupportedCaseShape "IO programs are not supported by backend conversion yet")
-    _ ->
-      case referencedOpaqueBuiltinBindings checked of
-        [] -> Right ()
-        refs ->
-          Left
-            ( BackendUnsupportedCaseShape
-                ( "IO dependencies are not supported by backend conversion yet: "
-                    ++ intercalate ", " [owner ++ " -> " ++ opaque | (owner, opaque) <- refs]
-                )
-            )
-
-referencedOpaqueBuiltinBindings :: CheckedProgram -> [(String, String)]
-referencedOpaqueBuiltinBindings checked =
-  [ (checkedBindingName binding, opaqueName)
-    | binding <- allCheckedBindings checked,
-      not (checkedBindingMentionsOpaqueBuiltin binding),
-      opaqueName <- Set.toList (freeTermVariables (checkedBindingTerm binding) `Set.intersection` opaqueNames)
-  ]
-  where
-    opaqueNames =
-      Builtins.builtinOpaqueValueNames
-        `Set.union` Set.fromList
-        [ checkedBindingName binding
-          | binding <- allCheckedBindings checked,
-            checkedBindingMentionsOpaqueBuiltin binding
-        ]
-
-allCheckedBindings :: CheckedProgram -> [CheckedBinding]
-allCheckedBindings checked =
-  [ binding
-    | checkedModule <- checkedProgramModules checked,
-      binding <- checkedModuleBindings checkedModule
-  ]
-
-checkedBindingMentionsOpaqueBuiltin :: CheckedBinding -> Bool
-checkedBindingMentionsOpaqueBuiltin =
-  Builtins.srcTypeMentionsOpaqueBuiltin . checkedBindingSourceType
+rejectOpaqueBuiltinMain _checked =
+  Right ()
 
 convertCheckedBinding :: ConvertContext -> Env -> CheckedModule -> CheckedBinding -> Either BackendConversionError [BackendBinding]
 convertCheckedBinding context env checkedModule binding = do
@@ -437,12 +409,25 @@ convertCheckedBinding context env checkedModule binding = do
                 (\lifted acc -> extendTermEnv (lrlName lifted) (lrlElabType lifted) acc)
                 env
                 liftedSpecs
+            opaqueBinding =
+              srcTypeMentionsOpaqueBuiltin (checkedBindingSourceType binding)
+            expectedBindingTy =
+              if opaqueBinding && not (checkedBindingExportedAsMain binding)
+                then Nothing
+                else Just bindingTy
         (liftedBindings, expr) <-
           runConvertM $ do
             liftedBindings <- mapM (convertLiftedRecursiveLet bindingContextWithLifted envWithLifted) liftedSpecs
-            expr <- convertTermExpectedMode DirectLambda bindingContextWithLifted envWithLifted emptyClosureScope (Just bindingTy) liftedTerm
+            expr <- convertTermExpectedMode DirectLambda bindingContextWithLifted envWithLifted emptyClosureScope expectedBindingTy liftedTerm
             pure (liftedBindings, expr)
-        Right (bindingTy, expr, liftedBindings)
+        -- For opaque bindings (types mentioning IO etc.), the expression type
+        -- from the builtin is authoritative. Use it to avoid Mu/base mismatches.
+        let finalBindingTy =
+              if opaqueBinding
+                && not (alphaEqBackendType bindingTy (backendExprType expr))
+                then backendExprType expr
+                else bindingTy
+        Right (finalBindingTy, expr, liftedBindings)
   let convertedBinding =
         BackendBinding
           { backendBindingName = checkedBindingName binding,
@@ -1355,7 +1340,7 @@ buildConvertContext checked = do
             ccData = dataMetas,
             ccGlobalTerms = checkedProgramGlobalTerms checked,
             ccClosureGlobals = Set.empty,
-            ccClosureValueArguments = Map.empty,
+            ccClosureValueArguments = builtinClosureValueArguments,
             ccEvidenceValueArguments = Map.empty,
             ccCurrentModuleName = Nothing,
             ccCurrentBindingName = ""
@@ -1408,19 +1393,26 @@ checkedProgramClosureValueArguments context checked = do
           bindingTy <- checkedBindingBackendValueType context checkedModule binding
           pure (checkedBindingName binding, bindingTy, checkedBindingTerm binding)
       )
-  pure (closureValueArgumentFixedPoint sources Map.empty)
+  pure (closureValueArgumentFixedPoint sources builtinClosureValueArguments)
   where
     closureValueArgumentFixedPoint sources demands =
       let context' = context {ccClosureValueArguments = demands}
           demands' =
-            Map.filter (not . Set.null) $
-              Map.fromList
-                [ (name, bindingClosureValueArguments context' emptyClosureScope bindingTy term)
-                | (name, bindingTy, term) <- sources
-                ]
+            Map.union
+              builtinClosureValueArguments
+              ( Map.filter (not . Set.null) $
+                  Map.fromList
+                    [ (name, bindingClosureValueArguments context' emptyClosureScope bindingTy term)
+                    | (name, bindingTy, term) <- sources
+                    ]
+              )
        in if demands' == demands
             then demands
             else closureValueArgumentFixedPoint sources demands'
+
+builtinClosureValueArguments :: Map String (Set.Set Int)
+builtinClosureValueArguments =
+  Map.singleton "__io_bind" (Set.singleton 1)
 
 checkedBindingBackendValueType :: ConvertContext -> CheckedModule -> CheckedBinding -> Either BackendConversionError BackendType
 checkedBindingBackendValueType context checkedModule binding = do
@@ -1917,7 +1909,7 @@ backendBaseTy name =
 
 backendBuiltinTypeNames :: Set.Set String
 backendBuiltinTypeNames =
-  Set.fromList ["Bool", "Int", "String"]
+  Set.fromList ["Bool", "Int", "String", "IO", "Unit"]
 
 normalizeBuiltinElabType :: Ty v -> Ty v
 normalizeBuiltinElabType =
@@ -3212,61 +3204,84 @@ convertTypeInstantiation context env scope resultTy inner inst =
         then pure innerExpr
         else liftEitherConvert (Left (BackendUnsupportedInstantiation inst))
     _ ->
-      case appLikeInstantiationType inst of
-        Just tyArg -> do
+      case appLikeInstantiationTypes inst of
+        Just tyArgs -> do
           innerExpr <- convertAppLikeInstantiationFunction context env scope inner
-          case backendExprType innerExpr of
-            BTForall name mbBound bodyTy -> do
-              backendTyArg0 <- normalizeBackendTypeForContext context <$> liftEitherConvert (convertElabType tyArg)
-              let appliedTy0 = normalizeBackendTypeForContext context (substituteBackendType name backendTyArg0 bodyTy)
-                  (backendTyArg, appliedTy) =
-                    expectedTypeInstantiation
-                      context
-                      name
-                      mbBound
-                      bodyTy
-                      resultTy
-                      backendTyArg0
-                      appliedTy0
-                  resultTy' =
-                    if alphaEqBackendType appliedTy resultTy
-                      then resultTy
-                      else appliedTy
-              pure
-                BackendTyApp
-                  { backendExprType = resultTy',
-                    backendTyFunction = innerExpr,
-                    backendTyArgument = backendTyArg
-                  }
-            _
+          backendTyArgs0 <- mapM (liftEitherConvert . convertElabType) tyArgs
+          let backendTyArgs = map (normalizeBackendTypeForContext context) backendTyArgs0
+          case chooseExpectedTypeApplications context resultTy (backendExprType innerExpr) backendTyArgs of
+            Just chosenArgs -> pure (applyBackendTypeApplications context resultTy innerExpr chosenArgs)
+            Nothing
               | alphaEqBackendType (backendExprType innerExpr) resultTy -> pure innerExpr
               | otherwise -> liftEitherConvert (Left (BackendUnsupportedInstantiation inst))
         Nothing -> liftEitherConvert (Left (BackendUnsupportedInstantiation inst))
 
-expectedTypeInstantiation ::
+appLikeInstantiationTypes :: Instantiation -> Maybe [ElabType]
+appLikeInstantiationTypes inst =
+  case inst of
+    InstApp ty -> Just [ty]
+    InstSeq (InstInside (InstBot ty)) InstElim -> Just [ty]
+    InstSeq (InstInside (InstApp ty)) InstElim -> Just [ty]
+    InstSeq left right -> (++) <$> appLikeInstantiationTypes left <*> appLikeInstantiationTypes right
+    _ -> Nothing
+
+chooseExpectedTypeApplications ::
   ConvertContext ->
-  String ->
-  Maybe BackendType ->
   BackendType ->
   BackendType ->
-  BackendType ->
-  BackendType ->
-  (BackendType, BackendType)
-expectedTypeInstantiation context name mbBound bodyTy resultTy explicitArg explicitAppliedTy =
-  case inferredExpectedTypeArg of
-    Just inferredArg
-      | not (alphaEqBackendType explicitAppliedTy resultTy),
-        let inferredAppliedTy = normalizeBackendTypeForContext context (substituteBackendType name inferredArg bodyTy),
-        alphaEqBackendType inferredAppliedTy resultTy ->
-          (inferredArg, inferredAppliedTy)
-    _ ->
-      (explicitArg, explicitAppliedTy)
+  [BackendType] ->
+  Maybe [BackendType]
+chooseExpectedTypeApplications context resultTy functionTy explicitArgs =
+  case peelForalls (length explicitArgs) functionTy of
+    Just (binders, finalBodyTy) ->
+      let names = [name | (name, _) <- binders]
+          parameterBounds = Map.fromList binders
+          explicitSubstitution = Map.fromList (zip names explicitArgs)
+          explicitAppliedTy =
+            normalizeBackendTypeForContext context (substituteBackendTypes explicitSubstitution finalBodyTy)
+          inferredArgs = do
+            substitution <- matchBackendTypeParameters Map.empty [] parameterBounds Map.empty finalBodyTy resultTy
+            let completed = completeBackendParameterSubstitution parameterBounds substitution
+            traverse (`Map.lookup` completed) names
+          inferredAppliedTy args =
+            normalizeBackendTypeForContext context (substituteBackendTypes (Map.fromList (zip names args)) finalBodyTy)
+       in case inferredArgs of
+            Just args
+              | not (alphaEqBackendType explicitAppliedTy resultTy),
+                alphaEqBackendType (inferredAppliedTy args) resultTy ->
+                  Just args
+            _ -> Just explicitArgs
+    Nothing -> Nothing
   where
-    parameterBounds =
-      Map.singleton name mbBound
-    inferredExpectedTypeArg = do
-      substitution <- matchBackendTypeParameters Map.empty [] parameterBounds Map.empty bodyTy resultTy
-      Map.lookup name (completeBackendParameterSubstitution parameterBounds substitution)
+    peelForalls 0 ty = Just ([], ty)
+    peelForalls count ty =
+      case ty of
+        BTForall name mbBound bodyTy -> do
+          (rest, finalTy) <- peelForalls (count - 1) bodyTy
+          Just ((name, mbBound) : rest, finalTy)
+        _ -> Nothing
+
+applyBackendTypeApplications :: ConvertContext -> BackendType -> BackendExpr -> [BackendType] -> BackendExpr
+applyBackendTypeApplications context resultTy expr0 args0 =
+  go expr0 args0
+  where
+    go expr [] = expr
+    go expr (arg : rest) =
+      case backendExprType expr of
+        BTForall name _ bodyTy ->
+          let appliedTy0 = normalizeBackendTypeForContext context (substituteBackendType name arg bodyTy)
+              appliedTy =
+                if null rest && alphaEqBackendType appliedTy0 resultTy
+                  then resultTy
+                  else appliedTy0
+              expr' =
+                BackendTyApp
+                  { backendExprType = appliedTy,
+                    backendTyFunction = expr,
+                    backendTyArgument = arg
+                  }
+           in go expr' rest
+        _ -> expr
 
 termContainsTypeInstantiation :: ElabTerm -> Bool
 termContainsTypeInstantiation =

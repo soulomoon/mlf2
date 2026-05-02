@@ -90,36 +90,62 @@ finalizeBindingAllowOpaque :: ElaborateScope -> LoweredBinding -> Either Program
 finalizeBindingAllowOpaque scope lowered
   | Builtins.srcTypeMentionsOpaqueBuiltin (loweredBindingSourceType lowered) = do
       placeholderTy <- srcTypeToElabType (loweredBindingExpectedType lowered)
-      let placeholder checked =
-            checked
-              { checkedBindingTerm = X.EVar (loweredBindingName lowered),
-                checkedBindingType = placeholderTy
-              }
-          uncheckedPlaceholder =
-            CheckedBinding
-              { checkedBindingName = loweredBindingName lowered,
-                checkedBindingSourceType = loweredBindingSourceType lowered,
-                checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
-                checkedBindingDeferredObligations = loweredBindingDeferredObligations lowered,
-                checkedBindingTerm = X.EVar (loweredBindingName lowered),
-                checkedBindingType = placeholderTy,
-                checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
-              }
       case finalizeBinding scope lowered of
         Right checked
           | Map.null (loweredBindingDeferredObligations lowered) ->
               -- Successful elaboration can still satisfy an opaque forall by
               -- instantiating the expected type. Re-check no-obligation
-              -- surfaces before replacing the checked term with a placeholder.
+              -- surfaces before accepting the elaborated result.
+              -- Use the source-level type to avoid structural Mu mismatches
+              -- in the backend, but keep the real elaborated term.
               case validateOpaqueBindingSurface scope lowered of
-                Right () -> Right (placeholder checked)
+                Right () -> Right (checked { checkedBindingType = placeholderTy })
                 Left validationErr -> Left validationErr
-          | otherwise -> Right (placeholder checked)
+          | otherwise -> Right (checked { checkedBindingType = placeholderTy })
         Left err ->
           case validateOpaqueBindingSurface scope lowered of
-            Right () -> Right uncheckedPlaceholder
+            Right () ->
+              finalizeOpaqueUncheckedBinding scope lowered placeholderTy
             Left _ -> Left err
   | otherwise = finalizeBinding scope lowered
+
+finalizeOpaqueUncheckedBinding :: ElaborateScope -> LoweredBinding -> ElabType -> Either ProgramError CheckedBinding
+finalizeOpaqueUncheckedBinding scope lowered placeholderTy = do
+  PipelineElabDetailedResult {pedTerm = term0, pedTypeCheckEnv = tcEnv} <-
+    runSurfacePipeline
+      scope
+      True
+      (loweredBindingDeferredObligations lowered)
+      (loweredBindingExternalTypes lowered)
+      (loweredBindingSurfaceExpr lowered)
+  term <- finalizeOpaqueDeferredConstructors scope (loweredBindingDeferredObligations lowered) tcEnv term0
+  Right
+    CheckedBinding
+      { checkedBindingName = loweredBindingName lowered,
+        checkedBindingSourceType = loweredBindingSourceType lowered,
+        checkedBindingSurfaceExpr = loweredBindingSurfaceExpr lowered,
+        checkedBindingDeferredObligations = loweredBindingDeferredObligations lowered,
+        checkedBindingTerm = term,
+        checkedBindingType = placeholderTy,
+        checkedBindingExportedAsMain = loweredBindingExportedAsMain lowered
+      }
+
+finalizeOpaqueDeferredConstructors ::
+  ElaborateScope ->
+  Map String DeferredProgramObligation ->
+  Env ->
+  ElabTerm ->
+  Either ProgramError ElabTerm
+finalizeOpaqueDeferredConstructors scope deferredObligations tcEnv term
+  | Map.null deferredObligations = Right term
+  | otherwise = do
+      rewriteEnv <- extendTypeCheckEnvWithRuntimeScope scope tcEnv
+      let constructorObligations = Map.mapMaybe onlyConstructor deferredObligations
+      resolveDeferredConstructors scope rewriteEnv constructorObligations term
+  where
+    onlyConstructor = \case
+      DeferredConstructor deferred -> Just deferred
+      _ -> Nothing
 
 validateOpaqueBindingSurface :: ElaborateScope -> LoweredBinding -> Either ProgramError ()
 validateOpaqueBindingSurface scope lowered

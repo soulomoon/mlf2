@@ -138,21 +138,20 @@ cabal run mlf2 -- emit-native test/programs/unified/authoritative-let-polymorphi
 ```
 
 `emit-backend` keeps the raw backend contract: the checked `.mlfp` `main`
-binding remains a module-qualified LLVM function such as `Main__main`. It is a
-pure LLVM subset contract today: checked `main : IO Unit`, direct `__io_*`
-primitive calls, and pure entrypoints with reachable IO-typed dependencies are
-rejected with an unsupported backend diagnostic before LLVM is emitted.
+binding remains a module-qualified LLVM function such as `Main__main`.
 `emit-native` adds the process contract used by native execution tests. It emits
 a C ABI `i32 @main()` wrapper that calls the checked zero-argument `.mlfp`
-`main`, renders supported pure results to stdout with the same value text used
-by `run-program`, prints one trailing newline, writes no stderr on success, and
-returns exit status `0`. Native rendering currently supports `Int`, `Bool`, and
-first-order ADT results whose fields are recursively renderable. Function,
-polymorphic, `String`, unknown, and IO-like results are rejected before native
-run assertions use them. Native mode declares libc `malloc` and vararg `printf`
-and defines the backend-owned `__mlfp_and` primitive when no program binding owns
-that runtime name; broader IO runtime linking remains outside this pure
-contract. The full test pipeline is documented in
+`main`; for `main : IO Unit`, it executes the IO action closure and exits
+without rendering a result. For pure mains it renders supported results to
+stdout with the same value text used by `run-program`, prints one trailing
+newline, writes no stderr on success, and returns exit status `0`. Native
+rendering currently supports `Int`, `Bool`, `String`, and first-order ADT
+results whose fields are recursively renderable. Function-valued, polymorphic,
+variable-headed, and structurally recursive main results without a named data
+runtime are rejected before native run assertions use them. Native mode declares
+libc `malloc`, vararg `printf`, `putchar`, and defines the backend-owned
+`__mlfp_and` plus primitive IO runtime wrappers when no program binding owns
+those runtime names. The full test pipeline is documented in
 `docs/backend-native-pipeline.md`.
 
 Backend LLVM validation tests use LLVM command-line tools with opaque pointer

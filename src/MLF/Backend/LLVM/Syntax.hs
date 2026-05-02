@@ -75,6 +75,10 @@ data LLVMExpression
   | LLVMCallVarArgs String [LLVMType] [(LLVMType, LLVMOperand)]
   | LLVMCallOperand LLVMOperand [(LLVMType, LLVMOperand)]
   | LLVMAnd LLVMOperand LLVMOperand
+  | LLVMICmpEq LLVMOperand LLVMOperand
+  | LLVMICmpUgt LLVMOperand LLVMOperand
+  | LLVMZext LLVMOperand LLVMType
+  | LLVMAlloca LLVMType LLVMOperand
   | LLVMGetElementPtr LLVMType LLVMOperand [(LLVMType, LLVMOperand)]
   | LLVMLoad LLVMType LLVMOperand
   | LLVMPhi LLVMType [(LLVMOperand, String)]

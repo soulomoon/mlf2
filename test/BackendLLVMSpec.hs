@@ -3,7 +3,7 @@
 module BackendLLVMSpec (spec) where
 
 import Control.Exception (evaluate)
-import Control.Monad (forM_, when)
+import Control.Monad (when)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
@@ -61,42 +61,42 @@ spec = describe "MLF.Backend.LLVM" $ do
     validateLLVMAssembly output
 
   describe "IO backend contract" $ do
-    it "rejects checked main : IO Unit before LLVM lowering" $ do
-      result <- emitBackendSource ioPureUnitMainProgram
+    it "accepts checked main : IO Unit and emits native LLVM" $ do
+      output <- requireRight =<< emitNativeSource ioPureUnitMainProgram
 
-      result `shouldFailWithAll` backendIOUnsupportedFragments
+      output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+      validateLLVMAssembly output
 
-    it "rejects primitive IO operations without emitting LLVM" $
-      forM_
-        [ ("putStrLn", ioPutStrLnMainProgram),
-          ("direct __io_pure/__io_bind", ioDirectPrimitiveMainProgram)
-        ]
-        ( \(_label, programText) -> do
-            result <- emitBackendSource programText
-            result `shouldFailWithAll` backendIOUnsupportedFragments
-        )
+    it "accepts primitive IO operations and emits native LLVM" $ do
+      output <- requireRight =<< emitNativeSource ioPutStrLnMainProgram
+      output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+      validateLLVMAssembly output
 
-    it "rejects pure mains that depend on IO-typed helpers" $ do
-      result <- emitBackendSource pureMainIODependencyProgram
+    it "executes __io_bind main through the native IO runtime" $ do
+      output <- requireRight =<< emitNativeSource ioDirectPrimitiveMainProgram
+      output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_bind.wrapper\""
+      validateLLVMAssembly output
+      validateLLVMObjectCode output
+      runLLVMNativeExecutable output
+        `shouldReturn` NativeRunResult ExitSuccess "world\n" ""
 
-      result
-        `shouldFailWithAll` [ "IO dependencies are not supported by backend conversion yet",
-                              "Main__main -> Main__discard"
-                            ]
+    it "accepts pure mains that depend on IO-typed helpers" $ do
+      output <- requireRight =<< emitBackendSource pureMainIODependencyProgram
 
-    it "rejects pure mains that directly reference opaque IO primitives" $ do
-      result <- emitBackendSource pureMainDirectIOPrimitiveProgram
+      output `shouldSatisfy` isInfixOf "Main__main"
+      validateLLVMAssembly output
 
-      result
-        `shouldFailWithAll` [ "IO dependencies are not supported by backend conversion yet",
-                              "Main__main -> __io_pure"
-                            ]
+    it "accepts pure mains that directly reference opaque IO primitives" $ do
+      output <- requireRight =<< emitNativeSource pureMainDirectIOPrimitiveProgram
+
+      output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+      validateLLVMAssembly output
 
     it "accepts pure mains when IO-typed bindings are unused" $ do
       output <- requireRight =<< emitBackendSource pureMainUnusedIOProgram
 
       output `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
-      output `shouldNotSatisfy` isInfixOf "__io_"
       validateLLVMAssembly output
 
   describe "native process entrypoint" $ do
@@ -115,9 +115,8 @@ spec = describe "MLF.Backend.LLVM" $ do
     it "links the backend-owned __mlfp_and runtime primitive in native mode" $
       assertNativeProgram preludeAndProgram "false"
 
-    it "rejects unsupported native string result rendering before native assertions use it" $
-      renderBackendProgramNativeLLVM nativeStringResultProgram
-        `shouldSatisfyLeft` isInfixOf "String main values are not supported"
+    it "renders String main values with quoted escaping in native mode" $
+      assertNativeProgram nativeStringSourceProgram "\"hello\""
 
     it "rejects source/native entrypoint symbol collisions" $
       renderBackendProgramNativeLLVM nativeMainNameCollisionProgram
@@ -1517,21 +1516,6 @@ emitBackendSource :: String -> IO (Either String String)
 emitBackendSource programText =
   withTempProgram programText emitBackendFile
 
-shouldFailWithAll :: Either String String -> [String] -> Expectation
-shouldFailWithAll result fragments =
-  case result of
-    Left message ->
-      mapM_ (\fragment -> message `shouldSatisfy` isInfixOf fragment) fragments
-    Right output ->
-      expectationFailure ("expected backend failure, got output:\n" ++ output)
-
-backendIOUnsupportedFragments :: [String]
-backendIOUnsupportedFragments =
-  [ "Backend LLVM conversion failed",
-    "Unsupported backend conversion shape",
-    "IO programs are not supported by backend conversion yet"
-  ]
-
 renderProgramMatrixSourceLLVM :: ProgramMatrixSource -> IO String
 renderProgramMatrixSourceLLVM source =
   case source of
@@ -1665,6 +1649,14 @@ nativeDoubleUnderscoreConstructorProgram =
       "      A__B : Weird;",
       "",
       "  def main : Weird = A__B;",
+      "}"
+    ]
+
+nativeStringSourceProgram :: String
+nativeStringSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : String = \"hello\";",
       "}"
     ]
 
@@ -2651,25 +2643,6 @@ stringProgram =
       backendProgramMain = "main"
     }
 
-nativeStringResultProgram :: BackendProgram
-nativeStringResultProgram =
-  BackendProgram
-    { backendProgramModules =
-        [ BackendModule
-            { backendModuleName = "Main",
-              backendModuleData = [],
-              backendModuleBindings =
-                [ BackendBinding
-                    { backendBindingName = "Main__main",
-                      backendBindingType = stringTy,
-                      backendBindingExpr = BackendLit stringTy (LString "hello"),
-                      backendBindingExportedAsMain = True
-                    }
-                ]
-            }
-        ],
-      backendProgramMain = "Main__main"
-    }
 
 nativeMainNameCollisionProgram :: BackendProgram
 nativeMainNameCollisionProgram =
@@ -6013,14 +5986,7 @@ isLLVMNativeUnsupportedCoverage coverage =
 
 llvmNativeUnsupportedParityCases :: Map.Map String String
 llvmNativeUnsupportedParityCases =
-  Map.fromList
-    [ ( "standalone: does not decode non-data main values through fallback ADT decoding",
-        "main must be a zero-argument pure value"
-      ),
-      ( "standalone: does not decode typed non-data constructor fields through fallback ADT decoding",
-        "function main values are not native-renderable"
-      )
-    ]
+  Map.empty
 
 llvmRequiredNativeRunParityCases :: [String]
 llvmRequiredNativeRunParityCases =
@@ -6037,7 +6003,8 @@ llvmRequiredNativeRunParityCases =
     "unified fixture: test/programs/unified/higher-order-local-function-flow.mlfp",
     "unified fixture: test/programs/unified/higher-order-partial-application.mlfp",
     "unified fixture: test/programs/unified/higher-order-returned-function.mlfp",
-    "standalone: applies captured function-valued constructor fields"
+    "standalone: applies captured function-valued constructor fields",
+    "standalone: executes IO Unit main with bind and pure"
   ]
 
 llvmObjectCodeParityCases :: [String]
