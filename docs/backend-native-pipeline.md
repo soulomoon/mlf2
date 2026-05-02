@@ -35,6 +35,23 @@ stores the tag word, field slots follow the tag word, function-like constructor 
 emit tag-only heap objects. This is evidence for private lowering policy, not
 a second IR or public lowering interface.
 
+Row-5 primitive/eager ownership is part of the same raw/native inspection
+contract. The current primitive surface is the closed reserved runtime-binding set
+`__mlfp_and`, `__io_pure`, `__io_bind`, and `__io_putStrLn`.
+`emit-backend` and `emit-native` keep those primitives on the same
+`BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`,
+no second executable IR, and no broad FFI lane.
+
+The eager sequencing contract stays explicit on that same path:
+
+- let RHS before body;
+- case scrutinee before branch selection;
+- direct/primitive call arguments in written order; and
+- effect sequencing remains explicit through `__io_bind`.
+
+Native execution relies on that explicit eager contract instead of fallback
+runtime execution or implicit laziness rescue.
+
 ## Emission Modes
 
 `emit-backend` prints the raw LLVM module lowered from that same

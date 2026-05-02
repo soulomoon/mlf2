@@ -70,16 +70,28 @@ spec = describe "MLF.Backend.LLVM" $ do
     it "accepts primitive IO operations and emits native LLVM" $ do
       output <- requireRight =<< emitNativeSource ioPutStrLnMainProgram
       output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_putStrLn.wrapper\""
       validateLLVMAssembly output
 
     it "executes __io_bind main through the native IO runtime" $ do
       output <- requireRight =<< emitNativeSource ioDirectPrimitiveMainProgram
       output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
       output `shouldSatisfy` isInfixOf "call ptr @\"__io_bind.wrapper\""
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_putStrLn.wrapper\""
       validateLLVMAssembly output
       validateLLVMObjectCode output
       runLLVMNativeExecutable output
         `shouldReturn` NativeRunResult ExitSuccess "world\n" ""
+
+    it "executes nested __io_bind / __io_putStrLn actions in written order through the native IO runtime" $ do
+      output <- requireRight =<< emitNativeSource ioNestedPrimitiveMainProgram
+      output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_bind.wrapper\""
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_putStrLn.wrapper\""
+      validateLLVMAssembly output
+      validateLLVMObjectCode output
+      runLLVMNativeExecutable output
+        `shouldReturn` NativeRunResult ExitSuccess "first\nsecond\nthird\n" ""
 
     it "accepts pure mains that depend on IO-typed helpers" $ do
       output <- requireRight =<< emitBackendSource pureMainIODependencyProgram
@@ -1562,6 +1574,17 @@ ioDirectPrimitiveMainProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (Unit(..), IO);",
       "  def main : IO Unit = __io_bind (__io_pure Unit) (\\(_done : Unit) __io_putStrLn \"world\");",
+      "}"
+    ]
+
+ioNestedPrimitiveMainProgram :: String
+ioNestedPrimitiveMainProgram =
+  unlines
+    [ "module Main export (afterSecond, afterFirst, main) {",
+      "  import Prelude exposing (Unit(..), IO);",
+      "  def afterSecond : Unit -> IO Unit = \\(_second : Unit) __io_putStrLn \"third\";",
+      "  def afterFirst : Unit -> IO Unit = \\(_first : Unit) __io_bind (__io_putStrLn \"second\") afterSecond;",
+      "  def main : IO Unit = __io_bind (__io_putStrLn \"first\") afterFirst;",
       "}"
     ]
 

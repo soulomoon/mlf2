@@ -78,6 +78,21 @@ These layout facts are not a second executable IR or public lowering surface.
 Checked-program conversion and `MLF.Backend.IR` keep only semantic ADT/case
 metadata and term nodes.
 -}
+{- Note [Primitive operations and eager sequencing]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Row-5 primitive/eager ownership keeps the primitive surface at the closed reserved runtime-binding set `__mlfp_and`, `__io_pure`, `__io_bind`, and `__io_putStrLn`.
+Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
+
+The lowerer relies on the current eager order exactly as written:
+
+* let RHS before body: `lowerExpr` calls `bindLet` before lowering the body;
+* case scrutinee before branch selection: `lowerHeapCase` lowers the scrutinee before reading the tag and entering an alternative;
+* direct/primitive call arguments in written order: direct call sites use `zipWithM`, and primitive/global primitive sites use `traverse` on the written argument list; and
+* effect sequencing remains explicit through `__io_bind`.
+
+Unsupported broader primitive or ordering-sensitive shapes still fail with
+explicit backend diagnostics instead of widening this boundary.
+-}
 module MLF.Backend.LLVM.Lower
   ( BackendLLVMError (..),
     evidenceFunctionTypesCompatible,

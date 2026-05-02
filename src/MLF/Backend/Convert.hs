@@ -27,6 +27,9 @@ Runtime tags, field slots, closure-record storage for function-like fields,
 and nullary tag-only representation stay private to LLVM/native lowering, so
 checked-program conversion must not assign tag numbers, field offsets, boxing
 or storage policy, nullary layout, or layout-only witnesses.
+Row-5 primitive/eager ownership keeps the primitive surface at the closed reserved runtime-binding set `__mlfp_and`, `__io_pure`, `__io_bind`, and `__io_putStrLn`.
+Checked-program conversion keeps those primitives on the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime lane.
+The emitted eager structure stays reviewable here: let RHS before body, case scrutinee before branch selection, direct/primitive call arguments in written order, and effect sequencing remains explicit through `__io_bind`.
 Any ANF-like normalization, layout-only structure, or lowerability-only
 representation stays private to backend-owned lowering helpers rather than
 becoming a second executable IR, a public `LowerableBackend.IR`, or a second

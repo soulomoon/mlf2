@@ -63,6 +63,11 @@ A later lower IR may be introduced only when all of the following hold:
   fields, and nullary tag-only representation stay private to LLVM/native
   lowering. The IR does not carry tag numbers, field offsets, nullary layout
   witnesses, or layout-only forms.
+* Row-5 primitive/eager ownership keeps the primitive surface at the closed reserved runtime-binding set `__mlfp_and`, `__io_pure`, `__io_bind`, and `__io_putStrLn`;
+* those primitives reach this IR through ordinary `BackendVar`, `BackendApp`, and `BackendTyApp` nodes, with no new `BackendPrim`, no broad FFI surface, and no second executable IR;
+* the eager boundary is reviewable here: let RHS before body, case scrutinee before branch selection, direct/primitive call arguments in written order, and effect sequencing remains explicit through `__io_bind`;
+* unsupported broader primitive or ordering-sensitive shapes stay on explicit
+  backend diagnostic paths instead of a fallback runtime lane;
 * `BackendClosureCall` is the indirect closure-call node, so closure-valued
   aliases, captured closures, constructor-field projections, and case/let-
   selected closure values stay on this explicit path, and confused direct-call

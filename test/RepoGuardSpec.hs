@@ -273,6 +273,22 @@ spec = describe "Repository guardrails" $ do
       $ \(path, src, markers) ->
         assertMarkersPresent path src markers
 
+  it "primitive-operation and eager-evaluation-order contract stays explicit without widening the backend boundary" $ do
+    architectureSrc <- readFile "docs/architecture.md"
+    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
+    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
+    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
+    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
+    forM_
+      [ ("docs/architecture.md", architectureSrc, primitiveOperationEagerOrderMarkers),
+        ("docs/backend-native-pipeline.md", nativePipelineSrc, primitiveOperationEagerOrderMarkers),
+        ("src/MLF/Backend/IR.hs", backendIRSrc, primitiveOperationEagerOrderMarkers),
+        ("src/MLF/Backend/Convert.hs", backendConvertSrc, primitiveOperationEagerOrderMarkers),
+        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, primitiveOperationEagerOrderMarkers)
+      ]
+      $ \(path, src, markers) ->
+        assertMarkersPresent path src markers
+
 discoverSpecModules :: FilePath -> IO [String]
 discoverSpecModules root = do
   hsFiles <- collectHsFiles root
@@ -636,6 +652,21 @@ backendLowerADTCaseLayoutMarkers =
     "field slots start after that tag word",
     "function-like constructor fields are stored as explicit closure records",
     "nullary constructors use tag-only heap objects"
+  ]
+
+primitiveOperationEagerOrderMarkers :: [String]
+primitiveOperationEagerOrderMarkers =
+  [ "closed reserved runtime-binding set",
+    "__mlfp_and",
+    "__io_pure",
+    "__io_bind",
+    "__io_putStrLn",
+    "`BackendVar`, `BackendApp`, and `BackendTyApp`",
+    "no new `BackendPrim`",
+    "let RHS before body",
+    "case scrutinee before branch selection",
+    "direct/primitive call arguments in written order",
+    "effect sequencing remains explicit through `__io_bind`"
   ]
 
 futureLowerIRCriteriaMarkers :: [String]

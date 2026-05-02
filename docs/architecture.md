@@ -172,6 +172,24 @@ and nullary tag-only representation stay private to LLVM/native lowering.
 Checked-program conversion must not assign runtime tag values, field offsets,
 boxing/storage policy, or layout-only witnesses.
 
+The row-5 primitive/eager contract is explicit as well. The current primitive
+surface is the closed reserved runtime-binding set
+`__mlfp_and`, `__io_pure`, `__io_bind`, and `__io_putStrLn`. Checked-program
+conversion and lowering keep those primitives on the existing
+`BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`,
+no second executable IR, no public lowering API, and no broad FFI lane.
+
+The eager sequencing contract is reviewable at that same boundary:
+
+- let RHS before body;
+- case scrutinee before branch selection;
+- direct/primitive call arguments in written order; and
+- effect sequencing remains explicit through `__io_bind`.
+
+Unsupported broader primitive or ordering-sensitive shapes stay on explicit
+backend diagnostic paths instead of falling through to a fallback runtime
+path.
+
 LLVM/native lowering owns only downstream private lowering/runtime details for
 that same `MLF.Backend.IR` program: closure-record layout and closure ABI
 details, environment-record layout, layout-only lowering helpers, native

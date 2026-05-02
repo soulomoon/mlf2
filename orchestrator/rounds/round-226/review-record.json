@@ -1,0 +1,85 @@
+{
+  "round_id": "round-226",
+  "attempt": 1,
+  "status": "authoritative",
+  "decision": "approved",
+  "implemented_stage_result": "accepted",
+  "attempt_verdict": "accepted",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "not needed",
+  "merge_readiness": "satisfied",
+  "controller_merge_hygiene": "satisfied",
+  "base_branch": "master",
+  "branch": "orchestrator/round-226-lock-primitive-evaluation-order-contract",
+  "base_commit": "5adb3702eb0d4e5230aa0a778f417075a20a6333",
+  "head_commit": "5adb3702eb0d4e5230aa0a778f417075a20a6333",
+  "merge_base": "5adb3702eb0d4e5230aa0a778f417075a20a6333",
+  "roadmap_id": "2026-05-02-00-backend-ir-executable-boundary-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-02-00-backend-ir-executable-boundary-roadmap/rev-001",
+  "milestone_id": "milestone-5",
+  "direction_id": "direction-5a-lock-primitive-and-evaluation-order-contract",
+  "extracted_item_id": null,
+  "review_path": "orchestrator/rounds/round-226/review.md",
+  "review_snapshot": "orchestrator/rounds/round-226/reviews/attempt-1.md",
+  "merge_payload_files": [
+    "docs/architecture.md",
+    "docs/backend-native-pipeline.md",
+    "src/MLF/Backend/IR.hs",
+    "src/MLF/Backend/Convert.hs",
+    "src/MLF/Backend/LLVM/Lower.hs",
+    "docs/plans/2026-05-02-backend-ir-executable-boundary-mechanism-table.md",
+    "test/BackendLLVMSpec.hs",
+    "test/RepoGuardSpec.hs"
+  ],
+  "residual_risks": [
+    "Milestone-6 through milestone-7 remain intentionally open and rows 6-7 stay NO in the mechanism table.",
+    "The accepted result freezes only the current closed primitive/runtime-binding set and eager sequencing contract; any broader primitive surface, FFI expansion, public lowering surface, or polymorphism-lowerability widening will need new evidence and a later accepted round."
+  ],
+  "mechanism_table": {
+    "row_1_ir_role_separation_and_non_duplication": "YES",
+    "row_2_eager_runtime_lowering_contract": "YES",
+    "row_3_direct_calls_closure_values_and_callable_shapes": "YES",
+    "row_4_adt_case_semantics_versus_layout": "YES",
+    "row_5_primitive_operations_and_eager_evaluation_order": "YES",
+    "row_6_polymorphism_erasure_and_lowerability": "NO",
+    "row_7_validation_evidence_and_guidance_synchronization": "NO"
+  },
+  "verification_results": {
+    "diff_hygiene": "passed",
+    "focused_backend_llvm_io_contract": {
+      "result": "passed",
+      "examples": 7,
+      "failures": 0
+    },
+    "focused_backend_llvm_prelude_primitive_slice": {
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "focused_row_5_guard": {
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "mechanism_table_gate": {
+      "result": "passed",
+      "row_1": "YES",
+      "row_2": "YES",
+      "row_3": "YES",
+      "row_4": "YES",
+      "row_5": "YES",
+      "row_6": "NO",
+      "row_7": "NO"
+    },
+    "full_gate": {
+      "command": "cabal build all && cabal test",
+      "result": "passed",
+      "examples": 2343,
+      "failures": 0,
+      "duration_seconds": 316.867
+    }
+  },
+  "evidence_summary": "Reviewed the canonical round-226 worktree against master commit 5adb3702eb0d4e5230aa0a778f417075a20a6333, where HEAD, master, and merge-base all match and the live round exists as an uncommitted worktree diff. The implementation-owned merge payload stays limited to docs/architecture.md, docs/backend-native-pipeline.md, src/MLF/Backend/IR.hs, src/MLF/Backend/Convert.hs, src/MLF/Backend/LLVM/Lower.hs, docs/plans/2026-05-02-backend-ir-executable-boundary-mechanism-table.md, test/BackendLLVMSpec.hs, and test/RepoGuardSpec.hs, while orchestrator/state.json, the pointer stubs, and the active roadmap/round lineage artifacts are controller-owned activation and review bookkeeping. The round makes the closed primitive runtime-binding set and eager sequencing contract explicit across the synchronized contract surfaces, proves native nested __io_bind / __io_putStrLn execution in written order, flips only mechanism-table row 5 to YES while preserving rows 1-4 at YES and rows 6-7 at NO, passes the focused row-5 slices, and passes cabal build all && cabal test with 2343 examples and 0 failures. The inherited one-backend-IR, eager-runtime, no-lazy-STG, no-public-lower-IR, and no-fallback boundaries remain intact, and the round does not widen into milestone-6/7 claims, public lowering surfaces, or broad FFI expansion."
+}
