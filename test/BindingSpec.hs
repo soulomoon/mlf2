@@ -1127,20 +1127,35 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
 
         -- **Feature: paper_general_raise_plan, Property: canonicalization preserves tree structure**
         -- **Validates: Requirements 2.1, 7.1**
-        it "canonicalization preserves tree structure (checkBindingTree passes on canonicalized)" $ property $
-            forAll (choose (3, 15)) $ \n -> do
-                c <- generate (genTreeBindingTree n)
-                -- Create a canonicalization that merges some nodes (simulating union-find)
-                let nodeIds = allNodeIds c
-                    -- Merge adjacent nodes in the chain
-                    canonical nid =
-                        case lookup nid (zip nodeIds (drop 1 nodeIds ++ [last nodeIds])) of
-                            Just rep | nid /= rep -> rep
-                            _ -> nid
-                -- Canonicalized binding parents should still pass validation
-                case canonicalizeBindParentsUnder canonical c of
-                    Left _ -> return ()  -- Error is acceptable for some canonicalizations
-                    Right _ -> return ()  -- Success means tree structure is preserved
+        it "canonicalization drops induced self-edges and preserves surviving parents" $ do
+            let root = NodeId 0
+                mid = NodeId 1
+                leaf = NodeId 2
+                c =
+                    rootedConstraint
+                        emptyConstraint
+                            { cNodes =
+                                nodeMapFromList
+                                    [ (0, TyForall root mid)
+                                    , (1, TyForall mid leaf)
+                                    , (2, TyVar { tnId = leaf, tnBound = Nothing })
+                                    ]
+                            , cBindParents =
+                                bindParentsFromPairs
+                                    [ (mid, root, BindFlex)
+                                    , (leaf, mid, BindRigid)
+                                    ]
+                            }
+                canonical nid
+                    | nid == leaf = mid
+                    | otherwise = nid
+                expected =
+                    IntMap.fromList
+                        [ (nodeRefKey (typeRef root), (genRef (GenNodeId 0), BindFlex))
+                        , (nodeRefKey (typeRef mid), (typeRef root, BindFlex))
+                        ]
+            canonicalizeBindParentsUnder canonical c `shouldBe` Right expected
+            checkBindingTreeUnder canonical c `shouldBe` Right ()
 
         -- **Feature: paper_general_raise_plan, Property: validation detects all parent-child mismatches**
         -- **Validates: Requirements 2.1, 7.1**

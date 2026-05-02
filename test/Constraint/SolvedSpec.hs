@@ -2,6 +2,7 @@ module Constraint.SolvedSpec (spec) where
 
 import Control.Monad (forM_)
 import Data.List (isInfixOf)
+import Data.Maybe (isJust)
 import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
@@ -263,10 +264,8 @@ spec = describe "MLF.Constraint.Solved" $ do
                                 equiv <- requireRight (fromSolveOutput out)
                                 -- Verify the Solved is well-formed by exercising core queries
                                 length (NodeAccess.allNodes (originalConstraint equiv)) `shouldSatisfy` (> 0)
-                                let _ = canonicalMap equiv
-                                    _ = cInstEdges (originalConstraint equiv)
-                                    _ = cBindParents (originalConstraint equiv)
-                                pure ()
+                                -- Force canonical map evaluation to catch crashes
+                                canonicalMap equiv `seq` pure ()
         forM_ cases $ \(label, expr) ->
             it ("produces valid Solved for " ++ label ++ " (" ++ show expr ++ ")") $
                 runCase (label, expr)
@@ -537,10 +536,17 @@ spec = describe "MLF.Constraint.Solved" $ do
         it "lookupNode works correctly for solver snapshots" $ do
             case snapshotEquiv of
                 Left err -> expectationFailure err
-                Right (staged, ids) ->
-                    -- Verify lookupNode returns consistent results
-                    map (\nid -> NodeAccess.lookupNode (originalConstraint staged) (canonical staged nid)) ids
-                        `shouldBe` map (\nid -> NodeAccess.lookupNode (originalConstraint staged) (canonical staged nid)) ids
+                Right (staged, _ids) -> do
+                    -- Existing nodes resolve through canonical form
+                    NodeAccess.lookupNode (originalConstraint staged) (canonical staged (NodeId 0))
+                        `shouldSatisfy` isJust
+                    NodeAccess.lookupNode (originalConstraint staged) (canonical staged (NodeId 1))
+                        `shouldSatisfy` isJust
+                    NodeAccess.lookupNode (originalConstraint staged) (canonical staged (NodeId 2))
+                        `shouldSatisfy` isJust
+                    -- Non-existent node returns Nothing
+                    NodeAccess.lookupNode (originalConstraint staged) (NodeId 99)
+                        `shouldBe` Nothing
 
         it "fromSolveOutput matches explicit pre-rewrite snapshot construction" $ do
             case solveUnifyWithSnapshot defaultTraceConfig (rootedConstraint emptyConstraint) of
@@ -591,12 +597,13 @@ spec = describe "MLF.Constraint.Solved" $ do
         it "keeps snapshot queries consistent" $ do
             case snapshotEquiv of
                 Left err -> expectationFailure err
-                Right (staged, ids) -> do
-                    -- Verify queries are internally consistent
-                    map (\nid -> NodeAccess.lookupVarBound (originalConstraint staged) (canonical staged nid)) ids
-                        `shouldBe` map (\nid -> NodeAccess.lookupVarBound (originalConstraint staged) (canonical staged nid)) ids
-                    let _ = cInstEdges (originalConstraint staged)
-                        _ = cBindParents (originalConstraint staged)
-                        _ = cGenNodes (originalConstraint staged)
-                        _ = NodeAccess.allNodes (originalConstraint staged)
-                    pure ()
+                Right (staged, _ids) -> do
+                    -- var4 (NodeId 4) has bound NodeId 0 (raw, not canonicalized)
+                    NodeAccess.lookupVarBound (originalConstraint staged) (canonical staged (NodeId 4))
+                        `shouldBe` Just (NodeId 0)
+                    -- Non-existent node returns Nothing
+                    NodeAccess.lookupVarBound (originalConstraint staged) (NodeId 99)
+                        `shouldBe` Nothing
+                    -- Non-variable nodes return Nothing
+                    NodeAccess.lookupVarBound (originalConstraint staged) (canonical staged (NodeId 1))
+                        `shouldBe` Nothing

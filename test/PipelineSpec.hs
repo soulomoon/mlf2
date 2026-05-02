@@ -89,6 +89,7 @@ import SpecUtil
     runToSolvedDefault,
     unsafeNormalizeExpr,
   )
+import System.Directory (doesFileExist)
 import System.IO.Error (tryIOError)
 import Test.Hspec
 import Test.QuickCheck (Gen, arbitrary, chooseInt, counterexample, elements, forAll, property, withMaxSuccess, (===))
@@ -1001,9 +1002,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       interpreterSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs"
       witnessSrc <- readFile "src/MLF/Constraint/Presolution/Witness.hs"
       cabalSrc <- readFile "mlf2.cabal"
-      wrapperExists <-
-        either (const False) (const True)
-          <$> tryIOError (readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Witness.hs" >>= \s -> pure $! length s)
+      wrapperExists <- doesFileExist "src/MLF/Constraint/Presolution/EdgeProcessing/Witness.hs"
       wrapperExists `shouldBe` False
       interpreterSrc `shouldSatisfy` (not . isInfixOf "MLF.Constraint.Presolution.EdgeProcessing.Witness")
       witnessSrc `shouldSatisfy` isInfixOf "data EdgeWitnessPlan ="
@@ -6844,24 +6843,37 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                               )
                               (ty' === ty)
 
-    it "Pipeline determinism proxy: step is a function on elaborated terms" $
-      property $
-        withMaxSuccess 300 $
-          forAll genClosedWellTypedExpr $ \expr ->
-            case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-              Left _ -> property True
-              Right (term, _ty) ->
-                counterexample
-                  ( "pipeline determinism failed\nexpr: "
-                      ++ show expr
-                      ++ "\nterm: "
-                      ++ show term
-                      ++ "\nstep run 1: "
-                      ++ show (step term)
-                      ++ "\nstep run 2: "
-                      ++ show (step term)
+    it "Pipeline one-step normalization proxy: representative elaborated terms preserve their normal form" $ do
+      let cases =
+            [ ( "annotated identity application",
+                ELet
+                  "f"
+                  (EAnn (ELam "x" (EVar "x")) (mkForalls [("a", Nothing)] (STArrow (STVar "a") (STVar "a"))))
+                  (EApp (EVar "f") (ELit (LInt 7)))
+              ),
+              ( "polymorphic let used at Int and Bool",
+                ELet
+                  "id"
+                  (ELam "x" (EVar "x"))
+                  ( ELet
+                      "a"
+                      (EApp (EVar "id") (ELit (LInt 1)))
+                      (EApp (EVar "id") (ELit (LBool True)))
                   )
-                  (step term === step term)
+              )
+            ]
+      forM_ cases $ \(label, expr) ->
+        case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+          Left err -> expectationFailure (label ++ ": pipeline failed:\n" ++ renderPipelineError err)
+          Right (term, ty) -> do
+            typeCheck term `shouldBe` Right ty
+            stepped <-
+              case step term of
+                Nothing ->
+                  expectationFailure (label ++ ": expected elaborated term to reduce at least once")
+                    >> fail "missing reduction step"
+                Just term' -> pure term'
+            normalize stepped `shouldBe` normalize term
 
   describe "Thesis obligations" $ do
     it "O08-REIFY-TYPE" $ do
@@ -6873,10 +6885,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
     it "O08-REIFY-NAMES" $ do
       -- Named reification: reifyType produces named type variables
-      let expr = ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1)))
+      let expr = ELam "x" (EVar "x")
       case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
         Left err -> expectationFailure $ "Pipeline failed: " ++ renderPipelineError err
-        Right (_term, ty) -> show ty `shouldSatisfy` (not . null)
+        Right (_term, ty) ->
+          ty `shouldSatisfy` \candidate ->
+            case candidate of
+              TForall name Nothing (TArrow (TVar dom) (TVar cod)) ->
+                not (null name) && dom == name && cod == name
+              _ -> False
 
     it "O08-BIND-MONO: alias bounds are inlined during normalization (B(σ))" $ do
       -- B(σ) from Fig 8.2.2: alias bounds (∀(a ⩾ b). body) are inlined
@@ -6930,9 +6947,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               )
       case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
         Left err -> expectationFailure $ "Pipeline failed: " ++ renderPipelineError err
-        Right (_term, ty) ->
-          -- The result type should be well-formed (non-empty rendering)
-          show ty `shouldSatisfy` (not . null)
+        Right (term, ty) -> do
+          ty `shouldBe` TBase (BaseTy "Bool")
+          typeCheck (normalize term) `shouldBe` Right ty
+          normalize term `shouldBe` Elab.ELit (LBool True)
 
   -- See Note [Constraint simplification: Var-Abs (Ch 12.4.1)] in Translate.hs
   describe "Constraint simplification: Var-Abs (Ch 12.4.1)" $ do

@@ -82,7 +82,7 @@ import MLF.Elab.Run.Util
     makeCanonicalizer,
   )
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
-import MLF.Frontend.Parse (parseRawEmlfExpr, renderEmlfParseError)
+import MLF.Frontend.Parse (parseRawEmlfExpr, parseRawEmlfType, renderEmlfParseError)
 import MLF.Frontend.Syntax (Expr (..), Lit (..), NormSrcType, SrcTy (..), SrcType, SurfaceExpr, mkSrcBound)
 import MLF.Reify.Core qualified as Reify
 import MLF.Util.Order qualified as Order
@@ -1531,7 +1531,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
     it "InstApp rejects arg not matching explicit bound on ∀(a ≥ Int). a" $ do
       let ty = Elab.TForall "a" (Just (boundFromType (Elab.TBase (BaseTy "Int")))) (Elab.TVar "a")
       case Elab.applyInstantiation ty (Elab.InstApp (Elab.TBase (BaseTy "Bool"))) of
-        Left _ -> pure ()
+        Left (Elab.InstantiationError _) -> pure ()
+        Left err -> expectationFailure ("Expected InstantiationError, got: " ++ show err)
         Right t -> expectationFailure ("Expected failure, got: " ++ show t)
 
     it "O14-APPLY-ID: InstId leaves the input type unchanged" $ do
@@ -1556,29 +1557,34 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
     it "fails InstElim on a non-∀ type" $ do
       case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) Elab.InstElim of
-        Left _ -> pure ()
+        Left (Elab.InstantiationError _) -> pure ()
+        Left err -> expectationFailure ("Expected InstantiationError, got: " ++ show err)
         Right t -> expectationFailure ("Expected failure, got: " ++ show t)
 
     it "fails InstInside on a non-∀ type" $ do
       let inst = Elab.InstInside (Elab.InstBot (Elab.TBase (BaseTy "Int")))
       case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) inst of
-        Left _ -> pure ()
+        Left (Elab.InstantiationError _) -> pure ()
+        Left err -> expectationFailure ("Expected InstantiationError, got: " ++ show err)
         Right t -> expectationFailure ("Expected failure, got: " ++ show t)
 
     it "fails InstUnder on a non-∀ type" $ do
       case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) (Elab.InstUnder "a" Elab.InstId) of
-        Left _ -> pure ()
+        Left (Elab.InstantiationError _) -> pure ()
+        Left err -> expectationFailure ("Expected InstantiationError, got: " ++ show err)
         Right t -> expectationFailure ("Expected failure, got: " ++ show t)
 
     it "O14-APPLY-BOT: fails InstBot on a non-⊥ type" $ do
       case Elab.applyInstantiation (Elab.TBase (BaseTy "Int")) (Elab.InstBot (Elab.TBase (BaseTy "Bool"))) of
-        Left _ -> pure ()
+        Left (Elab.InstantiationError _) -> pure ()
+        Left err -> expectationFailure ("Expected InstantiationError, got: " ++ show err)
         Right t -> expectationFailure ("Expected failure, got: " ++ show t)
 
     it "fails InstBot when argument equals non-bottom input type" $ do
       let ty = Elab.TArrow (Elab.TBase (BaseTy "Int")) (Elab.TBase (BaseTy "Int"))
       case Elab.applyInstantiation ty (Elab.InstBot ty) of
-        Left _ -> pure ()
+        Left (Elab.InstantiationError _) -> pure ()
+        Left err -> expectationFailure ("Expected InstantiationError, got: " ++ show err)
         Right t -> expectationFailure ("Expected strict InstBot failure, got: " ++ show t)
 
     it "URI-R2-C1 witness replay stays alpha-equivalent to the locked no-fallback shape" $ do
@@ -1728,8 +1734,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           st = STForall "a" (Just (mkSrcBound bound)) (STVar "a")
       st `shouldBe` STForall "a" (Just (mkSrcBound bound)) (STVar "a")
 
-    it "parses and represents STBottom" $ do
-      STBottom `shouldBe` STBottom
+    it "parses all bottom-type spellings as STBottom" $ do
+      parseRawEmlfType "⊥" `shouldBe` Right STBottom
+      parseRawEmlfType "_|_" `shouldBe` Right STBottom
+      parseRawEmlfType "bottom" `shouldBe` Right STBottom
 
     it "represents nested STForall with multiple binders" $ do
       let binds = [("a", Nothing), ("b", Just (STBase "Int"))]
@@ -1742,10 +1750,12 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           (STForall "b" (Just (mkSrcBound (STBase "Int"))) body)
 
   describe "Expansion to Instantiation conversion" $ do
-    it "converts ExpIdentity to InstId" $ do
-      -- Test the conversion function directly would require more setup
-      -- For now just test that the types exist
-      Elab.InstId `shouldBe` Elab.InstId
+    it "uses InstId as an operationally inert identity instantiation" $ do
+      let ty = Elab.TBase (BaseTy "Int")
+          term = Elab.ETyInst (Elab.ELit (LInt 1)) Elab.InstId
+      Elab.applyInstantiation ty Elab.InstId `shouldBe` Right ty
+      Elab.step term `shouldBe` Just (Elab.ELit (LInt 1))
+      Elab.typeCheck term `shouldBe` Right ty
 
     it "converts ExpInstantiate to InstApp sequence" $ do
       -- InstSeq combines multiple applications

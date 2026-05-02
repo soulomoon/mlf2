@@ -1538,10 +1538,18 @@ spec = do
                         Binding.lookupBindParent c' (typeRef n) `shouldBe` Just (typeRef mid, BindRigid)
 
     describe "Property-based witness tests" $ do
-        it "InstanceOp Arbitrary instance generates valid operations" $ property $
-            forAll genInstanceOp $ \op ->
-                -- Just verify the operation is well-formed (no error thrown)
-                isTotalOp op
+        it "InstanceOp generator covers every operation constructor with non-negative node ids" $ property $
+            withMaxSuccess 200 $
+                forAll genInstanceOp $ \op ->
+                    checkCoverage $
+                        cover 15 (isOpGraft op) "OpGraft" $
+                        cover 15 (isOpMerge op) "OpMerge" $
+                        cover 15 (isOpRaise op) "OpRaise" $
+                        cover 15 (isOpWeaken op) "OpWeaken" $
+                        cover 15 (isOpRaiseMerge op) "OpRaiseMerge" $
+                            counterexample
+                                ("generated invalid operation: " ++ show op)
+                                (all ((>= 0) . getNodeId) (opNodeIds op))
         it "witness normalization is idempotent" $ property $
             forAll (genInstanceOps 10) $ \ops ->
                 forAll genNormalizeEnvParams $ \envParams ->
@@ -2417,5 +2425,30 @@ spec = do
                             getInstanceOps (ewWitness ew') `shouldBe` []
 
   where
-    isTotalOp :: InstanceOp -> Bool
-    isTotalOp _ = True
+    opNodeIds :: InstanceOp -> [NodeId]
+    opNodeIds op = case op of
+        OpGraft n m -> [n, m]
+        OpMerge n m -> [n, m]
+        OpRaise n -> [n]
+        OpWeaken n -> [n]
+        OpRaiseMerge n m -> [n, m]
+
+    isOpGraft :: InstanceOp -> Bool
+    isOpGraft OpGraft{} = True
+    isOpGraft _ = False
+
+    isOpMerge :: InstanceOp -> Bool
+    isOpMerge OpMerge{} = True
+    isOpMerge _ = False
+
+    isOpRaise :: InstanceOp -> Bool
+    isOpRaise OpRaise{} = True
+    isOpRaise _ = False
+
+    isOpWeaken :: InstanceOp -> Bool
+    isOpWeaken OpWeaken{} = True
+    isOpWeaken _ = False
+
+    isOpRaiseMerge :: InstanceOp -> Bool
+    isOpRaiseMerge OpRaiseMerge{} = True
+    isOpRaiseMerge _ = False

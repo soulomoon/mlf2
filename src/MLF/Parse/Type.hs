@@ -78,8 +78,8 @@ parseArrowTypeWith cfg pType = do
 
     pTypeAtom =
         choice
-            [ AtomCon <$> tpcUpperIdent cfg
+            [ AtomOther (tpcMkBottom cfg) <$ tpcBottomTok cfg
+            , AtomCon <$> tpcUpperIdent cfg
             , AtomVar <$> tpcLowerIdent cfg
-            , AtomOther (tpcMkBottom cfg) <$ tpcBottomTok cfg
             , AtomOther <$> tpcParens cfg pType
             ]

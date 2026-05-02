@@ -48,8 +48,8 @@ spec = describe "MLF.Backend.Convert" $ do
             "}"
           ]
     checked <- requireRight (checkProgram (withPrelude program))
-    convertCheckedProgram checked
-      `shouldSatisfy` either (const False) (const True)
+    backend <- requireRight (convertCheckedProgram checked)
+    validateBackendProgram backend `shouldBe` Right ()
 
   it "accepts backend conversion when pure bindings reference IO primitives" $ do
     program <-
@@ -61,8 +61,8 @@ spec = describe "MLF.Backend.Convert" $ do
             "}"
           ]
     checked <- requireRight (checkProgram (withPrelude program))
-    convertCheckedProgram checked
-      `shouldSatisfy` either (const False) (const True)
+    backend <- requireRight (convertCheckedProgram checked)
+    validateBackendProgram backend `shouldBe` Right ()
 
   it "matches the checked backend IR snapshot for a primitive function program" $ do
     checked <- requireChecked simpleFunctionProgram

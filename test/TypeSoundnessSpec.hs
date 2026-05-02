@@ -140,32 +140,63 @@ spec = describe "Phase 7 theorem obligations" $ do
                                 )
                                 (typeCheck term' === Right ty)
 
-    it "Determinism proxy: step is a function (same input => same output)" $
+    it "One-step normalization proxy: stepping preserves the final normal form" $
         property $
             withMaxSuccess 300 $
                 forAll genClosedWellTypedElabTerm $ \term ->
                     checkCoverage $
+                        cover 20 (isJust (step term)) "reducible" $
+                        cover 20 (not (isJust (step term))) "normal form" $
                         cover 5 (isETyAbsBounded term) "ETyAbs-bounded" $
                         cover 5 (isETyInst term) "ETyInst" $
                         cover 3 (hasInstInside term) "InstInside" $
                         cover 3 (hasInstUnder term) "InstUnder" $
                         cover 3 (hasInstElim term) "InstElim" $
-                            counterexample
-                        ( "determinism failed on term: "
-                            ++ show term
-                            ++ "\nstep run 1: "
-                            ++ show (step term)
-                            ++ "\nstep run 2: "
-                            ++ show (step term)
-                        )
-                        (step term === step term)
+                            case typeCheck term of
+                                Left err ->
+                                    counterexample
+                                        ( "generator produced ill-typed term:\n"
+                                            ++ show term
+                                            ++ "\nerror: "
+                                            ++ show err
+                                        )
+                                        False
+                                Right _ ->
+                                    case step term of
+                                        Nothing ->
+                                            counterexample
+                                                ( "normal-form term changed under normalize\nterm: "
+                                                    ++ show term
+                                                    ++ "\nnormalize(term): "
+                                                    ++ show (normalize term)
+                                                )
+                                                (normalize term === term)
+                                        Just term' ->
+                                            counterexample
+                                                ( "single step changed final normal form\nterm: "
+                                                    ++ show term
+                                                    ++ "\nterm': "
+                                                    ++ show term'
+                                                    ++ "\nnormalize(term): "
+                                                    ++ show (normalize term)
+                                                    ++ "\nnormalize(term'): "
+                                                    ++ show (normalize term')
+                                                )
+                                                (normalize term' === normalize term)
 
     it "Canonical-forms proxy: values at base type are the expected literals" $
         property $
             withMaxSuccess 300 $
                 forAll genClosedWellTypedElabTerm $ \term ->
                     case typeCheck term of
-                        Left _ -> property True  -- skip ill-typed (shouldn't happen)
+                        Left err ->
+                            counterexample
+                                ( "generator produced ill-typed term:\n"
+                                    ++ show term
+                                    ++ "\nerror: "
+                                    ++ show err
+                                )
+                                False
                         Right ty
                             | not (isValue term) -> property True  -- only check values
                             | ty == TBase (BaseTy "Int") ->

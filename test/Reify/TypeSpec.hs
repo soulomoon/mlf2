@@ -1,10 +1,13 @@
+{-# LANGUAGE GADTs #-}
+
 module Reify.TypeSpec (spec) where
 
 import Data.IntSet qualified as IntSet
+import Data.List (isPrefixOf)
 import Data.Set qualified as Set
 import MLF.Constraint.Presolution.View (PresolutionView, fromSolved)
 import MLF.Constraint.Solved qualified as Solved
-import MLF.Constraint.Types.Graph (NodeId (..), getNodeId)
+import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..), getNodeId)
 import MLF.Frontend.Syntax (Expr (..), Lit (..), SurfaceExpr)
 import MLF.Reify.Type
   ( ReifyRoot (..),
@@ -44,15 +47,13 @@ spec = describe "MLF.Reify.Type" $ do
         -- Literal 42 should reify to int base type
         ty `shouldSatisfy` isBaseType
 
-    it "reifies identity function \\x.x without error" $ do
+    it "reifies identity function \\x.x to its representative type variable" $ do
       artifacts <- pipelineFor (ELam "x" (EVar "x"))
       let solved = paSolved artifacts
           view = viewFor solved
           root = paRoot artifacts
       expectRight (reifyType view root) $ \ty ->
-        -- paRoot is the expression root, which may reify to a var node
-        -- rather than the full arrow type; smoke-test: no crash.
-        ty `shouldSatisfy` const True
+        ty `shouldSatisfy` isVarType
 
     it "reifies let-polymorphism (let id = \\x.x in id 1)" $ do
       let expr =
@@ -117,9 +118,8 @@ spec = describe "MLF.Reify.Type" $ do
       let solved = paSolved artifacts
           root = paRoot artifacts
           fvs = freeVars solved root IntSet.empty
-      -- Identity has binders, so freeVars from root may collect them
-      -- (the specific content depends on canonical structure)
-      fvs `shouldSatisfy` const True -- smoke test: does not crash
+      -- Identity has a binder node reachable from the reified root.
+      fvs `shouldSatisfy` (not . IntSet.null)
     it "respects visited set by skipping already-seen nodes" $ do
       artifacts <- pipelineFor (ELam "x" (EVar "x"))
       let solved = paSolved artifacts
@@ -138,7 +138,7 @@ spec = describe "MLF.Reify.Type" $ do
           nameFor (NodeId i) = "v" ++ show i
           isNamed _ = False
       expectRight (reifyWith "test" solved nameFor isNamed RootType root) $ \ty ->
-        ty `shouldSatisfy` const True -- smoke: no crash
+        ty `shouldSatisfy` isPrefixedVarType "v"
     it "reifies literal with RootType" $ do
       artifacts <- pipelineFor (ELit (LInt 7))
       let solved = paSolved artifacts
@@ -167,7 +167,7 @@ spec = describe "MLF.Reify.Type" $ do
           asString :: ElabType -> Either ElabError String
           asString ty = Right (show ty)
       expectRight (reifyWithAs "test" solved nameFor isNamed RootType asString root) $ \s ->
-        s `shouldSatisfy` (not . null)
+        s `shouldBe` show (TBase (BaseTy "Int"))
 
     it "propagates conversion failure" $ do
       artifacts <- pipelineFor (ELit (LInt 1))
@@ -194,3 +194,12 @@ spec = describe "MLF.Reify.Type" $ do
 isBaseType :: ElabType -> Bool
 isBaseType (TBase _) = True
 isBaseType _ = False
+
+isVarType :: ElabType -> Bool
+isVarType (TVar _) = True
+isVarType _ = False
+
+isPrefixedVarType :: String -> ElabType -> Bool
+isPrefixedVarType prefix ty = case ty of
+  TVar name -> prefix `isPrefixOf` name
+  _ -> False

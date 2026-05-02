@@ -15,6 +15,7 @@ import MLF.Constraint.Presolution
     , PresolutionResult(..)
     , computePresolution
     )
+import MLF.Constraint.Presolution.Base (PresolutionUf(..))
 import MLF.Constraint.Presolution.TestSupport
     ( toListInterior
     , validateTranslatablePresolution
@@ -53,8 +54,7 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
 
     it "exposes presolution UF metadata without assuming non-empty UF" $ do
         pres <- requireRight (runToPresolutionDefault Set.empty (ELam "x" (EVar "x")))
-        let _uf = prUnionFind pres
-        pure ()
+        IntMap.null (getPresolutionUf (prUnionFind pres)) `shouldBe` True
 
     it "solves initial unify edges before inst-edge traversal effects are persisted" $ do
         let bodyId = NodeId 0
