@@ -93,17 +93,11 @@ expected diagnostic fragment.
 ## Coverage Contract
 
 `BackendLLVMSpec` drives the shared `programSpecToLLVMParityCases` matrix
-through one explicit coverage classification per interpreter-success row. Each
-row is exactly one of:
+through one explicit coverage entry per interpreter-success row. Every row is
+native-run checked with raw LLVM assembly validation, native compile/link/run,
+and result comparison. Selected rows also receive object-code smoke validation.
 
-- native-run checked, with raw LLVM assembly validation and native
-  compile/link/run/result comparison;
-- native-unsupported, with raw LLVM assembly validation and a required
-  `emit-native` diagnostic; or
-- object-code smoke in addition to either native classification.
-
-The current `ProgramSpec` parity matrix has no native-unsupported exceptions;
-every interpreter-success row is expected to emit, link, and execute natively.
+The current `ProgramSpec` parity matrix has no native-unsupported exceptions.
 
 Advanced rows added by the typeclass/evidence, first-class polymorphism, and
 higher-order backend slices are required native-run rows when their result is

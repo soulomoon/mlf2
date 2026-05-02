@@ -652,17 +652,12 @@ spec = describe "MLF.Backend.LLVM" $ do
           uniqueCaseNames = Set.fromList caseNames
           coverageCaseNames = Map.keysSet llvmParityCoverage
           objectCodeNames = Set.fromList llvmObjectCodeParityCases
-          nativeRunNames = Map.keysSet (Map.filter isLLVMNativeRunCoverage llvmParityCoverage)
-          nativeUnsupportedNames = Map.keysSet (Map.filter isLLVMNativeUnsupportedCoverage llvmParityCoverage)
           requiredNativeRunNames = Set.fromList llvmRequiredNativeRunParityCases
 
       length caseNames `shouldBe` Set.size uniqueCaseNames
       coverageCaseNames `shouldBe` uniqueCaseNames
       objectCodeNames `Set.isSubsetOf` uniqueCaseNames `shouldBe` True
-      Map.keysSet llvmNativeUnsupportedParityCases `Set.isSubsetOf` uniqueCaseNames `shouldBe` True
-      nativeRunNames `Set.union` nativeUnsupportedNames `shouldBe` uniqueCaseNames
-      nativeRunNames `Set.disjoint` nativeUnsupportedNames `shouldBe` True
-      requiredNativeRunNames `Set.isSubsetOf` nativeRunNames `shouldBe` True
+      requiredNativeRunNames `Set.isSubsetOf` coverageCaseNames `shouldBe` True
 
     mapM_ runLLVMParityCase programSpecToLLVMParityCases
 
@@ -5944,14 +5939,8 @@ recIntTy =
   BTMu "self" intTy
 
 data LLVMParityCoverage = LLVMParityCoverage
-  { llvmParityNativeCoverage :: LLVMNativeCoverage,
-    llvmParityObjectCodeSmoke :: Bool
+  { llvmParityObjectCodeSmoke :: Bool
   }
-  deriving (Eq, Show)
-
-data LLVMNativeCoverage
-  = LLVMNativeRun
-  | LLVMNativeUnsupported String
   deriving (Eq, Show)
 
 llvmParityCoverage :: Map.Map String LLVMParityCoverage
@@ -5959,34 +5948,11 @@ llvmParityCoverage =
   Map.fromList
     [ ( runtimeCaseName runtimeCase,
         LLVMParityCoverage
-          { llvmParityNativeCoverage = classifyLLVMNativeCoverage (runtimeCaseName runtimeCase),
-            llvmParityObjectCodeSmoke = runtimeCaseName runtimeCase `Set.member` llvmObjectCodeParityCaseNames
+          { llvmParityObjectCodeSmoke = runtimeCaseName runtimeCase `Set.member` llvmObjectCodeParityCaseNames
           }
       )
     | runtimeCase <- programSpecToLLVMParityCases
     ]
-
-classifyLLVMNativeCoverage :: String -> LLVMNativeCoverage
-classifyLLVMNativeCoverage caseName =
-  case Map.lookup caseName llvmNativeUnsupportedParityCases of
-    Just reason -> LLVMNativeUnsupported reason
-    Nothing -> LLVMNativeRun
-
-isLLVMNativeRunCoverage :: LLVMParityCoverage -> Bool
-isLLVMNativeRunCoverage coverage =
-  case llvmParityNativeCoverage coverage of
-    LLVMNativeRun -> True
-    LLVMNativeUnsupported _ -> False
-
-isLLVMNativeUnsupportedCoverage :: LLVMParityCoverage -> Bool
-isLLVMNativeUnsupportedCoverage coverage =
-  case llvmParityNativeCoverage coverage of
-    LLVMNativeRun -> False
-    LLVMNativeUnsupported _ -> True
-
-llvmNativeUnsupportedParityCases :: Map.Map String String
-llvmNativeUnsupportedParityCases =
-  Map.empty
 
 llvmRequiredNativeRunParityCases :: [String]
 llvmRequiredNativeRunParityCases =
@@ -6041,26 +6007,11 @@ runLLVMParityCase runtimeCase =
         validateLLVMAssembly output
         when (llvmParityObjectCodeSmoke coverage) $
           validateLLVMObjectCode output
-        case llvmParityNativeCoverage coverage of
-          LLVMNativeRun -> do
-            nativeOutput <- requireRight =<< emitProgramRuntimeNativeLLVM (runtimeCaseSource runtimeCase)
-            validateLLVMAssembly nativeOutput
-            validateLLVMObjectCode nativeOutput
-            nativeResult <- runLLVMNativeExecutable nativeOutput
-            assertNativeRuntimeResult (runtimeCaseExpectation runtimeCase) nativeResult
-          LLVMNativeUnsupported fragment -> do
-            nativeResult <- emitProgramRuntimeNativeLLVM (runtimeCaseSource runtimeCase)
-            case nativeResult of
-              Left err ->
-                err `shouldSatisfy` isInfixOf fragment
-              Right nativeOutput ->
-                expectationFailure $
-                  "expected native LLVM emission to reject "
-                    ++ runtimeCaseName runtimeCase
-                    ++ " with "
-                    ++ show fragment
-                    ++ ", but it emitted:\n"
-                    ++ nativeOutput
+        nativeOutput <- requireRight =<< emitProgramRuntimeNativeLLVM (runtimeCaseSource runtimeCase)
+        validateLLVMAssembly nativeOutput
+        validateLLVMObjectCode nativeOutput
+        nativeResult <- runLLVMNativeExecutable nativeOutput
+        assertNativeRuntimeResult (runtimeCaseExpectation runtimeCase) nativeResult
 
 emitProgramRuntimeLLVM :: ProgramMatrixSource -> IO (Either String String)
 emitProgramRuntimeLLVM source =
