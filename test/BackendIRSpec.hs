@@ -203,6 +203,15 @@ spec = describe "MLF.Backend.IR" $ do
                 (BackendVar idTy "f")
                 (BackendClosureCall intTy (BackendVar idTy "g") [intLit 1])
             )
+        callCaseSelectedClosureField =
+          BackendClosureCall
+            intTy
+            ( BackendCase
+                idTy
+                (BackendConstruct fnBoxTy "FnBox" [closure])
+                (BackendAlternative (BackendConstructorPattern "FnBox" ["f"]) (BackendVar idTy "f") :| [])
+            )
+            [intLit 1]
         structuralClosureArgTy =
           BTMu "$Box_self" (singleFieldStructuralBody (BTVar "a"))
         structuralClosure =
@@ -219,6 +228,12 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithMainExpr (callClosure capturedClosure))
       `shouldBe` Right ()
     validateBackendProgram (programWithMainExpr (callClosureAlias closure))
+      `shouldBe` Right ()
+    validateBackendProgram
+      ( programWithDataAndBindings
+          [fnBoxData]
+          [mainBinding callCaseSelectedClosureField]
+      )
       `shouldBe` Right ()
     validateBackendExpr (BackendClosureCall boolTy structuralClosure [BackendVar structuralBoxTy "box"])
       `shouldBe` Right ()
@@ -479,7 +494,7 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithMainExpr badCall)
       `shouldBe` Left (BackendClosureCallArgumentMismatch 0 intTy boolTy)
     validateBackendProgram (programWithMainExpr nonClosureCall)
-      `shouldBe` Left (BackendClosureCallExpectedClosureValue idTy)
+      `shouldBe` Left (BackendDirectCalledWithBackendClosureCall "f")
     validateBackendProgram (programWithMainExpr unlistedLocalCapture)
       `shouldBe` Left (BackendUnknownVariable "captured")
     validateBackendProgram (programWithMainExpr appCalledClosure)

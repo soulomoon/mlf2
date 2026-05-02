@@ -47,12 +47,19 @@ A later lower IR may be introduced only when all of the following hold:
 * a program `main` names one of those checked bindings;
 * variable references resolve through lexical binders or the global runtime
   binding table, with the carried type matching the binding;
+* `BackendApp` is the direct first-order call node, so local direct aliases
+  that remain first-order stay on this path and closure-valued heads violate a
+  named backend callable invariant;
 * application/lambda/let/type-application/recursive fold-unfold nodes satisfy
   local type equalities;
 * ADT construction and case analysis are explicit backend nodes, so a backend
   lowerer does not have to inspect source syntax or Church-encoded runtime
   terms to find the intended control/data boundary; constructor uses and case
   alternatives are checked against backend constructor metadata.
+* `BackendClosureCall` is the indirect closure-call node, so closure-valued
+  aliases, captured closures, constructor-field projections, and case/let-
+  selected closure values stay on this explicit path, and confused direct-call
+  heads are rejected with explicit callable diagnostics.
 
 The IR may still carry explicit type abstraction/application and recursive
 roll/unroll nodes. Lowering passes are expected to reject unsupported backend
@@ -71,8 +78,11 @@ module MLF.Backend.IR
     BackendExpr (..),
     BackendAlternative (..),
     BackendPattern (..),
+    BackendCallableBindingKind (..),
+    BackendCallableHead (..),
     BackendValidationError (..),
     alphaEqBackendType,
+    backendCallableHead,
     literalBackendType,
     substituteBackendType,
     substituteBackendTypes,
@@ -261,6 +271,7 @@ data BackendValidationError
   | BackendApplicationArgumentMismatch BackendType BackendType
   | BackendApplicationResultMismatch BackendType BackendType
   | BackendClosureCalledWithBackendApp String
+  | BackendDirectCalledWithBackendClosureCall String
   | BackendLetTypeMismatch String BackendType BackendType
   | BackendLetBodyTypeMismatch BackendType BackendType
   | BackendTypeAbsTypeMismatch String BackendType BackendType
@@ -315,6 +326,18 @@ data BackendConstructorInfo = BackendConstructorInfo
 data TypeVariableInstantiation
   = RejectFreeTypeVariableInstantiation FreshenedTypeVariableAliases
   | AllowStructuralPayloadInstantiation
+  deriving (Eq, Show)
+
+data BackendCallableBindingKind
+  = BackendCallableBindingDirect
+  | BackendCallableBindingClosure
+  | BackendCallableBindingUnknown
+  deriving (Eq, Show)
+
+data BackendCallableHead
+  = BackendDirectCallableHead (Maybe String)
+  | BackendClosureCallableHead String
+  | BackendUnknownCallableHead
   deriving (Eq, Show)
 
 data FreshenedTypeVariableAliases
@@ -688,7 +711,7 @@ backendClosureGlobalNames baseContext bindings =
             Set.fromList
               [ backendBindingName binding
                 | binding <- bindings,
-                  Just _ <- [backendDefiniteClosureValueName (Just (baseContext {bvcClosureGlobals = globals})) (backendBindingExpr binding)]
+                  BackendClosureCallableHead _ <- [backendCallableHeadInContext (Just (baseContext {bvcClosureGlobals = globals})) (backendBindingExpr binding)]
               ]
        in if globals' == globals
             then globals
@@ -765,9 +788,11 @@ validateBackendExprWith mbContext expr =
     BackendApp resultTy fun arg -> do
       validateBackendExprWith mbContext fun
       validateBackendExprWith mbContext arg
-      case backendAppClosureHead mbContext fun of
-        Just name -> Left (BackendClosureCalledWithBackendApp name)
-        Nothing -> pure ()
+      case backendCallableHeadInContext mbContext fun of
+        BackendClosureCallableHead name ->
+          Left (BackendClosureCalledWithBackendApp name)
+        _ ->
+          pure ()
       case backendExprType fun of
         BTArrow expectedArg expectedResult -> do
           unless (backendApplicationTypeMatches mbContext expectedArg (backendExprType arg)) $
@@ -862,88 +887,178 @@ validateBackendClosureFunctionType entryName resultTy params bodyTy =
       unless (and (zipWith alphaEqBackendType declaredParamTys (map snd params)) && alphaEqBackendType declaredResultTy bodyTy) $
         Left (BackendClosureTypeMismatch entryName resultTy expected)
 
-backendAppClosureHead :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
-backendAppClosureHead mbContext fun
-  | backendExprMayDispatchByValueKind fun,
-    backendTypeIsFirstOrderFunctionPointer (backendExprType fun) =
-      Nothing
+backendCallableHead :: (String -> BackendCallableBindingKind) -> BackendExpr -> BackendCallableHead
+backendCallableHead resolve0 =
+  go resolve0
+  where
+    go resolve =
+      \case
+        BackendVar _ name ->
+          case resolve name of
+            BackendCallableBindingDirect ->
+              BackendDirectCallableHead (Just name)
+            BackendCallableBindingClosure ->
+              BackendClosureCallableHead name
+            BackendCallableBindingUnknown ->
+              BackendUnknownCallableHead
+        BackendLam {} ->
+          BackendDirectCallableHead Nothing
+        BackendClosure _ entryName _ _ _ ->
+          BackendClosureCallableHead entryName
+        BackendTyAbs _ _ _ body ->
+          go resolve body
+        BackendTyApp _ fun _ ->
+          go resolve fun
+        BackendLet _ name _ rhs body ->
+          go (extendBindingKind resolve name (go resolve rhs)) body
+        BackendCase _ _ alternatives ->
+          collapseCallableHeads
+            [ go (extendPatternBindingKinds resolve (backendAltPattern alternative) (backendAltBody alternative)) (backendAltBody alternative)
+            | alternative <- NE.toList alternatives
+            ]
+        _ ->
+          BackendUnknownCallableHead
+
+    extendBindingKind resolve name headShape localName
+      | localName == name =
+          callableBindingKindForHead headShape
+      | otherwise =
+          resolve localName
+
+backendCallableHeadInContext :: Maybe BackendValidationContext -> BackendExpr -> BackendCallableHead
+backendCallableHeadInContext mbContext =
+  backendCallableHead (backendCallableBindingKindInContext mbContext)
+
+backendCallableBindingKindInContext :: Maybe BackendValidationContext -> String -> BackendCallableBindingKind
+backendCallableBindingKindInContext Nothing _ =
+  BackendCallableBindingUnknown
+backendCallableBindingKindInContext (Just context0) name
+  | Set.member name (bvcClosureLocals context0) =
+      BackendCallableBindingClosure
+  | Set.member name (bvcPossibleClosureLocals context0) =
+      BackendCallableBindingUnknown
+  | Map.member name (bvcLocals context0) =
+      BackendCallableBindingDirect
+  | Set.member name (bvcClosureGlobals context0) =
+      BackendCallableBindingClosure
+  | Map.member name (bvcGlobals context0) =
+      BackendCallableBindingDirect
   | otherwise =
-      backendClosureValueName mbContext fun
+      BackendCallableBindingUnknown
 
-backendClosureValueName :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
-backendClosureValueName mbContext =
+callableBindingKindForHead :: BackendCallableHead -> BackendCallableBindingKind
+callableBindingKindForHead =
   \case
-    BackendClosure _ entryName _ _ _ ->
-      Just entryName
-    BackendVar _ name
-      | Just context0 <- mbContext,
-        backendContextNameIsClosureValue True context0 name ->
-          Just name
-    BackendTyAbs _ _ _ body ->
-      backendClosureValueName mbContext body
-    BackendTyApp _ fun _ ->
-      backendClosureValueName mbContext fun
-    BackendLet _ name bindingTy rhs body ->
-      backendClosureValueName (extendLetLocalMaybe mbContext name bindingTy rhs) body
-    BackendCase _ scrutinee alternatives ->
-      backendCaseClosureValueName mbContext (backendExprType scrutinee) alternatives
-    _ ->
-      Nothing
+    BackendDirectCallableHead _ ->
+      BackendCallableBindingDirect
+    BackendClosureCallableHead _ ->
+      BackendCallableBindingClosure
+    BackendUnknownCallableHead ->
+      BackendCallableBindingUnknown
 
-backendDefiniteClosureValueName :: Maybe BackendValidationContext -> BackendExpr -> Maybe String
-backendDefiniteClosureValueName mbContext =
-  \case
-    BackendClosure _ entryName _ _ _ ->
-      Just entryName
-    BackendVar _ name
-      | Just context0 <- mbContext,
-        backendContextNameIsClosureValue False context0 name ->
-          Just name
-    BackendTyAbs _ _ _ body ->
-      backendDefiniteClosureValueName mbContext body
-    BackendTyApp _ fun _ ->
-      backendDefiniteClosureValueName mbContext fun
-    BackendLet _ name bindingTy rhs body ->
-      backendDefiniteClosureValueName (extendLetLocalMaybe mbContext name bindingTy rhs) body
-    BackendCase _ scrutinee alternatives ->
-      backendCaseDefiniteClosureValueName mbContext (backendExprType scrutinee) alternatives
-    _ ->
-      Nothing
-
-backendCaseClosureValueName :: Maybe BackendValidationContext -> BackendType -> NonEmpty BackendAlternative -> Maybe String
-backendCaseClosureValueName mbContext scrutineeTy =
-  firstClosureValueName . map closureAlternativeName . NE.toList
+extendPatternBindingKinds ::
+  (String -> BackendCallableBindingKind) ->
+  BackendPattern ->
+  BackendExpr ->
+  String ->
+  BackendCallableBindingKind
+extendPatternBindingKinds resolve pattern0 body name
+  | Set.member name binders,
+    backendExprMentionsNameWithCallableType name body =
+      BackendCallableBindingClosure
+  | Set.member name binders =
+      BackendCallableBindingDirect
+  | otherwise =
+      resolve name
   where
-    closureAlternativeName alternative =
-      case validateBackendPattern mbContext scrutineeTy (backendAltPattern alternative) of
-        Right contextForBody -> backendClosureValueName contextForBody (backendAltBody alternative)
-        Left _ -> Nothing
+    binders = patternBinders pattern0
 
-backendCaseDefiniteClosureValueName :: Maybe BackendValidationContext -> BackendType -> NonEmpty BackendAlternative -> Maybe String
-backendCaseDefiniteClosureValueName mbContext scrutineeTy alternatives =
-  case traverse closureAlternativeName (NE.toList alternatives) of
-    Just names -> firstClosureValueName (map Just names)
-    Nothing -> Nothing
+collapseCallableHeads :: [BackendCallableHead] -> BackendCallableHead
+collapseCallableHeads heads
+  | all isClosureHead heads =
+      BackendClosureCallableHead (firstClosureHeadName heads)
+  | all isDirectHead heads =
+      BackendDirectCallableHead (firstDirectHeadName heads)
+  | otherwise =
+      BackendUnknownCallableHead
   where
-    closureAlternativeName alternative =
-      case validateBackendPattern mbContext scrutineeTy (backendAltPattern alternative) of
-        Right contextForBody -> backendDefiniteClosureValueName contextForBody (backendAltBody alternative)
-        Left _ -> Nothing
+    isClosureHead =
+      \case
+        BackendClosureCallableHead _ -> True
+        _ -> False
 
-firstClosureValueName :: [Maybe String] -> Maybe String
-firstClosureValueName [] =
-  Nothing
-firstClosureValueName (Nothing : rest) =
-  firstClosureValueName rest
-firstClosureValueName (Just value : _) =
-  Just value
+    isDirectHead =
+      \case
+        BackendDirectCallableHead _ -> True
+        _ -> False
 
-backendContextNameIsClosureValue :: Bool -> BackendValidationContext -> String -> Bool
-backendContextNameIsClosureValue includePossibleLocals context0 name
-  | Set.member name (bvcClosureLocals context0) = True
-  | includePossibleLocals && Set.member name (bvcPossibleClosureLocals context0) = True
-  | Map.member name (bvcLocals context0) = False
-  | otherwise = Set.member name (bvcClosureGlobals context0)
+firstClosureHeadName :: [BackendCallableHead] -> String
+firstClosureHeadName =
+  go
+  where
+    go [] =
+      "__mlfp_unknown_closure_head"
+    go (BackendClosureCallableHead name : _) =
+      name
+    go (_ : rest) =
+      go rest
+
+firstDirectHeadName :: [BackendCallableHead] -> Maybe String
+firstDirectHeadName =
+  go
+  where
+    go [] =
+      Nothing
+    go (BackendDirectCallableHead (Just name) : _) =
+      Just name
+    go (_ : rest) =
+      go rest
+
+backendExprMentionsNameWithCallableType :: String -> BackendExpr -> Bool
+backendExprMentionsNameWithCallableType needle =
+  go
+  where
+    go =
+      \case
+        BackendVar ty name ->
+          name == needle && backendTypeIsClosureValue ty
+        BackendLit {} ->
+          False
+        BackendLam _ name _ body
+          | name == needle -> False
+          | otherwise -> go body
+        BackendApp _ fun arg ->
+          go fun || go arg
+        BackendLet _ name _ rhs body
+          | name == needle -> go rhs
+          | otherwise -> go rhs || go body
+        BackendTyAbs _ _ _ body ->
+          go body
+        BackendTyApp ty (BackendVar _ name) _
+          | name == needle,
+            backendTypeIsClosureValue ty ->
+              True
+        BackendTyApp _ fun _ ->
+          go fun
+        BackendConstruct _ _ args ->
+          any go args
+        BackendCase _ scrutinee alternatives ->
+          go scrutinee || any goAlternative (NE.toList alternatives)
+        BackendRoll _ payload ->
+          go payload
+        BackendUnroll _ payload ->
+          go payload
+        BackendClosure _ _ captures params body ->
+          any (go . backendClosureCaptureExpr) captures
+            || (not (Set.member needle closureBinders) && go body)
+          where
+            closureBinders = Set.fromList (map backendClosureCaptureName captures ++ map fst params)
+        BackendClosureCall _ fun args ->
+          go fun || any go args
+
+    goAlternative (BackendAlternative pattern0 body)
+      | Set.member needle (patternBinders pattern0) = False
+      | otherwise = go body
 
 backendExprCallsNameAsClosureHead :: String -> BackendExpr -> Bool
 backendExprCallsNameAsClosureHead needle =
@@ -1075,9 +1190,13 @@ validateBackendClosureCall mbContext resultTy fun args =
     Nothing ->
       Left (BackendClosureCallExpectedFunction funTy)
     Just (paramTys, expectedResultTy) -> do
-      case backendDefiniteClosureValueName mbContext fun of
-        Just _ -> pure ()
-        Nothing -> Left (BackendClosureCallExpectedClosureValue funTy)
+      case backendCallableHeadInContext mbContext fun of
+        BackendClosureCallableHead _ ->
+          pure ()
+        BackendDirectCallableHead (Just name) ->
+          Left (BackendDirectCalledWithBackendClosureCall name)
+        _ ->
+          Left (BackendClosureCallExpectedClosureValue funTy)
       unless (length paramTys == length args) $
         Left (BackendClosureCallArityMismatch (length paramTys) (length args))
       zipWithM_
@@ -1486,12 +1605,16 @@ extendClosureShapeLocalMaybe ::
   BackendExpr ->
   Maybe BackendValidationContext
 extendClosureShapeLocalMaybe sourceContext targetContext name ty rhs
-  | Just _ <- backendDefiniteClosureValueName sourceContext rhs =
-      extendClosureLocalMaybe targetContext name ty
-  | Just _ <- backendClosureValueName sourceContext rhs =
-      extendPossibleClosureLocalMaybe targetContext name ty
-  | otherwise =
+  | not (backendTypeIsClosureValue ty) =
       extendLocalMaybe targetContext name ty
+  | otherwise =
+      case backendCallableHeadInContext sourceContext rhs of
+        BackendClosureCallableHead _ ->
+          extendClosureLocalMaybe targetContext name ty
+        BackendUnknownCallableHead ->
+          extendPossibleClosureLocalMaybe targetContext name ty
+        BackendDirectCallableHead _ ->
+          extendLocalMaybe targetContext name ty
 
 extendPatternLocals :: BackendValidationContext -> [(String, BackendType)] -> BackendValidationContext
 extendPatternLocals =
@@ -1510,44 +1633,6 @@ backendTypeIsClosureValue =
 isOpaqueIOBackendName :: BaseTy -> Bool
 isOpaqueIOBackendName (BaseTy name) =
   name == "IO" || name == "<builtin>.IO"
-
-backendExprMayDispatchByValueKind :: BackendExpr -> Bool
-backendExprMayDispatchByValueKind =
-  \case
-    BackendVar {} -> True
-    BackendTyApp {} -> True
-    BackendLet {} -> True
-    BackendCase {} -> True
-    _ -> False
-
-backendTypeIsFirstOrderFunctionPointer :: BackendType -> Bool
-backendTypeIsFirstOrderFunctionPointer ty =
-  case ty of
-    BTArrow {} ->
-      let (params, returnTy) = collectArrows ty
-       in all backendTypeIsFirstOrderPointerValue (returnTy : params)
-    _ ->
-      False
-  where
-    collectArrows =
-      \case
-        BTArrow param result ->
-          let (params, returnTy) = collectArrows result
-           in (param : params, returnTy)
-        other ->
-          ([], other)
-
-backendTypeIsFirstOrderPointerValue :: BackendType -> Bool
-backendTypeIsFirstOrderPointerValue =
-  \case
-    BTVar {} -> False
-    BTArrow {} -> False
-    BTBase {} -> True
-    BTCon _ args -> all backendTypeIsFirstOrderPointerValue args
-    BTVarApp {} -> False
-    BTForall {} -> False
-    BTMu {} -> True
-    BTBottom -> False
 
 dropTermLocalsMaybe :: Maybe BackendValidationContext -> Maybe BackendValidationContext
 dropTermLocalsMaybe =

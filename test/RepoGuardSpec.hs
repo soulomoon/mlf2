@@ -243,6 +243,20 @@ spec = describe "Repository guardrails" $ do
       $ \(path, src, markers) ->
         assertMarkersPresent path src markers
 
+  it "callable-shape contract stays explicit and direct-vs-closure call heads stay unambiguous" $ do
+    architectureSrc <- readFile "docs/architecture.md"
+    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
+    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
+    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
+    forM_
+      [ ("docs/architecture.md", architectureSrc, architectureCallableShapeMarkers),
+        ("src/MLF/Backend/IR.hs", backendIRSrc, backendIRCallableShapeMarkers),
+        ("src/MLF/Backend/Convert.hs", backendConvertSrc, backendConvertCallableShapeMarkers),
+        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, backendLowerCallableShapeMarkers)
+      ]
+      $ \(path, src, markers) ->
+        assertMarkersPresent path src markers
+
 discoverSpecModules :: FilePath -> IO [String]
 discoverSpecModules root = do
   hsFiles <- collectHsFiles root
@@ -546,6 +560,38 @@ eagerRuntimeExclusionMarkers =
     "no CAF update semantics",
     "no graph reduction",
     "no implicit laziness rescue"
+  ]
+
+architectureCallableShapeMarkers :: [String]
+architectureCallableShapeMarkers =
+  [ "That callable contract is explicit. `BackendApp` is the direct first-order",
+    "`BackendClosureCall` is the indirect closure-call node, so closure-valued",
+    "`BackendApp` heads must stay on the direct-call path",
+    "`BackendClosureCall` heads must remain closure"
+  ]
+
+backendIRCallableShapeMarkers :: [String]
+backendIRCallableShapeMarkers =
+  [ "`BackendApp` is the direct first-order call node",
+    "closure-valued heads violate a",
+    "`BackendClosureCall` is the indirect closure-call node",
+    "heads are rejected with explicit callable diagnostics."
+  ]
+
+backendConvertCallableShapeMarkers :: [String]
+backendConvertCallableShapeMarkers =
+  [ "`BackendApp` is reserved for direct first-order callable heads",
+    "closure-valued aliases, captured closures, and case/let-selected closure",
+    "values are emitted as `BackendClosureCall`"
+  ]
+
+backendLowerCallableShapeMarkers :: [String]
+backendLowerCallableShapeMarkers =
+  [ "indirect closure calls must use",
+    "the explicit `BackendClosureCall` node.",
+    "Lowering consumes that same callable",
+    "`BackendApp` remains the direct first-order call path",
+    "case/let-selected closure values must"
   ]
 
 futureLowerIRCriteriaMarkers :: [String]

@@ -12,10 +12,14 @@ elaboration IR, and `MLF.Backend.IR` is the single executable eager backend
 IR. Checked-program conversion publishes that eager executable representation
 into `MLF.Backend.IR`: direct application, explicit closures and
 `BackendClosureCall`, ADT construction and case analysis, lets, lambdas, type
-abstraction/application, and roll/unroll. Checked-program conversion stops at `MLF.Backend.IR`;
+abstraction/application, and roll/unroll. Within that executable contract,
+`BackendApp` is reserved for direct first-order callable heads, while
+closure-valued aliases, captured closures, and case/let-selected closure
+values are emitted as `BackendClosureCall`. Checked-program conversion stops at `MLF.Backend.IR`;
 unsupported checked shapes must fail here instead of being rerouted through a second IR layer.
 Unsupported checked shapes fail here instead of being normalized into lazy runtime artifacts, lowerer-private
-layout forms, or native-wrapper-specific machinery. There are no thunks, no update frames, no CAF update semantics, no graph reduction, and no implicit laziness rescue at this conversion boundary.
+layout forms, or native-wrapper-specific machinery. There are no thunks, no update frames, no CAF update semantics,
+no graph reduction, and no implicit laziness rescue at this conversion boundary.
 Any ANF-like normalization, layout-only structure, or lowerability-only
 representation stays private to backend-owned lowering helpers rather than
 becoming a second executable IR, a public `LowerableBackend.IR`, or a second
@@ -2878,98 +2882,21 @@ isClosureAliasTerm context scope term =
     _ -> False
 
 backendExprIsClosureValue :: ConvertContext -> ClosureScope -> BackendExpr -> Bool
-backendExprIsClosureValue context scope =
-  \case
-    BackendClosure {} -> True
-    BackendVar _ name -> closureScopeNameIsClosure context scope name
-    BackendTyAbs _ _ _ body -> backendExprIsClosureValue context scope body
-    BackendTyApp _ fun _ -> backendExprIsClosureValue context scope fun
-    BackendLet _ name _ rhs body ->
-      let bodyScope =
-            scope
-              { closureScopeLocals =
-                  ( if backendExprIsClosureValue context scope rhs
-                      then Set.insert
-                      else Set.delete
-                  )
-                    name
-                    (closureScopeLocals scope)
-              }
-       in backendExprIsClosureValue context bodyScope body
-    BackendCase {backendAlternatives = alternatives} ->
-      all alternativeIsClosureValue (NE.toList alternatives)
+backendExprIsClosureValue context scope expr =
+  case backendCallableHead (convertCallableBindingKind context scope) expr of
+    BackendClosureCallableHead _ -> True
     _ -> False
-  where
-    alternativeIsClosureValue alternative =
-      backendExprIsClosureValue
-        context
-        (scopeForPatternBody (backendAltPattern alternative) (backendAltBody alternative))
-        (backendAltBody alternative)
 
-    scopeForPatternBody pattern0 body =
-      scope
-        { closureScopeBoundTerms = closureScopeBoundTerms scope <> binders,
-          closureScopeLocals =
-            (closureScopeLocals scope `Set.difference` binders) <> closureBinders
-        }
-      where
-        binders = backendPatternBinders pattern0
-        closureBinders =
-          Set.filter
-            (\name -> backendExprMentionsNameWithClosureType name body)
-            binders
-
-backendPatternBinders :: BackendPattern -> Set.Set String
-backendPatternBinders =
-  \case
-    BackendDefaultPattern -> Set.empty
-    BackendConstructorPattern _ binders -> Set.fromList binders
-
-backendExprMentionsNameWithClosureType :: String -> BackendExpr -> Bool
-backendExprMentionsNameWithClosureType needle =
-  go
-  where
-    go =
-      \case
-        BackendVar ty name ->
-          name == needle && isClosureConvertibleFunctionType ty
-        BackendLit {} ->
-          False
-        BackendLam _ name _ body
-          | name == needle -> False
-          | otherwise -> go body
-        BackendApp _ fun arg ->
-          go fun || go arg
-        BackendLet _ name _ rhs body
-          | name == needle -> go rhs
-          | otherwise -> go rhs || go body
-        BackendTyAbs _ _ _ body ->
-          go body
-        BackendTyApp ty (BackendVar _ name) _
-          | name == needle,
-            isClosureConvertibleFunctionType ty ->
-              True
-        BackendTyApp _ fun _ ->
-          go fun
-        BackendConstruct _ _ args ->
-          any go args
-        BackendCase _ scrutinee alternatives ->
-          go scrutinee || any goAlternative (NE.toList alternatives)
-        BackendRoll _ payload ->
-          go payload
-        BackendUnroll _ payload ->
-          go payload
-        BackendClosure _ _ captures params body ->
-          any (go . backendClosureCaptureExpr) captures
-            || (not (Set.member needle closureBinders) && go body)
-          where
-            closureBinders = Set.fromList (map backendClosureCaptureName captures ++ map fst params)
-        BackendClosureCall _ fun args ->
-          go fun || any go args
-
-    goAlternative (BackendAlternative pattern0 body)
-      | Set.member needle (backendPatternBinders pattern0) = False
-      | otherwise = go body
+convertCallableBindingKind :: ConvertContext -> ClosureScope -> String -> BackendCallableBindingKind
+convertCallableBindingKind context scope name
+  | Set.member name (closureScopeLocals scope) =
+      BackendCallableBindingClosure
+  | Set.member name (closureScopeBoundTerms scope) =
+      BackendCallableBindingDirect
+  | Set.member name (ccClosureGlobals context) =
+      BackendCallableBindingClosure
+  | otherwise =
+      BackendCallableBindingDirect
 
 isClosureHeadTerm :: ConvertContext -> ClosureScope -> ElabTerm -> Bool
 isClosureHeadTerm context scope term =

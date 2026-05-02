@@ -45,11 +45,15 @@ entry functions are private LLVM functions with debug-friendly names supplied
 by `BackendClosure`; they take a hidden `ptr env` parameter before the erased
 monomorphic runtime arguments. Direct first-order backend calls keep using
 their existing first-order function symbols; indirect closure calls must use
-the explicit `BackendClosureCall` node. Raw LLVM emission and native emission
-both start from the same `MLF.Backend.IR` program; this private closure ABI,
-plus native wrapper/runtime symbol emission and executable rendering support,
-stays downstream of that IR rather than becoming a second executable IR or a
-lazy runtime.
+the explicit `BackendClosureCall` node. Lowering consumes that same callable
+contract rather than legalizing malformed `BackendApp` heads after let/case
+peeling. `BackendApp` remains the direct first-order call path, and closure-
+valued aliases, captured closures, and case/let-selected closure values must
+already reach lowering as `BackendClosureCall`. Raw LLVM emission and native emission
+both start from the same `MLF.Backend.IR` program; this private
+closure ABI, plus native wrapper/runtime symbol emission and executable
+rendering support, stays downstream of that IR rather than becoming a second
+executable IR or a lazy runtime.
 -}
 module MLF.Backend.LLVM.Lower
   ( BackendLLVMError (..),
@@ -3210,7 +3214,7 @@ applyEvidenceWrapperArgs :: BackendExpr -> BackendType -> [BackendExpr] -> Backe
 applyEvidenceWrapperArgs expr _ [] =
   expr
 applyEvidenceWrapperArgs expr ty args
-  | backendExprIsExplicitClosure expr =
+  | backendExprUsesClosureCallPath expr =
       BackendClosureCall
         { backendExprType = returnTy,
           backendClosureFunction = expr,
@@ -3225,15 +3229,10 @@ applyEvidenceWrapperArgs expr ty (arg : rest) =
     _ ->
       expr
 
-backendExprIsExplicitClosure :: BackendExpr -> Bool
-backendExprIsExplicitClosure =
-  \case
-    BackendClosure {} -> True
-    BackendTyAbs _ _ _ body -> backendExprIsExplicitClosure body
-    BackendTyApp _ fun _ -> backendExprIsExplicitClosure fun
-    BackendLet _ _ _ _ body -> backendExprIsExplicitClosure body
-    BackendCase _ _ alternatives ->
-      all (backendExprIsExplicitClosure . backendAltBody) (NE.toList alternatives)
+backendExprUsesClosureCallPath :: BackendExpr -> Bool
+backendExprUsesClosureCallPath expr =
+  case backendCallableHead (const BackendCallableBindingUnknown) expr of
+    BackendClosureCallableHead _ -> True
     _ -> False
 
 lowerFunction :: ProgramEnv -> String -> Bool -> FunctionForm -> Either BackendLLVMError LLVMFunction
@@ -3658,26 +3657,15 @@ pushCallIntoExpression context resultTy fun typeArgs args =
 applyCallToExpr :: String -> BackendType -> BackendExpr -> [BackendType] -> [BackendExpr] -> Either BackendLLVMError BackendExpr
 applyCallToExpr context expectedTy expr typeArgs args = do
   (typedExpr, typedExprTy) <- applyTypeApplicationsToExprWithType context expr typeArgs
-  case explicitClosureCall typedExpr typedExprTy of
-    Just applied ->
-      pure applied
-    Nothing -> do
+  case backendCallableHead (const BackendCallableBindingUnknown) typedExpr of
+    BackendClosureCallableHead name ->
+      Left (BackendLLVMValidationFailed (BackendClosureCalledWithBackendApp name))
+    _ -> do
       (applied, actualTy) <- foldM applyOne (typedExpr, typedExprTy) args
       unless (alphaEqBackendType expectedTy actualTy) $
         Left (BackendLLVMInternalError ("call result mismatch at " ++ context))
       pure applied
   where
-    explicitClosureCall typedExpr typedExprTy
-      | backendExprIsExplicitClosure typedExpr,
-        length args == length paramTys,
-        and (zipWith alphaEqBackendType paramTys (map backendExprType args)),
-        alphaEqBackendType expectedTy returnTy =
-          Just (BackendClosureCall expectedTy typedExpr args)
-      | otherwise =
-          Nothing
-      where
-        (paramTys, returnTy) = collectArrowsType typedExprTy
-
     applyOne (current, currentTy) arg =
       case currentTy of
         BTArrow expectedArgTy resultTy
@@ -4090,13 +4078,17 @@ lowerCall env exprEnv context expr =
         BackendTyAbs {} ->
           lowerDirectFunctionCall env exprEnv context (backendExprType expr) (functionFormFromExpr headExpr) typeArgs args
         _ ->
-          case pushCallIntoExpression context (backendExprType expr) headExpr typeArgs args of
-            Right (Just applied) ->
-              lowerExpr env exprEnv context applied
-            Right Nothing ->
-              liftEither (BackendLLVMUnsupportedCall ("unsupported call head at " ++ context))
-            Left err ->
-              liftEither err
+          case backendCallableHead (const BackendCallableBindingUnknown) headExpr of
+            BackendClosureCallableHead name ->
+              liftEither (BackendLLVMValidationFailed (BackendClosureCalledWithBackendApp name))
+            _ ->
+              case pushCallIntoExpression context (backendExprType expr) headExpr typeArgs args of
+                Right (Just applied) ->
+                  lowerExpr env exprEnv context applied
+                Right Nothing ->
+                  liftEither (BackendLLVMUnsupportedCall ("unsupported call head at " ++ context))
+                Left err ->
+                  liftEither err
 
 lowerIndirectValueCall :: ProgramEnv -> ExprEnv -> String -> String -> LowerValue -> [BackendType] -> [BackendExpr] -> LowerM LowerValue
 lowerIndirectValueCall env exprEnv context name callee typeArgs args = do

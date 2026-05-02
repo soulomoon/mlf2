@@ -1337,31 +1337,11 @@ spec = describe "MLF.Backend.LLVM" $ do
     runLLVMNativeExecutable nativeOutput
       `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
 
-  it "lowers BackendApp case heads that select direct closures" $ do
-    output <- requireRight (renderBackendProgramLLVM caseHeadedDirectClosureBackendAppProgram)
-
-    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$backend_app_case_some\""
-    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
-    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM call"
-    validateLLVMAssembly output
-    validateLLVMObjectCode output
-
-    nativeOutput <- requireRight (renderBackendProgramNativeLLVM caseHeadedDirectClosureBackendAppProgram)
-    runLLVMNativeExecutable nativeOutput
-      `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
-
-  it "lowers BackendApp let heads that select direct closures" $ do
-    output <- requireRight (renderBackendProgramLLVM letHeadedDirectClosureBackendAppProgram)
-
-    output `shouldSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$backend_app_let\""
-    output `shouldSatisfy` isInfixOf "call i64 %\"__llvm.closure.code."
-    output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM call"
-    validateLLVMAssembly output
-    validateLLVMObjectCode output
-
-    nativeOutput <- requireRight (renderBackendProgramNativeLLVM letHeadedDirectClosureBackendAppProgram)
-    runLLVMNativeExecutable nativeOutput
-      `shouldReturn` NativeRunResult ExitSuccess "41\n" ""
+  it "rejects BackendApp heads that select closure values through let or case" $ do
+    renderBackendProgramLLVM caseHeadedDirectClosureBackendAppProgram
+      `shouldSatisfyLeft` isInfixOf "Backend LLVM validation failed: BackendClosureCalledWithBackendApp \"__mlfp_closure$backend_app_case_some\""
+    renderBackendProgramLLVM letHeadedDirectClosureBackendAppProgram
+      `shouldSatisfyLeft` isInfixOf "Backend LLVM validation failed: BackendClosureCalledWithBackendApp \"__mlfp_closure$backend_app_let\""
 
   it "captures first-order lambda parameters as raw function pointers" $ do
     output <- requireRight (renderBackendProgramLLVM capturedFirstOrderParameterClosureProgram)
@@ -4760,7 +4740,7 @@ capturedNullaryGlobalCaseClosureProgram =
                                 backendClosureEntryName = "__mlfp_closure$call_captured_nullary_global_case",
                                 backendClosureCaptures = [BackendClosureCapture "f" unaryIntTy (BackendVar unaryIntTy "getCaseClosure")],
                                 backendClosureParams = [("x", intTy)],
-                                backendClosureBody = BackendApp intTy (BackendVar unaryIntTy "f") (BackendVar intTy "x")
+                                backendClosureBody = BackendClosureCall intTy (BackendVar unaryIntTy "f") [BackendVar intTy "x"]
                               }
                           )
                           [intLit 999],
@@ -4996,15 +4976,15 @@ rawFunctionPointerFieldCallProgram =
                           "box"
                           fnBoxTy
                           (BackendConstruct fnBoxTy "FnBox" [BackendVar unaryIntTy "helper"])
-                          ( BackendCase
-                              intTy
-                              (BackendVar fnBoxTy "box")
-                              ( BackendAlternative
-                                  (BackendConstructorPattern "FnBox" ["f"])
-                                  (BackendApp intTy (BackendVar unaryIntTy "f") (intLit 41))
-                                  :| []
-                              )
-                          ),
+                              ( BackendCase
+                                  intTy
+                                  (BackendVar fnBoxTy "box")
+                                  ( BackendAlternative
+                                      (BackendConstructorPattern "FnBox" ["f"])
+                                      (BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 41])
+                                      :| []
+                                  )
+                              ),
                       backendBindingExportedAsMain = True
                     }
                 ]
@@ -5051,7 +5031,7 @@ closureFunctionFieldCallProgram =
                                   (BackendVar fnBoxTy "box")
                                   ( BackendAlternative
                                       (BackendConstructorPattern "FnBox" ["f"])
-                                      (BackendApp intTy (BackendVar unaryIntTy "f") (intLit 0))
+                                      (BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 0])
                                       :| []
                                   )
                               )
@@ -5103,7 +5083,7 @@ returnedClosureFunctionFieldCallProgram =
                           (BackendApp fnBoxTy (BackendVar (BTArrow intTy fnBoxTy) "makeBox") (intLit 41))
                           ( BackendAlternative
                               (BackendConstructorPattern "FnBox" ["f"])
-                              (BackendApp intTy (BackendVar unaryIntTy "f") (intLit 0))
+                              (BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 0])
                               :| []
                           ),
                       backendBindingExportedAsMain = True
@@ -5170,7 +5150,7 @@ returnedReboxedClosureFunctionFieldCallProgram =
                               )
                               ( BackendAlternative
                                   (BackendConstructorPattern "FnBox" ["f"])
-                                  (BackendApp intTy (BackendVar unaryIntTy "f") (intLit 0))
+                                  (BackendClosureCall intTy (BackendVar unaryIntTy "f") [intLit 0])
                                   :| []
                               )
                           ),

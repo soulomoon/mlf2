@@ -798,6 +798,7 @@ spec = describe "MLF.Backend.Convert" $ do
     backendBindingExpr useBinding `shouldSatisfy` containsBackendCase
     backendBindingExpr useBinding `shouldSatisfy` containsBackendClosure
     backendBindingExpr useBinding `shouldSatisfy` containsBackendClosureCall
+    backendBindingExpr useBinding `shouldNotSatisfy` containsBackendCaseHeadedApp
 
   it "lets function-valued case fields shadow same-named closure globals" $ do
     checked <- requireChecked shadowedGlobalClosureHeadProgram
@@ -1819,6 +1820,37 @@ containsBackendApp expr =
     BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
       containsBackendApp fun || any containsBackendApp args
     _ -> False
+
+containsBackendCaseHeadedApp :: BackendExpr -> Bool
+containsBackendCaseHeadedApp expr =
+  case expr of
+    BackendApp {backendFunction = fun, backendArgument = arg} ->
+      isCaseHead fun || containsBackendCaseHeadedApp fun || containsBackendCaseHeadedApp arg
+    BackendCase {backendScrutinee = scrutinee, backendAlternatives = alternatives} ->
+      containsBackendCaseHeadedApp scrutinee || any (containsBackendCaseHeadedApp . backendAltBody) (toList alternatives)
+    BackendLam {backendBody = body} -> containsBackendCaseHeadedApp body
+    BackendLet {backendLetRhs = rhs, backendLetBody = body} ->
+      containsBackendCaseHeadedApp rhs || containsBackendCaseHeadedApp body
+    BackendTyAbs {backendTyAbsBody = body} -> containsBackendCaseHeadedApp body
+    BackendTyApp {backendTyFunction = fun} -> containsBackendCaseHeadedApp fun
+    BackendConstruct {backendConstructArgs = args} -> any containsBackendCaseHeadedApp args
+    BackendRoll {backendRollPayload = body} -> containsBackendCaseHeadedApp body
+    BackendUnroll {backendUnrollPayload = body} -> containsBackendCaseHeadedApp body
+    BackendClosure {backendClosureCaptures = captures, backendClosureBody = body} ->
+      any (containsBackendCaseHeadedApp . backendClosureCaptureExpr) captures || containsBackendCaseHeadedApp body
+    BackendClosureCall {backendClosureFunction = fun, backendClosureArguments = args} ->
+      containsBackendCaseHeadedApp fun || any containsBackendCaseHeadedApp args
+    _ -> False
+  where
+    isCaseHead headExpr =
+      case stripTyApps headExpr of
+        BackendCase {} -> True
+        _ -> False
+
+    stripTyApps headExpr =
+      case headExpr of
+        BackendTyApp {backendTyFunction = fun} -> stripTyApps fun
+        other -> other
 
 containsBackendClosure :: BackendExpr -> Bool
 containsBackendClosure expr =

@@ -156,6 +156,13 @@ abstraction/application, and recursive roll/unroll. The validation-visible
 invariants for those executable shapes live at this boundary so conversion and
 lowering share one executable contract.
 
+That callable contract is explicit. `BackendApp` is the direct first-order
+call node, so local direct aliases that remain first-order stay on this path.
+`BackendClosureCall` is the indirect closure-call node, so closure-valued
+aliases, captured closures, constructor-field projections, and case/let-
+selected closure values stay on this explicit path instead of relying on
+lowerer recovery.
+
 LLVM/native lowering owns only downstream private lowering/runtime details for
 that same `MLF.Backend.IR` program: closure-record layout and closure ABI
 details, environment-record layout, layout-only lowering helpers, native
@@ -185,6 +192,9 @@ The boundary invariants are:
 - variable references must resolve either to lexical binders introduced by
   lambda/let/case patterns or to globally unique program bindings, and the
   carried variable type must match that binding;
+- `BackendApp` heads must stay on the direct-call path, while malformed direct
+  calls on closure-valued heads fail with explicit backend callable
+  diagnostics;
 - lambda, application, let, type abstraction/application, recursive roll, and
   recursive unroll nodes satisfy local type equalities checked by
   `validateBackendProgram`;
@@ -196,8 +206,9 @@ The boundary invariants are:
   closure entry names must be unique, capture and value-parameter binders must
   be locally unique, capture expressions must match their declared capture
   types, the closure body must match the declared function result after value
-  parameters are applied, and `BackendClosureCall` arguments must match the
-  function type carried by the closure expression.
+  parameters are applied, `BackendClosureCall` heads must remain closure
+  values rather than direct callables, and `BackendClosureCall` arguments must
+  match the function type carried by the closure expression.
 
 This module intentionally lives in the private `mlf2-internal` library for now.
 Conversion and lowering modules should depend on this IR rather than reaching
@@ -231,7 +242,8 @@ environment pointer or null. Non-empty environments are heap records with one
 machine word per captured runtime value. Closure entry functions are private
 LLVM functions named by the backend IR and take a hidden `ptr env` argument
 before erased monomorphic value parameters. Direct first-order calls still use
-the existing direct-call path; indirect calls must be represented with
+the existing direct-call path; closure-valued aliases, captured closures, and
+case/let-selected closure values must be represented with
 `BackendClosureCall`.
 
 Checked-program conversion now closure-converts ordinary monomorphic escaping
