@@ -52,6 +52,12 @@ The eager sequencing contract stays explicit on that same path:
 Native execution relies on that explicit eager contract instead of fallback
 runtime execution or implicit laziness rescue.
 
+Row-6 polymorphism/lowerability is part of the same raw/native inspection
+contract. checked `Backend.IR` may still carry `BackendTyAbs` and `BackendTyApp`.
+LLVM/native lowering owns only the specialization-based lowerable subset.
+Complete type applications may specialize privately inside the lowerer.
+Residual runtime polymorphism remains unsupported and must fail with explicit diagnostics without widening the backend boundary. Unsupported polymorphic `main` bindings, unspecialized polymorphic values, escaping type abstractions or polymorphic bindings, partial type applications, and non-native-renderable polymorphic results must fail before emission rather than silently surviving as raw or native rows.
+
 ## Emission Modes
 
 `emit-backend` prints the raw LLVM module lowered from that same

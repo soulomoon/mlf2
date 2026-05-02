@@ -182,6 +182,65 @@ spec = describe "MLF.Backend.LLVM" $ do
     length (filter (isInfixOf "define private ptr @\"poly$t") (lines output)) `shouldBe` 2
     validateLLVMAssembly output
 
+  describe "polymorphism lowerability contract" $ do
+    it "supports top-level complete type application through static specialization" $ do
+      output <- requireRight (renderBackendProgramLLVM polymorphicZeroArityProgram)
+
+      output `shouldSatisfy` isInfixOf "define private ptr @\"none$t"
+      output `shouldSatisfy` isInfixOf "call ptr @\"none$t"
+      validateLLVMAssembly output
+
+    it "supports local closure-sensitive specialization when type applications cross let heads" $ do
+      output <- requireRight (renderBackendProgramLLVM letHeadPolymorphicClosureCallProgram)
+
+      output `shouldSatisfy` isInfixOf "define private i64 @\"polyLocal$"
+      output `shouldSatisfy` isInfixOf "store ptr @\"polyLocal$"
+      output `shouldSatisfy` isInfixOf "$__mlfp_closure$direct_call_poly\""
+      validateLLVMAssembly output
+
+    it "supports first-class polymorphic lowering on the existing static lane" $ do
+      output <-
+        withTempProgram localFirstClassPolymorphismProgram $ \path ->
+          requireRight =<< emitBackendFile path
+
+      output `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
+      output `shouldNotSatisfy` isInfixOf "Unsupported backend LLVM type"
+      validateLLVMAssembly output
+
+    it "qualifies closure entries emitted from type specializations" $ do
+      output <- requireRight (renderBackendProgramLLVM polymorphicClosureSpecializationProgram)
+
+      let closureDefinitions =
+            filter
+              (\line -> "define private i64 @\"poly$t" `isInfixOf` line && "$__mlfp_closure$poly\"" `isInfixOf` line)
+              (lines output)
+      length closureDefinitions `shouldBe` 2
+      output `shouldNotSatisfy` isInfixOf "define private i64 @\"__mlfp_closure$poly\""
+      output `shouldNotSatisfy` isInfixOf "store ptr @\"__mlfp_closure$poly\""
+      validateLLVMAssembly output
+
+    it "rejects polymorphic main bindings before LLVM emission" $ do
+      result <- withTempProgram sourceEscapingPolymorphicMainProgram emitBackendFile
+
+      result
+        `shouldSatisfy` either
+          (isInfixOf "polymorphic main binding")
+          (const False)
+
+    it "rejects unspecialized polymorphic bindings that escape specialization" $ do
+      renderBackendProgramLLVM unspecializedPolymorphicBindingProgram
+        `shouldSatisfyLeft` isInfixOf "unspecialized polymorphic binding"
+
+    it "rejects escaping type abstractions and escaping polymorphic bindings as runtime values" $ do
+      renderBackendProgramLLVM escapingTypeAbstractionProgram
+        `shouldSatisfyLeft` isInfixOf "escaping type abstraction"
+      renderBackendProgramLLVM escapingPolymorphicBindingProgram
+        `shouldSatisfyLeft` isInfixOf "escaping polymorphic binding"
+
+    it "rejects partial type application instead of inventing runtime polymorphism" $ do
+      renderBackendProgramLLVM partialTypeApplicationProgram
+        `shouldSatisfyLeft` isInfixOf "partial type application"
+
   it "specializes polymorphic zero-arity globals used through type application" $ do
     output <- requireRight (renderBackendProgramLLVM polymorphicZeroArityProgram)
 
@@ -3577,6 +3636,23 @@ resultBoxData =
       backendDataConstructors = [BackendConstructor "ResultBox" [] [intTy] resultBoxTy]
     }
 
+singleFieldBoxTy :: String -> BackendType
+singleFieldBoxTy name =
+  BTBase (BaseTy name)
+
+singleFieldBoxData :: String -> BackendType -> BackendData
+singleFieldBoxData name fieldTy =
+  BackendData
+    { backendDataName = name,
+      backendDataParameters = [],
+      backendDataConstructors =
+        [BackendConstructor ("Mk" ++ name) [] [fieldTy] (singleFieldBoxTy name)]
+    }
+
+singleFieldBoxExpr :: String -> BackendExpr -> BackendExpr
+singleFieldBoxExpr name field =
+  BackendConstruct (singleFieldBoxTy name) ("Mk" ++ name) [field]
+
 nonePolyTy :: BackendType
 nonePolyTy =
   BTForall "a" Nothing (optionTy (BTVar "a"))
@@ -3644,6 +3720,140 @@ polyIdCall ty arg =
     ty
     (BackendTyApp (BTArrow ty ty) (BackendVar polyIdTy "poly") ty)
     arg
+
+unspecializedPolymorphicBindingProgram :: BackendProgram
+unspecializedPolymorphicBindingProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData, singleFieldBoxData "UnspecializedPolyBox" nonePolyTy],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "none",
+                      backendBindingType = nonePolyTy,
+                      backendBindingExpr = nonePolyExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = singleFieldBoxTy "UnspecializedPolyBox",
+                      backendBindingExpr =
+                        singleFieldBoxExpr "UnspecializedPolyBox" (BackendVar nonePolyTy "none"),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+escapingTypeAbstractionProgram :: BackendProgram
+escapingTypeAbstractionProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [optionData, singleFieldBoxData "EscapingTyAbsBox" nonePolyTy],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = singleFieldBoxTy "EscapingTyAbsBox",
+                      backendBindingExpr =
+                        singleFieldBoxExpr "EscapingTyAbsBox" nonePolyExpr,
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+escapingPolymorphicBindingProgram :: BackendProgram
+escapingPolymorphicBindingProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [singleFieldBoxData "EscapingPolyBindingBox" polyIdTy],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "poly",
+                      backendBindingType = polyIdTy,
+                      backendBindingExpr = polyIdExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = singleFieldBoxTy "EscapingPolyBindingBox",
+                      backendBindingExpr =
+                        singleFieldBoxExpr "EscapingPolyBindingBox" (BackendVar polyIdTy "poly"),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+partialTypeApplicationProgram :: BackendProgram
+partialTypeApplicationProgram =
+  BackendProgram
+    { backendProgramModules =
+        [ BackendModule
+            { backendModuleName = "Main",
+              backendModuleData = [singleFieldBoxData "PartialTypeAppBox" partialPolyAfterIntTy],
+              backendModuleBindings =
+                [ BackendBinding
+                    { backendBindingName = "polyPartial",
+                      backendBindingType = partialPolyTy,
+                      backendBindingExpr = partialPolyExpr,
+                      backendBindingExportedAsMain = False
+                    },
+                  BackendBinding
+                    { backendBindingName = "main",
+                      backendBindingType = singleFieldBoxTy "PartialTypeAppBox",
+                      backendBindingExpr =
+                        singleFieldBoxExpr
+                          "PartialTypeAppBox"
+                          (BackendTyApp partialPolyAfterIntTy (BackendVar partialPolyTy "polyPartial") intTy),
+                      backendBindingExportedAsMain = True
+                    }
+                ]
+            }
+        ],
+      backendProgramMain = "main"
+    }
+
+partialPolyTy :: BackendType
+partialPolyTy =
+  BTForall "a" Nothing (BTForall "b" Nothing (BTArrow (BTVar "a") (BTVar "a")))
+
+partialPolyAfterIntTy :: BackendType
+partialPolyAfterIntTy =
+  BTForall "b" Nothing unaryIntTy
+
+partialPolyExpr :: BackendExpr
+partialPolyExpr =
+  BackendTyAbs
+    partialPolyTy
+    "a"
+    Nothing
+    ( BackendTyAbs
+        partialPolyAfterATy
+        "b"
+        Nothing
+        ( BackendLam
+            (BTArrow (BTVar "a") (BTVar "a"))
+            "x"
+            (BTVar "a")
+            (BackendVar (BTVar "a") "x")
+        )
+    )
+
+partialPolyAfterATy :: BackendType
+partialPolyAfterATy =
+  BTForall "b" Nothing (BTArrow (BTVar "a") (BTVar "a"))
 
 partialApplicationProgram :: BackendProgram
 partialApplicationProgram =

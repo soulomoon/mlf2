@@ -68,6 +68,10 @@ A later lower IR may be introduced only when all of the following hold:
 * the eager boundary is reviewable here: let RHS before body, case scrutinee before branch selection, direct/primitive call arguments in written order, and effect sequencing remains explicit through `__io_bind`;
 * unsupported broader primitive or ordering-sensitive shapes stay on explicit
   backend diagnostic paths instead of a fallback runtime lane;
+* checked `Backend.IR` may still carry `BackendTyAbs` and `BackendTyApp`;
+* LLVM/native lowering owns only the specialization-based lowerable subset;
+* complete type applications may specialize privately inside the lowerer; and
+* residual runtime polymorphism remains unsupported and must fail with explicit diagnostics without widening the backend boundary;
 * `BackendClosureCall` is the indirect closure-call node, so closure-valued
   aliases, captured closures, constructor-field projections, and case/let-
   selected closure values stay on this explicit path, and confused direct-call
@@ -75,7 +79,8 @@ A later lower IR may be introduced only when all of the following hold:
 
 The IR may still carry explicit type abstraction/application and recursive
 roll/unroll nodes. Lowering passes are expected to reject unsupported backend
-features at their own boundary rather than weakening this checked IR contract.
+features at their own boundary rather than weakening this checked IR contract
+or erasing runtime polymorphism by accident.
 -}
 -}
 module MLF.Backend.IR

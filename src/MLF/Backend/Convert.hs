@@ -30,6 +30,11 @@ or storage policy, nullary layout, or layout-only witnesses.
 Row-5 primitive/eager ownership keeps the primitive surface at the closed reserved runtime-binding set `__mlfp_and`, `__io_pure`, `__io_bind`, and `__io_putStrLn`.
 Checked-program conversion keeps those primitives on the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime lane.
 The emitted eager structure stays reviewable here: let RHS before body, case scrutinee before branch selection, direct/primitive call arguments in written order, and effect sequencing remains explicit through `__io_bind`.
+Row-6 polymorphism/lowerability stays explicit here too: checked `Backend.IR` may still carry `BackendTyAbs` and `BackendTyApp`.
+Checked-program conversion preserves those nodes when the checked program needs them instead of erasing polymorphism just to satisfy LLVM.
+LLVM/native lowering owns only the specialization-based lowerable subset.
+Complete type applications may specialize privately inside the lowerer.
+Residual runtime polymorphism remains unsupported and must fail with explicit diagnostics without widening the backend boundary.
 Any ANF-like normalization, layout-only structure, or lowerability-only
 representation stays private to backend-owned lowering helpers rather than
 becoming a second executable IR, a public `LowerableBackend.IR`, or a second

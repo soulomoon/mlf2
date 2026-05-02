@@ -190,6 +190,13 @@ Unsupported broader primitive or ordering-sensitive shapes stay on explicit
 backend diagnostic paths instead of falling through to a fallback runtime
 path.
 
+The row-6 polymorphism/lowerability contract is explicit too:
+
+- checked `Backend.IR` may still carry `BackendTyAbs` and `BackendTyApp`.
+- LLVM/native lowering owns only the specialization-based lowerable subset.
+- Complete type applications may specialize privately inside the lowerer.
+- Residual runtime polymorphism remains unsupported and must fail with explicit diagnostics without widening the backend boundary.
+
 LLVM/native lowering owns only downstream private lowering/runtime details for
 that same `MLF.Backend.IR` program: closure-record layout and closure ABI
 details, environment-record layout, layout-only lowering helpers, native

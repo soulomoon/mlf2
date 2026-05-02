@@ -93,6 +93,25 @@ The lowerer relies on the current eager order exactly as written:
 Unsupported broader primitive or ordering-sensitive shapes still fail with
 explicit backend diagnostics instead of widening this boundary.
 -}
+{- Note [Polymorphism erasure and lowerability]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Row-6 keeps checked `Backend.IR` permissive while keeping emitted executables
+narrow:
+
+* checked `Backend.IR` may still carry `BackendTyAbs` and `BackendTyApp`.
+* LLVM/native lowering owns only the specialization-based lowerable subset.
+* Complete type applications may specialize privately inside the lowerer.
+* Residual runtime polymorphism remains unsupported and must fail with explicit diagnostics without widening the backend boundary.
+
+`collectRequiredSpecializations`, `lowerTyApp`, and `lowerGlobalValue` keep the
+current static specialization lane alive for complete type applications and
+other fully instantiated callable paths. `lowerExpr` rejects escaping
+`BackendTyAbs` values, `resolveTypeArguments` rejects partial type
+applications, `lowerFunction` rejects unspecialized polymorphic functions that
+would otherwise be emitted directly, and `lowerBackendProgramNative` together
+with `nativeRenderableKind` reject polymorphic `main` bindings or result
+shapes before native emission.
+-}
 module MLF.Backend.LLVM.Lower
   ( BackendLLVMError (..),
     evidenceFunctionTypesCompatible,
@@ -3731,6 +3750,9 @@ applyCallToExpr context expectedTy expr typeArgs args = do
 
 lowerLocalFunctionValue :: ProgramEnv -> String -> BackendType -> String -> LocalFunction -> [BackendType] -> LowerM LowerValue
 lowerLocalFunctionValue env context resultTy name localFunction typeArgs = do
+  case residualZeroArityPolymorphism context typeArgs (lfForm localFunction) of
+    Just err -> liftEither err
+    Nothing -> pure ()
   (resolvedTypeArgs, form0) <- instantiateFunctionFormWithTypeArgsM context (lfForm localFunction) typeArgs []
   let form = qualifyInstantiatedClosureEntries name resolvedTypeArgs form0
   lowerInstantiatedFunctionValue env (lfCapturedEnv localFunction) context name resultTy form
@@ -3854,7 +3876,11 @@ lowerGlobalValue env context resultTy name binding typeArgs =
     ([], _ : _) ->
       liftEither (BackendLLVMUnsupportedCall ("unexpected type arguments at " ++ context))
     (_ : _, []) ->
-      liftEither (BackendLLVMUnsupportedExpression context ("escaping polymorphic binding " ++ show name))
+      case residualZeroArityPolymorphism context typeArgs form of
+        Just err ->
+          liftEither err
+        Nothing ->
+          liftEither (BackendLLVMUnsupportedExpression context ("escaping polymorphic binding " ++ show name))
     (_ : _, _) -> do
       (resolvedTypeArgs, instantiated) <- instantiateFunctionFormWithTypeArgsM context form typeArgs []
       lowerInstantiatedGlobalValue resultTy name binding resolvedTypeArgs instantiated
@@ -3886,6 +3912,15 @@ lowerGlobalValue env context resultTy name binding typeArgs =
       requireEvidenceFunctionType context functionContext expectedTy actualTy
       functionName <- globalFunctionName env context binding0 resolvedTypeArgs
       pure (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr functionName))
+
+residualZeroArityPolymorphism :: String -> [BackendType] -> FunctionForm -> Maybe BackendLLVMError
+residualZeroArityPolymorphism context typeArgs form
+  | null typeArgs,
+    not (null (ffTypeBinders form)),
+    null (ffParams form) =
+      Just (BackendLLVMUnsupportedExpression context "unspecialized polymorphic binding")
+  | otherwise =
+      Nothing
 
 lowerLit :: ProgramEnv -> String -> BackendType -> Lit -> LowerM LowerValue
 lowerLit env context ty lit = do

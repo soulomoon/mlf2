@@ -289,6 +289,22 @@ spec = describe "Repository guardrails" $ do
       $ \(path, src, markers) ->
         assertMarkersPresent path src markers
 
+  it "polymorphism-erasure and lowerability contract stays explicit without widening the backend boundary" $ do
+    architectureSrc <- readFile "docs/architecture.md"
+    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
+    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
+    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
+    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
+    forM_
+      [ ("docs/architecture.md", architectureSrc, polymorphismLowerabilityMarkers),
+        ("docs/backend-native-pipeline.md", nativePipelineSrc, polymorphismLowerabilityMarkers),
+        ("src/MLF/Backend/IR.hs", backendIRSrc, polymorphismLowerabilityMarkers),
+        ("src/MLF/Backend/Convert.hs", backendConvertSrc, polymorphismLowerabilityMarkers),
+        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, polymorphismLowerabilityMarkers)
+      ]
+      $ \(path, src, markers) ->
+        assertMarkersPresent path src markers
+
 discoverSpecModules :: FilePath -> IO [String]
 discoverSpecModules root = do
   hsFiles <- collectHsFiles root
@@ -667,6 +683,14 @@ primitiveOperationEagerOrderMarkers =
     "case scrutinee before branch selection",
     "direct/primitive call arguments in written order",
     "effect sequencing remains explicit through `__io_bind`"
+  ]
+
+polymorphismLowerabilityMarkers :: [String]
+polymorphismLowerabilityMarkers =
+  [ "checked `Backend.IR` may still carry `BackendTyAbs` and `BackendTyApp`",
+    "LLVM/native lowering owns only the specialization-based lowerable subset",
+    "type applications may specialize privately inside the lowerer",
+    "runtime polymorphism remains unsupported and must fail with explicit diagnostics without widening the backend boundary"
   ]
 
 futureLowerIRCriteriaMarkers :: [String]

@@ -1,0 +1,82 @@
+{
+  "round_id": "round-227",
+  "attempt": 1,
+  "status": "authoritative",
+  "decision": "approved",
+  "implemented_stage_result": "accepted",
+  "attempt_verdict": "accepted",
+  "stage_action": "finalize",
+  "retry_reason": "none",
+  "fix_hypothesis": "not needed",
+  "merge_readiness": "satisfied",
+  "controller_merge_hygiene": "satisfied",
+  "base_branch": "master",
+  "branch": "orchestrator/round-227-freeze-polymorphism-lowerability-contract",
+  "base_commit": "b4e239c5d6fafd55ed56ed81154ec4e3faf79ac8",
+  "head_commit": "b4e239c5d6fafd55ed56ed81154ec4e3faf79ac8",
+  "merge_base": "b4e239c5d6fafd55ed56ed81154ec4e3faf79ac8",
+  "roadmap_id": "2026-05-02-00-backend-ir-executable-boundary-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-02-00-backend-ir-executable-boundary-roadmap/rev-001",
+  "milestone_id": "milestone-6",
+  "direction_id": "direction-6a-freeze-polymorphism-lowerability-contract",
+  "extracted_item_id": null,
+  "review_path": "orchestrator/rounds/round-227/review.md",
+  "review_snapshot": "orchestrator/rounds/round-227/reviews/attempt-1.md",
+  "merge_payload_files": [
+    "docs/architecture.md",
+    "docs/backend-native-pipeline.md",
+    "src/MLF/Backend/IR.hs",
+    "src/MLF/Backend/Convert.hs",
+    "src/MLF/Backend/LLVM/Lower.hs",
+    "docs/plans/2026-05-02-backend-ir-executable-boundary-mechanism-table.md",
+    "test/BackendLLVMSpec.hs",
+    "test/RepoGuardSpec.hs"
+  ],
+  "residual_risks": [
+    "Milestone-7 remains intentionally open and row 7 stays NO in the mechanism table.",
+    "The accepted result freezes only the current specialization-based row-6 lowerability boundary; any broader runtime-polymorphism support, public lowering surface, fallback lowering lane, or second executable IR will require new evidence and a later accepted round or roadmap revision."
+  ],
+  "mechanism_table": {
+    "row_1_ir_role_separation_and_non_duplication": "YES",
+    "row_2_eager_runtime_lowering_contract": "YES",
+    "row_3_direct_calls_closure_values_and_callable_shapes": "YES",
+    "row_4_adt_case_semantics_versus_layout": "YES",
+    "row_5_primitive_operations_and_eager_evaluation_order": "YES",
+    "row_6_polymorphism_erasure_and_lowerability": "YES",
+    "row_7_validation_evidence_and_guidance_synchronization": "NO"
+  },
+  "verification_results": {
+    "diff_hygiene": "passed",
+    "focused_backend_llvm_row_6_contract": {
+      "command": "cabal test mlf2-test --test-show-details=direct --test-options='--match \"/MLF.Backend.LLVM/polymorphism lowerability contract/\"'",
+      "result": "passed",
+      "examples": 8,
+      "failures": 0
+    },
+    "focused_row_6_guard": {
+      "command": "cabal test mlf2-test --test-show-details=direct --test-options='--match \"/Repository guardrails/polymorphism-erasure and lowerability contract stays explicit without widening the backend boundary/\"'",
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    "mechanism_table_gate": {
+      "result": "passed",
+      "row_1": "YES",
+      "row_2": "YES",
+      "row_3": "YES",
+      "row_4": "YES",
+      "row_5": "YES",
+      "row_6": "YES",
+      "row_7": "NO"
+    },
+    "full_gate": {
+      "command": "cabal build all && cabal test",
+      "result": "passed",
+      "examples": 2352,
+      "failures": 0,
+      "duration_seconds": 331.5107
+    }
+  },
+  "evidence_summary": "Reviewed the canonical round-227 worktree against master commit b4e239c5d6fafd55ed56ed81154ec4e3faf79ac8, where HEAD, master, and merge-base all match and the live round exists as an uncommitted worktree diff. The implementation-owned merge payload stays limited to docs/architecture.md, docs/backend-native-pipeline.md, src/MLF/Backend/IR.hs, src/MLF/Backend/Convert.hs, src/MLF/Backend/LLVM/Lower.hs, docs/plans/2026-05-02-backend-ir-executable-boundary-mechanism-table.md, test/BackendLLVMSpec.hs, and test/RepoGuardSpec.hs, while orchestrator/state.json, the pointer stubs, and the active roadmap/round lineage artifacts are controller-owned activation and review bookkeeping. The round makes the row-6 polymorphism lowerability boundary explicit across the synchronized contract surfaces, keeps checked Backend.IR permissive for BackendTyAbs and BackendTyApp while restricting LLVM/native emission to the specialization-based lowerable subset, adds focused supported and rejection coverage in BackendLLVMSpec plus the exact repository guard, flips only mechanism-table row 6 to YES while preserving rows 1-5 at YES and row 7 at NO, passes the focused row-6 slices, and passes cabal build all && cabal test with 2352 examples and 0 failures. The inherited one-backend-IR, eager-runtime, no-lazy-STG, no-public-lower-IR, and no-fallback boundaries remain intact, and the round does not widen into row-7 closeout work, runtime polymorphism, or a broader public lowering surface."
+}
