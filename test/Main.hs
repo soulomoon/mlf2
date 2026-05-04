@@ -29,7 +29,16 @@ import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
 import PipelineSpec qualified
 import ProgramSpec qualified
+import Presolution.EdgeInterpreterSpec qualified
+import Presolution.EdgePlannerSpec qualified
+import Presolution.EdgeTraceSpec qualified
+import Presolution.EnforcementSpec qualified
+import Presolution.ExpansionSpec qualified
+import Presolution.InstantiateSpec qualified
+import Presolution.MergeEmissionSpec qualified
+import Presolution.RaiseSpec qualified
 import Presolution.UnificationClosureSpec qualified
+import Presolution.WitnessSpec qualified
 import PresolutionFacadeSpec qualified
 import PresolutionSpec qualified
 import Property.QuickCheckPropertySpec qualified
@@ -70,6 +79,15 @@ main = do
     runIO (writeIORef presolutionMarker True)
     PresolutionSpec.spec
     Presolution.UnificationClosureSpec.spec
+    Presolution.EdgeInterpreterSpec.spec
+    Presolution.EdgePlannerSpec.spec
+    Presolution.EdgeTraceSpec.spec
+    Presolution.EnforcementSpec.spec
+    Presolution.ExpansionSpec.spec
+    Presolution.InstantiateSpec.spec
+    Presolution.MergeEmissionSpec.spec
+    Presolution.RaiseSpec.spec
+    Presolution.WitnessSpec.spec
     runIO $ do
       wasPresolutionWired <- readIORef presolutionMarker
       unless wasPresolutionWired $

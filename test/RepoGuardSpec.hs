@@ -466,8 +466,7 @@ isMainEntryPath :: FilePath -> FilePath -> Bool
 isMainEntryPath root path =
   case splitDirectories (makeRelative root path) of
     [_file] -> True
-    ["Presolution", "UnificationClosureSpec.hs"] -> True
-    [dir, _file] -> dir `elem` ["Constraint", "Phi", "Property", "Reify", "Research", "Thesis", "Util"]
+    [dir, _file] -> dir `elem` ["Constraint", "Phi", "Presolution", "Property", "Reify", "Research", "Thesis", "Util"]
     _ -> False
 
 assertSet :: String -> [String] -> [String] -> Expectation
