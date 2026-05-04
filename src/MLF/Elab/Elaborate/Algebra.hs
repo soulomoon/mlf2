@@ -21,7 +21,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust, isNothing)
 import qualified Data.Set as Set
 import MLF.Constraint.Presolution (PresolutionView)
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
   ( BaseTy (..),
     NodeId,
     TyNode (..),

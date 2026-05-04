@@ -13,7 +13,9 @@ module MLF.Constraint.Presolution.Plan.BinderPlan.Util (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 
 lookupNodeInMap :: IntMap.IntMap TyNode -> NodeId -> Maybe TyNode
 lookupNodeInMap nodes nid = IntMap.lookup (getNodeId nid) nodes

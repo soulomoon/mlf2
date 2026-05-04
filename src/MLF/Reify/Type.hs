@@ -25,7 +25,9 @@ import MLF.Constraint.Presolution.View (PresolutionView (..))
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import qualified MLF.Constraint.Solved.Internal as SolvedInternal
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Reify.Named (namedNodes)
 import MLF.Reify.Type.Core (ReifyRoot (..), reifyWith, reifyWithAs)

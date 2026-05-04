@@ -36,7 +36,7 @@ import MLF.Constraint.Presolution.Plan.Context
     GeneralizeEnv (..),
   )
 import MLF.Constraint.Presolution.View (PresolutionView (..))
-import MLF.Constraint.Types hiding (lookupNode)
+import MLF.Constraint.Types.Graph hiding (lookupNode)
 import MLF.Util.ElabError (ElabError)
 import MLF.Util.Trace (TraceConfig, tcGeneralize)
 

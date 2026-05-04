@@ -35,7 +35,9 @@ import Data.Maybe (mapMaybe)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base (EdgeTrace(..), PresolutionError(..), PresolutionM)
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Util.Trace (traceBindingM)

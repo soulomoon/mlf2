@@ -22,7 +22,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Types hiding (lookupNode)
+import MLF.Constraint.Types.Graph hiding (lookupNode)
 import MLF.Constraint.Presolution.Base (PresolutionError(..), PresolutionM, PresolutionState(..))
 import MLF.Constraint.Presolution.Ops (findRoot)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)

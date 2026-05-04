@@ -3,6 +3,8 @@ module InertSpec (spec) where
 import Test.Hspec
 import qualified Data.IntSet as IntSet
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.Inert as Inert
 import SpecUtil
     ( bindParentsFromPairs

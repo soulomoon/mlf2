@@ -22,7 +22,9 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Util.Order as Order
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base (MonadPresolution(..), PresolutionM, PresolutionError(..))
 import MLF.Constraint.Presolution.Ops (createFreshNodeId, registerNode, setBindParentM, setVarBound)
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical, liftBindingError)

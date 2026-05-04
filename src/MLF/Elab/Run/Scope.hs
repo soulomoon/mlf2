@@ -15,7 +15,7 @@ import Data.Maybe (listToMaybe)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution (PresolutionView)
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
   ( BindingError (..),
     Constraint,
     NodeId (..),

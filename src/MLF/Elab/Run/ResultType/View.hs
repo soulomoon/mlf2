@@ -13,7 +13,7 @@ import qualified Data.IntMap.Strict as IntMap
 import MLF.Constraint.Presolution (PresolutionView(..))
 import MLF.Constraint.Solve (SolveResult(..))
 import qualified MLF.Constraint.Solve as Solve
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( NodeId(..)
     , TyNode(..)
     , getNodeId

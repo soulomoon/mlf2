@@ -20,7 +20,7 @@ import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
 import MLF.Constraint.Presolution (PresolutionView)
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
   ( NodeId,
     NodeRef (..),
     getNodeId,

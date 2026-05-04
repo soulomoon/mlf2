@@ -6,7 +6,7 @@ import qualified Data.IntMap.Strict as IntMap
 
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( Constraint
     , NodeId(..)
     , NodeRef(..)
@@ -19,7 +19,7 @@ import MLF.Constraint.Types
     , nodeRefKey
     , typeRef
     )
-import qualified MLF.Constraint.Types as Types
+import qualified MLF.Constraint.Types.Graph as Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Run.Debug (debugGaScope)
 import MLF.Elab.Run.Generalize.Common

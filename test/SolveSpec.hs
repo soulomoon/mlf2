@@ -10,6 +10,8 @@ import Test.QuickCheck (choose, conjoin, counterexample, forAll, property, (===)
 
 import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Solve
     ( SolveError(..)
     , UnifyClosureResult(..)

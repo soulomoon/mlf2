@@ -59,7 +59,9 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
 import MLF.Constraint.Presolution.Base (InteriorNodes (..))
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Phi.Context (contextToNodeBoundWithOrderKeys)
 import MLF.Elab.Phi.Omega.Domain

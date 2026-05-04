@@ -21,8 +21,9 @@ import Data.List (sortOn)
 import Data.Maybe (listToMaybe)
 
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
-import MLF.Constraint.Types
-import MLF.Constraint.Types.Witness (ReplayContract)
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Types
 import MLF.Util.Trace (TraceConfig)

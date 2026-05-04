@@ -5,7 +5,7 @@ module MLF.Elab.Run.Generalize.Phase1 (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( NodeRef(..)
     , TyNode(..)
     , cBindParents
@@ -15,7 +15,7 @@ import MLF.Constraint.Types
     , gnSchemes
     , typeRef
     )
-import qualified MLF.Constraint.Types as Types
+import qualified MLF.Constraint.Types.Graph as Types
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Elab.Run.Generalize.Common
     ( nodeMapToIntMap

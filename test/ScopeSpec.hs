@@ -4,7 +4,7 @@ import qualified Data.IntMap.Strict as IntMap
 import Test.Hspec
 
 import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( BindFlag(..)
     , BaseTy(..)
     , BindingError(..)

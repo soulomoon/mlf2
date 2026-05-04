@@ -82,7 +82,7 @@ import MLF.Constraint.Presolution.Plan.Target
     buildTargetPlan,
     buildTypeRootPlan,
   )
-import MLF.Constraint.Types hiding (lookupNode)
+import MLF.Constraint.Types.Graph hiding (lookupNode)
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Util.ElabError (ElabError (..), bindingToElab)
 import MLF.Util.Graph (reachableFrom, reachableFromStop)

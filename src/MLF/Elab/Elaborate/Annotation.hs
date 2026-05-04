@@ -22,13 +22,12 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
 import MLF.Constraint.Presolution (EdgeTrace (..))
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
   ( BaseTy (..),
     EdgeId (..),
-    EdgeWitness (..),
-    Expansion (..),
     NodeId (..),
   )
+import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..))
 import MLF.Elab.Elaborate.Scope
   ( ScopeContext (..),
     generalizeAtNode,

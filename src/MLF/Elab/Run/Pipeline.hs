@@ -33,7 +33,7 @@ import MLF.Constraint.Presolution
 import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
 import MLF.Constraint.Presolution.View (PresolutionView, pvCanonical)
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Types (BaseTy (..), Constraint, NodeId (..), PolySyms, cNodes, getEdgeId, getNodeId, lookupNodeIn)
+import MLF.Constraint.Types.Graph (BaseTy (..), Constraint, NodeId (..), PolySyms, cNodes, getEdgeId, getNodeId, lookupNodeIn)
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot (..))
 import MLF.Elab.Elaborate (ElabConfig (..), ElabEnv (..), elaborateWithEnv)
 import MLF.Elab.Inst (schemeToType)

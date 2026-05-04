@@ -8,7 +8,7 @@ import qualified Data.IntSet as IntSet
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal, firstGenAncestorFrom)
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( BindFlag(..)
     , NodeId(..)
     , NodeRef(..)
@@ -24,7 +24,7 @@ import MLF.Constraint.Types
     , nodeRefKey
     , typeRef
     )
-import qualified MLF.Constraint.Types as Types
+import qualified MLF.Constraint.Types.Graph as Types
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Run.Debug (debugGaScope)
 import MLF.Elab.Run.Generalize.Common

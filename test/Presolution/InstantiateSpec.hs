@@ -4,8 +4,9 @@ import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution (PresolutionError(..))
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)

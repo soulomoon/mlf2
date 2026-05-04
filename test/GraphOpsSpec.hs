@@ -8,7 +8,8 @@ import Test.Hspec
 import Test.QuickCheck
 
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness (InstanceOp(..))
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Binding.Tree
 import MLF.Binding.GraphOps
 import SpecUtil (emptyConstraint, nodeMapFromList, nodeMapSingleton)

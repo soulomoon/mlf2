@@ -51,7 +51,7 @@ import MLF.Constraint.Presolution.Plan.Target
     TargetPlan (..),
     TypeRootPlan (..),
   )
-import MLF.Constraint.Types hiding (lookupNode)
+import MLF.Constraint.Types.Graph hiding (lookupNode)
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Util.ElabError (ElabError (..))
 import qualified MLF.Util.IntMapUtils as IntMapUtils

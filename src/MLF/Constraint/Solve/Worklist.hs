@@ -17,7 +17,7 @@ import qualified MLF.Constraint.Solve.Harmonize as Harmonize
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Core as UnifyCore
 import qualified MLF.Constraint.VarStore as VarStore
-import MLF.Constraint.Types hiding (lookupNode)
+import MLF.Constraint.Types.Graph hiding (lookupNode)
 import MLF.Constraint.Unify.Closure (SolveError(..), UnifyClosureResult(..))
 import MLF.Util.Trace (TraceConfig, traceBinding)
 import qualified MLF.Util.UnionFind as UnionFind

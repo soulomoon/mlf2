@@ -31,8 +31,8 @@ import MLF.Constraint.Presolution.View qualified as PresolutionViewBoundary
 import MLF.Constraint.Solved (Solved)
 import MLF.Constraint.Solved qualified as Solved
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Presolution (PresolutionSnapshot (..))
-import MLF.Constraint.Types.Witness (EdgeWitness (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Elab.Pipeline
   ( ElabType,
     Pretty (..),

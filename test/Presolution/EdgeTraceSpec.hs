@@ -5,9 +5,9 @@ import Test.Hspec
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness (Expansion(..))
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionResult(..)

@@ -50,7 +50,7 @@ import MLF.Constraint.Presolution.WitnessCanon
     reorderWeakenWithEnv,
   )
 import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeEnv (..), OmegaNormalizeError (..), validateNormalizedWitness)
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
   ( EdgeId,
     GenNodeId,
     NodeId,

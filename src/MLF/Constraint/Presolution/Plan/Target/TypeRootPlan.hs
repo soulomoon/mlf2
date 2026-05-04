@@ -9,7 +9,9 @@ module MLF.Constraint.Presolution.Plan.Target.TypeRootPlan (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 
 data TypeRootPlanInput = TypeRootPlanInput

@@ -8,6 +8,8 @@ import Data.Maybe (listToMaybe)
 
 import MLF.Binding.Path (firstGenAncestorFromPath)
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Binding.Tree as Binding
 import MLF.Util.ElabError (ElabError(..))
 

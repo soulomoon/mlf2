@@ -33,6 +33,8 @@ module MLF.Constraint.VarStore (
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 
 -- | Look up the instance bound of a variable.

@@ -35,7 +35,9 @@ import MLF.Constraint.Presolution.EdgeUnify.State (
 import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Util.Order as Order
 import MLF.Util.Trace (traceBindingM)
 

@@ -23,7 +23,7 @@ import MLF.Constraint.Solve (SolveError, SolveResult(..))
 import qualified MLF.Constraint.Solve as Solve
 import qualified MLF.Constraint.Solved.Internal as SolvedInternal
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Types (Constraint, NodeId)
+import MLF.Constraint.Types.Graph (Constraint, NodeId)
 
 stepSanitizeSnapshotUf :: Constraint -> IntMap NodeId -> IntMap NodeId
 stepSanitizeSnapshotUf constraint uf =

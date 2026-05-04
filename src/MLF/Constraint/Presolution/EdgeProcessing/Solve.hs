@@ -26,7 +26,9 @@ import qualified Data.IntSet as IntSet
 import MLF.Util.Trace (traceBindingM)
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.StateAccess (
     getCanonical,

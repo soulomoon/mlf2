@@ -40,7 +40,8 @@ import qualified Data.IntSet as IntSet
 import Data.Maybe (mapMaybe)
 import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Presolution (DepGraph (..))
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 
 {- Note [Phase 3: Acyclicity Check]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

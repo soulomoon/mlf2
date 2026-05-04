@@ -7,6 +7,8 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Test.Hspec
 
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Normalize
 import SpecUtil (emptyConstraint, lookupNodeMaybe, nodeMapFromList, nodeMapSingleton, nodeMapSize)
 

@@ -27,7 +27,8 @@ module MLF.Witness.OmegaExec (
 
 import Control.Monad (forM_, when)
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness (InstanceOp (..))
 
 data OmegaExecEnv m = OmegaExecEnv
     { omegaMetaFor :: NodeId -> m NodeId

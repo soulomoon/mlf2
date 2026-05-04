@@ -38,14 +38,13 @@ import MLF.Constraint.Presolution.TestSupport
   )
 import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import MLF.Constraint.Solved qualified as Solved
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
   ( BaseTy (..),
     BindFlag (..),
     BindingError (..),
     Constraint (..),
     EdgeId (..),
     ExpVarId (..),
-    Expansion (..),
     GenNode (..),
     GenNodeId (..),
     NodeId (..),
@@ -62,7 +61,7 @@ import MLF.Constraint.Types
     toListNode,
     typeRef,
   )
-import MLF.Constraint.Types.Witness (EdgeWitness (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
+import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Elab.Run.ResultType
   ( ResultTypeInputs (..),

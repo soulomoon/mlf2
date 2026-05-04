@@ -18,13 +18,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
-import MLF.Constraint.Types.Graph (BindFlag(..), Constraint(..), TyNode(..))
-import MLF.Constraint.Types.Graph (NodeId(..), NodeRef(..), getNodeId, nodeRefFromKey, typeRef)
-import MLF.Constraint.Types.Witness
-    ( InstanceOp(..)
-    , ReplayContract(..)
-    , isStrictReplayContract
-    )
+import MLF.Constraint.Types.Graph (BindFlag(..), Constraint(..), NodeId(..), NodeRef(..), TyNode(..), getNodeId, nodeRefFromKey, typeRef)
+import MLF.Constraint.Types.Witness (InstanceOp(..), ReplayContract(..), isStrictReplayContract)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Util.Order (OrderKey, compareOrderKey)

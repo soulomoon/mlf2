@@ -14,11 +14,7 @@ import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode, chaseRedir
 import qualified MLF.Constraint.Canonicalizer as Canonicalizer
 import MLF.Constraint.Presolution.Rewrite (canonicalizeTrace, canonicalizeWitness)
 import MLF.Constraint.Types.Graph (NodeId(..))
-import MLF.Constraint.Types.Witness
-    ( BoundRef(..)
-    , Expansion(..)
-    , ForallSpec(..)
-    )
+import MLF.Constraint.Types.Witness (BoundRef(..), Expansion(..), ForallSpec(..))
 
 -- | Chase redirects through the map until stable or missing.
 chaseRedirects :: IntMap.IntMap NodeId -> NodeId -> NodeId

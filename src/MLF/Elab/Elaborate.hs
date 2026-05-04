@@ -15,7 +15,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
 import MLF.Constraint.Presolution (EdgeTrace, PresolutionView)
 import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
-import MLF.Constraint.Types (EdgeWitness, Expansion, NodeRef)
+import MLF.Constraint.Types.Graph (NodeRef)
+import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
 import MLF.Elab.Elaborate.Algebra
   ( AlgebraContext (..),
     ElabOut (..),

@@ -14,7 +14,7 @@ import MLF.Constraint.Presolution
     ( PresolutionPlanBuilder(..)
     , PresolutionView(..)
     )
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( Constraint
     , NodeId(..)
     , NodeRef(..)

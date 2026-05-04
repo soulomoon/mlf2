@@ -3,7 +3,7 @@ module MLF.Constraint.Solve.Internal (
 ) where
 
 import Data.IntMap.Strict (IntMap)
-import MLF.Constraint.Types (Constraint, NodeId)
+import MLF.Constraint.Types.Graph (Constraint, NodeId)
 
 -- | Successful unification result.
 --

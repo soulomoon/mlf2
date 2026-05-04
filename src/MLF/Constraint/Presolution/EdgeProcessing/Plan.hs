@@ -20,7 +20,7 @@ module MLF.Constraint.Presolution.EdgeProcessing.Plan (
     mkEmptyResolvedPlan,
 ) where
 
-import MLF.Constraint.Types (ExpVarId, GenNodeId, InstEdge, NodeId, TyNode (..))
+import MLF.Constraint.Types.Graph (ExpVarId, GenNodeId, InstEdge, NodeId, TyNode (..))
 
 -- | Refined TyExp payload used by resolved edge plans.
 data ResolvedTyExp = ResolvedTyExp

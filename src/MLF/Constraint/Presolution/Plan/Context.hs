@@ -46,7 +46,7 @@ import MLF.Constraint.Finalize (presolutionViewFromSnapshot)
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo (..))
 import MLF.Constraint.Presolution.Plan.SchemeRoots (SchemeRootsPlan, buildSchemeRootsPlan)
 import MLF.Constraint.Presolution.View (PresolutionView)
-import MLF.Constraint.Types hiding (lookupNode)
+import MLF.Constraint.Types.Graph hiding (lookupNode)
 import MLF.Util.ElabError (ElabError (..), bindingToElab)
 import MLF.Util.Trace (traceWhen)
 

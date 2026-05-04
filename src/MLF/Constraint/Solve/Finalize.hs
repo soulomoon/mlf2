@@ -21,7 +21,7 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve.Internal (SolveResult(..))
 import MLF.Constraint.Solve.Worklist (SolveError(..))
-import MLF.Constraint.Types hiding (lookupNode)
+import MLF.Constraint.Types.Graph hiding (lookupNode)
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Util.UnionFind as UnionFind
 

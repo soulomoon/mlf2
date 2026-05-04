@@ -19,7 +19,7 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Solved (Solved)
-import MLF.Constraint.Types (Constraint, NodeId)
+import MLF.Constraint.Types.Graph (Constraint, NodeId)
 import qualified MLF.Reify.Bound as Bound
 import qualified MLF.Reify.Named as Named
 import qualified MLF.Reify.Type as Type

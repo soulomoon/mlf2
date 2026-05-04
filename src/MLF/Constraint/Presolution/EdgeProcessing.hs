@@ -21,7 +21,7 @@ module MLF.Constraint.Presolution.EdgeProcessing (
 import Control.Monad (foldM, unless, when)
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types (GenNodeId, InstEdge(..))
+import MLF.Constraint.Types.Graph (GenNodeId, InstEdge(..))
 import MLF.Constraint.Presolution.Base
     ( MonadPresolution(..)
     , PresolutionError(..)

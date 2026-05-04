@@ -13,7 +13,9 @@ import Data.Maybe (listToMaybe)
 import MLF.Util.Trace (traceWhen)
 
 import qualified MLF.Binding.Tree as Binding
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Util.IntMapUtils as IntMapUtils

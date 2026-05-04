@@ -14,7 +14,9 @@ import MLF.Constraint.Finalize (presolutionViewFromSnapshot)
 import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Reify.Type as ReifyType
 import MLF.Reify.Type (ReifyRoot(..), reifyWith, reifyWithAs, solvedFromView)
 import MLF.Types.Elab

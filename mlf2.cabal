@@ -61,8 +61,7 @@ library mlf2-internal
     visibility:       private
 
     -- Modules exported by the internal library (for tests / internal tooling).
-    exposed-modules:  MLF.Constraint.Types,
-                      MLF.Constraint.Types.Graph,
+    exposed-modules:  MLF.Constraint.Types.Graph,
                       MLF.Constraint.Types.Graph.NodeEdge,
                       MLF.Constraint.Types.Graph.Binding,
                       MLF.Constraint.Types.Graph.Accessors,

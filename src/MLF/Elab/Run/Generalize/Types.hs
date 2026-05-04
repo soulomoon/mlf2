@@ -16,7 +16,7 @@ module MLF.Elab.Run.Generalize.Types (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( BindFlag
     , Constraint
     , GenNode

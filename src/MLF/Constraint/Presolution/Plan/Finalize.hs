@@ -54,7 +54,9 @@ import MLF.Constraint.Presolution.Plan.Normalize
     promoteArrowAlias,
     simplifySchemeBindings,
   )
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Types (mapBoundType)
 import MLF.Reify.TypeOps (freeTypeVarsFrom, freeTypeVarsType, splitForalls, stripForallsType, substTypeSimple)

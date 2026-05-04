@@ -40,8 +40,9 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
-import MLF.Constraint.Types
-import MLF.Constraint.Types.Witness (ReplayContract(..), isStrictReplayContract)
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)

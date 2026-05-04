@@ -42,7 +42,8 @@ import MLF.Constraint.Presolution.EdgeUnify.Unify (
     unifyAcyclicEdge,
     unifyStructureEdge
     )
-import MLF.Constraint.Types (InstanceOp, NodeId)
+import MLF.Constraint.Types.Graph (NodeId)
+import MLF.Constraint.Types.Witness (InstanceOp)
 import qualified MLF.Witness.OmegaExec as OmegaExec
 
 -- | Testing helper: run a single edge-local unification and return the recorded

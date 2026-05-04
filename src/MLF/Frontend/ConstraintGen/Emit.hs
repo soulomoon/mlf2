@@ -23,7 +23,7 @@ import qualified Data.IntSet as IntSet
 import Data.List.NonEmpty (NonEmpty)
 import qualified Data.List.NonEmpty as NE
 
-import MLF.Constraint.Types hiding (insertNode)
+import MLF.Constraint.Types.Graph hiding (insertNode)
 import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM)
 import qualified MLF.Frontend.ConstraintGen.Scope as Scope
 

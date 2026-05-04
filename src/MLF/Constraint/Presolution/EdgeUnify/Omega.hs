@@ -22,7 +22,8 @@ import MLF.Constraint.Presolution.Base (
     )
 import MLF.Constraint.Presolution.EdgeUnify.State (EdgeUnifyM, applyPendingWeaken)
 import MLF.Constraint.Presolution.StateAccess (pendingWeakenOwnerM)
-import MLF.Constraint.Types (InstanceOp, NodeId(..), getNodeId)
+import MLF.Constraint.Types.Graph (NodeId(..), getNodeId)
+import MLF.Constraint.Types.Witness (InstanceOp)
 import qualified MLF.Witness.OmegaExec as OmegaExec
 
 -- | Execute edge-local graph operations as one block around a unification action.

@@ -86,7 +86,8 @@ import qualified MLF.Util.OrderKey as OrderKey
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness (BoundRef (..), ForallSpec (..))
 import qualified MLF.Constraint.Traversal as Traversal
 
 -- Re-export validation functions

@@ -74,7 +74,9 @@ import Data.IntSet (IntSet)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Util.UnionFind as UnionFind
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base (
     PendingWeakenOwner(..),
     PresolutionM,

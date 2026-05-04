@@ -31,8 +31,8 @@ import MLF.Constraint.Presolution.Witness
     validateNormalizedWitness,
   )
 import qualified MLF.Constraint.Presolution.Witness as Witness
-import MLF.Constraint.Types
-import MLF.Constraint.Types.Witness (ReplayContract (..))
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness (BoundRef (..), EdgeWitness (..), Expansion, ForallSpec (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
 import qualified MLF.Util.Order as Order
 
 -- | Normalize edge witnesses against the finalized presolution constraint.

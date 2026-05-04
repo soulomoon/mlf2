@@ -38,7 +38,9 @@ module MLF.Binding.Adjustment (
     raiseToParentWithCount,
 ) where
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Binding.Tree (isUnderRigidBinder, lookupBindParent, bindingLCA, isBindingRoot)
 import MLF.Binding.GraphOps (applyRaiseStep)
 

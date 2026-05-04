@@ -7,12 +7,12 @@ import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Types.Witness
     ( BoundRef(..)
     , Expansion(..)
     , ForallSpec(..)
     )
+import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Presolution
     ( PresolutionError(..)
     , PresolutionResult(..)

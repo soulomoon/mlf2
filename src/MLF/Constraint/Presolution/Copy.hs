@@ -47,7 +47,7 @@ import MLF.Constraint.Presolution.StateAccess (
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Traversal as Traversal
-import MLF.Constraint.Types hiding (lookupNode)
+import MLF.Constraint.Types.Graph hiding (lookupNode)
 
 data CopyState = CopyState
     { csCache :: IntMap NodeId

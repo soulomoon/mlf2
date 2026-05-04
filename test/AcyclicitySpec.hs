@@ -5,7 +5,8 @@ import Data.IntSet qualified as IntSet
 import MLF.API (Expr (..), Lit (..), SrcTy (..))
 import MLF.Constraint.Acyclicity
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Presolution (DepGraph (..))
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Pipeline (ConstraintResult (..), inferConstraintGraph)
 import SpecUtil (emptyConstraint, nodeMapElems, nodeMapFromList, nodeMapSingleton)
 import Test.Hspec

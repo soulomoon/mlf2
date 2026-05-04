@@ -31,7 +31,6 @@ import MLF.Constraint.Presolution.TestSupport
     unifyAcyclic,
     validateTranslatablePresolution,
   )
-import MLF.Constraint.Types.Presolution (Presolution (..))
 import MLF.Constraint.Presolution.Witness
   ( OmegaNormalizeEnv (..),
     coalesceRaiseMergeWithEnv,
@@ -41,7 +40,8 @@ import MLF.Constraint.Presolution.Witness
   )
 import MLF.Constraint.Solve (SolveResult (..), frWith, solveUnify)
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..), ForallSpec (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Frontend.ConstraintGen (ConstraintResult (..))

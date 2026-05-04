@@ -19,7 +19,9 @@ where
 import Data.Functor.Foldable (Base, Corecursive (..), Recursive (..), cata)
 import qualified Data.IntMap.Strict as IntMap
 import Data.Map.Strict (Map)
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Frontend.Syntax (Lit, NormSrcType, VarName)
 
 -- | Errors that can surface during constraint generation.

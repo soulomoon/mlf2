@@ -22,7 +22,9 @@ import MLF.Constraint.Presolution.Base (PresolutionError (..), PresolutionM)
 import MLF.Constraint.Presolution.EdgeProcessing.Plan
 import MLF.Constraint.Presolution.Ops (findRoot, getCanonicalNode, getNode)
 import MLF.Constraint.Presolution.StateAccess (findSchemeIntroducerM, getConstraintAndCanonical)
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Types.SynthesizedExpVar (isSynthesizedExpVar)
 import MLF.Util.Trace (traceBindingM)
 

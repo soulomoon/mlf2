@@ -6,7 +6,9 @@ import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 
 import qualified MLF.Binding.Adjustment as BindingAdjustment
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Unify.Closure (SolveError(..))
 import qualified MLF.Util.UnionFind as UnionFind
 

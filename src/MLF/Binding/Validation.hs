@@ -31,7 +31,9 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Traversal as Traversal
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 
 import MLF.Binding.Children (
     collectBoundChildrenWithFlag,

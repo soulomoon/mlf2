@@ -29,7 +29,9 @@ import MLF.Binding.NodeRefs (
     allNodeRefs,
     )
 import qualified MLF.Constraint.Canonicalize as Canonicalize
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 
 -- | Canonicalize the binding-parent relation under a canonicalization function.
 --

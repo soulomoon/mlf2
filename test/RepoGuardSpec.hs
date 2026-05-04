@@ -26,10 +26,6 @@ spec = describe "Repository guardrails" $ do
     offenders <- findImportOffenders ["src", "src-public", "test", "app"]
     offenders `shouldBe` []
 
-  it "modules do not import both MLF.Constraint.Types and .Graph" $ do
-    offenders <- findDualImportOffenders ["src", "src-public", "test", "app"]
-    offenders `shouldBe` []
-
   it "MLF.API no longer exports pipeline/runtime helpers and MLF.Pipeline owns them" $ do
     apiSrc <- readFile "src-public/MLF/API.hs"
     pipelineSrc <- readFile "src-public/MLF/Pipeline.hs"
@@ -410,22 +406,10 @@ findImportOffenders roots = do
   offenders <- mapM hasMyLibImport hsFiles
   pure [path | (path, True) <- offenders]
 
-findDualImportOffenders :: [FilePath] -> IO [FilePath]
-findDualImportOffenders roots = do
-  hsFiles <- concat <$> mapM collectHsFiles roots
-  offenders <- mapM hasDualImports hsFiles
-  pure [path | (path, True) <- offenders]
-
 hasMyLibImport :: FilePath -> IO (FilePath, Bool)
 hasMyLibImport path = do
   src <- readFile path
   pure (path, any (== "import MyLib") (map trimImport (lines src)))
-
-hasDualImports :: FilePath -> IO (FilePath, Bool)
-hasDualImports path = do
-  src <- readFile path
-  let imports = [moduleName | line <- lines src, Just moduleName <- [parseImportModule line]]
-  pure (path, "MLF.Constraint.Types" `elem` imports && "MLF.Constraint.Types.Graph" `elem` imports)
 
 collectHsFiles :: FilePath -> IO [FilePath]
 collectHsFiles root = do

@@ -44,8 +44,9 @@ import Data.Maybe (catMaybes, fromMaybe, mapMaybe)
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Canonicalizer (canonicalizerFrom, chaseRedirectsStable)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
-import MLF.Constraint.Types
-import MLF.Constraint.Types.Witness (isStrictReplayContract)
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.Plan (buildGeneralizePlans)
 import MLF.Constraint.Presolution.Rewrite (

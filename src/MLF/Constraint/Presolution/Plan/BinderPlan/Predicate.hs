@@ -8,7 +8,9 @@ module MLF.Constraint.Presolution.Plan.BinderPlan.Predicate (
     isTargetSchemeBinderFor
 ) where
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.VarStore as VarStore
 
 -- | Check if a variable is a target scheme binder.

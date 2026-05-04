@@ -11,7 +11,7 @@ import MLF.Constraint.Presolution
     , PresolutionView(..)
     )
 import MLF.Constraint.Presolution.Base (InteriorNodes(..), copiedNodes)
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( Constraint
     , NodeId(..)
     , NodeRef(..)
@@ -22,7 +22,7 @@ import MLF.Constraint.Types
     , getNodeId
     , nodeRefFromKey
     )
-import qualified MLF.Constraint.Types as Types
+import qualified MLF.Constraint.Types.Graph as Types
 import MLF.Elab.Run.Generalize.Common (nodeMapToIntMap)
 import MLF.Elab.Run.Generalize.Types (NodeKeySet)
 import MLF.Elab.Run.Util (chaseRedirects)

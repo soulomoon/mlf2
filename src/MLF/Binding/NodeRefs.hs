@@ -5,7 +5,9 @@ module MLF.Binding.NodeRefs (
 
 import qualified Data.IntMap.Strict as IntMap
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 
 allNodeRefs :: Constraint -> [NodeRef]
 allNodeRefs c =

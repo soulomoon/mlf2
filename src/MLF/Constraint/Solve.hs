@@ -37,7 +37,7 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve.Finalize (finalizeConstraintWithUF, frWith, repairNonUpperParents, rewriteConstraintWithUF, validateSolvedGraph, validateSolvedGraphStrict)
 import MLF.Constraint.Solve.Internal (SolveResult(..))
 import MLF.Constraint.Solve.Worklist (SolveError(..), UnifyClosureResult(..), runUnifyClosure)
-import MLF.Constraint.Types (Constraint, NodeId(..), cBindParents, nodeRefKey, typeRef)
+import MLF.Constraint.Types.Graph (Constraint, NodeId(..), cBindParents, nodeRefKey, typeRef)
 import MLF.Util.Trace (TraceConfig, traceBinding)
 
 -- | Snapshot of solve state right before final canonical rewriting.

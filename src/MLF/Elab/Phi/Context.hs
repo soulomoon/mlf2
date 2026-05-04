@@ -31,7 +31,9 @@ import Data.List (elemIndex)
 import qualified Data.List.NonEmpty as NE
 
 import qualified MLF.Util.Order as Order
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Elab.Types
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Binding.Tree as Binding

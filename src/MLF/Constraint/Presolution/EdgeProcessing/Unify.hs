@@ -74,7 +74,9 @@ import MLF.Constraint.Presolution.Ops
   )
 import MLF.Constraint.Presolution.StateAccess (getCanonical)
 import MLF.Constraint.Presolution.Witness (binderArgsFromExpansion)
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Util.Trace (traceBindingM)
 
 -- | Input bundle for edge-expansion unification.

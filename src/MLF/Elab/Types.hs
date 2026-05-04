@@ -68,8 +68,7 @@ import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
 import qualified MLF.Util.Order as Order
-import MLF.Constraint.Types.Graph (BaseTy(..))
-import MLF.Constraint.Types.Graph (NodeId(..), getNodeId)
+import MLF.Constraint.Types.Graph (BaseTy(..), NodeId(..), getNodeId)
 import MLF.Util.ElabError (ElabError(..), bindingToElab)
 import MLF.Types.Elab
 import MLF.Reify.TypeOps (splitForalls, substTypeCapture, freeTypeVarsType)

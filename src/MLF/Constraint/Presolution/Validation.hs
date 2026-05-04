@@ -28,7 +28,9 @@ module MLF.Constraint.Presolution.Validation (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.StateAccess (liftBindingError)
 import qualified MLF.Constraint.Traversal as Traversal

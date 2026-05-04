@@ -9,7 +9,7 @@ import qualified Data.IntSet as IntSet
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution (EdgeTrace(..))
 import MLF.Constraint.Presolution.Base (CopyMapping(..), toListInterior)
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( Constraint
     , NodeId(..)
     , NodeRef(..)

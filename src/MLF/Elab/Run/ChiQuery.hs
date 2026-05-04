@@ -9,7 +9,7 @@ module MLF.Elab.Run.ChiQuery (
 
 import qualified Data.IntMap.Strict as IntMap
 import MLF.Constraint.Presolution (PresolutionView(..))
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( Constraint
     , NodeId
     , TyNode

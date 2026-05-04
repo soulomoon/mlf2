@@ -13,7 +13,9 @@ where
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Util.ElabError (ElabError)
 import qualified MLF.Util.IntMapUtils as IntMapUtils

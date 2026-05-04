@@ -58,9 +58,10 @@ import qualified MLF.Binding.Canonicalization as BindingCanonical
 import qualified MLF.Binding.Path as BindingPath
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
-import MLF.Constraint.Types hiding (lookupNode)
-import qualified MLF.Constraint.Types as Types
-import MLF.Constraint.Types.Witness (ReplayContract)
+import MLF.Constraint.Types.Graph
+import qualified MLF.Constraint.Types.Graph as Types
+import MLF.Constraint.Types.Witness (EdgeWitness, Expansion, ForallSpec, ReplayContract)
+import MLF.Constraint.Types.Presolution (Presolution, PresolutionSnapshot (..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import qualified MLF.Constraint.Traversal as Traversal

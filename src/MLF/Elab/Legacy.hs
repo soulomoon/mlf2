@@ -7,7 +7,8 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
 
-import MLF.Constraint.Types (Expansion, ExpansionF(..), NodeId)
+import MLF.Constraint.Types.Graph (NodeId)
+import MLF.Constraint.Types.Witness (Expansion, ExpansionF(..))
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution.View (PresolutionView(..), fromSolved)

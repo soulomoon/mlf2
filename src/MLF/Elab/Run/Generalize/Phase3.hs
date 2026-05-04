@@ -5,7 +5,7 @@ module MLF.Elab.Run.Generalize.Phase3 (
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
     ( NodeId(..)
     , NodeRef(..)
     , cNodes
@@ -14,7 +14,7 @@ import MLF.Constraint.Types
     , nodeRefKey
     , typeRef
     )
-import qualified MLF.Constraint.Types as Types
+import qualified MLF.Constraint.Types.Graph as Types
 import MLF.Elab.Run.Debug (debugGaScope)
 import MLF.Elab.Run.Generalize.Common
     ( applyBindParent

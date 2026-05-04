@@ -54,7 +54,8 @@ module MLF.Binding.GraphOps (
 
 import qualified Data.IntSet as IntSet
 
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness (InstanceOp (..))
 import MLF.Binding.Tree (isUnderRigidBinder, lookupBindParent, setBindParent, bindingPathToRoot, isBindingRoot)
 
 expectTypeRef :: NodeRef -> Either BindingError NodeId

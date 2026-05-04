@@ -43,7 +43,7 @@ import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import qualified MLF.Constraint.Traversal as Traversal
-import MLF.Constraint.Types hiding (lookupNode)
+import MLF.Constraint.Types.Graph hiding (lookupNode)
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Reify.Cache
 import MLF.Reify.Named (softenedBindParentsUnder)

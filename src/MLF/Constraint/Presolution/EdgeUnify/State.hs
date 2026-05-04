@@ -50,7 +50,9 @@ import MLF.Constraint.Presolution.StateAccess (
     getConstraintAndCanonical,
     liftBindingError
     )
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Util.Order as Order
 import qualified MLF.Witness.OmegaExec as OmegaExec
 

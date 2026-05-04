@@ -16,7 +16,9 @@ import qualified Data.Set as Set
 import MLF.Constraint.Presolution.Plan.BinderPlan.Order (GaBindParentsInfo (..))
 import MLF.Constraint.Presolution.Plan.BinderPlan.Types (BinderPlan (..), BinderPlanInput (..))
 import MLF.Constraint.Presolution.Plan.BinderPlan.Util
-import MLF.Constraint.Types
+import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Reify.Core (reifyBoundWithNames, reifyBoundWithNamesOnConstraint, reifyTypeWithNames)
 import MLF.Reify.TypeOps (freeTypeVarsFrom)
