@@ -123,9 +123,9 @@ module MLF.Backend.LLVM.Lower
 where
 
 import Control.Monad (foldM, forM_, unless, void, when, zipWithM, zipWithM_)
-import Control.Monad.State.Strict (StateT (StateT), evalStateT, get, gets, modify)
+import Control.Monad.State.Strict (StateT (StateT), evalStateT, gets)
 import Data.Bifunctor (first)
-import Data.Char (isAlphaNum, ord)
+import Data.Char (ord)
 import Data.List (intercalate, isPrefixOf, nub, sort, sortOn, stripPrefix)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
@@ -137,231 +137,12 @@ import qualified Data.Set as Set
 import Numeric (showHex)
 
 import MLF.Backend.IR
+import MLF.Backend.LLVM.Lower.Emit
+import MLF.Backend.LLVM.Lower.Types
 import MLF.Backend.LLVM.Syntax
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Util.Names (freshNameLike)
-
-data BackendLLVMError
-  = BackendLLVMValidationFailed BackendValidationError
-  | BackendLLVMUnsupportedType String BackendType
-  | BackendLLVMUnsupportedExpression String String
-  | BackendLLVMUnsupportedCall String
-  | BackendLLVMUnknownFunction String
-  | BackendLLVMUnknownConstructor String
-  | BackendLLVMArityMismatch String Int Int
-  | BackendLLVMUnsupportedString String
-  | BackendLLVMDuplicateSymbol String
-  | BackendLLVMInternalError String
-  deriving (Eq, Show)
-
-data ProgramBase = ProgramBase
-  { pbBindings :: Map String BindingInfo,
-    pbBindingOrder :: [String],
-    pbConstructors :: Map String ConstructorRuntime,
-    pbData :: Map String DataRuntime,
-    pbDataNames :: Set String
-  }
-
-data DataRuntime = DataRuntime
-  { drData :: BackendData,
-    drConstructors :: [ConstructorRuntime]
-  }
-  deriving (Eq, Show)
-
-data ProgramEnv = ProgramEnv
-  { peBase :: ProgramBase,
-    peSpecializations :: Map String Specialization,
-    peEvidenceWrappers :: Map String Wrapper,
-    peFunctionWrappers :: Map String Wrapper,
-    peStringGlobals :: Map String String
-  }
-
-data BindingInfo = BindingInfo
-  { biName :: String,
-    biForm :: FunctionForm,
-    biExportedAsMain :: Bool
-  }
-  deriving (Eq, Show)
-
-data FunctionForm = FunctionForm
-  { ffTypeBinders :: [(String, Maybe BackendType)],
-    ffParams :: [(String, BackendType)],
-    ffBody :: BackendExpr,
-    ffReturnType :: BackendType
-  }
-  deriving (Eq, Show)
-
-data ConstructorRuntime = ConstructorRuntime
-  { crConstructor :: BackendConstructor,
-    crDataParameters :: [String],
-    crTag :: Integer
-  }
-  deriving (Eq, Show)
-
-constructorWordBytes :: Int
-constructorWordBytes = 8
-
-constructorTagOffset :: Int
-constructorTagOffset = 0
-
-constructorObjectBytes :: Int -> Int
-constructorObjectBytes fieldCount =
-  constructorWordBytes * (1 + fieldCount)
-
-constructorFieldOffset :: Int -> Int
-constructorFieldOffset index0 =
-  constructorWordBytes * (index0 + 1)
-
-data SpecRequest = SpecRequest
-  { srBindingName :: String,
-    srTypeArgs :: [BackendType]
-  }
-  deriving (Eq, Show)
-
-data Specialization = Specialization
-  { spRequest :: SpecRequest,
-    spFunctionName :: String,
-    spForm :: FunctionForm
-  }
-  deriving (Eq, Show)
-
-data WrapperKind = EvidenceWrapperKind | FunctionWrapperKind
-  deriving (Eq, Show)
-
-data Wrapper = Wrapper
-  { wrapperKind :: WrapperKind,
-    wrapperKey :: String,
-    wrapperFunctionName :: String,
-    wrapperExpectedType :: BackendType,
-    wrapperExpr :: BackendExpr
-  }
-  deriving (Eq, Show)
-
-data ClosureEntry = ClosureEntry
-  { ceFunctionType :: BackendType,
-    ceEntryName :: String,
-    ceCaptures :: [ClosureCaptureSlot],
-    ceParams :: [(String, BackendType)],
-    ceBody :: BackendExpr
-  }
-  deriving (Eq, Show)
-
-data ClosureCaptureSlot = ClosureCaptureSlot
-  { ccsName :: String,
-    ccsType :: BackendType,
-    ccsValueKind :: LowerValueKind
-  }
-  deriving (Eq, Show)
-
-data ConstructedValue = ConstructedValue
-  { cvFieldValueKindsByConstructor :: Map String [LowerValueKind]
-  }
-  deriving (Eq, Show)
-
-data LoweredProgram = LoweredProgram
-  { lpBase :: ProgramBase,
-    lpEnv :: ProgramEnv,
-    lpMainBinding :: BindingInfo,
-    lpFunctions :: [LLVMFunction]
-  }
-
-data NativeRenderSpec = NativeRenderSpec
-  { nrsType :: BackendType,
-    nrsFunctionName :: String
-  }
-  deriving (Eq, Show)
-
-data LowerValue = LowerValue
-  { lvBackendType :: BackendType,
-    lvLLVMType :: LLVMType,
-    lvOperand :: LLVMOperand,
-    lvValueKind :: LowerValueKind,
-    lvConstructedValue :: Maybe ConstructedValue
-  }
-  deriving (Eq, Show)
-
-data LowerValueKind
-  = LowerRuntimeValue
-  | LowerClosureRecord
-  | LowerFunctionPointer
-  deriving (Eq, Show)
-
-constructedValueForConstructor :: String -> [LowerValueKind] -> ConstructedValue
-constructedValueForConstructor name fieldKinds =
-  ConstructedValue (Map.singleton name fieldKinds)
-
-constructedFieldValueKind :: String -> Int -> ConstructedValue -> Maybe LowerValueKind
-constructedFieldValueKind constructorName index0 constructed =
-  Map.lookup constructorName (cvFieldValueKindsByConstructor constructed) >>= flip atMay index0
-
-mergeConstructedValues :: [Maybe ConstructedValue] -> Maybe ConstructedValue
-mergeConstructedValues values =
-  case foldM mergeValue Map.empty constructedFields of
-    Just fieldsByConstructor
-      | length constructedFields == length values,
-        not (Map.null fieldsByConstructor) ->
-          Just (ConstructedValue fieldsByConstructor)
-    _ ->
-      Nothing
-  where
-    constructedFields =
-      [fieldsByConstructor | Just (ConstructedValue fieldsByConstructor) <- values]
-
-    mergeValue acc fieldsByConstructor =
-      foldM mergeConstructor acc (Map.toList fieldsByConstructor)
-
-    mergeConstructor acc (constructorName, fieldKinds) =
-      case Map.lookup constructorName acc of
-        Nothing ->
-          Just (Map.insert constructorName fieldKinds acc)
-        Just existingKinds
-          | existingKinds == fieldKinds ->
-              Just acc
-        Just _ ->
-          Nothing
-
-combineValueKinds :: BackendType -> [LowerValueKind] -> LowerValueKind
-combineValueKinds resultTy kinds =
-  case uniqueKinds of
-    [kind] -> kind
-    _
-      | isFirstOrderFunctionPointerType resultTy,
-        LowerClosureRecord `elem` uniqueKinds,
-        LowerFunctionPointer `elem` uniqueKinds ->
-          LowerClosureRecord
-    _ -> valueKindForType resultTy
-  where
-    uniqueKinds = nub kinds
-
-data LocalFunction = LocalFunction
-  { lfForm :: FunctionForm,
-    lfCapturedEnv :: ExprEnv,
-    lfStoredReference :: Maybe (BackendType, BackendExpr)
-  }
-  deriving (Eq, Show)
-
-data ExprEnv = ExprEnv
-  { eeValues :: Map String LowerValue,
-    eeLocalFunctions :: Map String LocalFunction,
-    eeActiveGlobalInlines :: Set String
-  }
-  deriving (Eq, Show)
-
-exprEnvValueKinds :: ExprEnv -> Map String LowerValueKind
-exprEnvValueKinds =
-  Map.map lvValueKind . eeValues
-
-data FunctionState = FunctionState
-  { fsNextLocal :: Int,
-    fsNextBlock :: Int,
-    fsCurrentLabel :: String,
-    fsCurrentInstructions :: [LLVMInstruction],
-    fsCompletedBlocks :: [LLVMBasicBlock]
-  }
-  deriving (Eq, Show)
-
-type LowerM = StateT FunctionState (Either BackendLLVMError)
 
 lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
 lowerBackendProgram program = do
@@ -6003,13 +5784,6 @@ structuralBackendHandlerFields =
                 BTArrow fieldTy rest -> go (fields ++ [fieldTy]) rest
                 _ -> Nothing
 
-atMay :: [a] -> Int -> Maybe a
-atMay xs index0
-  | index0 < 0 = Nothing
-  | otherwise =
-      case drop index0 xs of
-        value : _ -> Just value
-        [] -> Nothing
 
 matchConstructorResult :: [String] -> Set String -> Map String BackendType -> BackendType -> BackendType -> Maybe (Map String BackendType)
 matchConstructorResult dataParameterOrder parameters substitution expected actual =
@@ -6208,68 +5982,6 @@ emitMalloc env context size
       liftEither (BackendLLVMUnsupportedExpression context ("reserved runtime binding " ++ show runtimeMallocName))
   | otherwise =
       emitAssign "malloc" LLVMPtr (LLVMCall runtimeMallocName [(LLVMInt 64, LLVMIntLiteral 64 (toInteger size))])
-
-emitGep :: String -> LLVMOperand -> Int -> LowerM LLVMOperand
-emitGep prefix base offset =
-  emitAssign prefix LLVMPtr (LLVMGetElementPtr (LLVMInt 8) base [(LLVMInt 64, LLVMIntLiteral 64 (toInteger offset))])
-
-emitStore :: LLVMType -> LLVMOperand -> LLVMOperand -> LowerM ()
-emitStore ty value pointer =
-  emitInstruction (LLVMStore ty value pointer)
-
-emitAssign :: String -> LLVMType -> LLVMExpression -> LowerM LLVMOperand
-emitAssign prefix ty expr = do
-  name <- freshLocal prefix
-  emitInstruction (LLVMAssign name ty expr)
-  pure (LLVMLocal ty name)
-
-emitInstruction :: LLVMInstruction -> LowerM ()
-emitInstruction instruction =
-  modify $ \state0 ->
-    state0 {fsCurrentInstructions = fsCurrentInstructions state0 ++ [instruction]}
-
-freshLocal :: String -> LowerM String
-freshLocal prefix = do
-  index0 <- gets fsNextLocal
-  modify $ \state0 -> state0 {fsNextLocal = index0 + 1}
-  pure ("__llvm." ++ prefix ++ "." ++ show index0)
-
-freshBlock :: String -> LowerM String
-freshBlock prefix = do
-  index0 <- gets fsNextBlock
-  modify $ \state0 -> state0 {fsNextBlock = index0 + 1}
-  pure (sanitizeBlockLabel prefix ++ "." ++ show index0)
-
-sanitizeBlockLabel :: String -> String
-sanitizeBlockLabel =
-  map sanitizeChar
-  where
-    sanitizeChar char
-      | isAlphaNum char = char
-      | otherwise = '.'
-
-finishCurrentBlock :: LLVMTerminator -> LowerM ()
-finishCurrentBlock terminator = do
-  state0 <- get
-  let block =
-        LLVMBasicBlock
-          { llvmBlockLabel = fsCurrentLabel state0,
-            llvmBlockInstructions = fsCurrentInstructions state0,
-            llvmBlockTerminator = terminator
-          }
-  modify $ \state1 ->
-    state1
-      { fsCurrentInstructions = [],
-        fsCompletedBlocks = block : fsCompletedBlocks state1
-      }
-
-startBlock :: String -> LowerM ()
-startBlock label =
-  modify $ \state0 ->
-    state0
-      { fsCurrentLabel = label,
-        fsCurrentInstructions = []
-      }
 
 substituteExprTypes :: Map String BackendType -> BackendExpr -> BackendExpr
 substituteExprTypes substitution =

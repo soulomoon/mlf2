@@ -87,6 +87,8 @@ library mlf2-internal
                       MLF.Backend.IR,
                       MLF.Backend.LLVM,
                       MLF.Backend.LLVM.Lower,
+                      MLF.Backend.LLVM.Lower.Emit,
+                      MLF.Backend.LLVM.Lower.Types,
                       MLF.Backend.LLVM.Ppr,
                       MLF.Backend.LLVM.Syntax,
                       MLF.Frontend.Parse,
