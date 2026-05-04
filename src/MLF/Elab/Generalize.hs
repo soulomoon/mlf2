@@ -55,8 +55,6 @@ import MLF.Constraint.Presolution.Plan.SchemeRoots
 import MLF.Constraint.Presolution.Plan.Target (TypeRootPlan (..))
 import MLF.Constraint.Presolution.View (pvCanonicalMap)
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Types
 import MLF.Reify.Core

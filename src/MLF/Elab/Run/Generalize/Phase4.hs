@@ -2,7 +2,7 @@ module MLF.Elab.Run.Generalize.Phase4 (
     computeSchemeOwnership
 ) where
 
-import Data.Functor.Foldable (ListF(..), cata, hylo)
+import Data.Functor.Foldable (ListF(..), cata)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
@@ -52,7 +52,7 @@ import MLF.Elab.Run.Generalize.Types
     , Phase3Result(..)
     , Phase4Result(..)
     )
-import MLF.Util.Graph (reachableFromStop)
+import MLF.Util.Graph (reachableFromStop, reachableFromStopWith)
 import MLF.Util.IntMapUtils (keepOld)
 
 computeSchemeOwnership :: GeneralizeEnv -> Phase1Result -> Phase2Result -> Phase3Result -> Phase4Result
@@ -80,6 +80,14 @@ computeSchemeOwnership env phase1 phase2 phase3 =
         isUpperRef = mkIsUpperRef upperConstraint
         allowBindEdge = mkAllowBindEdge okRef isUpperRef
         baseFirstGenAncestor = baseFirstGenAncestorWith solvedToBase bindParentsBase
+        resolveSchemeChildMeta child =
+            let baseNode =
+                    case IntMap.lookup (getNodeId child) solvedToBase of
+                        Just node -> node
+                        Nothing -> child
+                sticky = IntSet.member (getNodeId baseNode) stickyTypeParentsBase
+                baseOwner = baseFirstGenAncestor (typeRef child)
+            in (baseNode, sticky, baseOwner)
         mapBaseRef = mapBaseRefWith canonical baseToSolved nodesSolved
         (_schemeRootSetIgnored, schemeRootOwners) =
             canonicalSchemeRootOwners canonical genMerged
@@ -104,28 +112,9 @@ computeSchemeOwnership env phase1 phase2 phase3 =
             in reachableFromStop getNodeId canonical children shouldStop start
         reachableFromWithBoundsBaseStop start =
             let stopSet = schemeRootsBaseSet
-                startKey = getNodeId start
-                isStop nid =
-                    let key = getNodeId nid
-                    in key /= startKey && IntSet.member key stopSet
-                alg Nil = IntSet.empty
-                alg (Cons nid acc)
-                    | isStop nid = acc
-                    | otherwise = IntSet.insert (getNodeId (adoptNodeId nid)) acc
-                coalg (visited, queue) =
-                    case queue of
-                        [] -> Nil
-                        (nid0:rest) ->
-                            let key = getNodeId nid0
-                                visited' = IntSet.insert key visited
-                            in if IntSet.member key visited
-                                then Cons nid0 (visited, rest)
-                                else if isStop nid0
-                                    then Cons nid0 (visited', rest)
-                                    else
-                                        let kids = childrenFrom baseNodes key
-                                        in Cons nid0 (visited', kids ++ rest)
-            in hylo alg coalg (IntSet.empty, [start])
+                shouldStop nid = IntSet.member (getNodeId nid) stopSet
+                children nid = childrenFrom baseNodes (getNodeId nid)
+            in reachableFromStopWith getNodeId (getNodeId . adoptNodeId) id children shouldStop start
         boundSchemeRoots =
             IntSet.fromList
                 [ getNodeId (canonical bnd)
@@ -375,13 +364,9 @@ computeSchemeOwnership env phase1 phase2 phase3 =
                         (\acc nidInt ->
                             let child = NodeId nidInt
                                 childKey = nodeRefKey (typeRef child)
-                                baseKey =
-                                    case IntMap.lookup nidInt solvedToBase of
-                                        Just (NodeId key) -> key
-                                        Nothing -> nidInt
-                                sticky = IntSet.member baseKey stickyTypeParentsBase
+                                (_baseNode, sticky, baseOwner) =
+                                    resolveSchemeChildMeta child
                                 owner = IntMap.lookup nidInt schemeInteriorOwnersFiltered'
-                                baseOwner = baseFirstGenAncestor (typeRef child)
                                 ownerMismatch = ownerIsOther gid owner
                                 baseOwnerMismatch = ownerIsOther gid baseOwner
                             in if sticky || IntSet.member nidInt instCopyNodes
@@ -450,13 +435,9 @@ computeSchemeOwnership env phase1 phase2 phase3 =
                                             Just TyVar{} ->
                                                 let child = NodeId nidInt
                                                     childKey = nodeRefKey (typeRef child)
-                                                    baseKey =
-                                                        case IntMap.lookup nidInt solvedToBase of
-                                                            Just (NodeId key) -> key
-                                                            Nothing -> nidInt
-                                                    sticky = IntSet.member baseKey stickyTypeParentsBase
+                                                    (_baseNode, sticky, baseOwner) =
+                                                        resolveSchemeChildMeta child
                                                     owner = IntMap.lookup nidInt schemeRootOwnersFiltered
-                                                    baseOwner = baseFirstGenAncestor (typeRef child)
                                                 in if sticky || ownerIsOther gid baseOwner || ownerIsOther gid owner
                                                     then acc'
                                                     else
@@ -500,19 +481,16 @@ computeSchemeOwnership env phase1 phase2 phase3 =
                             case ownerFinal of
                                 Just gid' | gid' /= gid -> acc
                                 _ ->
-                                    let childRef = typeRef (NodeId nidInt)
+                                    let child = NodeId nidInt
+                                        childRef = typeRef child
                                         childKey = nodeRefKey childRef
                                         currentOwner = firstGenAncestorWith acc childRef
                                         shouldOverride =
                                             case currentOwner of
                                                 Just gid' -> gid' /= gid
                                                 Nothing -> True
-                                        baseKey =
-                                            case IntMap.lookup nidInt solvedToBase of
-                                                Just (NodeId key) -> key
-                                                Nothing -> nidInt
-                                        sticky = IntSet.member baseKey stickyTypeParentsBase
-                                        baseOwner = baseFirstGenAncestor childRef
+                                        (_baseNode, sticky, baseOwner) =
+                                            resolveSchemeChildMeta child
                                         oldOwner = IntMap.lookup nidInt schemeInteriorOwnersFiltered'
                                         ownerChanged =
                                             case (oldOwner, ownerFinal) of
@@ -560,12 +538,8 @@ computeSchemeOwnership env phase1 phase2 phase3 =
                         Just TyVar{} ->
                             let child = NodeId nidInt
                                 childKey = nodeRefKey (typeRef child)
-                                baseKey =
-                                    case IntMap.lookup nidInt solvedToBase of
-                                        Just (NodeId key) -> key
-                                        Nothing -> nidInt
-                                sticky = IntSet.member baseKey stickyTypeParentsBase
-                                baseOwner = baseFirstGenAncestor (typeRef child)
+                                (_baseNode, sticky, baseOwner) =
+                                    resolveSchemeChildMeta child
                                 baseParent = IntMap.lookup childKey bindParentsBase'
                                 existing = IntMap.lookup childKey acc
                                 shouldPreserve =

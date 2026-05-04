@@ -13,12 +13,14 @@ where
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
+import MLF.Constraint.Presolution.Plan.BinderPlan.Alias
+  ( AliasEnv (..),
+    boundMentionsSelfAliasFor,
+  )
 import MLF.Constraint.Presolution.Plan.BinderPlan.Order (GaBindParentsInfo (..))
 import MLF.Constraint.Presolution.Plan.BinderPlan.Types (BinderPlan (..), BinderPlanInput (..))
 import MLF.Constraint.Presolution.Plan.BinderPlan.Util
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Reify.Core (reifyBoundWithNames, reifyBoundWithNamesOnConstraint, reifyTypeWithNames)
 import MLF.Reify.TypeOps (freeTypeVarsFrom)
@@ -166,6 +168,16 @@ buildBinderPlan BinderPlanInput {..} = do
               | v <- normalizedBinders
             ]
   let typeRootForScheme = liftToForall typeRoot
+      aliasEnv =
+        AliasEnv
+          { aeCanonical = canonical,
+            aeConstraint = constraint,
+            aeNodes = cNodes constraint,
+            aeBindParents = bindParents,
+            aeDepthMap = gammaAlias,
+            aeScopeSchemeRoots = nestedSchemeInteriorSet,
+            aeNodeChildren = reachableFromWithBounds
+          }
       isSchemeRootAlias v =
         IntSet.member (getNodeId (canonical v)) schemeRootKeySet
           && canonical v /= canonical target0
@@ -193,11 +205,7 @@ buildBinderPlan BinderPlanInput {..} = do
               bndC = canonical bnd
           _ -> False
       boundIsTypeRootAlias v =
-        case VarStore.lookupVarBound constraint (canonical v) of
-          Just bnd ->
-            let bndC = canonical bnd
-             in bndC == canonical typeRoot || bndC == canonical typeRootForScheme
-          Nothing -> False
+        boundIsSchemeBodyAlias v
       boundHasNamedOutsideGammaFor v =
         case mbBindParentsGa of
           Just ga
@@ -265,24 +273,8 @@ buildBinderPlan BinderPlanInput {..} = do
                             _ -> False
                  in any isNamedOutside (IntSet.toList reachableBound)
               Nothing -> False
-      boundMentionsSelfAlias v =
-        case VarStore.lookupVarBound constraint (canonical v) of
-          Just bnd ->
-            let reachableBound = reachableFromWithBounds bnd
-                binderKey = getNodeId (canonical v)
-                mentionsSelf nidInt =
-                  let nidC = canonical (NodeId nidInt)
-                      keyC = getNodeId nidC
-                   in if IntSet.member keyC nestedSchemeInteriorSet
-                        then False
-                        else case lookupNodeInMap nodes nidC of
-                          Just TyVar {} ->
-                            case IntMap.lookup keyC gammaAlias of
-                              Just repKey -> repKey == binderKey
-                              Nothing -> False
-                          _ -> False
-             in any mentionsSelf (IntSet.toList reachableBound)
-          Nothing -> False
+      boundMentionsSelfAlias =
+        boundMentionsSelfAliasFor aliasEnv
       aliasBoundIsBottomOrNone v =
         isSchemeRootAlias v
           && not (isTargetSchemeBinder v)

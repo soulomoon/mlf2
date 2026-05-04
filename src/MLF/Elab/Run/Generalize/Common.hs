@@ -46,6 +46,7 @@ import MLF.Elab.Run.Generalize.Types
     , NodeKey
     , NodeMap
     )
+import MLF.Util.Graph (reachableFrom)
 
 nodeMapToIntMap :: Graph.NodeMap a -> IntMap.IntMap a
 nodeMapToIntMap nodes =
@@ -127,20 +128,7 @@ childrenFrom nodes key =
 
 reachableFromWithBounds :: NodeMap -> NodeId -> IntSet.IntSet
 reachableFromWithBounds nodes start =
-    let alg Nil = IntSet.empty
-        alg (Cons nid acc) = IntSet.insert (getNodeId nid) acc
-        coalg (visited, queue) =
-            case queue of
-                [] -> Nil
-                (nid0:rest) ->
-                    let key = getNodeId nid0
-                    in if IntSet.member key visited
-                        then Cons nid0 (visited, rest)
-                        else
-                            let visited' = IntSet.insert key visited
-                                kids = childrenFrom nodes key
-                            in Cons nid0 (visited', kids ++ rest)
-    in hylo alg coalg (IntSet.empty, [start])
+    reachableFrom getNodeId id (\nid -> childrenFrom nodes (getNodeId nid)) start
 
 isTyVarAt :: NodeMap -> NodeKey -> Bool
 isTyVarAt nodes key =

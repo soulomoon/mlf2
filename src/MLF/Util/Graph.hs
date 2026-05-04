@@ -1,7 +1,8 @@
 module MLF.Util.Graph (
     topoSortBy,
     reachableFrom,
-    reachableFromStop
+    reachableFromStop,
+    reachableFromStopWith
 ) where
 
 import Data.Functor.Foldable (ListF(..), hylo)
@@ -73,19 +74,30 @@ reachableFromStop
     -> a                  -- ^ Start node.
     -> IntSet.IntSet
 reachableFromStop keyOf canonical successors shouldStop start =
+    reachableFromStopWith keyOf keyOf canonical successors shouldStop start
+
+reachableFromStopWith
+    :: (a -> Int)         -- ^ Key for visited sets.
+    -> (a -> Int)         -- ^ Key for the returned set.
+    -> (a -> a)           -- ^ Canonicalization for nodes.
+    -> (a -> [a])         -- ^ Successors for a node.
+    -> (a -> Bool)        -- ^ Stop expansion at a node (except start).
+    -> a                  -- ^ Start node.
+    -> IntSet.IntSet
+reachableFromStopWith visitKeyOf resultKeyOf canonical successors shouldStop start =
     let startC = canonical start
-        startKey = keyOf startC
-        isStop nC = keyOf nC /= startKey && shouldStop nC
+        startKey = visitKeyOf startC
+        isStop nC = visitKeyOf nC /= startKey && shouldStop nC
         alg Nil = IntSet.empty
         alg (Cons nC acc)
             | isStop nC = acc
-            | otherwise = IntSet.insert (keyOf nC) acc
+            | otherwise = IntSet.insert (resultKeyOf nC) acc
         coalg (visited, queue) =
             case queue of
                 [] -> Nil
                 (n:rest) ->
                     let nC = canonical n
-                        key = keyOf nC
+                        key = visitKeyOf nC
                     in if IntSet.member key visited
                         then Cons nC (visited, rest)
                         else

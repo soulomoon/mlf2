@@ -72,7 +72,6 @@ computeBindParentsBase env phase1 phase2 =
                 childRef' = adoptRef childRef
                 parentRef' = adoptRef parentRef
                 childKey' = nodeRefKey childRef'
-                isSelf = nodeRefKey childRef' == nodeRefKey parentRef'
                 existing = IntMap.lookup childKey' acc
                 childIsCopy =
                     case childRef' of
@@ -83,22 +82,25 @@ computeBindParentsBase env phase1 phase2 =
                         Just (parentExisting, _) -> nodeRefKey parentExisting == childKey'
                         Nothing -> False
                 wasRed = wasRedirected childRef
-                dbgInsert msg =
+                allowed = allowBindEdge childRef' parentRef'
+                inserted = applyBindParent allowBindEdge SelfOrEmpty childRef' parentRef' flag acc
+                insertLabel =
+                    case existing of
+                        Just _ | childIsCopy && existingSelf -> Just "override copy"
+                        Nothing -> Just "fill"
+                        Just _ | existingSelf -> Just "override self-parent"
+                        _ -> Nothing
+                dbgInsert msg result =
                     debug ("bind-parent " ++ msg ++ " child=" ++ show childRef'
                            ++ " parent=" ++ show parentRef'
                            ++ " redirected=" ++ show wasRed)
-                          (IntMap.insert childKey' (parentRef', flag) acc)
-            in case () of
-                _ | not (okRef childRef' && okRef parentRef') -> acc
-                  | isSelf -> acc
-                  | not (isUpperRef parentRef' childRef') -> acc
-                  | otherwise ->
-                        case existing of
-                            Just _ | childIsCopy && not existingSelf -> acc
-                            Just _ | childIsCopy -> dbgInsert "override copy"
-                            Nothing -> dbgInsert "fill"
-                            Just _ | existingSelf -> dbgInsert "override self-parent"
-                            _ -> acc
+                          result
+            in case insertLabel of
+                Just label
+                    | allowed
+                    , IntMap.lookup childKey' inserted == Just (parentRef', flag) ->
+                        dbgInsert label inserted
+                _ -> inserted
 
         bindParentsBase' =
             IntMap.foldlWithKey'

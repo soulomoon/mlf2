@@ -12,8 +12,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Util.Graph (reachableFromStop)
 import MLF.Frontend.ConstraintGen.State (BuildState(..), ConstraintM, ScopeFrame(..))
 import MLF.Frontend.ConstraintGen.Types (ConstraintError(..))
