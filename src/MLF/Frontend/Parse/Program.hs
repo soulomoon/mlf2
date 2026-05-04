@@ -174,6 +174,17 @@ pLocatedConstrainedType =
             ty <- pType
             pure (ConstrainedType constraints ty, spans)
         )
+        <|> try
+            ( do
+                forallTok
+                vars <- some (lowerIdent reservedWords)
+                void (symbol ".")
+                (constraints, spans) <- pLocatedConstraintList
+                void (symbol "=>")
+                ty <- pType
+                let wrappedTy = foldr (\v acc -> STForall v Nothing acc) ty vars
+                pure (ConstrainedType constraints wrappedTy, spans)
+            )
         <|> do
             ty <- pType
             pure (unconstrainedType ty, emptyProgramSpanIndex)

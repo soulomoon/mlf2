@@ -7,6 +7,7 @@ import Data.Set qualified as Set
 import Data.Text qualified as T
 import MLF.API
 import MLF.API qualified as API
+import MLF.Constraint.NodeAccess qualified as NodeAccess
 import MLF.Pipeline qualified as Pipeline
 import MLF.XMLF
 import Test.Hspec
@@ -59,13 +60,15 @@ spec = describe "Public surface contracts" $ do
       expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
         case Pipeline.inferConstraintGraph Set.empty expr of
           Left err -> expectationFailure ("Expected constraint graph, got " ++ show err)
-          Right _ -> pure ()
+          Right result ->
+            length (NodeAccess.allNodes (Pipeline.crConstraint result)) `shouldSatisfy` (> 0)
 
     it "accepts recursive surface annotations on the explicit-only path" $ do
       expectRight (parseNormEmlfExpr "λ(x : μa. a -> Int) x") $ \expr -> do
         case Pipeline.inferConstraintGraph Set.empty expr of
           Left err -> expectationFailure ("Expected constraint graph, got " ++ show err)
-          Right _ -> pure ()
+          Right result ->
+            length (NodeAccess.allNodes (Pipeline.crConstraint result)) `shouldSatisfy` (> 0)
         expectRight (Pipeline.runPipelineElab Set.empty expr) $ \(term, ty) -> do
           Pipeline.typeCheck term `shouldBe` Right ty
           ty `shouldSatisfy` hasRecursiveArrow

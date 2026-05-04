@@ -118,6 +118,8 @@ runCheckedPureProgram checked =
       pure (toValueWithProgram checked (normalizeProgramTerm (programMainTerm checked)))
     MainIOUnit ->
       Left (ProgramPipelineError "runProgram value API does not return IO main output")
+    MainIOOther ty ->
+      Left (ProgramPipelineError ("runProgram value API does not return IO main output: " ++ show ty))
     MainUnsupportedIO ty ->
       Left (unsupportedIOMainError ty)
 
@@ -143,12 +145,22 @@ runCheckedProgramOutput checked =
                 programRunValue = Nothing
               }
         else Left (ProgramPipelineError "run-program IO main did not finish with Unit")
+    MainIOOther _ty -> do
+      let context = mkRuntimeContext checked
+      action <- mainIOAction checked
+      (stdoutText, result) <- executeIOAction context action
+      pure
+        ProgramRunResult
+          { programRunStdout = stdoutText,
+            programRunValue = Just (runtimeValueToValue result)
+          }
     MainUnsupportedIO ty ->
       Left (unsupportedIOMainError ty)
 
 data MainMode
   = MainPure
   | MainIOUnit
+  | MainIOOther SrcType
   | MainUnsupportedIO SrcType
   deriving (Eq, Show)
 
@@ -157,8 +169,15 @@ classifyMainMode checked =
   case mainIdentitySourceType checked of
     Just ty
       | isIOUnitSourceType ty -> MainIOUnit
+      | isIOType ty -> MainIOOther (recoverMainSourceType checked ty)
       | Builtins.srcTypeMentionsOpaqueBuiltin ty -> MainUnsupportedIO (recoverMainSourceType checked ty)
     _ -> MainPure
+
+isIOType :: SrcType -> Bool
+isIOType ty =
+  case ty of
+    STCon name _ -> isIOTypeName name
+    _ -> False
 
 isIOUnitSourceType :: SrcType -> Bool
 isIOUnitSourceType ty =
@@ -247,6 +266,16 @@ data RuntimePrimitive
   = RuntimeIOPure
   | RuntimeIOBind
   | RuntimeIOPutStrLn
+  | RuntimeIOGetLine
+  | RuntimeIOPutStr
+  | RuntimeIOReadFile
+  | RuntimeIOWriteFile
+  | RuntimeIOAppendFile
+  | RuntimeIOExitWith
+  | RuntimeIONewIORef
+  | RuntimeIOReadIORef
+  | RuntimeIOWriteIORef
+  | RuntimeIOGetArgs
   | RuntimeAnd
   deriving (Eq, Show)
 
@@ -254,6 +283,16 @@ data RuntimeIOAction
   = RuntimePure RuntimeValue
   | RuntimeBind RuntimeIOAction RuntimeValue
   | RuntimePutStrLn String
+  | RuntimeGetLine
+  | RuntimePutStr String
+  | RuntimeReadFile String
+  | RuntimeWriteFile String String
+  | RuntimeAppendFile String String
+  | RuntimeExitWith Integer
+  | RuntimeNewIORef RuntimeValue
+  | RuntimeReadIORef RuntimeValue
+  | RuntimeWriteIORef RuntimeValue RuntimeValue
+  | RuntimeGetArgs
 
 mainIOAction :: CheckedProgram -> Either ProgramError RuntimeIOAction
 mainIOAction checked = do
@@ -381,6 +420,16 @@ runtimePrimitive name =
     "__io_pure" -> Just RuntimeIOPure
     "__io_bind" -> Just RuntimeIOBind
     "__io_putStrLn" -> Just RuntimeIOPutStrLn
+    "__io_getLine" -> Just RuntimeIOGetLine
+    "__io_putStr" -> Just RuntimeIOPutStr
+    "__io_readFile" -> Just RuntimeIOReadFile
+    "__io_writeFile" -> Just RuntimeIOWriteFile
+    "__io_appendFile" -> Just RuntimeIOAppendFile
+    "__io_exitWith" -> Just RuntimeIOExitWith
+    "__io_newIORef" -> Just RuntimeIONewIORef
+    "__io_readIORef" -> Just RuntimeIOReadIORef
+    "__io_writeIORef" -> Just RuntimeIOWriteIORef
+    "__io_getArgs" -> Just RuntimeIOGetArgs
     "__mlfp_and" -> Just RuntimeAnd
     _ -> Nothing
 
@@ -1008,6 +1057,38 @@ applyRuntimePrimitive prim args
           Right (RuntimeIO (RuntimePutStrLn msg))
         (RuntimeIOPutStrLn, [_]) ->
           Left (ProgramPipelineError "run-program __io_putStrLn expected a String argument")
+        (RuntimeIOGetLine, []) ->
+          Right (RuntimeIO RuntimeGetLine)
+        (RuntimeIOPutStr, [RuntimeLit (LString msg)]) ->
+          Right (RuntimeIO (RuntimePutStr msg))
+        (RuntimeIOPutStr, [_]) ->
+          Left (ProgramPipelineError "run-program __io_putStr expected a String argument")
+        (RuntimeIOReadFile, [RuntimeLit (LString path)]) ->
+          Right (RuntimeIO (RuntimeReadFile path))
+        (RuntimeIOReadFile, [_]) ->
+          Left (ProgramPipelineError "run-program __io_readFile expected a String argument")
+        (RuntimeIOWriteFile, [RuntimeLit (LString path), RuntimeLit (LString contents)]) ->
+          Right (RuntimeIO (RuntimeWriteFile path contents))
+        (RuntimeIOWriteFile, _) ->
+          Left (ProgramPipelineError "run-program __io_writeFile expected two String arguments")
+        (RuntimeIOAppendFile, [RuntimeLit (LString path), RuntimeLit (LString contents)]) ->
+          Right (RuntimeIO (RuntimeAppendFile path contents))
+        (RuntimeIOAppendFile, _) ->
+          Left (ProgramPipelineError "run-program __io_appendFile expected two String arguments")
+        (RuntimeIOExitWith, [RuntimeLit (LInt status)]) ->
+          Right (RuntimeIO (RuntimeExitWith status))
+        (RuntimeIOExitWith, [_]) ->
+          Left (ProgramPipelineError "run-program __io_exitWith expected an Int argument")
+        (RuntimeIONewIORef, [value]) ->
+          Right (RuntimeIO (RuntimeNewIORef value))
+        (RuntimeIOReadIORef, [ref]) ->
+          Right (RuntimeIO (RuntimeReadIORef ref))
+        (RuntimeIOWriteIORef, [ref, value]) ->
+          Right (RuntimeIO (RuntimeWriteIORef ref value))
+        (RuntimeIOWriteIORef, _) ->
+          Left (ProgramPipelineError "run-program __io_writeIORef expected two arguments")
+        (RuntimeIOGetArgs, []) ->
+          Right (RuntimeIO RuntimeGetArgs)
         (RuntimeAnd, [RuntimeLit (LBool left), RuntimeLit (LBool right)]) ->
           Right (RuntimeLit (LBool (left && right)))
         (RuntimeAnd, _) ->
@@ -1021,6 +1102,16 @@ runtimePrimitiveArity prim =
     RuntimeIOPure -> 1
     RuntimeIOBind -> 2
     RuntimeIOPutStrLn -> 1
+    RuntimeIOGetLine -> 0
+    RuntimeIOPutStr -> 1
+    RuntimeIOReadFile -> 1
+    RuntimeIOWriteFile -> 2
+    RuntimeIOAppendFile -> 2
+    RuntimeIOExitWith -> 1
+    RuntimeIONewIORef -> 1
+    RuntimeIOReadIORef -> 1
+    RuntimeIOWriteIORef -> 2
+    RuntimeIOGetArgs -> 0
     RuntimeAnd -> 2
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
@@ -1030,6 +1121,26 @@ executeIOAction context action =
       Right ("", value)
     RuntimePutStrLn msg ->
       Right (msg ++ "\n", RuntimeUnit)
+    RuntimeGetLine ->
+      Left (ProgramPipelineError "run-program __io_getLine requires native execution (use --native)")
+    RuntimePutStr msg ->
+      Right (msg, RuntimeUnit)
+    RuntimeReadFile _ ->
+      Left (ProgramPipelineError "run-program __io_readFile requires native execution (use --native)")
+    RuntimeWriteFile _ _ ->
+      Left (ProgramPipelineError "run-program __io_writeFile requires native execution (use --native)")
+    RuntimeAppendFile _ _ ->
+      Left (ProgramPipelineError "run-program __io_appendFile requires native execution (use --native)")
+    RuntimeExitWith _ ->
+      Left (ProgramPipelineError "run-program __io_exitWith requires native execution (use --native)")
+    RuntimeNewIORef _ ->
+      Left (ProgramPipelineError "run-program __io_newIORef requires native execution (use --native)")
+    RuntimeReadIORef _ ->
+      Left (ProgramPipelineError "run-program __io_readIORef requires native execution (use --native)")
+    RuntimeWriteIORef _ _ ->
+      Left (ProgramPipelineError "run-program __io_writeIORef requires native execution (use --native)")
+    RuntimeGetArgs ->
+      Left (ProgramPipelineError "run-program __io_getArgs requires native execution (use --native)")
     RuntimeBind first continuation -> do
       (firstStdout, firstValue) <- executeIOAction context first
       nextValue <- applyRuntimeValue context continuation firstValue
@@ -1046,6 +1157,15 @@ isRuntimeUnit value =
     RuntimeUnit -> True
     RuntimeData ctor _ [] -> isPreludeUnitConstructor ctor
     _ -> False
+
+runtimeValueToValue :: RuntimeValue -> Value
+runtimeValueToValue rv =
+  case rv of
+    RuntimeLit lit -> VLit lit
+    RuntimeUnit -> VData "Unit" []
+    RuntimeData ctor _ args -> VData (ctorName ctor) (map runtimeValueToValue args)
+    RuntimeConstructor spec args -> VData (ctorName (runtimeConstructorInfo spec)) (map runtimeValueToValue args)
+    _ -> VData "<closure>" []
 
 reachableOpaqueRuntimeDependencies :: CheckedProgram -> [String]
 reachableOpaqueRuntimeDependencies checked =

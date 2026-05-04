@@ -3,7 +3,7 @@ module ConstraintGenSpec (spec) where
 import Control.Monad (filterM, forM, forM_, when)
 import Data.List (nub)
 import Data.List.NonEmpty (NonEmpty(..))
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, isJust)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
@@ -1046,7 +1046,12 @@ spec = describe "Phase 1 — Constraint generation" $ do
             -- ∀(a ⩾ Int). a - valid: 'a' is in body but not in bound
             let ann = STForall "a" (Just (mkSrcBound (STBase "Int"))) (STVar "a")
                 expr = EAnn (ELit (LInt 1)) ann
-            expectRight (inferConstraintGraphDefault expr) $ \_ -> pure ()
+            expectRight (inferConstraintGraphDefault expr) $ \result -> do
+                let nodes = cNodes (crConstraint result)
+                -- The forall annotation should produce bind parents
+                length (cBindParents (crConstraint result)) `shouldSatisfy` (> 0)
+                -- Root node should exist in the graph
+                lookupNodeMaybe nodes (crRoot result) `shouldSatisfy` isJust
 
         it "alias bound ∀(b ⩾ a) inlined by normalization before constraint gen" $ do
             -- ∀(b ⩾ a). b → a is an alias bound: normalization inlines b := a,

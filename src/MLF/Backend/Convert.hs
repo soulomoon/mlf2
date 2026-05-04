@@ -385,6 +385,47 @@ backendBuiltinTermTypes =
       ( "__io_putStrLn",
         TArrow (TBase (BaseTy "String"))
           (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| []))
+      ),
+      ( "__io_getLine",
+        TCon (BaseTy "IO") (TBase (BaseTy "String") :| [])
+      ),
+      ( "__io_putStr",
+        TArrow (TBase (BaseTy "String"))
+          (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| []))
+      ),
+      ( "__io_readFile",
+        TArrow (TBase (BaseTy "String"))
+          (TCon (BaseTy "IO") (TBase (BaseTy "String") :| []))
+      ),
+      ( "__io_writeFile",
+        TArrow (TBase (BaseTy "String"))
+          (TArrow (TBase (BaseTy "String"))
+            (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| [])))
+      ),
+      ( "__io_appendFile",
+        TArrow (TBase (BaseTy "String"))
+          (TArrow (TBase (BaseTy "String"))
+            (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| [])))
+      ),
+      ( "__io_exitWith",
+        TArrow (TBase (BaseTy "Int"))
+          (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| []))
+      ),
+      ( "__io_newIORef",
+        TForall "a" Nothing
+          (TArrow (TVar "a") (TCon (BaseTy "IO") (TCon (BaseTy "IORef") (TVar "a" :| []) :| [])))
+      ),
+      ( "__io_readIORef",
+        TForall "a" Nothing
+          (TArrow (TCon (BaseTy "IORef") (TVar "a" :| [])) (TCon (BaseTy "IO") (TVar "a" :| [])))
+      ),
+      ( "__io_writeIORef",
+        TForall "a" Nothing
+          (TArrow (TCon (BaseTy "IORef") (TVar "a" :| []))
+            (TArrow (TVar "a") (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| []))))
+      ),
+      ( "__io_getArgs",
+        TCon (BaseTy "IO") (TCon (BaseTy "List") (TBase (BaseTy "String") :| []) :| [])
       )
     ]
 

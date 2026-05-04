@@ -94,7 +94,7 @@ spec = describe "Thesis alignment invariants" $ do
                     (Right (t1, ty1), Right (t2, ty2)) -> do
                         show t1 `shouldBe` show t2
                         show ty1 `shouldBe` show ty2
-                    (Left _, Left _) -> pure ()
+                    (Left e1, Left e2) -> e1 `shouldBe` e2
                     _ -> expectationFailure $
                         "Path disagreement for " ++ label
 
@@ -113,7 +113,7 @@ spec = describe "Thesis alignment invariants" $ do
                     (Right (t1, ty1), Right (t2, ty2)) -> do
                         show t1 `shouldBe` show t2
                         show ty1 `shouldBe` show ty2
-                    (Left _, Left _) -> pure ()
+                    (Left e1, Left e2) -> e1 `shouldBe` e2
                     _ -> expectationFailure $
                         "Path disagreement for " ++ label
 

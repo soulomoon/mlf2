@@ -838,7 +838,11 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
             case solveUnify defaultTraceConfig c of
-                Right _ -> pure ()
+                Right res -> do
+                    -- Unify edges should be drained after harmonization
+                    cUnifyEdges (resultConstraint res) `shouldBe` []
+                    -- The constraint should still have its nodes
+                    length (cNodes (resultConstraint res)) `shouldSatisfy` (> 0)
                 Left err -> expectationFailure $ "solveUnify failed: " ++ show err
 
         it "O12-SOLVE-ARROW" $ do

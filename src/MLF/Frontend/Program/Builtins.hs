@@ -44,14 +44,15 @@ builtinTypeKinds =
     [ ("Int", P.KType),
       ("Bool", P.KType),
       ("String", P.KType),
-      ("IO", P.KArrow P.KType P.KType)
+      ("IO", P.KArrow P.KType P.KType),
+      ("IORef", P.KArrow P.KType P.KType)
     ]
 
 builtinTypeNames :: Set String
 builtinTypeNames = Map.keysSet builtinTypeKinds
 
 builtinOpaqueTypeNames :: Set String
-builtinOpaqueTypeNames = Set.singleton "IO"
+builtinOpaqueTypeNames = Set.fromList ["IO", "IORef"]
 
 isBuiltinTypeName :: String -> Bool
 isBuiltinTypeName = (`Map.member` builtinTypeKinds)
@@ -91,7 +92,17 @@ builtinValues =
     [ builtinOrdinary "__mlfp_and" (bool `STArrow` (bool `STArrow` bool)),
       builtinOrdinary "__io_pure" (STForall "a" Nothing (STVar "a" `STArrow` ioOf (STVar "a"))),
       builtinOrdinary "__io_bind" (STForall "a" Nothing (STForall "b" Nothing ioBindType)),
-      builtinOrdinary "__io_putStrLn" (string `STArrow` ioOf unit)
+      builtinOrdinary "__io_putStrLn" (string `STArrow` ioOf unit),
+      builtinOrdinary "__io_getLine" (ioOf string),
+      builtinOrdinary "__io_putStr" (string `STArrow` ioOf unit),
+      builtinOrdinary "__io_readFile" (string `STArrow` ioOf string),
+      builtinOrdinary "__io_writeFile" (string `STArrow` (string `STArrow` ioOf unit)),
+      builtinOrdinary "__io_appendFile" (string `STArrow` (string `STArrow` ioOf unit)),
+      builtinOrdinary "__io_exitWith" (STBase "Int" `STArrow` ioOf unit),
+      builtinOrdinary "__io_newIORef" (STForall "a" Nothing (STVar "a" `STArrow` ioOf (STCon "IORef" (STVar "a" :| [])))),
+      builtinOrdinary "__io_readIORef" (STForall "a" Nothing (STCon "IORef" (STVar "a" :| []) `STArrow` ioOf (STVar "a"))),
+      builtinOrdinary "__io_writeIORef" (STForall "a" Nothing (STCon "IORef" (STVar "a" :| []) `STArrow` (STVar "a" `STArrow` ioOf unit))),
+      builtinOrdinary "__io_getArgs" (ioOf (STCon "List" (STBase "String" :| [])))
     ]
   where
     bool = STBase "Bool"
@@ -127,20 +138,31 @@ builtinOpaqueValueNames =
 
 builtinOpaqueTypes :: Map String DataInfo
 builtinOpaqueTypes =
-  Map.singleton
-    "IO"
-    DataInfo
-      { dataName = "IO",
-        dataInfoSymbol = builtinIdentity SymbolType "IO",
-        dataModule = builtinModuleName,
-        dataTypeParams = [firstOrderTypeParam "a"],
-        dataParams = ["a"],
-        dataConstructors = []
-      }
+  Map.fromList
+    [ ("IO",
+        DataInfo
+          { dataName = "IO",
+            dataInfoSymbol = builtinIdentity SymbolType "IO",
+            dataModule = builtinModuleName,
+            dataTypeParams = [firstOrderTypeParam "a"],
+            dataParams = ["a"],
+            dataConstructors = []
+          })
+    , ("IORef",
+        DataInfo
+          { dataName = "IORef",
+            dataInfoSymbol = builtinIdentity SymbolType "IORef",
+            dataModule = builtinModuleName,
+            dataTypeParams = [firstOrderTypeParam "a"],
+            dataParams = ["a"],
+            dataConstructors = []
+          })
+    ]
 
 isOpaqueBuiltinDataInfo :: DataInfo -> Bool
 isOpaqueBuiltinDataInfo info =
   dataInfoSymbol info == builtinIdentity SymbolType "IO"
+    || dataInfoSymbol info == builtinIdentity SymbolType "IORef"
 
 srcTypeMentionsOpaqueBuiltin :: SrcType -> Bool
 srcTypeMentionsOpaqueBuiltin = go

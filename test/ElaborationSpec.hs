@@ -1820,7 +1820,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       phi `shouldBe` Elab.InstApp (Elab.TVar "t32")
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
-        Right _ -> pure ()
+        Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
 
     it "sameLaneDoubleAliasFrameClearBoundaryExpr exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -1897,7 +1897,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t38")) (Elab.InstApp (Elab.TVar "t44"))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDoubleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
-        Right _ -> pure ()
+        Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
 
     it "sameLaneTripleAliasFrameClearBoundaryExpr exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -1983,7 +1983,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t41")) (Elab.InstApp (Elab.TVar "t47"))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneTripleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
-        Right _ -> pure ()
+        Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
 
     it "sameLaneQuadrupleAliasFrameClearBoundaryExpr exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -2078,7 +2078,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t44")) (Elab.InstApp (Elab.TVar "t50"))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuadrupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
-        Right _ -> pure ()
+        Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
 
     it "sameLaneQuintupleAliasFrameClearBoundaryExpr exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -2182,7 +2182,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t47")) (Elab.InstApp (Elab.TVar "t53"))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuintupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
-        Right _ -> pure ()
+        Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
 
     it "sameLaneSextupleAliasFrameClearBoundaryExpr exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -2295,7 +2295,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t50")) (Elab.InstApp (Elab.TVar "t56"))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
-        Right _ -> pure ()
+        Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
 
     it "sameLaneSeptupleAliasFrameClearBoundaryExpr exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -2417,7 +2417,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t53")) (Elab.InstApp (Elab.TVar "t59"))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSeptupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
-        Right _ -> pure ()
+        Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
 
     it "sameLaneOctupleAliasFrameClearBoundaryExpr exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -2548,7 +2548,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t56")) (Elab.InstApp (Elab.TVar "t62"))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneOctupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
-        Right _ -> pure ()
+        Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
 
     it "sameLaneNonupleAliasFrameClearBoundaryExpr exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -2688,7 +2688,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       phi `shouldBe` Elab.InstSeq (Elab.InstApp (Elab.TVar "t59")) (Elab.InstApp (Elab.TVar "t65"))
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneNonupleAliasFrameClearBoundaryExpr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
-        Right _ -> pure ()
+        Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
 
     it "selected same-wrapper nested-forall exact edge authoritative instantiation translation" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -2749,7 +2749,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       phi `shouldBe` Elab.InstId
       case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
         Left err -> expectationFailure (Elab.renderPipelineError err)
-        Right _ -> pure ()
+        Right (_, ty) -> Elab.pretty ty `shouldSatisfy` (not . null)
 
     it "selected same-wrapper nested-forall reaches the post-annotation authoritative handoff" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -3592,8 +3592,9 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   ewWitness = InstanceWitness ops
                 }
 
-        _ <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew)
-        pure ()
+        phi <- requireRight (Elab.phiFromEdgeWitnessWithTrace defaultTraceConfig (generalizeAtWithActive solved) (presolutionViewFromSolved solved) Nothing (Just si) (Just tr) ew)
+        -- OpRaise with aliasing should produce a non-identity instantiation
+        phi `shouldSatisfy` (/= Elab.InstId)
 
       it "OpWeaken on solved-away binder emits InstElim (binder preserved in scheme)" $ do
         let root = NodeId 100

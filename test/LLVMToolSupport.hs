@@ -25,7 +25,7 @@ import System.Directory
 import System.Environment (lookupEnv)
 import System.Exit (ExitCode (..))
 import System.FilePath (isPathSeparator, takeFileName, (</>))
-import System.IO (hClose, hPutStr, openTempFile)
+import System.IO (hClose, hPutStr, openTempFile, stderr)
 import System.Process (readProcessWithExitCode)
 import Test.Hspec
 
@@ -139,10 +139,13 @@ runLLVMNativeExecutableWith toolchain output =
             runLLVMTool llc ["-relocation-model=pic", "-filetype=obj", "-o", objectPath, llvmPath]
         expectProcessSuccess "llc rejected native-runner LLVM input" llcExitCode "" llcStderr
 
+        -- Compile and link the C runtime if it exists
+        extraObjects <- compileCRuntimeIfPresent nativeLinker buildDir
+
         (linkExitCode, linkStdout, linkStderr) <-
             readProcessWithExitCode
                 (toolCommandExecutable nativeLinker)
-                (toolCommandArguments nativeLinker ++ [objectPath, "-o", executablePath])
+                (toolCommandArguments nativeLinker ++ [objectPath] ++ extraObjects ++ ["-o", executablePath])
                 ""
         expectProcessSuccess "native linker rejected LLVM object" linkExitCode linkStdout linkStderr
 
@@ -153,6 +156,35 @@ runLLVMNativeExecutableWith toolchain output =
                 , nativeRunStdout = runStdout
                 , nativeRunStderr = runStderr
                 }
+
+-- | Compile the Rust runtime crate if it exists, returning the path to the static library.
+compileCRuntimeIfPresent :: ToolCommand -> FilePath -> IO [FilePath]
+compileCRuntimeIfPresent _nativeLinker _buildDir = do
+    let cargoTomlPath = "runtime" </> "mlfp_io" </> "Cargo.toml"
+    exists <- doesFileExist cargoTomlPath
+    if exists
+        then do
+            mbCargo <- findExecutable "cargo"
+            case mbCargo of
+                Nothing -> do
+                    hPutStr stderr "warning: cargo not found, skipping Rust runtime compilation\n"
+                    pure []
+                Just cargo -> do
+                    (cargoExitCode, _cargoStdout, cargoStderr) <-
+                        readProcessWithExitCode cargo
+                            ["build", "--release", "--manifest-path", cargoTomlPath]
+                            ""
+                    case cargoExitCode of
+                        ExitSuccess -> do
+                            let libPath = "runtime" </> "mlfp_io" </> "target" </> "release" </> "libmlfp_io.a"
+                            libExists <- doesFileExist libPath
+                            if libExists
+                                then pure [libPath]
+                                else pure []
+                        _ -> do
+                            hPutStr stderr ("warning: Rust runtime compilation failed:\n" ++ cargoStderr)
+                            pure []
+        else pure []
 
 withTempLLVMBuildDirectory :: (FilePath -> IO a) -> IO a
 withTempLLVMBuildDirectory action = do

@@ -4538,10 +4538,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr)),
                 ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
               ]
+        let collapsedTy = TForall "a" Nothing (TVar "a")
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
-            Right _ -> pure ()
+            Right (_term, ty) ->
+              ty `shouldSatisfy` (/= collapsedTy)
 
       it "sameLaneClearBoundaryExpr authoritative public output stays recursive on both entrypoints without collapsing to forall identity" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))

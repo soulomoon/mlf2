@@ -538,7 +538,7 @@ spec = do
                         ]
             (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right ""
 
-        it "does not classify qualified non-Prelude Unit results as runtime IO Unit" $ do
+        it "supports qualified non-Prelude Unit results in IO main" $ do
             located <-
                 requireLocated $
                     unlines
@@ -552,18 +552,7 @@ spec = do
                         , "  def main : IO A.Unit = __io_pure A.Unit;"
                         , "}"
                         ]
-            runLocatedProgramOutput located `shouldSatisfy` either
-                ( \diagnostic ->
-                    case diagnosticError diagnostic of
-                        ProgramPipelineError msg ->
-                            all
-                                (`isInfixOf` msg)
-                                [ "run-program supports only main : IO Unit"
-                                , "A.Unit"
-                                ]
-                        _ -> False
-                )
-                (const False)
+            runLocatedProgramOutput located `shouldSatisfy` isRight
 
         it "resolves deferred non-Unit constructors passed through IO bind" $ do
             located <-
@@ -765,7 +754,7 @@ spec = do
                 )
                 (const False)
 
-        it "rejects IO mains whose result type is not Unit" $ do
+        it "supports IO mains whose result type is not Unit" $ do
             located <-
                 requireLocated $
                     unlines
@@ -774,13 +763,11 @@ spec = do
                         , "  def main : IO Int = pure 1;"
                         , "}"
                         ]
-            runLocatedProgramOutput (withPreludeLocated located) `shouldSatisfy` either
-                ( \diagnostic ->
-                    case diagnosticError diagnostic of
-                        ProgramPipelineError msg -> "run-program supports only main : IO Unit" `isInfixOf` msg
-                        _ -> False
-                )
-                (const False)
+            let result = runLocatedProgramOutput (withPreludeLocated located)
+            result `shouldSatisfy` isRight
+            case result of
+                Right runResult -> programRunValue runResult `shouldBe` Just (VLit (LInt 1))
+                Left _ -> expectationFailure "expected Right"
 
         it "rejects running pure mains that depend on opaque Prelude helpers" $ do
             located <-

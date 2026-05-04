@@ -93,6 +93,74 @@ spec = describe "MLF.Backend.LLVM" $ do
       runLLVMNativeExecutable output
         `shouldReturn` NativeRunResult ExitSuccess "first\nsecond\nthird\n" ""
 
+    it "executes __io_putStr without trailing newline" $ do
+      output <- requireRight =<< emitNativeSource ioPutStrMainProgram
+      validateLLVMAssembly output
+      validateLLVMObjectCode output
+      runLLVMNativeExecutable output
+        `shouldReturn` NativeRunResult ExitSuccess "hello" ""
+
+    it "executes __io_writeFile through the native IO runtime" $ do
+      output <- requireRight =<< emitNativeSource ioWriteFileMainProgram
+      validateLLVMAssembly output
+      validateLLVMObjectCode output
+      result <- runLLVMNativeExecutable output
+      nativeRunExitCode result `shouldBe` ExitSuccess
+      -- Verify the file was written
+      contents <- readFile "/tmp/mlf2-test-write.txt"
+      contents `shouldBe` "hello from mlfp"
+
+    it "executes __io_appendFile through the native IO runtime" $ do
+      -- Write initial content, then append
+      writeFile "/tmp/mlf2-test-append.txt" "base"
+      output <- requireRight =<< emitNativeSource ioAppendFileMainProgram
+      validateLLVMAssembly output
+      validateLLVMObjectCode output
+      result <- runLLVMNativeExecutable output
+      nativeRunExitCode result `shouldBe` ExitSuccess
+      contents <- readFile "/tmp/mlf2-test-append.txt"
+      contents `shouldBe` "baseappended"
+
+    it "executes __io_readFile through the native IO runtime" $ do
+      -- Write a test file first
+      writeFile "/tmp/mlf2-test-read-input.txt" "read me please"
+      output <- requireRight =<< emitNativeSource ioReadFileMainProgram
+      validateLLVMAssembly output
+      validateLLVMObjectCode output
+      runLLVMNativeExecutable output
+        `shouldReturn` NativeRunResult ExitSuccess "read me please\n" ""
+
+    it "executes __io_exitWith with the given exit code" $ do
+      output <- requireRight =<< emitNativeSource ioExitWithMainProgram
+      validateLLVMAssembly output
+      validateLLVMObjectCode output
+      result <- runLLVMNativeExecutable output
+      nativeRunExitCode result `shouldBe` ExitFailure 42
+
+    it "executes __io_newIORef through the native IO runtime" $ do
+      output <- requireRight =<< emitNativeSource ioNewIORefMainProgram
+      validateLLVMAssembly output
+      validateLLVMObjectCode output
+      result <- runLLVMNativeExecutable output
+      nativeRunExitCode result `shouldBe` ExitSuccess
+
+    it "emits valid LLVM for __io_writeIORef" $ do
+      output <- requireRight =<< emitBackendSource ioWriteIORefProgram
+      output `shouldSatisfy` isInfixOf "__io_writeIORef.wrapper"
+      validateLLVMAssembly output
+
+    it "emits valid LLVM for __io_readIORef" $ do
+      output <- requireRight =<< emitBackendSource ioReadIORefProgram
+      output `shouldSatisfy` isInfixOf "__io_readIORef.wrapper"
+      validateLLVMAssembly output
+
+    it "executes __io_getArgs through the native IO runtime" $ do
+      output <- requireRight =<< emitNativeSource ioGetArgsProgram
+      validateLLVMAssembly output
+      validateLLVMObjectCode output
+      result <- runLLVMNativeExecutable output
+      nativeRunExitCode result `shouldBe` ExitSuccess
+
     it "accepts pure mains that depend on IO-typed helpers" $ do
       output <- requireRight =<< emitBackendSource pureMainIODependencyProgram
 
@@ -343,7 +411,7 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "rejects rigid applied type heads during type-argument inference" $ do
     case
-      Lower.inferTypeArgumentsForTest
+      Lower.inferTypeArguments
         "rigid application head"
         ["a"]
         [("value", BTVarApp "f" (BTVar "a" :| []))]
@@ -356,7 +424,7 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   it "rejects mismatched applied type arguments during type-argument inference" $ do
     case
-      Lower.inferTypeArgumentsForTest
+      Lower.inferTypeArguments
         "applied argument mismatch"
         ["f"]
         [("value", BTVarApp "f" (intTy :| []))]
@@ -1644,6 +1712,89 @@ ioNestedPrimitiveMainProgram =
       "  def afterSecond : Unit -> IO Unit = \\(_second : Unit) __io_putStrLn \"third\";",
       "  def afterFirst : Unit -> IO Unit = \\(_first : Unit) __io_bind (__io_putStrLn \"second\") afterSecond;",
       "  def main : IO Unit = __io_bind (__io_putStrLn \"first\") afterFirst;",
+      "}"
+    ]
+
+ioPutStrMainProgram :: String
+ioPutStrMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, putStr);",
+      "  def main : IO Unit = putStr \"hello\";",
+      "}"
+    ]
+
+ioWriteFileMainProgram :: String
+ioWriteFileMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, writeFile);",
+      "  def main : IO Unit = writeFile \"/tmp/mlf2-test-write.txt\" \"hello from mlfp\";",
+      "}"
+    ]
+
+ioAppendFileMainProgram :: String
+ioAppendFileMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, appendFile);",
+      "  def main : IO Unit = appendFile \"/tmp/mlf2-test-append.txt\" \"appended\";",
+      "}"
+    ]
+
+ioReadFileMainProgram :: String
+ioReadFileMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, readFile, putStrLn);",
+      "  def main : IO Unit = __io_bind (readFile \"/tmp/mlf2-test-read-input.txt\") (\\(contents : String) putStrLn contents);",
+      "}"
+    ]
+
+ioExitWithMainProgram :: String
+ioExitWithMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, exitWith);",
+      "  def main : IO Unit = exitWith 42;",
+      "}"
+    ]
+
+ioNewIORefMainProgram :: String
+ioNewIORefMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, newIORef);",
+      "  def main : IO (IORef String) = newIORef \"hello\";",
+      "}"
+    ]
+
+ioWriteIORefProgram :: String
+ioWriteIORefProgram =
+  unlines
+    [ "module Main export (writeIt, main) {",
+      "  import Prelude exposing (Unit(..), IO, writeIORef, pure);",
+      "  def writeIt : IORef String -> String -> IO Unit = \\(ref : IORef String) \\(val : String) writeIORef ref val;",
+      "  def main : IO Unit = pure Unit;",
+      "}"
+    ]
+
+ioGetArgsProgram :: String
+ioGetArgsProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, List(..), getArgs);",
+      "  def main : IO (List String) = getArgs;",
+      "}"
+    ]
+
+ioReadIORefProgram :: String
+ioReadIORefProgram =
+  unlines
+    [ "module Main export (readIt, main) {",
+      "  import Prelude exposing (Unit(..), IO, readIORef, pure);",
+      "  def readIt : IORef String -> IO String = \\(ref : IORef String) readIORef ref;",
+      "  def main : IO Unit = pure Unit;",
       "}"
     ]
 

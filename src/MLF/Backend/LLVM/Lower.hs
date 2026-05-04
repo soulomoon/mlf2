@@ -115,14 +115,14 @@ shapes before native emission.
 module MLF.Backend.LLVM.Lower
   ( BackendLLVMError (..),
     evidenceFunctionTypesCompatible,
-    inferTypeArgumentsForTest,
+    inferTypeArguments,
     lowerBackendProgram,
     lowerBackendProgramNative,
     renderBackendLLVMError,
   )
 where
 
-import Control.Monad (foldM, unless, when, zipWithM, zipWithM_)
+import Control.Monad (foldM, forM_, unless, void, when, zipWithM, zipWithM_)
 import Control.Monad.State.Strict (StateT (StateT), evalStateT, get, gets, modify)
 import Data.Bifunctor (first)
 import Data.Char (isAlphaNum, ord)
@@ -172,8 +172,8 @@ data DataRuntime = DataRuntime
 data ProgramEnv = ProgramEnv
   { peBase :: ProgramBase,
     peSpecializations :: Map String Specialization,
-    peEvidenceWrappers :: Map String EvidenceWrapper,
-    peFunctionWrappers :: Map String FunctionWrapper,
+    peEvidenceWrappers :: Map String Wrapper,
+    peFunctionWrappers :: Map String Wrapper,
     peStringGlobals :: Map String String
   }
 
@@ -226,19 +226,15 @@ data Specialization = Specialization
   }
   deriving (Eq, Show)
 
-data EvidenceWrapper = EvidenceWrapper
-  { ewKey :: String,
-    ewFunctionName :: String,
-    ewExpectedType :: BackendType,
-    ewExpr :: BackendExpr
-  }
+data WrapperKind = EvidenceWrapperKind | FunctionWrapperKind
   deriving (Eq, Show)
 
-data FunctionWrapper = FunctionWrapper
-  { fwKey :: String,
-    fwFunctionName :: String,
-    fwExpectedType :: BackendType,
-    fwExpr :: BackendExpr
+data Wrapper = Wrapper
+  { wrapperKind :: WrapperKind,
+    wrapperKey :: String,
+    wrapperFunctionName :: String,
+    wrapperExpectedType :: BackendType,
+    wrapperExpr :: BackendExpr
   }
   deriving (Eq, Show)
 
@@ -404,8 +400,8 @@ lowerBackendProgramCore program = do
         ProgramEnv
           { peBase = base,
             peSpecializations = Map.fromList [(specializationKey (spRequest spec), spec) | spec <- specializations],
-            peEvidenceWrappers = Map.fromList [(ewKey wrapper, wrapper) | wrapper <- evidenceWrappers],
-            peFunctionWrappers = Map.fromList [(fwKey wrapper, wrapper) | wrapper <- functionWrappers],
+            peEvidenceWrappers = Map.fromList [(wrapperKey wrapper, wrapper) | wrapper <- evidenceWrappers],
+            peFunctionWrappers = Map.fromList [(wrapperKey wrapper, wrapper) | wrapper <- functionWrappers],
             peStringGlobals = stringGlobals
           }
   closureEntries <- requireUniqueClosureEntries closureEntries0
@@ -490,6 +486,13 @@ nativeRuntimeDeclarations base =
   ]
     ++ [LLVMDeclaration nativePrintfName (LLVMInt 32) [LLVMPtr] True]
     ++ [LLVMDeclaration nativePutcharName (LLVMInt 32) [LLVMInt 32] False]
+    ++ [LLVMDeclaration nativeReadLineName LLVMPtr [] False]
+    ++ [LLVMDeclaration nativeReadFileName LLVMPtr [LLVMPtr] False]
+    ++ [LLVMDeclaration nativeWriteFileName (LLVMInt 32) [LLVMPtr, LLVMPtr] False]
+    ++ [LLVMDeclaration nativeAppendFileName (LLVMInt 32) [LLVMPtr, LLVMPtr] False]
+    ++ [LLVMDeclaration nativeExitName (LLVMInt 32) [LLVMInt 64] False]
+    ++ [LLVMDeclaration nativeGetArgsName LLVMPtr [] False]
+    ++ [LLVMDeclaration nativeFreeArgsName (LLVMInt 32) [LLVMPtr] False]
 
 nativeRuntimeFunctions :: ProgramBase -> [LLVMFunction]
 nativeRuntimeFunctions base =
@@ -523,6 +526,34 @@ nativeStrTrueName =
 nativeStrFalseName :: String
 nativeStrFalseName =
   "__mlfp_native_str_false"
+
+nativeReadLineName :: String
+nativeReadLineName =
+  "mlfp_runtime_read_line"
+
+nativeReadFileName :: String
+nativeReadFileName =
+  "mlfp_runtime_read_file"
+
+nativeWriteFileName :: String
+nativeWriteFileName =
+  "mlfp_runtime_write_file"
+
+nativeAppendFileName :: String
+nativeAppendFileName =
+  "mlfp_runtime_append_file"
+
+nativeExitName :: String
+nativeExitName =
+  "mlfp_runtime_exit"
+
+nativeGetArgsName :: String
+nativeGetArgsName =
+  "mlfp_runtime_get_args"
+
+nativeFreeArgsName :: String
+nativeFreeArgsName =
+  "mlfp_runtime_free_args"
 
 nativeStrNewlineName :: String
 nativeStrNewlineName =
@@ -980,6 +1011,36 @@ ioBindName = "__io_bind"
 ioPutStrLnName :: String
 ioPutStrLnName = "__io_putStrLn"
 
+ioGetLineName :: String
+ioGetLineName = "__io_getLine"
+
+ioPutStrName :: String
+ioPutStrName = "__io_putStr"
+
+ioReadFileName :: String
+ioReadFileName = "__io_readFile"
+
+ioWriteFileName :: String
+ioWriteFileName = "__io_writeFile"
+
+ioAppendFileName :: String
+ioAppendFileName = "__io_appendFile"
+
+ioExitWithName :: String
+ioExitWithName = "__io_exitWith"
+
+ioNewIORefName :: String
+ioNewIORefName = "__io_newIORef"
+
+ioReadIORefName :: String
+ioReadIORefName = "__io_readIORef"
+
+ioWriteIORefName :: String
+ioWriteIORefName = "__io_writeIORef"
+
+ioGetArgsName :: String
+ioGetArgsName = "__io_getArgs"
+
 nativeIOEntryName :: String -> String
 nativeIOEntryName prim = prim ++ ".entry"
 
@@ -988,140 +1049,241 @@ nativeIOWrapperName prim = prim ++ ".wrapper"
 
 nativeIOFunctions :: ProgramBase -> [LLVMFunction]
 nativeIOFunctions _base =
-  [ioPureEntry, ioPureWrapper, ioBindEntry, ioBindWrapper, ioPutStrLnEntry, ioPutStrLnWrapper]
+  [ ioPureEntry, ioPureWrapper
+  , ioBindEntry, ioBindWrapper
+  , ioPutStrLnEntry, ioPutStrLnWrapper
+  , ioGetLineEntry, ioGetLineWrapper
+  , ioPutStrEntry, ioPutStrWrapper
+  , ioReadFileEntry, ioReadFileWrapper
+  , ioWriteFileEntry, ioWriteFileWrapper
+  , ioAppendFileEntry, ioAppendFileWrapper
+  , ioExitWithEntry, ioExitWithWrapper
+  , ioNewIORefEntry, ioNewIORefWrapper
+  , ioReadIORefEntry, ioReadIORefWrapper
+  , ioWriteIORefEntry, ioWriteIORefWrapper
+  , ioGetArgsEntry, ioGetArgsWrapper
+  ]
   where
     emitMallocLocal :: String -> Int -> LowerM LLVMOperand
     emitMallocLocal prefix size =
       emitAssign prefix LLVMPtr (LLVMCall runtimeMallocName [(LLVMInt 64, LLVMIntLiteral 64 (toInteger size))])
 
-    ioPureEntry =
-      case lowerNativeFunction (nativeIOEntryName ioPureName) LLVMPtr [(LLVMPtr, "env")] $ \params -> do
+    emitPrintCStringLoop :: String -> LLVMOperand -> Bool -> LowerM ()
+    emitPrintCStringLoop prefix str emitNewline = do
+      let i8Ty = LLVMInt 8
+      let i64Ty = LLVMInt 64
+      curSlot <- emitAssign (prefix ++ ".slot") LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitStore LLVMPtr str curSlot
+      loopHeader <- freshBlock (prefix ++ ".header")
+      loopBody <- freshBlock (prefix ++ ".body")
+      loopNext <- freshBlock (prefix ++ ".next")
+      loopDone <- freshBlock (prefix ++ ".done")
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock loopHeader
+      curPtr <- emitAssign (prefix ++ ".cur") LLVMPtr (LLVMLoad LLVMPtr curSlot)
+      charPtr <- emitAssign (prefix ++ ".cptr") LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 0)])
+      charVal <- emitAssign (prefix ++ ".c") i8Ty (LLVMLoad i8Ty charPtr)
+      isNull <- emitAssign (prefix ++ ".end") (LLVMInt 1) (LLVMICmpEq charVal (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isNull loopBody [(1, loopDone)])
+      startBlock loopBody
+      charI32 <- emitAssign (prefix ++ ".c32") (LLVMInt 32) (LLVMZext charVal (LLVMInt 32))
+      _ <- emitPutchar charI32
+      finishCurrentBlock (LLVMBr loopNext)
+      startBlock loopNext
+      nextPtr <- emitAssign (prefix ++ ".next") LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 1)])
+      emitStore LLVMPtr nextPtr curSlot
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock loopDone
+      when emitNewline $ void (emitPutchar (LLVMIntLiteral 32 10))
+      finishCurrentBlock (LLVMRet LLVMPtr LLVMNull)
+
+    finalizeEntry :: String -> (LLVMOperand -> LowerM ()) -> LLVMFunction
+    finalizeEntry prim body =
+      case lowerNativeFunction (nativeIOEntryName prim) LLVMPtr [(LLVMPtr, "env")] $ \params -> do
         let envPtr = requireNativeParam "env" params
-        valPtr <- emitGep "pure.val.ptr" envPtr 0
-        val <- emitAssign "pure.val" LLVMPtr (LLVMLoad LLVMPtr valPtr)
-        finishCurrentBlock (LLVMRet LLVMPtr val)
+        body envPtr
         of
         Right fn -> fn { llvmFunctionPrivate = True }
-        Left err -> error ("internal native __io_pure entry lowering failed: " ++ renderBackendLLVMError err)
+        Left err -> error ("internal native " ++ prim ++ " entry lowering failed: " ++ renderBackendLLVMError err)
 
-    ioPureWrapper =
-      case lowerNativeFunction (nativeIOWrapperName ioPureName) LLVMPtr [(LLVMPtr, "value")] $ \params -> do
-        let value = requireNativeParam "value" params
-        closure <- emitMallocLocal "io_pure.closure" 16
-        envPtr <- emitMallocLocal "io_pure.env" 8
-        emitStore LLVMPtr value envPtr
-        codePtr <- emitGep "io_pure.code.ptr" closure 0
-        emitStore LLVMPtr (LLVMGlobalRef LLVMPtr (nativeIOEntryName ioPureName)) codePtr
-        envSlot <- emitGep "io_pure.env.ptr" closure 8
+    finalizeWrapper :: String -> [(LLVMType, String)] -> LLVMFunction
+    finalizeWrapper prim args =
+      case lowerNativeFunction (nativeIOWrapperName prim) LLVMPtr args $ \params -> do
+        let envSize = max 1 (length args * 8)
+        closure <- emitMallocLocal (prim ++ ".closure") 16
+        envPtr <- emitMallocLocal (prim ++ ".env") envSize
+        forM_ (zip [0, 8 :: Int ..] args) $ \(offset, (ty, argName)) -> do
+          let value = requireNativeParam argName params
+          if offset == 0
+            then emitStore ty value envPtr
+            else do
+              slot <- emitGep (prim ++ "." ++ argName) envPtr offset
+              emitStore ty value slot
+        codePtr <- emitGep (prim ++ ".code") closure 0
+        emitStore LLVMPtr (LLVMGlobalRef LLVMPtr (nativeIOEntryName prim)) codePtr
+        envSlot <- emitGep (prim ++ ".env.slot") closure 8
         emitStore LLVMPtr envPtr envSlot
         finishCurrentBlock (LLVMRet LLVMPtr closure)
         of
         Right fn -> fn { llvmFunctionPrivate = True }
-        Left err -> error ("internal native __io_pure wrapper lowering failed: " ++ renderBackendLLVMError err)
+        Left err -> error ("internal native " ++ prim ++ " wrapper lowering failed: " ++ renderBackendLLVMError err)
 
-    ioBindEntry =
-      case lowerNativeFunction (nativeIOEntryName ioBindName) LLVMPtr [(LLVMPtr, "env")] $ \params -> do
-        let envPtr = requireNativeParam "env" params
-        actionPtr <- emitGep "bind.action.ptr" envPtr 0
-        action <- emitAssign "bind.action" LLVMPtr (LLVMLoad LLVMPtr actionPtr)
-        contPtr <- emitGep "bind.cont.ptr" envPtr 8
-        cont <- emitAssign "bind.cont" LLVMPtr (LLVMLoad LLVMPtr contPtr)
-        -- Call action: load code+env, indirect call
-        actionCodePtrField <- emitGep "bind.action.code.ptr" action 0
-        actionCode <- emitAssign "bind.action.code" LLVMPtr (LLVMLoad LLVMPtr actionCodePtrField)
-        actionEnvField <- emitGep "bind.action.env.ptr" action 8
-        actionEnv <- emitAssign "bind.action.env" LLVMPtr (LLVMLoad LLVMPtr actionEnvField)
-        actionResult <- emitAssign "bind.action.result" LLVMPtr (LLVMCallOperand actionCode [(LLVMPtr, actionEnv)])
-        -- Call continuation with result
-        contCodePtrField <- emitGep "bind.cont.code.ptr" cont 0
-        contCode <- emitAssign "bind.cont.code" LLVMPtr (LLVMLoad LLVMPtr contCodePtrField)
-        contEnvField <- emitGep "bind.cont.env.ptr" cont 8
-        contEnv <- emitAssign "bind.cont.env" LLVMPtr (LLVMLoad LLVMPtr contEnvField)
-        nextAction <- emitAssign "bind.next" LLVMPtr (LLVMCallOperand contCode [(LLVMPtr, contEnv), (LLVMPtr, actionResult)])
-        -- Call nextAction
-        nextCodePtrField <- emitGep "bind.next.code.ptr" nextAction 0
-        nextCode <- emitAssign "bind.next.code" LLVMPtr (LLVMLoad LLVMPtr nextCodePtrField)
-        nextEnvField <- emitGep "bind.next.env.ptr" nextAction 8
-        nextEnv <- emitAssign "bind.next.env" LLVMPtr (LLVMLoad LLVMPtr nextEnvField)
-        result <- emitAssign "bind.result" LLVMPtr (LLVMCallOperand nextCode [(LLVMPtr, nextEnv)])
-        finishCurrentBlock (LLVMRet LLVMPtr result)
-        of
-        Right fn -> fn { llvmFunctionPrivate = True }
-        Left err -> error ("internal native __io_bind entry lowering failed: " ++ renderBackendLLVMError err)
+    ioPureEntry = finalizeEntry ioPureName $ \envPtr -> do
+      valPtr <- emitGep "pure.val" envPtr 0
+      val <- emitAssign "pure.val" LLVMPtr (LLVMLoad LLVMPtr valPtr)
+      finishCurrentBlock (LLVMRet LLVMPtr val)
+    ioPureWrapper = finalizeWrapper ioPureName [(LLVMPtr, "value")]
 
-    ioBindWrapper =
-      case lowerNativeFunction (nativeIOWrapperName ioBindName) LLVMPtr [(LLVMPtr, "action"), (LLVMPtr, "cont")] $ \params -> do
-        let action = requireNativeParam "action" params
-        let cont = requireNativeParam "cont" params
-        closure <- emitMallocLocal "io_bind.closure" 16
-        envPtr <- emitMallocLocal "io_bind.env" 16
-        emitStore LLVMPtr action envPtr
-        contSlot <- emitGep "io_bind.cont.slot" envPtr 8
-        emitStore LLVMPtr cont contSlot
-        codePtr <- emitGep "io_bind.code.ptr" closure 0
-        emitStore LLVMPtr (LLVMGlobalRef LLVMPtr (nativeIOEntryName ioBindName)) codePtr
-        envSlot <- emitGep "io_bind.env.ptr" closure 8
-        emitStore LLVMPtr envPtr envSlot
-        finishCurrentBlock (LLVMRet LLVMPtr closure)
-        of
-        Right fn -> fn { llvmFunctionPrivate = True }
-        Left err -> error ("internal native __io_bind wrapper lowering failed: " ++ renderBackendLLVMError err)
+    ioBindEntry = finalizeEntry ioBindName $ \envPtr -> do
+      actionPtr <- emitGep "bind.action" envPtr 0
+      action <- emitAssign "bind.action" LLVMPtr (LLVMLoad LLVMPtr actionPtr)
+      contPtr <- emitGep "bind.cont" envPtr 8
+      cont <- emitAssign "bind.cont" LLVMPtr (LLVMLoad LLVMPtr contPtr)
+      actionCodePtrField <- emitGep "bind.action.code" action 0
+      actionCode <- emitAssign "bind.action.code" LLVMPtr (LLVMLoad LLVMPtr actionCodePtrField)
+      actionEnvField <- emitGep "bind.action.env" action 8
+      actionEnv <- emitAssign "bind.action.env" LLVMPtr (LLVMLoad LLVMPtr actionEnvField)
+      actionResult <- emitAssign "bind.action.result" LLVMPtr (LLVMCallOperand actionCode [(LLVMPtr, actionEnv)])
+      contCodePtrField <- emitGep "bind.cont.code" cont 0
+      contCode <- emitAssign "bind.cont.code" LLVMPtr (LLVMLoad LLVMPtr contCodePtrField)
+      contEnvField <- emitGep "bind.cont.env" cont 8
+      contEnv <- emitAssign "bind.cont.env" LLVMPtr (LLVMLoad LLVMPtr contEnvField)
+      nextAction <- emitAssign "bind.next" LLVMPtr (LLVMCallOperand contCode [(LLVMPtr, contEnv), (LLVMPtr, actionResult)])
+      nextCodePtrField <- emitGep "bind.next.code" nextAction 0
+      nextCode <- emitAssign "bind.next.code" LLVMPtr (LLVMLoad LLVMPtr nextCodePtrField)
+      nextEnvField <- emitGep "bind.next.env" nextAction 8
+      nextEnv <- emitAssign "bind.next.env" LLVMPtr (LLVMLoad LLVMPtr nextEnvField)
+      result <- emitAssign "bind.result" LLVMPtr (LLVMCallOperand nextCode [(LLVMPtr, nextEnv)])
+      finishCurrentBlock (LLVMRet LLVMPtr result)
+    ioBindWrapper = finalizeWrapper ioBindName [(LLVMPtr, "action"), (LLVMPtr, "cont")]
 
-    ioPutStrLnEntry =
-      case lowerNativeFunction (nativeIOEntryName ioPutStrLnName) LLVMPtr [(LLVMPtr, "env")] $ \params -> do
-        let envPtr = requireNativeParam "env" params
-        strPtr <- emitGep "putStrLn.str.ptr" envPtr 0
-        str <- emitAssign "putStrLn.str" LLVMPtr (LLVMLoad LLVMPtr strPtr)
-        -- Print string character by character
-        let i8Ty = LLVMInt 8
-        let i64Ty = LLVMInt 64
-        curSlot <- emitAssign "putStrLn.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
-        emitStore LLVMPtr str curSlot
-        loopHeader <- freshBlock "putStrLn.header"
-        loopBody <- freshBlock "putStrLn.body"
-        loopNext <- freshBlock "putStrLn.next"
-        loopDone <- freshBlock "putStrLn.done"
-        finishCurrentBlock (LLVMBr loopHeader)
-        startBlock loopHeader
-        curPtr <- emitAssign "putStrLn.cur" LLVMPtr (LLVMLoad LLVMPtr curSlot)
-        charPtr <- emitAssign "putStrLn.cptr" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 0)])
-        charVal <- emitAssign "putStrLn.c" i8Ty (LLVMLoad i8Ty charPtr)
-        isNull <- emitAssign "putStrLn.end" (LLVMInt 1) (LLVMICmpEq charVal (LLVMIntLiteral 8 0))
-        finishCurrentBlock (LLVMSwitch (LLVMInt 1) isNull loopBody [(1, loopDone)])
-        startBlock loopBody
-        charI32 <- emitAssign "putStrLn.c32" (LLVMInt 32) (LLVMZext charVal (LLVMInt 32))
-        _ <- emitPutchar charI32
-        finishCurrentBlock (LLVMBr loopNext)
-        startBlock loopNext
-        nextPtr <- emitAssign "putStrLn.next" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 1)])
-        emitStore LLVMPtr nextPtr curSlot
-        finishCurrentBlock (LLVMBr loopHeader)
-        startBlock loopDone
-        _ <- emitPutchar (LLVMIntLiteral 32 10) -- newline
-        -- Return Unit (as null pointer)
-        finishCurrentBlock (LLVMRet LLVMPtr LLVMNull)
-        of
-        Right fn -> fn { llvmFunctionPrivate = True }
-        Left err -> error ("internal native __io_putStrLn entry lowering failed: " ++ renderBackendLLVMError err)
+    ioPutStrLnEntry = finalizeEntry ioPutStrLnName $ \envPtr -> do
+      strPtr <- emitGep "putStrLn.str" envPtr 0
+      str <- emitAssign "putStrLn.str" LLVMPtr (LLVMLoad LLVMPtr strPtr)
+      emitPrintCStringLoop "putStrLn" str True
+    ioPutStrLnWrapper = finalizeWrapper ioPutStrLnName [(LLVMPtr, "str")]
 
-    ioPutStrLnWrapper =
-      case lowerNativeFunction (nativeIOWrapperName ioPutStrLnName) LLVMPtr [(LLVMPtr, "str")] $ \params -> do
-        let str = requireNativeParam "str" params
-        closure <- emitMallocLocal "io_putStrLn.closure" 16
-        envPtr <- emitMallocLocal "io_putStrLn.env" 8
-        emitStore LLVMPtr str envPtr
-        codePtr <- emitGep "io_putStrLn.code.ptr" closure 0
-        emitStore LLVMPtr (LLVMGlobalRef LLVMPtr (nativeIOEntryName ioPutStrLnName)) codePtr
-        envSlot <- emitGep "io_putStrLn.env.ptr" closure 8
-        emitStore LLVMPtr envPtr envSlot
-        finishCurrentBlock (LLVMRet LLVMPtr closure)
-        of
-        Right fn -> fn { llvmFunctionPrivate = True }
-        Left err -> error ("internal native __io_putStrLn wrapper lowering failed: " ++ renderBackendLLVMError err)
+    ioGetLineEntry = finalizeEntry ioGetLineName $ \_envPtr -> do
+      strPtr <- emitAssign "getLine.result" LLVMPtr (LLVMCall nativeReadLineName [])
+      finishCurrentBlock (LLVMRet LLVMPtr strPtr)
+    ioGetLineWrapper = finalizeWrapper ioGetLineName []
+
+    ioPutStrEntry = finalizeEntry ioPutStrName $ \envPtr -> do
+      strPtr <- emitGep "putStr.str" envPtr 0
+      str <- emitAssign "putStr.str" LLVMPtr (LLVMLoad LLVMPtr strPtr)
+      emitPrintCStringLoop "putStr" str False
+    ioPutStrWrapper = finalizeWrapper ioPutStrName [(LLVMPtr, "str")]
+
+    ioReadFileEntry = finalizeEntry ioReadFileName $ \envPtr -> do
+      pathPtr <- emitGep "readFile.path" envPtr 0
+      path <- emitAssign "readFile.path" LLVMPtr (LLVMLoad LLVMPtr pathPtr)
+      strPtr <- emitAssign "readFile.result" LLVMPtr (LLVMCall nativeReadFileName [(LLVMPtr, path)])
+      finishCurrentBlock (LLVMRet LLVMPtr strPtr)
+    ioReadFileWrapper = finalizeWrapper ioReadFileName [(LLVMPtr, "path")]
+
+    ioWriteFileEntry = finalizeEntry ioWriteFileName $ \envPtr -> do
+      pathPtr <- emitGep "writeFile.path" envPtr 0
+      path <- emitAssign "writeFile.path" LLVMPtr (LLVMLoad LLVMPtr pathPtr)
+      contentsPtr <- emitGep "writeFile.contents" envPtr 8
+      contents <- emitAssign "writeFile.contents" LLVMPtr (LLVMLoad LLVMPtr contentsPtr)
+      _ <- emitAssign "writeFile.result" (LLVMInt 32) (LLVMCall nativeWriteFileName [(LLVMPtr, path), (LLVMPtr, contents)])
+      finishCurrentBlock (LLVMRet LLVMPtr LLVMNull)
+    ioWriteFileWrapper = finalizeWrapper ioWriteFileName [(LLVMPtr, "path"), (LLVMPtr, "contents")]
+
+    ioAppendFileEntry = finalizeEntry ioAppendFileName $ \envPtr -> do
+      pathPtr <- emitGep "appendFile.path" envPtr 0
+      path <- emitAssign "appendFile.path" LLVMPtr (LLVMLoad LLVMPtr pathPtr)
+      contentsPtr <- emitGep "appendFile.contents" envPtr 8
+      contents <- emitAssign "appendFile.contents" LLVMPtr (LLVMLoad LLVMPtr contentsPtr)
+      _ <- emitAssign "appendFile.result" (LLVMInt 32) (LLVMCall nativeAppendFileName [(LLVMPtr, path), (LLVMPtr, contents)])
+      finishCurrentBlock (LLVMRet LLVMPtr LLVMNull)
+    ioAppendFileWrapper = finalizeWrapper ioAppendFileName [(LLVMPtr, "path"), (LLVMPtr, "contents")]
+
+    ioExitWithEntry = finalizeEntry ioExitWithName $ \envPtr -> do
+      statusPtr <- emitGep "exitWith.status" envPtr 0
+      status <- emitAssign "exitWith.status" (LLVMInt 64) (LLVMLoad (LLVMInt 64) statusPtr)
+      _ <- emitAssign "exitWith.call" (LLVMInt 32) (LLVMCall nativeExitName [(LLVMInt 64, status)])
+      finishCurrentBlock (LLVMRet LLVMPtr LLVMNull)
+    ioExitWithWrapper = finalizeWrapper ioExitWithName [(LLVMInt 64, "status")]
+
+    ioNewIORefEntry = finalizeEntry ioNewIORefName $ \envPtr -> do
+      valPtr <- emitGep "newIORef.val" envPtr 0
+      val <- emitAssign "newIORef.val" LLVMPtr (LLVMLoad LLVMPtr valPtr)
+      cell <- emitMallocLocal "newIORef.cell" 8
+      emitStore LLVMPtr val cell
+      finishCurrentBlock (LLVMRet LLVMPtr cell)
+    ioNewIORefWrapper = finalizeWrapper ioNewIORefName [(LLVMPtr, "value")]
+
+    ioReadIORefEntry = finalizeEntry ioReadIORefName $ \envPtr -> do
+      refPtr <- emitGep "readIORef.ref" envPtr 0
+      ref <- emitAssign "readIORef.ref" LLVMPtr (LLVMLoad LLVMPtr refPtr)
+      val <- emitAssign "readIORef.val" LLVMPtr (LLVMLoad LLVMPtr ref)
+      finishCurrentBlock (LLVMRet LLVMPtr val)
+    ioReadIORefWrapper = finalizeWrapper ioReadIORefName [(LLVMPtr, "ref")]
+
+    ioWriteIORefEntry = finalizeEntry ioWriteIORefName $ \envPtr -> do
+      refPtr <- emitGep "writeIORef.ref" envPtr 0
+      ref <- emitAssign "writeIORef.ref" LLVMPtr (LLVMLoad LLVMPtr refPtr)
+      valPtr <- emitGep "writeIORef.val" envPtr 8
+      val <- emitAssign "writeIORef.val" LLVMPtr (LLVMLoad LLVMPtr valPtr)
+      emitStore LLVMPtr val ref
+      finishCurrentBlock (LLVMRet LLVMPtr LLVMNull)
+    ioWriteIORefWrapper = finalizeWrapper ioWriteIORefName [(LLVMPtr, "ref"), (LLVMPtr, "value")]
+
+    ioGetArgsEntry = finalizeEntry ioGetArgsName $ \_envPtr -> do
+      argsPtr <- emitAssign "getArgs.result" LLVMPtr (LLVMCall nativeGetArgsName [])
+      let i8Ty = LLVMInt 8
+      let i64Ty = LLVMInt 64
+      curSlot <- emitAssign "getArgs.cur" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitStore LLVMPtr argsPtr curSlot
+      accSlot <- emitAssign "getArgs.acc" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      nilCell <- emitMallocLocal "getArgs.nil" 8
+      tagPtr0 <- emitGep "getArgs.nil.tag" nilCell 0
+      emitStore i64Ty (LLVMIntLiteral 64 0) tagPtr0
+      emitStore LLVMPtr nilCell accSlot
+      loopHeader <- freshBlock "getArgs.header"
+      loopBody <- freshBlock "getArgs.body"
+      loopNext <- freshBlock "getArgs.next"
+      loopDone <- freshBlock "getArgs.done"
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock loopHeader
+      curPtr <- emitAssign "getArgs.cur" LLVMPtr (LLVMLoad LLVMPtr curSlot)
+      strPtr <- emitAssign "getArgs.str" LLVMPtr (LLVMLoad LLVMPtr curPtr)
+      isNull <- emitAssign "getArgs.isnull" (LLVMInt 1) (LLVMICmpEq strPtr LLVMNull)
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isNull loopBody [(1, loopDone)])
+      startBlock loopBody
+      consCell <- emitMallocLocal "getArgs.cons" 24
+      tagPtr1 <- emitGep "getArgs.cons.tag" consCell 0
+      emitStore i64Ty (LLVMIntLiteral 64 1) tagPtr1
+      headPtr <- emitGep "getArgs.cons.head" consCell 8
+      emitStore LLVMPtr strPtr headPtr
+      acc <- emitAssign "getArgs.acc" LLVMPtr (LLVMLoad LLVMPtr accSlot)
+      tailPtr <- emitGep "getArgs.cons.tail" consCell 16
+      emitStore LLVMPtr acc tailPtr
+      emitStore LLVMPtr consCell accSlot
+      finishCurrentBlock (LLVMBr loopNext)
+      startBlock loopNext
+      nextPtr <- emitAssign "getArgs.next" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 8)])
+      emitStore LLVMPtr nextPtr curSlot
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock loopDone
+      result <- emitAssign "getArgs.result.list" LLVMPtr (LLVMLoad LLVMPtr accSlot)
+      _ <- emitAssign "getArgs.free" (LLVMInt 32) (LLVMCall nativeFreeArgsName [(LLVMPtr, argsPtr)])
+      finishCurrentBlock (LLVMRet LLVMPtr result)
+    ioGetArgsWrapper = finalizeWrapper ioGetArgsName []
 
 -- | Names of IO runtime primitives that are handled specially.
 ioPrimitiveNames :: Set.Set String
-ioPrimitiveNames = Set.fromList [ioPureName, ioBindName, ioPutStrLnName]
+ioPrimitiveNames = Set.fromList [ioPureName, ioBindName, ioPutStrLnName, ioGetLineName, ioPutStrName, ioReadFileName, ioWriteFileName, ioAppendFileName, ioExitWithName, ioNewIORefName, ioReadIORefName, ioWriteIORefName, ioGetArgsName]
+
+resolveIOPrimitiveAsValue :: BackendType -> String -> LowerM LowerValue
+resolveIOPrimitiveAsValue ty name = do
+  let wrapperName = nativeIOWrapperName name
+  if isFunctionLikeBackendType ty
+    then pure (LowerValue ty LLVMPtr (LLVMGlobalRef LLVMPtr wrapperName) LowerRuntimeValue Nothing)
+    else do
+      result <- emitAssign "io.prim" LLVMPtr (LLVMCall wrapperName [])
+      pure (LowerValue ty LLVMPtr result LowerRuntimeValue Nothing)
 
 -- | LLVM-level names of IO wrapper functions generated by 'nativeIOFunctions'.
 ioWrapperNames :: Set.Set String
@@ -1296,10 +1458,12 @@ functionFormCallsGlobal name form =
     alternativeCalls bound (BackendAlternative pattern0 body) =
       go (Set.union bound (patternBinders pattern0)) body
 
-    patternBinders =
-      \case
-        BackendDefaultPattern -> Set.empty
-        BackendConstructorPattern _ binders -> Set.fromList binders
+
+
+patternBinders :: BackendPattern -> Set String
+patternBinders = \case
+  BackendDefaultPattern -> Set.empty
+  BackendConstructorPattern _ binders -> Set.fromList binders
 
 shouldLowerSpecialization :: Set String -> Specialization -> Bool
 shouldLowerSpecialization referencedFunctionNames specialization =
@@ -1701,13 +1865,6 @@ freeBackendExprVars =
     freeAlternative bound (BackendAlternative pattern0 body) =
       go (Set.union (patternBinders pattern0) bound) body
 
-    patternBinders =
-      \case
-        BackendDefaultPattern ->
-          Set.empty
-        BackendConstructorPattern _ binders ->
-          Set.fromList binders
-
 backendExprVarTypesFor :: Set String -> BackendExpr -> Map String BackendType
 backendExprVarTypesFor targets =
   go Set.empty
@@ -1745,13 +1902,6 @@ backendExprVarTypesFor targets =
 
     goAlternative shadowed (BackendAlternative pattern0 body) =
       go (Set.union shadowed (patternBinders pattern0)) body
-
-    patternBinders =
-      \case
-        BackendDefaultPattern ->
-          Set.empty
-        BackendConstructorPattern _ binders ->
-          Set.fromList binders
 
 reachableBindings :: ProgramBase -> String -> Either BackendLLVMError [BindingInfo]
 reachableBindings base mainName =
@@ -1809,7 +1959,7 @@ collectRequiredSpecializations base reachable =
       where
         key = specializationKey request
 
-collectEvidenceWrappers :: ProgramBase -> [BindingInfo] -> [Specialization] -> [EvidenceWrapper]
+collectEvidenceWrappers :: ProgramBase -> [BindingInfo] -> [Specialization] -> [Wrapper]
 collectEvidenceWrappers base reachable specializations =
   zipWith assignName [(0 :: Int) ..] uniqueRequests
   where
@@ -1819,16 +1969,17 @@ collectEvidenceWrappers base reachable specializations =
     monomorphicReachable =
       filter (null . ffTypeBinders . biForm) reachable
     uniqueRequests =
-      map snd (Map.toAscList (Map.fromList [(evidenceWrapperKey expected expr, (expected, expr)) | (expected, expr) <- requests]))
+      map snd (Map.toAscList (Map.fromList [(wrapperKey' expected expr, (expected, expr)) | (expected, expr) <- requests]))
     assignName index0 (expected, expr) =
-      EvidenceWrapper
-        { ewKey = evidenceWrapperKey expected expr,
-          ewFunctionName = "__mlfp_evidence_wrapper$" ++ show index0,
-          ewExpectedType = expected,
-          ewExpr = expr
+      Wrapper
+        { wrapperKind = EvidenceWrapperKind,
+          wrapperKey = wrapperKey' expected expr,
+          wrapperFunctionName = "__mlfp_evidence_wrapper$" ++ show index0,
+          wrapperExpectedType = expected,
+          wrapperExpr = expr
         }
 
-collectFunctionWrappers :: ProgramBase -> [BindingInfo] -> [Specialization] -> [FunctionWrapper]
+collectFunctionWrappers :: ProgramBase -> [BindingInfo] -> [Specialization] -> [Wrapper]
 collectFunctionWrappers base reachable specializations =
   zipWith assignName [(0 :: Int) ..] uniqueRequests
   where
@@ -1838,16 +1989,17 @@ collectFunctionWrappers base reachable specializations =
     monomorphicReachable =
       filter (null . ffTypeBinders . biForm) reachable
     uniqueRequests =
-      map snd (Map.toAscList (Map.fromList [(functionWrapperKey expected expr, (expected, expr)) | (expected, expr) <- requests]))
+      map snd (Map.toAscList (Map.fromList [(wrapperKey' expected expr, (expected, expr)) | (expected, expr) <- requests]))
     assignName index0 (expected, expr) =
-      FunctionWrapper
-        { fwKey = functionWrapperKey expected expr,
-          fwFunctionName = "__mlfp_function_wrapper$" ++ show index0,
-          fwExpectedType = expected,
-          fwExpr = expr
+      Wrapper
+        { wrapperKind = FunctionWrapperKind,
+          wrapperKey = wrapperKey' expected expr,
+          wrapperFunctionName = "__mlfp_function_wrapper$" ++ show index0,
+          wrapperExpectedType = expected,
+          wrapperExpr = expr
         }
 
-collectReferencedFunctionNames :: ProgramBase -> [BindingInfo] -> [Specialization] -> [EvidenceWrapper] -> [FunctionWrapper] -> Set String
+collectReferencedFunctionNames :: ProgramBase -> [BindingInfo] -> [Specialization] -> [Wrapper] -> [Wrapper] -> Set String
 collectReferencedFunctionNames base reachable specializations evidenceWrappers functionWrappers =
   Set.unions
     ( map (collectReferencedFunctionNamesInForm base Map.empty Set.empty . biForm) reachable
@@ -2026,10 +2178,7 @@ collectReferencedFunctionNamesInExpr base substitution localForms bound expr =
         (Set.union binders bound)
         (backendAltBody alternative)
 
-    patternBinders =
-      \case
-        BackendDefaultPattern -> Set.empty
-        BackendConstructorPattern _ binders -> Set.fromList binders
+
 
 collectEvidenceWrappersInForm :: ProgramBase -> Map String BackendType -> Set String -> FunctionForm -> [(BackendType, BackendExpr)]
 collectEvidenceWrappersInForm base substitution bound form =
@@ -2155,13 +2304,10 @@ collectEvidenceWrappersInExpr base substitution localForms bound expr =
         (Set.union binders bound)
         (backendAltBody alternative)
 
-    patternBinders =
-      \case
-        BackendDefaultPattern -> Set.empty
-        BackendConstructorPattern _ binders -> Set.fromList binders
 
-evidenceWrapperKey :: BackendType -> BackendExpr -> String
-evidenceWrapperKey expected expr =
+
+wrapperKey' :: BackendType -> BackendExpr -> String
+wrapperKey' expected expr =
   backendTypeKey expected ++ "\0" ++ show expr
 
 collectFunctionWrappersInForm :: ProgramBase -> Map String BackendType -> Set String -> FunctionForm -> [(BackendType, BackendExpr)]
@@ -2301,14 +2447,10 @@ collectFunctionWrappersInExpr base substitution localFunctions bound expr =
             (Set.union binders bound)
             (backendAltBody alternative)
 
-    patternBinders =
-      \case
-        BackendDefaultPattern -> Set.empty
-        BackendConstructorPattern _ binders -> Set.fromList binders
 
-functionWrapperKey :: BackendType -> BackendExpr -> String
-functionWrapperKey expected expr =
-  backendTypeKey expected ++ "\0" ++ show expr
+
+
+
 
 isSimpleFunctionReference :: BackendExpr -> Bool
 isSimpleFunctionReference arg =
@@ -2360,10 +2502,7 @@ freeTermVars =
     goAlternative bound (BackendAlternative pattern0 body) =
       go (Set.union (patternBinders pattern0) bound) body
 
-    patternBinders =
-      \case
-        BackendDefaultPattern -> Set.empty
-        BackendConstructorPattern _ binders -> Set.fromList binders
+
 
 collectSpecializationRequestsInForm :: ProgramBase -> Map String BackendType -> FunctionForm -> [SpecRequest]
 collectSpecializationRequestsInForm base substitution form =
@@ -2515,10 +2654,7 @@ collectSpecializationRequestsWithBound base substitution bound expr =
         typeArgs' = map (substituteBackendTypes substitution) typeArgs
         args' = map (substituteExprTypes substitution) args
 
-    patternBinders =
-      \case
-        BackendDefaultPattern -> Set.empty
-        BackendConstructorPattern _ binders -> Set.fromList binders
+
 
 freeGlobalBindingRefs :: ProgramBase -> BindingInfo -> Set String
 freeGlobalBindingRefs base binding =
@@ -2564,12 +2700,9 @@ freeGlobalRefs base bound expr =
     freeAlternativeRefs bound0 alternative =
       freeGlobalRefs base (Set.union (patternBinders (backendAltPattern alternative)) bound0) (backendAltBody alternative)
 
-    patternBinders =
-      \case
-        BackendDefaultPattern -> Set.empty
-        BackendConstructorPattern _ binders -> Set.fromList binders
 
-collectProgramStrings :: [BindingInfo] -> [Specialization] -> [EvidenceWrapper] -> [FunctionWrapper] -> [String]
+
+collectProgramStrings :: [BindingInfo] -> [Specialization] -> [Wrapper] -> [Wrapper] -> [String]
 collectProgramStrings reachable specializations evidenceWrappers functionWrappers =
   sort $
     nub $
@@ -2671,15 +2804,15 @@ lowerSpecialization :: ProgramEnv -> Specialization -> Either BackendLLVMError L
 lowerSpecialization env specialization =
   lowerFunction env (spFunctionName specialization) True (qualifiedSpecializationForm specialization)
 
-lowerEvidenceWrapper :: ProgramEnv -> EvidenceWrapper -> Either BackendLLVMError LLVMFunction
+lowerEvidenceWrapper :: ProgramEnv -> Wrapper -> Either BackendLLVMError LLVMFunction
 lowerEvidenceWrapper env wrapper =
-  lowerFunction env (ewFunctionName wrapper) True (qualifiedEvidenceWrapperForm wrapper)
+  lowerFunction env (wrapperFunctionName wrapper) True (qualifiedEvidenceWrapperForm wrapper)
 
-lowerFunctionWrapper :: ProgramEnv -> FunctionWrapper -> Either BackendLLVMError LLVMFunction
+lowerFunctionWrapper :: ProgramEnv -> Wrapper -> Either BackendLLVMError LLVMFunction
 lowerFunctionWrapper env wrapper =
-  lowerFunction env (fwFunctionName wrapper) True (qualifiedFunctionWrapperForm wrapper)
+  lowerFunction env (wrapperFunctionName wrapper) True (qualifiedFunctionWrapperForm wrapper)
 
-collectClosureEntries :: ProgramBase -> [BindingInfo] -> [Specialization] -> [EvidenceWrapper] -> [FunctionWrapper] -> [ClosureEntry]
+collectClosureEntries :: ProgramBase -> [BindingInfo] -> [Specialization] -> [Wrapper] -> [Wrapper] -> [ClosureEntry]
 collectClosureEntries base reachable specializations evidenceWrappers functionWrappers =
   concatMap (collectClosureEntriesInForm base . biForm) (filter (null . ffTypeBinders . biForm) reachable)
     ++ concatMap (collectClosureEntriesInForm base . qualifiedSpecializationForm) specializations
@@ -2704,13 +2837,13 @@ qualifiedSpecializationForm :: Specialization -> FunctionForm
 qualifiedSpecializationForm specialization =
   qualifyClosureEntriesInForm (spFunctionName specialization) (spForm specialization)
 
-qualifiedEvidenceWrapperForm :: EvidenceWrapper -> FunctionForm
+qualifiedEvidenceWrapperForm :: Wrapper -> FunctionForm
 qualifiedEvidenceWrapperForm wrapper =
-  qualifyClosureEntriesInForm (ewFunctionName wrapper) (evidenceWrapperForm wrapper)
+  qualifyClosureEntriesInForm (wrapperFunctionName wrapper) (evidenceWrapperForm wrapper)
 
-qualifiedFunctionWrapperForm :: FunctionWrapper -> FunctionForm
+qualifiedFunctionWrapperForm :: Wrapper -> FunctionForm
 qualifiedFunctionWrapperForm wrapper =
-  qualifyClosureEntriesInForm (fwFunctionName wrapper) (functionWrapperForm wrapper)
+  qualifyClosureEntriesInForm (wrapperFunctionName wrapper) (functionWrapperForm wrapper)
 
 qualifyClosureEntriesInForm :: String -> FunctionForm -> FunctionForm
 qualifyClosureEntriesInForm ownerName form =
@@ -3245,17 +3378,20 @@ collectClosureEntriesInExpr base localForms valueKinds expr =
         not (null paramTys)
       ]
 
-    patternBinders =
-      \case
-        BackendDefaultPattern -> Set.empty
-        BackendConstructorPattern _ binders -> Set.fromList binders
+
 
 closureEntryOwnerName :: String -> [BackendType] -> String
 closureEntryOwnerName name typeArgs =
   name ++ concatMap (("$" ++) . backendTypeKey) typeArgs
 
-evidenceWrapperForm :: EvidenceWrapper -> FunctionForm
-evidenceWrapperForm wrapper =
+evidenceWrapperForm :: Wrapper -> FunctionForm
+evidenceWrapperForm = wrapperForm "__mlfp_evidence_arg"
+
+functionWrapperForm :: Wrapper -> FunctionForm
+functionWrapperForm = wrapperForm "__mlfp_function_arg"
+
+wrapperForm :: String -> Wrapper -> FunctionForm
+wrapperForm argPrefix wrapper =
   FunctionForm
     { ffTypeBinders = [],
       ffParams = zip paramNames params,
@@ -3263,29 +3399,15 @@ evidenceWrapperForm wrapper =
       ffReturnType = returnTy
     }
   where
-    (params, returnTy) = collectArrowsType (ewExpectedType wrapper)
-    paramNames = ["__mlfp_evidence_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
+    (params, returnTy) = collectArrowsType (wrapperExpectedType wrapper)
+    paramNames = [argPrefix ++ show index0 | index0 <- [(0 :: Int) ..]]
     paramExprs = [BackendVar paramTy name | (name, paramTy) <- zip paramNames params]
-    body = applyEvidenceWrapperArgs (ewExpr wrapper) (ewExpectedType wrapper) paramExprs
+    body = applyWrapperArgs (wrapperExpr wrapper) (wrapperExpectedType wrapper) paramExprs
 
-functionWrapperForm :: FunctionWrapper -> FunctionForm
-functionWrapperForm wrapper =
-  FunctionForm
-    { ffTypeBinders = [],
-      ffParams = zip paramNames params,
-      ffBody = body,
-      ffReturnType = returnTy
-    }
-  where
-    (params, returnTy) = collectArrowsType (fwExpectedType wrapper)
-    paramNames = ["__mlfp_function_arg" ++ show index0 | index0 <- [(0 :: Int) ..]]
-    paramExprs = [BackendVar paramTy name | (name, paramTy) <- zip paramNames params]
-    body = applyEvidenceWrapperArgs (fwExpr wrapper) (fwExpectedType wrapper) paramExprs
-
-applyEvidenceWrapperArgs :: BackendExpr -> BackendType -> [BackendExpr] -> BackendExpr
-applyEvidenceWrapperArgs expr _ [] =
+applyWrapperArgs :: BackendExpr -> BackendType -> [BackendExpr] -> BackendExpr
+applyWrapperArgs expr _ [] =
   expr
-applyEvidenceWrapperArgs expr ty args
+applyWrapperArgs expr ty args
   | backendExprUsesClosureCallPath expr =
       BackendClosureCall
         { backendExprType = returnTy,
@@ -3294,10 +3416,10 @@ applyEvidenceWrapperArgs expr ty args
         }
   where
     (_, returnTy) = collectArrowsType ty
-applyEvidenceWrapperArgs expr ty (arg : rest) =
+applyWrapperArgs expr ty (arg : rest) =
   case ty of
     BTArrow _ resultTy ->
-      applyEvidenceWrapperArgs (BackendApp resultTy expr arg) resultTy rest
+      applyWrapperArgs (BackendApp resultTy expr arg) resultTy rest
     _ ->
       expr
 
@@ -3563,10 +3685,7 @@ containsInlineOnlyEvidenceParameterCall form =
                in functionExpressionRequiresInline localFunctions' body
             _ -> False
 
-    patternBinders =
-      \case
-        BackendDefaultPattern -> Set.empty
-        BackendConstructorPattern _ binders -> Set.fromList binders
+
 
 evidenceParameterNames :: FunctionForm -> Set String
 evidenceParameterNames form =
@@ -3658,10 +3777,9 @@ lowerTyApp env exprEnv context expr =
           lowerLocalFunctionValue env context (backendExprType expr) name localFunction typeArgs
       | Just binding <- Map.lookup name (pbBindings (peBase env)),
         not (null (ffTypeBinders (biForm binding))) ->
-          lowerGlobalValue env context (backendExprType expr) name binding typeArgs
+          lowerGlobalValue env exprEnv context (backendExprType expr) name binding typeArgs
       | Set.member name ioPrimitiveNames ->
-          let result = LLVMGlobalRef LLVMPtr (nativeIOWrapperName name)
-           in pure (LowerValue (backendExprType expr) LLVMPtr result LowerRuntimeValue Nothing)
+          resolveIOPrimitiveAsValue (backendExprType expr) name
     (fun, typeArgs) ->
       lowerDirectFunctionValue env exprEnv context (backendExprType expr) fun typeArgs
 
@@ -3859,17 +3977,15 @@ lowerVar env exprEnv context ty name =
         Nothing ->
           case Map.lookup name (pbBindings (peBase env)) of
             Just binding ->
-              lowerGlobalValue env context ty name binding []
+              lowerGlobalValue env exprEnv context ty name binding []
             Nothing
-              | Set.member name ioPrimitiveNames -> do
-                  let wrapperName = nativeIOWrapperName name
-                  let result = LLVMGlobalRef LLVMPtr wrapperName
-                  pure (LowerValue ty LLVMPtr result LowerRuntimeValue Nothing)
+              | Set.member name ioPrimitiveNames ->
+                  resolveIOPrimitiveAsValue ty name
             Nothing ->
               liftEither (BackendLLVMUnknownFunction name)
 
-lowerGlobalValue :: ProgramEnv -> String -> BackendType -> String -> BindingInfo -> [BackendType] -> LowerM LowerValue
-lowerGlobalValue env context resultTy name binding typeArgs =
+lowerGlobalValue :: ProgramEnv -> ExprEnv -> String -> BackendType -> String -> BindingInfo -> [BackendType] -> LowerM LowerValue
+lowerGlobalValue env exprEnv context resultTy name binding typeArgs =
   case (ffTypeBinders form, typeArgs) of
     ([], []) ->
       lowerInstantiatedGlobalValue resultTy name binding [] form
@@ -3890,20 +4006,25 @@ lowerGlobalValue env context resultTy name binding typeArgs =
     lowerInstantiatedGlobalValue expectedTy functionContext binding0 resolvedTypeArgs instantiated
       | not (null (ffParams instantiated)) =
           lowerInstantiatedGlobalFunctionValue expectedTy functionContext binding0 resolvedTypeArgs instantiated
-      | otherwise = do
-          unless (alphaEqBackendType expectedTy (ffReturnType instantiated)) $
-            liftEither (BackendLLVMInternalError ("global value type mismatch for " ++ functionContext ++ " at " ++ context))
-          resultLLVMType <- lowerRuntimeValueTypeM env context expectedTy
-          functionName <- globalFunctionName env context binding0 resolvedTypeArgs
-          result <- emitAssign "call" resultLLVMType (LLVMCall functionName [])
-          pure
-            ( LowerValue
-                expectedTy
-                resultLLVMType
-                result
-                (functionFormReturnValueKind env instantiated)
-                (functionFormReturnConstructedValue env instantiated)
-            )
+      | otherwise =
+          if alphaEqBackendType expectedTy (ffReturnType instantiated)
+            then do
+              resultLLVMType <- lowerRuntimeValueTypeM env context expectedTy
+              functionName <- globalFunctionName env context binding0 resolvedTypeArgs
+              result <- emitAssign "call" resultLLVMType (LLVMCall functionName [])
+              pure
+                ( LowerValue
+                    expectedTy
+                    resultLLVMType
+                    result
+                    (functionFormReturnValueKind env instantiated)
+                    (functionFormReturnConstructedValue env instantiated)
+                )
+            -- Fallback: type mismatch between mu-encoded and named types (e.g. BTMu vs BTCon for List).
+            -- Safe to inline when body is a simple reference — avoids a spurious function call.
+            else case ffBody instantiated of
+              BackendVar {} -> lowerExpr env exprEnv context (ffBody instantiated)
+              _ -> liftEither (BackendLLVMInternalError ("type mismatch for zero-arity binding at " ++ context ++ ": expected " ++ show expectedTy ++ " but got " ++ show (ffReturnType instantiated)))
 
     lowerInstantiatedGlobalFunctionValue expectedTy functionContext binding0 resolvedTypeArgs instantiated = do
       unless (isFirstOrderFunctionPointerType expectedTy) $
@@ -4219,10 +4340,10 @@ lookupFunctionFormByName env functionName =
       case [qualifiedSpecializationForm specialization | specialization <- Map.elems (peSpecializations env), spFunctionName specialization == functionName] of
         form : _ -> Just form
         [] ->
-          case [qualifiedEvidenceWrapperForm wrapper | wrapper <- Map.elems (peEvidenceWrappers env), ewFunctionName wrapper == functionName] of
+          case [qualifiedEvidenceWrapperForm wrapper | wrapper <- Map.elems (peEvidenceWrappers env), wrapperFunctionName wrapper == functionName] of
             form : _ -> Just form
             [] ->
-              case [qualifiedFunctionWrapperForm wrapper | wrapper <- Map.elems (peFunctionWrappers env), fwFunctionName wrapper == functionName] of
+              case [qualifiedFunctionWrapperForm wrapper | wrapper <- Map.elems (peFunctionWrappers env), wrapperFunctionName wrapper == functionName] of
                 form : _ -> Just form
                 [] -> Nothing
 
@@ -4253,9 +4374,9 @@ lowerExprForIndirectArgument env exprEnv context (paramName, paramTy) arg
   | isEvidenceArgument False paramName paramTy =
       lowerEvidenceArgument env exprEnv context paramTy arg
   | isFunctionLikeBackendType paramTy =
-      case Map.lookup (evidenceWrapperKey paramTy arg) (peEvidenceWrappers env) of
+      case Map.lookup (wrapperKey' paramTy arg) (peEvidenceWrappers env) of
         Just wrapper ->
-          pure (functionPointerValue paramTy (LLVMGlobalRef LLVMPtr (ewFunctionName wrapper)))
+          pure (functionPointerValue paramTy (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
         Nothing ->
           lowerFunctionArgument env exprEnv context paramTy arg
   | otherwise =
@@ -4275,9 +4396,9 @@ lowerStoredFunctionArgument env exprEnv context expectedTy arg =
     (BackendVar _ name, typeArgs) ->
       lowerStoredFunctionReference env exprEnv context expectedTy name typeArgs
     _ ->
-      case Map.lookup (functionWrapperKey expectedTy arg) (peFunctionWrappers env) of
+      case Map.lookup (wrapperKey' expectedTy arg) (peFunctionWrappers env) of
         Just wrapper ->
-          pure (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr (fwFunctionName wrapper)))
+          pure (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
         Nothing ->
           liftEither (BackendLLVMUnsupportedExpression context "unsupported function argument")
 
@@ -4287,9 +4408,9 @@ lowerEvidenceArgument env exprEnv context expectedTy arg =
     (BackendVar _ name, typeArgs) ->
       lowerFunctionReference env exprEnv context expectedTy name typeArgs
     _ ->
-      case Map.lookup (evidenceWrapperKey expectedTy arg) (peEvidenceWrappers env) of
+      case Map.lookup (wrapperKey' expectedTy arg) (peEvidenceWrappers env) of
         Just wrapper ->
-          pure (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr (ewFunctionName wrapper)))
+          pure (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper)))
         Nothing ->
           liftEither (BackendLLVMUnsupportedExpression context "unsupported evidence function argument")
 
@@ -4344,9 +4465,9 @@ lowerLocalFunctionStoredReference env context expectedTy localFunction typeArgs 
   case lfStoredReference localFunction of
     Just (_, sourceExpr0) -> do
       sourceExpr <- storedReferenceSourceExpr context sourceExpr0 typeArgs
-      case Map.lookup (functionWrapperKey expectedTy sourceExpr) (peFunctionWrappers env) of
+      case Map.lookup (wrapperKey' expectedTy sourceExpr) (peFunctionWrappers env) of
         Just wrapper ->
-          pure (Just (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr (fwFunctionName wrapper))))
+          pure (Just (functionPointerValue expectedTy (LLVMGlobalRef LLVMPtr (wrapperFunctionName wrapper))))
         Nothing ->
           pure Nothing
     Nothing ->
@@ -4612,7 +4733,7 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
       | Set.member name ioPrimitiveNames -> do
           callArgs <- traverse (lowerExpr env exprEnv context) args
           let wrapperName = nativeIOWrapperName name
-          result <- emitAssign "io.call" LLVMPtr (LLVMCall wrapperName [(LLVMPtr, lvOperand arg) | arg <- callArgs])
+          result <- emitAssign "io.call" LLVMPtr (LLVMCall wrapperName [(lvLLVMType arg, lvOperand arg) | arg <- callArgs])
           pure (LowerValue resultTy LLVMPtr result LowerRuntimeValue Nothing)
     Nothing ->
       liftEither (BackendLLVMUnknownFunction name)
@@ -4875,7 +4996,7 @@ lowerClosureRuntimeArgumentMaybe env exprEnv context expectedTy arg =
                   if null (ffParams form)
                     && alphaEqBackendType expectedTy (ffReturnType form)
                     && isClosureRuntimeValueType (ffReturnType form)
-                    then Just <$> lowerGlobalValue env context expectedTy name binding typeArgs
+                    then Just <$> lowerGlobalValue env exprEnv context expectedTy name binding typeArgs
                     else pure Nothing
             _ ->
               pure Nothing
@@ -5085,10 +5206,6 @@ matchTypeParamApplication binderSet substitution name expectedArgs actual =
         Just previous
           | alphaEqBackendType previous actualHead -> Right substitution
           | otherwise -> Left (BackendLLVMUnsupportedCall ("conflicting inferred type argument for " ++ paramName))
-
-inferTypeArgumentsForTest :: String -> [String] -> [(String, BackendType)] -> [BackendExpr] -> Either BackendLLVMError (Map String BackendType)
-inferTypeArgumentsForTest =
-  inferTypeArguments
 
 collectCall :: BackendExpr -> Maybe (BackendExpr, [BackendType], [BackendExpr])
 collectCall expr =

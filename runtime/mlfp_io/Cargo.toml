@@ -1,0 +1,8 @@
+[package]
+name = "mlfp_io"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "mlfp_io"
+crate-type = ["staticlib"]

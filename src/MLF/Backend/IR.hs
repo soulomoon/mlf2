@@ -759,6 +759,54 @@ backendRuntimePrimitiveTypes =
         BTArrow
           (BTBase (BaseTy "String"))
           (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| []))
+      ),
+      ( "__io_getLine",
+        BTCon (BaseTy "IO") (BTBase (BaseTy "String") :| [])
+      ),
+      ( "__io_putStr",
+        BTArrow
+          (BTBase (BaseTy "String"))
+          (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| []))
+      ),
+      ( "__io_readFile",
+        BTArrow
+          (BTBase (BaseTy "String"))
+          (BTCon (BaseTy "IO") (BTBase (BaseTy "String") :| []))
+      ),
+      ( "__io_writeFile",
+        BTArrow
+          (BTBase (BaseTy "String"))
+          (BTArrow
+            (BTBase (BaseTy "String"))
+            (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| [])))
+      ),
+      ( "__io_appendFile",
+        BTArrow
+          (BTBase (BaseTy "String"))
+          (BTArrow
+            (BTBase (BaseTy "String"))
+            (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| [])))
+      ),
+      ( "__io_exitWith",
+        BTArrow
+          (BTBase (BaseTy "Int"))
+          (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| []))
+      ),
+      ( "__io_newIORef",
+        BTForall "a" Nothing
+          (BTArrow (BTVar "a") (BTCon (BaseTy "IO") (BTCon (BaseTy "IORef") (BTVar "a" :| []) :| [])))
+      ),
+      ( "__io_readIORef",
+        BTForall "a" Nothing
+          (BTArrow (BTCon (BaseTy "IORef") (BTVar "a" :| [])) (BTCon (BaseTy "IO") (BTVar "a" :| [])))
+      ),
+      ( "__io_writeIORef",
+        BTForall "a" Nothing
+          (BTArrow (BTCon (BaseTy "IORef") (BTVar "a" :| []))
+            (BTArrow (BTVar "a") (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| []))))
+      ),
+      ( "__io_getArgs",
+        BTCon (BaseTy "IO") (BTCon (BaseTy "List") (BTBase (BaseTy "String") :| []) :| [])
       )
     ]
 

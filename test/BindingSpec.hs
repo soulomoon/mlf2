@@ -1021,11 +1021,14 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                 c <- generate (genTreeBindingTree n)
                 let allNodes = allNodeIds c
                 -- For each node, verify interiorOf includes the node itself
-                forM_ allNodes $ \nid -> do
+                results <- forM allNodes $ \nid ->
                     case interiorOf c (typeRef nid) of
-                        Right interior -> 
+                        Right interior -> do
                             IntSet.member (nodeRefKey (typeRef nid)) interior `shouldBe` True
-                        Left _ -> pure ()  -- Error is acceptable for some nodes
+                            pure True
+                        Left _ -> pure False
+                -- At least some nodes should have a valid interior
+                or results `shouldBe` True
 
         -- **Feature: paper_general_raise_plan, Property 8: interiorOf is monotonic (children's interior is subset of parent's)**
         -- **Validates: Requirements 3.2, 3.3**
