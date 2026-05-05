@@ -52,7 +52,7 @@ spec = describe "MLF.Constraint.Presolution facade" $ do
         typesSrc <- readFile "src/MLF/Constraint/Types/Presolution.hs"
         viewSrc <- readFile "src/MLF/Constraint/Presolution/View.hs"
 
-        driverSrc `shouldSatisfy` isInfixOf "-> Constraint 'Acyclic"
+        driverSrc `shouldSatisfy` isInfixOf computePresolutionSignature
         baseSrc `shouldSatisfy` isInfixOf "prConstraint :: Constraint 'Presolved"
         typesSrc `shouldSatisfy` isInfixOf "snapshotConstraint :: a -> Constraint 'Presolved"
         viewSrc `shouldSatisfy` isInfixOf "fromPresolutionResult :: PresolutionSnapshot a => a -> PresolutionView 'Presolved"
@@ -102,6 +102,16 @@ supportMarkers =
     , "processInstEdge"
     , "validateTranslatablePresolution"
     ]
+
+computePresolutionSignature :: String
+computePresolutionSignature =
+    unlines
+        [ "computePresolution"
+        , "    :: TraceConfig"
+        , "    -> AcyclicityResult"
+        , "    -> Constraint 'Acyclic"
+        , "    -> Either PresolutionError PresolutionResult"
+        ]
 
 markerLine :: String -> String -> Int
 markerLine marker src =
