@@ -53,6 +53,14 @@ spec = describe "Repository guardrails" $ do
               "    castConstraint",
               "  )"
             ]
+        multilineQualifiedImport =
+          unlines
+            [ "import qualified MLF.Constraint.Types.Graph",
+              "  as Graph",
+              "  (",
+              "    castConstraint",
+              "  )"
+            ]
         multilineExport =
           unlines
             [ "module MLF.Constraint.Types.Graph",
@@ -69,6 +77,7 @@ spec = describe "Repository guardrails" $ do
     containsCastConstraintCall guardedSource `shouldBe` False
     containsCastConstraintCall multilineSignature `shouldBe` False
     containsCastConstraintCall multilineImport `shouldBe` False
+    containsCastConstraintCall multilineQualifiedImport `shouldBe` False
     containsCastConstraintCall multilineExport `shouldBe` False
     containsCastConstraintCall classSignature `shouldBe` False
     containsCastConstraintCall "legacy = castConstraint c" `shouldBe` True
@@ -80,6 +89,8 @@ spec = describe "Repository guardrails" $ do
     containsCastConstraintCall (unlines ["legacy =", "  castConstraint", "  :: Constraint p -> Constraint q"])
       `shouldBe` True
     containsCastConstraintCall (unlines ["legacy =", "  id", "    castConstraint", "    :: Constraint p -> Constraint q"])
+      `shouldBe` True
+    containsCastConstraintCall (unlines ["legacy = id", "  castConstraint", "  :: Constraint p -> Constraint q"])
       `shouldBe` True
     containsCastConstraintCall "legacy = Graph.castConstraint c" `shouldBe` True
 
@@ -575,6 +586,7 @@ advanceSymbolListContext listContext line =
     PendingSymbolList
       | null (trim line) -> PendingSymbolList
       | "(" `isPrefixOf` trim line -> continueList (parenDelta line)
+      | isImportQualifierContinuation line -> PendingSymbolList
       | otherwise -> OutsideSymbolList
     OutsideSymbolList
       | startsSymbolListOwner line ->
@@ -669,11 +681,13 @@ priorLinesContinueExpression currentIndent = go
   where
     go [] = False
     go (line : rest)
-      | null (trim line) = go rest
-      | lineIndent line < currentIndent = lineContinuesExpression line
+      | null trimmed = go rest
+      | lineIndent line < currentIndent = lineContinuesExpression line || lineIntroducesExpression trimmed
           || (not (lineStartsDeclarationBoundary line) && go rest)
       | currentIndent == 0 = lineContinuesExpression line
       | otherwise = go rest
+      where
+        trimmed = trim line
 
 lineIndent :: String -> Int
 lineIndent = length . takeWhile (== ' ')
@@ -686,6 +700,17 @@ lineStartsDeclarationBoundary line =
     || " where" `isSuffixOf` trimmed
   where
     trimmed = trim line
+
+lineIntroducesExpression :: String -> Bool
+lineIntroducesExpression line =
+  "=" `isInfixOf` line
+    && not ("::" `isInfixOf` line)
+
+isImportQualifierContinuation :: String -> Bool
+isImportQualifierContinuation line =
+  case words line of
+    ["as", _alias] -> True
+    _ -> False
 
 collectHsFiles :: FilePath -> IO [FilePath]
 collectHsFiles root = do
