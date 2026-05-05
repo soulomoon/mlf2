@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {- |
 Module      : MLF.Constraint.Normalize.Internal
 Description : Shared normalization state and helper operations
@@ -19,7 +20,7 @@ module MLF.Constraint.Normalize.Internal (
 
 {- Note [Normalization state and shared helpers]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-This module provides the shared mutable state ('NormalizeState p', 'NormalizeM p')
+This module provides the shared mutable state ('NormalizeState', 'NormalizeM')
 and primitive operations used by both the grafting ('Normalize.Graft') and
 merging ('Normalize.Merge') normalization submodules.
 
@@ -50,6 +51,7 @@ import MLF.Constraint.Types.Graph
     , TyNode (..)
     , typeRef
     )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.SynthesizedExpVar
     ( SynthExpVarSupply
     , takeSynthExpVar
@@ -57,22 +59,22 @@ import MLF.Constraint.Types.SynthesizedExpVar
 import qualified MLF.Util.UnionFind as UnionFind
 
 -- | State maintained during normalization.
-data NormalizeState p = NormalizeState { nsNextNodeId :: !Int
+data NormalizeState = NormalizeState { nsNextNodeId :: !Int
       -- ^ Counter for allocating fresh nodes during grafting.
     , nsSynthExpVarSupply :: !SynthExpVarSupply
       -- ^ Opaque allocator for synthesized-wrapper expansion variables in
       -- a reserved negative-ID space.
     , nsUnionFind :: !(IntMap NodeId)
       -- ^ Union-find structure: maps node IDs to their canonical representative.
-    , nsConstraint :: !(Constraint p)
-      -- ^ The constraint being normalized.
+    , nsConstraint :: !(Constraint 'Raw)
+      -- ^ The raw constraint being normalized before Phase 2 advances it.
     }
     deriving (Eq, Show)
 
-type NormalizeM p a = State (NormalizeState p) a
+type NormalizeM a = State NormalizeState a
 
 -- | Allocate a fresh variable node.
-freshVar :: NormalizeM p NodeId
+freshVar :: NormalizeM NodeId
 freshVar = do
     nid <- freshNodeId
     let node = TyVar { tnId = nid, tnBound = Nothing }
@@ -81,7 +83,7 @@ freshVar = do
     pure nid
 
 -- | Set the binding parent for a node in the constraint.
-setBindParentNorm :: NodeId -> NodeId -> BindFlag -> NormalizeM p ()
+setBindParentNorm :: NodeId -> NodeId -> BindFlag -> NormalizeM ()
 setBindParentNorm child parent flag =
     when (child /= parent) $
         modify' $ \s ->
@@ -89,7 +91,7 @@ setBindParentNorm child parent flag =
                 c' = Binding.setBindParent (typeRef child) (typeRef parent, flag) c
             in s { nsConstraint = c' }
 
-setBindParentRefNorm :: NodeRef -> NodeRef -> BindFlag -> NormalizeM p ()
+setBindParentRefNorm :: NodeRef -> NodeRef -> BindFlag -> NormalizeM ()
 setBindParentRefNorm child parent flag =
     when (child /= parent) $
         modify' $ \s ->
@@ -98,14 +100,14 @@ setBindParentRefNorm child parent flag =
             in s { nsConstraint = c' }
 
 -- | Get a fresh NodeId.
-freshNodeId :: NormalizeM p NodeId
+freshNodeId :: NormalizeM NodeId
 freshNodeId = do
     n <- gets nsNextNodeId
     modify' $ \s -> s { nsNextNodeId = n + 1 }
     pure (NodeId n)
 
 -- | Insert a node into the constraint.
-insertNode :: TyNode -> NormalizeM p ()
+insertNode :: TyNode -> NormalizeM ()
 insertNode node = modify' $ \s ->
     let c = nsConstraint s
         nodes' = Graph.insertNode (tnId node) node (cNodes c)
@@ -113,7 +115,7 @@ insertNode node = modify' $ \s ->
 
 -- Union-find link; caller is responsible for any scope maintenance (e.g.
 -- binding-edge harmonization / paper Raise(n) for Var/Var unions).
-unionNodes :: NodeId -> NodeId -> NormalizeM p ()
+unionNodes :: NodeId -> NodeId -> NormalizeM ()
 unionNodes from to = modify' $ \s ->
     s { nsUnionFind = IntMap.insert (getNodeId from) to (nsUnionFind s) }
 
@@ -122,7 +124,7 @@ findRoot :: IntMap NodeId -> NodeId -> NodeId
 findRoot = UnionFind.frWith
 
 -- | Allocate a fresh expansion variable for synthesized wrappers.
-freshSynthExpVarNorm :: NormalizeM p ExpVarId
+freshSynthExpVarNorm :: NormalizeM ExpVarId
 freshSynthExpVarNorm = do
     supply <- gets nsSynthExpVarSupply
     let (expVar, supply') = takeSynthExpVar supply

@@ -22,6 +22,9 @@ breakCyclesAndCheckAcyclicity =
     . Acyclicity.breakCyclesAndCheckAcyclicity
     . toNormalizedConstraint
 
+normalizedDependencyGraph :: Constraint 'Raw -> DepGraph EdgeId
+normalizedDependencyGraph = buildDependencyGraph . toNormalizedConstraint
+
 spec :: Spec
 spec = do
   describe "Phase 3 — Acyclicity Check" $ do
@@ -495,7 +498,7 @@ spec = do
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
         checkAcyclicity constraint `shouldSatisfy` isRight
         -- No dependency between them (independent)
-        let g = buildDependencyGraph constraint
+        let g = normalizedDependencyGraph constraint
         -- e₁ should NOT depend on e₂ and vice versa
         case IntMap.lookup 0 (dgEdges g) of
           Just deps -> deps `shouldNotContain` [EdgeId 1]
@@ -621,7 +624,7 @@ spec = do
 
     describe "Dependency graph construction" $ do
       it "builds empty graph for empty constraint" $ do
-        let g = buildDependencyGraph emptyConstraint
+        let g = normalizedDependencyGraph emptyConstraint
         dgVertices g `shouldBe` []
 
       it "builds graph with correct vertices" $ do
@@ -632,7 +635,7 @@ spec = do
                 ]
             edges = [InstEdge (EdgeId 42) (NodeId 0) (NodeId 1)]
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = edges}
-            g = buildDependencyGraph constraint
+            g = normalizedDependencyGraph constraint
         dgVertices g `shouldBe` [EdgeId 42]
 
       it "creates dependency edge when nodes overlap" $ do
@@ -647,7 +650,7 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2)
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-            g = buildDependencyGraph constraint
+            g = normalizedDependencyGraph constraint
         -- e₁ should depend on e₂
         case IntMap.lookup 0 (dgEdges g) of
           Just deps -> deps `shouldContain` [EdgeId 1]

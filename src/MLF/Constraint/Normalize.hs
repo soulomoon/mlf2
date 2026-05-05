@@ -99,7 +99,7 @@ normalize c = toNormalizedConstraint (nsConstraint finalState)
     finalState = execState (normalizeLoop >> enforcePaperShapedInstEdges) initialState
 
 -- | Main normalization loop: apply transformations until fixed point.
-normalizeLoop :: NormalizeM p ()
+normalizeLoop :: NormalizeM ()
 normalizeLoop = do
     before <- gets nsConstraint
     modify' $ \s -> s { nsConstraint = dropReflexiveInstEdges (nsConstraint s) }

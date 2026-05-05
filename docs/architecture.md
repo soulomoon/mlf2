@@ -127,6 +127,11 @@ runtime invariants as compile-time types:
   encode those boundaries; `castConstraint` remains only as a quarantined legacy
   escape hatch, and raw-view bridges are named where older elaboration/query code
   still expects the historical raw surface.
+  Phase-specific helpers should expose the narrowest phase they actually
+  require: normalization's mutable helper state is raw-phase owned, dependency
+  graph construction consumes normalized constraints, and acyclicity results are
+  assembled from the acyclic constraint. Structural readers such as node access
+  and binding-tree queries remain phase-polymorphic.
 
 - **`ForallSpec`** (`MLF.Constraint.Types.Witness`): `fsBinderCount` was removed;
   binder count is derived from `length fsBounds`. `mkForallSpec` validates

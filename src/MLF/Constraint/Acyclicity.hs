@@ -113,7 +113,9 @@ checkAcyclicity c =
                   "Cyclic instantiation dependency detected: "
                     ++ show (map getEdgeId cycleIds)
               }
-        Right sortedIds -> Right (toAcyclicConstraint c, mkAcyclicityResult c depGraph sortedIds)
+        Right sortedIds ->
+          let cAcyclic = toAcyclicConstraint c
+           in Right (cAcyclic, mkAcyclicityResult cAcyclic depGraph sortedIds)
 
 -- | Break dependency cycles one-by-one by introducing `TyMu` nodes until the
 -- instantiation graph becomes acyclic.
@@ -135,7 +137,7 @@ breakCyclesAndCheckAcyclicity = go
                   }
             else go c'
 
-mkAcyclicityResult :: Constraint p -> DepGraph EdgeId -> [EdgeId] -> AcyclicityResult
+mkAcyclicityResult :: Constraint 'Acyclic -> DepGraph EdgeId -> [EdgeId] -> AcyclicityResult
 mkAcyclicityResult c depGraph sortedIds =
   let edgeMap =
         IntMap.fromList
@@ -158,7 +160,7 @@ data CycleRewriteState = CycleRewriteState
 
 type CycleRewriteM a = State CycleRewriteState a
 
-breakSingleCycle :: Constraint p -> [EdgeId] -> Either CycleError (Constraint p)
+breakSingleCycle :: Constraint 'Normalized -> [EdgeId] -> Either CycleError (Constraint 'Normalized)
 breakSingleCycle _ [] = Left (invalidCycleError [] "empty cycle reported by dependency graph")
 breakSingleCycle c cycleIds = do
   pivotEdge <-
@@ -212,14 +214,14 @@ invalidCycleError cycleIds msg =
       ceMessage = msg
     }
 
-lookupInstEdge :: Constraint p -> EdgeId -> Maybe InstEdge
+lookupInstEdge :: Constraint 'Normalized -> EdgeId -> Maybe InstEdge
 lookupInstEdge c eid =
   case filter ((== eid) . instEdgeId) (cInstEdges c) of
     edge : _ -> Just edge
     [] -> Nothing
 
 runCycleRewrite ::
-  Constraint p ->
+  Constraint 'Normalized ->
   InstEdge ->
   IntSet ->
   CycleRewriteState ->
@@ -341,7 +343,7 @@ cloneWithSubstitution originalNodes recursiveNodes binderId nid
               pure cloneId
 
 attachClonedBindParentsWithMu ::
-  Constraint p ->
+  Constraint 'Normalized ->
   NodeId ->
   NodeId ->
   NodeId ->
@@ -368,7 +370,7 @@ attachClonedBindParentsWithMu c bodyId binderId muId rhsParent = do
                   setBindParentCR (typeRef cloneId) (translateParent clones parentRef, flag)
 
 attachClonedBindParentsNoMu ::
-  Constraint p ->
+  Constraint 'Normalized ->
   NodeId ->
   Maybe (NodeRef, BindFlag) ->
   CycleRewriteM ()
@@ -397,7 +399,7 @@ translateParent clones parentRef =
         Nothing -> parentRef
     GenRef _ -> parentRef
 
-lookupBindParentInfo :: Constraint p -> NodeRef -> Maybe (NodeRef, BindFlag)
+lookupBindParentInfo :: Constraint 'Normalized -> NodeRef -> Maybe (NodeRef, BindFlag)
 lookupBindParentInfo c ref = IntMap.lookup (nodeRefKey ref) (cBindParents c)
 
 freshNodeIdCR :: CycleRewriteM NodeId
@@ -453,7 +455,7 @@ This ensures topological order processes e₂ before e₁.
 -}
 
 -- | Build the dependency graph between instantiation edges.
-buildDependencyGraph :: Constraint p -> DepGraph EdgeId
+buildDependencyGraph :: Constraint 'Normalized -> DepGraph EdgeId
 buildDependencyGraph c =
   let edges = cInstEdges c
       nodes = cNodes c
