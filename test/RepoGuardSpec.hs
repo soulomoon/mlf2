@@ -60,10 +60,17 @@ spec = describe "Repository guardrails" $ do
               "    castConstraint",
               "  ) where"
             ]
+        classSignature =
+          unlines
+            [ "class Legacy c where",
+              "  castConstraint",
+              "    :: Constraint p -> Constraint q"
+            ]
     containsCastConstraintCall guardedSource `shouldBe` False
     containsCastConstraintCall multilineSignature `shouldBe` False
     containsCastConstraintCall multilineImport `shouldBe` False
     containsCastConstraintCall multilineExport `shouldBe` False
+    containsCastConstraintCall classSignature `shouldBe` False
     containsCastConstraintCall "legacy = castConstraint c" `shouldBe` True
     containsCastConstraintCall "x' = castConstraint c" `shouldBe` True
     containsCastConstraintCall (unlines ["legacy =", "  castConstraint", "    c"])
@@ -71,6 +78,8 @@ spec = describe "Repository guardrails" $ do
     containsCastConstraintCall (unlines ["legacy =", "  (castConstraint)", "    c"])
       `shouldBe` True
     containsCastConstraintCall (unlines ["legacy =", "  castConstraint", "  :: Constraint p -> Constraint q"])
+      `shouldBe` True
+    containsCastConstraintCall (unlines ["legacy =", "  id", "    castConstraint", "    :: Constraint p -> Constraint q"])
       `shouldBe` True
     containsCastConstraintCall "legacy = Graph.castConstraint c" `shouldBe` True
 
@@ -523,17 +532,18 @@ containsCastConstraintCall source =
        in isCastConstraintCallContext
             inImportExportList
             (nextLineStartsSignature lineIndex)
-            (previousLineContinuesExpression lineIndex)
+            (previousLinesContinueExpression lineIndex)
             prefix
             suffix
     nextLineStartsSignature lineIndex =
       case firstNonEmpty (drop (lineIndex + 1) sourceLines) of
         Just nextLine -> "::" `isPrefixOf` trim nextLine
         Nothing -> False
-    previousLineContinuesExpression lineIndex =
-      case lastNonEmpty (take lineIndex sourceLines) of
-        Just previousLine -> lineContinuesExpression previousLine
-        Nothing -> False
+    previousLinesContinueExpression lineIndex =
+      case drop lineIndex sourceLines of
+        currentLine : _ ->
+          priorLinesContinueExpression (lineIndent currentLine) (reverse (take lineIndex sourceLines))
+        [] -> False
 
 isImportLine :: String -> Bool
 isImportLine line = "import " `isPrefixOf` trim line
@@ -648,12 +658,32 @@ firstNonEmpty (line : rest)
   | null (trim line) = firstNonEmpty rest
   | otherwise = Just line
 
-lastNonEmpty :: [String] -> Maybe String
-lastNonEmpty = firstNonEmpty . reverse
-
 lineContinuesExpression :: String -> Bool
 lineContinuesExpression line =
   any (`isSuffixOf` trimmed) ["=", "(", "$", "\\", "->"]
+  where
+    trimmed = trim line
+
+priorLinesContinueExpression :: Int -> [String] -> Bool
+priorLinesContinueExpression currentIndent = go
+  where
+    go [] = False
+    go (line : rest)
+      | null (trim line) = go rest
+      | lineIndent line < currentIndent = lineContinuesExpression line
+          || (not (lineStartsDeclarationBoundary line) && go rest)
+      | currentIndent == 0 = lineContinuesExpression line
+      | otherwise = go rest
+
+lineIndent :: String -> Int
+lineIndent = length . takeWhile (== ' ')
+
+lineStartsDeclarationBoundary :: String -> Bool
+lineStartsDeclarationBoundary line =
+  any
+    (`isPrefixOf` trimmed)
+    ["class ", "data ", "instance ", "module ", "import "]
+    || " where" `isSuffixOf` trimmed
   where
     trimmed = trim line
 
