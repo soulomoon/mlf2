@@ -2,6 +2,7 @@
 module RepoGuardSpec (spec) where
 
 import Control.Monad (forM_)
+import Data.Char (isAlphaNum)
 import Data.List (intercalate, isInfixOf, isSuffixOf, sort)
 import System.Directory (doesFileExist, listDirectory)
 import System.FilePath (dropExtension, makeRelative, splitDirectories, takeExtension, (</>))
@@ -30,6 +31,21 @@ spec = describe "Repository guardrails" $ do
   it "production code keeps castConstraint quarantined to the defining module" $ do
     offenders <- findCastConstraintOffenders ["src", "src-public", "app"]
     offenders `shouldBe` []
+
+  it "castConstraint guard ignores non-call mentions" $ do
+    let guardedSource =
+          unlines
+            [ "-- castConstraint is mentioned in a comment",
+              "{- castConstraint is mentioned in a block comment -}",
+              "message = \"castConstraint is mentioned in a string\"",
+              "castConstraint :: Constraint p -> Constraint q",
+              "    castConstraint,",
+              "import MLF.Constraint.Types.Graph (castConstraint)"
+            ]
+        guardedLines = lines (stripHaskellCommentsAndLiterals guardedSource)
+    any containsCastConstraintCall guardedLines `shouldBe` False
+    containsCastConstraintCall "legacy = castConstraint c" `shouldBe` True
+    containsCastConstraintCall "legacy = Graph.castConstraint c" `shouldBe` True
 
   it "MLF.API no longer exports pipeline/runtime helpers and MLF.Pipeline owns them" $ do
     apiSrc <- readFile "src-public/MLF/API.hs"
@@ -424,9 +440,91 @@ findCastConstraintOffenders roots = do
 
 hasCastConstraintUse :: FilePath -> IO (FilePath, Bool)
 hasCastConstraintUse path = do
-  src <- readFile path
+  src <- stripHaskellCommentsAndLiterals <$> readFile path
   let definingModule = path == "src/MLF/Constraint/Types/Graph.hs"
-  pure (path, not definingModule && "castConstraint" `isInfixOf` src)
+  pure (path, not definingModule && any containsCastConstraintCall (lines src))
+
+data SourceMode
+  = SourceCode
+  | SourceLineComment
+  | SourceBlockComment Int
+  | SourceString
+  | SourceChar
+
+stripHaskellCommentsAndLiterals :: String -> String
+stripHaskellCommentsAndLiterals = go SourceCode
+  where
+    go _ [] = []
+    go SourceCode ('-' : '-' : rest) = ' ' : ' ' : go SourceLineComment rest
+    go SourceCode ('{' : '-' : rest) = ' ' : ' ' : go (SourceBlockComment 1) rest
+    go SourceCode ('"' : rest) = ' ' : go SourceString rest
+    go SourceCode ('\'' : rest) = ' ' : go SourceChar rest
+    go SourceCode (ch : rest) = ch : go SourceCode rest
+    go SourceLineComment ('\n' : rest) = '\n' : go SourceCode rest
+    go SourceLineComment (_ : rest) = ' ' : go SourceLineComment rest
+    go (SourceBlockComment depth) ('{' : '-' : rest) =
+      ' ' : ' ' : go (SourceBlockComment (depth + 1)) rest
+    go (SourceBlockComment 1) ('-' : '}' : rest) = ' ' : ' ' : go SourceCode rest
+    go (SourceBlockComment depth) ('-' : '}' : rest) =
+      ' ' : ' ' : go (SourceBlockComment (depth - 1)) rest
+    go mode@(SourceBlockComment _) ('\n' : rest) = '\n' : go mode rest
+    go mode@(SourceBlockComment _) (_ : rest) = ' ' : go mode rest
+    go SourceString ('\\' : _ : rest) = ' ' : ' ' : go SourceString rest
+    go SourceString ('"' : rest) = ' ' : go SourceCode rest
+    go SourceString ('\n' : rest) = '\n' : go SourceCode rest
+    go SourceString (_ : rest) = ' ' : go SourceString rest
+    go SourceChar ('\\' : _ : rest) = ' ' : ' ' : go SourceChar rest
+    go SourceChar ('\'' : rest) = ' ' : go SourceCode rest
+    go SourceChar ('\n' : rest) = '\n' : go SourceCode rest
+    go SourceChar (_ : rest) = ' ' : go SourceChar rest
+
+containsCastConstraintCall :: String -> Bool
+containsCastConstraintCall line
+  | Just _ <- stripPrefix "import " stripped = False
+  | otherwise = any isCallAt (identifierTokenOffsets "castConstraint" line)
+  where
+    stripped = trim line
+    isCallAt offset =
+      let (prefix, tokenAndSuffix) = splitAt offset line
+          suffix = drop (length "castConstraint") tokenAndSuffix
+       in isCastConstraintCallContext prefix suffix
+
+isCastConstraintCallContext :: String -> String -> Bool
+isCastConstraintCallContext prefix suffix =
+  not (isSignatureEntry || isExportListEntry)
+  where
+    prefixTrimmed = trim prefix
+    suffixTrimmed = trim suffix
+    onlyExportPunctuation = all (`elem` "(),")
+    onlySignaturePrefix = all (== ',')
+    isSignatureEntry =
+      "::" `isPrefixOf` suffixTrimmed
+        && onlySignaturePrefix prefixTrimmed
+    isExportListEntry =
+      onlyExportPunctuation prefixTrimmed
+        && onlyExportPunctuation suffixTrimmed
+
+identifierTokenOffsets :: String -> String -> [Int]
+identifierTokenOffsets needle haystack = go 0 haystack
+  where
+    go _ [] = []
+    go offset rest@(_ : tailRest)
+      | Just suffix <- stripPrefix needle rest,
+        hasIdentifierBoundary offset suffix =
+          offset : go (offset + 1) tailRest
+      | otherwise = go (offset + 1) tailRest
+    hasIdentifierBoundary offset suffix =
+      let beforeOk =
+            offset == 0
+              || not (isIdentifierChar (haystack !! (offset - 1)))
+          afterOk =
+            case suffix of
+              ch : _ -> not (isIdentifierChar ch)
+              [] -> True
+       in beforeOk && afterOk
+
+isIdentifierChar :: Char -> Bool
+isIdentifierChar ch = isAlphaNum ch || ch == '_' || ch == '\''
 
 collectHsFiles :: FilePath -> IO [FilePath]
 collectHsFiles root = do
@@ -448,13 +546,6 @@ dropFieldPrefix line =
   case break (== ':') line of
     (_field, ':' : rest) -> rest
     _ -> line
-
-parseImportModule :: String -> Maybe String
-parseImportModule line =
-  case words (trim line) of
-    ("import" : "qualified" : modName : _) -> Just modName
-    ("import" : modName : _) -> Just modName
-    _ -> Nothing
 
 trimImport :: String -> String
 trimImport = unwords . take 2 . words
