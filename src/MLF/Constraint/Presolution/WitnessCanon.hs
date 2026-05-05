@@ -29,7 +29,7 @@ import MLF.Constraint.Presolution.WitnessValidation (OmegaNormalizeEnv(..), Omeg
 --
 -- Thesis alignment: §15.2.2 (Convention after Definition 15.2.1) splits
 -- derivations into Iu ; I, keeps only I, and I is defined by touching I(r).
-stripExteriorOps :: OmegaNormalizeEnv -> [InstanceOp] -> [InstanceOp]
+stripExteriorOps :: OmegaNormalizeEnv p -> [InstanceOp] -> [InstanceOp]
 stripExteriorOps env =
     filter keepOp
   where
@@ -50,7 +50,7 @@ stripExteriorOps env =
 
     keepOp op = touchesInterior op
 
-coalesceRaiseMergeWithEnv :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+coalesceRaiseMergeWithEnv :: OmegaNormalizeEnv p -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 coalesceRaiseMergeWithEnv env ops =
     let stepper = cata (coalesceAlg env) ops
     in stepper Nothing
@@ -67,7 +67,7 @@ coalesceRaiseMergeWithEnv env ops =
         Just (_n, opsRev) -> Right (reverse opsRev)
 
     coalesceAlg
-        :: OmegaNormalizeEnv
+        :: OmegaNormalizeEnv p
         -> ListF InstanceOp (Maybe (NodeId, [InstanceOp]) -> Either OmegaNormalizeError [InstanceOp])
         -> (Maybe (NodeId, [InstanceOp]) -> Either OmegaNormalizeError [InstanceOp])
     coalesceAlg _ = \case
@@ -115,7 +115,7 @@ data WeakenInfo = WeakenInfo
     , wiDesc :: IntSet.IntSet
     }
 
-reorderWeakenWithEnv :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+reorderWeakenWithEnv :: OmegaNormalizeEnv p -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 reorderWeakenWithEnv env ops =
     if null weakenIndexed
         then Right ops
@@ -232,7 +232,7 @@ reorderWeakenWithEnv env ops =
         emitQueue [] _ = Nil
         emitQueue (q:qs) remaining = Cons q (qs, remaining)
 
-coalesceDelayedGraftWeakenWithEnv :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+coalesceDelayedGraftWeakenWithEnv :: OmegaNormalizeEnv p -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 coalesceDelayedGraftWeakenWithEnv env = go
   where
     canon = canonical env
@@ -287,7 +287,7 @@ coalesceDelayedGraftWeakenWithEnv env = go
                 suffix <- go rest
                 pure (op : suffix)
 
-assertNoStandaloneGrafts :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError ()
+assertNoStandaloneGrafts :: OmegaNormalizeEnv p -> [InstanceOp] -> Either OmegaNormalizeError ()
 assertNoStandaloneGrafts env = go
   where
     canon = canonical env
@@ -302,7 +302,7 @@ assertNoStandaloneGrafts env = go
 
 -- | Normalize Ω by canonicalization/coalescing/reordering passes only.
 -- Validation is applied by 'normalizeInstanceOpsFull' or at call-site boundaries.
-normalizeInstanceOpsCore :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+normalizeInstanceOpsCore :: OmegaNormalizeEnv p -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 normalizeInstanceOpsCore env ops0 = do
     let ops1 = stripExteriorOps env ops0
     ops2 <- canonicalizeOps ops1
@@ -394,7 +394,7 @@ normalizeInstanceOpsCore env ops0 = do
             _ -> Left (MergeDirectionInvalid (canon n) (canon m))
 
 -- | Normalize Ω and validate paper invariants (conditions (1)–(5)).
-normalizeInstanceOpsFull :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
+normalizeInstanceOpsFull :: OmegaNormalizeEnv p -> [InstanceOp] -> Either OmegaNormalizeError [InstanceOp]
 normalizeInstanceOpsFull env ops0 = do
     ops <- normalizeInstanceOpsCore env ops0
     validateNormalizedWitness env ops

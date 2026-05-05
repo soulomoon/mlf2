@@ -38,7 +38,7 @@ data SchemeRootsPlan = SchemeRootsPlan
 
 buildSchemeRootInfo
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> IntMap.IntMap TyNode
     -> SchemeRootInfo
 buildSchemeRootInfo canonical constraint nodes =
@@ -81,9 +81,9 @@ buildSchemeRootInfo canonical constraint nodes =
 
 buildSchemeRootsPlan
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> IntMap.IntMap TyNode
-    -> Maybe GaBindParentsInfo
+    -> Maybe (GaBindParentsInfo p)
     -> (BindParents -> NodeRef -> Maybe GenNodeId)
     -> SchemeRootsPlan
 buildSchemeRootsPlan canonical constraint nodes mbBindParentsGa firstGenAncestor =
@@ -209,7 +209,7 @@ schemeOwnerFromBody plan solvedToBasePref typeRootC =
 
 preferredBaseRoot
     :: (NodeId -> NodeId)
-    -> Maybe GaBindParentsInfo
+    -> Maybe (GaBindParentsInfo p)
     -> IntMap.IntMap NodeId
     -> NodeId
     -> Maybe NodeId

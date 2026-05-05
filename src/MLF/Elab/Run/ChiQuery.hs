@@ -15,21 +15,21 @@ import MLF.Constraint.Types.Graph
     , TyNode
     )
 
-chiCanonical :: PresolutionView -> NodeId -> NodeId
+chiCanonical :: PresolutionView p -> NodeId -> NodeId
 chiCanonical = pvCanonical
 
-chiCanonicalMap :: PresolutionView -> IntMap.IntMap NodeId
+chiCanonicalMap :: PresolutionView p -> IntMap.IntMap NodeId
 chiCanonicalMap = pvCanonicalMap
 
-chiLookupNode :: PresolutionView -> NodeId -> Maybe TyNode
+chiLookupNode :: PresolutionView p -> NodeId -> Maybe TyNode
 chiLookupNode = pvLookupNode
 
-chiLookupVarBound :: PresolutionView -> NodeId -> Maybe NodeId
+chiLookupVarBound :: PresolutionView p -> NodeId -> Maybe NodeId
 chiLookupVarBound = pvLookupVarBound
 
-chiConstraint :: PresolutionView -> Constraint
+chiConstraint :: PresolutionView p -> Constraint p
 chiConstraint = pvConstraint
 
-chiCanonicalConstraint :: PresolutionView -> Constraint
+chiCanonicalConstraint :: PresolutionView p -> Constraint p
 chiCanonicalConstraint = pvCanonicalConstraint
 

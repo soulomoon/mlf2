@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Presolution.RaiseSpec (spec) where
 
 import Test.Hspec
@@ -34,6 +35,7 @@ import SpecUtil
     , nodeMapFromList
     , rootedConstraint
     )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 
 spec :: Spec
 spec = do
@@ -584,12 +586,12 @@ spec = do
                                 IntMap.empty
                         interior = IntSet.fromList [0 .. rightVarId]
 
-                        replayRaises :: Constraint -> [InstanceOp] -> Either BindingError Constraint
+                        replayRaises :: Constraint 'Raw -> [InstanceOp] -> Either BindingError (Constraint 'Raw)
                         replayRaises c ops0 = go c ops0
                           where
                             go c' [] = Right c'
                             go c' (OpRaise nid : rest) = do
-                                (c'', _mOp) <- GraphOps.applyRaiseStep (typeRef nid) c'
+                                (c'', _mOp) <- GraphOps.applyRaiseStep (TypeRefTag nid) c'
                                 go c'' rest
                             go c' (_ : rest) = go c' rest
 

@@ -41,12 +41,12 @@ reifyBoundWithNamesSolved solved subst =
 
     isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
 
-reifyBoundWithNames :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyBoundWithNames :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNames presolutionView subst nid =
     reifyBoundWithNamesSolved (solvedFromView presolutionView) subst nid
 
 
-reifyBoundWithNamesBound :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
+reifyBoundWithNamesBound :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
 reifyBoundWithNamesBound presolutionView subst nid =
     reifyBoundWithNamesBoundSolved (solvedFromView presolutionView) subst nid
 
@@ -71,12 +71,12 @@ reifyBoundWithNamesBoundSolved solved subst =
     isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
 
 -- | Reify a node for use as a binder bound on an explicit constraint (Schi_p on base graphs).
-reifyBoundWithNamesOnConstraint :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyBoundWithNamesOnConstraint :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNamesOnConstraint constraint subst nid =
     let presolutionView = presolutionViewFromSnapshot constraint IntMap.empty
     in reifyBoundWithNames presolutionView subst nid
 
-reifyBoundWithNamesOnConstraintBound :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
+reifyBoundWithNamesOnConstraintBound :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
 reifyBoundWithNamesOnConstraintBound constraint subst nid =
     let presolutionView = presolutionViewFromSnapshot constraint IntMap.empty
     in reifyBoundWithNamesBound presolutionView subst nid

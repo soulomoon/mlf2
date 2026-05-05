@@ -32,15 +32,15 @@ import MLF.Elab.Types
     , tyToElab
     , mapBoundType
     )
-inlineBoundVarsType :: PresolutionView -> ElabType -> ElabType
+inlineBoundVarsType :: PresolutionView p -> ElabType -> ElabType
 inlineBoundVarsType = inlineBoundVarsTypeWith False
 
-inlineBoundVarsTypeForBound :: PresolutionView -> ElabType -> ElabType
+inlineBoundVarsTypeForBound :: PresolutionView p -> ElabType -> ElabType
 inlineBoundVarsTypeForBound = inlineBoundVarsTypeWith True
 
 -- See Note [Scope-aware bound/alias inlining] in
 -- docs/notes/2026-01-27-elab-changes.md.
-inlineBoundVarsTypeWith :: Bool -> PresolutionView -> ElabType -> ElabType
+inlineBoundVarsTypeWith :: Bool -> PresolutionView p -> ElabType -> ElabType
 inlineBoundVarsTypeWith unboundToBottom presolutionView =
     inlineAliasBoundsWithBySeen
         unboundToBottom

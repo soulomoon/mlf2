@@ -39,8 +39,7 @@ data ConstraintError
 
 -- | Successful constraint generation returns the full constraint graph and the
 -- root 'NodeId' that represents the program's type.
-data ConstraintResult = ConstraintResult
-  { crConstraint :: Constraint,
+data ConstraintResult p = ConstraintResult { crConstraint :: Constraint p,
     crRoot :: NodeId,
     crAnnotated :: AnnExpr,
     -- | Original source annotation types keyed by AAnn codomain NodeId.

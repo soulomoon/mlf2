@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Phi.WitnessDomainUtil (
     WitnessDomainBridge,
     mkWitnessDomainBridge,
@@ -15,6 +16,7 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Types.Graph (NodeId(..), getNodeId)
+import MLF.Constraint.Types.Phase (Phase(Raw))
 
 -- | Test-local witness-domain bridge used to preserve the pure source-key unit
 -- coverage without keeping helper hooks in the main library.
@@ -25,11 +27,11 @@ data WitnessDomainBridge = WitnessDomainBridge
     , wbReverseTraceByTarget :: IntMap.IntMap [Int]
     , wbInvCopyMap :: IntMap.IntMap NodeId
     , wbCopyMap :: IntMap.IntMap NodeId
-    , wbPresolutionView :: PresolutionView
+    , wbPresolutionView :: PresolutionView 'Raw
     }
 
 mkWitnessDomainBridge
-    :: PresolutionView
+    :: PresolutionView 'Raw
     -> Maybe EdgeTrace
     -> IntMap.IntMap NodeId
     -> WitnessDomainBridge

@@ -237,7 +237,7 @@ decideMinimalExpansion gid allowTrivial (TyExp { tnBody = bodyId }) targetNode =
             else case targetNode of
             TyForall { tnId = targetForallId, tnBody = targetBody } -> do
                 targetSpec <- forallSpecM targetForallId
-                if length boundVars == fsBinderCount targetSpec
+                if length boundVars == forallSpecBinderCount targetSpec
                     then
                         -- Note [Minimal Expansion Decision] case 1 (∀≤∀ matching arity)
                         return (ExpIdentity, [(bodyRoot, targetBody)])

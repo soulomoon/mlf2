@@ -14,11 +14,11 @@ import qualified MLF.Util.UnionFind as UnionFind
 
 -- | Apply the thesis-style generalized admissibility repair once per final UF
 -- equivalence class, rather than pairwise during worklist reduction.
-batchHarmonizeConstraint :: IntMap NodeId -> Constraint -> Either SolveError Constraint
+batchHarmonizeConstraint :: IntMap NodeId -> Constraint p -> Either SolveError (Constraint p)
 batchHarmonizeConstraint uf c0 =
     foldl' harmonizeOne (Right c0) (equivalenceClasses c0)
   where
-    harmonizeOne :: Either SolveError Constraint -> [NodeId] -> Either SolveError Constraint
+    harmonizeOne :: Either SolveError (Constraint p) -> [NodeId] -> Either SolveError (Constraint p)
     harmonizeOne acc members = do
         cBefore <- acc
         let refs = map typeRef members
@@ -26,7 +26,7 @@ batchHarmonizeConstraint uf c0 =
             Left err -> Left (BindingTreeError err)
             Right (cAfter, _trace) -> Right cAfter
 
-    equivalenceClasses :: Constraint -> [[NodeId]]
+    equivalenceClasses :: Constraint p -> [[NodeId]]
     equivalenceClasses c =
         let canonical = UnionFind.frWith uf
             allNodeIds = map fst (toListNode (cNodes c))

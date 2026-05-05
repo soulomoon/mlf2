@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {- |
 Module      : MLF.Elab.Phi.Env
 Description : Environment helpers for witness translation
@@ -21,6 +22,7 @@ import Control.Monad.Reader (ReaderT, asks)
 import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Types.Graph (NodeId)
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Presolution (EdgeTrace)
 import MLF.Elab.Generalize (GaBindParents)
 import MLF.Elab.Types (ElabError)
@@ -40,7 +42,7 @@ import MLF.Elab.Types (ElabError)
 data PhiEnv = PhiEnv
     { peCanonical :: NodeId -> NodeId
     , peCopyMap :: IntMap.IntMap NodeId
-    , peGaParents :: Maybe GaBindParents
+    , peGaParents :: Maybe (GaBindParents 'Raw)
     , peTrace :: Maybe EdgeTrace
     }
 
@@ -58,8 +60,8 @@ askCanonical = asks peCanonical
 askCopyMap :: PhiM (IntMap.IntMap NodeId)
 askCopyMap = asks peCopyMap
 
--- | Get the optional GaBindParents from the environment.
-askGaParents :: PhiM (Maybe GaBindParents)
+-- | Get the optional GaBindParents 'Raw from the environment.
+askGaParents :: PhiM (Maybe (GaBindParents 'Raw))
 askGaParents = asks peGaParents
 
 -- | Get the optional EdgeTrace from the environment.

@@ -13,7 +13,7 @@ import MLF.Constraint.Types.Presolution
 
 collectBoundChildren
     :: (NodeRef -> Maybe NodeId)
-    -> Constraint
+    -> Constraint p
     -> BindParents
     -> NodeRef
     -> String
@@ -24,7 +24,7 @@ collectBoundChildren childFilter =
 collectBoundChildrenWithFlag
     :: (NodeRef -> Maybe NodeId)
     -> (BindFlag -> Bool)
-    -> Constraint
+    -> Constraint p
     -> BindParents
     -> NodeRef
     -> String

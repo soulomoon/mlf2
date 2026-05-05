@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module GoldenSpec (spec) where
 
 {- Note [Golden test workflow]
@@ -34,6 +35,7 @@ import System.Directory (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)
 import Test.Hspec
+import MLF.Constraint.Types.Phase (Phase(Raw))
 
 -- ---------------------------------------------------------------------------
 -- Canonical test expressions
@@ -108,7 +110,7 @@ goldenXmlfTest name expr = it ("golden xMLF output: " ++ name) $ do
 -- ---------------------------------------------------------------------------
 
 -- | Produce a deterministic text summary of a constraint graph.
-constraintSummary :: Constraint -> NodeId -> String
+constraintSummary :: Constraint 'Raw -> NodeId -> String
 constraintSummary c root =
   unlines
     [ "root: " ++ show (getNodeId root),

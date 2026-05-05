@@ -27,6 +27,7 @@ import MLF.Constraint.Types.Graph
     TyNode (..),
     getNodeId,
   )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Elaborate.Annotation
   ( AnnotationContext (..),
     desugaredAnnLambdaInfo,
@@ -111,7 +112,7 @@ data ElabOut = ElabOut
   }
 
 data AlgebraContext = AlgebraContext
-  { algPresolutionView :: PresolutionView,
+  { algPresolutionView :: PresolutionView 'Raw,
     algTraceConfig :: TraceConfig,
     algCanonical :: NodeId -> NodeId,
     algResolvedLambdaParamNode :: NodeId -> Maybe NodeId,

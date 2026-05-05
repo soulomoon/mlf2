@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+
 module Phi.WitnessDomainSpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -25,6 +27,7 @@ import MLF.Constraint.Presolution.TestSupport
     , InteriorNodes(..)
     , copiedNodes
     )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Witness (ReplayContract(..))
 import MLF.Frontend.Syntax (Expr(..))
 import Phi.WitnessDomainUtil
@@ -35,7 +38,7 @@ import SpecUtil (emptyConstraint, nodeMapFromList, runPipelineArtifactsDefault, 
 mkTestSolved :: IntMap.IntMap NodeId -> Solved
 mkTestSolved uf = SolvedTest.mkTestSolved emptyConstraint uf
 
-solvedToPresolutionView :: Solved -> PresolutionView
+solvedToPresolutionView :: Solved -> PresolutionView 'Raw
 solvedToPresolutionView solved =
     let constraint = Solved.originalConstraint solved
         canonical = Solved.canonical solved

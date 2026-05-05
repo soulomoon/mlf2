@@ -28,7 +28,7 @@ import MLF.Elab.Run.Generalize.Types
     )
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 
-restoreSchemeNodes :: GeneralizeEnv -> Phase1Result
+restoreSchemeNodes :: GeneralizeEnv p -> Phase1Result
 restoreSchemeNodes env =
     let solvedConstraint = geSolvedConstraint env
         base = geBaseConstraint env

@@ -60,8 +60,8 @@ data SchemeTypeChoice = SchemeTypeChoice
     stcSchemeOwners :: [GenNodeId]
   }
 
-data ReifyPlanInput = ReifyPlanInput
-  { rpiConstraint :: Constraint,
+data ReifyPlanInput p = ReifyPlanInput
+  { rpiConstraint :: Constraint p,
     rpiNodes :: IntMap.IntMap TyNode,
     rpiCanonical :: NodeId -> NodeId,
     rpiScopeRootC :: NodeRef,
@@ -71,7 +71,7 @@ data ReifyPlanInput = ReifyPlanInput
     rpiTargetIsBaseLike :: Bool,
     rpiTargetBound :: Maybe NodeId,
     rpiReachableFromWithBounds :: NodeId -> IntSet.IntSet,
-    rpiBindParentsGa :: Maybe GaBindParentsInfo,
+    rpiBindParentsGa :: Maybe (GaBindParentsInfo p),
     rpiExtraNameStart :: Int,
     rpiOrderedExtra :: [Int],
     rpiSubst0 :: IntMap.IntMap String,
@@ -83,8 +83,8 @@ data ReifyPlanInput = ReifyPlanInput
     rpiTypeRoot :: NodeId
   }
 
-data ReifyBindingEnv = ReifyBindingEnv
-  { rbeConstraint :: Constraint,
+data ReifyBindingEnv p = ReifyBindingEnv
+  { rbeConstraint :: Constraint p,
     rbeNodes :: IntMap.IntMap TyNode,
     rbeCanonical :: NodeId -> NodeId,
     rbeBindParents :: BindParents,
@@ -99,8 +99,8 @@ data ReifyBindingEnv = ReifyBindingEnv
     rbeNamedUnderGaSet :: IntSet.IntSet,
     rbeBinderSet :: IntSet.IntSet,
     rbeUniqueUnboundedName :: Maybe String,
-    rbeResForReify :: PresolutionView,
-    rbeBindParentsGa :: Maybe GaBindParentsInfo,
+    rbeResForReify :: PresolutionView p,
+    rbeBindParentsGa :: Maybe (GaBindParentsInfo p),
     rbeBindingScopeGen :: NodeId -> Maybe GenNodeId,
     rbeHasExplicitBound :: NodeId -> Bool,
     rbeIsTargetSchemeBinder :: NodeId -> Bool,
@@ -111,7 +111,7 @@ data ReifyBindingEnv = ReifyBindingEnv
     rbeTraceM :: String -> Either ElabError ()
   }
 
-buildReifyPlan :: ReifyPlanInput -> ReifyPlan
+buildReifyPlan :: ReifyPlanInput p -> ReifyPlan
 buildReifyPlan ReifyPlanInput {..} =
   let extraNames = zipWith alphaName [rpiExtraNameStart ..] rpiOrderedExtra
       substExtra = IntMap.fromList (zip rpiOrderedExtra extraNames)
@@ -264,8 +264,7 @@ buildReifyPlan ReifyPlanInput {..} =
           rpiTargetIsBaseLike
       boundMentionsSelfAliasLocal =
         boundMentionsSelfAliasFor
-          AliasEnv
-            { aeCanonical = rpiCanonical,
+          AliasEnv { aeCanonical = rpiCanonical,
               aeConstraint = rpiConstraint,
               aeNodes = nodesMap,
               aeBindParents = IntMap.empty, -- unused by boundMentionsSelfAliasFor
@@ -290,7 +289,7 @@ buildReifyPlan ReifyPlanInput {..} =
         }
 
 bindingFor ::
-  ReifyBindingEnv ->
+  ReifyBindingEnv p ->
   ReifyPlan ->
   (String, Int) ->
   Either ElabError (String, Maybe BoundType)

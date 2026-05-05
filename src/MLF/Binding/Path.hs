@@ -29,7 +29,7 @@ bindingPathToRootWithLookup lookupParent start =
                 Just (parentRef, _flag) ->
                     go (IntSet.insert key seen) (parentRef : path) (nodeRefKey parentRef)
 
-bindingPathToRoot :: Constraint -> NodeRef -> Either BindingError [NodeRef]
+bindingPathToRoot :: Constraint p -> NodeRef -> Either BindingError [NodeRef]
 bindingPathToRoot c =
     bindingPathToRootWithLookup (\key -> IntMap.lookup key (cBindParents c))
 

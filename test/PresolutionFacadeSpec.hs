@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module PresolutionFacadeSpec (spec) where
 
 import Control.Monad (forM_)

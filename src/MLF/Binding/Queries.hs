@@ -55,7 +55,7 @@ import MLF.Binding.Canonicalization (
 -- | Look up the binding parent and flag for a node.
 --
 -- Returns 'Nothing' if the node is a binding root (has no parent).
-lookupBindParent :: Constraint -> NodeRef -> Maybe (NodeRef, BindFlag)
+lookupBindParent :: Constraint p -> NodeRef -> Maybe (NodeRef, BindFlag)
 lookupBindParent c ref = IntMap.lookup (nodeRefKey ref) (cBindParents c)
 
 -- | Paper node kinds (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1).
@@ -69,17 +69,17 @@ data NodeKind
     deriving (Eq, Show)
 
 -- | Check if a node is a binding root.
-isBindingRoot :: Constraint -> NodeRef -> Bool
+isBindingRoot :: Constraint p -> NodeRef -> Bool
 isBindingRoot c ref = not $ IntMap.member (nodeRefKey ref) (cBindParents c)
 
 -- | Compute the set of binding roots (nodes with no binding parent).
-bindingRoots :: Constraint -> [NodeRef]
+bindingRoots :: Constraint p -> [NodeRef]
 bindingRoots c = filter (isBindingRoot c) (allNodeRefs c)
 
 -- | Compute the lowest common ancestor of two nodes in the binding tree.
 --
 -- Returns an error if either node has a cycle in its binding path.
-bindingLCA :: Constraint -> NodeRef -> NodeRef -> Either BindingError NodeRef
+bindingLCA :: Constraint p -> NodeRef -> NodeRef -> Either BindingError NodeRef
 bindingLCA c n1 n2 = do
     path1 <- bindingPathToRoot c n1
     path2 <- bindingPathToRoot c n2
@@ -97,7 +97,7 @@ bindingLCA c n1 n2 = do
 --   - Restricted: the node's own binding edge is rigid.
 --   - Locked: the node's own edge is flexible, but some strict ancestor edge is rigid.
 --   - Instantiable: the entire binding path to the root is flexible.
-nodeKind :: Constraint -> NodeRef -> Either BindingError NodeKind
+nodeKind :: Constraint p -> NodeRef -> Either BindingError NodeKind
 nodeKind c nid = case lookupBindParent c nid of
     Nothing                     -> Right NodeRoot
     Just (_, BindRigid)         -> Right NodeRestricted
@@ -112,7 +112,7 @@ nodeKind c nid = case lookupBindParent c nid of
 --
 -- Paper anchor (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.4):
 -- normalized witnesses do not perform operations under rigidly bound nodes.
-isUnderRigidBinder :: Constraint -> NodeRef -> Either BindingError Bool
+isUnderRigidBinder :: Constraint p -> NodeRef -> Either BindingError Bool
 isUnderRigidBinder c nid =
     any (\ref -> case lookupBindParent c ref of Just (_, BindRigid) -> True; _ -> False)
     . drop 1 <$> bindingPathToRoot c nid
@@ -120,7 +120,7 @@ isUnderRigidBinder c nid =
 -- | Compute the interior I(r): all nodes transitively bound to r.
 --
 -- This includes r itself and all nodes whose binding path passes through r.
-interiorOf :: Constraint -> NodeRef -> Either BindingError IntSet
+interiorOf :: Constraint p -> NodeRef -> Either BindingError IntSet
 interiorOf c root = do
     unless (nodeRefExists c root) $
         Left $ InvalidBindingTree $ "interiorOf: root " ++ show root ++ " not in constraint"
@@ -139,7 +139,7 @@ interiorOf c root = do
 -- The returned set contains canonical node ids.
 interiorOfUnder
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> NodeRef
     -> Either BindingError IntSet
 interiorOfUnder canonical c0 root0 =

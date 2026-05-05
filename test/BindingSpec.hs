@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module BindingSpec (spec) where
 
@@ -13,6 +14,7 @@ import Test.QuickCheck
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Binding.Tree
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import qualified MLF.Binding.GraphOps as GraphOps
@@ -30,7 +32,7 @@ import SpecUtil
     , mkForalls
     )
 
-generateConstraintsDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
+generateConstraintsDefault :: SurfaceExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraintsDefault expr =
     case normalizeExpr expr of
         Left err -> error ("normalizeExpr failed in test: " ++ show err)
@@ -40,7 +42,7 @@ generateConstraintsDefault expr =
 -- The tree is structured as a chain of TyForall nodes: node 0 -> node 1 -> ... -> node (n-1)
 -- where each node's body is the next node, and the last node is a TyVar.
 -- Binding edges follow the term-DAG structure: each child is bound to its structural parent.
-genValidBindingTree :: Int -> Gen Constraint
+genValidBindingTree :: Int -> Gen (Constraint 'Raw)
 genValidBindingTree n
     | n <= 0 = return (rootedConstraint emptyConstraint)
     | n == 1 = return $ rootedConstraint emptyConstraint
@@ -70,7 +72,7 @@ genValidBindingTree n
 -- Uses TyForall nodes to create a tree structure where each node can have
 -- at most one structural child, and binding edges can point to any ancestor.
 -- This ensures the "parent is upper than child" invariant is satisfied.
-genTreeBindingTree :: Int -> Gen Constraint
+genTreeBindingTree :: Int -> Gen (Constraint 'Raw)
 genTreeBindingTree n
     | n <= 0 = return (rootedConstraint emptyConstraint)
     | n == 1 = return $ rootedConstraint emptyConstraint
@@ -96,7 +98,7 @@ genTreeBindingTree n
             , cBindParents = bindParents
             }
 
-newtype SmallBindingConstraint = SmallBindingConstraint { getSmallBindingConstraint :: Constraint }
+newtype SmallBindingConstraint = SmallBindingConstraint { getSmallBindingConstraint :: Constraint 'Raw }
     deriving (Eq, Show)
 
 instance Arbitrary SmallBindingConstraint where
@@ -160,7 +162,7 @@ genOrderKeyDag n
                 body <- pickChild
                 pure $ TyForall { tnId = nid, tnBody = body }
 
-mkOrderedBinderConstraint :: Int -> (Constraint, NodeId, NodeId)
+mkOrderedBinderConstraint :: Int -> (Constraint 'Raw, NodeId, NodeId)
 mkOrderedBinderConstraint n =
     let count = max 1 n
         varIds = [1..count]
@@ -322,7 +324,7 @@ bindingTreeSpec = describe "MLF.Binding.Tree" $ do
                                 ]
                         }
             forallSpecFromForall id c (NodeId 0)
-                `shouldBe` Right (ForallSpec 2 [Nothing, Just (BoundBinder 0)])
+                `shouldBe` Right (ForallSpec [Nothing, Just (BoundBinder 0)])
 
     describe "Order keys (<P)" $ do
         it "prefers leftmost paths when branches diverge" $ do
@@ -1212,7 +1214,7 @@ isJust (Just _) = True
 isJust Nothing = False
 
 -- | Generate a constraint for testing harmonization.
-genConstraintWithBinderChain :: Int -> Gen Constraint
+genConstraintWithBinderChain :: Int -> Gen (Constraint 'Raw)
 genConstraintWithBinderChain n
     | n <= 0 = return (rootedConstraint emptyConstraint)
     | n == 1 =
@@ -1317,7 +1319,7 @@ bindingAdjustmentSpec = describe "MLF.Binding.Adjustment" $ do
                                 -- Replay the trace by applying Raise steps to the original constraint
                                 let replayRaises constraint [] = Right constraint
                                     replayRaises constraint (nid:rest) =
-                                        case GraphOps.applyRaiseStep (typeRef nid) constraint of
+                                        case GraphOps.applyRaiseStep (TypeRefTag nid) constraint of
                                             Right (c'', Just _) -> replayRaises c'' rest
                                             Right (_c'', Nothing) -> Left (RaiseNotPossible (typeRef nid))
                                             Left err -> Left err

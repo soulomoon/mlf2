@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Presolution.Util
     ( -- * Node lookup helpers
       nodeAt
@@ -26,6 +27,7 @@ import qualified Data.IntSet as IntSet
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Presolution.Witness (OmegaNormalizeEnv(..))
 import qualified MLF.Util.Order as Order
 import SpecUtil
@@ -70,7 +72,7 @@ expectForallBody nodes nid = case lookupNodeMaybe nodes nid of
         let msg = "Expected TyForall at " ++ show nid ++ ", found " ++ show other
         expectationFailure msg >> fail msg
 
-mkNormalizeConstraint :: Constraint
+mkNormalizeConstraint :: Constraint 'Raw
 mkNormalizeConstraint =
     let root = NodeId 0
         arrow = NodeId 1
@@ -92,7 +94,7 @@ mkNormalizeConstraint =
                 ]
         }
 
-mkNormalizeEnv :: Constraint -> NodeId -> IntSet.IntSet -> OmegaNormalizeEnv
+mkNormalizeEnv :: Constraint 'Raw -> NodeId -> IntSet.IntSet -> OmegaNormalizeEnv 'Raw
 mkNormalizeEnv c root interior =
     OmegaNormalizeEnv
         { oneRoot = root
@@ -109,7 +111,7 @@ mkNormalizeEnv c root interior =
         , isAnnotationEdge = False
         }
 
-orderedPairByPrec :: Constraint -> NodeId -> (NodeId, NodeId)
+orderedPairByPrec :: Constraint 'Raw -> NodeId -> (NodeId, NodeId)
 orderedPairByPrec c root =
     let n1 = NodeId 2
         n2 = NodeId 3
@@ -133,8 +135,8 @@ genNormalizeEnvParams = do
     interiorSize <- choose (0, 20)
     pure $ NormalizeEnvParams root interiorSize
 
--- | Construct an OmegaNormalizeEnv from parameters.
-mkTestNormalizeEnv :: NormalizeEnvParams -> OmegaNormalizeEnv
+-- | Construct an OmegaNormalizeEnv 'Raw from parameters.
+mkTestNormalizeEnv :: NormalizeEnvParams -> OmegaNormalizeEnv 'Raw
 mkTestNormalizeEnv params =
     let interiorNodes = IntSet.fromList [0 .. nepInteriorSize params]
      in OmegaNormalizeEnv

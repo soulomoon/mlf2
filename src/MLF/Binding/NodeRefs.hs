@@ -9,12 +9,12 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 
-allNodeRefs :: Constraint -> [NodeRef]
+allNodeRefs :: Constraint p -> [NodeRef]
 allNodeRefs c =
     map (TypeRef . fst) (toListNode (cNodes c))
         ++ map (GenRef . GenNodeId) (IntMap.keys (getGenNodeMap (cGenNodes c)))
 
-nodeRefExists :: Constraint -> NodeRef -> Bool
+nodeRefExists :: Constraint p -> NodeRef -> Bool
 nodeRefExists c ref = case ref of
     TypeRef nid ->
         case lookupNodeIn (cNodes c) nid of

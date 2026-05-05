@@ -86,7 +86,7 @@ mkInitialStateWithPolySyms polySyms =
       bsAnnSourceTypes = IntMap.empty
     }
 
-buildConstraint :: BuildState -> Constraint
+buildConstraint :: BuildState -> Constraint p
 buildConstraint st =
   Constraint
     { cNodes = NodeMap (bsNodes st),

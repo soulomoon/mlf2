@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {- |
 Module      : MLF.Constraint.Normalize
 Description : Phase 2 - Local constraint transformations
@@ -45,7 +46,9 @@ import MLF.Constraint.Types.Graph
     , InstEdge (..)
     , UnifyEdge (..)
     , maxNodeIdKeyOr0
+    , toNormalizedConstraint
     )
+import MLF.Constraint.Types.Phase (Phase(Raw, Normalized))
 import MLF.Constraint.Types.SynthesizedExpVar (initSynthExpVarSupply)
 
 {- Note [Normalization / Local Transformations]
@@ -85,11 +88,10 @@ See also:
 -}
 
 -- | Apply all normalization rules until a fixed point is reached.
-normalize :: Constraint -> Constraint
-normalize c = nsConstraint finalState
+normalize :: Constraint 'Raw -> Constraint 'Normalized
+normalize c = toNormalizedConstraint (nsConstraint finalState)
   where
-    initialState = NormalizeState
-        { nsNextNodeId = maxNodeIdKeyOr0 c + 1
+    initialState = NormalizeState { nsNextNodeId = maxNodeIdKeyOr0 c + 1
         , nsSynthExpVarSupply = initSynthExpVarSupply c
         , nsUnionFind = IntMap.empty
         , nsConstraint = c
@@ -97,7 +99,7 @@ normalize c = nsConstraint finalState
     finalState = execState (normalizeLoop >> enforcePaperShapedInstEdges) initialState
 
 -- | Main normalization loop: apply transformations until fixed point.
-normalizeLoop :: NormalizeM ()
+normalizeLoop :: NormalizeM p ()
 normalizeLoop = do
     before <- gets nsConstraint
     modify' $ \s -> s { nsConstraint = dropReflexiveInstEdges (nsConstraint s) }
@@ -109,13 +111,13 @@ normalizeLoop = do
     when (before /= after) normalizeLoop
 
 -- | Remove instantiation edges where left == right (T ≤ T).
-dropReflexiveInstEdges :: Constraint -> Constraint
+dropReflexiveInstEdges :: Constraint p -> Constraint p
 dropReflexiveInstEdges c = c { cInstEdges = filter (not . isReflexive) (cInstEdges c) }
   where
     isReflexive edge = instLeft edge == instRight edge
 
 -- | Remove unification edges where left == right (T = T).
-dropReflexiveUnifyEdges :: Constraint -> Constraint
+dropReflexiveUnifyEdges :: Constraint p -> Constraint p
 dropReflexiveUnifyEdges c = c { cUnifyEdges = filter (not . isReflexive) (cUnifyEdges c) }
   where
     isReflexive edge = uniLeft edge == uniRight edge

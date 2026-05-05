@@ -29,7 +29,7 @@ import MLF.Elab.Run.Generalize.Types
     , Phase3Result(..)
     )
 
-computeBindParentsBase :: GeneralizeEnv -> Phase1Result -> Phase2Result -> Phase3Result
+computeBindParentsBase :: GeneralizeEnv p -> Phase1Result -> Phase2Result -> Phase3Result
 computeBindParentsBase env phase1 phase2 =
     let solvedConstraint = geSolvedConstraint env
         nodesSolved = p1NodesSolved phase1

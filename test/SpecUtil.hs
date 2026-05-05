@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module SpecUtil
   ( emptyConstraint,
     nodeMapFromList,
@@ -56,10 +57,12 @@ import MLF.Constraint.Types.Graph
     insertGen,
     nodeRefKey,
     structuralChildren,
+    toRawConstraintForLegacy,
     toListNode,
     typeRef,
   )
 import MLF.Constraint.Types.Graph qualified as Graph
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot (..))
 import MLF.Elab.Pipeline (defaultTraceConfig)
 import MLF.Frontend.ConstraintGen (AnnExpr (..), ConstraintResult (..), generateConstraints)
@@ -68,7 +71,7 @@ import MLF.Frontend.Syntax (NormSurfaceExpr, SrcTy (..), SrcType, SurfaceExpr, V
 import SolvedFacadeTestUtil qualified as SolvedTest
 import Test.Hspec (Expectation, expectationFailure)
 
-emptyConstraint :: Constraint
+emptyConstraint :: Constraint 'Raw
 emptyConstraint =
   Constraint
     { cNodes = fromListNode [],
@@ -120,7 +123,7 @@ mkForalls binds body =
     binds
 
 -- | Attach a root gen node and bind term-DAG roots under it (test helper).
-rootedConstraint :: Constraint -> Constraint
+rootedConstraint :: Constraint 'Raw -> Constraint 'Raw
 rootedConstraint c0 =
   let rootId = GenNodeId 0
       roots =
@@ -166,27 +169,27 @@ firstShowE :: (Show e) => Either e a -> Either String a
 firstShowE = either (Left . show) Right
 
 data PipelineArtifacts = PipelineArtifacts
-  { paConstraintNorm :: Constraint,
+  { paConstraintNorm :: Constraint 'Raw,
     paPresolution :: PresolutionResult,
     paSolved :: Solved.Solved,
     paAnnotated :: AnnExpr,
     paRoot :: NodeId
   }
 
-runConstraintDefault :: PolySyms -> SurfaceExpr -> Either String ConstraintResult
+runConstraintDefault :: PolySyms -> SurfaceExpr -> Either String (ConstraintResult 'Raw)
 runConstraintDefault poly expr =
   firstShowE (generateConstraints poly (unsafeNormalizeExpr expr))
 
 runToPresolutionDetailedDefault ::
   PolySyms ->
   SurfaceExpr ->
-  Either String (ConstraintResult, Constraint, PresolutionResult)
+  Either String (ConstraintResult 'Raw, Constraint 'Raw, PresolutionResult)
 runToPresolutionDetailedDefault poly expr = do
   result@ConstraintResult {crConstraint = c0} <- runConstraintDefault poly expr
   let c1 = normalize c0
-  acyc <- firstShowE (checkAcyclicity c1)
-  pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
-  pure (result, c1, pres)
+  (cAcyclic, acyc) <- firstShowE (checkAcyclicity c1)
+  pres <- firstShowE (computePresolution defaultTraceConfig acyc cAcyclic)
+  pure (result, toRawConstraintForLegacy cAcyclic, pres)
 
 runToPresolutionDefault :: PolySyms -> SurfaceExpr -> Either String PresolutionResult
 runToPresolutionDefault poly expr = do

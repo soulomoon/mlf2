@@ -16,8 +16,8 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..))
 
-data TargetPlanInput = TargetPlanInput
-    { tpiConstraint :: Constraint
+data TargetPlanInput p = TargetPlanInput
+    { tpiConstraint :: Constraint p
     , tpiNodes :: IntMap.IntMap TyNode
     , tpiCanonical :: NodeId -> NodeId
     , tpiCanonKey :: NodeId -> Int
@@ -33,7 +33,7 @@ data TargetPlanInput = TargetPlanInput
     , tpiContainsForallForTarget :: NodeId -> Bool
     , tpiFirstGenAncestor :: NodeRef -> Maybe GenNodeId
     , tpiReachableFromWithBounds :: NodeId -> IntSet.IntSet
-    , tpiBindParentsGa :: Maybe GaBindParentsInfo
+    , tpiBindParentsGa :: Maybe (GaBindParentsInfo p)
     }
 
 data TargetPlan = TargetPlan
@@ -54,7 +54,7 @@ data TargetPlan = TargetPlan
     , tpTargetIsTyVar :: Bool
     }
 
-buildTargetPlan :: TargetPlanInput -> TargetPlan
+buildTargetPlan :: TargetPlanInput p -> TargetPlan
 buildTargetPlan TargetPlanInput{..} =
     let constraint = tpiConstraint
         nodes = tpiNodes

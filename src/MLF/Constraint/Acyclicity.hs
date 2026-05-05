@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 -- |
 -- Module      : MLF.Constraint.Acyclicity
 -- Description : Phase 3 - Acyclicity check and dependency graph construction
@@ -40,7 +41,7 @@ import qualified Data.IntSet as IntSet
 import Data.Maybe (mapMaybe)
 import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Phase (Phase(Acyclic, Normalized))
 import MLF.Constraint.Types.Presolution
 
 {- Note [Phase 3: Acyclicity Check]
@@ -99,8 +100,8 @@ data CycleError = CycleError
   deriving (Eq, Show)
 
 -- | Check acyclicity of instantiation dependencies.
--- Returns either a cycle error or the topologically sorted edges.
-checkAcyclicity :: Constraint -> Either CycleError AcyclicityResult
+-- Returns either a cycle error or the acyclic constraint plus topologically sorted edges.
+checkAcyclicity :: Constraint 'Normalized -> Either CycleError (Constraint 'Acyclic, AcyclicityResult)
 checkAcyclicity c =
   let depGraph = buildDependencyGraph c
    in case topologicalSort depGraph of
@@ -112,16 +113,16 @@ checkAcyclicity c =
                   "Cyclic instantiation dependency detected: "
                     ++ show (map getEdgeId cycleIds)
               }
-        Right sortedIds -> Right (mkAcyclicityResult c depGraph sortedIds)
+        Right sortedIds -> Right (toAcyclicConstraint c, mkAcyclicityResult c depGraph sortedIds)
 
 -- | Break dependency cycles one-by-one by introducing `TyMu` nodes until the
 -- instantiation graph becomes acyclic.
-breakCyclesAndCheckAcyclicity :: Constraint -> Either CycleError (Constraint, AcyclicityResult)
+breakCyclesAndCheckAcyclicity :: Constraint 'Normalized -> Either CycleError (Constraint 'Acyclic, AcyclicityResult)
 breakCyclesAndCheckAcyclicity = go
   where
     go c =
       case checkAcyclicity c of
-        Right result -> Right (c, result)
+        Right result -> Right result
         Left cycleErr -> do
           c' <- breakSingleCycle c (ceEdgesInCycle cycleErr)
           if c' == c
@@ -134,7 +135,7 @@ breakCyclesAndCheckAcyclicity = go
                   }
             else go c'
 
-mkAcyclicityResult :: Constraint -> DepGraph EdgeId -> [EdgeId] -> AcyclicityResult
+mkAcyclicityResult :: Constraint p -> DepGraph EdgeId -> [EdgeId] -> AcyclicityResult
 mkAcyclicityResult c depGraph sortedIds =
   let edgeMap =
         IntMap.fromList
@@ -157,7 +158,7 @@ data CycleRewriteState = CycleRewriteState
 
 type CycleRewriteM a = State CycleRewriteState a
 
-breakSingleCycle :: Constraint -> [EdgeId] -> Either CycleError Constraint
+breakSingleCycle :: Constraint p -> [EdgeId] -> Either CycleError (Constraint p)
 breakSingleCycle _ [] = Left (invalidCycleError [] "empty cycle reported by dependency graph")
 breakSingleCycle c cycleIds = do
   pivotEdge <-
@@ -211,14 +212,14 @@ invalidCycleError cycleIds msg =
       ceMessage = msg
     }
 
-lookupInstEdge :: Constraint -> EdgeId -> Maybe InstEdge
+lookupInstEdge :: Constraint p -> EdgeId -> Maybe InstEdge
 lookupInstEdge c eid =
   case filter ((== eid) . instEdgeId) (cInstEdges c) of
     edge : _ -> Just edge
     [] -> Nothing
 
 runCycleRewrite ::
-  Constraint ->
+  Constraint p ->
   InstEdge ->
   IntSet ->
   CycleRewriteState ->
@@ -340,7 +341,7 @@ cloneWithSubstitution originalNodes recursiveNodes binderId nid
               pure cloneId
 
 attachClonedBindParentsWithMu ::
-  Constraint ->
+  Constraint p ->
   NodeId ->
   NodeId ->
   NodeId ->
@@ -367,7 +368,7 @@ attachClonedBindParentsWithMu c bodyId binderId muId rhsParent = do
                   setBindParentCR (typeRef cloneId) (translateParent clones parentRef, flag)
 
 attachClonedBindParentsNoMu ::
-  Constraint ->
+  Constraint p ->
   NodeId ->
   Maybe (NodeRef, BindFlag) ->
   CycleRewriteM ()
@@ -396,7 +397,7 @@ translateParent clones parentRef =
         Nothing -> parentRef
     GenRef _ -> parentRef
 
-lookupBindParentInfo :: Constraint -> NodeRef -> Maybe (NodeRef, BindFlag)
+lookupBindParentInfo :: Constraint p -> NodeRef -> Maybe (NodeRef, BindFlag)
 lookupBindParentInfo c ref = IntMap.lookup (nodeRefKey ref) (cBindParents c)
 
 freshNodeIdCR :: CycleRewriteM NodeId
@@ -452,7 +453,7 @@ This ensures topological order processes e₂ before e₁.
 -}
 
 -- | Build the dependency graph between instantiation edges.
-buildDependencyGraph :: Constraint -> DepGraph EdgeId
+buildDependencyGraph :: Constraint p -> DepGraph EdgeId
 buildDependencyGraph c =
   let edges = cInstEdges c
       nodes = cNodes c

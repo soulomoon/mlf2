@@ -219,7 +219,7 @@ unifyStructure n1 n2 = do
             Right edges -> mapM_ (\edge -> unifyStructure (uniLeft edge) (uniRight edge)) edges
             Left _ -> pure ()
 
-isSchemeRootNode :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM Bool
+isSchemeRootNode :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PresolutionM Bool
 isSchemeRootNode canonical c0 nid =
     case Binding.lookupBindParentUnder canonical c0 (typeRef nid) of
         Left _ -> pure False
@@ -229,7 +229,7 @@ isSchemeRootNode canonical c0 nid =
                 Just gen -> pure (nid `elem` map canonical (gnSchemes gen))
         _ -> pure False
 
-getBindingPermission :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM (Bool, Maybe GenNodeId)
+getBindingPermission :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PresolutionM (Bool, Maybe GenNodeId)
 getBindingPermission canonical c0 nid =
     case Binding.lookupBindParentUnder canonical c0 (typeRef nid) of
         Left err -> throwError (BindingTreeError err)
@@ -275,7 +275,7 @@ solveBoundVarInstantiation lhs rhs bnd = do
                 else unifyStructure lhs rhs
         _ -> unifyStructure lhs rhs
 
-checkOccurs :: (NodeId -> NodeId) -> Constraint -> NodeId -> NodeId -> PresolutionM Bool
+checkOccurs :: (NodeId -> NodeId) -> Constraint p -> NodeId -> NodeId -> PresolutionM Bool
 checkOccurs canonical c0 rhsC lhsC =
     case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) rhsC lhsC of
         Left _ -> pure True

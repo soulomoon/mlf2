@@ -495,12 +495,12 @@ Let-bindings `let x = e₁ in e₂` introduce generalization and are the source
 of polymorphism in MLF. The translation differs from lambda in crucial ways.
 
 In this repo, the paper’s binding nodes `g` are represented explicitly using a
-`TyForall` anchor plus binding edges (`Constraint.cBindParents`).
+`TyForall` anchor plus binding edges (`Constraint p.cBindParents`).
 
 Repo translation:
   1. Translate e₁ while recording the nodes allocated for it (a fresh scope frame)
   2. Insert a `TyForall` anchor g whose body is the RHS type node τ
-  3. Rebind all RHS-scope nodes under g via `Constraint.cBindParents`
+  3. Rebind all RHS-scope nodes under g via `Constraint p.cBindParents`
   4. Bind x to g in the environment (no `TyExp` at the definition site)
   5. At each *use site* of x, wrap g in a fresh expansion node `s · g` (`TyExp`)
 

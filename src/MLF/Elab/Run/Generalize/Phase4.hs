@@ -55,7 +55,7 @@ import MLF.Elab.Run.Generalize.Types
 import MLF.Util.Graph (reachableFromStop, reachableFromStopWith)
 import MLF.Util.IntMapUtils (keepOld)
 
-computeSchemeOwnership :: GeneralizeEnv -> Phase1Result -> Phase2Result -> Phase3Result -> Phase4Result
+computeSchemeOwnership :: GeneralizeEnv p -> Phase1Result -> Phase2Result -> Phase3Result -> Phase4Result
 computeSchemeOwnership env phase1 phase2 phase3 =
     let base = geBaseConstraint env
         solvedConstraint = geSolvedConstraint env

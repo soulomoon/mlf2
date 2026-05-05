@@ -62,7 +62,7 @@ data ReifyPlan = ReifyPlan
     rpSubstForReifyAdjusted :: IntMap.IntMap String
   }
 
-planReify :: PresolutionEnv -> GeneralizePlan -> Either ElabError ReifyPlan
+planReify :: PresolutionEnv p -> GeneralizePlan p -> Either ElabError ReifyPlan
 planReify _ plan = do
   let GeneralizePlan
         { gpEnv = env,
@@ -75,8 +75,7 @@ planReify _ plan = do
           gpSchemeRootsPlan = schemeRootsPlan,
           gpReachableFromWithBounds = reachableFromWithBounds
         } = plan
-      GeneralizeEnv
-        { geConstraint = constraint,
+      GeneralizeEnv { geConstraint = constraint,
           geNodes = nodes,
           geCanonical = canonical,
           geIsTyVarKey = isTyVarKey

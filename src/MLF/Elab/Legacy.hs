@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module MLF.Elab.Legacy (
     expansionToInst,
     expInstantiateArgsToInstNoFallback
@@ -9,6 +10,7 @@ import qualified Data.List.NonEmpty as NE
 
 import MLF.Constraint.Types.Graph (NodeId)
 import MLF.Constraint.Types.Witness (Expansion, ExpansionF(..))
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Solved (Solved)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Presolution.View (PresolutionView(..), fromSolved)
@@ -46,7 +48,7 @@ import MLF.Util.RecursionSchemes (cataM)
 --     refines this if explicit N is required.
 --     For now: ExpInstantiate [t] -> ⟨t⟩.
 expInstantiateArgsToInstNoFallback
-    :: PresolutionView
+    :: PresolutionView 'Raw
     -> IntSet.IntSet
     -> [NodeId]
     -> Either ElabError Instantiation
@@ -85,7 +87,7 @@ expansionToInst solved = cataM alg
         ExpForallF _ -> Right InstIntro
         ExpComposeF exps -> Right $ foldr1 InstSeq (NE.toList exps)
 
-instAppsFromTypes :: PresolutionView -> [ElabType] -> Either ElabError Instantiation
+instAppsFromTypes :: PresolutionView p -> [ElabType] -> Either ElabError Instantiation
 instAppsFromTypes presolutionView tys =
     let tys' = map (inlineBoundVarsTypeForBound presolutionView) tys
     in if null tys'

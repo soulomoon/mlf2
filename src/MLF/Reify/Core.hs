@@ -27,23 +27,23 @@ import MLF.Reify.Type (ReifyRoot)
 import MLF.Types.Elab (BoundType, ElabType)
 import MLF.Util.ElabError (ElabError)
 
-reifyType :: PresolutionView -> NodeId -> Either ElabError ElabType
+reifyType :: PresolutionView p -> NodeId -> Either ElabError ElabType
 reifyType = Type.reifyType
 
-reifyTypeWithNames :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyTypeWithNames :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNames = Type.reifyTypeWithNames
 
-reifyTypeWithNamesNoFallback :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamesNoFallback :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamesNoFallback = Type.reifyTypeWithNamesNoFallback
 
-reifyTypeWithNamesNoFallbackOnConstraint :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamesNoFallbackOnConstraint :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamesNoFallbackOnConstraint = Type.reifyTypeWithNamesNoFallbackOnConstraint
 
-reifyTypeWithNamedSet :: PresolutionView -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamedSet :: PresolutionView p -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamedSet = Type.reifyTypeWithNamedSet
 
 reifyTypeWithNamedSetNoFallback
-    :: PresolutionView
+    :: PresolutionView p
     -> IntMap.IntMap String
     -> IntSet.IntSet
     -> NodeId
@@ -61,20 +61,20 @@ reifyWithAs
     -> Either ElabError a
 reifyWithAs = Type.reifyWithAs
 
-reifyBoundWithNames :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyBoundWithNames :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNames = Bound.reifyBoundWithNames
 
-reifyBoundWithNamesOnConstraint :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyBoundWithNamesOnConstraint :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNamesOnConstraint = Bound.reifyBoundWithNamesOnConstraint
 
-reifyBoundWithNamesBound :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
+reifyBoundWithNamesBound :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
 reifyBoundWithNamesBound = Bound.reifyBoundWithNamesBound
 
-reifyBoundWithNamesOnConstraintBound :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
+reifyBoundWithNamesOnConstraintBound :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
 reifyBoundWithNamesOnConstraintBound = Bound.reifyBoundWithNamesOnConstraintBound
 
 freeVars :: Solved -> NodeId -> IntSet.IntSet -> IntSet.IntSet
 freeVars = Bound.freeVars
 
-namedNodes :: PresolutionView -> Either ElabError IntSet.IntSet
+namedNodes :: PresolutionView p -> Either ElabError IntSet.IntSet
 namedNodes = Named.namedNodes

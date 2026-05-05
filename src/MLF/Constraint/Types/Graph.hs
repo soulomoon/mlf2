@@ -1,3 +1,7 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE RankNTypes #-}
 {- |
 Module      : MLF.Constraint.Types.Graph
 Description : Graph identifiers and core constraint graph types
@@ -50,6 +54,13 @@ module MLF.Constraint.Types.Graph (
     fromListGen,
     toListGen,
     NodeRef (..),
+    RefTag (..),
+    NodeRefTag (..),
+    SomeNodeRef (..),
+    fromNodeRefTag,
+    toNodeRefTag,
+    nodeIdFromTypeRef,
+    genNodeIdFromGenRef,
     typeRef,
     genRef,
     nodeRefKey,
@@ -78,13 +89,19 @@ module MLF.Constraint.Types.Graph (
     maxNodeIdKeyOr0,
     -- * Constraint record
     Constraint (..),
+    toNormalizedConstraint,
+    toAcyclicConstraint,
+    toPresolvedConstraint,
+    toSolvedConstraint,
+    toRawConstraintForLegacy,
+    castConstraint,
 ) where
 
 import Data.IntSet (IntSet)
-
 import qualified MLF.Constraint.Types.Graph.Accessors as Accessors
 import MLF.Constraint.Types.Graph.Binding
 import MLF.Constraint.Types.Graph.NodeEdge
+import MLF.Constraint.Types.Phase (Phase(..))
 
 {- Note [Binding tree]
 ~~~~~~~~~~~~~~~~~~~~~~
@@ -107,7 +124,11 @@ bounds on the `TyVar` itself.
 --
 -- Subsequent elaboration phases also read the same graph to reconstruct typed
 -- terms, so this record is the single source of truth for the constraint state.
-data Constraint = Constraint
+--
+-- The phantom type parameter @p :: Phase@ tracks which pipeline stage the
+-- constraint has reached. Phase entrypoints should use the directional
+-- transition helpers below rather than the legacy 'castConstraint'.
+data Constraint (p :: Phase) = Constraint
         { cNodes :: NodeMap TyNode
             -- ^ The hash-consed DAG of graphic type nodes. Every structural operation
             --   (unification, grafting, elaboration) needs fast access to the canonical
@@ -168,5 +189,55 @@ data Constraint = Constraint
 --
 -- This is used to initialize fresh NodeId counters in phases that allocate new
 -- nodes during rewriting (Normalize, Presolution).
-maxNodeIdKeyOr0 :: Constraint -> Int
+maxNodeIdKeyOr0 :: Constraint p -> Int
 maxNodeIdKeyOr0 c = Accessors.maxNodeIdKeyOr0 (cNodes c)
+
+-- | Rebuild the same runtime graph at a different phantom phase.
+--
+-- This is intentionally private to this module; exported transition helpers
+-- name the specific phase boundary they represent.
+rephaseConstraint :: Constraint p -> Constraint q
+rephaseConstraint c =
+    Constraint
+        { cNodes = cNodes c
+        , cInstEdges = cInstEdges c
+        , cUnifyEdges = cUnifyEdges c
+        , cBindParents = cBindParents c
+        , cPolySyms = cPolySyms c
+        , cEliminatedVars = cEliminatedVars c
+        , cWeakenedVars = cWeakenedVars c
+        , cAnnEdges = cAnnEdges c
+        , cLetEdges = cLetEdges c
+        , cGenNodes = cGenNodes c
+        }
+
+-- | Phase 2 boundary: raw generated constraints have been normalized.
+toNormalizedConstraint :: Constraint 'Raw -> Constraint 'Normalized
+toNormalizedConstraint = rephaseConstraint
+
+-- | Phase 3 boundary: normalized constraints have passed acyclicity checking.
+toAcyclicConstraint :: Constraint 'Normalized -> Constraint 'Acyclic
+toAcyclicConstraint = rephaseConstraint
+
+-- | Phase 4 boundary: acyclic constraints have been presolved.
+toPresolvedConstraint :: Constraint 'Acyclic -> Constraint 'Presolved
+toPresolvedConstraint = rephaseConstraint
+
+-- | Phase 5 boundary: presolved constraints have been solved.
+toSolvedConstraint :: Constraint 'Presolved -> Constraint 'Solved
+toSolvedConstraint = rephaseConstraint
+
+-- | Compatibility bridge for legacy readers that still expose raw constraints.
+--
+-- This should stay near solved/elaboration compatibility boundaries. New phase
+-- transitions should use the directional helpers above.
+toRawConstraintForLegacy :: Constraint p -> Constraint 'Raw
+toRawConstraintForLegacy = rephaseConstraint
+
+-- | Cast the phase index of a 'Constraint'.
+--
+-- Compatibility escape hatch only. Prefer the directional transition helpers
+-- above, or a local compatibility bridge that documents why phase erasure is
+-- required.
+castConstraint :: Constraint p -> Constraint q
+castConstraint = rephaseConstraint

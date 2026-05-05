@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Research.C1AuthoritativeSurfaceSpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -60,6 +61,7 @@ import SpecUtil
     , runPipelineArtifactsDefault
     , unsafeNormalizeExpr
     )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 
 spec :: Spec
 spec =
@@ -132,7 +134,7 @@ bodyRoot ann0 = case extractVarBody ann0 of
 rebindRootTo :: ResultTypeInputs -> NodeId -> NodeId -> ResultTypeInputs
 rebindRootTo inputs rootNid newBound = rewriteResultTypeInputs (setVarBound rootNid newBound) inputs
 
-rewriteResultTypeInputs :: (Constraint -> Constraint) -> ResultTypeInputs -> ResultTypeInputs
+rewriteResultTypeInputs :: (Constraint 'Raw -> Constraint 'Raw) -> ResultTypeInputs -> ResultTypeInputs
 rewriteResultTypeInputs rewrite inputs =
     let view0 = rtcPresolutionView inputs
         baseConstraint' = rewrite (pvConstraint view0)
@@ -159,7 +161,7 @@ rewriteResultTypeInputs rewrite inputs =
         , rtcBindParentsGa = ga'
         }
 
-setVarBound :: NodeId -> NodeId -> Constraint -> Constraint
+setVarBound :: NodeId -> NodeId -> Constraint 'Raw -> Constraint 'Raw
 setVarBound nid newBound constraint =
     let tweak node = case node of
             TyVar{ tnId = varId } | varId == nid ->
@@ -173,7 +175,7 @@ setVarBound nid newBound constraint =
                 ]
         }
 
-findBaseNode :: BaseTy -> PresolutionView.PresolutionView -> NodeId
+findBaseNode :: BaseTy -> PresolutionView 'Raw -> NodeId
 findBaseNode expectedBase view0 =
     case
         [ tnId node

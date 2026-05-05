@@ -38,9 +38,8 @@ data NodeMapping = NodeMapping
     , mapSolvedToBase :: IntMap.IntMap NodeId
     }
 
-data GeneralizeEnv = GeneralizeEnv
-    { geBaseConstraint :: Constraint
-    , geSolvedConstraint :: Constraint
+data GeneralizeEnv p = GeneralizeEnv { geBaseConstraint :: Constraint p
+    , geSolvedConstraint :: Constraint p
     , geRedirects :: IntMap.IntMap NodeId
     , geInstCopyNodes :: NodeKeySet
     , geInstCopyMap :: IntMap.IntMap NodeId

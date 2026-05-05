@@ -26,6 +26,7 @@ import MLF.Constraint.Types.Graph
     getNodeId,
     typeRef,
   )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Generalize (GaBindParents (..))
 import MLF.Elab.Inst (schemeToType)
 import qualified MLF.Elab.Inst as Inst
@@ -43,14 +44,14 @@ import MLF.Reify.Core (namedNodes, reifyTypeWithNamedSetNoFallback)
 import MLF.Reify.TypeOps (inlineBaseBoundsType, parseNameId)
 
 type GeneralizeAtWith =
-  Maybe GaBindParents ->
+  Maybe (GaBindParents 'Raw) ->
   NodeRef ->
   NodeId ->
   Either ElabError (ElabScheme, IntMap.IntMap String)
 
 data ScopeContext = ScopeContext
-  { scPresolutionView :: PresolutionView,
-    scGaParents :: GaBindParents,
+  { scPresolutionView :: PresolutionView 'Raw,
+    scGaParents :: GaBindParents 'Raw,
     scScopeOverrides :: IntMap.IntMap NodeRef,
     scGeneralizeAtWith :: GeneralizeAtWith
   }
@@ -140,13 +141,13 @@ reifyTargetNodeType scopeContext namedSetReify schemeInfo nodeId =
       targetNode = canonical nodeId
    in reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify targetNode
 
-reifyTypeForParam :: PresolutionView -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
+reifyTypeForParam :: PresolutionView p -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
 reifyTypeForParam presolutionView namedSet nodeId = do
   ty <- reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet nodeId
   let ty' = inlineBaseBounds presolutionView ty
   pure (inlineBoundVarsType presolutionView ty')
 
-inlineBaseBounds :: PresolutionView -> ElabType -> ElabType
+inlineBaseBounds :: PresolutionView p -> ElabType -> ElabType
 inlineBaseBounds presolutionView =
   inlineBaseBoundsType
     (ChiQuery.chiConstraint presolutionView)

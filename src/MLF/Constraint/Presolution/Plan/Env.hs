@@ -21,7 +21,7 @@ where
   * Trace config for conditional debug output
   * The node-lookup helper 'lookupNodeInMap'
 
-'mkGeneralizeEnv' constructs a 'GeneralizeEnv' for a single generalization
+'mkGeneralizeEnv' constructs a 'GeneralizeEnv p' for a single generalization
 scope by sanitizing the canonical map and projecting scope-local binding
 structure.  'softenBindParents' downgrades rigid bindings to flex when nodes
 are outside the generalization scope, ensuring the planner sees only
@@ -43,12 +43,12 @@ import MLF.Util.Trace (TraceConfig, tcGeneralize)
 lookupNodeInMap :: IntMap.IntMap TyNode -> NodeId -> Maybe TyNode
 lookupNodeInMap nodes nid = IntMap.lookup (getNodeId nid) nodes
 
-data PresolutionEnv = PresolutionEnv
-  { peConstraint :: Constraint,
-    pePresolutionView :: PresolutionView,
+data PresolutionEnv p = PresolutionEnv
+  { peConstraint :: Constraint p,
+    pePresolutionView :: PresolutionView p,
     peCanonical :: NodeId -> NodeId,
     peBindParents :: BindParents,
-    peBindParentsGa :: Maybe GaBindParents,
+    peBindParentsGa :: Maybe (GaBindParents p),
     peScopeRoot :: NodeRef,
     peTargetNode :: NodeId,
     peTraceConfig :: TraceConfig
@@ -56,9 +56,9 @@ data PresolutionEnv = PresolutionEnv
 
 mkGeneralizeEnv ::
   TraceConfig ->
-  Maybe GaBindParents ->
-  PresolutionView ->
-  Either ElabError GeneralizeEnv
+  Maybe (GaBindParents p) ->
+  PresolutionView p ->
+  Either ElabError (GeneralizeEnv p)
 mkGeneralizeEnv traceCfg mbBindParentsGa presolutionView =
   let constraint = pvCanonicalConstraint presolutionView
       canonicalMap = stepSanitizeSnapshotUf constraint (pvCanonicalMap presolutionView)
@@ -84,8 +84,7 @@ mkGeneralizeEnv traceCfg mbBindParentsGa presolutionView =
       isTyForallKey key = maybe False isTyForallNode (lookupNode key)
       isBaseLikeKey key = maybe False isBaseLikeNode (lookupNode key)
    in pure
-        GeneralizeEnv
-          { geConstraint = constraint,
+        GeneralizeEnv { geConstraint = constraint,
             geOriginalConstraint = pvConstraint presolutionView,
             geNodes = nodes,
             geCanonical = canonical,
@@ -99,7 +98,7 @@ mkGeneralizeEnv traceCfg mbBindParentsGa presolutionView =
             geDebugEnabled = tcGeneralize traceCfg
           }
 
-softenBindParents :: (NodeId -> NodeId) -> Constraint -> BindParents -> BindParents
+softenBindParents :: (NodeId -> NodeId) -> Constraint p -> BindParents -> BindParents
 softenBindParents canonical constraint =
   let weakened = cWeakenedVars constraint
       softenOne childKey (parent, flag) =

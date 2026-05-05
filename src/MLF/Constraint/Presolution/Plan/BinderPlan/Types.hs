@@ -19,15 +19,15 @@ import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 import MLF.Util.ElabError (ElabError)
 
-data BinderPlanInput = BinderPlanInput
+data BinderPlanInput p = BinderPlanInput
     { bpiDebugEnabled :: Bool
-    , bpiConstraint :: Constraint
+    , bpiConstraint :: Constraint p
     , bpiNodes :: IntMap.IntMap TyNode
     , bpiCanonical :: NodeId -> NodeId
     , bpiCanonKey :: NodeId -> Int
     , bpiIsTyVarKey :: Int -> Bool
     , bpiBindParents :: BindParents
-    , bpiBindParentsGa :: Maybe GaBindParentsInfo
+    , bpiBindParentsGa :: Maybe (GaBindParentsInfo p)
     , bpiScopeRootC :: NodeRef
     , bpiScopeGen :: Maybe GenNodeId
     , bpiTarget0 :: NodeId
@@ -53,7 +53,7 @@ data BinderPlanInput = BinderPlanInput
     , bpiTypeRootIsForall :: Bool
     , bpiLiftToForall :: NodeId -> NodeId
     , bpiReachableFromWithBounds :: NodeId -> IntSet.IntSet
-    , bpiResForReify :: PresolutionView
+    , bpiResForReify :: PresolutionView p
     , bpiGammaKeyFor :: Int -> Int -> Int
     , bpiNestedSchemeInteriorSet :: IntSet.IntSet
     , bpiBoundIsSchemeRootVar :: NodeId -> Bool

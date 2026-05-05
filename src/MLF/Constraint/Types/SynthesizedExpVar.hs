@@ -23,7 +23,7 @@ newtype SynthExpVarSupply = SynthExpVarSupply Int
 
 -- | Initialize the supply from a constraint, preserving strict separation from
 -- any existing negative IDs.
-initSynthExpVarSupply :: Constraint -> SynthExpVarSupply
+initSynthExpVarSupply :: Constraint p -> SynthExpVarSupply
 initSynthExpVarSupply c =
     let minSeen = foldl' minExpVar 0 (toListNode (cNodes c))
         start = if minSeen < 0 then minSeen - 1 else -1

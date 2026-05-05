@@ -45,11 +45,11 @@ import MLF.Util.Trace (TraceConfig)
 
 buildGeneralizePlans ::
   TraceConfig ->
-  PresolutionView ->
-  Maybe GaBindParents ->
+  PresolutionView p ->
+  Maybe (GaBindParents p) ->
   NodeRef ->
   NodeId ->
-  Either ElabError (GeneralizePlan, ReifyPlan)
+  Either ElabError (GeneralizePlan p, ReifyPlan)
 buildGeneralizePlans traceCfg presolutionView mbBindParentsGa scopeRoot targetNode = do
   let constraint = pvCanonicalConstraint presolutionView
       canonical = pvCanonical presolutionView

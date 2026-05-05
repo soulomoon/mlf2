@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+
 module ConstraintGenSpec (spec) where
 
 import Control.Monad (filterM, forM, forM_, when)
@@ -14,6 +16,7 @@ import MLF.Constraint.Presolution (PresolutionResult(..))
 import MLF.Constraint.Solve (solveUnifyWithSnapshot)
 import MLF.Constraint.Solved (fromSolveOutput, originalConstraint)
 import MLF.Constraint.Types.Graph hiding (lookupNode)
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Frontend.ConstraintGen (AnnExpr (..), generateConstraintsCore)
 import MLF.API hiding (lookupNode)
 import MLF.Pipeline (ConstraintError(..), ConstraintResult(..), defaultTraceConfig, inferConstraintGraph)
@@ -29,7 +32,7 @@ import SpecUtil
     , unsafeNormalizeExpr
     )
 
-inferConstraintGraphDefault :: SurfaceExpr -> Either ConstraintError ConstraintResult
+inferConstraintGraphDefault :: SurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)
 inferConstraintGraphDefault expr =
     inferConstraintGraph Set.empty (unsafeNormalizeExpr expr)
 

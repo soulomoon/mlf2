@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-|
 Phase 5 — Global unification (Rémy–Yakobowski, TLDI 2007; ICFP 2008 §3/§5)
 
@@ -19,7 +20,9 @@ module MLF.Constraint.Solve (
     SolveResult(..),
     runUnifyClosure,
     solveUnify,
+    solveUnifyResult,
     solveUnifyWithSnapshot,
+    solveUnifyResultWithSnapshot,
     solveResultFromSnapshot,
     finalizeConstraintWithUF,
     validateSolvedGraph,
@@ -29,47 +32,40 @@ module MLF.Constraint.Solve (
     frWith
 ) where
 
-import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
 
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve.Finalize (finalizeConstraintWithUF, frWith, repairNonUpperParents, rewriteConstraintWithUF, validateSolvedGraph, validateSolvedGraphStrict)
-import MLF.Constraint.Solve.Internal (SolveResult(..))
+import MLF.Constraint.Solve.Internal (SolveOutput(..), SolveResult(..), SolveSnapshot(..))
 import MLF.Constraint.Solve.Worklist (SolveError(..), UnifyClosureResult(..), runUnifyClosure)
 import MLF.Constraint.Types.Graph (Constraint, NodeId(..), cBindParents, nodeRefKey, typeRef)
+import MLF.Constraint.Types.Phase (Phase(Presolved))
+import qualified MLF.Constraint.Solved.Internal as SolvedInternal
 import MLF.Util.Trace (TraceConfig, traceBinding)
 
--- | Snapshot of solve state right before final canonical rewriting.
-data SolveSnapshot = SolveSnapshot
-    { snapUnionFind :: IntMap NodeId
-    , snapPreRewriteConstraint :: Constraint
-    }
-    deriving (Eq, Show)
-
--- | Full solve output with:
---   * `soSnapshot`: primary data for staged `Solved` construction.
---   * `soResult`: legacy compatibility payload for `SolveResult` call sites.
-data SolveOutput = SolveOutput
-    { soResult :: SolveResult
-    , soSnapshot :: SolveSnapshot
-    }
-    deriving (Eq, Show)
-
 -- | Drain all unification edges; assumes instantiation work was already done
--- by earlier phases. Returns the rewritten constraint and the final UF map.
-solveUnify :: TraceConfig -> Constraint -> Either SolveError SolveResult
-solveUnify traceCfg c0 = soResult <$> solveUnifyWithSnapshot traceCfg c0
+-- by earlier phases. Returns the solved abstraction for post-solve queries.
+solveUnify :: TraceConfig -> Constraint 'Presolved -> Either SolveError SolvedInternal.Solved
+solveUnify traceCfg c0 = solveUnifyWithSnapshot traceCfg c0 >>= SolvedInternal.fromSolveOutput
+
+-- | Legacy result-shaped solve helper for low-level tests and validators.
+solveUnifyResult :: TraceConfig -> Constraint p -> Either SolveError (SolveResult p)
+solveUnifyResult traceCfg c0 = soResult <$> solveUnifyResultWithSnapshot traceCfg c0
 
 -- | Rebuild a validated legacy solve result from a pre-rewrite snapshot.
 -- This keeps snapshot-driven consumers independent of `soResult.srConstraint`.
-solveResultFromSnapshot :: SolveSnapshot -> Either SolveError SolveResult
+solveResultFromSnapshot :: SolveSnapshot p -> Either SolveError (SolveResult p)
 solveResultFromSnapshot SolveSnapshot { snapUnionFind = uf, snapPreRewriteConstraint = preRewrite } =
     finalizeConstraintWithUF uf preRewrite
 
 -- | `solveUnify` plus a pre-rewrite snapshot for staged equivalence-backend construction.
-solveUnifyWithSnapshot :: TraceConfig -> Constraint -> Either SolveError SolveOutput
-solveUnifyWithSnapshot traceCfg c0 = do
+solveUnifyWithSnapshot :: TraceConfig -> Constraint p -> Either SolveError (SolveOutput p)
+solveUnifyWithSnapshot = solveUnifyResultWithSnapshot
+
+-- | Legacy snapshot-enabled helper that preserves the caller's phantom phase.
+solveUnifyResultWithSnapshot :: TraceConfig -> Constraint p -> Either SolveError (SolveOutput p)
+solveUnifyResultWithSnapshot traceCfg c0 = do
     let debugSolveBinding = traceBinding traceCfg
         c0' = repairNonUpperParents c0
         probeIds = [NodeId 2, NodeId 3]

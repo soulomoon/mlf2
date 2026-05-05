@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE PatternSynonyms #-}
 
@@ -33,6 +34,7 @@ import MLF.Constraint.Solved qualified as Solved
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Pipeline
   ( ElabType,
     Pretty (..),
@@ -287,14 +289,14 @@ expectAlignedPipelinePastPhase3 expr =
           typeCheck termChecked `shouldBe` Right tyChecked
           tyUnchecked `shouldBe` tyChecked
 
-automaticMuConstraint :: SurfaceExpr -> IO Constraint
+automaticMuConstraint :: SurfaceExpr -> IO (Constraint 'Raw)
 automaticMuConstraint expr = do
   ConstraintResult {crConstraint = c0} <-
     requireRight (runConstraintDefault Set.empty expr)
   let c1 = ConstraintNormalize.normalize c0
-  fst <$> requireRight (breakCyclesAndCheckAcyclicity c1)
+  toRawConstraintForLegacy . fst <$> requireRight (breakCyclesAndCheckAcyclicity c1)
 
-constraintContainsTyMu :: Constraint -> Bool
+constraintContainsTyMu :: Constraint 'Raw -> Bool
 constraintContainsTyMu constraint =
   any isTyMu (map snd (toListNode (cNodes constraint)))
   where
@@ -694,7 +696,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         src `shouldSatisfy` (not . isInfixOf "fromSolved")
       legacySrc `shouldSatisfy` isInfixOf "fromSolved"
 
-    it "chi-p wrapper retirement guard: primary helper signatures are PresolutionView-native" $ do
+    it "chi-p wrapper retirement guard: primary helper signatures are PresolutionView p-native" $ do
       scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
       typeOpsSrc <- readFile "src/MLF/Elab/Run/TypeOps.hs"
       generalizeSrc <- readFile "src/MLF/Elab/Run/Generalize.hs"
@@ -704,8 +706,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         [ "bindingScopeRefCanonical :: Solved",
           "schemeBodyTarget :: Solved",
           "canonicalizeScopeRef :: Solved",
-          "resolveCanonicalScope :: Constraint -> Solved",
-          "letScopeOverrides :: Constraint -> Constraint -> Solved"
+          "resolveCanonicalScope :: Constraint 'Raw -> Solved",
+          "letScopeOverrides :: Constraint 'Raw -> Constraint 'Raw -> Solved"
         ]
         $ \marker ->
           scopeSrc `shouldSatisfy` (not . isInfixOf marker)
@@ -1252,12 +1254,12 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               . lines
           generalizeSection =
             section
-              "generalizeTargetNode :: PresolutionView -> NodeId -> NodeId"
-              "schemeBodyTarget :: PresolutionView -> NodeId -> NodeId"
+              "generalizeTargetNode :: PresolutionView p -> NodeId -> NodeId"
+              "schemeBodyTarget :: PresolutionView p -> NodeId -> NodeId"
               scopeSrc
           schemeSection =
             section
-              "schemeBodyTarget :: PresolutionView -> NodeId -> NodeId"
+              "schemeBodyTarget :: PresolutionView p -> NodeId -> NodeId"
               "{- Note [ga′ preservation across redirects]"
               scopeSrc
       scopeSrc `shouldSatisfy` isInfixOf "targetUnwrapInfo ::"
@@ -1274,7 +1276,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       forM_ representativeMigrationCorpus $ \expr -> do
         artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
         let pres = paPresolution artifacts
-            view = PresolutionViewBoundary.fromPresolutionResult pres
+            view = PresolutionViewBoundary.toRawPresolutionViewForLegacy (PresolutionViewBoundary.fromPresolutionResult pres)
             legacy = paSolved artifacts
             thesisCoreValidated = Finalize.stepSolvedFromPresolutionView view
         validateStrict thesisCoreValidated
@@ -7016,7 +7018,7 @@ assertCheckedAuthoritative expr =
           typeCheck termChecked `shouldBe` Right tyChecked
           tyUnchecked `shouldBe` tyChecked
 
-assertViewParity :: PresolutionViewBoundary.PresolutionView -> Solved -> Expectation
+assertViewParity :: PresolutionViewBoundary.PresolutionView 'Raw -> Solved -> Expectation
 assertViewParity view legacy = do
   let sharedLiveDomain =
         IntSet.intersection
@@ -7057,7 +7059,7 @@ projectCanonicalMap domain =
         && IntSet.member (nodeIdToKey rep) domain
         && rep /= NodeId key
 
-liveNodeKeySet :: Constraint -> IntSet.IntSet
+liveNodeKeySet :: Constraint 'Raw -> IntSet.IntSet
 liveNodeKeySet constraint =
   IntSet.fromList
     [ nodeIdToKey nid

@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {- |
 Module      : MLF.Constraint.Presolution.Rewrite
@@ -36,6 +37,7 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base (EdgeTrace(..), PresolutionError(..), PresolutionM)
@@ -159,7 +161,7 @@ rewriteGenNodes canonical nodes0 gen0 =
 
 -- | Environment for rebuilding bind parents.
 data RebuildBindParentsEnv = RebuildBindParentsEnv
-    { rbpOriginalConstraint :: !Constraint
+    { rbpOriginalConstraint :: !(Constraint 'Raw)
       -- ^ The original constraint before rewriting
     , rbpNewNodes :: !(IntMap TyNode)
       -- ^ The rewritten nodes (TyExp removed)

@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Presolution.EdgePlannerSpec (spec) where
 
 import Data.List (isInfixOf)
@@ -26,6 +27,7 @@ import MLF.Constraint.Types.Graph
     , typeRef
     )
 import MLF.Constraint.Types.Presolution (Presolution(..))
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import SpecUtil (bindParentsFromPairs, defaultTraceConfig, emptyConstraint, nodeMapFromList, rootedConstraint)
 import Test.Hspec
 

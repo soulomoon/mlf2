@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module RepoGuardSpec (spec) where
 
 import Control.Monad (forM_)

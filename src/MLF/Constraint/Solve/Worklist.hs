@@ -22,23 +22,22 @@ import MLF.Constraint.Unify.Closure (SolveError(..), UnifyClosureResult(..))
 import MLF.Util.Trace (TraceConfig, traceBinding)
 import qualified MLF.Util.UnionFind as UnionFind
 
-data SolveState = SolveState
-    { suConstraint :: Constraint
+data SolveState p = SolveState { suConstraint :: Constraint p
     , suUnionFind :: IntMap NodeId
     , suQueue :: [UnifyEdge]
     }
 
-type SolveM = StateT SolveState (Either SolveError)
+type SolveM p = StateT (SolveState p) (Either SolveError)
 
-runUnifyClosure :: TraceConfig -> Constraint -> Either SolveError UnifyClosureResult
+runUnifyClosure :: TraceConfig -> Constraint p -> Either SolveError (UnifyClosureResult p)
 runUnifyClosure traceCfg =
     runUnifyClosureWithSeed traceCfg IntMap.empty
 
 runUnifyClosureWithSeed
     :: TraceConfig
     -> IntMap NodeId
-    -> Constraint
-    -> Either SolveError UnifyClosureResult
+    -> Constraint p
+    -> Either SolveError (UnifyClosureResult p)
 runUnifyClosureWithSeed traceCfg ufSeed c0 = do
     let debugSolveBinding = traceBinding traceCfg
         probeIds = [NodeId 2, NodeId 3]
@@ -71,12 +70,11 @@ runUnifyClosureWithSeed traceCfg ufSeed c0 = do
                     case debugSolveBinding ("runUnifyClosure: post-check probe " ++ show probeInfo') () of
                         () -> pure ()
                     pure
-                        UnifyClosureResult
-                            { ucConstraint = preRewrite
+                        UnifyClosureResult { ucConstraint = preRewrite
                             , ucUnionFind = suUnionFind final
                             }
 
-loop :: SolveM ()
+loop :: SolveM p ()
 loop = do
     queue <- gets suQueue
     case queue of
@@ -86,11 +84,11 @@ loop = do
             processEdge edge
             loop
 
-enqueue :: [UnifyEdge] -> SolveM ()
+enqueue :: [UnifyEdge] -> SolveM p ()
 enqueue edges =
     modify' $ \st -> st { suQueue = edges ++ suQueue st }
 
-processEdge :: UnifyEdge -> SolveM ()
+processEdge :: UnifyEdge -> SolveM p ()
 processEdge (UnifyEdge l r) = do
     lRoot <- findRoot l
     rRoot <- findRoot r
@@ -126,7 +124,7 @@ boundEdgesFor lRoot lNode rRoot rNode = case (lNode, rNode) of
             _ -> []
     _ -> []
 
-solveUnifyStrategy :: UnifyCore.UnifyStrategy SolveM
+solveUnifyStrategy :: UnifyCore.UnifyStrategy (SolveM p)
 solveUnifyStrategy = UnifyCore.UnifyStrategy
     { UnifyCore.usOccursCheck = UnifyCore.OccursCheck occursCheck
     , UnifyCore.usTyExpPolicy = UnifyCore.TyExpReject
@@ -135,7 +133,7 @@ solveUnifyStrategy = UnifyCore.UnifyStrategy
     , UnifyCore.usOnMismatch = solveOnMismatch
     }
 
-solveForallArity :: NodeId -> SolveM (Maybe Int)
+solveForallArity :: NodeId -> SolveM p (Maybe Int)
 solveForallArity nid = do
     cCur <- gets suConstraint
     uf0 <- gets suUnionFind
@@ -144,7 +142,7 @@ solveForallArity nid = do
         Right binders -> pure (Just (length binders))
         Left err -> throwError (BindingTreeError err)
 
-solveRepresentative :: NodeId -> TyNode -> NodeId -> TyNode -> SolveM (NodeId, NodeId)
+solveRepresentative :: NodeId -> TyNode -> NodeId -> TyNode -> SolveM p (NodeId, NodeId)
 solveRepresentative left leftNode right rightNode = do
     cCur <- gets suConstraint
     let leftElim = VarStore.isEliminatedVar cCur left
@@ -185,7 +183,7 @@ solveRepresentative left leftNode right rightNode = do
             | otherwise = (from0, to0)
     pure (from, to)
 
-solveOnMismatch :: UnifyCore.UnifyMismatch -> SolveM UnifyCore.UnifyMismatchAction
+solveOnMismatch :: UnifyCore.UnifyMismatch -> SolveM p UnifyCore.UnifyMismatchAction
 solveOnMismatch mismatch = case mismatch of
     UnifyCore.MismatchMissingNode nid ->
         throwError (MissingNode nid)
@@ -206,32 +204,32 @@ solveOnMismatch mismatch = case mismatch of
     UnifyCore.MismatchTyConArity c k1 k2 ->
         throwError (TyConArityMismatch c k1 k2)
 
-lookupNode :: NodeId -> SolveM TyNode
+lookupNode :: NodeId -> SolveM p TyNode
 lookupNode nid = do
     nodes <- gets (cNodes . suConstraint)
     case lookupNodeIn nodes nid of
         Just node -> pure node
         Nothing -> throwError (MissingNode nid)
 
-lookupNodeMaybe :: NodeId -> SolveM (Maybe TyNode)
+lookupNodeMaybe :: NodeId -> SolveM p (Maybe TyNode)
 lookupNodeMaybe nid = do
     nodes <- gets (cNodes . suConstraint)
     pure (lookupNodeIn nodes nid)
 
-findRoot :: NodeId -> SolveM NodeId
+findRoot :: NodeId -> SolveM p NodeId
 findRoot nid = do
     uf <- gets suUnionFind
     let (root, uf') = UnionFind.findRootWithCompression uf nid
     modify' $ \st -> st { suUnionFind = uf' }
     pure root
 
-unionNodes :: NodeId -> NodeId -> SolveM ()
+unionNodes :: NodeId -> NodeId -> SolveM p ()
 unionNodes from to =
     when (from /= to) $
         modify' $ \st ->
             st { suUnionFind = IntMap.insert (getNodeId from) to (suUnionFind st) }
 
-occursCheck :: NodeId -> NodeId -> SolveM ()
+occursCheck :: NodeId -> NodeId -> SolveM p ()
 occursCheck var target = do
     varRoot <- findRoot var
     targetRoot <- findRoot target

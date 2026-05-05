@@ -89,9 +89,9 @@ import MLF.Util.Graph (reachableFrom, reachableFromStop)
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 import MLF.Util.Names (parseNameId)
 
-data GeneralizePlan = GeneralizePlan
-  { gpEnv :: GeneralizeEnv,
-    gpContext :: GeneralizeCtx,
+data GeneralizePlan p = GeneralizePlan
+  { gpEnv :: GeneralizeEnv p,
+    gpContext :: GeneralizeCtx p,
     gpSchemeRootsPlan :: SchemeRootsPlan,
     gpTargetPlan :: TargetPlan,
     gpGammaPlan :: GammaPlan,
@@ -105,7 +105,7 @@ data GeneralizePlan = GeneralizePlan
     gpBindParents :: BindParents
   }
 
-planGeneralizeAt :: PresolutionEnv -> Either ElabError GeneralizePlan
+planGeneralizeAt :: PresolutionEnv p -> Either ElabError (GeneralizePlan p)
 planGeneralizeAt
   PresolutionEnv
     { pePresolutionView = presolutionView,
@@ -311,8 +311,7 @@ planGeneralizeAt
         nodesMap = NodeMap nodes
     (aliasBinderBases, aliasBinderNodes) <-
       computeAliasBinders
-        AliasEnv
-          { aeCanonical = canonical,
+        AliasEnv { aeCanonical = canonical,
             aeConstraint = constraint,
             aeNodes = nodesMap,
             aeBindParents = bindParents,
@@ -327,8 +326,7 @@ planGeneralizeAt
           bindableChildrenUnder canonical bindParents isBindable
         hasExplicitBound' = hasExplicitBoundFor canonical nodesMap constraint
         bseEnv =
-          BinderSelectionEnv
-            { bseCanonical = canonical,
+          BinderSelectionEnv { bseCanonical = canonical,
               bseBindParents = bindParents,
               bseNodes = nodesMap,
               bseConstraint = constraint,

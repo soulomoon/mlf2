@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Presolution.ExpansionSpec (spec) where
 
 import Test.Hspec
@@ -16,8 +17,8 @@ import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Presolution
     ( PresolutionError(..)
     , PresolutionResult(..)
-    , computePresolution
     )
+import MLF.Constraint.Presolution qualified as PresolutionPhase
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
     , applyExpansion
@@ -26,6 +27,8 @@ import MLF.Constraint.Presolution.TestSupport
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 import MLF.Constraint.Solve (SolveResult(..), validateSolvedGraphStrict)
+import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Elab.Pipeline (TraceConfig)
 import qualified MLF.Binding.Tree as Binding
 import SpecUtil
     ( defaultTraceConfig
@@ -38,6 +41,13 @@ import SpecUtil
     , rootedConstraint
     )
 import Presolution.Util (expectForallBody, nodeAt)
+
+computePresolution :: TraceConfig -> AcyclicityResult -> Constraint 'Raw -> Either PresolutionError PresolutionResult
+computePresolution traceCfg acyclicity constraint =
+    PresolutionPhase.computePresolution
+        traceCfg
+        acyclicity
+        (toAcyclicConstraint (toNormalizedConstraint constraint))
 
 spec :: Spec
 spec = do
@@ -213,7 +223,7 @@ spec = do
                     case IntMap.lookup 0 exps of
                         Just (ExpCompose (ExpInstantiate args NE.:| rest)) -> do
                             length args `shouldBe` 1
-                            rest `shouldBe` [ExpForall (ForallSpec 2 [Nothing, Nothing] NE.:| [])]
+                            rest `shouldBe` [ExpForall (ForallSpec [Nothing, Nothing] NE.:| [])]
                         Just other -> expectationFailure $ "Expected composed instantiate+forall, got " ++ show other
                         Nothing -> expectationFailure "No expansion found for Edge 0"
 
@@ -338,7 +348,7 @@ spec = do
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps } ->
                     case IntMap.lookup 0 exps of
-                        Just (ExpForall (s NE.:| [])) -> s `shouldBe` ForallSpec 0 []
+                        Just (ExpForall (s NE.:| [])) -> s `shouldBe` ForallSpec []
                         Just other -> expectationFailure $ "Expected ExpForall, got " ++ show other
                         Nothing -> expectationFailure "No expansion found for Edge 0"
 
@@ -475,7 +485,7 @@ spec = do
 
                 -- Construct an expansion: ExpCompose [ExpForall [1], ExpIdentity]
                 -- This will trigger the ExpCompose branch in applyExpansionOverNode
-                expansion = ExpCompose (ExpForall (ForallSpec 0 [] NE.:| []) NE.:| [ExpIdentity])
+                expansion = ExpCompose (ExpForall (ForallSpec [] NE.:| []) NE.:| [ExpIdentity])
 
             case runPresolutionM defaultTraceConfig st0 (applyExpansion (GenNodeId 0) expansion (nodeAt nodes 0)) of
                 Right (resId, _) -> do
@@ -515,8 +525,7 @@ spec = do
                         IntMap.empty
                 forallSpec =
                     ForallSpec
-                        { fsBinderCount = 2
-                        , fsBounds =
+                        { fsBounds =
                             [ Just (BoundBinder 1)
                             , Just (BoundNode bndId)
                             ]
@@ -660,10 +669,10 @@ spec = do
             let expansionMatrix =
                     [ ExpIdentity
                     , ExpInstantiate [NodeId 0]
-                    , ExpForall (ForallSpec 1 [Nothing] NE.:| [])
+                    , ExpForall (ForallSpec [Nothing] NE.:| [])
                     , ExpCompose
                         ( ExpInstantiate [NodeId 1]
-                            NE.:| [ExpForall (ForallSpec 1 [Nothing] NE.:| [])]
+                            NE.:| [ExpForall (ForallSpec [Nothing] NE.:| [])]
                         )
                     ]
                 tag expansion = case expansion of

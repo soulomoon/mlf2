@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Constraint.SolvedSpec (spec) where
 
 import Control.Monad (forM_)
@@ -55,6 +56,7 @@ import SpecUtil
     , runToPresolutionDefault
     , rootedConstraint
     )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 
 -- | Build a small solved graph by hand:
 --
@@ -286,7 +288,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                     helperSrc `shouldSatisfy` isInfixOf marker
 
     describe "Presolution view parity guards" $ do
-        it "PresolutionView mirrors solved canonical/node/bound queries" $ do
+        it "PresolutionView 'Raw mirrors solved canonical/node/bound queries" $ do
             let fixtures =
                     [ ("id", ELam "x" (EVar "x"))
                     , ("let-poly-use", ELet "id" (ELam "x" (EVar "x")) (EApp (EVar "id") (ELit (LInt 1))))
@@ -580,8 +582,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                     { cNodes = nodeMapFromList [(99, TyBase (NodeId 99) (BaseTy "Poison"))] }
                 out =
                     SolveOutput
-                        { soResult = SolveResult
-                            { srConstraint = poisonedConstraint
+                        { soResult = SolveResult { srConstraint = poisonedConstraint
                             , srUnionFind = poisonedUf
                             }
                         , soSnapshot =

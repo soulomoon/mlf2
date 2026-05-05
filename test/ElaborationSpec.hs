@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 
 module ElaborationSpec (spec) where
@@ -62,6 +63,7 @@ import MLF.Constraint.Types.Graph
     typeRef,
   )
 import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Elab.Run.ResultType
   ( ResultTypeInputs (..),
@@ -125,7 +127,7 @@ boundFromType ty = case ty of
   Elab.TMu v body -> Elab.TMu v body
 
 generalizeAtWith ::
-  Maybe GaBindParents ->
+  Maybe (GaBindParents 'Raw) ->
   Solved.Solved ->
   NodeRef ->
   NodeId ->
@@ -145,7 +147,7 @@ generalizeAt = generalizeAtWith Nothing
 
 generalizeAtWithActive ::
   Solved.Solved ->
-  Maybe GaBindParents ->
+  Maybe (GaBindParents 'Raw) ->
   NodeRef ->
   NodeId ->
   Either Elab.ElabError (Elab.ElabScheme, IntMap.IntMap String)
@@ -191,10 +193,10 @@ dropLeadingTyAbs term = case term of
   Elab.ETyAbs _ _ body -> dropLeadingTyAbs body
   _ -> term
 
-mkSolved :: Constraint -> IntMap.IntMap NodeId -> Solved.Solved
+mkSolved :: Constraint 'Raw -> IntMap.IntMap NodeId -> Solved.Solved
 mkSolved = SolvedTest.mkTestSolved
 
-presolutionViewFromSolved :: Solved.Solved -> PresolutionView
+presolutionViewFromSolved :: Solved.Solved -> PresolutionView 'Raw
 presolutionViewFromSolved solved =
   let constraint = Solved.originalConstraint solved
       canonical = Solved.canonical solved
@@ -640,7 +642,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       (_term, viaPipeline) <- requirePipeline expr
       viaFallback `shouldAlphaEqType` viaPipeline
 
-    it "result-type reconstruction fails on malformed PresolutionView materialization" $ do
+    it "result-type reconstruction fails on malformed PresolutionView 'Raw materialization" $ do
       let expr = ELit (LInt 1)
       artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
       let (inputs, annCanon, annPre) = resultTypeInputsForArtifacts artifacts
@@ -662,7 +664,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           msgs `shouldSatisfy` any ("Residual unification edge" `isInfixOf`)
         other ->
           expectationFailure
-            ("Expected ValidationFailed from malformed PresolutionView, got " ++ show other)
+            ("Expected ValidationFailed from malformed PresolutionView 'Raw, got " ++ show other)
 
     it "annotation result-type path is driven by runtime witness payload" $ do
       let expr =
@@ -1135,7 +1137,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
 
         bindingPathToRootUnder ::
           (NodeId -> NodeId) ->
-          Constraint ->
+          Constraint 'Raw ->
           NodeRef ->
           Either BindingError [NodeRef]
         bindingPathToRootUnder canonical constraint start0 =
@@ -7130,8 +7132,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           solved = mkSolved solvedConstraint IntMap.empty
           nodes = IntMap.singleton (getNodeId solvedN) (TyBase solvedN (BaseTy "Int"))
           env =
-            GeneralizeEnv
-              { geConstraint = solvedConstraint,
+            GeneralizeEnv { geConstraint = solvedConstraint,
                 geOriginalConstraint = solvedConstraint,
                 geNodes = nodes,
                 geCanonical = id,

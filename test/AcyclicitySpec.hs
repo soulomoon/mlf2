@@ -1,15 +1,26 @@
+{-# LANGUAGE DataKinds #-}
 module AcyclicitySpec (spec) where
 
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
 import MLF.API (Expr (..), Lit (..), SrcTy (..))
-import MLF.Constraint.Acyclicity
+import MLF.Constraint.Acyclicity hiding (breakCyclesAndCheckAcyclicity, checkAcyclicity)
+import MLF.Constraint.Acyclicity qualified as Acyclicity
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Pipeline (ConstraintResult (..), inferConstraintGraph)
 import SpecUtil (emptyConstraint, nodeMapElems, nodeMapFromList, nodeMapSingleton)
 import Test.Hspec
+
+checkAcyclicity :: Constraint 'Raw -> Either CycleError AcyclicityResult
+checkAcyclicity = fmap snd . Acyclicity.checkAcyclicity . toNormalizedConstraint
+
+breakCyclesAndCheckAcyclicity :: Constraint 'Raw -> Either CycleError (Constraint 'Raw, AcyclicityResult)
+breakCyclesAndCheckAcyclicity =
+  fmap (\(constraint, result) -> (toRawConstraintForLegacy constraint, result))
+    . Acyclicity.breakCyclesAndCheckAcyclicity
+    . toNormalizedConstraint
 
 spec :: Spec
 spec = do

@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 module MLF.Elab.Run.ResultType.View (
     ResultTypeView,
@@ -18,6 +19,7 @@ import MLF.Constraint.Types.Graph
     , TyNode(..)
     , getNodeId
     )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import MLF.Util.ElabError (ElabError(..))
@@ -31,8 +33,7 @@ buildResultTypeView :: ResultTypeInputs -> Either ElabError ResultTypeView
 buildResultTypeView inputs = do
     let presolutionView = rtcPresolutionView inputs
     case Solve.validateSolvedGraphStrict
-        SolveResult
-            { srConstraint = ChiQuery.chiCanonicalConstraint presolutionView
+        SolveResult { srConstraint = ChiQuery.chiCanonicalConstraint presolutionView
             , srUnionFind = ChiQuery.chiCanonicalMap presolutionView
             } of
         [] -> pure ()
@@ -67,10 +68,10 @@ rtvLookupVarBound view nid =
         Just bnd -> Just bnd
         Nothing -> ChiQuery.chiLookupVarBound (rtvPresolutionView view) nid
 
-rtvPresolutionView :: ResultTypeView -> PresolutionView
+rtvPresolutionView :: ResultTypeView -> PresolutionView 'Raw
 rtvPresolutionView = rtcPresolutionView . rtvInputs0
 
-rtvPresolutionViewOverlay :: ResultTypeView -> PresolutionView
+rtvPresolutionViewOverlay :: ResultTypeView -> PresolutionView 'Raw
 rtvPresolutionViewOverlay view =
     (rtvPresolutionView view)
         { pvLookupNode = rtvLookupNode view

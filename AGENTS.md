@@ -30,6 +30,14 @@
 - Commit messages should be imperative and descriptive. Update `CHANGELOG.md` only when the change records meaningful project progress rather than pure wording cleanup.
 - When using `spawn_agent`, use the builtin subagent with `model: "gpt-5.4"` and `reasoning_effort: "xhigh"` unless the user explicitly requests something else.
 
+## Type-level Conventions
+
+- `Constraint (p :: Phase)` is phase-indexed. Main phase entrypoints advance phases explicitly (`Raw -> Normalized -> Acyclic -> Presolved`) and solve returns the `Solved` abstraction. Keep `castConstraint` quarantined as a legacy escape hatch; prefer directional transition helpers or named legacy raw-view bridges.
+- `NodeRef (t :: RefTag)` is a GADT; use `TypeRef`/`GenRef` constructors, not pattern-match discriminators.
+- `ForallSpec` derives binder count from `length fsBounds`; do not add a separate count field.
+- `EdgeWitness` and `InstanceWitness` should be constructed via `mkEdgeWitness` / `mkInstanceWitness` smart constructors.
+- `singletons-th` is the only type-level library dependency. Singletons boilerplate lives in dedicated `*.Singletons` modules.
+
 ## Guidance Ownership Map
 
 - `docs/architecture.md`: repo layout, public/internal boundaries, module ownership, and key shared abstractions.

@@ -103,7 +103,7 @@ mkOkRef nodes gens ref =
         TypeRef nid -> IntMap.member (getNodeId nid) nodes
         GenRef gid -> IntMap.member (genNodeKey gid) gens
 
-mkIsUpperRef :: Constraint -> (NodeRef -> NodeRef -> Bool)
+mkIsUpperRef :: Constraint p -> (NodeRef -> NodeRef -> Bool)
 mkIsUpperRef upperConstraint parentRef childRef =
     case parentRef of
         TypeRef _ -> Binding.isUpper upperConstraint parentRef childRef
@@ -210,7 +210,7 @@ ownerIsOther :: GenNodeId -> Maybe GenNodeId -> Bool
 ownerIsOther gid = maybe False (/= gid)
 
 -- | Choose the root gen node ID from a constraint.
-chooseRootGenId :: Constraint -> GenMap -> GenNodeId
+chooseRootGenId :: Constraint p -> GenMap -> GenNodeId
 chooseRootGenId constraint gens =
     case [gid | GenRef gid <- Binding.bindingRoots constraint] of
         [gid] -> gid

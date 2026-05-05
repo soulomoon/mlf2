@@ -32,7 +32,7 @@ import MLF.Elab.Run.Generalize.Types
 import MLF.Util.IntMapUtils (keepOld)
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 
-buildNodeMappings :: GeneralizeEnv -> Phase1Result -> Phase2Result
+buildNodeMappings :: GeneralizeEnv p -> Phase1Result -> Phase2Result
 buildNodeMappings env phase1 =
     let solvedConstraint = geSolvedConstraint env
         base = geBaseConstraint env

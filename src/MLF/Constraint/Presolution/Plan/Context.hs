@@ -3,9 +3,9 @@
 This module provides the generalization-context infrastructure used by the
 constraint-presolution planning phase.  It supplies:
 
-\* GaBindParents — the mapping between base (pre-solving) and solved binding
+\* GaBindParents p — the mapping between base (pre-solving) and solved binding
   parents, used to translate gen-node ownership across the solve boundary.
-\* GeneralizeEnv — the read-only environment threaded through generalization
+\* GeneralizeEnv p — the read-only environment threaded through generalization
   planning, carrying canonical maps, node tables, and debug flags.
 \* GeneralizeCtx — the resolved per-call-site context produced by
   'resolveContext', bundling the canonicalized target, scope root, order root,
@@ -50,9 +50,9 @@ import MLF.Constraint.Types.Graph hiding (lookupNode)
 import MLF.Util.ElabError (ElabError (..), bindingToElab)
 import MLF.Util.Trace (traceWhen)
 
-data GaBindParents = GaBindParents
+data GaBindParents p = GaBindParents
   { gaBindParentsBase :: BindParents,
-    gaBaseConstraint :: Constraint,
+    gaBaseConstraint :: Constraint p,
     gaBaseToSolved :: IntMap.IntMap NodeId,
     gaSolvedToBase :: IntMap.IntMap NodeId
   }
@@ -63,7 +63,7 @@ data SolvedToBaseResolution
   | SolvedToBaseMissing
   deriving (Eq, Show)
 
-resolveGaSolvedToBase :: GaBindParents -> NodeId -> SolvedToBaseResolution
+resolveGaSolvedToBase :: GaBindParents p -> NodeId -> SolvedToBaseResolution
 resolveGaSolvedToBase ga solvedNid =
   case IntMap.lookup (getNodeId solvedNid) (gaSolvedToBase ga) of
     Just baseNid -> SolvedToBaseMapped baseNid
@@ -72,12 +72,11 @@ resolveGaSolvedToBase ga solvedNid =
         Just _ -> SolvedToBaseSameDomain solvedNid
         Nothing -> SolvedToBaseMissing
 
-data GeneralizeEnv = GeneralizeEnv
-  { geConstraint :: Constraint,
+data GeneralizeEnv p = GeneralizeEnv { geConstraint :: Constraint p,
     -- | The original (pre-solving) constraint with all binders intact.
     -- Used by OnConstraint reification paths so that solved-away binders
     -- are preserved in scheme types.
-    geOriginalConstraint :: Constraint,
+    geOriginalConstraint :: Constraint p,
     geNodes :: IntMap.IntMap TyNode,
     geCanonical :: NodeId -> NodeId,
     geCanonKey :: NodeId -> Int,
@@ -85,12 +84,12 @@ data GeneralizeEnv = GeneralizeEnv
     geIsTyVarKey :: Int -> Bool,
     geIsTyForallKey :: Int -> Bool,
     geIsBaseLikeKey :: Int -> Bool,
-    geBindParentsGa :: Maybe GaBindParents,
+    geBindParentsGa :: Maybe (GaBindParents p),
     geCanonicalMap :: IntMap.IntMap NodeId,
     geDebugEnabled :: Bool
   }
 
-data GeneralizeCtx = GeneralizeCtx
+data GeneralizeCtx p = GeneralizeCtx
   { gcTarget0 :: NodeId,
     gcTargetBase :: NodeId,
     gcScopeRootC :: NodeRef,
@@ -100,8 +99,8 @@ data GeneralizeCtx = GeneralizeCtx
     gcScopeGen :: Maybe GenNodeId,
     gcBindParents :: BindParents,
     gcFirstGenAncestor :: NodeRef -> Maybe GenNodeId,
-    gcResForReify :: PresolutionView,
-    gcBindParentsGaInfo :: Maybe GaBindParentsInfo,
+    gcResForReify :: PresolutionView p,
+    gcBindParentsGaInfo :: Maybe (GaBindParentsInfo p),
     gcSchemeRootsPlan :: SchemeRootsPlan
   }
 
@@ -118,18 +117,18 @@ data ResolveScope = ResolveScope
   { rsScopeGen :: Maybe GenNodeId
   }
 
-data ResolveBinds = ResolveBinds
+data ResolveBinds p = ResolveBinds
   { rbBindParents :: BindParents,
     rbFirstGenAncestor :: NodeRef -> Maybe GenNodeId,
-    rbResForReify :: PresolutionView
+    rbResForReify :: PresolutionView p
   }
 
 resolveContext ::
-  GeneralizeEnv ->
+  GeneralizeEnv p ->
   BindParents ->
   NodeRef ->
   NodeId ->
-  Either ElabError GeneralizeCtx
+  Either ElabError (GeneralizeCtx p)
 resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
   let constraint = geConstraint env
       nodes = geNodes env
@@ -412,7 +411,7 @@ resolveContext env bindParentsSoft scopeRootArg targetNodeArg = do
         gcSchemeRootsPlan = schemeRootsPlan
       }
   where
-    traceUnexpectedSolvedToBaseMissing :: GaBindParents -> NodeId -> a -> a
+    traceUnexpectedSolvedToBaseMissing :: GaBindParents p -> NodeId -> a -> a
     traceUnexpectedSolvedToBaseMissing ga solvedNid out =
       let baseNodes = cNodes (gaBaseConstraint ga)
        in case lookupNodeIn baseNodes solvedNid of
@@ -483,8 +482,8 @@ validateCrossGenMapping gidScope fga baseParents findSolvedKey =
 traceGeneralizeEnabled :: Bool -> String -> a -> a
 traceGeneralizeEnabled = traceWhen
 
-traceGeneralize :: GeneralizeEnv -> String -> a -> a
+traceGeneralize :: GeneralizeEnv p -> String -> a -> a
 traceGeneralize env = traceGeneralizeEnabled (geDebugEnabled env)
 
-traceGeneralizeM :: GeneralizeEnv -> String -> Either ElabError ()
+traceGeneralizeM :: GeneralizeEnv p -> String -> Either ElabError ()
 traceGeneralizeM env msg = traceGeneralize env msg (Right ())

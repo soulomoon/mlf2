@@ -19,7 +19,7 @@ module MLF.Constraint.Normalize.Internal (
 
 {- Note [Normalization state and shared helpers]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-This module provides the shared mutable state ('NormalizeState', 'NormalizeM')
+This module provides the shared mutable state ('NormalizeState p', 'NormalizeM p')
 and primitive operations used by both the grafting ('Normalize.Graft') and
 merging ('Normalize.Merge') normalization submodules.
 
@@ -57,23 +57,22 @@ import MLF.Constraint.Types.SynthesizedExpVar
 import qualified MLF.Util.UnionFind as UnionFind
 
 -- | State maintained during normalization.
-data NormalizeState = NormalizeState
-    { nsNextNodeId :: !Int
+data NormalizeState p = NormalizeState { nsNextNodeId :: !Int
       -- ^ Counter for allocating fresh nodes during grafting.
     , nsSynthExpVarSupply :: !SynthExpVarSupply
       -- ^ Opaque allocator for synthesized-wrapper expansion variables in
       -- a reserved negative-ID space.
     , nsUnionFind :: !(IntMap NodeId)
       -- ^ Union-find structure: maps node IDs to their canonical representative.
-    , nsConstraint :: !Constraint
+    , nsConstraint :: !(Constraint p)
       -- ^ The constraint being normalized.
     }
     deriving (Eq, Show)
 
-type NormalizeM a = State NormalizeState a
+type NormalizeM p a = State (NormalizeState p) a
 
 -- | Allocate a fresh variable node.
-freshVar :: NormalizeM NodeId
+freshVar :: NormalizeM p NodeId
 freshVar = do
     nid <- freshNodeId
     let node = TyVar { tnId = nid, tnBound = Nothing }
@@ -82,7 +81,7 @@ freshVar = do
     pure nid
 
 -- | Set the binding parent for a node in the constraint.
-setBindParentNorm :: NodeId -> NodeId -> BindFlag -> NormalizeM ()
+setBindParentNorm :: NodeId -> NodeId -> BindFlag -> NormalizeM p ()
 setBindParentNorm child parent flag =
     when (child /= parent) $
         modify' $ \s ->
@@ -90,7 +89,7 @@ setBindParentNorm child parent flag =
                 c' = Binding.setBindParent (typeRef child) (typeRef parent, flag) c
             in s { nsConstraint = c' }
 
-setBindParentRefNorm :: NodeRef -> NodeRef -> BindFlag -> NormalizeM ()
+setBindParentRefNorm :: NodeRef -> NodeRef -> BindFlag -> NormalizeM p ()
 setBindParentRefNorm child parent flag =
     when (child /= parent) $
         modify' $ \s ->
@@ -99,14 +98,14 @@ setBindParentRefNorm child parent flag =
             in s { nsConstraint = c' }
 
 -- | Get a fresh NodeId.
-freshNodeId :: NormalizeM NodeId
+freshNodeId :: NormalizeM p NodeId
 freshNodeId = do
     n <- gets nsNextNodeId
     modify' $ \s -> s { nsNextNodeId = n + 1 }
     pure (NodeId n)
 
 -- | Insert a node into the constraint.
-insertNode :: TyNode -> NormalizeM ()
+insertNode :: TyNode -> NormalizeM p ()
 insertNode node = modify' $ \s ->
     let c = nsConstraint s
         nodes' = Graph.insertNode (tnId node) node (cNodes c)
@@ -114,7 +113,7 @@ insertNode node = modify' $ \s ->
 
 -- Union-find link; caller is responsible for any scope maintenance (e.g.
 -- binding-edge harmonization / paper Raise(n) for Var/Var unions).
-unionNodes :: NodeId -> NodeId -> NormalizeM ()
+unionNodes :: NodeId -> NodeId -> NormalizeM p ()
 unionNodes from to = modify' $ \s ->
     s { nsUnionFind = IntMap.insert (getNodeId from) to (nsUnionFind s) }
 
@@ -123,7 +122,7 @@ findRoot :: IntMap NodeId -> NodeId -> NodeId
 findRoot = UnionFind.frWith
 
 -- | Allocate a fresh expansion variable for synthesized wrappers.
-freshSynthExpVarNorm :: NormalizeM ExpVarId
+freshSynthExpVarNorm :: NormalizeM p ExpVarId
 freshSynthExpVarNorm = do
     supply <- gets nsSynthExpVarSupply
     let (expVar, supply') = takeSynthExpVar supply

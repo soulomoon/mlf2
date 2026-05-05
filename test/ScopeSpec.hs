@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module ScopeSpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -22,6 +23,7 @@ import MLF.Constraint.Types.Graph
 import MLF.Elab.Run.Scope (bindingScopeRef, generalizeTargetNode, resolveCanonicalScope, schemeBodyTarget)
 import qualified SolvedFacadeTestUtil as SolvedTest
 import SpecUtil (emptyConstraint, nodeMapFromList)
+import MLF.Constraint.Types.Phase (Phase(Raw))
 
 spec :: Spec
 spec = do
@@ -156,11 +158,11 @@ isBindingCycleError result = case result of
     Left (BindingCycleDetected _) -> True
     _ -> False
 
-presolutionView :: Constraint -> IntMap.IntMap NodeId -> PresolutionViewBoundary.PresolutionView
+presolutionView :: Constraint 'Raw -> IntMap.IntMap NodeId -> PresolutionViewBoundary.PresolutionView 'Raw
 presolutionView constraint uf =
     PresolutionViewBoundary.fromSolved (SolvedTest.mkTestSolved constraint uf)
 
-cyclicConstraint :: NodeId -> NodeId -> Constraint
+cyclicConstraint :: NodeId -> NodeId -> Constraint 'Raw
 cyclicConstraint n1 n2 =
     let nodes = nodeMapFromList
             [ (getNodeId n1, TyVar { tnId = n1, tnBound = Nothing })

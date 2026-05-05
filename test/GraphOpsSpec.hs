@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE LambdaCase #-}
 module GraphOpsSpec (spec) where
@@ -10,6 +11,7 @@ import Test.QuickCheck
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Binding.Tree
 import MLF.Binding.GraphOps
 import SpecUtil (emptyConstraint, nodeMapFromList, nodeMapSingleton)
@@ -23,7 +25,7 @@ rootGenRef = genRef rootGenId
 rootGenNode :: NodeId -> GenNode
 rootGenNode rootNode = GenNode rootGenId [rootNode]
 
-attachRootGen :: NodeId -> Constraint -> Constraint
+attachRootGen :: NodeId -> Constraint 'Raw -> Constraint 'Raw
 attachRootGen rootNode c =
     let rootKey = nodeRefKey (typeRef rootNode)
         bp0 = cBindParents c
@@ -43,7 +45,7 @@ bp child parent flag = (nodeRefKey (typeRef child), (typeRef parent, flag))
 -- Node 0 is root, node i has parent i-1, all edges are flexible.
 -- Uses TyForall nodes to create a chain structure where each node can reach
 -- the next via its body pointer, satisfying the "parent is upper" invariant.
-genFlexChain :: Int -> Gen Constraint
+genFlexChain :: Int -> Gen (Constraint 'Raw)
 genFlexChain n
     | n <= 0 = return emptyConstraint { cGenNodes = fromListGen [(rootGenId, GenNode rootGenId [])] }
     | n == 1 = return $ attachRootGen (NodeId 0) emptyConstraint
@@ -66,7 +68,7 @@ genFlexChain n
 -- | Generate a valid tree with all flexible edges.
 -- Uses TyForall nodes to create a chain structure, with binding edges that
 -- can point to any ancestor, satisfying the "parent is upper" invariant.
-genAllFlexTree :: Int -> Gen Constraint
+genAllFlexTree :: Int -> Gen (Constraint 'Raw)
 genAllFlexTree n
     | n <= 0 = return emptyConstraint { cGenNodes = fromListGen [(rootGenId, GenNode rootGenId [])] }
     | n == 1 = return $ attachRootGen (NodeId 0) emptyConstraint
@@ -151,7 +153,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         ]
                     , cBindParents = IntMap.singleton (nodeRefKey (typeRef (NodeId 1))) (typeRef (NodeId 0), BindFlex)
                     }
-            case applyWeaken (typeRef (NodeId 1)) c of
+            case applyWeaken (TypeRefTag (NodeId 1)) c of
                 Right (c', op) -> do
                     op `shouldBe` OpWeaken (NodeId 1)
                     getBindFlag c' (typeRef (NodeId 1)) `shouldBe` Just BindRigid
@@ -161,7 +163,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
             let c = emptyConstraint
                     { cNodes = nodeMapSingleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
                     }
-            case applyWeaken (typeRef (NodeId 0)) c of
+            case applyWeaken (TypeRefTag (NodeId 0)) c of
                 Left (MissingBindParent _) -> return ()
                 other -> expectationFailure $ "Expected MissingBindParent, got: " ++ show other
 
@@ -173,7 +175,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         ]
                     , cBindParents = IntMap.singleton (nodeRefKey (typeRef (NodeId 1))) (typeRef (NodeId 0), BindRigid)
                     }
-            case applyWeaken (typeRef (NodeId 1)) c of
+            case applyWeaken (TypeRefTag (NodeId 1)) c of
                 Left (OperationOnLockedNode _) -> return ()
                 other -> expectationFailure $ "Expected OperationOnLockedNode, got: " ++ show other
 
@@ -191,7 +193,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         , bp (NodeId 2) (NodeId 1) BindFlex
                         ]
                     }
-            case applyRaiseStep (typeRef (NodeId 2)) c of
+            case applyRaiseStep (TypeRefTag (NodeId 2)) c of
                 Right (c', Just op) -> do
                     op `shouldBe` OpRaise (NodeId 2)
                     -- Node 2 should now have parent 0
@@ -208,7 +210,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         ]
                     , cBindParents = IntMap.singleton (nodeRefKey (typeRef (NodeId 1))) (typeRef (NodeId 0), BindFlex)
                     }
-            case applyRaiseStep (typeRef (NodeId 1)) c of
+            case applyRaiseStep (TypeRefTag (NodeId 1)) c of
                 Right (c', Nothing) -> do
                     -- Constraint should be unchanged
                     lookupBindParent c' (typeRef (NodeId 1)) `shouldBe` Just (typeRef (NodeId 0), BindFlex)
@@ -228,7 +230,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         , bp (NodeId 2) (NodeId 1) BindFlex
                         ]
                     }
-            case applyRaiseStep (typeRef (NodeId 2)) c of
+            case applyRaiseStep (TypeRefTag (NodeId 2)) c of
                 Left (OperationOnLockedNode _) -> return ()
                 other -> expectationFailure $ "Expected OperationOnLockedNode, got: " ++ show other
 
@@ -245,7 +247,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         , bp (NodeId 2) (NodeId 1) BindFlex
                         ]
                     }
-            case applyRaiseStep (typeRef (NodeId 2)) c of
+            case applyRaiseStep (TypeRefTag (NodeId 2)) c of
                 Right (c', Just _) -> do
                     -- Flag should still be BindFlex
                     getBindFlag c' (typeRef (NodeId 2)) `shouldBe` Just BindFlex
@@ -267,7 +269,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         , bp (NodeId 3) (NodeId 2) BindFlex
                         ]
                     }
-            case applyRaiseTo (typeRef (NodeId 3)) (typeRef (NodeId 0)) c of
+            case applyRaiseTo (TypeRefTag (NodeId 3)) (typeRef (NodeId 0)) c of
                 Right (c', ops) -> do
                     -- Should have 2 raise operations (3->1, then 3->0)
                     length ops `shouldBe` 2
@@ -284,7 +286,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         ]
                     , cBindParents = IntMap.singleton (nodeRefKey (typeRef (NodeId 1))) (typeRef (NodeId 0), BindFlex)
                     }
-            case applyRaiseTo (typeRef (NodeId 1)) (typeRef (NodeId 0)) c of
+            case applyRaiseTo (TypeRefTag (NodeId 1)) (typeRef (NodeId 0)) c of
                 Right (c', ops) -> do
                     ops `shouldBe` []
                     lookupBindParent c' (typeRef (NodeId 1)) `shouldBe` Just (typeRef (NodeId 0), BindFlex)
@@ -305,7 +307,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         , bp (NodeId 2) (NodeId 0) BindFlex
                         ]
                     }
-            case applyRaiseTo (typeRef (NodeId 1)) (typeRef (NodeId 2)) c of
+            case applyRaiseTo (TypeRefTag (NodeId 1)) (typeRef (NodeId 2)) c of
                 Left (InvalidBindingTree _) -> return ()
                 other -> expectationFailure $ "Expected InvalidBindingTree, got: " ++ show other
 
@@ -319,8 +321,8 @@ spec = describe "MLF.Binding.GraphOps" $ do
                 let nonRoots = filter (not . isBindingRoot c) (map typeRef (allNodeIds c))
                 case nonRoots of
                     [] -> return ()  -- No non-roots to test
-                    (nid:_) -> do
-                        case applyWeaken nid c of
+                    (TypeRef nId:_) -> do
+                        case applyWeaken (TypeRefTag nId) c of
                             Right (c', _) -> 
                                 checkBindingTree c' `shouldBe` Right ()
                             Left _ -> return ()  -- Operation not applicable
@@ -334,8 +336,8 @@ spec = describe "MLF.Binding.GraphOps" $ do
                 let candidates = filter (hasNonRootParent c) (map typeRef (allNodeIds c))
                 case candidates of
                     [] -> return ()
-                    (nid:_) -> do
-                        case applyRaiseStep nid c of
+                    (TypeRef nId:_) -> do
+                        case applyRaiseStep (TypeRefTag nId) c of
                             Right (c', _) -> 
                                 checkBindingTree c' `shouldBe` Right ()
                             Left _ -> return ()
@@ -346,12 +348,12 @@ spec = describe "MLF.Binding.GraphOps" $ do
             forAll (choose (2, 15)) $ \n -> do
                 c <- generate (genFlexChain n)
                 -- Pick the deepest node (n-1)
-                let deepest = typeRef (NodeId (n - 1))
+                let deepestNid = NodeId (n - 1)
                 -- Repeatedly raise until we can't anymore
                 let raiseUntilDone constraint count
                         | count > n = expectationFailure "Raise did not terminate"
                         | otherwise = do
-                            case applyRaiseStep deepest constraint of
+                            case applyRaiseStep (TypeRefTag deepestNid) constraint of
                                 Right (c', Just _) -> raiseUntilDone c' (count + 1)
                                 Right (_, Nothing) -> return ()  -- Done
                                 Left _ -> return ()  -- Can't raise
@@ -367,7 +369,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                 targetIdx <- generate $ choose (0, nodeIdx - 2)
                 let nid = typeRef (NodeId nodeIdx)
                     target = typeRef (NodeId targetIdx)
-                case applyRaiseTo nid target c of
+                case applyRaiseTo (TypeRefTag (NodeId nodeIdx)) target c of
                     Right (c', ops) -> do
                         -- Number of ops should equal distance - 1
                         let expectedOps = nodeIdx - targetIdx - 1
@@ -385,11 +387,10 @@ spec = describe "MLF.Binding.GraphOps" $ do
                 let midIdx = n `div` 2
                     midNode = typeRef (NodeId midIdx)
                 -- Weaken it
-                case applyWeaken midNode c of
+                case applyWeaken (TypeRefTag (NodeId midIdx)) c of
                     Right (c', _) -> do
                         -- Now try to raise a node below it
-                        let belowNode = typeRef (NodeId (n - 1))
-                        case applyRaiseStep belowNode c' of
+                        case applyRaiseStep (TypeRefTag (NodeId (n - 1))) c' of
                             Left (OperationOnLockedNode _) -> return ()
                             other -> expectationFailure $ 
                                 "Expected OperationOnLockedNode, got: " ++ show other
@@ -406,7 +407,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                     { cNodes = nodes
                     , cBindParents = IntMap.fromList [(nodeRefKey (typeRef (NodeId 1)), (typeRef (NodeId 0), BindFlex))]
                     }
-            case applyWeaken (typeRef (NodeId 1)) c of
+            case applyWeaken (TypeRefTag (NodeId 1)) c of
                 Right (c', _ops) ->
                     lookupBindParent c' (typeRef (NodeId 1)) `shouldBe` Just (typeRef (NodeId 0), BindRigid)
                 Left err -> expectationFailure $ "applyWeaken failed: " ++ show err
@@ -425,7 +426,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         , (nodeRefKey (typeRef (NodeId 2)), (typeRef (NodeId 1), BindFlex))
                         ]
                     }
-            case applyRaiseStep (typeRef (NodeId 2)) c of
+            case applyRaiseStep (TypeRefTag (NodeId 2)) c of
                 Right (c', _ops) -> do
                     let parent = lookupBindParent c' (typeRef (NodeId 2))
                     parent `shouldSatisfy` \case
@@ -447,7 +448,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         , (nodeRefKey (typeRef (NodeId 2)), (typeRef (NodeId 1), BindFlex))
                         ]
                     }
-            case applyRaiseTo (typeRef (NodeId 2)) (typeRef (NodeId 0)) c of
+            case applyRaiseTo (TypeRefTag (NodeId 2)) (typeRef (NodeId 0)) c of
                 Right (c', _ops) -> do
                     let parent = lookupBindParent c' (typeRef (NodeId 2))
                     parent `shouldSatisfy` \case
@@ -456,7 +457,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
                 Left err -> expectationFailure $ "applyRaiseTo failed: " ++ show err
 
 -- | Check if a node has a non-root parent
-hasNonRootParent :: Constraint -> NodeRef -> Bool
+hasNonRootParent :: Constraint 'Raw -> NodeRef -> Bool
 hasNonRootParent c nid =
     case lookupBindParent c nid of
         Nothing -> False

@@ -1,9 +1,12 @@
+{-# LANGUAGE DataKinds #-}
+
 module Reify.CoreSpec (spec) where
 
 import Data.IntSet qualified as IntSet
 import Data.Set qualified as Set
 import MLF.Constraint.Presolution.View (PresolutionView, fromSolved)
 import MLF.Constraint.Solved qualified as Solved
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Graph (NodeId (..), getNodeId)
 import MLF.Frontend.Syntax (Expr (..), Lit (..))
 import MLF.Reify.Bound qualified as Bound
@@ -18,7 +21,7 @@ import SpecUtil
 import Test.Hspec
 
 -- | Run the full pipeline on an expression and return artifacts.
-pipelineFor :: PipelineArtifacts -> (Solved.Solved, PresolutionView, NodeId)
+pipelineFor :: PipelineArtifacts -> (Solved.Solved, PresolutionView 'Raw, NodeId)
 pipelineFor artifacts =
   let solved = paSolved artifacts
       view = fromSolved solved

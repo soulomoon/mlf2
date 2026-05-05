@@ -54,16 +54,16 @@ bindableChildrenUnder canonical bindParents isBindable parentRef =
     isBindable childKey child
   ]
 
-bindingScopeGen :: Constraint -> NodeId -> Maybe GenNodeId
+bindingScopeGen :: Constraint p -> NodeId -> Maybe GenNodeId
 bindingScopeGen constraint child = bindingScopeFor constraint (typeRef child)
 
-isQuantifiable :: (NodeId -> NodeId) -> Constraint -> (Int -> Bool) -> NodeId -> Bool
+isQuantifiable :: (NodeId -> NodeId) -> Constraint p -> (Int -> Bool) -> NodeId -> Bool
 isQuantifiable canonical constraint isTyVarKey child =
   isTyVarKey (getNodeId child) && not (VarStore.isEliminatedVar constraint (canonical child))
 
 boundContainsForall ::
   (NodeId -> NodeId) ->
-  Constraint ->
+  Constraint p ->
   (NodeId -> Bool) ->
   NodeId ->
   Bool
@@ -83,7 +83,7 @@ isScopeSchemeRoot canonKey scopeSchemeRoots child =
 hasExplicitBoundFor ::
   (NodeId -> NodeId) ->
   NodeMap TyNode ->
-  Constraint ->
+  Constraint p ->
   NodeId ->
   Bool
 hasExplicitBoundFor canonical nodes constraint v =
@@ -103,15 +103,14 @@ mkIsBindable bindFlags isQuantifiableP key child =
 -- | Shared environment for binder-selection functions.
 -- Bundles the constraint-graph context that 'selectBinders', 'bindersForGen',
 -- and 'bindersForType' all require.
-data BinderSelectionEnv = BinderSelectionEnv
-  { -- | Chase function mapping nodes to canonical representatives
+data BinderSelectionEnv p = BinderSelectionEnv { -- | Chase function mapping nodes to canonical representatives
     bseCanonical :: NodeId -> NodeId,
     -- | Binding tree (child -> parent+flag map)
     bseBindParents :: BindParents,
     -- | Node-to-type map from the constraint
     bseNodes :: NodeMap TyNode,
     -- | Full constraint graph
-    bseConstraint :: Constraint,
+    bseConstraint :: Constraint p,
     -- | Predicate: is this node bindable at given depth?
     bseIsBindable :: Int -> NodeId -> Bool
   }
@@ -135,7 +134,7 @@ data SelectBindersArgs = SelectBindersArgs
   }
 
 bindersForGen ::
-  BinderSelectionEnv ->
+  BinderSelectionEnv p ->
   ([(NodeId, BindFlag, Maybe TyNode, Bool)] -> String) ->
   [NodeId] ->
   (String -> Either ElabError ()) ->
@@ -171,7 +170,7 @@ bindersForGen env renderAllChildren aliasBinderNodes traceM gid = do
   pure (bindableUnder ++ aliasBinderNodes ++ bindableByScope)
 
 bindersForType ::
-  BinderSelectionEnv ->
+  BinderSelectionEnv p ->
   (NodeId -> Int) ->
   IntSet.IntSet ->
   (NodeId -> Bool) ->
@@ -191,7 +190,7 @@ bindersForType env canonKey scopeSchemeRoots hasExplicitBoundP scopeRootN =
             else [v | v <- direct, not (hasExplicitBoundP v)]
 
 selectBinders ::
-  BinderSelectionEnv ->
+  BinderSelectionEnv p ->
   SelectBindersArgs ->
   NodeId ->
   Either ElabError [NodeId]

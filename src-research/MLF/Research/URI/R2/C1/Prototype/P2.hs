@@ -26,6 +26,7 @@ import MLF.Constraint.Presolution
     , computePresolution
     )
 import MLF.Constraint.Presolution.Base (EdgeArtifacts(..))
+import MLF.Constraint.Presolution.View (toRawPresolutionViewForLegacy)
 import MLF.Constraint.Types.Graph
     ( EdgeId
     , NodeId(..)
@@ -34,6 +35,7 @@ import MLF.Constraint.Types.Graph
     , getEdgeId
     , getNodeId
     , lookupNodeIn
+    , toRawConstraintForLegacy
     )
 import MLF.Constraint.Types.Presolution (snapshotConstraint, snapshotUnionFind)
 import qualified MLF.Constraint.Solved as Solved
@@ -344,17 +346,18 @@ prepareScenarioContext = do
     normExpr <- firstShow (normalizeExpr expr)
     ConstraintResult { crConstraint = c0, crAnnotated = ann } <- firstShow (generateConstraints Set.empty normExpr)
     let c1 = normalize c0
-    acyclic <- firstShow (checkAcyclicity c1)
-    pres <- firstShow (computePresolution defaultTraceConfig acyclic c1)
+    (cAcyclic, acyclic) <- firstShow (checkAcyclicity c1)
+    pres <- firstShow (computePresolution defaultTraceConfig acyclic cAcyclic)
     solvedClean <- firstShow (Finalize.finalizeSolvedFromSnapshot (snapshotConstraint pres) (snapshotUnionFind pres))
-    presolutionViewClean <- firstShow (Finalize.finalizePresolutionViewFromSnapshot (snapshotConstraint pres) (snapshotUnionFind pres))
+    presolutionViewClean <- toRawPresolutionViewForLegacy <$> firstShow (Finalize.finalizePresolutionViewFromSnapshot (snapshotConstraint pres) (snapshotUnionFind pres))
     let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
         canonical = canonicalizeNode canonNode
-        baseNamedKeysAll = collectBaseNamedKeys c1
+        cBaseRaw = toRawConstraintForLegacy cAcyclic
+        baseNamedKeysAll = collectBaseNamedKeys cBaseRaw
         edgeTracesForCopy =
             IntMap.filter
                 (\tr ->
-                    case lookupNodeIn (cNodes c1) (etRoot tr) of
+                    case lookupNodeIn (cNodes cBaseRaw) (etRoot tr) of
                         Just _ -> True
                         Nothing -> False
                 )
@@ -363,7 +366,7 @@ prepareScenarioContext = do
             instantiationCopyNodes presolutionViewClean (prRedirects pres) edgeTracesForCopy
         traceMaps =
             map
-                (buildTraceCopyMap c1 baseNamedKeysAll canonical)
+                (buildTraceCopyMap cBaseRaw baseNamedKeysAll canonical)
                 (IntMap.elems edgeTracesForCopy)
         instCopyMapFull = foldl' IntMap.union IntMap.empty traceMaps
         (constraintForGen, bindParentsGa) =
@@ -373,7 +376,7 @@ prepareScenarioContext = do
                 (prRedirects pres)
                 instCopyNodes
                 instCopyMapFull
-                c1
+                cBaseRaw
                 ann
     presolutionViewForGen <-
         firstShow
@@ -393,7 +396,7 @@ prepareScenarioContext = do
                 presolutionViewForGen
                 bindParentsGa
                 (prPlanBuilder pres)
-                c1
+                cBaseRaw
                 (prRedirects pres)
                 defaultTraceConfig
     case annCanon of
@@ -408,7 +411,7 @@ prepareScenarioContext = do
                         (gaSolvedToBase (rtcBindParentsGa inputs))
             scopeRoot <-
                 firstShow
-                    (bindingToElab (resolveCanonicalScope c1 (rtcPresolutionView inputs) (rtcRedirects inputs) scopeRootNodePre))
+                    (bindingToElab (resolveCanonicalScope cBaseRaw (rtcPresolutionView inputs) (rtcRedirects inputs) scopeRootNodePre))
             pure
                 ScenarioContext
                     { scInputs = inputs

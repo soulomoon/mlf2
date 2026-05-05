@@ -25,29 +25,29 @@ import qualified MLF.Constraint.Solved.Internal as SolvedInternal
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph (Constraint, NodeId)
 
-stepSanitizeSnapshotUf :: Constraint -> IntMap NodeId -> IntMap NodeId
+stepSanitizeSnapshotUf :: Constraint p -> IntMap NodeId -> IntMap NodeId
 stepSanitizeSnapshotUf constraint uf =
     spSanitizedUf (prepareSnapshotPreparationFromParts constraint uf)
 
-stepCanonicalizeConstraint :: Constraint -> IntMap NodeId -> Constraint
+stepCanonicalizeConstraint :: Constraint p -> IntMap NodeId -> Constraint p
 stepCanonicalizeConstraint constraint uf =
     let ufSanitized = stepSanitizeSnapshotUf constraint uf
     in Solve.repairNonUpperParents (Solve.rewriteConstraintWithUF ufSanitized constraint)
 
-presolutionViewFromSnapshot :: Constraint -> IntMap NodeId -> PresolutionView
+presolutionViewFromSnapshot :: Constraint p -> IntMap NodeId -> PresolutionView p
 presolutionViewFromSnapshot constraint uf =
     let prepared = prepareSnapshotPreparationFromParts constraint uf
     in buildPresolutionView prepared (stepCanonicalizeConstraint constraint (spSanitizedUf prepared))
 
-finalizePresolutionViewFromSnapshot :: Constraint -> IntMap NodeId -> Either SolveError PresolutionView
+finalizePresolutionViewFromSnapshot :: Constraint p -> IntMap NodeId -> Either SolveError (PresolutionView p)
 finalizePresolutionViewFromSnapshot constraint uf = do
     let prepared0 = prepareSnapshotPreparationFromParts constraint uf
-    SolveResult{ srConstraint = canonicalConstraint, srUnionFind = ufFinal } <-
+    SolveResult { srConstraint = canonicalConstraint, srUnionFind = ufFinal } <-
         Solve.finalizeConstraintWithUF (spSanitizedUf prepared0) constraint
     let preparedFinal = prepareSnapshotPreparationFromParts constraint ufFinal
     pure (buildPresolutionView preparedFinal canonicalConstraint)
 
-stepSolvedFromPresolutionView :: PresolutionView -> Solved.Solved
+stepSolvedFromPresolutionView :: PresolutionView p -> Solved.Solved
 stepSolvedFromPresolutionView presolutionView =
     let constraint = pvConstraint presolutionView
         canonicalMap = pvCanonicalMap presolutionView
@@ -67,22 +67,22 @@ stepValidateSolvedStrict solved =
                 [] -> Right solved
                 violations -> Left (Solve.ValidationFailed violations)
 
-finalizeSolvedFromSnapshot :: Constraint -> IntMap NodeId -> Either SolveError Solved.Solved
+finalizeSolvedFromSnapshot :: Constraint p -> IntMap NodeId -> Either SolveError Solved.Solved
 finalizeSolvedFromSnapshot constraint uf =
     let ufSanitized = stepSanitizeSnapshotUf constraint uf
     in do
-        SolveResult{ srConstraint = canonicalConstraint, srUnionFind = ufFinal } <-
+        SolveResult { srConstraint = canonicalConstraint, srUnionFind = ufFinal } <-
             Solve.finalizeConstraintWithUF ufSanitized constraint
         let solved0 = SolvedInternal.fromConstraintAndUf constraint ufFinal
             solved1 = SolvedInternal.rebuildWithConstraint solved0 canonicalConstraint
             solved2 = stepPruneSolvedBindParents solved1
         stepValidateSolvedStrict solved2
 
-finalizeSolvedForConstraint :: Solved.Solved -> Constraint -> Either SolveError Solved.Solved
+finalizeSolvedForConstraint :: Solved.Solved -> Constraint p -> Either SolveError Solved.Solved
 finalizeSolvedForConstraint solved constraint =
     let uf = Solved.canonicalMap solved
     in do
-        SolveResult{ srConstraint = canonicalConstraint } <-
+        SolveResult { srConstraint = canonicalConstraint } <-
             Solve.finalizeConstraintWithUF uf constraint
         let solved0 = SolvedInternal.rebuildWithConstraint solved canonicalConstraint
             solved1 = stepPruneSolvedBindParents solved0

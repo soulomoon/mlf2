@@ -36,7 +36,7 @@ import MLF.Util.ElabError (ElabError (..))
 
 -- | Reify a solved NodeId into an elaborated type.
 -- This version doesn't compute instance bounds (all foralls are unbounded).
-reifyType :: PresolutionView -> NodeId -> Either ElabError ElabType
+reifyType :: PresolutionView p -> NodeId -> Either ElabError ElabType
 reifyType presolutionView =
   let solved = solvedFromView presolutionView
    in reifyWith "reifyType" solved nameFor (const False) RootType
@@ -44,7 +44,7 @@ reifyType presolutionView =
     nameFor (NodeId i) = "t" ++ show i
 
 -- | Reify with an explicit name substitution for vars (Schi': named nodes become variables).
-reifyTypeWithNames :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyTypeWithNames :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNames presolutionView subst nid = do
   namedSet <- namedNodes presolutionView
   reifyTypeWithNamedSet presolutionView subst namedSet nid
@@ -53,7 +53,7 @@ reifyTypeWithNames presolutionView subst nid = do
 -- quantifiers (used when an outer scheme already quantifies binders).
 -- See Note [No-fallback reify preserves explicit bounds] in
 -- docs/notes/2026-01-27-elab-changes.md.
-reifyTypeWithNamesNoFallback :: PresolutionView -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamesNoFallback :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamesNoFallback presolutionView subst nid =
   reifyTypeWithNamesNoFallbackSolved (solvedFromView presolutionView) subst nid
 
@@ -76,13 +76,13 @@ reifyTypeWithNamesNoFallbackSolved solved subst nid =
    in reifyWith "reifyTypeWithNamesNoFallback" solved varNameFor isNamed RootTypeNoFallback nid
 
 -- | Reify with an explicit constraint (Schi' on base graphs).
-reifyTypeWithNamesNoFallbackOnConstraint :: Constraint -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamesNoFallbackOnConstraint :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamesNoFallbackOnConstraint constraint subst nid =
   let presolutionView = presolutionViewFromSnapshot constraint IntMap.empty
    in reifyTypeWithNamesNoFallback presolutionView subst nid
 
 -- | Reify with an explicit named-node set (Schi').
-reifyTypeWithNamedSet :: PresolutionView -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
+reifyTypeWithNamedSet :: PresolutionView p -> IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
 reifyTypeWithNamedSet presolutionView subst namedSet =
   reifyTypeWithNamedSetSolved (solvedFromView presolutionView) subst namedSet
 
@@ -128,7 +128,7 @@ reifyTypeWithNamedSetNoFallbackSolved solved subst namedSet =
     isNamed nodeId = IntSet.member (getNodeId (canonical nodeId)) namedSet
 
 reifyTypeWithNamedSetNoFallback ::
-  PresolutionView ->
+  PresolutionView p ->
   IntMap.IntMap String ->
   IntSet.IntSet ->
   NodeId ->
@@ -136,7 +136,7 @@ reifyTypeWithNamedSetNoFallback ::
 reifyTypeWithNamedSetNoFallback presolutionView subst namedSet nid =
   reifyTypeWithNamedSetNoFallbackSolved (solvedFromView presolutionView) subst namedSet nid
 
-solvedFromView :: PresolutionView -> Solved
+solvedFromView :: PresolutionView p -> Solved
 solvedFromView presolutionView =
   let solved0 =
         SolvedInternal.fromConstraintAndUf

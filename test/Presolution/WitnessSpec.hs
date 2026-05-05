@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Presolution.WitnessSpec (spec) where
 
 import Test.Hspec
@@ -31,9 +32,9 @@ import MLF.Constraint.Types.Presolution (Presolution(..))
 import MLF.Constraint.Presolution
     ( PresolutionError(..)
     , PresolutionResult(..)
-    , computePresolution
     , EdgeTrace(..)
     )
+import MLF.Constraint.Presolution qualified as PresolutionPhase
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
     , validateReplayMapTraceContract
@@ -43,8 +44,10 @@ import MLF.Constraint.Presolution.TestSupport
     , fromListInterior
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import qualified MLF.Constraint.Inert as Inert
 import qualified MLF.Binding.Tree as Binding
+import MLF.Elab.Pipeline (TraceConfig)
 import SpecUtil
     ( bindParentsFromPairs
     , defaultTraceConfig
@@ -64,6 +67,13 @@ import Presolution.Util
     , genInstanceOp
     , hasRedundantOps
     )
+
+computePresolution :: TraceConfig -> AcyclicityResult -> Constraint 'Raw -> Either PresolutionPhase.PresolutionError PresolutionResult
+computePresolution traceCfg acyclicity constraint =
+    PresolutionPhase.computePresolution
+        traceCfg
+        acyclicity
+        (toAcyclicConstraint (toNormalizedConstraint constraint))
 
 spec :: Spec
 spec = do
@@ -86,7 +96,7 @@ spec = do
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 4 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
                 expansion =
                     ExpCompose
-                        (ExpForall (ForallSpec 1 [Nothing] NE.:| []) NE.:| [ExpInstantiate [argId]])
+                        (ExpForall (ForallSpec [Nothing] NE.:| []) NE.:| [ExpInstantiate [argId]])
 
             case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
@@ -116,7 +126,7 @@ spec = do
                 -- Instantiate BEFORE forall: suffix has forall, so suppressWeaken fires today
                 expansion =
                     ExpCompose
-                        (ExpInstantiate [argId] NE.:| [ExpForall (ForallSpec 1 [Nothing] NE.:| [])])
+                        (ExpInstantiate [argId] NE.:| [ExpForall (ForallSpec [Nothing] NE.:| [])])
 
             case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)
@@ -233,7 +243,7 @@ spec = do
                         , cBindParents = inferBindParents nodes
                         }
                 st0 = PresolutionState constraint (Presolution IntMap.empty) IntMap.empty 2 IntSet.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty IntMap.empty
-                expansion = ExpForall (ForallSpec 2 [Nothing, Nothing] NE.:| [])
+                expansion = ExpForall (ForallSpec [Nothing, Nothing] NE.:| [])
 
             case runPresolutionM defaultTraceConfig st0 (witnessFromExpansion (GenNodeId 0) expNodeId (nodeAt nodes 0) expansion) of
                 Left err -> expectationFailure ("witnessFromExpansion failed: " ++ show err)

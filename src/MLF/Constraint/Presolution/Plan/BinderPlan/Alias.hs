@@ -21,11 +21,10 @@ import MLF.Util.ElabError (ElabError)
 import qualified MLF.Util.IntMapUtils as IntMapUtils
 
 -- | Shared environment for alias-binder analysis functions.
-data AliasEnv = AliasEnv
-  { -- | Chase function mapping nodes to canonical representatives
+data AliasEnv p = AliasEnv { -- | Chase function mapping nodes to canonical representatives
     aeCanonical :: NodeId -> NodeId,
     -- | Full constraint graph
-    aeConstraint :: Constraint,
+    aeConstraint :: Constraint p,
     -- | Node-to-type map from the constraint
     aeNodes :: NodeMap TyNode,
     -- | Binding tree (child -> parent+flag map)
@@ -40,7 +39,7 @@ data AliasEnv = AliasEnv
 
 -- | Check if a bound mentions a self-alias.
 boundMentionsSelfAliasFor ::
-  AliasEnv ->
+  AliasEnv p ->
   NodeId ->
   Bool
 boundMentionsSelfAliasFor env v =
@@ -66,7 +65,7 @@ boundMentionsSelfAliasFor env v =
         Nothing -> False
 
 computeAliasBinders ::
-  AliasEnv ->
+  AliasEnv p ->
   (NodeId -> Int) ->
   NodeRef ->
   (String -> Either ElabError ()) ->

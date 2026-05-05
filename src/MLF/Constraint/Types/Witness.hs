@@ -14,11 +14,16 @@ module MLF.Constraint.Types.Witness (
     EdgeId(..),
     BoundRef(..),
     ForallSpec(..),
+    forallSpecBinderCount,
+    mkForallSpec,
     Expansion(..),
     ExpansionF(..),
     InstanceOp(..),
     InstanceWitness(..),
+    mkInstanceWitness,
     EdgeWitness(..),
+    mkEdgeWitness,
+    WitnessError(..),
     ReplayContract(..),
     classifyReplayContract,
     isStrictReplayContract
@@ -38,11 +43,21 @@ data BoundRef
     deriving (Eq, Show)
 
 -- | Binder specification for quantifier introduction.
+--
+-- `fsBounds` length equals the binder count; no redundant `fsBinderCount` field.
 data ForallSpec = ForallSpec
-    { fsBinderCount :: Int
-    , fsBounds :: [Maybe BoundRef]
+    { fsBounds :: [Maybe BoundRef]
     }
     deriving (Eq, Show)
+
+-- | Binder count derived from bounds list length.
+forallSpecBinderCount :: ForallSpec -> Int
+forallSpecBinderCount = length . fsBounds
+
+-- | Smart constructor: validates that bounds list is non-empty.
+mkForallSpec :: [Maybe BoundRef] -> Maybe ForallSpec
+mkForallSpec [] = Nothing
+mkForallSpec bounds = Just (ForallSpec bounds)
 
 -- | A presolution "expansion recipe" assigned to an `ExpVarId`.
 --
@@ -155,6 +170,37 @@ data EdgeWitness = EdgeWitness
     , ewWitness :: InstanceWitness
     }
     deriving (Eq, Show)
+
+-- | Errors from witness smart constructors.
+data WitnessError
+    = NegativeForallIntros Int
+    deriving (Eq, Show)
+
+-- | Smart constructor for `InstanceWitness`.
+mkInstanceWitness :: [InstanceOp] -> InstanceWitness
+mkInstanceWitness = InstanceWitness
+
+-- | Smart constructor for `EdgeWitness`.
+-- Validates that `ewForallIntros` is non-negative.
+mkEdgeWitness
+    :: EdgeId
+    -> NodeId
+    -> NodeId
+    -> NodeId
+    -> Int
+    -> InstanceWitness
+    -> Either WitnessError EdgeWitness
+mkEdgeWitness eid left right root intros iw
+    | intros < 0 = Left (NegativeForallIntros intros)
+    | otherwise =
+        Right EdgeWitness
+            { ewEdgeId = eid
+            , ewLeft = left
+            , ewRight = right
+            , ewRoot = root
+            , ewForallIntros = intros
+            , ewWitness = iw
+            }
 
 -- | Producer/consumer replay-map contract mode.
 --

@@ -67,6 +67,7 @@ library mlf2-internal
                       MLF.Constraint.Types.Graph.Accessors,
                       MLF.Constraint.Types.Witness,
                       MLF.Constraint.Types.Presolution,
+                      MLF.Constraint.Types.Phase,
                       MLF.Constraint.Canonicalizer,
                       MLF.Constraint.Finalize,
                       MLF.Frontend.Syntax,
@@ -268,7 +269,8 @@ library mlf2-internal
                       directory,
                       filepath,
                       megaparsec,
-                      mtl
+                      mtl,
+                      singletons-th ^>= 3.5
 
     -- Directories containing source files.
     hs-source-dirs:   src

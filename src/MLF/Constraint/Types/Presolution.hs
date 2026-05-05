@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {- |
 Module      : MLF.Constraint.Types.Presolution
 Description : Presolution-only constraint types
@@ -17,6 +18,7 @@ module MLF.Constraint.Types.Presolution (
 import Data.IntMap.Strict (IntMap)
 
 import MLF.Constraint.Types.Graph (Constraint, EdgeId, NodeId)
+import MLF.Constraint.Types.Phase (Phase(Presolved))
 import MLF.Constraint.Types.Witness (Expansion)
 
 -- | A presolution assignment map.
@@ -35,9 +37,8 @@ newtype Presolution = Presolution { getAssignments :: IntMap Expansion }
 --
 -- This is not the only way to run phases, but it is a useful snapshot for
 -- debugging and for pipeline-style entry points.
-data SolverState = SolverState
-    { -- | The current constraint graph.
-      ssConstraint :: Constraint
+data SolverState p = SolverState { -- | The current constraint graph.
+      ssConstraint :: Constraint p
     , -- | The presolution assignment map.
       ssPresolution :: Presolution
     , -- | The union-find map.
@@ -61,5 +62,5 @@ data DepGraph a = DepGraph
 -- | Minimal snapshot interface used to construct a solved view directly
 -- from presolution output without replaying the solve pipeline.
 class PresolutionSnapshot a where
-    snapshotConstraint :: a -> Constraint
+    snapshotConstraint :: a -> Constraint 'Presolved
     snapshotUnionFind :: a -> IntMap NodeId

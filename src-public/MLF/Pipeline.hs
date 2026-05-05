@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 {- |
 Module      : MLF.Pipeline
@@ -130,6 +131,7 @@ import MLF.Frontend.Program.Run
     , runProgramOutput
     )
 import MLF.Constraint.Types.Graph (BaseTy(..), PolySyms)
+import MLF.Constraint.Types.Phase (Phase(Raw))
 -- Keep legacy elaboration conversion helpers quarantined in MLF.Elab.Legacy.
 import MLF.Elab.Pipeline
     ( ElabError (..)
@@ -158,7 +160,7 @@ import MLF.Elab.Pipeline
     , typeCheck
     )
 
-inferConstraintGraph :: PolySyms -> NormSurfaceExpr -> Either ConstraintError ConstraintResult
+inferConstraintGraph :: PolySyms -> NormSurfaceExpr -> Either ConstraintError (ConstraintResult 'Raw)
 inferConstraintGraph = generateConstraints
 
 -- | Extract the numeric pipeline phase where the error occurred.

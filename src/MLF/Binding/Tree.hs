@@ -142,7 +142,7 @@ import MLF.Binding.Queries (
 -- Returns 'Nothing' if the node is a binding root in the quotient relation.
 lookupBindParentUnder
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> NodeRef
     -> Either BindingError (Maybe (NodeRef, BindFlag))
 lookupBindParentUnder canonical c0 ref0 =
@@ -152,19 +152,19 @@ lookupBindParentUnder canonical c0 ref0 =
 -- | Set the binding parent for a node.
 --
 -- This overwrites any existing binding parent for the node.
-setBindParent :: NodeRef -> (NodeRef, BindFlag) -> Constraint -> Constraint
+setBindParent :: NodeRef -> (NodeRef, BindFlag) -> Constraint p -> Constraint p
 setBindParent child parentInfo c =
     c { cBindParents = IntMap.insert (nodeRefKey child) parentInfo (cBindParents c) }
 
 -- | Remove the binding parent for a node, making it a root.
-removeBindParent :: NodeRef -> Constraint -> Constraint
+removeBindParent :: NodeRef -> Constraint p -> Constraint p
 removeBindParent child c =
     c { cBindParents = IntMap.delete (nodeRefKey child) (cBindParents c) }
 
 -- | Convenience wrapper for collectBoundChildrenWithFlag that only accepts BindFlex.
 collectBoundChildren
     :: (NodeRef -> Maybe NodeId)
-    -> Constraint
+    -> Constraint p
     -> BindParents
     -> NodeRef
     -> String
@@ -172,7 +172,7 @@ collectBoundChildren
 collectBoundChildren childFilter =
     collectBoundChildrenWithFlag childFilter (== BindFlex)
 
-tyVarChildFilter :: Constraint -> NodeRef -> Maybe NodeId
+tyVarChildFilter :: Constraint p -> NodeRef -> Maybe NodeId
 tyVarChildFilter c ref = case ref of
     TypeRef nid ->
         case NodeAccess.lookupNode c nid of
@@ -183,7 +183,7 @@ tyVarChildFilter c ref = case ref of
 -- | Direct flexibly-bound TyVar children of a binder node.
 --
 -- This corresponds to Q(n) in the paper, restricted to variable nodes.
-boundFlexChildren :: Constraint -> NodeRef -> Either BindingError [NodeId]
+boundFlexChildren :: Constraint p -> NodeRef -> Either BindingError [NodeId]
 boundFlexChildren c binder = do
     unless (nodeRefExists c binder) $
         Left $
@@ -194,7 +194,7 @@ boundFlexChildren c binder = do
 -- | Quotient-aware variant of 'boundFlexChildren' (canonicalized binding tree).
 boundFlexChildrenUnder
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> NodeRef
     -> Either BindingError [NodeId]
 boundFlexChildrenUnder canonical c0 binder0 =
@@ -208,7 +208,7 @@ boundFlexChildrenUnder canonical c0 binder0 =
 -- in the xMLF translation.
 boundFlexChildrenAllUnder
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> NodeRef
     -> Either BindingError [NodeId]
 boundFlexChildrenAllUnder canonical c0 binder0 =
@@ -235,7 +235,7 @@ boundFlexChildrenAllUnder canonical c0 binder0 =
 -- quantifier still binds those variables.
 orderedBinders
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> NodeRef
     -> Either BindingError [NodeId]
 orderedBinders canonical c0 binder0 = do
@@ -284,7 +284,7 @@ orderedBinders canonical c0 binder0 = do
   where
     boundChildrenUnder
         :: (NodeId -> NodeId)
-        -> Constraint
+        -> Constraint p
         -> NodeRef
         -> Bool
         -> Either BindingError [NodeId]
@@ -296,7 +296,7 @@ orderedBinders canonical c0 binder0 = do
 
 orderBindersByDeps
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> IntMap.IntMap OrderKey.OrderKey
     -> [NodeId]
     -> Either BindingError [NodeId]
@@ -334,7 +334,7 @@ orderBindersByDeps canonical c0 orderKeys binders =
 -- | Compute a ForallSpec (binder count + bounds) for a forall node.
 forallSpecFromForall
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> NodeId
     -> Either BindingError ForallSpec
 forallSpecFromForall canonical c0 binder0 = do
@@ -354,8 +354,7 @@ forallSpecFromForall canonical c0 binder0 = do
                         Nothing -> Just (BoundNode bndC)
     pure
         ForallSpec
-            { fsBinderCount = length binders
-            , fsBounds = map boundFor binders
+            { fsBounds = map boundFor binders
             }
 
 -- | Check if a node is a binding root.
@@ -412,7 +411,7 @@ forallSpecFromForall canonical c0 binder0 = do
 --
 -- Scheme roots are the structural roots of each gen node's scope as determined
 -- by the binding tree. Root-only graphs keep empty schemes.
-rebuildGenNodesFromBinding :: Constraint -> Either BindingError (GenNodeMap GenNode)
+rebuildGenNodesFromBinding :: Constraint p -> Either BindingError (GenNodeMap GenNode)
 rebuildGenNodesFromBinding c0
     | null (toListNode nodes0) =
         pure $
@@ -443,7 +442,7 @@ rebuildGenNodesFromBinding c0
 --
 -- A term-DAG root is a node that has no incoming structure edge, i.e., no other
 -- node points to it via TyArrow dom/cod, TyForall body, or TyExp body.
-computeTermDagRoots :: Constraint -> IntSet
+computeTermDagRoots :: Constraint p -> IntSet
 computeTermDagRoots c =
     let nodes = cNodes c
         referencedNodes =
@@ -458,7 +457,7 @@ computeTermDagRoots c =
 --
 -- This mirrors 'computeTermDagRoots', but first rewrites each node/child
 -- through the provided canonicalization function and deduplicates via IntSet.
-computeTermDagRootsUnder :: (NodeId -> NodeId) -> Constraint -> IntSet
+computeTermDagRootsUnder :: (NodeId -> NodeId) -> Constraint p -> IntSet
 computeTermDagRootsUnder canonical c =
     let nodes = cNodes c
         rootIdOf = getNodeId . canonical
@@ -475,5 +474,5 @@ computeTermDagRootsUnder canonical c =
     in IntSet.difference allRoots referencedRoots
 
 -- | Get all NodeIds in the constraint.
-allNodeIds :: Constraint -> [NodeId]
+allNodeIds :: Constraint p -> [NodeId]
 allNodeIds c = map fst (toListNode (cNodes c))

@@ -46,29 +46,27 @@ data SolveError
     deriving (Eq, Show)
 
 -- | Result of draining unification edges without rewrite/elimination passes.
-data UnifyClosureResult = UnifyClosureResult
-    { ucConstraint :: Constraint
+data UnifyClosureResult p = UnifyClosureResult { ucConstraint :: Constraint p
     , ucUnionFind :: IntMap NodeId
     }
     deriving (Eq, Show)
 
-data SolveState = SolveState
-    { suConstraint :: Constraint
+data SolveState p = SolveState { suConstraint :: Constraint p
     , suUnionFind :: IntMap NodeId
     , suQueue :: [UnifyEdge]
     }
 
-type SolveM = StateT SolveState (Either SolveError)
+type SolveM p = StateT (SolveState p) (Either SolveError)
 
-runUnifyClosure :: TraceConfig -> Constraint -> Either SolveError UnifyClosureResult
+runUnifyClosure :: TraceConfig -> Constraint p -> Either SolveError (UnifyClosureResult p)
 runUnifyClosure traceCfg =
     runUnifyClosureWithSeed traceCfg IntMap.empty
 
 runUnifyClosureWithSeed
     :: TraceConfig
     -> IntMap NodeId
-    -> Constraint
-    -> Either SolveError UnifyClosureResult
+    -> Constraint p
+    -> Either SolveError (UnifyClosureResult p)
 runUnifyClosureWithSeed traceCfg ufSeed c0 = do
     let debugSolveBinding = traceBinding traceCfg
         probeIds = [NodeId 2, NodeId 3]
@@ -100,12 +98,11 @@ runUnifyClosureWithSeed traceCfg ufSeed c0 = do
                     case debugSolveBinding ("runUnifyClosure: post-check probe " ++ show probeInfo') () of
                         () -> pure ()
                     pure
-                        UnifyClosureResult
-                            { ucConstraint = preRewrite
+                        UnifyClosureResult { ucConstraint = preRewrite
                             , ucUnionFind = suUnionFind final
                             }
   where
-    loop :: SolveM ()
+    loop :: SolveM p ()
     loop = do
         q <- gets suQueue
         case q of
@@ -115,10 +112,10 @@ runUnifyClosureWithSeed traceCfg ufSeed c0 = do
                 processEdge e
                 loop
 
-    enqueue :: [UnifyEdge] -> SolveM ()
+    enqueue :: [UnifyEdge] -> SolveM p ()
     enqueue es = modify' $ \s -> s { suQueue = es ++ suQueue s }
 
-    equivalenceClasses :: IntMap NodeId -> Constraint -> [[NodeId]]
+    equivalenceClasses :: IntMap NodeId -> Constraint p -> [[NodeId]]
     equivalenceClasses uf c =
         let canonical = UnionFind.frWith uf
             allNodeIds = map fst (toListNode (cNodes c))
@@ -133,13 +130,13 @@ runUnifyClosureWithSeed traceCfg ufSeed c0 = do
                         allNodeIds
         in [ members | (_, members) <- grouped, length members > 1 ]
 
-    batchHarmonize :: SolveM ()
+    batchHarmonize :: SolveM p ()
     batchHarmonize = do
         uf <- gets suUnionFind
         c <- gets suConstraint
         mapM_ harmonizeClass (equivalenceClasses uf c)
 
-    harmonizeClass :: [NodeId] -> SolveM ()
+    harmonizeClass :: [NodeId] -> SolveM p ()
     harmonizeClass members = do
         cBefore <- gets suConstraint
         let refs = map typeRef members
@@ -147,7 +144,7 @@ runUnifyClosureWithSeed traceCfg ufSeed c0 = do
             Left err -> throwError (BindingTreeError err)
             Right (c', _trace) -> modify' $ \s -> s { suConstraint = c' }
 
-    processEdge :: UnifyEdge -> SolveM ()
+    processEdge :: UnifyEdge -> SolveM p ()
     processEdge (UnifyEdge l r) = do
         lRoot <- findRoot l
         rRoot <- findRoot r
@@ -183,7 +180,7 @@ runUnifyClosureWithSeed traceCfg ufSeed c0 = do
                 _ -> []
         _ -> []
 
-    solveUnifyStrategy :: UnifyCore.UnifyStrategy SolveM
+    solveUnifyStrategy :: UnifyCore.UnifyStrategy (SolveM p)
     solveUnifyStrategy = UnifyCore.UnifyStrategy
         { UnifyCore.usOccursCheck = UnifyCore.OccursCheck occursCheck
         , UnifyCore.usTyExpPolicy = UnifyCore.TyExpReject
@@ -192,7 +189,7 @@ runUnifyClosureWithSeed traceCfg ufSeed c0 = do
         , UnifyCore.usOnMismatch = solveOnMismatch
         }
 
-    solveForallArity :: NodeId -> SolveM (Maybe Int)
+    solveForallArity :: NodeId -> SolveM p (Maybe Int)
     solveForallArity nid = do
         cCur <- gets suConstraint
         uf0 <- gets suUnionFind
@@ -201,7 +198,7 @@ runUnifyClosureWithSeed traceCfg ufSeed c0 = do
             Right bs -> pure (Just (length bs))
             Left err -> throwError (BindingTreeError err)
 
-    solveRepresentative :: NodeId -> TyNode -> NodeId -> TyNode -> SolveM (NodeId, NodeId)
+    solveRepresentative :: NodeId -> TyNode -> NodeId -> TyNode -> SolveM p (NodeId, NodeId)
     solveRepresentative left leftNode right rightNode = do
         cCur <- gets suConstraint
         let leftElim = VarStore.isEliminatedVar cCur left
@@ -242,7 +239,7 @@ runUnifyClosureWithSeed traceCfg ufSeed c0 = do
                 | otherwise = (from0, to0)
         pure (from, to)
 
-    solveOnMismatch :: UnifyCore.UnifyMismatch -> SolveM UnifyCore.UnifyMismatchAction
+    solveOnMismatch :: UnifyCore.UnifyMismatch -> SolveM p UnifyCore.UnifyMismatchAction
     solveOnMismatch mismatch = case mismatch of
         UnifyCore.MismatchMissingNode nid ->
             throwError (MissingNode nid)
@@ -263,32 +260,32 @@ runUnifyClosureWithSeed traceCfg ufSeed c0 = do
         UnifyCore.MismatchTyConArity c k1 k2 ->
             throwError (TyConArityMismatch c k1 k2)
 
-    lookupNode :: NodeId -> SolveM TyNode
+    lookupNode :: NodeId -> SolveM p TyNode
     lookupNode nid = do
         nodes <- gets (cNodes . suConstraint)
         case lookupNodeIn nodes nid of
             Just n -> pure n
             Nothing -> throwError (MissingNode nid)
 
-    lookupNodeMaybe :: NodeId -> SolveM (Maybe TyNode)
+    lookupNodeMaybe :: NodeId -> SolveM p (Maybe TyNode)
     lookupNodeMaybe nid = do
         nodes <- gets (cNodes . suConstraint)
         pure (lookupNodeIn nodes nid)
 
-    findRoot :: NodeId -> SolveM NodeId
+    findRoot :: NodeId -> SolveM p NodeId
     findRoot nid = do
         uf <- gets suUnionFind
         let (root, uf') = UnionFind.findRootWithCompression uf nid
         modify' $ \s -> s { suUnionFind = uf' }
         pure root
 
-    unionNodes :: NodeId -> NodeId -> SolveM ()
+    unionNodes :: NodeId -> NodeId -> SolveM p ()
     unionNodes from to =
         when (from /= to) $
             modify' $ \s ->
                 s { suUnionFind = IntMap.insert (getNodeId from) to (suUnionFind s) }
 
-    occursCheck :: NodeId -> NodeId -> SolveM ()
+    occursCheck :: NodeId -> NodeId -> SolveM p ()
     occursCheck var target = do
         varRoot <- findRoot var
         targetRoot <- findRoot target

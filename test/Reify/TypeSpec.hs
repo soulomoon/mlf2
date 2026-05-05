@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 
 module Reify.TypeSpec (spec) where
@@ -7,6 +8,7 @@ import Data.List (isPrefixOf)
 import Data.Set qualified as Set
 import MLF.Constraint.Presolution.View (PresolutionView, fromSolved)
 import MLF.Constraint.Solved qualified as Solved
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..), getNodeId)
 import MLF.Frontend.Syntax (Expr (..), Lit (..), SurfaceExpr)
 import MLF.Reify.Type
@@ -31,8 +33,8 @@ import Test.Hspec
 pipelineFor :: SurfaceExpr -> IO PipelineArtifacts
 pipelineFor expr = requireRight (runPipelineArtifactsDefault Set.empty expr)
 
--- | Helper: build PresolutionView from a Solved value.
-viewFor :: Solved.Solved -> PresolutionView
+-- | Helper: build PresolutionView 'Raw from a Solved value.
+viewFor :: Solved.Solved -> PresolutionView 'Raw
 viewFor = fromSolved
 
 spec :: Spec

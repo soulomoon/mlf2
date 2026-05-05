@@ -49,7 +49,7 @@ orderKeysFromRootRestricted solved root0 allowed =
 -- instance-bound dependencies.
 orderKeysFromConstraintWith
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> NodeId
     -> Maybe IntSet.IntSet
     -> IntMap OrderKey

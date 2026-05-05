@@ -53,7 +53,7 @@ import MLF.Constraint.Presolution (PresolutionView(..))
 -- that contains @target@.
 --
 -- Returns 'Nothing' when @target@ is not transitively bound to @root@.
-contextToNodeBound :: PresolutionView -> NodeId -> NodeId -> Either ElabError (Maybe [ContextStep])
+contextToNodeBound :: PresolutionView p -> NodeId -> NodeId -> Either ElabError (Maybe [ContextStep])
 contextToNodeBound presolutionView root target = do
     let c = pvConstraint presolutionView
         canonicalNode = pvCanonical presolutionView
@@ -69,7 +69,7 @@ contextToNodeBound presolutionView root target = do
 contextToNodeBoundWithOrderKeys
     :: (NodeId -> NodeId)
     -> IntMap.IntMap Order.OrderKey
-    -> Constraint
+    -> Constraint p
     -> NodeId
     -> NodeId
     -> Either ElabError (Maybe [ContextStep])

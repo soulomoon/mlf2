@@ -108,17 +108,17 @@ Paper references:
     discusses the design choice of annotation-free let-polymorphism
 -}
 
-generateConstraints :: PolySyms -> NormSurfaceExpr -> Either ConstraintError ConstraintResult
+generateConstraints :: PolySyms -> NormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraints polySyms expr =
   generateConstraintsCore polySyms (desugarSurface expr)
 
 -- | Like 'generateConstraints' but with an external environment of
 -- pre-existing type assumptions for free variables.
-generateConstraintsWithEnv :: PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either ConstraintError ConstraintResult
+generateConstraintsWithEnv :: PolySyms -> ExternalEnv -> NormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraintsWithEnv polySyms extEnv expr =
   generateConstraintsCoreWithEnv polySyms extEnv (desugarSurface expr)
 
-generateConstraintsWithExternalBindings :: PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either ConstraintError ConstraintResult
+generateConstraintsWithExternalBindings :: PolySyms -> ExternalBindings -> NormSurfaceExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraintsWithExternalBindings polySyms extBindings expr =
   generateConstraintsCoreWithExternalBindings polySyms extBindings (desugarSurface expr)
 
@@ -127,12 +127,12 @@ generateConstraintsWithExternalBindings polySyms extBindings expr =
 -- This is primarily useful for regression tests that need to exercise
 -- core-only forms (for example bare coercion constants) that are not
 -- constructible through the surface parser/normalizer pipeline.
-generateConstraintsCore :: PolySyms -> NormCoreExpr -> Either ConstraintError ConstraintResult
+generateConstraintsCore :: PolySyms -> NormCoreExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraintsCore polySyms =
   generateConstraintsCoreWithEnv polySyms Map.empty
 
 -- | Like 'generateConstraintsCore' but with an external environment.
-generateConstraintsCoreWithEnv :: PolySyms -> ExternalEnv -> NormCoreExpr -> Either ConstraintError ConstraintResult
+generateConstraintsCoreWithEnv :: PolySyms -> ExternalEnv -> NormCoreExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraintsCoreWithEnv polySyms extEnv expr = do
   let extBindings =
         Map.map
@@ -145,7 +145,7 @@ generateConstraintsCoreWithEnv polySyms extEnv expr = do
           extEnv
   generateConstraintsCoreWithExternalBindings polySyms extBindings expr
 
-generateConstraintsCoreWithExternalBindings :: PolySyms -> ExternalBindings -> NormCoreExpr -> Either ConstraintError ConstraintResult
+generateConstraintsCoreWithExternalBindings :: PolySyms -> ExternalBindings -> NormCoreExpr -> Either ConstraintError (ConstraintResult p)
 generateConstraintsCoreWithExternalBindings polySyms extBindings expr = do
   let initialState = mkInitialStateWithPolySyms polySyms
   ((_rootGen, initialEnv, rootNode, annRoot), finalState) <-
@@ -153,8 +153,7 @@ generateConstraintsCoreWithExternalBindings polySyms extBindings expr = do
   let annEdges = collectAnnEdges annRoot
       constraint = (buildConstraint finalState) {cAnnEdges = annEdges}
   pure
-    ConstraintResult
-      { crConstraint = constraint,
+    ConstraintResult { crConstraint = constraint,
         crRoot = rootNode,
         crAnnotated = annRoot,
         crAnnSourceTypes = bsAnnSourceTypes finalState,

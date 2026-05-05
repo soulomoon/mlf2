@@ -124,8 +124,8 @@ buildAnchorResult (label, expr) = do
     norm <- firstShowE (normalizeExpr expr)
     ConstraintResult { crConstraint = c0 } <- firstShowE (generateConstraints Set.empty norm)
     let c1 = normalize c0
-    acyc <- firstShowE (checkAcyclicity c1)
-    pres <- firstShowE (computePresolution defaultTraceConfig acyc c1)
+    (cAcyclic, acyc) <- firstShowE (checkAcyclicity c1)
+    pres <- firstShowE (computePresolution defaultTraceConfig acyc cAcyclic)
     solved <- firstShowE (SolvedTest.solvedFromSnapshot (snapshotUnionFind pres) (snapshotConstraint pres))
     (_, ty) <- firstShowE (runPipelineElab Set.empty norm)
     pure FrozenAnchorResult

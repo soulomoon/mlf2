@@ -108,7 +108,7 @@ planEdge edge = do
 -- Ownership is always derived from the wrapped body root.  Synthesized
 -- wrappers no longer get a wrapper-root recovery path; missing body-root
 -- ownership fails fast so the planner remains thesis-authoritative.
-resolveSchemeOwnerGen :: (NodeId -> NodeId) -> Constraint -> ResolvedTyExp -> PresolutionM GenNodeId
+resolveSchemeOwnerGen :: (NodeId -> NodeId) -> Constraint p -> ResolvedTyExp -> PresolutionM GenNodeId
 resolveSchemeOwnerGen canonical constraint0 leftTyExp =
     findSchemeIntroducerM canonical constraint0 (rteBodyId leftTyExp)
 

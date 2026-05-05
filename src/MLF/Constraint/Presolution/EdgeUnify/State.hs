@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
 
 {- |
@@ -208,7 +209,7 @@ applyPendingWeaken nid0 = do
             Nothing -> pure False
             Just (_p, BindRigid) -> pure False
             Just _ ->
-                case GraphOps.applyWeaken (typeRef target) c0 of
+                case GraphOps.applyWeaken (TypeRefTag target) c0 of
                     Left MissingBindParent{} -> pure True
                     Left OperationOnLockedNode{} -> pure True
                     Left err -> throwError (BindingTreeError err)

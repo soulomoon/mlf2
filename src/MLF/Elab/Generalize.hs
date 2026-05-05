@@ -258,7 +258,7 @@ inlineRigidTypes rigidBounds = go Set.empty
       TMu v body -> TMu v (go seen body)
 
 applyGeneralizePlan ::
-  GeneralizePlan ->
+  GeneralizePlan p ->
   ReifyPlan ->
   Either ElabError (ElabScheme, IntMap.IntMap String)
 applyGeneralizePlan plan reifyPlanWrapper = do
@@ -273,8 +273,7 @@ applyGeneralizePlan plan reifyPlanWrapper = do
           gpReachableFromWithBounds = reachableFromWithBounds,
           gpBindParents = bindParents
         } = plan
-      GeneralizeEnv
-        { geConstraint = constraint,
+      GeneralizeEnv { geConstraint = constraint,
           geOriginalConstraint = originalConstraint,
           geNodes = nodes,
           geCanonical = canonical,

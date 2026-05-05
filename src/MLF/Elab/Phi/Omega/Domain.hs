@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {- |
 Module      : MLF.Elab.Phi.Omega.Domain
 Description : Omega binder-domain and replay lookup helpers
@@ -24,6 +25,7 @@ import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Types
 import MLF.Util.Trace (TraceConfig)
@@ -31,11 +33,11 @@ import MLF.Util.Trace (TraceConfig)
 -- | Shared context for Omega/Step interpretation.
 data OmegaContext = OmegaContext
     { ocTraceConfig :: TraceConfig
-    , ocPresolutionView :: PresolutionView
+    , ocPresolutionView :: PresolutionView 'Raw
     , ocReifyBoundWithNames :: IntMap.IntMap String -> NodeId -> Either ElabError ElabType
     , ocReifyTypeWithNamedSetNoFallback :: IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
     , ocCopyMap :: IntMap.IntMap NodeId
-    , ocGaParents :: Maybe GaBindParents
+    , ocGaParents :: Maybe (GaBindParents 'Raw)
     , ocTrace :: Maybe EdgeTrace
     , ocSchemeInfo :: Maybe SchemeInfo
     , ocTraceBinderSources :: IntSet.IntSet

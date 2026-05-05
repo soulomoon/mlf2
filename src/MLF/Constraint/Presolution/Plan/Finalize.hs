@@ -46,7 +46,7 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.BindingUtil (firstGenAncestorFrom)
-import MLF.Constraint.Presolution.Plan.Context (GaBindParents (..), GeneralizeEnv, traceGeneralize)
+import MLF.Constraint.Presolution.Plan.Context (GaBindParents (..), GeneralizeEnv (..), traceGeneralize)
 import MLF.Constraint.Presolution.Plan.Normalize
   ( containsForall,
     isBaseBound,
@@ -75,9 +75,9 @@ import MLF.Util.Names (alphaName, parseNameId)
 import Text.Read (readMaybe)
 
 -- | Inputs needed to finalize a generalized scheme.
-data FinalizeInput = FinalizeInput
-  { fiEnv :: GeneralizeEnv,
-    fiConstraint :: Constraint,
+data FinalizeInput p = FinalizeInput
+  { fiEnv :: GeneralizeEnv p,
+    fiConstraint :: Constraint p,
     fiCanonical :: NodeId -> NodeId,
     fiBindParents :: BindParents,
     fiScopeRootC :: NodeRef,
@@ -85,7 +85,7 @@ data FinalizeInput = FinalizeInput
     fiTypeRootC :: NodeId,
     fiScopeGen :: Maybe GenNodeId,
     fiFirstGenAncestorGa :: NodeRef -> Maybe GenNodeId,
-    fiBindParentsGa :: Maybe GaBindParents,
+    fiBindParentsGa :: Maybe (GaBindParents p),
     fiSolvedToBasePref :: IntMap.IntMap NodeId,
     fiGammaAlias :: IntMap.IntMap Int,
     fiNamedUnderGaSet :: IntSet.IntSet,
@@ -96,7 +96,7 @@ data FinalizeInput = FinalizeInput
     fiTyRaw :: ElabType
   }
 
-finalizeScheme :: FinalizeInput -> Either ElabError (ElabScheme, IntMap.IntMap String)
+finalizeScheme :: FinalizeInput p -> Either ElabError (ElabScheme, IntMap.IntMap String)
 finalizeScheme FinalizeInput {..} =
   let env = fiEnv
       constraint = fiConstraint

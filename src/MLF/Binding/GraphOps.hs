@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {- |
 Module      : MLF.Binding.GraphOps
 Description : Paper ω binding-tree operations as pure graph transformations
@@ -58,19 +59,10 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness (InstanceOp (..))
 import MLF.Binding.Tree (isUnderRigidBinder, lookupBindParent, setBindParent, bindingPathToRoot, isBindingRoot)
 
-expectTypeRef :: NodeRef -> Either BindingError NodeId
-expectTypeRef ref = case ref of
-    TypeRef nid -> Right nid
-    GenRef _ ->
-        Left $
-            InvalidBindingTree $
-                "binding-tree operation expects a type node, got gen node " ++ show ref
-
-
 -- | Get the binding flag for a node.
 --
 -- Returns 'Nothing' if the node is a binding root.
-getBindFlag :: Constraint -> NodeRef -> Maybe BindFlag
+getBindFlag :: Constraint p -> NodeRef -> Maybe BindFlag
 getBindFlag c nid = fmap snd (lookupBindParent c nid)
 
 -- | Check if a node is instantiable (all-flexible binding path).
@@ -81,7 +73,7 @@ getBindFlag c nid = fmap snd (lookupBindParent c nid)
 --
 -- Paper reference: instantiable nodes have no rigid edges on their binding
 -- path (full-flexible flag path).
-isInstantiable :: Constraint -> NodeRef -> Either BindingError Bool
+isInstantiable :: Constraint p -> NodeRef -> Either BindingError Bool
 isInstantiable c nid = do
     -- Check if it's a root (roots cannot be raised)
     if isBindingRoot c nid
@@ -106,7 +98,7 @@ isInstantiable c nid = do
 -- Note: Raise operations in this module check only *strict* rigid ancestors
 -- via `isUnderRigidBinder`, so a restricted node (own edge rigid) is treated
 -- as locked here but can still be raised.
-isLocked :: Constraint -> NodeRef -> Either BindingError Bool
+isLocked :: Constraint p -> NodeRef -> Either BindingError Bool
 isLocked c nid = do
     instantiable <- isInstantiable c nid
     return (not instantiable)
@@ -122,9 +114,10 @@ isLocked c nid = do
 -- Returns the updated constraint and the operation that was applied.
 --
 -- Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.1)
-applyWeaken :: NodeRef -> Constraint -> Either BindingError (Constraint, InstanceOp)
-applyWeaken nid c = do
-    _ <- expectTypeRef nid
+applyWeaken :: NodeRefTag 'TypeTag -> Constraint p -> Either BindingError (Constraint p, InstanceOp)
+applyWeaken tag c = do
+    let nid = TypeRef (nodeIdFromTypeRef tag)
+        nidT = nodeIdFromTypeRef tag
     -- Check that the node has a binding parent
     case lookupBindParent c nid of
         Nothing -> Left $ MissingBindParent nid
@@ -132,7 +125,6 @@ applyWeaken nid c = do
         Just (parent, BindFlex) -> do
     -- Change the flag to rigid and remember this binder was weakened.
             let c' = setBindParent nid (parent, BindRigid) c
-            nidT <- expectTypeRef nid
             let c'' = c' { cWeakenedVars = IntSet.insert (getNodeId nidT) (cWeakenedVars c') }
             return (c'', OpWeaken nidT)
 
@@ -154,9 +146,10 @@ applyWeaken nid c = do
 --
 -- Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.1)
 -- "slide over" semantics
-applyRaiseStep :: NodeRef -> Constraint -> Either BindingError (Constraint, Maybe InstanceOp)
-applyRaiseStep nid c = do
-    nidT <- expectTypeRef nid
+applyRaiseStep :: NodeRefTag 'TypeTag -> Constraint p -> Either BindingError (Constraint p, Maybe InstanceOp)
+applyRaiseStep tag c = do
+    let nid = TypeRef (nodeIdFromTypeRef tag)
+        nidT = nodeIdFromTypeRef tag
     -- Check that the node has a binding parent
     case lookupBindParent c nid of
         Nothing -> Left $ MissingBindParent nid
@@ -194,30 +187,27 @@ applyRaiseStep nid c = do
 -- Returns the updated constraint and the list of Raise operations applied.
 --
 -- Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.1)
-applyRaiseTo :: NodeRef -> NodeRef -> Constraint -> Either BindingError (Constraint, [InstanceOp])
-applyRaiseTo nid target c = do
+applyRaiseTo :: NodeRefTag 'TypeTag -> NodeRef -> Constraint p -> Either BindingError (Constraint p, [InstanceOp])
+applyRaiseTo tag target c = do
+    let nid = TypeRef (nodeIdFromTypeRef tag)
     -- Verify target is an ancestor of nid
     path <- bindingPathToRoot c nid
     let pathSet = IntSet.fromList $ map nodeRefKey path
     if not (IntSet.member (nodeRefKey target) pathSet)
-        then Left $ InvalidBindingTree $ 
+        then Left $ InvalidBindingTree $
             "Target " ++ show target ++
             " is not an ancestor of " ++ show nid
-        else go c []
+        else go nid c []
   where
-    go constraint ops = do
-        -- Check current parent
+    go nid constraint ops =
         case lookupBindParent constraint nid of
             Nothing -> Left $ MissingBindParent nid
             Just (parent, _) ->
                 if parent == target
                     then return (constraint, reverse ops)
                     else do
-                        -- Apply one raise step
-                        (constraint', mOp) <- applyRaiseStep nid constraint
+                        (constraint', mOp) <- applyRaiseStep tag constraint
                         case mOp of
-                            Nothing -> 
-                                -- Can't raise further (parent is root)
-                                -- This shouldn't happen if target is a proper ancestor
+                            Nothing ->
                                 Left $ RaiseNotPossible nid
-                            Just op -> go constraint' (op : ops)
+                            Just op -> go nid constraint' (op : ops)

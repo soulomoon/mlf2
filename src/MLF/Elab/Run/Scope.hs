@@ -16,8 +16,7 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution (PresolutionView)
 import MLF.Constraint.Types.Graph
-  ( BindingError (..),
-    Constraint,
+  ( BindingError (..), Constraint,
     NodeId (..),
     NodeRef (..),
     TyNode (..),
@@ -54,7 +53,7 @@ Conclusion: the pipeline is thesis-aligned and propagates binding-tree errors
 consistently through original-constraint scope selection and canonical scope
 resolution without a redundant second binding-tree lookup.
 -}
-bindingScopeRef :: Constraint -> NodeId -> Either BindingError NodeRef
+bindingScopeRef :: Constraint p -> NodeId -> Either BindingError NodeRef
 bindingScopeRef constraint root = do
   path <- Binding.bindingPathToRoot constraint (typeRef root)
   case listToMaybe [gid | GenRef gid <- drop 1 path] of
@@ -62,7 +61,7 @@ bindingScopeRef constraint root = do
     Nothing -> Right (TypeRef root)
 
 -- | Canonical-domain variant of 'bindingScopeRef' that traverses canonical bind-parents from a presolution view.
-bindingScopeRefCanonical :: PresolutionView -> NodeId -> Either BindingError NodeRef
+bindingScopeRefCanonical :: PresolutionView p -> NodeId -> Either BindingError NodeRef
 bindingScopeRefCanonical presolutionView root =
   bindingScopeRef (ChiQuery.chiCanonicalConstraint presolutionView) root
 
@@ -95,7 +94,7 @@ data TargetUnwrapInfo = TargetUnwrapInfo
     tuiBoundNode :: Maybe TyNode
   }
 
-targetUnwrapInfo :: PresolutionView -> NodeId -> TargetUnwrapInfo
+targetUnwrapInfo :: PresolutionView p -> NodeId -> TargetUnwrapInfo
 targetUnwrapInfo presolutionView target =
   let canonical = ChiQuery.chiCanonical presolutionView
       targetC = canonical target
@@ -111,7 +110,7 @@ targetUnwrapInfo presolutionView target =
           tuiBoundNode = boundNode
         }
 
-generalizeTargetNode :: PresolutionView -> NodeId -> NodeId
+generalizeTargetNode :: PresolutionView p -> NodeId -> NodeId
 generalizeTargetNode presolutionView target =
   let canonical = ChiQuery.chiCanonical presolutionView
       info = targetUnwrapInfo presolutionView target
@@ -124,7 +123,7 @@ generalizeTargetNode presolutionView target =
         Just TyForall {tnBody = body} -> canonical body
         _ -> tuiTargetCanonical info
 
-schemeBodyTarget :: PresolutionView -> NodeId -> NodeId
+schemeBodyTarget :: PresolutionView p -> NodeId -> NodeId
 schemeBodyTarget presolutionView target =
   let constraint = ChiQuery.chiConstraint presolutionView
       canonical = ChiQuery.chiCanonical presolutionView
@@ -184,7 +183,7 @@ Redirect chasing and UF canonicalization preserve ga′ through the pipeline:
      Existing tests in PipelineSpec verify no stale (pre-redirect) nodes
      remain after annotation rewriting.
 -}
-canonicalizeScopeRef :: PresolutionView -> IntMap.IntMap NodeId -> NodeRef -> NodeRef
+canonicalizeScopeRef :: PresolutionView p -> IntMap.IntMap NodeId -> NodeRef -> NodeRef
 canonicalizeScopeRef presolutionView redirects scopeRef =
   case scopeRef of
     GenRef gid -> GenRef gid
@@ -192,12 +191,12 @@ canonicalizeScopeRef presolutionView redirects scopeRef =
       let canonical = ChiQuery.chiCanonical presolutionView
        in TypeRef (canonical (chaseRedirects redirects nid))
 
-resolveCanonicalScope :: Constraint -> PresolutionView -> IntMap.IntMap NodeId -> NodeId -> Either BindingError NodeRef
+resolveCanonicalScope :: Constraint p -> PresolutionView p -> IntMap.IntMap NodeId -> NodeId -> Either BindingError NodeRef
 resolveCanonicalScope constraint presolutionView redirects scopeRoot = do
   scope0 <- bindingScopeRef constraint scopeRoot
   pure (canonicalizeScopeRef presolutionView redirects scope0)
 
-letScopeOverrides :: Constraint -> Constraint -> PresolutionView -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
+letScopeOverrides :: Constraint p -> Constraint p -> PresolutionView p -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
 letScopeOverrides base solvedForGen presolutionView redirects ann =
   let canonical = ChiQuery.chiCanonical presolutionView
       addOverride acc schemeRootId =

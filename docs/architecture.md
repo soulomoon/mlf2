@@ -105,6 +105,37 @@ after eMLF type recovery.
 - `Expansion` — presolution recipes (identity, forall-intro, instantiation, composition)
 - `EdgeWitness` — per-edge xMLF instantiation reconstruction metadata
 
+## Type-level safety invariants
+
+The codebase uses GADTs, DataKinds, and the `singletons` library to encode
+runtime invariants as compile-time types:
+
+- **`NodeRef` GADT** (`MLF.Constraint.Types.Graph`): `NodeRef` is indexed by a
+  `RefTag` kind (`TypeTag | GenTag`). `TypeRef :: NodeId -> NodeRef 'TypeTag`
+  and `GenRef :: GenNodeId -> NodeRef 'GenTag` statically distinguish type-node
+  references from gen-node references. Functions that only accept type nodes use
+  `NodeRef 'TypeTag`.
+
+- **Phase-indexed `Constraint`** (`MLF.Constraint.Types.Graph`): `Constraint` is
+  parameterized by a phantom `Phase` (`'Raw | 'Normalized | 'Acyclic | 'Presolved | 'Solved`).
+  The `Phase` kind is defined in `MLF.Constraint.Types.Phase` with `singletons-th`
+  generated singletons. The main phase entrypoints now make the phase progression
+  explicit: normalization returns `Constraint 'Normalized`, acyclicity checking
+  returns `Constraint 'Acyclic`, presolution returns `Constraint 'Presolved`,
+  and solve consumes presolved constraints to produce the opaque `Solved`
+  abstraction. Directional transition helpers in `MLF.Constraint.Types.Graph`
+  encode those boundaries; `castConstraint` remains only as a quarantined legacy
+  escape hatch, and raw-view bridges are named where older elaboration/query code
+  still expects the historical raw surface.
+
+- **`ForallSpec`** (`MLF.Constraint.Types.Witness`): `fsBinderCount` was removed;
+  binder count is derived from `length fsBounds`. `mkForallSpec` validates
+  non-empty bounds.
+
+- **Witness smart constructors** (`MLF.Constraint.Types.Witness`):
+  `mkEdgeWitness` and `mkInstanceWitness` validate well-formedness at
+  construction time. `WitnessError` describes invariant violations.
+
 ## Shared ownership notes
 
 - Core graph node/edge/binding identifiers and types live in `MLF.Constraint.Types.Graph`; witness metadata lives in `MLF.Constraint.Types.Witness`; presolution-only state/types live in `MLF.Constraint.Types.Presolution`. `MLF.Constraint.Types` re-exports these for compatibility.

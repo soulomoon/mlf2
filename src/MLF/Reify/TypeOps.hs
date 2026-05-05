@@ -635,7 +635,7 @@ matchType binderSet = goMatch Map.empty Map.empty
       _ -> Left (InstantiationError "matchType: structure mismatch")
 
 resolveBaseBoundForInstConstraint ::
-  Constraint ->
+  Constraint p ->
   (NodeId -> NodeId) ->
   NodeId ->
   Maybe NodeId
@@ -664,7 +664,7 @@ resolveBaseBoundForInstSolved solved =
 
 resolveBoundBodyConstraint ::
   (NodeId -> NodeId) ->
-  Constraint ->
+  Constraint p ->
   IntSet.IntSet ->
   NodeId ->
   NodeId
@@ -679,7 +679,7 @@ resolveBoundBodyConstraint canonical constraint visited0 start =
                 Nothing -> nid
    in go visited0 start
 
-inlineBaseBoundsType :: Constraint -> (NodeId -> NodeId) -> ElabType -> ElabType
+inlineBaseBoundsType :: Constraint p -> (NodeId -> NodeId) -> ElabType -> ElabType
 inlineBaseBoundsType constraint canonical = cataIx alg
   where
     alg :: TyIF i Ty -> Ty i

@@ -37,7 +37,7 @@ traceBinderPlanEnabledM :: Bool -> String -> Either ElabError ()
 traceBinderPlanEnabledM enabled msg =
   traceBinderPlanEnabled enabled msg (Right ())
 
-buildBinderPlan :: BinderPlanInput -> Either ElabError BinderPlan
+buildBinderPlan :: BinderPlanInput p -> Either ElabError BinderPlan
 buildBinderPlan BinderPlanInput {..} = do
   let traceGeneralize = traceBinderPlanEnabled bpiDebugEnabled
       traceGeneralizeM = traceBinderPlanEnabledM bpiDebugEnabled
@@ -169,8 +169,7 @@ buildBinderPlan BinderPlanInput {..} = do
             ]
   let typeRootForScheme = liftToForall typeRoot
       aliasEnv =
-        AliasEnv
-          { aeCanonical = canonical,
+        AliasEnv { aeCanonical = canonical,
             aeConstraint = constraint,
             aeNodes = cNodes constraint,
             aeBindParents = bindParents,

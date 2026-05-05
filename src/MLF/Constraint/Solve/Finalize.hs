@@ -27,7 +27,7 @@ import qualified MLF.Util.UnionFind as UnionFind
 
 -- | Apply snapshot finalization steps to a pre-rewrite constraint and
 -- union-find map without running unification.
-finalizeConstraintWithUF :: IntMap NodeId -> Constraint -> Either SolveError SolveResult
+finalizeConstraintWithUF :: IntMap NodeId -> Constraint p -> Either SolveError (SolveResult p)
 finalizeConstraintWithUF uf preRewrite = do
     let rewritten = rewriteConstraintWithUF uf preRewrite
     (rewritten', elimSubst) <- case rewriteEliminatedBinders rewritten of
@@ -54,7 +54,7 @@ applyElimSubstToUF uf subst =
         uf
         subst
 
-repairNonUpperParents :: Constraint -> Constraint
+repairNonUpperParents :: Constraint p -> Constraint p
 repairNonUpperParents c =
     let bindParents0 = cBindParents c
         nodes = cNodes c
@@ -108,7 +108,7 @@ repairNonUpperParents c =
         bindParents1 = IntMap.mapWithKey fixOne bindParents0
     in c { cBindParents = bindParents1 }
 
-pruneBindParentsToLive :: Constraint -> Constraint
+pruneBindParentsToLive :: Constraint p -> Constraint p
 pruneBindParentsToLive c =
     let nodes = cNodes c
         genNodes = cGenNodes c
@@ -126,10 +126,10 @@ pruneBindParentsToLive c =
 
 -- | Rewrite every node/edge to UF representatives and collapse duplicates,
 -- preferring structured nodes when both sides share an id.
-rewriteConstraintWithUF :: IntMap NodeId -> Constraint -> Constraint
+rewriteConstraintWithUF :: IntMap NodeId -> Constraint p -> Constraint p
 rewriteConstraintWithUF = applyUFConstraint
 
-applyUFConstraint :: IntMap NodeId -> Constraint -> Constraint
+applyUFConstraint :: IntMap NodeId -> Constraint p -> Constraint p
 applyUFConstraint uf c =
     let canonical = frWith uf
         nodes' = IntMap.fromListWith Canonicalize.chooseRepNode (map rewriteNode (NodeAccess.allNodes c))
@@ -222,7 +222,7 @@ applyUFConstraint uf c =
         in GenNodeMap
             (IntMap.fromListWith const (map rewriteOne (IntMap.elems (getGenNodeMap gen0))))
 
-rewriteEliminatedBinders :: Constraint -> Either BindingError (Constraint, IntMap NodeId)
+rewriteEliminatedBinders :: Constraint p -> Either BindingError (Constraint p, IntMap NodeId)
 rewriteEliminatedBinders c0
     | IntSet.null elims0 =
         pure (c0, IntMap.empty)
@@ -478,20 +478,20 @@ frWith :: IntMap NodeId -> NodeId -> NodeId
 frWith = UnionFind.frWith
 
 -- | Debug validator for solved-graph invariants. Returns an empty list on success.
-validateSolvedGraph :: SolveResult -> [String]
+validateSolvedGraph :: SolveResult p -> [String]
 validateSolvedGraph SolveResult { srConstraint = c, srUnionFind = uf } =
     validateWith ValidateOpts { voCheckInstEdges = False }
         SolveResult { srConstraint = c, srUnionFind = uf }
 
 -- | Strict variant that also requires instantiation edges to be gone.
-validateSolvedGraphStrict :: SolveResult -> [String]
+validateSolvedGraphStrict :: SolveResult p -> [String]
 validateSolvedGraphStrict = validateWith ValidateOpts { voCheckInstEdges = True }
 
 data ValidateOpts = ValidateOpts
     { voCheckInstEdges :: Bool
     }
 
-validateWith :: ValidateOpts -> SolveResult -> [String]
+validateWith :: ValidateOpts -> SolveResult p -> [String]
 validateWith opts SolveResult { srConstraint = c, srUnionFind = uf } =
     concat
         [ tyExpViolations

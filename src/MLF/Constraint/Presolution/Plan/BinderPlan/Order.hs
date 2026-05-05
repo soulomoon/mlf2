@@ -21,9 +21,9 @@ import MLF.Util.Graph (topoSortBy)
 import qualified MLF.Util.Order as Order
 import MLF.Util.Trace (traceWhen)
 
-data GaBindParentsInfo = GaBindParentsInfo
+data GaBindParentsInfo p = GaBindParentsInfo
     { gbiBindParentsBase :: BindParents
-    , gbiBaseConstraint :: Constraint
+    , gbiBaseConstraint :: Constraint p
     , gbiBaseToSolved :: IntMap.IntMap NodeId
     , gbiSolvedToBase :: IntMap.IntMap NodeId
     }
@@ -31,9 +31,9 @@ data GaBindParentsInfo = GaBindParentsInfo
 -- | Order binder candidates topologically by their bound dependencies.
 orderBinderCandidates
     :: Bool
-    -> Maybe GaBindParentsInfo
+    -> Maybe (GaBindParentsInfo p)
     -> (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> NodeId
     -> NodeId
     -> [Int]

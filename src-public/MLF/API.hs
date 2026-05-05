@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 -- |
@@ -82,6 +83,7 @@ import MLF.Constraint.Types.Graph
     lookupNode,
     toListNode,
   )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Frontend.Normalize
   ( NormalizationError (..),
     normalizeExpr,
@@ -113,9 +115,9 @@ import MLF.Frontend.Syntax
 import MLF.Frontend.Syntax.Program (LocatedProgram, Program, ProgramSpanIndex, SourcePosition, SourceSpan)
 
 -- | Number of type nodes in a constraint graph.
-constraintNodeCount :: Constraint -> Int
+constraintNodeCount :: Constraint 'Raw -> Int
 constraintNodeCount = length . toListNode . cNodes
 
 -- | Total number of edges (instantiation + unification) in a constraint graph.
-constraintEdgeCount :: Constraint -> Int
+constraintEdgeCount :: Constraint 'Raw -> Int
 constraintEdgeCount c = length (cInstEdges c) + length (cUnifyEdges c)

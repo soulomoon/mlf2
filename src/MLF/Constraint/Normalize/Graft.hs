@@ -97,7 +97,7 @@ See also:
 -}
 
 -- | Process instantiation edges by grafting structure onto variables.
-graftInstEdges :: NormalizeM ()
+graftInstEdges :: NormalizeM p ()
 graftInstEdges = do
   c <- gets nsConstraint
   let edges = cInstEdges c
@@ -131,7 +131,7 @@ graftInstEdges = do
 -- | Partition edges into (graftable, non-graftable).
 -- An edge is graftable if we can structurally transform it without needing
 -- presolution decisions. See Note [Grafting Cases].
-partitionGraftable :: [InstEdge] -> NodeMap TyNode -> NormalizeM ([InstEdge], [InstEdge])
+partitionGraftable :: [InstEdge] -> NodeMap TyNode -> NormalizeM p ([InstEdge], [InstEdge])
 partitionGraftable edges nodes = do
   polySyms <- gets (cPolySyms . nsConstraint)
   uf <- gets nsUnionFind
@@ -229,7 +229,7 @@ error reporting to a later phase with better diagnostics.
 
 -- | Graft a single edge, returning new unification edges.
 -- Returns Nothing if the edge represents a type error that should be kept.
-graftEdge :: InstEdge -> NormalizeM (Maybe [UnifyEdge])
+graftEdge :: InstEdge -> NormalizeM p (Maybe [UnifyEdge])
 graftEdge edge = do
   c <- gets nsConstraint
   uf <- gets nsUnionFind

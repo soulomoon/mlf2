@@ -12,7 +12,7 @@ import qualified Data.IntSet as IntSet
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Types.Graph (Constraint, NodeId(..), TyNode(..), getNodeId)
 
-buildCanonicalMap :: IntMap NodeId -> Constraint -> IntMap NodeId
+buildCanonicalMap :: IntMap NodeId -> Constraint p -> IntMap NodeId
 buildCanonicalMap uf constraint =
     let nodeKeys = map (getNodeId . tnId) (NodeAccess.allNodes constraint)
         allKeys = IntSet.toList (IntSet.fromList (nodeKeys ++ IntMap.keys uf))

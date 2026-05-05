@@ -23,15 +23,15 @@ import MLF.Constraint.Presolution.Plan.BinderPlan (GaBindParentsInfo(..), firstS
 import MLF.Constraint.BindingUtil (firstGenAncestorFrom)
 import qualified MLF.Util.Order as Order
 
-data GammaPlanInput = GammaPlanInput
+data GammaPlanInput p = GammaPlanInput
     { gpiDebugEnabled :: Bool
-    , gpiConstraint :: Constraint
+    , gpiConstraint :: Constraint p
     , gpiNodes :: IntMap.IntMap TyNode
     , gpiCanonical :: NodeId -> NodeId
     , gpiCanonKey :: NodeId -> Int
     , gpiIsTyVarKey :: Int -> Bool
     , gpiBindParents :: BindParents
-    , gpiBindParentsGa :: Maybe GaBindParentsInfo
+    , gpiBindParentsGa :: Maybe (GaBindParentsInfo p)
     , gpiScopeGen :: Maybe GenNodeId
     , gpiTarget0 :: NodeId
     , gpiTargetBound :: Maybe NodeId
@@ -68,7 +68,7 @@ data GammaPlan = GammaPlan
 tracePlanEnabled :: Bool -> String -> a -> a
 tracePlanEnabled = traceWhen
 
-buildGammaPlan :: GammaPlanInput -> GammaPlan
+buildGammaPlan :: GammaPlanInput p -> GammaPlan
 buildGammaPlan GammaPlanInput{..} =
     let tracePlan = tracePlanEnabled gpiDebugEnabled
         constraint = gpiConstraint

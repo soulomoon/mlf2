@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE LambdaCase #-}
 
@@ -14,9 +15,10 @@ import Data.Maybe (isJust)
 import Data.Set qualified as Set
 import MLF.Binding.GraphOps qualified as GraphOps
 import MLF.Binding.Tree qualified as Binding
-import MLF.Constraint.Acyclicity (AcyclicityResult (..), checkAcyclicity)
+import MLF.Constraint.Acyclicity (AcyclicityResult (..))
+import MLF.Constraint.Acyclicity qualified as Acyclicity
 import MLF.Constraint.Inert qualified as Inert
-import MLF.Constraint.Normalize (normalize)
+import MLF.Constraint.Normalize qualified as Normalize
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionError (..), PresolutionResult (..), PresolutionView (..))
 import MLF.Constraint.Presolution.TestSupport
   ( CopyMapping (..),
@@ -38,14 +40,16 @@ import MLF.Constraint.Presolution.Witness
     reorderWeakenWithEnv,
     validateNormalizedWitness,
   )
-import MLF.Constraint.Solve (SolveResult (..), frWith, solveUnify)
+import MLF.Constraint.Solve (SolveError, SolveResult (..), frWith, solveUnifyResult)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Frontend.ConstraintGen (ConstraintResult (..))
 import MLF.Frontend.Syntax qualified as Surf
+import MLF.Elab.Pipeline (TraceConfig)
 import Presolution.Util (mkNormalizeConstraint, mkNormalizeEnv)
 import SpecUtil
   ( PipelineArtifacts (..),
@@ -61,6 +65,15 @@ import SpecUtil
   )
 import Test.Hspec
 import Test.QuickCheck
+
+checkAcyclicity :: Constraint 'Raw -> Either Acyclicity.CycleError AcyclicityResult
+checkAcyclicity = fmap snd . Acyclicity.checkAcyclicity . toNormalizedConstraint
+
+solveUnify :: TraceConfig -> Constraint p -> Either SolveError (SolveResult p)
+solveUnify = solveUnifyResult
+
+normalize :: Constraint 'Raw -> Constraint 'Raw
+normalize = toRawConstraintForLegacy . Normalize.normalize
 
 spec :: Spec
 spec = describe "Thesis obligation property evidence" $
@@ -217,7 +230,7 @@ propGraphWeaken :: Int -> Property
 propGraphWeaken size =
   let c = chainConstraint size
       nid = typeRef (NodeId (size - 1))
-   in case GraphOps.applyWeaken nid c of
+   in case GraphOps.applyWeaken (TypeRefTag (NodeId (size - 1))) c of
         Right (c', _) ->
           conjoin
             [ Binding.checkBindingTree c' === Right (),
@@ -230,7 +243,7 @@ propGraphRaiseStep size =
   let c = chainConstraint size
       nid = typeRef (NodeId (size - 1))
       grandparent = typeRef (NodeId (size - 3))
-   in case GraphOps.applyRaiseStep nid c of
+   in case GraphOps.applyRaiseStep (TypeRefTag (NodeId (size - 1))) c of
         Right (c', Just _) ->
           conjoin
             [ Binding.checkBindingTree c' === Right (),
@@ -243,7 +256,7 @@ propGraphRaiseTo size =
   let c = chainConstraint size
       nid = typeRef (NodeId (size - 1))
       target = typeRef (NodeId 0)
-   in case GraphOps.applyRaiseTo nid target c of
+   in case GraphOps.applyRaiseTo (TypeRefTag (NodeId (size - 1))) target c of
         Right (c', ops) ->
           conjoin
             [ counterexample (show ops) (not (null ops)),
@@ -834,7 +847,7 @@ propExpDecide size =
           other -> counterexample (show other) False,
       assertMinimalDecision "compose" cCompose expCompose targetForall2 $ \(expansion, unifications) ->
         case expansion of
-          ExpCompose (ExpInstantiate args :| [ExpForall (ForallSpec 2 [Nothing, Nothing] :| [])]) ->
+          ExpCompose (ExpInstantiate args :| [ExpForall (ForallSpec [Nothing, Nothing] :| [])]) ->
             conjoin
               [ counterexample (show args) (length args === 1),
                 unifications === []
@@ -842,7 +855,7 @@ propExpDecide size =
           other -> counterexample (show other) False,
       assertMinimalDecision "forall-intro" cForallIntro expForallIntro targetForallIntro $ \(expansion, unifications) ->
         conjoin
-          [ expansion === ExpForall (ForallSpec 2 [Nothing, Nothing] :| []),
+          [ expansion === ExpForall (ForallSpec [Nothing, Nothing] :| []),
             unifications === []
           ]
     ]
@@ -1173,7 +1186,7 @@ propCopyInst size =
               Left err -> counterexample (show err) False
    in conjoin [directCopy, recordedTrace]
 
-edgeTraceCopyEvidence :: Constraint -> EdgeTrace -> Property
+edgeTraceCopyEvidence :: Constraint 'Raw -> EdgeTrace -> Property
 edgeTraceCopyEvidence c tr =
   let copyPairs = IntMap.toList (getCopyMapping (etCopyMap tr))
       binderPairs = etBinderArgs tr
@@ -1332,7 +1345,7 @@ propEdgeWitnessOps expr predicate =
        in counterexample (show values) (predicate values)
     Left err -> counterexample err False
 
-acyclicConstraint :: Int -> Constraint
+acyclicConstraint :: Int -> Constraint 'Raw
 acyclicConstraint size =
   rootedConstraintLocal
     emptyConstraint
@@ -1345,7 +1358,7 @@ acyclicConstraint size =
         cInstEdges = [InstEdge (EdgeId size) (NodeId 0) (NodeId 2)]
       }
 
-flexibleSchemeRootConstraint :: Constraint
+flexibleSchemeRootConstraint :: Constraint 'Raw
 flexibleSchemeRootConstraint =
   let rootGen = GenNodeId 0
       schemeRoot = NodeId 0
@@ -1356,7 +1369,7 @@ flexibleSchemeRootConstraint =
             cGenNodes = fromListGen [(rootGen, GenNode rootGen [schemeRoot])]
           }
 
-flexibleArrowConstraint :: Constraint
+flexibleArrowConstraint :: Constraint 'Raw
 flexibleArrowConstraint =
   let rootGen = GenNodeId 0
       dom = NodeId 0
@@ -1379,7 +1392,7 @@ flexibleArrowConstraint =
             cGenNodes = fromListGen [(rootGen, GenNode rootGen [arr])]
           }
 
-flexibleNonInteriorConstraint :: Constraint
+flexibleNonInteriorConstraint :: Constraint 'Raw
 flexibleNonInteriorConstraint =
   let rootGen = GenNodeId 0
       schemeRoot = NodeId 0
@@ -1428,7 +1441,7 @@ boundFromType ty =
     Elab.TForall v mb body -> Elab.TForall v mb body
     Elab.TMu v body -> Elab.TMu v body
 
-emptyPresolutionState :: Constraint -> PresolutionState
+emptyPresolutionState :: Constraint 'Raw -> PresolutionState
 emptyPresolutionState c =
   PresolutionState
     c
@@ -1442,7 +1455,7 @@ emptyPresolutionState c =
     IntMap.empty
     IntMap.empty
 
-identityPresolutionView :: Constraint -> PresolutionView
+identityPresolutionView :: Constraint 'Raw -> PresolutionView 'Raw
 identityPresolutionView c =
   PresolutionView
     { pvConstraint = c,
@@ -1460,7 +1473,7 @@ identityPresolutionView c =
 
 assertMinimalDecision ::
   String ->
-  Constraint ->
+  Constraint 'Raw ->
   NodeId ->
   NodeId ->
   ((Expansion, [(NodeId, NodeId)]) -> Property) ->
@@ -1470,7 +1483,7 @@ assertMinimalDecision caseName c expNodeId targetNodeId checkDecision =
     Right decision -> counterexample (caseName ++ ": " ++ show decision) (checkDecision decision)
     Left err -> counterexample (caseName ++ ": " ++ err) False
 
-decideMinimalFor :: Constraint -> NodeId -> NodeId -> Either String (Expansion, [(NodeId, NodeId)])
+decideMinimalFor :: Constraint 'Raw -> NodeId -> NodeId -> Either String (Expansion, [(NodeId, NodeId)])
 decideMinimalFor c expNodeId targetNodeId =
   case (lookupNodeIn (cNodes c) expNodeId, lookupNodeIn (cNodes c) targetNodeId) of
     (Just expNode, Just targetNode) ->
@@ -1506,7 +1519,7 @@ assertNodeAliasTranslation size mkOp =
             Left err -> counterexample (show err) False
             Right out -> counterexample (Elab.pretty phi ++ " => " ++ Elab.pretty out) (out === expected)
 
-nodeAliasTranslationFixture :: Int -> (Constraint, NodeId, NodeId, NodeId, Elab.ElabScheme, Elab.SchemeInfo, EdgeTrace)
+nodeAliasTranslationFixture :: Int -> (Constraint 'Raw, NodeId, NodeId, NodeId, Elab.ElabScheme, Elab.SchemeInfo, EdgeTrace)
 nodeAliasTranslationFixture size =
   (c, root, binderA, binderB, scheme, si, tr)
   where
@@ -1554,7 +1567,7 @@ nodeAliasTranslationFixture size =
           etCopyMap = mempty
         }
 
-orderedBinderFixture :: Int -> (Constraint, NodeId, [NodeId])
+orderedBinderFixture :: Int -> (Constraint 'Raw, NodeId, [NodeId])
 orderedBinderFixture size =
   (c, root, [bN, aN])
   where
@@ -1581,7 +1594,7 @@ orderedBinderFixture size =
                 ]
           }
 
-contextFindFixture :: Int -> (Constraint, NodeId, NodeId, [Elab.ContextStep])
+contextFindFixture :: Int -> (Constraint 'Raw, NodeId, NodeId, [Elab.ContextStep])
 contextFindFixture size =
   (c, root, cN, [Elab.StepUnder ("t" ++ show (getNodeId aN)), Elab.StepInside])
   where
@@ -1611,7 +1624,7 @@ contextFindFixture size =
                 ]
           }
 
-contextRejectFixture :: Int -> (Constraint, NodeId, NodeId)
+contextRejectFixture :: Int -> (Constraint 'Raw, NodeId, NodeId)
 contextRejectFixture size =
   (c, root, bodyOnly)
   where
@@ -1638,7 +1651,7 @@ contextRejectFixture size =
                 ]
           }
 
-chainConstraint :: Int -> Constraint
+chainConstraint :: Int -> Constraint 'Raw
 chainConstraint rawSize =
   rootedConstraintLocal
     emptyConstraint
@@ -1657,7 +1670,7 @@ chainConstraint rawSize =
   where
     size = max 3 rawSize
 
-binderConstraint :: Constraint
+binderConstraint :: Constraint 'Raw
 binderConstraint =
   rootedConstraintLocal
     emptyConstraint
@@ -1674,7 +1687,7 @@ binderConstraint =
             ]
       }
 
-varTripleConstraint :: Constraint
+varTripleConstraint :: Constraint 'Raw
 varTripleConstraint =
   rootedConstraintLocal
     emptyConstraint
@@ -1693,7 +1706,7 @@ varTripleConstraint =
             ]
       }
 
-rootedConstraintLocal :: Constraint -> Constraint
+rootedConstraintLocal :: Constraint 'Raw -> Constraint 'Raw
 rootedConstraintLocal c0 =
   c0
     { cGenNodes = fromListGen [(GenNodeId 0, GenNode (GenNodeId 0) [NodeId 0])],
@@ -1705,7 +1718,7 @@ rootedConstraintLocal c0 =
           (cBindParents c0)
     }
 
-inertConstraint :: Int -> Constraint
+inertConstraint :: Int -> Constraint 'Raw
 inertConstraint size =
   rootedConstraintLocal
     emptyConstraint

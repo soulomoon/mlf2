@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module SolvedFacadeTestUtil (
     mkTestSolved,
     solvedFromSnapshot,
@@ -31,12 +32,13 @@ import MLF.Constraint.Types.Graph
     , getNodeId
     , tnId
     )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 
-mkTestSolved :: Constraint -> IntMap.IntMap NodeId -> Solved.Solved
+mkTestSolved :: Constraint 'Raw -> IntMap.IntMap NodeId -> Solved.Solved
 mkTestSolved constraint uf =
     stepSolvedFromPresolutionView (presolutionViewFromSnapshot constraint uf)
 
-solvedFromSnapshot :: IntMap.IntMap NodeId -> Constraint -> Either SolveError Solved.Solved
+solvedFromSnapshot :: IntMap.IntMap NodeId -> Constraint p -> Either SolveError Solved.Solved
 solvedFromSnapshot uf constraint = do
     let snapshot =
             SolveSnapshot

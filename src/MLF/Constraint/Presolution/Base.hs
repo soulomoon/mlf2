@@ -1,4 +1,6 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE RankNTypes #-}
 
 module MLF.Constraint.Presolution.Base (
     PresolutionUf(..),
@@ -59,6 +61,7 @@ import qualified MLF.Binding.Path as BindingPath
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Phase (Phase(Presolved, Raw))
 import qualified MLF.Constraint.Types.Graph as Types
 import MLF.Constraint.Types.Witness (EdgeWitness, Expansion, ForallSpec, ReplayContract)
 import MLF.Constraint.Types.Presolution (Presolution, PresolutionSnapshot (..))
@@ -89,7 +92,7 @@ emptyEdgeArtifacts = EdgeArtifacts IntMap.empty IntMap.empty IntMap.empty
 
 -- | Result of the presolution phase.
 data PresolutionResult = PresolutionResult
-    { prConstraint :: Constraint
+    { prConstraint :: Constraint 'Presolved
     , prEdgeExpansions :: IntMap Expansion
     , prEdgeWitnesses :: IntMap EdgeWitness
     , prEdgeTraces :: IntMap EdgeTrace
@@ -104,11 +107,12 @@ instance PresolutionSnapshot PresolutionResult where
 
 newtype PresolutionPlanBuilder = PresolutionPlanBuilder
     { ppbBuildGeneralizePlans
-        :: PresolutionView
-        -> Maybe GaBindParents
+        :: forall p.
+           PresolutionView p
+        -> Maybe (GaBindParents p)
         -> NodeRef
         -> NodeId
-        -> Either ElabError (GeneralizePlan, ReifyPlan)
+        -> Either ElabError (GeneralizePlan p, ReifyPlan)
     }
 
 instance Eq PresolutionPlanBuilder where
@@ -150,7 +154,7 @@ data TranslatabilityIssue
 
 -- | State maintained during the presolution process.
 data PresolutionState = PresolutionState
-    { psConstraint :: Constraint
+    { psConstraint :: Constraint 'Raw
     , psPresolution :: Presolution
     , psUnionFind :: IntMap NodeId
     , psNextNodeId :: Int
@@ -321,9 +325,9 @@ removed.
 -- reducing the need for explicit lift calls.
 class Monad m => MonadPresolution m where
     -- | Get the current constraint.
-    getConstraint :: m Constraint
+    getConstraint :: m (Constraint 'Raw)
     -- | Modify the constraint with a function.
-    modifyConstraint :: (Constraint -> Constraint) -> m ()
+    modifyConstraint :: (Constraint 'Raw -> Constraint 'Raw) -> m ()
     -- | Get the full presolution state.
     getPresolutionState :: m PresolutionState
     -- | Put a new presolution state.
@@ -376,7 +380,7 @@ instance {-# OVERLAPPING #-} MonadPresolution PresolutionM where
 
 bindingPathToRootUnderM
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> NodeRef
     -> PresolutionM [NodeRef]
 bindingPathToRootUnderM canonical c start =
@@ -550,7 +554,7 @@ edgeInteriorExact root0 = do
 
 -- | Choose the binding-tree root reference used for exact I(r) computation in
 -- edge traces and post-rewrite trace refresh.
-traceInteriorRootRef :: (NodeId -> NodeId) -> Constraint -> NodeId -> NodeRef
+traceInteriorRootRef :: (NodeId -> NodeId) -> Constraint p -> NodeId -> NodeRef
 traceInteriorRootRef canonical c0 root0 =
     let rootC = canonical root0
         schemeOwner =
@@ -731,7 +735,7 @@ debugBinders msg = do
 --
 -- See Note [Constraint simplification: Var-Let (Ch 12.4.1)]
 dropTrivialSchemeEdges
-    :: Constraint
+    :: Constraint p
     -> EdgeArtifacts
     -> EdgeArtifacts
 dropTrivialSchemeEdges constraint edgeArtifacts =

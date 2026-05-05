@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Presolution.UnificationClosureSpec (spec) where
 
 import Control.Monad (forM_)
@@ -13,17 +14,19 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionResult(..)
-    , computePresolution
     )
+import MLF.Constraint.Presolution qualified as PresolutionPhase
 import MLF.Constraint.Presolution.Base (PresolutionUf(..))
 import MLF.Constraint.Presolution.TestSupport
     ( toListInterior
     , validateTranslatablePresolution
     )
-import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), Constraint(..), EdgeId(..), ExpVarId(..), InstEdge(..), NodeId(..), TyNode(..), UnifyEdge(..))
+import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), Constraint(..), EdgeId(..), ExpVarId(..), InstEdge(..), NodeId(..), TyNode(..), UnifyEdge(..), toAcyclicConstraint, toNormalizedConstraint)
 import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWitness(..))
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Unify.Closure (SolveError(..), runUnifyClosureWithSeed)
 import MLF.Frontend.Syntax (Expr(..), Lit(..))
+import MLF.Elab.Pipeline (TraceConfig)
 import SpecUtil
     ( bindParentsFromPairs
     , defaultTraceConfig
@@ -34,6 +37,13 @@ import SpecUtil
     , rootedConstraint
     , runToPresolutionDefault
     )
+
+computePresolution :: TraceConfig -> AcyclicityResult -> Constraint 'Raw -> Either PresolutionPhase.PresolutionError PresolutionResult
+computePresolution traceCfg acyclicity constraint =
+    PresolutionPhase.computePresolution
+        traceCfg
+        acyclicity
+        (toAcyclicConstraint (toNormalizedConstraint constraint))
 
 spec :: Spec
 spec = describe "Phase 4 thesis-exact unification closure" $ do

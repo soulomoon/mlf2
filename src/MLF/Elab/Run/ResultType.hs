@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
 
 module MLF.Elab.Run.ResultType
@@ -22,6 +23,7 @@ import MLF.Constraint.Types.Graph
     EdgeId (..),
     NodeId (..),
   )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Generalize (GaBindParents)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
@@ -42,10 +44,10 @@ import MLF.Util.Trace (TraceConfig)
 mkResultTypeInputs ::
   (NodeId -> NodeId) ->
   EdgeArtifacts ->
-  PresolutionView ->
-  GaBindParents ->
+  PresolutionView 'Raw ->
+  GaBindParents 'Raw ->
   PresolutionPlanBuilder ->
-  Constraint ->
+  Constraint 'Raw ->
   IntMap.IntMap NodeId ->
   TraceConfig ->
   ResultTypeInputs

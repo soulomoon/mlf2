@@ -60,7 +60,7 @@ import MLF.Constraint.Types.Graph
     getNodeId,
     nodeRefFromKey,
   )
-import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..), ExpansionF (..), ForallSpec (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
+import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..), ExpansionF (..), ForallSpec (..), forallSpecBinderCount, InstanceOp (..), InstanceWitness (..), mkEdgeWitness, mkInstanceWitness, ReplayContract (..))
 import MLF.Util.RecursionSchemes (cataM)
 
 -- | Precompute the base forall-intro count and ops for a witness.
@@ -106,16 +106,10 @@ buildEdgeWitness input baseOps extraOps = do
         TyExp {tnBody = b} -> b
         _ -> left
       (intros, ops) = integratePhase2Steps (introCount, baseOps) extraOps
-      iw = InstanceWitness ops
-  pure
-    EdgeWitness
-      { ewEdgeId = eid,
-        ewLeft = left,
-        ewRight = right,
-        ewRoot = root,
-        ewForallIntros = intros,
-        ewWitness = iw
-      }
+  let iw = mkInstanceWitness ops
+  case mkEdgeWitness eid left right root intros iw of
+    Left err -> throwError (InternalError ("buildEdgeWitness: " ++ show err))
+    Right w -> pure w
 
 buildEdgeTrace ::
   EdgeWitnessInput ->
@@ -204,7 +198,7 @@ witnessFromExpansion gid _root leftRaw expn = do
       ExpIdentityF ->
         (False, pure (0, []))
       ExpForallF ls ->
-        let count = sum (map fsBinderCount (NE.toList ls))
+        let count = sum (map forallSpecBinderCount (NE.toList ls))
          in (True, pure (count, []))
       ExpInstantiateF args ->
         ( False,

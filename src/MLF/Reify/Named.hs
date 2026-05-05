@@ -14,7 +14,7 @@ import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 import MLF.Util.ElabError (ElabError, bindingToElab)
 
-softenedBindParentsUnder :: (NodeId -> NodeId) -> Constraint -> Either ElabError BindParents
+softenedBindParentsUnder :: (NodeId -> NodeId) -> Constraint p -> Either ElabError BindParents
 softenedBindParentsUnder canonical constraint = do
     bindParents0 <- bindingToElab (canonicalizeBindParentsUnder canonical constraint)
     pure (softenBindParents canonical (cWeakenedVars constraint) bindParents0)
@@ -29,7 +29,7 @@ softenBindParents canonical weakened =
                 _ -> (parent, flag)
     in IntMap.mapWithKey softenOne
 
-namedNodes :: PresolutionView -> Either ElabError IntSet.IntSet
+namedNodes :: PresolutionView p -> Either ElabError IntSet.IntSet
 namedNodes presolutionView = do
     let constraint = pvConstraint presolutionView
         canonical = pvCanonical presolutionView

@@ -1,4 +1,8 @@
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {- |
 Module      : MLF.Constraint.Types.Graph.NodeEdge
 Description : Core node and edge type definitions for the constraint graph
@@ -45,6 +49,13 @@ module MLF.Constraint.Types.Graph.NodeEdge (
     toListGen,
     -- * Node references
     NodeRef (..),
+    RefTag (..),
+    NodeRefTag (..),
+    SomeNodeRef (..),
+    fromNodeRefTag,
+    toNodeRefTag,
+    nodeIdFromTypeRef,
+    genNodeIdFromGenRef,
     typeRef,
     genRef,
     nodeRefKey,
@@ -136,6 +147,63 @@ data NodeRef
     | GenRef GenNodeId
     deriving (Eq, Ord, Show)
 
+-- | Tag kind for indexing 'NodeRefTag' by node sort.
+data RefTag = TypeTag | GenTag
+
+-- | Type-safe node reference indexed by its tag.
+--
+-- Use this in new code and migrated functions to enforce at compile time
+-- whether a function accepts only type nodes, only gen nodes, or both.
+-- 'SomeNodeRef' wraps an existentially-quantified 'NodeRefTag' for mixed
+-- contexts (e.g., 'BindParents').
+data NodeRefTag (t :: RefTag) where
+    TypeRefTag :: NodeId    -> NodeRefTag 'TypeTag
+    GenRefTag  :: GenNodeId -> NodeRefTag 'GenTag
+
+deriving instance Eq   (NodeRefTag t)
+deriving instance Ord  (NodeRefTag t)
+deriving instance Show (NodeRefTag t)
+
+-- | Existentially-quantified node reference.
+--
+-- Used in contexts that store both type and gen node references (e.g.,
+-- 'BindParents', error messages). Pattern-match on the 'NodeRef' inside
+-- to discriminate.
+data SomeNodeRef where
+    SomeNodeRef :: NodeRefTag t -> SomeNodeRef
+
+deriving instance Show SomeNodeRef
+
+instance Eq SomeNodeRef where
+    SomeNodeRef (TypeRefTag a) == SomeNodeRef (TypeRefTag b) = a == b
+    SomeNodeRef (GenRefTag  a) == SomeNodeRef (GenRefTag  b) = a == b
+    _                          == _                          = False
+
+instance Ord SomeNodeRef where
+    compare (SomeNodeRef (TypeRefTag a)) (SomeNodeRef (TypeRefTag b)) = compare a b
+    compare (SomeNodeRef (GenRefTag  a)) (SomeNodeRef (GenRefTag  b)) = compare a b
+    compare (SomeNodeRef (TypeRefTag _)) (SomeNodeRef (GenRefTag  _)) = LT
+    compare (SomeNodeRef (GenRefTag  _)) (SomeNodeRef (TypeRefTag _)) = GT
+
+-- | Convert a typed reference to the untyped 'NodeRef'.
+fromNodeRefTag :: NodeRefTag t -> NodeRef
+fromNodeRefTag (TypeRefTag nid) = TypeRef nid
+fromNodeRefTag (GenRefTag  gid) = GenRef  gid
+
+-- | Convert an untyped 'NodeRef' to a typed reference.
+toNodeRefTag :: NodeRef -> SomeNodeRef
+toNodeRefTag (TypeRef nid) = SomeNodeRef (TypeRefTag nid)
+toNodeRefTag (GenRef  gid) = SomeNodeRef (GenRefTag  gid)
+
+-- | Extract a 'NodeId' from a type-node reference.
+-- This is total — no 'expectTypeRef' runtime check needed.
+nodeIdFromTypeRef :: NodeRefTag 'TypeTag -> NodeId
+nodeIdFromTypeRef (TypeRefTag nid) = nid
+
+-- | Extract a 'GenNodeId' from a gen-node reference.
+genNodeIdFromGenRef :: NodeRefTag 'GenTag -> GenNodeId
+genNodeIdFromGenRef (GenRefTag gid) = gid
+
 typeRef :: NodeId -> NodeRef
 typeRef = TypeRef
 
@@ -208,11 +276,11 @@ term-DAG constructors.
 
 Phases at a glance
 ------------------
-  - Phase 1 (ConstraintGen): builds `Constraint` (nodes, binding edges, edges).
+  - Phase 1 (ConstraintGen): builds `Constraint p` (nodes, binding edges, edges).
   - Phase 2 (Normalize): local rewrites (grafting + merge/unify) on the graph.
   - Phase 3: checks/derives a dependency order for instantiation edges.
   - Phase 4 (Presolution): chooses minimal expansions, records witnesses.
-  - Phase 5 (Solve): discharges remaining unifications; returns `SolveResult`.
+  - Phase 5 (Solve): discharges remaining unifications; returns the `Solved` abstraction.
   - Phase 6 (Elab): reifies solved graph and witnesses into xMLF terms/types.
 
 The rest of this file documents the invariants that those phases rely on.

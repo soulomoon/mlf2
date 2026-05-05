@@ -24,14 +24,14 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Util.Order (OrderKey, compareOrderKey)
 
-data OmegaNormalizeEnv = OmegaNormalizeEnv
+data OmegaNormalizeEnv p = OmegaNormalizeEnv
     { oneRoot :: NodeId
     , interior :: IntSet.IntSet
     , interiorRaw :: IntSet.IntSet
     , weakened :: IntSet.IntSet
     , orderKeys :: IntMap.IntMap OrderKey
     , canonical :: NodeId -> NodeId
-    , constraint :: Constraint
+    , constraint :: Constraint p
     , binderArgs :: IntMap.IntMap NodeId
     , binderReplayMap :: IntMap.IntMap NodeId
     , replayContract :: ReplayContract
@@ -63,7 +63,7 @@ data OmegaNormalizeError
     | StandaloneGraftRemaining NodeId
     deriving (Eq, Show)
 
-compareNodesByOrderKeyM :: OmegaNormalizeEnv -> NodeId -> NodeId -> Either OmegaNormalizeError Ordering
+compareNodesByOrderKeyM :: OmegaNormalizeEnv p -> NodeId -> NodeId -> Either OmegaNormalizeError Ordering
 compareNodesByOrderKeyM env a b =
     case (IntMap.lookup (getNodeId (canon a)) (orderKeys env), IntMap.lookup (getNodeId (canon b)) (orderKeys env)) of
         (Just ka, Just kb) ->
@@ -75,7 +75,7 @@ compareNodesByOrderKeyM env a b =
   where
     canon = canonical env
 
-validateNormalizedWitness :: OmegaNormalizeEnv -> [InstanceOp] -> Either OmegaNormalizeError ()
+validateNormalizedWitness :: OmegaNormalizeEnv p -> [InstanceOp] -> Either OmegaNormalizeError ()
 validateNormalizedWitness env ops = do
     validateReplayMapContract
     mapM_ checkOp ops

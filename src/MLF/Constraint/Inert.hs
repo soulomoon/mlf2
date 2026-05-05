@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {- |
 Module      : MLF.Constraint.Inert
 Description : Inert and inert-locked node classification (thesis §5.2.2, §15.2.2)
@@ -28,6 +29,7 @@ import MLF.Constraint.Types.Graph
     , Constraint(..)
     , NodeId(..)
     , NodeRef(..)
+    , NodeRefTag(..)
     , TyNode(..)
     , getNodeId
     , toListNode
@@ -39,7 +41,7 @@ import MLF.Constraint.Types.Graph
 --
 -- Thesis note: Definition 5.2.2 (inert nodes) uses intrinsically polymorphic
 -- symbols (⊥ and Poly; see §5.2.1 for the symbol set).
-isPolymorphicAnchor :: Constraint -> TyNode -> Bool
+isPolymorphicAnchor :: Constraint p -> TyNode -> Bool
 isPolymorphicAnchor _ TyBottom{} = True
 isPolymorphicAnchor c TyBase{ tnBase = b } = Set.member b (cPolySyms c)
 isPolymorphicAnchor c TyCon{ tnCon = con } = Set.member con (cPolySyms c)
@@ -48,7 +50,7 @@ isPolymorphicAnchor _ _ = False
 -- | Compute the set of inert nodes.
 --
 -- Definition 5.2.2 (Inert nodes).
-inertNodes :: Constraint -> Either BindingError IntSet.IntSet
+inertNodes :: Constraint p -> Either BindingError IntSet.IntSet
 inertNodes c = do
     let nodes = cNodes c
         anchors0 =
@@ -78,7 +80,7 @@ isImplicitBottomAnchor node = case node of
     TyVar{ tnBound = Nothing } -> True
     _ -> False
 
-collectFlexAncestors :: Constraint -> [NodeId] -> IntSet.IntSet
+collectFlexAncestors :: Constraint p -> [NodeId] -> IntSet.IntSet
 collectFlexAncestors c anchors =
     go visited0 anchors
   where
@@ -100,7 +102,7 @@ collectFlexAncestors c anchors =
 
 -- | Compute inert-locked nodes: inert nodes that are flexibly bound and have a
 -- rigid ancestor (Definition 15.2.2).
-inertLockedNodes :: Constraint -> Either BindingError IntSet.IntSet
+inertLockedNodes :: Constraint p -> Either BindingError IntSet.IntSet
 inertLockedNodes c = do
     inert <- inertNodes c
     foldM addLocked IntSet.empty (IntSet.toList inert)
@@ -121,7 +123,7 @@ inertLockedNodes c = do
 -- Thesis alignment: Lemma 15.2.4 + Corollary 15.2.5 (§15.2.3.2) show we can
 -- weaken inert-locked nodes to obtain an inert-equivalent presolution without
 -- inert-locked nodes.
-weakenInertLockedNodes :: Constraint -> Either BindingError Constraint
+weakenInertLockedNodes :: Constraint p -> Either BindingError (Constraint p)
 weakenInertLockedNodes c0 = go c0
   where
     go c = do
@@ -136,14 +138,14 @@ weakenInertLockedNodes c0 = go c0
         case Binding.lookupBindParent c (typeRef nid) of
             Nothing -> pure c
             Just (_, BindRigid) -> pure c
-            Just _ -> fst <$> GraphOps.applyWeaken (typeRef nid) c
+            Just _ -> fst <$> GraphOps.applyWeaken (TypeRefTag nid) c
 
 -- | Weaken all inert nodes (flip their binding edge to rigid when flexible).
 --
 -- Thesis alignment: §15.2.8 applies weakening to all inert nodes; Corollary
 -- 15.2.5 ensures the result is still a presolution inert-equivalent to the
 -- original.
-weakenInertNodes :: Constraint -> Either BindingError Constraint
+weakenInertNodes :: Constraint p -> Either BindingError (Constraint p)
 weakenInertNodes c0 = do
     inert <- inertNodes c0
     foldM weakenOne c0 (IntSet.toList inert)
@@ -153,4 +155,4 @@ weakenInertNodes c0 = do
         case Binding.lookupBindParent c (typeRef nid) of
             Nothing -> pure c
             Just (_, BindRigid) -> pure c
-            Just _ -> fst <$> GraphOps.applyWeaken (typeRef nid) c
+            Just _ -> fst <$> GraphOps.applyWeaken (TypeRefTag nid) c

@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module MLF.Elab.Run.Generalize (
     GeneralizeAtView,
     pruneBindParentsConstraint,
@@ -40,8 +41,8 @@ import MLF.Frontend.ConstraintGen (AnnExpr)
 import MLF.Elab.Types (ElabScheme)
 import MLF.Util.ElabError (ElabError)
 
-type GeneralizeAtView =
-    Maybe GaBindParents
+type GeneralizeAtView p =
+    Maybe (GaBindParents p)
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
@@ -91,7 +92,7 @@ policies are safe because (a) redirects merge structurally equivalent nodes
 sharing the same gen ancestor, and (b) the base-domain binding parents
 (which define ga′) are computed independently of the solved-domain quotient.
 -}
-constraintForGeneralization :: TraceConfig -> PresolutionView -> IntMap.IntMap NodeId -> NodeKeySet -> IntMap.IntMap NodeId -> Constraint -> AnnExpr -> (Constraint, GaBindParents)
+constraintForGeneralization :: TraceConfig -> PresolutionView p -> IntMap.IntMap NodeId -> NodeKeySet -> IntMap.IntMap NodeId -> Constraint p -> AnnExpr -> (Constraint p, GaBindParents p)
 constraintForGeneralization traceCfg presolutionView redirects instCopyNodes instCopyMap base _ann =
     let env = buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap base
         phase1 = restoreSchemeNodes env
@@ -102,12 +103,12 @@ constraintForGeneralization traceCfg presolutionView redirects instCopyNodes ins
 
 buildGeneralizeEnv
     :: TraceConfig
-    -> PresolutionView
+    -> PresolutionView p
     -> IntMap.IntMap NodeId
     -> NodeKeySet
     -> IntMap.IntMap NodeId
-    -> Constraint
-    -> GeneralizeEnv
+    -> Constraint p
+    -> GeneralizeEnv p
 buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap base =
     let canonicalConstraint = pvCanonicalConstraint presolutionView
         canonical = pvCanonical presolutionView
@@ -121,8 +122,7 @@ buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap 
             case adoptRef (typeRef nid) of
                 TypeRef nid' -> nid'
                 GenRef _ -> nid
-    in GeneralizeEnv
-        { geBaseConstraint = base
+    in GeneralizeEnv { geBaseConstraint = base
         , geSolvedConstraint = canonicalConstraint
         , geRedirects = redirects
         , geInstCopyNodes = instCopyNodes
@@ -136,8 +136,8 @@ buildGeneralizeEnv traceCfg presolutionView redirects instCopyNodes instCopyMap 
 
 generalizeAtWithBuilder
     :: PresolutionPlanBuilder
-    -> Maybe GaBindParents
-    -> PresolutionView
+    -> Maybe (GaBindParents p)
+    -> PresolutionView p
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
@@ -150,7 +150,7 @@ generalizeAtWithBuilder planBuilder mbBindParentsGa presolutionView scopeRoot ta
 
 mkGeneralizeAtWithBuilder
     :: PresolutionPlanBuilder
-    -> PresolutionView
-    -> GeneralizeAtView
+    -> PresolutionView p
+    -> GeneralizeAtView p
 mkGeneralizeAtWithBuilder planBuilder presolutionView mbGa scopeRoot targetNode =
     generalizeAtWithBuilder planBuilder mbGa presolutionView scopeRoot targetNode

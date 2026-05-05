@@ -267,7 +267,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
   where
     resetBindingsForCopies
         :: (NodeId -> NodeId)
-        -> Constraint
+        -> Constraint p
         -> GenNodeId
         -> NodeId
         -> NodeId

@@ -34,6 +34,7 @@ import MLF.Types.Elab (BoundType, ElabType, Ty (..))
 import SpecUtil (bindParentsFromPairs, emptyConstraint, nodeMapFromList, rootedConstraint)
 import Test.Hspec
 import Test.QuickCheck
+import MLF.Constraint.Types.Phase (Phase(Raw))
 
 -- ============================================================================
 -- Generators
@@ -140,7 +141,7 @@ nodeDomain uf redirects =
 -- | Generate a valid binding constraint with n nodes.
 -- Builds a chain of TyForall nodes: node 0 -> node 1 -> ... -> node (n-2) -> var(n-1)
 -- Each child is bound to its structural parent.
-genValidBindingConstraint :: Int -> Gen Constraint
+genValidBindingConstraint :: Int -> Gen (Constraint 'Raw)
 genValidBindingConstraint n
   | n <= 0 = pure (rootedConstraint emptyConstraint)
   | n == 1 =

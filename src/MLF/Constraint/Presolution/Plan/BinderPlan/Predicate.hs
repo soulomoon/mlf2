@@ -16,7 +16,7 @@ import qualified MLF.Constraint.VarStore as VarStore
 -- | Check if a variable is a target scheme binder.
 isTargetSchemeBinderFor
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> NodeId
     -> Bool
     -> NodeId

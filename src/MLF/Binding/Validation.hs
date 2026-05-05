@@ -60,7 +60,7 @@ import MLF.Binding.ScopeGraph (
     )
 
 -- | Node keys that participate in binding-tree invariants.
-liveNodeKeys :: Constraint -> IntSet
+liveNodeKeys :: Constraint p -> IntSet
 liveNodeKeys c =
     let typeKeys = IntSet.fromList
             [ nodeRefKey (TypeRef nid)
@@ -73,7 +73,7 @@ liveNodeKeys c =
     in IntSet.union typeKeys genKeys
 
 -- | Validate all binding-tree invariants.
-checkBindingTree :: Constraint -> Either BindingError ()
+checkBindingTree :: Constraint p -> Either BindingError ()
 checkBindingTree c = do
     let bindParents = cBindParents c
         liveKeys = liveNodeKeys c
@@ -196,7 +196,7 @@ This check is kept as a regression guard: it rejects any constraint that
 would require gen-ancestor fallback before Φ translation begins.
 -}
 -- | Reject binding trees that would require a gen-ancestor fallback.
-checkNoGenFallback :: Constraint -> Either BindingError ()
+checkNoGenFallback :: Constraint p -> Either BindingError ()
 checkNoGenFallback c = do
     let nodes = cNodes c
         reachableFromWithBounds root0 =
@@ -233,12 +233,12 @@ checkNoGenFallback c = do
             _ -> pure ()
 
 -- | Reject scheme roots that reach named nodes not bound under their gen node.
-checkSchemeClosure :: Constraint -> Either BindingError ()
+checkSchemeClosure :: Constraint p -> Either BindingError ()
 checkSchemeClosure = checkSchemeClosureUnder id
 
 -- | Reject scheme roots that reach named nodes not bound under their gen node,
 --   under a canonicalization function.
-checkSchemeClosureUnder :: (NodeId -> NodeId) -> Constraint -> Either BindingError ()
+checkSchemeClosureUnder :: (NodeId -> NodeId) -> Constraint p -> Either BindingError ()
 checkSchemeClosureUnder canonical c0 = do
     let nodes = cNodes c0
         isNamedNode nid =
@@ -440,7 +440,7 @@ checkSchemeClosureUnder canonical c0 = do
         firstGenAncestorFromPath (bindingPathToRootLocal bindParents') (typeRef (canonical root0))
 
 -- | Check if a node is "upper" than another in the term-DAG.
-isUpper :: Constraint -> NodeRef -> NodeRef -> Bool
+isUpper :: Constraint p -> NodeRef -> NodeRef -> Bool
 isUpper c parent child
     | parent == child = True
     | otherwise =
@@ -463,16 +463,16 @@ isUpper c parent child
 
 -- Local helpers for validation checks.
 
-lookupBindParent :: Constraint -> NodeRef -> Maybe (NodeRef, BindFlag)
+lookupBindParent :: Constraint p -> NodeRef -> Maybe (NodeRef, BindFlag)
 lookupBindParent c ref = IntMap.lookup (nodeRefKey ref) (cBindParents c)
 
-isBindingRoot :: Constraint -> NodeRef -> Bool
+isBindingRoot :: Constraint p -> NodeRef -> Bool
 isBindingRoot c ref = not $ IntMap.member (nodeRefKey ref) (cBindParents c)
 
-bindingRoots :: Constraint -> [NodeRef]
+bindingRoots :: Constraint p -> [NodeRef]
 bindingRoots c = filter (isBindingRoot c) (allNodeRefs c)
 
-boundFlexChildren :: Constraint -> NodeRef -> Either BindingError [NodeId]
+boundFlexChildren :: Constraint p -> NodeRef -> Either BindingError [NodeId]
 boundFlexChildren c binder = do
     unless (nodeRefExists c binder) $
         Left $
@@ -480,7 +480,7 @@ boundFlexChildren c binder = do
                 "boundFlexChildren: binder " ++ show binder ++ " not in constraint"
     collectBoundChildren (tyVarChildFilter c) c (cBindParents c) binder "boundFlexChildren"
 
-tyVarChildFilter :: Constraint -> NodeRef -> Maybe NodeId
+tyVarChildFilter :: Constraint p -> NodeRef -> Maybe NodeId
 tyVarChildFilter c ref = case ref of
     TypeRef nid ->
         case NodeAccess.lookupNode c nid of
@@ -490,7 +490,7 @@ tyVarChildFilter c ref = case ref of
 
 collectBoundChildren
     :: (NodeRef -> Maybe NodeId)
-    -> Constraint
+    -> Constraint p
     -> BindParents
     -> NodeRef
     -> String
@@ -499,7 +499,7 @@ collectBoundChildren childFilter c bindParents binder errCtx =
     collectBoundChildrenWithFlag childFilter (== BindFlex) c bindParents binder errCtx
 
 -- | Validate binding-tree invariants on the quotient graph induced by a canonicalization function.
-checkBindingTreeUnder :: (NodeId -> NodeId) -> Constraint -> Either BindingError ()
+checkBindingTreeUnder :: (NodeId -> NodeId) -> Constraint p -> Either BindingError ()
 checkBindingTreeUnder canonical c0 = do
     let nodes0 = cNodes c0
         genNodes0 = cGenNodes c0

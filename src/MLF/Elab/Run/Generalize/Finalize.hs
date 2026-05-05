@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module MLF.Elab.Run.Generalize.Finalize (
     finalizeConstraint
 ) where
@@ -41,12 +42,12 @@ import MLF.Elab.Run.Generalize.Types
 import MLF.Util.IntMapUtils (keepOld)
 
 finalizeConstraint
-    :: GeneralizeEnv
+    :: GeneralizeEnv p
     -> Phase1Result
     -> Phase2Result
     -> Phase3Result
     -> Phase4Result
-    -> (Constraint, GaBindParents)
+    -> (Constraint p, GaBindParents p)
 finalizeConstraint env phase1 phase2 _phase3 phase4 =
     let base = geBaseConstraint env
         solvedConstraint = geSolvedConstraint env

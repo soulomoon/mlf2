@@ -44,7 +44,7 @@ import qualified MLF.Util.IntMapUtils as IntMapUtils
 -- 2. All scheme roots are rigidly bound to their gen node
 -- 3. All arrow nodes are rigidly bound
 -- 4. All non-interior flexible children are rigidly bound
-validateTranslatablePresolution :: Constraint -> Either PresolutionError ()
+validateTranslatablePresolution :: Constraint p -> Either PresolutionError ()
 validateTranslatablePresolution c0 = do
     let nodes = cNodes c0
         bindParents = cBindParents c0
@@ -207,7 +207,7 @@ structuralInterior nodes =
 -- - Rigidly bound scheme roots
 -- - Rigidly bound arrow nodes
 -- - Rigidly bound non-interior children
-translatableWeakenedNodes :: Constraint -> IntSet.IntSet
+translatableWeakenedNodes :: Constraint p -> IntSet.IntSet
 translatableWeakenedNodes c0 =
     let nodes = cNodes c0
         genNodes = cGenNodes c0

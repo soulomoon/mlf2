@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module SolveSpec (spec) where
 
 import Test.Hspec
@@ -10,8 +11,7 @@ import Test.QuickCheck (choose, conjoin, counterexample, forAll, property, (===)
 
 import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Solve
     ( SolveError(..)
     , UnifyClosureResult(..)
@@ -21,11 +21,12 @@ import MLF.Constraint.Solve
     , frWith
     , runUnifyClosure
     , rewriteConstraintWithUF
-    , solveUnify
+    , solveUnifyResult
     , solveResultFromSnapshot
-    , solveUnifyWithSnapshot
+    , solveUnifyResultWithSnapshot
     , validateSolvedGraphStrict
     )
+import MLF.Elab.Pipeline (TraceConfig)
 import SpecUtil
     ( defaultTraceConfig
     , emptyConstraint
@@ -36,16 +37,22 @@ import SpecUtil
     , rootedConstraint
     )
 
-resultConstraint :: SolveResult -> Constraint
+solveUnify :: TraceConfig -> Constraint p -> Either SolveError (SolveResult p)
+solveUnify = solveUnifyResult
+
+solveUnifyWithSnapshot :: TraceConfig -> Constraint p -> Either SolveError (SolveOutput p)
+solveUnifyWithSnapshot = solveUnifyResultWithSnapshot
+
+resultConstraint :: SolveResult 'Raw -> Constraint 'Raw
 resultConstraint = srConstraint
 
-resultUnionFind :: SolveResult -> IntMap.IntMap NodeId
+resultUnionFind :: SolveResult 'Raw -> IntMap.IntMap NodeId
 resultUnionFind = srUnionFind
 
-mkSolveResult :: Constraint -> IntMap.IntMap NodeId -> SolveResult
+mkSolveResult :: Constraint 'Raw -> IntMap.IntMap NodeId -> SolveResult 'Raw
 mkSolveResult c uf = SolveResult { srConstraint = c, srUnionFind = uf }
 
-genUnificationConstraint :: Int -> Constraint
+genUnificationConstraint :: Int -> Constraint 'Raw
 genUnificationConstraint depth =
     let v0 = NodeId 0
         v1 = NodeId 1

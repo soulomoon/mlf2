@@ -23,7 +23,7 @@ import MLF.Constraint.Types.Graph
     )
 
 -- | Collect base named keys (variables bound by Gen nodes).
-collectBaseNamedKeys :: Constraint -> IntSet.IntSet
+collectBaseNamedKeys :: Constraint p -> IntSet.IntSet
 collectBaseNamedKeys c =
     let baseNodes = cNodes c
         baseBindParents = cBindParents c
@@ -40,7 +40,7 @@ collectBaseNamedKeys c =
         ]
 
 -- | Build interior set from edge trace root.
-buildInteriorSet :: Constraint -> (NodeId -> NodeId) -> NodeId -> IntSet.IntSet
+buildInteriorSet :: Constraint p -> (NodeId -> NodeId) -> NodeId -> IntSet.IntSet
 buildInteriorSet c _adoptNode rootBase =
     case Binding.interiorOf c (typeRef rootBase) of
         Right s ->
@@ -56,7 +56,7 @@ buildInteriorSet c _adoptNode rootBase =
 
 -- | Build copy map from a single edge trace.
 buildTraceCopyMap
-    :: Constraint
+    :: Constraint p
     -> IntSet.IntSet
     -> (NodeId -> NodeId)
     -> EdgeTrace

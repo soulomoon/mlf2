@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module MLF.Elab.Run.Generalize.Constraint (
     pruneBindParentsConstraint,
     instantiationCopyNodes
@@ -27,7 +28,7 @@ import MLF.Elab.Run.Generalize.Common (nodeMapToIntMap)
 import MLF.Elab.Run.Generalize.Types (NodeKeySet)
 import MLF.Elab.Run.Util (chaseRedirects)
 
-pruneBindParentsConstraint :: Constraint -> Constraint
+pruneBindParentsConstraint :: Constraint p -> Constraint p
 pruneBindParentsConstraint c =
     let liveNodes = nodeMapToIntMap (cNodes c)
         liveGens = Types.getGenNodeMap (cGenNodes c)
@@ -47,7 +48,7 @@ pruneBindParentsConstraint c =
     in c { cBindParents = bindParents' }
 
 instantiationCopyNodes
-    :: PresolutionView
+    :: PresolutionView p
     -> IntMap.IntMap NodeId
     -> IntMap.IntMap EdgeTrace
     -> NodeKeySet

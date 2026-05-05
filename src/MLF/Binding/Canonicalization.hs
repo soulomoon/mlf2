@@ -45,7 +45,7 @@ import MLF.Constraint.Types.Presolution
 -- operations (like LCA and Raise) well-defined on representatives.
 canonicalizeBindParentsUnder
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> Either BindingError BindParents
 canonicalizeBindParentsUnder canonical c0 = do
     (_allRoots, bindParents) <- quotientBindParentsUnder canonical c0
@@ -61,7 +61,7 @@ canonicalizeBindParentsUnder canonical c0 = do
 -- Returns the set of all canonical node keys and the canonicalized bind parents.
 quotientBindParentsUnder
     :: (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> Either BindingError (IntSet, BindParents)
 quotientBindParentsUnder canonical c0 = do
     let bindParents0 = cBindParents c0
@@ -127,7 +127,7 @@ quotientBindParentsUnder canonical c0 = do
 withQuotientBindParents
     :: String  -- ^ Error context for validation failures
     -> (NodeId -> NodeId)
-    -> Constraint
+    -> Constraint p
     -> NodeRef
     -> (NodeRef -> BindParents -> Either BindingError a)
     -> Either BindingError a

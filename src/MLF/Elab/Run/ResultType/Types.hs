@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module MLF.Elab.Run.ResultType.Types (
     ResultTypeInputs
         ( ResultTypeInputs
@@ -20,8 +21,9 @@ import qualified Data.IntMap.Strict as IntMap
 import MLF.Constraint.Types.Graph (Constraint, NodeId)
 import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder)
 import MLF.Constraint.Presolution.Base (EdgeArtifacts(..))
-import MLF.Constraint.Presolution.View (PresolutionView)
+import MLF.Constraint.Presolution.View (PresolutionView(..))
 import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Generalize (GaBindParents)
 import MLF.Util.Trace (TraceConfig)
 
@@ -29,10 +31,10 @@ import MLF.Util.Trace (TraceConfig)
 data ResultTypeInputs = ResultTypeInputs
     { rtcCanonical :: NodeId -> NodeId
     , rtcEdgeArtifacts :: EdgeArtifacts
-    , rtcPresolutionView :: PresolutionView
-    , rtcBindParentsGa :: GaBindParents
+    , rtcPresolutionView :: PresolutionView 'Raw
+    , rtcBindParentsGa :: GaBindParents 'Raw
     , rtcPlanBuilder :: PresolutionPlanBuilder
-    , rtcBaseConstraint :: Constraint
+    , rtcBaseConstraint :: Constraint 'Raw
     , rtcRedirects :: IntMap.IntMap NodeId
     , rtcTraceConfig :: TraceConfig
     }

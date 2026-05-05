@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 module CanonicalizerSpec (spec) where
 
@@ -23,6 +24,7 @@ import MLF.Constraint.Types.Witness
     , ReplayContract(..)
     )
 import MLF.Elab.Run.Util (canonicalizeExpansion, canonicalizeTrace, canonicalizeWitness)
+import MLF.Constraint.Types.Phase (Phase(Raw))
 
 newtype UnionFindMap = UnionFindMap (IntMap.IntMap NodeId)
     deriving (Show)
@@ -117,8 +119,7 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
 
         it "canonicalizes expansions" $ do
             let spec0 = ForallSpec
-                    { fsBinderCount = 1
-                    , fsBounds = [Just (BoundNode (NodeId 1)), Just (BoundBinder 0)]
+                    { fsBounds = [Just (BoundNode (NodeId 1)), Just (BoundBinder 0)]
                     }
                 exp0 =
                     ExpCompose (ExpForall (spec0 NE.:| []) NE.:| [ExpInstantiate [NodeId 3]])
@@ -128,8 +129,7 @@ spec = describe "MLF.Constraint.Canonicalizer" $ do
                     ExpCompose
                         ( ExpForall
                             ( ForallSpec
-                                { fsBinderCount = 1
-                                , fsBounds =
+                                { fsBounds =
                                     [ Just (BoundNode (canonNode (NodeId 1)))
                                     , Just (BoundBinder 0)
                                     ]

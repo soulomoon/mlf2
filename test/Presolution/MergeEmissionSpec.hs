@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Presolution.MergeEmissionSpec (spec) where
 
 import Test.Hspec
@@ -16,8 +17,8 @@ import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionError(..)
     , PresolutionResult(..)
-    , computePresolution
     )
+import MLF.Constraint.Presolution qualified as PresolutionPhase
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
     , lookupCopy
@@ -25,7 +26,9 @@ import MLF.Constraint.Presolution.TestSupport
     , runPresolutionM
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Presolution.Witness (OmegaNormalizeError(..))
+import MLF.Elab.Pipeline (TraceConfig)
 import qualified MLF.Binding.Tree as Binding
 import SpecUtil
     ( bindParentsFromPairs
@@ -35,6 +38,13 @@ import SpecUtil
     , nodeMapFromList
     , rootedConstraint
     )
+
+computePresolution :: TraceConfig -> AcyclicityResult -> Constraint 'Raw -> Either PresolutionError PresolutionResult
+computePresolution traceCfg acyclicity constraint =
+    PresolutionPhase.computePresolution
+        traceCfg
+        acyclicity
+        (toAcyclicConstraint (toNormalizedConstraint constraint))
 
 spec :: Spec
 spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do

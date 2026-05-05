@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {- |
 Module      : MLF.Constraint.Presolution.Driver
@@ -45,6 +46,7 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Canonicalizer (canonicalizerFrom, chaseRedirectsStable)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Phase (Phase(Acyclic))
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base
@@ -81,7 +83,7 @@ import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 computePresolution
     :: TraceConfig
     -> AcyclicityResult
-    -> Constraint
+    -> Constraint 'Acyclic
     -> Either PresolutionError PresolutionResult
 computePresolution traceCfg acyclicityResult constraint = do
     -- Initialize state
@@ -101,6 +103,9 @@ computePresolution traceCfg acyclicityResult constraint = do
         runFinalizationStage
 
     let finalConstraint = psConstraint finalState
+        presolvedConstraint =
+            toPresolvedConstraint
+                (toAcyclicConstraint (toNormalizedConstraint finalConstraint))
     when (not (null (cUnifyEdges finalConstraint))) $
         Left (ResidualUnifyEdges (cUnifyEdges finalConstraint))
     when (not (null (cInstEdges finalConstraint))) $
@@ -140,7 +145,7 @@ computePresolution traceCfg acyclicityResult constraint = do
             validateReplayMapTraceContract canonical constraint finalConstraint eid tr
 
     return PresolutionResult
-        { prConstraint = finalConstraint
+        { prConstraint = presolvedConstraint
         , prEdgeExpansions = edgeExpansions
         , prEdgeWitnesses = edgeWitnesses
         , prEdgeTraces = edgeTraces
@@ -223,8 +228,8 @@ assertWitnessTraceDomain phase = do
 
 validateReplayMapTraceContract
     :: (NodeId -> NodeId)
-    -> Constraint
-    -> Constraint
+    -> Constraint p
+    -> Constraint q
     -> Int
     -> EdgeTrace
     -> Either PresolutionError ()
@@ -472,10 +477,10 @@ rewriteConstraint mapping = do
 
     return fullRedirects
 
-mkInitialPresolutionState :: Constraint -> PresolutionState
+mkInitialPresolutionState :: Constraint 'Acyclic -> PresolutionState
 mkInitialPresolutionState constraint =
     PresolutionState
-        { psConstraint = constraint
+        { psConstraint = toRawConstraintForLegacy constraint
         , psPresolution = Presolution IntMap.empty
         , psUnionFind = IntMap.empty
         , psNextNodeId = maxNodeIdKeyOr0 constraint + 1
@@ -487,7 +492,7 @@ mkInitialPresolutionState constraint =
         , psEdgeTraces = IntMap.empty
         }
 
-tyExpNodeIds :: Constraint -> [NodeId]
+tyExpNodeIds :: Constraint p -> [NodeId]
 tyExpNodeIds c =
     [ tnId node
     | node@TyExp{} <- NodeAccess.allNodes c

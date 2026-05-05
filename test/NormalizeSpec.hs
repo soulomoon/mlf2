@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 module NormalizeSpec (spec) where
 
@@ -7,10 +8,12 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Test.Hspec
 
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
-import MLF.Constraint.Normalize
+import MLF.Constraint.Normalize qualified as Normalize
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import SpecUtil (emptyConstraint, lookupNodeMaybe, nodeMapFromList, nodeMapSingleton, nodeMapSize)
+
+normalize :: Constraint 'Raw -> Constraint 'Raw
+normalize = toRawConstraintForLegacy . Normalize.normalize
 
 spec :: Spec
 spec = describe "Phase 2 — Normalization" $ do

@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {- |
 Module      : MLF.Constraint.Presolution.StateAccess
@@ -75,6 +76,7 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types.Graph
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base (
@@ -116,19 +118,19 @@ getCanonical = do
 -- uf <- gets psUnionFind
 -- let canonical = UnionFind.frWith uf
 -- @
-getConstraintAndCanonical :: PresolutionM (Constraint, NodeId -> NodeId)
+getConstraintAndCanonical :: PresolutionM (Constraint 'Raw, NodeId -> NodeId)
 getConstraintAndCanonical = do
     c <- gets psConstraint
     uf <- gets psUnionFind
     pure (c, UnionFind.frWith uf)
 
-getConstraintAndUnionFind :: PresolutionM (Constraint, IntMap NodeId)
+getConstraintAndUnionFind :: PresolutionM (Constraint 'Raw, IntMap NodeId)
 getConstraintAndUnionFind = do
     c <- gets psConstraint
     uf <- gets psUnionFind
     pure (c, uf)
 
-putConstraintAndUnionFind :: Constraint -> IntMap NodeId -> PresolutionM ()
+putConstraintAndUnionFind :: Constraint 'Raw -> IntMap NodeId -> PresolutionM ()
 putConstraintAndUnionFind constraint uf = do
     modify' $ \st ->
         st
@@ -272,7 +274,7 @@ pendingWeakenOwnerM nid = do
     (c, canonical) <- getConstraintAndCanonical
     pure (pendingWeakenOwnerUnder canonical c nid)
 
-pendingWeakenOwnerUnder :: (NodeId -> NodeId) -> Constraint -> NodeId -> PendingWeakenOwner
+pendingWeakenOwnerUnder :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PendingWeakenOwner
 pendingWeakenOwnerUnder canonical c0 nid0 = go IntSet.empty (typeRef (canonical nid0))
   where
     go :: IntSet -> NodeRef -> PendingWeakenOwner
@@ -291,7 +293,7 @@ pendingWeakenOwnerUnder canonical c0 nid0 = go IntSet.empty (typeRef (canonical 
 -- This is used to identify which ∀-scheme "owns" a given body root during
 -- instantiation.  The function canonicalizes the root, walks the binding path
 -- upward, and returns the first 'GenNodeId' encountered.
-findSchemeIntroducerM :: (NodeId -> NodeId) -> Constraint -> NodeId -> PresolutionM GenNodeId
+findSchemeIntroducerM :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PresolutionM GenNodeId
 findSchemeIntroducerM canonical c0 root0 = do
     let root = canonical root0
     path <- bindingPathToRootUnderM canonical c0 (typeRef root)

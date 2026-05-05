@@ -87,13 +87,7 @@ rewireStructuralParents canonical old new =
         in c0 { cNodes = nodes1 }
 
 bindForallBindersFromSpec :: NodeId -> NodeId -> ForallSpec -> PresolutionM ()
-bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBounds = bounds } = do
-    when (k /= length bounds) $
-        throwError $
-            InternalError $
-                "bindForallBindersFromSpec: fsBounds length mismatch: expected "
-                    ++ show k ++ ", got " ++ show (length bounds)
-
+bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBounds = bounds } = do
     (c0, canonical) <- getConstraintAndCanonical
     let nodes0 = cNodes c0
         bodyC = canonical bodyRoot
@@ -168,7 +162,7 @@ bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBinderCount = k, fsBou
             InternalError $
                 "bindForallBindersFromSpec: missing order keys for " ++ show missing
 
-    let binders = take k candidates
+    let binders = take (length bounds) candidates
         binderByIndex = IntMap.fromList (zip [0..] binders)
 
     forM_ binders $ \bv ->

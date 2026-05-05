@@ -13,7 +13,7 @@ import MLF.Constraint.Types.Presolution
 import qualified MLF.Binding.Tree as Binding
 import MLF.Util.ElabError (ElabError(..))
 
-bindingScopeFor :: Constraint -> NodeRef -> Maybe GenNodeId
+bindingScopeFor :: Constraint p -> NodeRef -> Maybe GenNodeId
 bindingScopeFor constraint ref =
     case Binding.bindingPathToRoot constraint ref of
         Right path -> listToMaybe [gid | GenRef gid <- drop 1 path]

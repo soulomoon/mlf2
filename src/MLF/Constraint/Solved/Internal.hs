@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 -- |
 -- Module      : MLF.Constraint.Solved
 -- Description : Opaque abstraction over solved constraint graphs
@@ -63,14 +64,10 @@ import qualified Data.IntSet as IntSet
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Canonicalization.Shared (buildCanonicalMap, equivCanonical, nodeIdKey)
 import qualified MLF.Constraint.NodeAccess as NA
-import MLF.Constraint.Solve
-  ( SolveError,
-    SolveOutput (..),
-    SolveSnapshot (..),
-    solveResultFromSnapshot,
-  )
-import qualified MLF.Constraint.Solve as Solve
-import MLF.Constraint.Solve.Internal (SolveResult (..))
+import MLF.Constraint.Solve.Finalize (finalizeConstraintWithUF, validateSolvedGraphStrict)
+import MLF.Constraint.Solve.Internal (SolveOutput (..), SolveResult (..), SolveSnapshot (..))
+import MLF.Constraint.Solve.Worklist (SolveError)
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Graph
   ( BindFlag (..),
     BindParents,
@@ -89,6 +86,7 @@ import MLF.Constraint.Types.Graph
     WeakenedVars,
     genNodeKey,
     nodeRefFromKey,
+    toRawConstraintForLegacy,
   )
 import Prelude hiding (lookup)
 
@@ -98,7 +96,7 @@ import Prelude hiding (lookup)
 
 -- | Opaque handle to a solved constraint graph, backed by an
 -- equivalence-class representation.
-data SolvedBackend
+data SolvedBackend p
   = EquivBackend
   { ebCanonicalMap :: IntMap NodeId,
     ebCanonicalNodes :: NodeMap TyNode,
@@ -112,43 +110,47 @@ data SolvedBackend
     ebCanonicalLetEdges :: IntSet,
     ebCanonicalGenNodes :: GenNodeMap GenNode,
     ebEquivClasses :: IntMap [NodeId],
-    ebOriginalConstraint :: Constraint
+    ebOriginalConstraint :: Constraint p
   }
   deriving (Eq, Show)
 
-newtype Solved = Solved {unSolved :: SolvedBackend}
+-- | Opaque solved handle. Internally wraps a 'SolvedBackend' at a fixed
+-- phantom phase. The phantom parameter is erased at runtime, so the
+-- 'unsafeCoerce' in the smart constructors is sound.
+newtype Solved = Solved {unSolved :: SolvedBackend 'Raw}
   deriving (Eq, Show)
 
 -- | Construct an Equiv backend directly from a constraint and
 -- union-find map. The input constraint is used as both original and
 -- canonical; callers should only use this when no solve replay is needed.
-fromConstraintAndUf :: Constraint -> IntMap NodeId -> Solved
+fromConstraintAndUf :: Constraint p -> IntMap NodeId -> Solved
 fromConstraintAndUf c uf =
-  let canonMap = buildCanonicalMap uf c
-      equivClasses = buildEquivClasses canonMap c
+  let cRaw = toRawConstraintForLegacy c
+      canonMap = buildCanonicalMap uf cRaw
+      equivClasses = buildEquivClasses canonMap cRaw
    in Solved
         EquivBackend
           { ebCanonicalMap = canonMap,
-            ebCanonicalNodes = cNodes c,
-            ebCanonicalInstEdges = cInstEdges c,
-            ebCanonicalUnifyEdges = cUnifyEdges c,
-            ebCanonicalBindParents = cBindParents c,
-            ebCanonicalPolySyms = cPolySyms c,
-            ebCanonicalEliminatedVars = cEliminatedVars c,
-            ebCanonicalWeakenedVars = cWeakenedVars c,
-            ebCanonicalAnnEdges = cAnnEdges c,
-            ebCanonicalLetEdges = cLetEdges c,
-            ebCanonicalGenNodes = cGenNodes c,
+            ebCanonicalNodes = cNodes cRaw,
+            ebCanonicalInstEdges = cInstEdges cRaw,
+            ebCanonicalUnifyEdges = cUnifyEdges cRaw,
+            ebCanonicalBindParents = cBindParents cRaw,
+            ebCanonicalPolySyms = cPolySyms cRaw,
+            ebCanonicalEliminatedVars = cEliminatedVars cRaw,
+            ebCanonicalWeakenedVars = cWeakenedVars cRaw,
+            ebCanonicalAnnEdges = cAnnEdges cRaw,
+            ebCanonicalLetEdges = cLetEdges cRaw,
+            ebCanonicalGenNodes = cGenNodes cRaw,
             ebEquivClasses = equivClasses,
-            ebOriginalConstraint = c
+            ebOriginalConstraint = cRaw
           }
 
 -- | Backward-compatible alias used by tests and legacy call sites.
-mkTestSolved :: Constraint -> IntMap NodeId -> Solved
+mkTestSolved :: Constraint 'Raw -> IntMap NodeId -> Solved
 mkTestSolved = fromConstraintAndUf
 
 -- | Build a staged equivalence backend from snapshot-enabled solve output.
-fromSolveOutput :: SolveOutput -> Either SolveError Solved
+fromSolveOutput :: SolveOutput p -> Either SolveError Solved
 fromSolveOutput out =
   let snapshot = soSnapshot out
    in fromPreRewriteStateStrict
@@ -159,21 +161,22 @@ fromSolveOutput out =
 --
 -- The input pair should come from solve after unification has converged:
 -- a pre-rewrite constraint and the final union-find map.
-fromPreRewriteState :: IntMap NodeId -> Constraint -> Either SolveError Solved
+fromPreRewriteState :: IntMap NodeId -> Constraint p -> Either SolveError Solved
 fromPreRewriteState = fromPreRewriteStateStrict
 
 -- | Strict snapshot replay used by production solve output conversion.
-fromPreRewriteStateStrict :: IntMap NodeId -> Constraint -> Either SolveError Solved
+fromPreRewriteStateStrict :: IntMap NodeId -> Constraint p -> Either SolveError Solved
 fromPreRewriteStateStrict uf preRewrite = do
+  let preRewriteRaw = toRawConstraintForLegacy preRewrite
   let snapshot =
         SolveSnapshot
           { snapUnionFind = uf,
-            snapPreRewriteConstraint = preRewrite
+            snapPreRewriteConstraint = preRewriteRaw
           }
-  replayed <- solveResultFromSnapshot snapshot
-  let canonMap = buildCanonicalMap (srUnionFind replayed) preRewrite
+  replayed <- finalizeConstraintWithUF (snapUnionFind snapshot) (snapPreRewriteConstraint snapshot)
+  let canonMap = buildCanonicalMap (srUnionFind replayed) preRewriteRaw
       canonicalC = srConstraint replayed
-      equivClasses = buildEquivClasses canonMap preRewrite
+      equivClasses = buildEquivClasses canonMap preRewriteRaw
   pure $
     Solved
       EquivBackend
@@ -189,10 +192,10 @@ fromPreRewriteStateStrict uf preRewrite = do
           ebCanonicalLetEdges = cLetEdges canonicalC,
           ebCanonicalGenNodes = cGenNodes canonicalC,
           ebEquivClasses = equivClasses,
-          ebOriginalConstraint = preRewrite
+          ebOriginalConstraint = preRewriteRaw
         }
 
-buildEquivClasses :: IntMap NodeId -> Constraint -> IntMap [NodeId]
+buildEquivClasses :: IntMap NodeId -> Constraint 'Raw -> IntMap [NodeId]
 buildEquivClasses canonMap c =
   foldr addNode IntMap.empty (map tnId (NA.allNodes c))
   where
@@ -204,7 +207,7 @@ buildEquivClasses canonMap c =
 -- Core queries
 -- -----------------------------------------------------------------
 
-canonicalConstraintFromBackend :: SolvedBackend -> Constraint
+canonicalConstraintFromBackend :: SolvedBackend 'Raw -> Constraint 'Raw
 canonicalConstraintFromBackend
   EquivBackend
     { ebCanonicalNodes = nodes,
@@ -231,7 +234,7 @@ canonicalConstraintFromBackend
         cGenNodes = genNodes0
       }
 
-setCanonicalConstraint :: Constraint -> SolvedBackend -> SolvedBackend
+setCanonicalConstraint :: Constraint 'Raw -> SolvedBackend 'Raw -> SolvedBackend 'Raw
 setCanonicalConstraint c eb =
   eb
     { ebCanonicalNodes = cNodes c,
@@ -257,11 +260,11 @@ canonicalMap (Solved EquivBackend {ebCanonicalMap = cm}) = cm
 
 -- | The original (pre-solving) constraint.  Primary accessor for all
 -- post-solve operations (thesis-exact).
-originalConstraint :: Solved -> Constraint
+originalConstraint :: Solved -> Constraint 'Raw
 originalConstraint (Solved EquivBackend {ebOriginalConstraint = c}) = c
 
 -- | The canonical (post-solving) constraint.
-canonicalConstraint :: Solved -> Constraint
+canonicalConstraint :: Solved -> Constraint 'Raw
 canonicalConstraint (Solved eb) = canonicalConstraintFromBackend eb
 
 -- | Look up a type node, canonicalizing the id first.
@@ -302,9 +305,9 @@ lookupVarBound s@(Solved EquivBackend {ebOriginalConstraint = c}) nid =
 -- | Rebuild a Solved with a different constraint, preserving the
 -- canonical map. Used by callers that modify the constraint
 -- (e.g., alias insertion, canonicalization).
-rebuildWithConstraint :: Solved -> Constraint -> Solved
+rebuildWithConstraint :: Solved -> Constraint p -> Solved
 rebuildWithConstraint (Solved eb) c =
-  Solved (setCanonicalConstraint c eb)
+  Solved (setCanonicalConstraint (toRawConstraintForLegacy c) eb)
 
 -- -----------------------------------------------------------------
 -- Mutation helpers
@@ -393,9 +396,8 @@ canonicalizedBindParents s =
 -- | Run strict solved-graph validation against the canonical solved view.
 validateCanonicalGraphStrict :: Solved -> [String]
 validateCanonicalGraphStrict s =
-  Solve.validateSolvedGraphStrict
-    SolveResult
-      { srConstraint = canonicalConstraint s,
+  validateSolvedGraphStrict
+    SolveResult { srConstraint = canonicalConstraint s,
         srUnionFind = canonicalMap s
       }
 

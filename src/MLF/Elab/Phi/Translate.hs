@@ -43,6 +43,7 @@ import Data.Maybe (listToMaybe)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
@@ -70,7 +71,7 @@ canonicalNodeM nid = do
 
 -- | Translate a recorded per-edge graph witness to an xMLF instantiation.
 type GeneralizeAtWith =
-    Maybe GaBindParents
+    Maybe (GaBindParents 'Raw)
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
@@ -78,8 +79,8 @@ type GeneralizeAtWith =
 phiFromEdgeWitnessWithTrace
     :: TraceConfig
     -> GeneralizeAtWith
-    -> PresolutionView
-    -> Maybe GaBindParents
+    -> PresolutionView 'Raw
+    -> Maybe (GaBindParents 'Raw)
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
@@ -102,8 +103,8 @@ were merged during solving but does not introduce new semantic content.
 phiFromEdgeWitnessCore
     :: TraceConfig
     -> GeneralizeAtWith
-    -> PresolutionView
-    -> Maybe GaBindParents
+    -> PresolutionView 'Raw
+    -> Maybe (GaBindParents 'Raw)
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
@@ -249,7 +250,7 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
     canonicalNode :: NodeId -> NodeId
     canonicalNode = pvCanonical presolutionView
 
-    constraint :: Constraint
+    constraint :: Constraint 'Raw
     constraint = pvConstraint presolutionView
 
     reifyDebugType :: NodeId -> Either ElabError ElabType

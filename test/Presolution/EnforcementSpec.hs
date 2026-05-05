@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Presolution.EnforcementSpec (spec) where
 
 import Data.List (isInfixOf)
@@ -6,18 +7,18 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution
     ( PresolutionResult(..)
     , PresolutionError(..)
-    , computePresolution
     )
+import MLF.Constraint.Presolution qualified as PresolutionPhase
 import MLF.Constraint.Presolution.TestSupport
     ( translatableWeakenedNodes
     , validateTranslatablePresolution
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
+import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Elab.Pipeline (TraceConfig)
 import SpecUtil
     ( defaultTraceConfig
     , emptyConstraint
@@ -25,6 +26,13 @@ import SpecUtil
     , nodeMapFromList
     , rootedConstraint
     )
+
+computePresolution :: TraceConfig -> AcyclicityResult -> Constraint 'Raw -> Either PresolutionError PresolutionResult
+computePresolution traceCfg acyclicity constraint =
+    PresolutionPhase.computePresolution
+        traceCfg
+        acyclicity
+        (toAcyclicConstraint (toNormalizedConstraint constraint))
 
 spec :: Spec
 spec = describe "Translatable presolution enforcement" $ do
