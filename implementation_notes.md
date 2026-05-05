@@ -1922,7 +1922,7 @@ and non-local proxy elaboration boundary tests.
   - drain initial pending unification closure before inst-edge traversal,
   - process edges in topological order,
   - drain closure after each edge when unification work is pending.
-- Presolution now carries UF metadata explicitly (`prUnionFind`) while keeping `prConstraint` as the raw translation input graph.
+- Presolution now carries UF metadata explicitly (`prUnionFind`) while exposing `prConstraint` as the typed presolved graph; the temporary raw graph remains an internal Phase 4 state detail.
 - Shared unification closure logic is centralized in `MLF.Constraint.Unify.Closure` and reused by both Solve and Presolution.
 - `Solved.fromPresolutionResult` now uses replay-equivalent snapshot finalization (shared semantics with `fromSolveOutput`).
 - Production decision update (2026-02-26): default elaboration pipeline now uses presolution-native solved construction directly (`fromPresolutionResult`) without dual-run legacy replay in the production path.
