@@ -61,6 +61,22 @@ spec = describe "Repository guardrails" $ do
               "    castConstraint",
               "  )"
             ]
+        multilineQualifiedPostImport =
+          unlines
+            [ "import MLF.Constraint.Types.Graph",
+              "  qualified as Graph",
+              "  (",
+              "    castConstraint",
+              "  )"
+            ]
+        multilineBareQualifiedPostImport =
+          unlines
+            [ "import MLF.Constraint.Types.Graph",
+              "  qualified",
+              "  (",
+              "    castConstraint",
+              "  )"
+            ]
         multilineHidingImport =
           unlines
             [ "import MLF.Constraint.Types.Graph",
@@ -91,6 +107,8 @@ spec = describe "Repository guardrails" $ do
     containsCastConstraintCall multilineSignature `shouldBe` False
     containsCastConstraintCall multilineImport `shouldBe` False
     containsCastConstraintCall multilineQualifiedImport `shouldBe` False
+    containsCastConstraintCall multilineQualifiedPostImport `shouldBe` False
+    containsCastConstraintCall multilineBareQualifiedPostImport `shouldBe` False
     containsCastConstraintCall multilineHidingImport `shouldBe` False
     containsCastConstraintCall sameLineHidingImport `shouldBe` False
     containsCastConstraintCall multilineExport `shouldBe` False
@@ -755,6 +773,10 @@ pendingSymbolListLineOpens line =
 isImportSpecContinuation :: String -> Bool
 isImportSpecContinuation line =
   case words (takeWhile (/= '(') (trim line)) of
+    ["qualified"] -> True
+    ["qualified", "as", _alias] -> True
+    ["qualified", "hiding"] -> True
+    ["qualified", "as", _alias, "hiding"] -> True
     ["as", _alias] -> True
     ["as", _alias, "hiding"] -> True
     ["hiding"] -> True
