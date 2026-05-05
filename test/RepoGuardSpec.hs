@@ -45,6 +45,8 @@ spec = describe "Repository guardrails" $ do
         guardedLines = lines (stripHaskellCommentsAndLiterals guardedSource)
     any containsCastConstraintCall guardedLines `shouldBe` False
     containsCastConstraintCall "legacy = castConstraint c" `shouldBe` True
+    any containsCastConstraintCall (lines (stripHaskellCommentsAndLiterals "x' = castConstraint c"))
+      `shouldBe` True
     containsCastConstraintCall "legacy = Graph.castConstraint c" `shouldBe` True
 
   it "MLF.API no longer exports pipeline/runtime helpers and MLF.Pipeline owns them" $ do
@@ -449,7 +451,6 @@ data SourceMode
   | SourceLineComment
   | SourceBlockComment Int
   | SourceString
-  | SourceChar
 
 stripHaskellCommentsAndLiterals :: String -> String
 stripHaskellCommentsAndLiterals = go SourceCode
@@ -458,7 +459,6 @@ stripHaskellCommentsAndLiterals = go SourceCode
     go SourceCode ('-' : '-' : rest) = ' ' : ' ' : go SourceLineComment rest
     go SourceCode ('{' : '-' : rest) = ' ' : ' ' : go (SourceBlockComment 1) rest
     go SourceCode ('"' : rest) = ' ' : go SourceString rest
-    go SourceCode ('\'' : rest) = ' ' : go SourceChar rest
     go SourceCode (ch : rest) = ch : go SourceCode rest
     go SourceLineComment ('\n' : rest) = '\n' : go SourceCode rest
     go SourceLineComment (_ : rest) = ' ' : go SourceLineComment rest
@@ -473,10 +473,6 @@ stripHaskellCommentsAndLiterals = go SourceCode
     go SourceString ('"' : rest) = ' ' : go SourceCode rest
     go SourceString ('\n' : rest) = '\n' : go SourceCode rest
     go SourceString (_ : rest) = ' ' : go SourceString rest
-    go SourceChar ('\\' : _ : rest) = ' ' : ' ' : go SourceChar rest
-    go SourceChar ('\'' : rest) = ' ' : go SourceCode rest
-    go SourceChar ('\n' : rest) = '\n' : go SourceCode rest
-    go SourceChar (_ : rest) = ' ' : go SourceChar rest
 
 containsCastConstraintCall :: String -> Bool
 containsCastConstraintCall line
