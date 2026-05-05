@@ -49,6 +49,8 @@ spec = describe "Repository guardrails" $ do
       `shouldBe` True
     any containsCastConstraintCall (lines (unlines ["legacy =", "  castConstraint", "    c"]))
       `shouldBe` True
+    any containsCastConstraintCall (lines (unlines ["legacy =", "  (castConstraint)", "    c"]))
+      `shouldBe` True
     containsCastConstraintCall "legacy = Graph.castConstraint c" `shouldBe` True
 
   it "MLF.API no longer exports pipeline/runtime helpers and MLF.Pipeline owns them" $ do
@@ -493,7 +495,7 @@ isCastConstraintCallContext prefix suffix =
   where
     prefixTrimmed = trim prefix
     suffixTrimmed = trim suffix
-    onlyExportPunctuation = all (`elem` "(),")
+    onlyExportPunctuation = all (== ',')
     onlySignaturePrefix = all (== ',')
     isSignatureEntry =
       "::" `isPrefixOf` suffixTrimmed
