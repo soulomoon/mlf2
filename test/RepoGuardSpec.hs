@@ -97,6 +97,10 @@ spec = describe "Repository guardrails" $ do
     containsCastConstraintCall classSignature `shouldBe` False
     containsCastConstraintCall "legacy = castConstraint c" `shouldBe` True
     containsCastConstraintCall "x' = castConstraint c" `shouldBe` True
+    containsCastConstraintCall "legacy = lhs --> castConstraint c" `shouldBe` True
+    containsCastConstraintCall "legacy = lhs |-- castConstraint c" `shouldBe` True
+    containsCastConstraintCall "legacy = lhs -- castConstraint c" `shouldBe` False
+    containsCastConstraintCall "legacy = lhs --castConstraint c" `shouldBe` False
     containsCastConstraintCall (unlines ["legacy =", "  castConstraint", "    c"])
       `shouldBe` True
     containsCastConstraintCall (unlines ["legacy =", "  (castConstraint)", "    c"])
@@ -518,26 +522,39 @@ data SymbolListContext
   | InsideSymbolList Int
 
 stripHaskellCommentsAndLiterals :: String -> String
-stripHaskellCommentsAndLiterals = go SourceCode
+stripHaskellCommentsAndLiterals = go Nothing SourceCode
   where
-    go _ [] = []
-    go SourceCode ('-' : '-' : rest) = ' ' : ' ' : go SourceLineComment rest
-    go SourceCode ('{' : '-' : rest) = ' ' : ' ' : go (SourceBlockComment 1) rest
-    go SourceCode ('"' : rest) = ' ' : go SourceString rest
-    go SourceCode (ch : rest) = ch : go SourceCode rest
-    go SourceLineComment ('\n' : rest) = '\n' : go SourceCode rest
-    go SourceLineComment (_ : rest) = ' ' : go SourceLineComment rest
-    go (SourceBlockComment depth) ('{' : '-' : rest) =
-      ' ' : ' ' : go (SourceBlockComment (depth + 1)) rest
-    go (SourceBlockComment 1) ('-' : '}' : rest) = ' ' : ' ' : go SourceCode rest
-    go (SourceBlockComment depth) ('-' : '}' : rest) =
-      ' ' : ' ' : go (SourceBlockComment (depth - 1)) rest
-    go mode@(SourceBlockComment _) ('\n' : rest) = '\n' : go mode rest
-    go mode@(SourceBlockComment _) (_ : rest) = ' ' : go mode rest
-    go SourceString ('\\' : _ : rest) = ' ' : ' ' : go SourceString rest
-    go SourceString ('"' : rest) = ' ' : go SourceCode rest
-    go SourceString ('\n' : rest) = '\n' : go SourceCode rest
-    go SourceString (_ : rest) = ' ' : go SourceString rest
+    go _ _ [] = []
+    go previous SourceCode input@('-' : '-' : _) =
+      let (dashes, rest) = span (== '-') input
+       in if dashRunIsOperator previous rest
+            then dashes ++ go (Just '-') SourceCode rest
+            else replicate (length dashes) ' ' ++ go Nothing SourceLineComment rest
+    go _ SourceCode ('{' : '-' : rest) = ' ' : ' ' : go Nothing (SourceBlockComment 1) rest
+    go _ SourceCode ('"' : rest) = ' ' : go Nothing SourceString rest
+    go _ SourceCode ('\n' : rest) = '\n' : go Nothing SourceCode rest
+    go _ SourceCode (ch : rest) = ch : go (Just ch) SourceCode rest
+    go _ SourceLineComment ('\n' : rest) = '\n' : go Nothing SourceCode rest
+    go _ SourceLineComment (_ : rest) = ' ' : go Nothing SourceLineComment rest
+    go _ (SourceBlockComment depth) ('{' : '-' : rest) =
+      ' ' : ' ' : go Nothing (SourceBlockComment (depth + 1)) rest
+    go _ (SourceBlockComment 1) ('-' : '}' : rest) = ' ' : ' ' : go Nothing SourceCode rest
+    go _ (SourceBlockComment depth) ('-' : '}' : rest) =
+      ' ' : ' ' : go Nothing (SourceBlockComment (depth - 1)) rest
+    go _ mode@(SourceBlockComment _) ('\n' : rest) = '\n' : go Nothing mode rest
+    go _ mode@(SourceBlockComment _) (_ : rest) = ' ' : go Nothing mode rest
+    go _ SourceString ('\\' : _ : rest) = ' ' : ' ' : go Nothing SourceString rest
+    go _ SourceString ('"' : rest) = ' ' : go Nothing SourceCode rest
+    go _ SourceString ('\n' : rest) = '\n' : go Nothing SourceCode rest
+    go _ SourceString (_ : rest) = ' ' : go Nothing SourceString rest
+    dashRunIsOperator previous rest =
+      maybe False isHaskellSymbolChar previous
+        || case rest of
+          ch : _ -> isHaskellSymbolChar ch
+          [] -> False
+
+isHaskellSymbolChar :: Char -> Bool
+isHaskellSymbolChar ch = ch `elem` "!#$%&*+./<=>?@\\^|-~:"
 
 containsCastConstraintCall :: String -> Bool
 containsCastConstraintCall source =
