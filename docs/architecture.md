@@ -98,7 +98,7 @@ after eMLF type recovery.
 ## Key graph and witness types
 
 - `Expr` (`MLF.Frontend.Syntax`) — surface eMLF terms
-- `Constraint` (`MLF.Constraint.Types`) — constraint graph plus binding tree
+- `Constraint` (`MLF.Constraint.Types.Graph`) — constraint graph plus binding tree
 - `TyNode` — graph nodes (`TyVar`, `TyArrow`, `TyForall`, `TyBase`, `TyExp`, `TyBottom`)
 - `InstEdge` — instantiation edges (`<=`)
 - `BindParents` — child-to-parent binding tree map with `BindFlag`
@@ -138,7 +138,7 @@ runtime invariants as compile-time types:
 
 ## Shared ownership notes
 
-- Core graph node/edge/binding identifiers and types live in `MLF.Constraint.Types.Graph`; witness metadata lives in `MLF.Constraint.Types.Witness`; presolution-only state/types live in `MLF.Constraint.Types.Presolution`. `MLF.Constraint.Types` re-exports these for compatibility.
+- Core graph node/edge/binding identifiers and types live in `MLF.Constraint.Types.Graph`; witness metadata lives in `MLF.Constraint.Types.Witness`; presolution-only state/types live in `MLF.Constraint.Types.Presolution`.
 - Shared unification flow lives in `MLF.Constraint.Unify.Core`; shared structural decomposition lives in `MLF.Constraint.Unify.Decompose`.
 - Prefer `MLF.Constraint.Canonicalizer` for redirect + union-find canonicalization instead of ad hoc chase helpers.
 - Legacy expansion-to-instantiation translation lives in `MLF.Elab.Legacy` and is re-exported by `MLF.Elab.Elaborate` and `MLF.Elab.Pipeline`.

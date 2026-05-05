@@ -46,6 +46,22 @@ spec = describe "MLF.Constraint.Presolution facade" $ do
         edgeProcessingSrc `shouldSatisfy` isInfixOf "MLF.Constraint.Presolution.EdgeUnify.Omega"
         edgeProcessingSrc `shouldSatisfy` isInfixOf "pendingWeakenOwners"
 
+    it "keeps the Phase 4 boundary typed and the raw state bridge private" $ do
+        driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
+        baseSrc <- readFile "src/MLF/Constraint/Presolution/Base.hs"
+        typesSrc <- readFile "src/MLF/Constraint/Types/Presolution.hs"
+        viewSrc <- readFile "src/MLF/Constraint/Presolution/View.hs"
+
+        driverSrc `shouldSatisfy` isInfixOf computePresolutionSignature
+        baseSrc `shouldSatisfy` isInfixOf "prConstraint :: Constraint 'Presolved"
+        typesSrc `shouldSatisfy` isInfixOf "snapshotConstraint :: a -> Constraint 'Presolved"
+        viewSrc `shouldSatisfy` isInfixOf "fromPresolutionResult :: PresolutionSnapshot a => a -> PresolutionView 'Presolved"
+        driverSrc `shouldSatisfy` isInfixOf "Note [Presolution in-progress raw bridge]"
+        driverSrc `shouldSatisfy` isInfixOf "presolutionInProgressRawBridge :: Constraint 'Acyclic -> Constraint 'Raw"
+        markerLine "let presolvedConstraint =" driverSrc
+            `shouldSatisfy`
+                (> markerLine "validateReplayMapTraceContract canonical constraint finalRawConstraint eid tr" driverSrc)
+
 bannedMarkers :: [String]
 bannedMarkers =
     [ "PresolutionState(..)"
@@ -86,3 +102,19 @@ supportMarkers =
     , "processInstEdge"
     , "validateTranslatablePresolution"
     ]
+
+computePresolutionSignature :: String
+computePresolutionSignature =
+    unlines
+        [ "computePresolution"
+        , "    :: TraceConfig"
+        , "    -> AcyclicityResult"
+        , "    -> Constraint 'Acyclic"
+        , "    -> Either PresolutionError PresolutionResult"
+        ]
+
+markerLine :: String -> String -> Int
+markerLine marker src =
+    case [ix | (ix, line) <- zip [1 :: Int ..] (lines src), marker `isInfixOf` line] of
+        ix : _ -> ix
+        [] -> error ("missing source marker: " ++ marker)
