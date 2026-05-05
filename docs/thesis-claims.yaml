@@ -22,7 +22,7 @@ claims:
       property_tests: []
       code_paths:
         - src/MLF/Frontend/ConstraintGen/Translate.hs#buildExprRaw
-        - src/MLF/Constraint/Types.hs#Constraint
+        - src/MLF/Constraint/Types/Graph.hs#data Constraint
     deviations:
       - DEV-CONSTRAINT-REPR-SIMPLIFIED
     status: defended
