@@ -47,6 +47,8 @@ spec = describe "Repository guardrails" $ do
     containsCastConstraintCall "legacy = castConstraint c" `shouldBe` True
     any containsCastConstraintCall (lines (stripHaskellCommentsAndLiterals "x' = castConstraint c"))
       `shouldBe` True
+    any containsCastConstraintCall (lines (unlines ["legacy =", "  castConstraint", "    c"]))
+      `shouldBe` True
     containsCastConstraintCall "legacy = Graph.castConstraint c" `shouldBe` True
 
   it "MLF.API no longer exports pipeline/runtime helpers and MLF.Pipeline owns them" $ do
@@ -497,7 +499,8 @@ isCastConstraintCallContext prefix suffix =
       "::" `isPrefixOf` suffixTrimmed
         && onlySignaturePrefix prefixTrimmed
     isExportListEntry =
-      onlyExportPunctuation prefixTrimmed
+      not (null prefixTrimmed && null suffixTrimmed)
+        && onlyExportPunctuation prefixTrimmed
         && onlyExportPunctuation suffixTrimmed
 
 identifierTokenOffsets :: String -> String -> [Int]
