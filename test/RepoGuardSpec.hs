@@ -61,6 +61,19 @@ spec = describe "Repository guardrails" $ do
               "    castConstraint",
               "  )"
             ]
+        multilineHidingImport =
+          unlines
+            [ "import MLF.Constraint.Types.Graph",
+              "  hiding",
+              "  (",
+              "    castConstraint",
+              "  )"
+            ]
+        sameLineHidingImport =
+          unlines
+            [ "import MLF.Constraint.Types.Graph",
+              "  hiding (castConstraint)"
+            ]
         multilineExport =
           unlines
             [ "module MLF.Constraint.Types.Graph",
@@ -78,6 +91,8 @@ spec = describe "Repository guardrails" $ do
     containsCastConstraintCall multilineSignature `shouldBe` False
     containsCastConstraintCall multilineImport `shouldBe` False
     containsCastConstraintCall multilineQualifiedImport `shouldBe` False
+    containsCastConstraintCall multilineHidingImport `shouldBe` False
+    containsCastConstraintCall sameLineHidingImport `shouldBe` False
     containsCastConstraintCall multilineExport `shouldBe` False
     containsCastConstraintCall classSignature `shouldBe` False
     containsCastConstraintCall "legacy = castConstraint c" `shouldBe` True
@@ -569,7 +584,7 @@ importExportSymbolListLines = go OutsideSymbolList
     go listContext (line : rest) =
       let startsPendingList =
             case listContext of
-              PendingSymbolList -> "(" `isPrefixOf` trim line
+              PendingSymbolList -> pendingSymbolListLineOpens line
               _ -> False
           inSymbolList =
             startsPendingList
@@ -585,8 +600,8 @@ advanceSymbolListContext listContext line =
     InsideSymbolList depth -> continueList (depth + parenDelta line)
     PendingSymbolList
       | null (trim line) -> PendingSymbolList
-      | "(" `isPrefixOf` trim line -> continueList (parenDelta line)
-      | isImportQualifierContinuation line -> PendingSymbolList
+      | pendingSymbolListLineOpens line -> continueList (parenDelta line)
+      | isImportSpecContinuation line -> PendingSymbolList
       | otherwise -> OutsideSymbolList
     OutsideSymbolList
       | startsSymbolListOwner line ->
@@ -629,6 +644,13 @@ isCastConstraintCallContext inImportExportList nextLineStartsSignature previousL
     suffixTrimmed = trim suffix
     onlyImportExportPunctuation = all (`elem` "(),")
     onlySignaturePunctuation = all (== ',')
+    isImportExportPrefix =
+      onlyImportExportPunctuation prefixTrimmed
+        || case break (== '(') prefixTrimmed of
+          (beforeParen, '(' : afterParen) ->
+            isImportSpecContinuation beforeParen
+              && onlyImportExportPunctuation ('(' : afterParen)
+          _ -> False
     isSignatureEntry =
       onlySignaturePunctuation prefixTrimmed
         && ( "::" `isPrefixOf` suffixTrimmed
@@ -639,7 +661,7 @@ isCastConstraintCallContext inImportExportList nextLineStartsSignature previousL
            )
     isImportExportListEntry =
       inImportExportList
-        && onlyImportExportPunctuation prefixTrimmed
+        && isImportExportPrefix
         && onlyImportExportPunctuation suffixTrimmed
 
 identifierTokenOffsets :: String -> String -> [Int]
@@ -706,10 +728,19 @@ lineIntroducesExpression line =
   "=" `isInfixOf` line
     && not ("::" `isInfixOf` line)
 
-isImportQualifierContinuation :: String -> Bool
-isImportQualifierContinuation line =
-  case words line of
+pendingSymbolListLineOpens :: String -> Bool
+pendingSymbolListLineOpens line =
+  "(" `isPrefixOf` trimmed
+    || (hasOpeningParen trimmed && isImportSpecContinuation line)
+  where
+    trimmed = trim line
+
+isImportSpecContinuation :: String -> Bool
+isImportSpecContinuation line =
+  case words (takeWhile (/= '(') (trim line)) of
     ["as", _alias] -> True
+    ["as", _alias, "hiding"] -> True
+    ["hiding"] -> True
     _ -> False
 
 collectHsFiles :: FilePath -> IO [FilePath]
