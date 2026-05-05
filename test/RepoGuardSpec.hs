@@ -39,17 +39,38 @@ spec = describe "Repository guardrails" $ do
               "{- castConstraint is mentioned in a block comment -}",
               "message = \"castConstraint is mentioned in a string\"",
               "castConstraint :: Constraint p -> Constraint q",
-              "    castConstraint,",
               "import MLF.Constraint.Types.Graph (castConstraint)"
             ]
-        guardedLines = lines (stripHaskellCommentsAndLiterals guardedSource)
-    any containsCastConstraintCall guardedLines `shouldBe` False
+        multilineSignature =
+          unlines
+            [ "castConstraint",
+              "  :: Constraint p -> Constraint q"
+            ]
+        multilineImport =
+          unlines
+            [ "import MLF.Constraint.Types.Graph",
+              "  (",
+              "    castConstraint",
+              "  )"
+            ]
+        multilineExport =
+          unlines
+            [ "module MLF.Constraint.Types.Graph",
+              "  (",
+              "    castConstraint",
+              "  ) where"
+            ]
+    containsCastConstraintCall guardedSource `shouldBe` False
+    containsCastConstraintCall multilineSignature `shouldBe` False
+    containsCastConstraintCall multilineImport `shouldBe` False
+    containsCastConstraintCall multilineExport `shouldBe` False
     containsCastConstraintCall "legacy = castConstraint c" `shouldBe` True
-    any containsCastConstraintCall (lines (stripHaskellCommentsAndLiterals "x' = castConstraint c"))
+    containsCastConstraintCall "x' = castConstraint c" `shouldBe` True
+    containsCastConstraintCall (unlines ["legacy =", "  castConstraint", "    c"])
       `shouldBe` True
-    any containsCastConstraintCall (lines (unlines ["legacy =", "  castConstraint", "    c"]))
+    containsCastConstraintCall (unlines ["legacy =", "  (castConstraint)", "    c"])
       `shouldBe` True
-    any containsCastConstraintCall (lines (unlines ["legacy =", "  (castConstraint)", "    c"]))
+    containsCastConstraintCall (unlines ["legacy =", "  castConstraint", "  :: Constraint p -> Constraint q"])
       `shouldBe` True
     containsCastConstraintCall "legacy = Graph.castConstraint c" `shouldBe` True
 
@@ -446,15 +467,20 @@ findCastConstraintOffenders roots = do
 
 hasCastConstraintUse :: FilePath -> IO (FilePath, Bool)
 hasCastConstraintUse path = do
-  src <- stripHaskellCommentsAndLiterals <$> readFile path
+  src <- readFile path
   let definingModule = path == "src/MLF/Constraint/Types/Graph.hs"
-  pure (path, not definingModule && any containsCastConstraintCall (lines src))
+  pure (path, not definingModule && containsCastConstraintCall src)
 
 data SourceMode
   = SourceCode
   | SourceLineComment
   | SourceBlockComment Int
   | SourceString
+
+data SymbolListContext
+  = OutsideSymbolList
+  | PendingSymbolList
+  | InsideSymbolList Int
 
 stripHaskellCommentsAndLiterals :: String -> String
 stripHaskellCommentsAndLiterals = go SourceCode
@@ -479,31 +505,120 @@ stripHaskellCommentsAndLiterals = go SourceCode
     go SourceString (_ : rest) = ' ' : go SourceString rest
 
 containsCastConstraintCall :: String -> Bool
-containsCastConstraintCall line
-  | Just _ <- stripPrefix "import " stripped = False
-  | otherwise = any isCallAt (identifierTokenOffsets "castConstraint" line)
+containsCastConstraintCall source =
+  any lineHasCastConstraintCall (zip3 [0 ..] symbolListLines sourceLines)
   where
-    stripped = trim line
-    isCallAt offset =
+    sourceLines = lines (stripHaskellCommentsAndLiterals source)
+    symbolListLines = importExportSymbolListLines sourceLines
+    lineHasCastConstraintCall (lineIndex, inImportExportList, line)
+      | isImportLine line = False
+      | isModuleHeaderLine line = False
+      | otherwise =
+          any
+            (isCallAt lineIndex inImportExportList line)
+            (identifierTokenOffsets "castConstraint" line)
+    isCallAt lineIndex inImportExportList line offset =
       let (prefix, tokenAndSuffix) = splitAt offset line
           suffix = drop (length "castConstraint") tokenAndSuffix
-       in isCastConstraintCallContext prefix suffix
+       in isCastConstraintCallContext
+            inImportExportList
+            (nextLineStartsSignature lineIndex)
+            (previousLineContinuesExpression lineIndex)
+            prefix
+            suffix
+    nextLineStartsSignature lineIndex =
+      case firstNonEmpty (drop (lineIndex + 1) sourceLines) of
+        Just nextLine -> "::" `isPrefixOf` trim nextLine
+        Nothing -> False
+    previousLineContinuesExpression lineIndex =
+      case lastNonEmpty (take lineIndex sourceLines) of
+        Just previousLine -> lineContinuesExpression previousLine
+        Nothing -> False
 
-isCastConstraintCallContext :: String -> String -> Bool
-isCastConstraintCallContext prefix suffix =
-  not (isSignatureEntry || isExportListEntry)
+isImportLine :: String -> Bool
+isImportLine line = "import " `isPrefixOf` trim line
+
+isModuleHeaderLine :: String -> Bool
+isModuleHeaderLine line = "module " `isPrefixOf` trim line
+
+importExportSymbolListLines :: [String] -> [Bool]
+importExportSymbolListLines = go OutsideSymbolList
+  where
+    go _ [] = []
+    go listContext (line : rest) =
+      let startsPendingList =
+            case listContext of
+              PendingSymbolList -> "(" `isPrefixOf` trim line
+              _ -> False
+          inSymbolList =
+            startsPendingList
+              || case listContext of
+                InsideSymbolList _ -> True
+                _ -> False
+          nextContext = advanceSymbolListContext listContext line
+       in inSymbolList : go nextContext rest
+
+advanceSymbolListContext :: SymbolListContext -> String -> SymbolListContext
+advanceSymbolListContext listContext line =
+  case listContext of
+    InsideSymbolList depth -> continueList (depth + parenDelta line)
+    PendingSymbolList
+      | null (trim line) -> PendingSymbolList
+      | "(" `isPrefixOf` trim line -> continueList (parenDelta line)
+      | otherwise -> OutsideSymbolList
+    OutsideSymbolList
+      | startsSymbolListOwner line ->
+          let depth = parenDelta line
+           in if depth > 0
+                then InsideSymbolList depth
+                else
+                  if hasOpeningParen line
+                    then OutsideSymbolList
+                    else PendingSymbolList
+      | otherwise -> OutsideSymbolList
+  where
+    continueList depth
+      | depth > 0 = InsideSymbolList depth
+      | otherwise = OutsideSymbolList
+
+startsSymbolListOwner :: String -> Bool
+startsSymbolListOwner line =
+  isImportLine line
+    || (isModuleHeaderLine line && not (" where" `isInfixOf` trim line))
+
+parenDelta :: String -> Int
+parenDelta = go 0
+  where
+    go depth [] = depth
+    go depth ('(' : rest) = go (depth + 1) rest
+    go depth (')' : rest) = go (depth - 1) rest
+    go depth (_ : rest) = go depth rest
+
+hasOpeningParen :: String -> Bool
+hasOpeningParen [] = False
+hasOpeningParen ('(' : _) = True
+hasOpeningParen (_ : rest) = hasOpeningParen rest
+
+isCastConstraintCallContext :: Bool -> Bool -> Bool -> String -> String -> Bool
+isCastConstraintCallContext inImportExportList nextLineStartsSignature previousLineContinuesExpression prefix suffix =
+  not (isSignatureEntry || isImportExportListEntry)
   where
     prefixTrimmed = trim prefix
     suffixTrimmed = trim suffix
-    onlyExportPunctuation = all (== ',')
-    onlySignaturePrefix = all (== ',')
+    onlyImportExportPunctuation = all (`elem` "(),")
+    onlySignaturePunctuation = all (== ',')
     isSignatureEntry =
-      "::" `isPrefixOf` suffixTrimmed
-        && onlySignaturePrefix prefixTrimmed
-    isExportListEntry =
-      not (null prefixTrimmed && null suffixTrimmed)
-        && onlyExportPunctuation prefixTrimmed
-        && onlyExportPunctuation suffixTrimmed
+      onlySignaturePunctuation prefixTrimmed
+        && ( "::" `isPrefixOf` suffixTrimmed
+              || ( nextLineStartsSignature
+                     && not previousLineContinuesExpression
+                     && onlySignaturePunctuation suffixTrimmed
+                 )
+           )
+    isImportExportListEntry =
+      inImportExportList
+        && onlyImportExportPunctuation prefixTrimmed
+        && onlyImportExportPunctuation suffixTrimmed
 
 identifierTokenOffsets :: String -> String -> [Int]
 identifierTokenOffsets needle haystack = go 0 haystack
@@ -526,6 +641,21 @@ identifierTokenOffsets needle haystack = go 0 haystack
 
 isIdentifierChar :: Char -> Bool
 isIdentifierChar ch = isAlphaNum ch || ch == '_' || ch == '\''
+
+firstNonEmpty :: [String] -> Maybe String
+firstNonEmpty [] = Nothing
+firstNonEmpty (line : rest)
+  | null (trim line) = firstNonEmpty rest
+  | otherwise = Just line
+
+lastNonEmpty :: [String] -> Maybe String
+lastNonEmpty = firstNonEmpty . reverse
+
+lineContinuesExpression :: String -> Bool
+lineContinuesExpression line =
+  any (`isSuffixOf` trimmed) ["=", "(", "$", "\\", "->"]
+  where
+    trimmed = trim line
 
 collectHsFiles :: FilePath -> IO [FilePath]
 collectHsFiles root = do
