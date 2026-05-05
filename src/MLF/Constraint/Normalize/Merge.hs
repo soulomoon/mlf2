@@ -108,7 +108,7 @@ See also:
 -}
 
 -- | Process unification edges using union-find.
-mergeUnifyEdges :: NormalizeM p ()
+mergeUnifyEdges :: NormalizeM ()
 mergeUnifyEdges = do
     c <- gets nsConstraint
     let edges = cUnifyEdges c
@@ -118,7 +118,7 @@ mergeUnifyEdges = do
         in s { nsConstraint = c' { cUnifyEdges = remainingEdges } }
 
 -- | Process unification edges, returning any that couldn't be resolved.
-processUnifyEdges :: [UnifyEdge] -> NormalizeM p [UnifyEdge]
+processUnifyEdges :: [UnifyEdge] -> NormalizeM [UnifyEdge]
 processUnifyEdges edges =
     UnifyCore.processUnifyEdgesWith
         normalizeUnifyStrategy
@@ -127,17 +127,17 @@ processUnifyEdges edges =
         unionNodes
         edges
 
-normalizeFindRoot :: NodeId -> NormalizeM p NodeId
+normalizeFindRoot :: NodeId -> NormalizeM NodeId
 normalizeFindRoot nid = do
     uf <- gets nsUnionFind
     pure (findRoot uf nid)
 
-normalizeLookupNode :: NodeId -> NormalizeM p (Maybe TyNode)
+normalizeLookupNode :: NodeId -> NormalizeM (Maybe TyNode)
 normalizeLookupNode nid = do
     nodes <- gets (cNodes . nsConstraint)
     pure (lookupNodeIn nodes nid)
 
-normalizeUnifyStrategy :: UnifyCore.UnifyStrategy (State (NormalizeState p))
+normalizeUnifyStrategy :: UnifyCore.UnifyStrategy (State NormalizeState)
 normalizeUnifyStrategy = UnifyCore.UnifyStrategy
     { UnifyCore.usOccursCheck = UnifyCore.OccursCheckNone
     , UnifyCore.usTyExpPolicy = UnifyCore.TyExpAllow
@@ -146,7 +146,7 @@ normalizeUnifyStrategy = UnifyCore.UnifyStrategy
     , UnifyCore.usOnMismatch = \_ -> pure UnifyCore.KeepEdge
     }
 
-normalizeForallArity :: NodeId -> NormalizeM p (Maybe Int)
+normalizeForallArity :: NodeId -> NormalizeM (Maybe Int)
 normalizeForallArity nid = do
     c0 <- gets nsConstraint
     uf <- gets nsUnionFind
@@ -168,7 +168,7 @@ unifying Var ~ (s·Var) would create a self-loop if we made Var point to the
 point to the variable (this corresponds to forcing `s` to be the identity
 expansion).
 -}
-normalizeRepresentative :: NodeId -> TyNode -> NodeId -> TyNode -> NormalizeM p (NodeId, NodeId)
+normalizeRepresentative :: NodeId -> TyNode -> NodeId -> TyNode -> NormalizeM (NodeId, NodeId)
 normalizeRepresentative left leftNode right rightNode = case (leftNode, rightNode) of
     (TyVar {}, TyVar {}) -> do
         modify' $ \s ->
@@ -193,7 +193,7 @@ normalizeRepresentative left leftNode right rightNode = case (leftNode, rightNod
     _ -> pure (left, right)
 
 -- | Apply the union-find substitution to all node references in the constraint.
-applyUnionFindToConstraint :: NormalizeM p ()
+applyUnionFindToConstraint :: NormalizeM ()
 applyUnionFindToConstraint = do
     uf <- gets nsUnionFind
     when (not (IntMap.null uf)) $
@@ -282,14 +282,14 @@ applyToStructure uf node = case node of
 -- | Post-loop pass: force residual instantiation edges to paper-shaped form.
 -- Every residual edge becomes `TyExp(s, body) ≤ τ` by wrapping non-`TyExp`
 -- left nodes in a synthesized expansion node.
-enforcePaperShapedInstEdges :: NormalizeM p ()
+enforcePaperShapedInstEdges :: NormalizeM ()
 enforcePaperShapedInstEdges = do
     c <- gets nsConstraint
     wrappedEdges <- mapM wrapInstEdgeLeft (cInstEdges c)
     modify' $ \st -> st { nsConstraint = (nsConstraint st) { cInstEdges = wrappedEdges } }
 
 -- | Wrap a residual edge's left node with a fresh `TyExp` node when needed.
-wrapInstEdgeLeft :: InstEdge -> NormalizeM p InstEdge
+wrapInstEdgeLeft :: InstEdge -> NormalizeM InstEdge
 wrapInstEdgeLeft edge = do
     nodes <- gets (cNodes . nsConstraint)
     case lookupNodeIn nodes (instLeft edge) of
@@ -304,7 +304,7 @@ wrapInstEdgeLeft edge = do
             pure edge { instLeft = wrapperNid }
 
 -- | Keep synthesized wrappers on the same binding-parent chain as their body.
-inheritWrapperBindParent :: NodeId -> NodeId -> NormalizeM p ()
+inheritWrapperBindParent :: NodeId -> NodeId -> NormalizeM ()
 inheritWrapperBindParent bodyId wrapperId = do
     bindParents <- gets (cBindParents . nsConstraint)
     case IntMap.lookup (nodeRefKey (typeRef bodyId)) bindParents of

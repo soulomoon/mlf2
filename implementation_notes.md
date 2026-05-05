@@ -1,3 +1,16 @@
+## 2026-05-05 - Core constraint helpers classified by phase requirement
+
+- Normalization's internal mutable state is now raw-phase owned, matching the
+  Phase 2 boundary that advances generated constraints from `Raw` to
+  `Normalized`.
+- Acyclicity dependency graph construction now consumes normalized constraints,
+  while the successful result assembly is tied to the acyclic constraint
+  returned by Phase 3.
+- Structural graph and binding helpers remain phase-polymorphic where they only
+  read or rewrite the common graph representation. `castConstraint` stays
+  quarantined to its defining module, with a repository guard covering
+  production callers.
+
 ## 2026-05-03 - Backend IR executable-boundary family closed on the merged 710c92eb baseline
 
 - The backend IR executable-boundary family now has rows 1 through 7 closed on the merged `710c92eb` baseline.

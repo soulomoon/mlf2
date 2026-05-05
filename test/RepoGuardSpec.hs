@@ -27,6 +27,10 @@ spec = describe "Repository guardrails" $ do
     offenders <- findImportOffenders ["src", "src-public", "test", "app"]
     offenders `shouldBe` []
 
+  it "production code keeps castConstraint quarantined to the defining module" $ do
+    offenders <- findCastConstraintOffenders ["src", "src-public", "app"]
+    offenders `shouldBe` []
+
   it "MLF.API no longer exports pipeline/runtime helpers and MLF.Pipeline owns them" $ do
     apiSrc <- readFile "src-public/MLF/API.hs"
     pipelineSrc <- readFile "src-public/MLF/Pipeline.hs"
@@ -411,6 +415,18 @@ hasMyLibImport :: FilePath -> IO (FilePath, Bool)
 hasMyLibImport path = do
   src <- readFile path
   pure (path, any (== "import MyLib") (map trimImport (lines src)))
+
+findCastConstraintOffenders :: [FilePath] -> IO [FilePath]
+findCastConstraintOffenders roots = do
+  hsFiles <- concat <$> mapM collectHsFiles roots
+  offenders <- mapM hasCastConstraintUse hsFiles
+  pure [path | (path, True) <- offenders]
+
+hasCastConstraintUse :: FilePath -> IO (FilePath, Bool)
+hasCastConstraintUse path = do
+  src <- readFile path
+  let definingModule = path == "src/MLF/Constraint/Types/Graph.hs"
+  pure (path, not definingModule && "castConstraint" `isInfixOf` src)
 
 collectHsFiles :: FilePath -> IO [FilePath]
 collectHsFiles root = do

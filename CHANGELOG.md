@@ -44,6 +44,10 @@
   partial applications now run through shared backend parity.
 
 ### Changed
+- Classified core constraint graph helpers by phase requirement: normalization
+  internals now stay raw-phase owned, acyclicity dependency graph construction
+  consumes normalized constraints, and a repository guard keeps
+  `castConstraint` quarantined to its defining module.
 - Replaced several tautological or smoke-only tests with structural assertions
   for backend conversion, binding canonicalization, elaboration, pipeline
   normalization, presolution witness operation generation, reification, and type
