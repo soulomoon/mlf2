@@ -53,8 +53,8 @@ This ledger is the canonical rule-to-code-to-test index for thesis Chapters 4–
   - initial unify closure drain,
   - per-edge propagation/interpreter step,
   - post-edge closure drain when pending unify work exists.
-- Presolution exposes UF metadata separately (`prUnionFind`) while preserving raw presolution graph (`prConstraint`) for translation.
-- Production Phase 6 now consumes presolution-native solved snapshots (`fromPresolutionResult`) directly as the default path; legacy replay remains only as an explicit fallback/testing entrypoint.
+- Presolution exposes UF metadata separately (`prUnionFind`) while publishing `prConstraint :: Constraint 'Presolved`; the raw in-progress graph remains a named private bridge inside Phase 4, not the translation boundary.
+- Production Phase 6 consumes presolution-native finalized snapshots/views from that typed presolved result (`finalizeSolvedFromSnapshot`, `finalizePresolutionViewFromSnapshot`); legacy raw views are explicit compatibility adapters around those finalized artifacts.
 
 ## Section-to-Module Mapping
 

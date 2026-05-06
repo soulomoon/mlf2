@@ -44,6 +44,10 @@
   partial applications now run through shared backend parity.
 
 ### Changed
+- Tightened the Phase 4 presolution boundary so the public entry/output remains
+  `Constraint 'Acyclic` to `Constraint 'Presolved`, with the internal raw
+  in-progress bridge named privately and final presolved construction delayed
+  until producer checks pass.
 - Replaced several tautological or smoke-only tests with structural assertions
   for backend conversion, binding canonicalization, elaboration, pipeline
   normalization, presolution witness operation generation, reification, and type
