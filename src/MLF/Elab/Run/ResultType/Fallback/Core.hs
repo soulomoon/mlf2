@@ -116,8 +116,8 @@ uniqueCandidate = selectUniqueCandidate
 
 -- | Core implementation of computeResultTypeFallback (non-annotated-lambda case).
 computeResultTypeFallbackCore ::
-  ResultTypeInputs ->
-  View.ResultTypeView ->
+  ResultTypeInputs p ->
+  View.ResultTypeView p ->
   -- | annCanon (post-redirect)
   AnnExpr ->
   -- | ann (pre-redirect)

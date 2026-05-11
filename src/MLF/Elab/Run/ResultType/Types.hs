@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
 module MLF.Elab.Run.ResultType.Types (
     ResultTypeInputs
         ( ResultTypeInputs
@@ -23,27 +24,30 @@ import MLF.Constraint.Presolution (EdgeTrace, PresolutionPlanBuilder)
 import MLF.Constraint.Presolution.Base (EdgeArtifacts(..))
 import MLF.Constraint.Presolution.View (PresolutionView(..))
 import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Generalize (GaBindParents)
 import MLF.Util.Trace (TraceConfig)
 
 -- | Context for result type computation, bundling shared state.
-data ResultTypeInputs = ResultTypeInputs
+--
+-- Phase-polymorphic: the result type machinery only reads phase-insensitive
+-- graph data, so it works at any pipeline phase.
+data ResultTypeInputs (p :: Phase) = ResultTypeInputs
     { rtcCanonical :: NodeId -> NodeId
     , rtcEdgeArtifacts :: EdgeArtifacts
-    , rtcPresolutionView :: PresolutionView 'Raw
-    , rtcBindParentsGa :: GaBindParents 'Raw
+    , rtcPresolutionView :: PresolutionView p
+    , rtcBindParentsGa :: GaBindParents p
     , rtcPlanBuilder :: PresolutionPlanBuilder
-    , rtcBaseConstraint :: Constraint 'Raw
+    , rtcBaseConstraint :: Constraint p
     , rtcRedirects :: IntMap.IntMap NodeId
     , rtcTraceConfig :: TraceConfig
     }
 
-rtcEdgeWitnesses :: ResultTypeInputs -> IntMap.IntMap EdgeWitness
+rtcEdgeWitnesses :: ResultTypeInputs p -> IntMap.IntMap EdgeWitness
 rtcEdgeWitnesses = eaEdgeWitnesses . rtcEdgeArtifacts
 
-rtcEdgeTraces :: ResultTypeInputs -> IntMap.IntMap EdgeTrace
+rtcEdgeTraces :: ResultTypeInputs p -> IntMap.IntMap EdgeTrace
 rtcEdgeTraces = eaEdgeTraces . rtcEdgeArtifacts
 
-rtcEdgeExpansions :: ResultTypeInputs -> IntMap.IntMap Expansion
+rtcEdgeExpansions :: ResultTypeInputs p -> IntMap.IntMap Expansion
 rtcEdgeExpansions = eaEdgeExpansions . rtcEdgeArtifacts

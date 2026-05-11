@@ -48,7 +48,7 @@ import MLF.Util.RecursionSchemes (cataM)
 --     refines this if explicit N is required.
 --     For now: ExpInstantiate [t] -> ⟨t⟩.
 expInstantiateArgsToInstNoFallback
-    :: PresolutionView 'Raw
+    :: PresolutionView p
     -> IntSet.IntSet
     -> [NodeId]
     -> Either ElabError Instantiation

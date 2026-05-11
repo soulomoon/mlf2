@@ -61,8 +61,7 @@ import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
 import MLF.Constraint.Presolution.Base (InteriorNodes (..))
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Presolution ()
 import MLF.Elab.Inst (applyInstantiation, composeInst, instMany, schemeToType, splitForalls)
 import MLF.Elab.Phi.Context (contextToNodeBoundWithOrderKeys)
 import MLF.Elab.Phi.Omega.Domain
@@ -92,7 +91,7 @@ import Text.Read (readMaybe)
 newtype ApplyFun i = ApplyFun {runApplyFun :: Set.Set String -> Ty i}
 
 phiWithSchemeOmega ::
-  OmegaContext ->
+  OmegaContext p ->
   IntSet.IntSet ->
   SchemeInfo ->
   -- | forall intro count (O phase)
@@ -102,7 +101,6 @@ phiWithSchemeOmega ::
   Either ElabError Instantiation
 phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
   where
-    presolutionView :: PresolutionView 'Raw
     presolutionView = ocPresolutionView ctx
 
     canonicalNode :: NodeId -> NodeId
@@ -120,7 +118,6 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     bindParents :: BindParents
     bindParents = pvBindParents presolutionView
 
-    constraint :: Constraint 'Raw
     constraint = pvConstraint presolutionView
 
     reifyBoundWithNamesAt :: IntMap.IntMap String -> NodeId -> Either ElabError ElabType

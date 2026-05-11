@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 
 module MLF.Elab.Run.ResultType
   ( ResultTypeInputs (..),
@@ -23,7 +24,7 @@ import MLF.Constraint.Types.Graph
     EdgeId (..),
     NodeId (..),
   )
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Generalize (GaBindParents)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
@@ -44,13 +45,13 @@ import MLF.Util.Trace (TraceConfig)
 mkResultTypeInputs ::
   (NodeId -> NodeId) ->
   EdgeArtifacts ->
-  PresolutionView 'Raw ->
-  GaBindParents 'Raw ->
+  PresolutionView p ->
+  GaBindParents p ->
   PresolutionPlanBuilder ->
-  Constraint 'Raw ->
+  Constraint p ->
   IntMap.IntMap NodeId ->
   TraceConfig ->
-  ResultTypeInputs
+  ResultTypeInputs p
 mkResultTypeInputs canonical edgeArtifacts presolutionView bindParentsGa planBuilder baseConstraint redirects traceCfg =
   ResultTypeInputs
     { rtcCanonical = canonical,
@@ -64,7 +65,7 @@ mkResultTypeInputs canonical edgeArtifacts presolutionView bindParentsGa planBui
     }
 
 -- Re-export computeResultTypeFromAnn from Ann module
-computeResultTypeFromAnn :: ResultTypeInputs -> AnnExpr -> AnnExpr -> NodeId -> EdgeId -> Either ElabError ElabType
+computeResultTypeFromAnn :: ResultTypeInputs p -> AnnExpr -> AnnExpr -> NodeId -> EdgeId -> Either ElabError ElabType
 computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
   view <- View.buildResultTypeView ctx
   Ann.computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid
@@ -73,7 +74,7 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
 -- This is a facade that handles the AAnn case by delegating to computeResultTypeFromAnn,
 -- and delegates the non-AAnn case to the Fallback submodule.
 computeResultTypeFallback ::
-  ResultTypeInputs ->
+  ResultTypeInputs p ->
   -- | annCanon (post-redirect)
   AnnExpr ->
   -- | ann (pre-redirect)
@@ -84,8 +85,8 @@ computeResultTypeFallback ctx annCanon ann = do
   computeResultTypeDispatch ctx view annCanon ann
 
 computeResultTypeDispatch ::
-  ResultTypeInputs ->
-  View.ResultTypeView ->
+  ResultTypeInputs p ->
+  View.ResultTypeView p ->
   AnnExpr ->
   AnnExpr ->
   Either ElabError ElabType

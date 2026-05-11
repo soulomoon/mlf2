@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 
 module MLF.Elab.Elaborate.Scope
   ( GeneralizeAtWith,
@@ -26,7 +27,7 @@ import MLF.Constraint.Types.Graph
     getNodeId,
     typeRef,
   )
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Generalize (GaBindParents (..))
 import MLF.Elab.Inst (schemeToType)
 import qualified MLF.Elab.Inst as Inst
@@ -43,20 +44,20 @@ import MLF.Elab.Types
 import MLF.Reify.Core (namedNodes, reifyTypeWithNamedSetNoFallback)
 import MLF.Reify.TypeOps (inlineBaseBoundsType, parseNameId)
 
-type GeneralizeAtWith =
-  Maybe (GaBindParents 'Raw) ->
+type GeneralizeAtWith (p :: Phase) =
+  Maybe (GaBindParents p) ->
   NodeRef ->
   NodeId ->
   Either ElabError (ElabScheme, IntMap.IntMap String)
 
-data ScopeContext = ScopeContext
-  { scPresolutionView :: PresolutionView 'Raw,
-    scGaParents :: GaBindParents 'Raw,
+data ScopeContext (p :: Phase) = ScopeContext
+  { scPresolutionView :: PresolutionView p,
+    scGaParents :: GaBindParents p,
     scScopeOverrides :: IntMap.IntMap NodeRef,
-    scGeneralizeAtWith :: GeneralizeAtWith
+    scGeneralizeAtWith :: GeneralizeAtWith p
   }
 
-scopeRootForNode :: ScopeContext -> NodeId -> Either ElabError NodeRef
+scopeRootForNode :: ScopeContext p -> NodeId -> Either ElabError NodeRef
 scopeRootForNode scopeContext nodeId =
   case IntMap.lookup (getNodeId (canonical nodeId)) (scScopeOverrides scopeContext) of
     Just ref -> pure ref
@@ -65,7 +66,7 @@ scopeRootForNode scopeContext nodeId =
     canonical = ChiQuery.chiCanonical presolutionView
     presolutionView = scPresolutionView scopeContext
 
-scopeRootFromBase :: ScopeContext -> NodeId -> Either ElabError NodeRef
+scopeRootFromBase :: ScopeContext p -> NodeId -> Either ElabError NodeRef
 scopeRootFromBase scopeContext root =
   case IntMap.lookup (getNodeId (canonical root)) (gaSolvedToBase gaParents) of
     Nothing -> pure (typeRef root)
@@ -79,7 +80,7 @@ scopeRootFromBase scopeContext root =
     gaParents = scGaParents scopeContext
     canonical = ChiQuery.chiCanonical presolutionView
 
-generalizeAtNode :: ScopeContext -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
+generalizeAtNode :: ScopeContext p -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
 generalizeAtNode scopeContext nodeId = do
   scopeRoot <- scopeRootForNode scopeContext nodeId
   let targetC = generalizeTargetNode presolutionView nodeId
@@ -107,7 +108,7 @@ normalizeSubstForScheme scheme substRaw =
         substRaw
         binds
 
-reifyNodeTypeDirect :: ScopeContext -> NodeId -> Either ElabError ElabType
+reifyNodeTypeDirect :: ScopeContext p -> NodeId -> Either ElabError ElabType
 reifyNodeTypeDirect scopeContext nodeId = do
   namedSet <- namedNodes presolutionView
   reifyTypeForParam presolutionView namedSet (canonical nodeId)
@@ -115,7 +116,7 @@ reifyNodeTypeDirect scopeContext nodeId = do
     presolutionView = scPresolutionView scopeContext
     canonical = ChiQuery.chiCanonical presolutionView
 
-reifyNodeTypePreferringBound :: ScopeContext -> NodeId -> Either ElabError ElabType
+reifyNodeTypePreferringBound :: ScopeContext p -> NodeId -> Either ElabError ElabType
 reifyNodeTypePreferringBound scopeContext nodeId = do
   namedSet <- namedNodes presolutionView
   let nodeC = canonical nodeId
@@ -126,14 +127,14 @@ reifyNodeTypePreferringBound scopeContext nodeId = do
     presolutionView = scPresolutionView scopeContext
     canonical = ChiQuery.chiCanonical presolutionView
 
-reifyTargetType :: ScopeContext -> IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
+reifyTargetType :: ScopeContext p -> IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
 reifyTargetType scopeContext namedSetReify schemeInfo nodeId =
   let presolutionView = scPresolutionView scopeContext
       subst = siSubst schemeInfo
       targetNode = schemeBodyTarget presolutionView nodeId
    in reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify targetNode
 
-reifyTargetNodeType :: ScopeContext -> IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
+reifyTargetNodeType :: ScopeContext p -> IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
 reifyTargetNodeType scopeContext namedSetReify schemeInfo nodeId =
   let presolutionView = scPresolutionView scopeContext
       canonical = ChiQuery.chiCanonical presolutionView

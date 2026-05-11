@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 module MLF.Elab.Elaborate.Annotation
@@ -27,6 +28,7 @@ import MLF.Constraint.Types.Graph
     EdgeId (..),
     NodeId (..),
   )
+import MLF.Constraint.Types.Phase (Phase)
 import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..))
 import MLF.Elab.Elaborate.Scope
   ( ScopeContext (..),
@@ -72,9 +74,9 @@ import MLF.Reify.Core (reifyTypeWithNamedSetNoFallback)
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarsType, freshNameLike, parseNameId, substTypeCapture)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
-data AnnotationContext = AnnotationContext
+data AnnotationContext (p :: Phase) = AnnotationContext
   { acTraceConfig :: TraceConfig,
-    acScopeContext :: ScopeContext,
+    acScopeContext :: ScopeContext p,
     acAnnSourceTypes :: IntMap.IntMap NormSrcType,
     acEdgeWitnesses :: IntMap.IntMap EdgeWitness,
     acEdgeTraces :: IntMap.IntMap EdgeTrace,
@@ -142,7 +144,7 @@ desugaredAnnLambdaInfo param bodyAnn =
     _ -> Nothing
 
 elaborateAnnotationTerm ::
-  AnnotationContext ->
+  AnnotationContext p ->
   IntSet.IntSet ->
   Map.Map VarName SchemeInfo ->
   AnnExpr ->
@@ -424,7 +426,7 @@ closeAnnotatedLambdaParam tcEnv annotationTy term =
     _ -> Nothing
 
 reifyInst ::
-  AnnotationContext ->
+  AnnotationContext p ->
   IntSet.IntSet ->
   Map.Map VarName SchemeInfo ->
   AnnExpr ->

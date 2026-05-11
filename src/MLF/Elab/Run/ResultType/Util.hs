@@ -32,7 +32,6 @@ import MLF.Constraint.Types.Graph
     gnSchemes,
     toListGen,
   )
-import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Generalize (GaBindParents (..))
 import MLF.Elab.Inst (applyInstantiation)
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
@@ -83,8 +82,8 @@ selectUniqueCandidateBy eqCandidate =
 -- | Generalize with plan helper
 generalizeWithPlan ::
   PresolutionPlanBuilder ->
-  GaBindParents 'Raw ->
-  PresolutionView 'Raw ->
+  GaBindParents p ->
+  PresolutionView p ->
   NodeRef ->
   NodeId ->
   Either ElabError (ElabScheme, IntMap.IntMap String)

@@ -1,6 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {- |
 Module      : MLF.Elab.Phi.Translate
 Description : Translate graph witnesses to xMLF instantiations
@@ -43,7 +44,7 @@ import Data.Maybe (listToMaybe)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
@@ -64,23 +65,23 @@ import MLF.Util.Trace (TraceConfig, traceGeneralize)
 import MLF.Elab.Run.Scope (schemeBodyTarget)
 
 -- | Canonicalize a node id using the union-find from the solve result.
-canonicalNodeM :: NodeId -> PhiM NodeId
+canonicalNodeM :: NodeId -> PhiM p NodeId
 canonicalNodeM nid = do
     canonicalNode <- askCanonical
     pure (canonicalNode nid)
 
 -- | Translate a recorded per-edge graph witness to an xMLF instantiation.
-type GeneralizeAtWith =
-    Maybe (GaBindParents 'Raw)
+type GeneralizeAtWith (p :: Phase) =
+    Maybe (GaBindParents p)
     -> NodeRef
     -> NodeId
     -> Either ElabError (ElabScheme, IntMap.IntMap String)
 
 phiFromEdgeWitnessWithTrace
     :: TraceConfig
-    -> GeneralizeAtWith
-    -> PresolutionView 'Raw
-    -> Maybe (GaBindParents 'Raw)
+    -> GeneralizeAtWith p
+    -> PresolutionView p
+    -> Maybe (GaBindParents p)
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
@@ -102,9 +103,9 @@ were merged during solving but does not introduce new semantic content.
 
 phiFromEdgeWitnessCore
     :: TraceConfig
-    -> GeneralizeAtWith
-    -> PresolutionView 'Raw
-    -> Maybe (GaBindParents 'Raw)
+    -> GeneralizeAtWith p
+    -> PresolutionView p
+    -> Maybe (GaBindParents p)
     -> Maybe SchemeInfo
     -> Maybe EdgeTrace
     -> EdgeWitness
@@ -207,13 +208,6 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
     debugPhi :: String -> a -> a
     debugPhi = traceGeneralize traceCfg
 
-    omegaCtx
-        :: Maybe SchemeInfo
-        -> IntSet.IntSet
-        -> IntMap.IntMap NodeId
-        -> IntSet.IntSet
-        -> ReplayContract
-        -> OmegaContext
     omegaCtx mSchemeInfoCtx traceBinderSources traceBinderReplayMap traceBinderMapDomain replayContractCtx =
         OmegaContext
             { ocTraceConfig = traceCfg
@@ -250,7 +244,6 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
     canonicalNode :: NodeId -> NodeId
     canonicalNode = pvCanonical presolutionView
 
-    constraint :: Constraint 'Raw
     constraint = pvConstraint presolutionView
 
     reifyDebugType :: NodeId -> Either ElabError ElabType

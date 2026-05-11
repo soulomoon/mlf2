@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
 {- |
 Module      : MLF.Elab.Phi.Omega.Domain
 Description : Omega binder-domain and replay lookup helpers
@@ -24,20 +25,19 @@ import Data.Maybe (listToMaybe)
 import MLF.Constraint.Presolution (EdgeTrace(..), PresolutionView(..))
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Types
 import MLF.Util.Trace (TraceConfig)
 
 -- | Shared context for Omega/Step interpretation.
-data OmegaContext = OmegaContext
+data OmegaContext (p :: Phase) = OmegaContext
     { ocTraceConfig :: TraceConfig
-    , ocPresolutionView :: PresolutionView 'Raw
+    , ocPresolutionView :: PresolutionView p
     , ocReifyBoundWithNames :: IntMap.IntMap String -> NodeId -> Either ElabError ElabType
     , ocReifyTypeWithNamedSetNoFallback :: IntMap.IntMap String -> IntSet.IntSet -> NodeId -> Either ElabError ElabType
     , ocCopyMap :: IntMap.IntMap NodeId
-    , ocGaParents :: Maybe (GaBindParents 'Raw)
+    , ocGaParents :: Maybe (GaBindParents p)
     , ocTrace :: Maybe EdgeTrace
     , ocSchemeInfo :: Maybe SchemeInfo
     , ocTraceBinderSources :: IntSet.IntSet
@@ -59,7 +59,7 @@ data OmegaDomainEnv = OmegaDomainEnv
     , odeTraceBinderMapDomain :: IntSet.IntSet
     }
 
-mkOmegaDomainEnv :: OmegaContext -> OmegaDomainEnv
+mkOmegaDomainEnv :: OmegaContext p -> OmegaDomainEnv
 mkOmegaDomainEnv ctx =
     let presolutionView = ocPresolutionView ctx
     in OmegaDomainEnv

@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
 module MLF.Research.URI.R2.C1.Prototype.P2 (
     P2CheckArtifact(..),
     P2Execution(..),
@@ -37,6 +39,7 @@ import MLF.Constraint.Types.Graph
     , lookupNodeIn
     , toRawConstraintForLegacy
     )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Presolution (snapshotConstraint, snapshotUnionFind)
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
@@ -102,7 +105,7 @@ data P2Execution = P2Execution
     deriving (Eq, Show)
 
 data ScenarioContext = ScenarioContext
-    { scInputs :: ResultTypeInputs
+    { scInputs :: ResultTypeInputs 'Raw
     , scInner :: AnnExpr
     , scAnnNodeId :: NodeId
     , scEdgeId :: EdgeId

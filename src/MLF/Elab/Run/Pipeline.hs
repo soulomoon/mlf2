@@ -31,10 +31,10 @@ import MLF.Constraint.Presolution
     computePresolution,
   )
 import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
-import MLF.Constraint.Presolution.View (PresolutionView, pvCanonical, toRawPresolutionViewForLegacy)
+import MLF.Constraint.Presolution.View (PresolutionView, pvCanonical)
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Types.Graph (BaseTy (..), Constraint, NodeId (..), PolySyms, cNodes, getEdgeId, getNodeId, lookupNodeIn, toRawConstraintForLegacy)
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Graph (BaseTy (..), Constraint, NodeId (..), PolySyms, castConstraint, cNodes, getEdgeId, getNodeId, lookupNodeIn)
+import MLF.Constraint.Types.Phase (Phase(Presolved, Raw))
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot (..))
 import MLF.Elab.Elaborate (ElabConfig (..), ElabEnv (..), elaborateWithEnv)
 import MLF.Elab.Inst (schemeToType)
@@ -93,7 +93,7 @@ import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data SnapshotViews = SnapshotViews
   { svSolvedClean :: Solved.Solved,
-    svPresolutionViewClean :: PresolutionView 'Raw,
+    svPresolutionViewClean :: PresolutionView 'Presolved,
     svCanonNode :: Canonicalizer
   }
 
@@ -240,15 +240,19 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
       svCanonNode = canonNode
     } <-
     prepareSnapshotViews pres
-  let cAcyclicRaw = toRawConstraintForLegacy cAcyclic
+  -- | Named phase bridge: the acyclic base constraint must share a phase
+  -- index with the presolved view for constraintForGeneralization.
+  -- The constraint graph data is structurally identical across phases;
+  -- only the phantom type tag differs.
+  let cAcyclicAsPresolved = castConstraint cAcyclic :: Constraint 'Presolved
   let planBuilder = prPlanBuilder pres
   TraceCopyArtifacts
     { tcaInstCopyNodes = instCopyNodes,
       tcaInstCopyMapFull = instCopyMapFull
     } <-
-    pure (prepareTraceCopyArtifacts cAcyclicRaw presolutionViewClean (prRedirects pres) canonNode (prEdgeTraces pres))
+    pure (prepareTraceCopyArtifacts cAcyclic presolutionViewClean (prRedirects pres) canonNode (prEdgeTraces pres))
   let (constraintForGen, bindParentsGa) =
-        constraintForGeneralization traceCfg presolutionViewClean (prRedirects pres) instCopyNodes instCopyMapFull cAcyclicRaw ann
+        constraintForGeneralization traceCfg presolutionViewClean (prRedirects pres) instCopyNodes instCopyMapFull cAcyclicAsPresolved ann
   presolutionViewForGen <- fromSolveError (Finalize.finalizePresolutionViewFromSnapshot constraintForGen (Solved.canonicalMap solvedClean))
   let generalizeAtWithView mbGa =
         generalizeAtWithBuilder
@@ -274,7 +278,7 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
           }
   let scopeOverrides =
         letScopeOverrides
-          cAcyclicRaw
+          cAcyclicAsPresolved
           constraintForGen
           presolutionViewClean
           (prRedirects pres)
@@ -308,7 +312,7 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
   rootScope <-
     fromElabError $
       bindingToElab $
-        resolveCanonicalScope cAcyclicRaw presolutionViewForGen (prRedirects pres) (annNode authoritativeAnnPreFinal)
+        resolveCanonicalScope cAcyclicAsPresolved presolutionViewForGen (prRedirects pres) (annNode authoritativeAnnPreFinal)
   let rootTarget = schemeBodyTarget presolutionViewForGen (annNode authoritativeAnnCanonFinal)
   (rootScheme, rootSubst) <-
     fromElabError $
@@ -324,7 +328,7 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
           presolutionViewForGen
           bindParentsGa
           planBuilder
-          cAcyclicRaw
+          cAcyclicAsPresolved
           (prRedirects pres)
           traceCfg
       retainedChildAuthoritativeCandidate =
@@ -517,7 +521,7 @@ prepareSnapshotViews :: PresolutionResult -> Either PipelineError SnapshotViews
 prepareSnapshotViews pres = do
   let preRewrite = snapshotConstraint pres
   solvedClean <- fromSolveError (Finalize.finalizeSolvedFromSnapshot preRewrite (snapshotUnionFind pres))
-  presolutionViewClean <- toRawPresolutionViewForLegacy <$> fromSolveError (Finalize.finalizePresolutionViewFromSnapshot preRewrite (snapshotUnionFind pres))
+  presolutionViewClean <- fromSolveError (Finalize.finalizePresolutionViewFromSnapshot preRewrite (snapshotUnionFind pres))
   let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
   pure
     SnapshotViews
@@ -527,8 +531,8 @@ prepareSnapshotViews pres = do
       }
 
 prepareTraceCopyArtifacts ::
-  Constraint 'Raw ->
-  PresolutionView 'Raw ->
+  Constraint p ->
+  PresolutionView q ->
   IntMap.IntMap NodeId ->
   Canonicalizer ->
   IntMap.IntMap EdgeTrace ->

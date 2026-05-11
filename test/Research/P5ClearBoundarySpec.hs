@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 module Research.P5ClearBoundarySpec (spec) where
 
 import qualified Data.IntMap.Strict as IntMap
@@ -17,6 +18,7 @@ import MLF.Constraint.Presolution.TestSupport
     ( EdgeArtifacts(..)
     , defaultPlanBuilder
     )
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Graph
     ( BindFlag(..)
     , NodeId(..)
@@ -674,7 +676,7 @@ extractSelectedBodyApp ann0 =
         AAnn inner _ _ -> inner
         other -> other
 
-wireSameLaneLocalRoot :: ResultTypeInputs -> NodeId -> NodeId -> ResultTypeInputs
+wireSameLaneLocalRoot :: ResultTypeInputs 'Raw -> NodeId -> NodeId -> ResultTypeInputs 'Raw
 wireSameLaneLocalRoot inputs rootNid childNid =
     let setVarBound' nid newBound constraint =
             let tweak node = case node of
@@ -732,7 +734,7 @@ wireSameLaneLocalRoot inputs rootNid childNid =
         , rtcBindParentsGa = ga'
         }
 
-resultTypeInputsForArtifacts :: PipelineArtifacts -> (ResultTypeInputs, AnnExpr, AnnExpr)
+resultTypeInputsForArtifacts :: PipelineArtifacts -> (ResultTypeInputs 'Raw, AnnExpr, AnnExpr)
 resultTypeInputsForArtifacts
     PipelineArtifacts
         { paConstraintNorm = c1

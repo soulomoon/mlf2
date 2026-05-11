@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 module MLF.Elab.Run.ResultType.View (
     ResultTypeView,
     buildResultTypeView,
@@ -19,17 +20,17 @@ import MLF.Constraint.Types.Graph
     , TyNode(..)
     , getNodeId
     )
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Phase (Phase)
 import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import MLF.Util.ElabError (ElabError(..))
 
-data ResultTypeView = ResultTypeView
-    { rtvInputs0 :: ResultTypeInputs
+data ResultTypeView (p :: Phase) = ResultTypeView
+    { rtvInputs0 :: ResultTypeInputs p
     , rtvBoundOverlay0 :: IntMap.IntMap NodeId
     }
 
-buildResultTypeView :: ResultTypeInputs -> Either ElabError ResultTypeView
+buildResultTypeView :: ResultTypeInputs p -> Either ElabError (ResultTypeView p)
 buildResultTypeView inputs = do
     let presolutionView = rtcPresolutionView inputs
     case Solve.validateSolvedGraphStrict
@@ -43,7 +44,7 @@ buildResultTypeView inputs = do
         , rtvBoundOverlay0 = IntMap.empty
         }
 
-rtvWithBoundOverlay :: NodeId -> NodeId -> ResultTypeView -> ResultTypeView
+rtvWithBoundOverlay :: NodeId -> NodeId -> ResultTypeView p -> ResultTypeView p
 rtvWithBoundOverlay rootNid baseBound view =
     let canonical = rtcCanonical (rtvInputs0 view)
         rootKey = getNodeId (canonical rootNid)
@@ -53,7 +54,7 @@ rtvWithBoundOverlay rootNid baseBound view =
         }
 
 
-rtvLookupNode :: ResultTypeView -> NodeId -> Maybe TyNode
+rtvLookupNode :: ResultTypeView p -> NodeId -> Maybe TyNode
 rtvLookupNode view nid =
     case ChiQuery.chiLookupNode (rtvPresolutionView view) nid of
         Just TyVar{ tnId = varId, tnBound = Nothing } ->
@@ -62,22 +63,22 @@ rtvLookupNode view nid =
                 Nothing -> Just TyVar{ tnId = varId, tnBound = Nothing }
         other -> other
 
-rtvLookupVarBound :: ResultTypeView -> NodeId -> Maybe NodeId
+rtvLookupVarBound :: ResultTypeView p -> NodeId -> Maybe NodeId
 rtvLookupVarBound view nid =
     case overlayBound view nid of
         Just bnd -> Just bnd
         Nothing -> ChiQuery.chiLookupVarBound (rtvPresolutionView view) nid
 
-rtvPresolutionView :: ResultTypeView -> PresolutionView 'Raw
+rtvPresolutionView :: ResultTypeView p -> PresolutionView p
 rtvPresolutionView = rtcPresolutionView . rtvInputs0
 
-rtvPresolutionViewOverlay :: ResultTypeView -> PresolutionView 'Raw
+rtvPresolutionViewOverlay :: ResultTypeView p -> PresolutionView p
 rtvPresolutionViewOverlay view =
     (rtvPresolutionView view)
         { pvLookupNode = rtvLookupNode view
         , pvLookupVarBound = rtvLookupVarBound view
         }
 
-overlayBound :: ResultTypeView -> NodeId -> Maybe NodeId
+overlayBound :: ResultTypeView p -> NodeId -> Maybe NodeId
 overlayBound view nid =
     IntMap.lookup (getNodeId (rtcCanonical (rtvInputs0 view) nid)) (rtvBoundOverlay0 view)

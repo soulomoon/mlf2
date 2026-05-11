@@ -1,6 +1,7 @@
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 
 module MLF.Elab.Elaborate
   ( ElabConfig (ElabConfig, ecTraceConfig, ecGeneralizeAtWith),
@@ -16,7 +17,7 @@ import qualified Data.Map.Strict as Map
 import MLF.Constraint.Presolution (EdgeTrace, PresolutionView)
 import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
 import MLF.Constraint.Types.Graph (NodeRef)
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Phase (Phase)
 import MLF.Constraint.Types.Witness (EdgeWitness, Expansion)
 import MLF.Elab.Elaborate.Algebra
   ( AlgebraContext (..),
@@ -36,32 +37,32 @@ import MLF.Frontend.Syntax (NormSrcType, VarName)
 import MLF.Reify.Core (namedNodes)
 import MLF.Util.Trace (TraceConfig)
 
-data ElabConfig = ElabConfig
+data ElabConfig (p :: Phase) = ElabConfig
   { ecTraceConfig :: TraceConfig,
-    ecGeneralizeAtWith :: GeneralizeAtWith
+    ecGeneralizeAtWith :: GeneralizeAtWith p
   }
 
-data ElabEnv = ElabEnv
-  { eePresolutionView :: PresolutionView 'Raw,
-    eeGaParents :: GaBindParents 'Raw,
+data ElabEnv (p :: Phase) = ElabEnv
+  { eePresolutionView :: PresolutionView p,
+    eeGaParents :: GaBindParents p,
     eeEdgeArtifacts :: EdgeArtifacts,
     eeScopeOverrides :: IntMap.IntMap NodeRef,
     eeAnnSourceTypes :: IntMap.IntMap NormSrcType,
     eeInitialTermEnv :: Map.Map VarName SchemeInfo
   }
 
-eeEdgeWitnesses :: ElabEnv -> IntMap.IntMap EdgeWitness
+eeEdgeWitnesses :: ElabEnv p -> IntMap.IntMap EdgeWitness
 eeEdgeWitnesses = eaEdgeWitnesses . eeEdgeArtifacts
 
-eeEdgeTraces :: ElabEnv -> IntMap.IntMap EdgeTrace
+eeEdgeTraces :: ElabEnv p -> IntMap.IntMap EdgeTrace
 eeEdgeTraces = eaEdgeTraces . eeEdgeArtifacts
 
-eeEdgeExpansions :: ElabEnv -> IntMap.IntMap Expansion
+eeEdgeExpansions :: ElabEnv p -> IntMap.IntMap Expansion
 eeEdgeExpansions = eaEdgeExpansions . eeEdgeArtifacts
 
 elaborateWithEnv ::
-  ElabConfig ->
-  ElabEnv ->
+  ElabConfig p ->
+  ElabEnv p ->
   AnnExpr ->
   Either ElabError ElabTerm
 elaborateWithEnv config elabEnv ann = do

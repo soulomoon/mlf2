@@ -1,4 +1,5 @@
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
 {- |
 Module      : MLF.Elab.Phi.Env
 Description : Environment helpers for witness translation
@@ -22,7 +23,7 @@ import Control.Monad.Reader (ReaderT, asks)
 import qualified Data.IntMap.Strict as IntMap
 
 import MLF.Constraint.Types.Graph (NodeId)
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Phase (Phase)
 import MLF.Constraint.Presolution (EdgeTrace)
 import MLF.Elab.Generalize (GaBindParents)
 import MLF.Elab.Types (ElabError)
@@ -39,10 +40,10 @@ import MLF.Elab.Types (ElabError)
 --   * peCopyMap: Copy mapping from edge trace (original -> copied)
 --   * peGaParents: Optional generalized binding parents
 --   * peTrace: Optional edge trace with interior/copy info
-data PhiEnv = PhiEnv
+data PhiEnv (p :: Phase) = PhiEnv
     { peCanonical :: NodeId -> NodeId
     , peCopyMap :: IntMap.IntMap NodeId
-    , peGaParents :: Maybe (GaBindParents 'Raw)
+    , peGaParents :: Maybe (GaBindParents p)
     , peTrace :: Maybe EdgeTrace
     }
 
@@ -50,20 +51,20 @@ data PhiEnv = PhiEnv
 --
 -- PhiM is a ReaderT over Either ElabError, providing access to the PhiEnv
 -- and short-circuiting error handling.
-type PhiM = ReaderT PhiEnv (Either ElabError)
+type PhiM (p :: Phase) = ReaderT (PhiEnv p) (Either ElabError)
 
 -- | Get the canonical node function from the environment.
-askCanonical :: PhiM (NodeId -> NodeId)
+askCanonical :: PhiM p (NodeId -> NodeId)
 askCanonical = asks peCanonical
 
 -- | Get the copy map from the environment.
-askCopyMap :: PhiM (IntMap.IntMap NodeId)
+askCopyMap :: PhiM p (IntMap.IntMap NodeId)
 askCopyMap = asks peCopyMap
 
--- | Get the optional GaBindParents 'Raw from the environment.
-askGaParents :: PhiM (Maybe (GaBindParents 'Raw))
+-- | Get the optional GaBindParents from the environment.
+askGaParents :: PhiM p (Maybe (GaBindParents p))
 askGaParents = asks peGaParents
 
 -- | Get the optional EdgeTrace from the environment.
-askTrace :: PhiM (Maybe EdgeTrace)
+askTrace :: PhiM p (Maybe EdgeTrace)
 askTrace = asks peTrace

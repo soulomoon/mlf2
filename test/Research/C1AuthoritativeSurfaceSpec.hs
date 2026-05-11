@@ -131,10 +131,10 @@ bodyRoot ann0 = case extractVarBody ann0 of
     AVar _ nid -> nid
     other -> error ("expected scheme alias variable body, got " ++ show other)
 
-rebindRootTo :: ResultTypeInputs -> NodeId -> NodeId -> ResultTypeInputs
+rebindRootTo :: ResultTypeInputs 'Raw -> NodeId -> NodeId -> ResultTypeInputs 'Raw
 rebindRootTo inputs rootNid newBound = rewriteResultTypeInputs (setVarBound rootNid newBound) inputs
 
-rewriteResultTypeInputs :: (Constraint 'Raw -> Constraint 'Raw) -> ResultTypeInputs -> ResultTypeInputs
+rewriteResultTypeInputs :: (Constraint 'Raw -> Constraint 'Raw) -> ResultTypeInputs 'Raw -> ResultTypeInputs 'Raw
 rewriteResultTypeInputs rewrite inputs =
     let view0 = rtcPresolutionView inputs
         baseConstraint' = rewrite (pvConstraint view0)
@@ -187,7 +187,7 @@ findBaseNode expectedBase view0 =
         baseNid : _ -> baseNid
         [] -> error ("expected base node for " ++ show expectedBase ++ " in C1 fallback case")
 
-resultTypeInputsForArtifacts :: PipelineArtifacts -> (ResultTypeInputs, AnnExpr, AnnExpr)
+resultTypeInputsForArtifacts :: PipelineArtifacts -> (ResultTypeInputs 'Raw, AnnExpr, AnnExpr)
 resultTypeInputsForArtifacts
     PipelineArtifacts
         { paConstraintNorm = c1

@@ -250,7 +250,7 @@ phiFromEdgeWitnessFixtureTrace solved mSchemeInfo ew =
 
 resultTypeInputsForArtifacts ::
   PipelineArtifacts ->
-  (ResultTypeInputs, AnnExpr, AnnExpr)
+  (ResultTypeInputs 'Raw, AnnExpr, AnnExpr)
 resultTypeInputsForArtifacts
   PipelineArtifacts
     { paConstraintNorm = c1,

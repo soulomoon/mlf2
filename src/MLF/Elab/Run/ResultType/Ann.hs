@@ -66,8 +66,8 @@ import MLF.Elab.Run.ResultType.Types
 import qualified MLF.Elab.Run.ResultType.View as View
 
 computeResultTypeFromAnnWithView
-    :: ResultTypeInputs
-    -> View.ResultTypeView
+    :: ResultTypeInputs p
+    -> View.ResultTypeView p
     -> AnnExpr
     -> AnnExpr
     -> NodeId

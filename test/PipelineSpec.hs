@@ -304,7 +304,7 @@ constraintContainsTyMu constraint =
       TyMu {} -> True
       _ -> False
 
-resultTypeInputsForArtifacts :: PipelineArtifacts -> (ResultTypeInputs, AnnExpr, AnnExpr)
+resultTypeInputsForArtifacts :: PipelineArtifacts -> (ResultTypeInputs 'Raw, AnnExpr, AnnExpr)
 resultTypeInputsForArtifacts
   PipelineArtifacts
     { paConstraintNorm = c1,

@@ -22,9 +22,9 @@ import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MLF.Reify.TypeOps (freeTypeVarsType, freshNameLike)
 
-type ResultTypeRecursor =
-  ResultTypeInputs ->
-  View.ResultTypeView ->
+type ResultTypeRecursor p =
+  ResultTypeInputs p ->
+  View.ResultTypeView p ->
   AnnExpr ->
   AnnExpr ->
   Either ElabError ElabType
@@ -33,9 +33,9 @@ type ResultTypeRecursor =
 -- Note: This function handles the non-AAnn case. When the root is an AAnn,
 -- the facade (ResultType.hs) dispatches to computeResultTypeFromAnn instead.
 computeResultTypeFallback ::
-  ResultTypeRecursor ->
-  ResultTypeInputs ->
-  View.ResultTypeView ->
+  ResultTypeRecursor p ->
+  ResultTypeInputs p ->
+  View.ResultTypeView p ->
   -- | annCanon (post-redirect)
   AnnExpr ->
   -- | ann (pre-redirect)
@@ -45,9 +45,9 @@ computeResultTypeFallback recurse ctx view annCanon ann =
   computeResultTypeFallbackWithView recurse ctx view annCanon ann
 
 computeResultTypeFallbackWithView ::
-  ResultTypeRecursor ->
-  ResultTypeInputs ->
-  View.ResultTypeView ->
+  ResultTypeRecursor p ->
+  ResultTypeInputs p ->
+  View.ResultTypeView p ->
   AnnExpr ->
   AnnExpr ->
   Either ElabError ElabType
@@ -138,9 +138,9 @@ computeResultTypeFallbackWithView recurse ctx view annCanon ann = do
 -- | Compute result type for the body of an annotated lambda.
 -- This handles the case where the body is wrapped in AAnn.
 computeBodyResultType ::
-  ResultTypeRecursor ->
-  ResultTypeInputs ->
-  View.ResultTypeView ->
+  ResultTypeRecursor p ->
+  ResultTypeInputs p ->
+  View.ResultTypeView p ->
   AnnExpr ->
   Either ElabError ElabType
 computeBodyResultType recurse ctx view bodyAnn =

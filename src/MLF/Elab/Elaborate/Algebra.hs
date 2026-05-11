@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE PatternSynonyms #-}
 
 module MLF.Elab.Elaborate.Algebra
@@ -27,7 +28,7 @@ import MLF.Constraint.Types.Graph
     TyNode (..),
     getNodeId,
   )
-import MLF.Constraint.Types.Phase (Phase(Raw))
+import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Elaborate.Annotation
   ( AnnotationContext (..),
     desugaredAnnLambdaInfo,
@@ -111,12 +112,12 @@ data ElabOut = ElabOut
     elabStripped :: Env -> Either ElabError ElabTerm
   }
 
-data AlgebraContext = AlgebraContext
-  { algPresolutionView :: PresolutionView 'Raw,
+data AlgebraContext (p :: Phase) = AlgebraContext
+  { algPresolutionView :: PresolutionView p,
     algTraceConfig :: TraceConfig,
     algCanonical :: NodeId -> NodeId,
     algResolvedLambdaParamNode :: NodeId -> Maybe NodeId,
-    algAnnotationContext :: AnnotationContext,
+    algAnnotationContext :: AnnotationContext p,
     algNamedSetReify :: IntSet.IntSet,
     -- | Original source annotation types from constraint generation, keyed by
     -- canonicalized AAnn codomain NodeId.  Used in ALamF to recover annotation
@@ -184,7 +185,7 @@ envSchemeInfos = Map.map ebSchemeInfo
 lookupSchemeInfo :: VarName -> Env -> Maybe SchemeInfo
 lookupSchemeInfo name env = ebSchemeInfo <$> Map.lookup name env
 
-sourceAnnotatedTypeFrom :: AlgebraContext -> Env -> AnnExpr -> Either ElabError (Maybe ElabType)
+sourceAnnotatedTypeFrom :: AlgebraContext p -> Env -> AnnExpr -> Either ElabError (Maybe ElabType)
 sourceAnnotatedTypeFrom algebraContext env ann =
   case ann of
     AVar name _ -> pure (schemeToType . siScheme <$> lookupSchemeInfo name env)
@@ -200,7 +201,7 @@ sourceSchemePairFromType srcTy = do
   ty <- srcTypeToElabType srcTy
   pure (schemeFromType ty, IntMap.empty)
 
-sourceSchemePairForNode :: AlgebraContext -> ScopeContext -> NodeId -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
+sourceSchemePairForNode :: AlgebraContext p -> ScopeContext p -> NodeId -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
 sourceSchemePairForNode algebraContext scopeContext nodeId =
   case IntMap.lookup (getNodeId nodeId) (algAnnSourceTypes algebraContext) of
     Just srcTy -> do
@@ -211,14 +212,14 @@ sourceSchemePairForNode algebraContext scopeContext nodeId =
           _ -> Just fallback
     Nothing -> pure Nothing
 
-sourceSchemePairForOuterAnnotation :: AlgebraContext -> ScopeContext -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
+sourceSchemePairForOuterAnnotation :: AlgebraContext p -> ScopeContext p -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
 sourceSchemePairForOuterAnnotation algebraContext scopeContext annExpr =
   case annExpr of
     AAnn _ annNodeId _ -> sourceSchemePairForNode algebraContext scopeContext annNodeId
     AUnfold (AAnn _ annNodeId _) _ _ -> sourceSchemePairForNode algebraContext scopeContext annNodeId
     _ -> pure Nothing
 
-sourceSchemePairForAnnotation :: AlgebraContext -> ScopeContext -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
+sourceSchemePairForAnnotation :: AlgebraContext p -> ScopeContext p -> AnnExpr -> Either ElabError (Maybe (ElabScheme, IntMap.IntMap String))
 sourceSchemePairForAnnotation algebraContext scopeContext annExpr =
   case annExpr of
     AAnn inner annNodeId _ -> do
@@ -457,7 +458,7 @@ isTransparentMediatorAnn annExpr =
     ALam rootParam _ _ body _ -> isTransparentMediatorBodyFor rootParam body
     _ -> False
 
-elabAlg :: AlgebraContext -> AnnExprF (AnnExpr, ElabOut) -> ElabOut
+elabAlg :: AlgebraContext p -> AnnExprF (AnnExpr, ElabOut) -> ElabOut
 elabAlg algebraContext layer =
   case layer of
     AVarF v _ -> mkOut $ \env ->
