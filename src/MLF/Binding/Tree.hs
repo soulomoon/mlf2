@@ -8,6 +8,14 @@ This module implements the binding-tree data model and operations from
 @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.1). The binding tree is an explicit representation of
 which nodes are bound by which other nodes, with flexible/rigid flags.
 
+= Phase Classification
+
+All operations in this module (and its sub-modules: Queries, Path,
+Children, NodeRefs, ScopeGraph, Canonicalization) are phase-insensitive.
+They read or mutate the binding-parent map without relying on normalization,
+acyclicity, or presolution invariants.  Every helper is polymorphic in the
+phase index @p@.
+
 Note [Binding Tree]
 ~~~~~~~~~~~~~~~~~~~
 The paper represents scope via a *binding tree* that is separate from the

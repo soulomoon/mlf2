@@ -9,6 +9,17 @@ This module implements the normalization phase of MLF type inference,
 which applies semantics-preserving local transformations to put constraints
 into "locally-solved form."
 
+= Phase Classification
+
+The main entry point enforces the phase boundary:
+
+  * 'normalize' accepts @Constraint 'Raw@ and produces @Constraint 'Normalized@.
+
+The individual transformation rules ('dropReflexiveInstEdges',
+'dropReflexiveUnifyEdges') are phase-insensitive: they are iterated inside
+'normalize' on the in-progress constraint, which may be at any intermediate
+state.  They remain polymorphic in @p@.
+
 Primary references:
   * Rémy & Yakobowski, "Graphic Type Constraints and Efficient Type
     Inference: from ML to MLF" (ICFP 2008) - §4 "Solving constraints locally"

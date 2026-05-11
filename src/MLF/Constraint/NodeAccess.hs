@@ -8,6 +8,13 @@ This module provides a centralized API for accessing nodes in the constraint gra
 It eliminates duplicate lookup patterns across the codebase and provides consistent
 error handling.
 
+= Phase Classification
+
+All operations in this module are phase-insensitive structural readers. They
+access the graph by node ID without relying on any normalization, acyclicity,
+or presolution invariant. Consequently every helper is polymorphic in the
+phase index @p@.
+
 = Design Rationale
 
 Previously, 42+ modules duplicated patterns like:

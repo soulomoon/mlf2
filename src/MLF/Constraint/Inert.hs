@@ -7,6 +7,15 @@ This module provides helpers for computing inert nodes (nodes that do not
 expose polymorphism through flexible binding paths) and inert-locked nodes
 (inert nodes that are flexibly bound but have a rigid ancestor).
 
+= Phase Classification
+
+All operations in this module are phase-insensitive. Inertness and
+inert-locked classification depend only on binding-tree structure and
+polymorphic-symbol membership, both of which are maintained at every
+pipeline stage. The weakening helpers ('weakenInertLockedNodes',
+'weakenInertNodes') mutate binding flags without relying on normalization
+or acyclicity invariants. All helpers are polymorphic in @p@.
+
 Paper anchor: `papers/these-finale-english.txt` Definition 5.2.2 (inert nodes)
 and Definition 15.2.2 (inert-locked nodes).
 -}

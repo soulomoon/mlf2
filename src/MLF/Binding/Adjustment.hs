@@ -8,6 +8,12 @@ License     : BSD-3-Clause
 This module implements binding-edge harmonization (paper Raise(n)) on the
 paper-style binding tree.
 
+= Phase Classification
+
+All operations are phase-insensitive.  Harmonization reads and mutates
+binding edges without relying on normalization or acyclicity invariants.
+Every helper is polymorphic in the phase index @p@.
+
 Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.4)
 describes Raise(n) as a binding-edge raising operation. This module provides
 'harmonizeBindParentsWithTrace' which

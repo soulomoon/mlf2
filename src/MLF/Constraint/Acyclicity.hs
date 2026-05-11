@@ -9,6 +9,20 @@
 -- It builds a dependency graph between instantiation edges and verifies that
 -- the graph is acyclic, which is required for the presolution phase to terminate.
 --
+-- = Phase Classification
+--
+-- The main API functions enforce the phase boundary at the type level:
+--
+--   * 'checkAcyclicity' and 'breakCyclesAndCheckAcyclicity' accept
+--     @Constraint 'Normalized@ and produce @Constraint 'Acyclic@.
+--
+-- The exported building blocks are phase-insensitive graph algorithms:
+--
+--   * 'buildDependencyGraph' reads inst edges and computes reachability
+--     without relying on normalization or acyclicity invariants.
+--   * 'collectReachableNodes', 'isAcyclic', 'topologicalSort', 'findCycle'
+--     operate on the 'DepGraph' type, which has no phase index.
+--
 -- Primary references:
 --   * Rémy & Yakobowski, "Graphic Type Constraints and Efficient Type
 --     Inference: from ML to MLF" (ICFP 2008) - §5 "Presolution"

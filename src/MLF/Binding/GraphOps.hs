@@ -9,6 +9,12 @@ This module implements the paper's ω operations (Raise/Weaken) as pure
 transformations on the binding tree. These operations modify only the
 binding-edge structure, not the term-DAG.
 
+= Phase Classification
+
+All operations are phase-insensitive.  Raise and Weaken modify binding
+flags without relying on normalization or acyclicity invariants.  Every
+helper is polymorphic in the phase index @p@.
+
 Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@
 §3.1-§3.4)
 

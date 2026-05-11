@@ -6,6 +6,13 @@ License     : BSD-3-Clause
 
 This module provides validation functions for binding tree invariants.
 Extracted from MLF.Binding.Tree for modularity.
+
+= Phase Classification
+
+All operations are phase-insensitive.  The validation checks read
+binding-parent structure, gen-node schemes, and term-DAG edges without
+relying on normalization or acyclicity invariants.  Every helper is
+polymorphic in the phase index @p@.
 -}
 module MLF.Binding.Validation (
     -- * Invariant checking
