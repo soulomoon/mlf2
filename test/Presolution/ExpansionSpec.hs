@@ -18,7 +18,6 @@ import MLF.Constraint.Presolution
     ( PresolutionError(..)
     , PresolutionResult(..)
     )
-import MLF.Constraint.Presolution qualified as PresolutionPhase
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
     , applyExpansion
@@ -27,11 +26,10 @@ import MLF.Constraint.Presolution.TestSupport
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 import MLF.Constraint.Solve (SolveResult(..), validateSolvedGraphStrict)
-import MLF.Constraint.Types.Phase (Phase(Raw))
-import MLF.Elab.Pipeline (TraceConfig)
 import qualified MLF.Binding.Tree as Binding
 import SpecUtil
-    ( defaultTraceConfig
+    ( computePresolutionRaw
+    , defaultTraceConfig
     , emptyConstraint
     , inferBindParents
     , lookupNodeMaybe
@@ -41,13 +39,6 @@ import SpecUtil
     , rootedConstraint
     )
 import Presolution.Util (expectForallBody, nodeAt)
-
-computePresolution :: TraceConfig -> AcyclicityResult -> Constraint 'Raw -> Either PresolutionError PresolutionResult
-computePresolution traceCfg acyclicity constraint =
-    PresolutionPhase.computePresolution
-        traceCfg
-        acyclicity
-        (toAcyclicConstraint (toNormalizedConstraint constraint))
 
 spec :: Spec
 spec = do
@@ -76,7 +67,7 @@ spec = do
                         , arDepGraph = undefined -- Not used by computePresolution currently
                         }
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps } ->
                     case IntMap.lookup 0 exps of
@@ -121,7 +112,7 @@ spec = do
                         , arDepGraph = undefined
                         }
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prConstraint = c', prEdgeExpansions = exps } -> do
                     case IntMap.lookup 0 exps of
@@ -170,7 +161,7 @@ spec = do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps } ->
                     case IntMap.lookup 0 exps of
@@ -217,7 +208,7 @@ spec = do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps } -> do
                     case IntMap.lookup 0 exps of
@@ -251,7 +242,7 @@ spec = do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps, prConstraint = c' } -> do
                     case IntMap.lookup 0 exps of
@@ -309,7 +300,7 @@ spec = do
                         ExecError inner -> isOccursCheck inner
                         _ -> False
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err | isOccursCheck err -> pure ()
                 Left other -> expectationFailure $ "Unexpected error: " ++ show other
                 Right _ -> expectationFailure "Expected presolution occurs-check failure"
@@ -344,7 +335,7 @@ spec = do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps } ->
                     case IntMap.lookup 0 exps of
@@ -378,7 +369,7 @@ spec = do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left other -> expectationFailure $ "Unexpected error: " ++ show other
                 Right _ -> pure ()
 
@@ -591,7 +582,7 @@ spec = do
                         , arDepGraph = undefined
                         }
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps } -> do
                     case (IntMap.lookup 0 exps, IntMap.lookup 1 exps) of
@@ -622,7 +613,7 @@ spec = do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge1, edge2], arDepGraph = undefined }
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps, prConstraint = c' } -> do
                     case (IntMap.lookup 0 exps, IntMap.lookup 1 exps) of
@@ -656,7 +647,7 @@ spec = do
                 isExp TyExp{} = True
                 isExp _ = False
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prConstraint = c' } -> do
                     any isExp (nodeMapElems (cNodes c')) `shouldBe` False
@@ -701,7 +692,7 @@ spec = do
                         ]
                     }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Right PresolutionResult{ prEdgeExpansions = exps } ->
                     IntMap.size exps `shouldSatisfy` (> 0)
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
@@ -724,7 +715,7 @@ spec = do
                         ]
                     }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Right PresolutionResult{ prEdgeWitnesses = ews } ->
                     IntMap.size ews `shouldSatisfy` (> 0)
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err

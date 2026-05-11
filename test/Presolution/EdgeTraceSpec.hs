@@ -11,9 +11,9 @@ import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
+    , PresolutionError
     , PresolutionResult(..)
     )
-import MLF.Constraint.Presolution qualified as PresolutionPhase
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
     , fromListInterior
@@ -22,24 +22,16 @@ import MLF.Constraint.Presolution.TestSupport
     , runPresolutionM
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
-import MLF.Constraint.Types.Phase (Phase(Raw))
-import MLF.Elab.Pipeline (TraceConfig)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Util.UnionFind as UF
 import SpecUtil
     ( bindParentsFromPairs
+    , computePresolutionRaw
     , defaultTraceConfig
     , emptyConstraint
     , nodeMapFromList
     , rootedConstraint
     )
-
-computePresolution :: TraceConfig -> AcyclicityResult -> Constraint 'Raw -> Either PresolutionPhase.PresolutionError PresolutionResult
-computePresolution traceCfg acyclicity constraint =
-    PresolutionPhase.computePresolution
-        traceCfg
-        acyclicity
-        (toAcyclicConstraint (toNormalizedConstraint constraint))
 
 spec :: Spec
 spec = describe "EdgeTrace" $ do
@@ -305,7 +297,7 @@ spec = describe "EdgeTrace" $ do
                     , arDepGraph = undefined
                     }
 
-        case computePresolution defaultTraceConfig acyclicityRes constraint of
+        case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
             Left err -> expectationFailure ("Presolution failed: " ++ show err)
             Right PresolutionResult{ prConstraint = c', prEdgeTraces = traces } -> do
                 tr <- case IntMap.lookup 0 traces of

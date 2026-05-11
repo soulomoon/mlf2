@@ -18,7 +18,6 @@ import MLF.Constraint.Presolution
     , PresolutionError(..)
     , PresolutionResult(..)
     )
-import MLF.Constraint.Presolution qualified as PresolutionPhase
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
     , lookupCopy
@@ -26,25 +25,17 @@ import MLF.Constraint.Presolution.TestSupport
     , runPresolutionM
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
-import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Presolution.Witness (OmegaNormalizeError(..))
-import MLF.Elab.Pipeline (TraceConfig)
 import qualified MLF.Binding.Tree as Binding
 import SpecUtil
     ( bindParentsFromPairs
+    , computePresolutionRaw
     , defaultTraceConfig
     , emptyConstraint
     , inferBindParents
     , nodeMapFromList
     , rootedConstraint
     )
-
-computePresolution :: TraceConfig -> AcyclicityResult -> Constraint 'Raw -> Either PresolutionError PresolutionResult
-computePresolution traceCfg acyclicity constraint =
-    PresolutionPhase.computePresolution
-        traceCfg
-        acyclicity
-        (toAcyclicConstraint (toNormalizedConstraint constraint))
 
 spec :: Spec
 spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
@@ -234,7 +225,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                     }
             acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-        case computePresolution defaultTraceConfig acyclicityRes constraint of
+        case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
             Left (WitnessNormalizationError (EdgeId eid) normErr) -> do
                 eid `shouldBe` 0
                 case normErr of
@@ -425,7 +416,7 @@ spec = describe "Phase 2 — Merge/RaiseMerge emission" $ do
                     , cBindParents = bindParents
                     }
 
-        case computePresolution defaultTraceConfig acyclicityRes constraint of
+        case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
             Left err -> expectationFailure ("computePresolution failed: " ++ show err)
             Right pr -> do
                 -- Extract binder-meta and instantiation-arg from the edge trace.

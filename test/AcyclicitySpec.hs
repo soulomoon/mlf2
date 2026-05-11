@@ -4,23 +4,12 @@ module AcyclicitySpec (spec) where
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
 import MLF.API (Expr (..), Lit (..), SrcTy (..))
-import MLF.Constraint.Acyclicity hiding (breakCyclesAndCheckAcyclicity, checkAcyclicity)
-import MLF.Constraint.Acyclicity qualified as Acyclicity
+import MLF.Constraint.Acyclicity (AcyclicityResult (..), CycleError (..), buildDependencyGraph, collectReachableNodes, findCycle, isAcyclic, topologicalSort)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Presolution
-import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Pipeline (ConstraintResult (..), inferConstraintGraph)
-import SpecUtil (emptyConstraint, nodeMapElems, nodeMapFromList, nodeMapSingleton)
+import SpecUtil (breakCyclesAndCheckAcyclicityRaw, checkAcyclicityRaw, emptyConstraint, nodeMapElems, nodeMapFromList, nodeMapSingleton)
 import Test.Hspec
-
-checkAcyclicity :: Constraint 'Raw -> Either CycleError AcyclicityResult
-checkAcyclicity = fmap snd . Acyclicity.checkAcyclicity . toNormalizedConstraint
-
-breakCyclesAndCheckAcyclicity :: Constraint 'Raw -> Either CycleError (Constraint 'Raw, AcyclicityResult)
-breakCyclesAndCheckAcyclicity =
-  fmap (\(constraint, result) -> (toRawConstraintForLegacy constraint, result))
-    . Acyclicity.breakCyclesAndCheckAcyclicity
-    . toNormalizedConstraint
 
 spec :: Spec
 spec = do
@@ -28,7 +17,7 @@ spec = do
     describe "Trivial cases" $ do
       it "empty constraint is acyclic" $ do
         let constraint = emptyConstraint
-        checkAcyclicity constraint `shouldSatisfy` isRight
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
 
       it "single InstEdge is acyclic" $ do
         let nodes =
@@ -42,10 +31,10 @@ spec = do
                 { cNodes = nodes,
                   cInstEdges = [edge]
                 }
-        checkAcyclicity constraint `shouldSatisfy` isRight
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
 
       it "returns empty sorted list for empty InstEdges" $ do
-        case checkAcyclicity emptyConstraint of
+        case checkAcyclicityRaw emptyConstraint of
           Right result -> arSortedEdges result `shouldBe` []
           Left _ -> expectationFailure "Expected acyclic result"
 
@@ -68,8 +57,8 @@ spec = do
                 { cNodes = nodes,
                   cInstEdges = edges
                 }
-        checkAcyclicity constraint `shouldSatisfy` isRight
-        case checkAcyclicity constraint of
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
+        case checkAcyclicityRaw constraint of
           Right result -> length (arSortedEdges result) `shouldBe` 2
           Left _ -> expectationFailure "Expected acyclic"
 
@@ -88,7 +77,7 @@ spec = do
                 { cNodes = nodes,
                   cInstEdges = edges
                 }
-        case checkAcyclicity constraint of
+        case checkAcyclicityRaw constraint of
           Right result -> length (arSortedEdges result) `shouldBe` 3
           Left _ -> expectationFailure "Expected acyclic"
 
@@ -111,8 +100,8 @@ spec = do
                 { cNodes = nodes,
                   cInstEdges = [e1, e2]
                 }
-        checkAcyclicity constraint `shouldSatisfy` isRight
-        case checkAcyclicity constraint of
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
+        case checkAcyclicityRaw constraint of
           Right result -> do
             let sorted = arSortedEdges result
             length sorted `shouldBe` 2
@@ -139,7 +128,7 @@ spec = do
                 InstEdge (EdgeId 2) (NodeId 2) (NodeId 3) -- γ ≤ δ
               ]
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = edges}
-        checkAcyclicity constraint `shouldSatisfy` isRight
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
 
     describe "Edges through structured types" $ do
       it "explicit TyMu annotations remain acyclic without a cyclic escape hatch" $ do
@@ -147,7 +136,7 @@ spec = do
         case inferConstraintGraph mempty expr of
           Left err -> expectationFailure ("Expected constraint graph, got " ++ show err)
           Right result ->
-            checkAcyclicity (crConstraint result) `shouldSatisfy` isRight
+            checkAcyclicityRaw (crConstraint result) `shouldSatisfy` isRight
 
       it "dependency through arrow domain is tracked" $ do
         -- e₁: α ≤ (β → Int)  (right side reaches β through arrow domain)
@@ -171,9 +160,9 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 4) -- α ≤ (β → Int)
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2) -- β ≤ γ
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        checkAcyclicity constraint `shouldSatisfy` isRight
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
         -- e₂ should be processed before e₁
-        case checkAcyclicity constraint of
+        case checkAcyclicityRaw constraint of
           Right result -> do
             let ids = map instEdgeId (arSortedEdges result)
             let posE1 = findIndex (EdgeId 0) ids
@@ -197,7 +186,7 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 4) -- α ≤ (Int → β)
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2) -- β ≤ γ
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        checkAcyclicity constraint `shouldSatisfy` isRight
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
 
       it "deep nesting in arrows is traversed" $ do
         -- α ≤ ((β → Int) → Bool)
@@ -215,7 +204,7 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 6)
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2)
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        checkAcyclicity constraint `shouldSatisfy` isRight
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
 
     describe "Cycle detection" $ do
       it "detects simple 2-node cycle" $ do
@@ -232,7 +221,7 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1) -- α ≤ β
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 0) -- β ≤ α
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        checkAcyclicity constraint `shouldSatisfy` isLeft
+        checkAcyclicityRaw constraint `shouldSatisfy` isLeft
 
       it "detects 3-node cycle" $ do
         -- e₁: α ≤ β, e₂: β ≤ γ, e₃: γ ≤ α
@@ -247,7 +236,7 @@ spec = do
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2) -- β ≤ γ
             e3 = InstEdge (EdgeId 2) (NodeId 2) (NodeId 0) -- γ ≤ α
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2, e3]}
-        checkAcyclicity constraint `shouldSatisfy` isLeft
+        checkAcyclicityRaw constraint `shouldSatisfy` isLeft
 
       it "returns cycle edges in error" $ do
         let nodes =
@@ -258,7 +247,7 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 0)
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        case checkAcyclicity constraint of
+        case checkAcyclicityRaw constraint of
           Left err -> do
             ceEdgesInCycle err `shouldSatisfy` (not . null)
             ceMessage err `shouldSatisfy` (not . null)
@@ -280,7 +269,7 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3) -- α ≤ (β → Int)
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 4) -- β ≤ (α → Int)
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        checkAcyclicity constraint `shouldSatisfy` isLeft
+        checkAcyclicityRaw constraint `shouldSatisfy` isLeft
 
     describe "Cycle breaking" $ do
       it "rewrites a simple cycle into an acyclic graph" $ do
@@ -292,10 +281,10 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 0)
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        case breakCyclesAndCheckAcyclicity constraint of
+        case breakCyclesAndCheckAcyclicityRaw constraint of
           Left err -> expectationFailure ("Expected rewritten acyclic graph, got " ++ show err)
           Right (rewritten, result) -> do
-            checkAcyclicity rewritten `shouldSatisfy` isRight
+            checkAcyclicityRaw rewritten `shouldSatisfy` isRight
             arSortedEdges result `shouldSatisfy` (not . null)
 
       it "introduces TyMu nodes when it breaks a cycle" $ do
@@ -311,7 +300,7 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3)
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 4)
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        case breakCyclesAndCheckAcyclicity constraint of
+        case breakCyclesAndCheckAcyclicityRaw constraint of
           Left err -> expectationFailure ("Expected rewritten acyclic graph, got " ++ show err)
           Right (rewritten, _result) -> do
             let muNodes = [node | node@TyMu {} <- nodeMapElems (cNodes rewritten)]
@@ -325,7 +314,7 @@ spec = do
                 ]
             edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [edge]}
-        case breakCyclesAndCheckAcyclicity constraint of
+        case breakCyclesAndCheckAcyclicityRaw constraint of
           Left err -> expectationFailure ("Expected unchanged acyclic graph, got " ++ show err)
           Right (rewritten, result) -> do
             rewritten `shouldBe` constraint
@@ -348,7 +337,7 @@ spec = do
                 InstEdge (EdgeId 2) (NodeId 2) (NodeId 3) -- γ ≤ δ (independent)
               ]
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = edges}
-        checkAcyclicity constraint `shouldSatisfy` isLeft
+        checkAcyclicityRaw constraint `shouldSatisfy` isLeft
 
     describe "TyForall traversal" $ do
       it "dependency through forall body is tracked" $ do
@@ -365,8 +354,8 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3) -- α ≤ ∀g.β
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2) -- β ≤ γ
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        checkAcyclicity constraint `shouldSatisfy` isRight
-        case checkAcyclicity constraint of
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
+        case checkAcyclicityRaw constraint of
           Right result -> do
             let ids = map instEdgeId (arSortedEdges result)
             let posE1 = findIndex (EdgeId 0) ids
@@ -390,7 +379,7 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 2) -- α ≤ ∀g.β
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 3) -- β ≤ ∀g.α
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        checkAcyclicity constraint `shouldSatisfy` isLeft
+        checkAcyclicityRaw constraint `shouldSatisfy` isLeft
 
     describe "TyExp (expansion node) traversal" $ do
       it "dependency through expansion body is tracked" $ do
@@ -407,8 +396,8 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 3) -- α ≤ (s · β)
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2) -- β ≤ γ
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        checkAcyclicity constraint `shouldSatisfy` isRight
-        case checkAcyclicity constraint of
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
+        case checkAcyclicityRaw constraint of
           Right result -> do
             let ids = map instEdgeId (arSortedEdges result)
             let posE1 = findIndex (EdgeId 0) ids
@@ -432,7 +421,7 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 2) -- α ≤ (s · β)
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 3) -- β ≤ (s · α)
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        checkAcyclicity constraint `shouldSatisfy` isLeft
+        checkAcyclicityRaw constraint `shouldSatisfy` isLeft
 
     describe "Diamond dependencies (DAG)" $ do
       it "diamond shape is acyclic" $ do
@@ -455,8 +444,8 @@ spec = do
                 InstEdge (EdgeId 3) (NodeId 2) (NodeId 3) -- γ ≤ δ
               ]
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = edges}
-        checkAcyclicity constraint `shouldSatisfy` isRight
-        case checkAcyclicity constraint of
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
+        case checkAcyclicityRaw constraint of
           Right result -> length (arSortedEdges result) `shouldBe` 4
           Left _ -> expectationFailure "Expected acyclic"
 
@@ -477,7 +466,7 @@ spec = do
                 InstEdge (EdgeId 4) (NodeId 3) (NodeId 0) -- δ ≤ α (back edge!)
               ]
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = edges}
-        checkAcyclicity constraint `shouldSatisfy` isLeft
+        checkAcyclicityRaw constraint `shouldSatisfy` isLeft
 
     describe "Shared nodes" $ do
       it "shared node on RHS creates no dependency" $ do
@@ -493,7 +482,7 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1) -- α ≤ β
             e2 = InstEdge (EdgeId 1) (NodeId 2) (NodeId 1) -- γ ≤ β
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        checkAcyclicity constraint `shouldSatisfy` isRight
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
         -- No dependency between them (independent)
         let g = buildDependencyGraph constraint
         -- e₁ should NOT depend on e₂ and vice versa
@@ -519,7 +508,7 @@ spec = do
             e1 = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1) -- α ≤ β
             e2 = InstEdge (EdgeId 1) (NodeId 0) (NodeId 2) -- α ≤ γ
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2]}
-        checkAcyclicity constraint `shouldSatisfy` isRight
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
 
     describe "Self-referential edge" $ do
       it "self-loop α ≤ α is acyclic (trivially satisfied)" $ do
@@ -529,7 +518,7 @@ spec = do
         let nodes = nodeMapSingleton 0 (TyVar {tnId = NodeId 0, tnBound = Nothing})
             edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 0) -- α ≤ α
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [edge]}
-        checkAcyclicity constraint `shouldSatisfy` isRight
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
 
     describe "Edge cases" $ do
       it "missing node in IntMap is handled gracefully" $ do
@@ -538,7 +527,7 @@ spec = do
             edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 99) -- 99 doesn't exist
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [edge]}
         -- Should still be acyclic (missing node has no children)
-        checkAcyclicity constraint `shouldSatisfy` isRight
+        checkAcyclicityRaw constraint `shouldSatisfy` isRight
 
       it "longer chain order is verified" $ do
         -- e₁: α ≤ β, e₂: β ≤ γ, e₃: γ ≤ δ
@@ -551,7 +540,7 @@ spec = do
             e2 = InstEdge (EdgeId 1) (NodeId 1) (NodeId 2) -- β ≤ γ
             e3 = InstEdge (EdgeId 2) (NodeId 2) (NodeId 3) -- γ ≤ δ
             constraint = emptyConstraint {cNodes = nodes, cInstEdges = [e1, e2, e3]}
-        case checkAcyclicity constraint of
+        case checkAcyclicityRaw constraint of
           Right result -> do
             let ids = map instEdgeId (arSortedEdges result)
             let pos0 = findIndex (EdgeId 0) ids
@@ -719,7 +708,7 @@ acyclicityObligationsSpec = describe "Thesis obligations (Chapter 12)" $ do
             ]
         edge = InstEdge (EdgeId 0) (NodeId 0) (NodeId 1)
         constraint = emptyConstraint {cNodes = nodes, cInstEdges = [edge]}
-    checkAcyclicity constraint `shouldSatisfy` isRight
+    checkAcyclicityRaw constraint `shouldSatisfy` isRight
 
   it "O12-ACYCLIC-TOPO" $ do
     -- Topological sort: topologicalSort orders edges without cycles

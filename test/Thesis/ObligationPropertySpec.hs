@@ -16,9 +16,7 @@ import Data.Set qualified as Set
 import MLF.Binding.GraphOps qualified as GraphOps
 import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Acyclicity (AcyclicityResult (..))
-import MLF.Constraint.Acyclicity qualified as Acyclicity
 import MLF.Constraint.Inert qualified as Inert
-import MLF.Constraint.Normalize qualified as Normalize
 import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionError (..), PresolutionResult (..), PresolutionView (..))
 import MLF.Constraint.Presolution.TestSupport
   ( CopyMapping (..),
@@ -40,7 +38,7 @@ import MLF.Constraint.Presolution.Witness
     reorderWeakenWithEnv,
     validateNormalizedWitness,
   )
-import MLF.Constraint.Solve (SolveError, SolveResult (..), frWith, solveUnifyResult)
+import MLF.Constraint.Solve (SolveResult (..), frWith)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
@@ -49,31 +47,24 @@ import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Frontend.ConstraintGen (ConstraintResult (..))
 import MLF.Frontend.Syntax qualified as Surf
-import MLF.Elab.Pipeline (TraceConfig)
 import Presolution.Util (mkNormalizeConstraint, mkNormalizeEnv)
 import SpecUtil
   ( PipelineArtifacts (..),
     bindParentsFromPairs,
+    checkAcyclicityRaw,
     defaultTraceConfig,
     emptyConstraint,
     nodeMapFromList,
+    normalizeRaw,
     runConstraintDefault,
     runPipelineArtifactsDefault,
     runToPresolutionDefault,
     rootedConstraint,
+    solveUnifyRaw,
     unsafeNormalizeExpr,
   )
 import Test.Hspec
 import Test.QuickCheck
-
-checkAcyclicity :: Constraint 'Raw -> Either Acyclicity.CycleError AcyclicityResult
-checkAcyclicity = fmap snd . Acyclicity.checkAcyclicity . toNormalizedConstraint
-
-solveUnify :: TraceConfig -> Constraint p -> Either SolveError (SolveResult p)
-solveUnify = solveUnifyResult
-
-normalize :: Constraint 'Raw -> Constraint 'Raw
-normalize = toRawConstraintForLegacy . Normalize.normalize
 
 spec :: Spec
 spec = describe "Thesis obligation property evidence" $
@@ -303,7 +294,7 @@ propSolveVar _size =
         varTripleConstraint
           { cUnifyEdges = [UnifyEdge (NodeId 1) (NodeId 3)]
           }
-   in case solveUnify defaultTraceConfig c of
+   in case solveUnifyRaw defaultTraceConfig c of
         Right SolveResult {srConstraint = solved, srUnionFind = uf} ->
           conjoin
             [ cUnifyEdges solved === [],
@@ -352,7 +343,7 @@ propSolveArrow _size =
                   ],
               cUnifyEdges = [UnifyEdge (NodeId 1) (NodeId 4)]
             }
-   in case solveUnify defaultTraceConfig c of
+   in case solveUnifyRaw defaultTraceConfig c of
         Right SolveResult {srConstraint = solved} ->
           conjoin
             [ cUnifyEdges solved === [],
@@ -382,7 +373,7 @@ propGeneralizedUnify _size =
                 UnifyEdge (NodeId 2) (NodeId 3)
               ]
           }
-   in case solveUnify defaultTraceConfig c of
+   in case solveUnifyRaw defaultTraceConfig c of
         Right SolveResult {srConstraint = solved, srUnionFind = uf} ->
           conjoin
             [ cUnifyEdges solved === [],
@@ -1062,14 +1053,14 @@ propWitnessReorder _size =
 propAcyclicCheck :: Int -> Property
 propAcyclicCheck size =
   let c = acyclicConstraint size
-   in case checkAcyclicity c of
+   in case checkAcyclicityRaw c of
         Right result -> counterexample (show result) (not (null (arSortedEdges result)))
         Left err -> counterexample (show err) False
 
 propAcyclicTopo :: Int -> Property
 propAcyclicTopo size =
   let c = acyclicConstraint size
-   in case checkAcyclicity c of
+   in case checkAcyclicityRaw c of
         Right result -> arSortedEdges result === [InstEdge (EdgeId size) (NodeId 0) (NodeId 2)]
         Left err -> counterexample (show err) False
 
@@ -1216,7 +1207,7 @@ propNormGraft size =
               cBindParents = bindParentsFromPairs [(NodeId 1, NodeId 0, BindFlex)],
               cInstEdges = [InstEdge (EdgeId size) (NodeId 0) (NodeId 1)]
             }
-      normalized = normalize c
+      normalized = normalizeRaw c
    in conjoin
         [ cInstEdges normalized === [],
           cUnifyEdges normalized === [],
@@ -1236,7 +1227,7 @@ propNormMerge size =
                 ],
             cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
           }
-      normalized = normalize c
+      normalized = normalizeRaw c
    in conjoin
         [ cUnifyEdges normalized === [],
           lookupNodeIn (cNodes normalized) (NodeId 0) === Just (TyBase (NodeId 0) mergeBase)
@@ -1251,7 +1242,7 @@ propNormDrop size =
           { cNodes = nodeMapFromList [(0, node)],
             cInstEdges = [edge]
           }
-      normalized = normalize c
+      normalized = normalizeRaw c
    in conjoin
         [ cInstEdges normalized === [],
           cUnifyEdges normalized === [],
@@ -1274,9 +1265,9 @@ propNormFixpoint size =
                 InstEdge (EdgeId (size + 1)) (NodeId 1) (NodeId 2)
               ]
           }
-      normalized = normalize c
+      normalized = normalizeRaw c
    in conjoin
-        [ normalized === normalize normalized,
+        [ normalized === normalizeRaw normalized,
           cInstEdges normalized === [],
           cUnifyEdges normalized === [],
           lookupNodeIn (cNodes normalized) (NodeId 0) === Just (TyBase (NodeId 0) fixpointBase),
@@ -1292,7 +1283,7 @@ propSolveVarBase _size =
               cBindParents = bindParentsFromPairs [(NodeId 1, NodeId 0, BindFlex), (NodeId 2, NodeId 0, BindFlex)],
               cUnifyEdges = [UnifyEdge (NodeId 1) (NodeId 2)]
             }
-   in case solveUnify defaultTraceConfig c of
+   in case solveUnifyRaw defaultTraceConfig c of
         Right SolveResult {srConstraint = solved, srUnionFind = uf} ->
           conjoin [cUnifyEdges solved === [], frWith uf (NodeId 1) === frWith uf (NodeId 2)]
         Left err -> counterexample (show err) False
@@ -1307,7 +1298,7 @@ propSolveHarmonize _size =
 
 propSolveValidate :: Int -> Property
 propSolveValidate _size =
-  case solveUnify defaultTraceConfig varTripleConstraint of
+  case solveUnifyRaw defaultTraceConfig varTripleConstraint of
     Right SolveResult {srConstraint = solved} -> Binding.checkBindingTree solved === Right ()
     Left err -> counterexample (show err) False
 

@@ -27,6 +27,12 @@ module SpecUtil
     lookupNode,
     lookupNodeIO,
     mkForalls,
+    -- * Phase-erasing test wrappers
+    normalizeRaw,
+    checkAcyclicityRaw,
+    breakCyclesAndCheckAcyclicityRaw,
+    computePresolutionRaw,
+    solveUnifyRaw,
   )
 where
 
@@ -35,9 +41,10 @@ import Data.IntSet qualified as IntSet
 import Data.Set qualified as Set
 import GHC.Stack (HasCallStack)
 import MLF.Binding.Tree qualified as Binding
-import MLF.Constraint.Acyclicity (checkAcyclicity)
-import MLF.Constraint.Normalize (normalize)
-import MLF.Constraint.Presolution (PresolutionResult (..), computePresolution)
+import MLF.Constraint.Acyclicity qualified as Acyc
+import MLF.Constraint.Normalize qualified as CNormalize
+import MLF.Constraint.Presolution (PresolutionError, PresolutionResult (..), computePresolution)
+import MLF.Constraint.Solve (SolveError, SolveResult, solveUnifyResult)
 import MLF.Constraint.Solved qualified as Solved
 import MLF.Constraint.Types.Graph
   ( BindFlag (..),
@@ -57,6 +64,8 @@ import MLF.Constraint.Types.Graph
     insertGen,
     nodeRefKey,
     structuralChildren,
+    toAcyclicConstraint,
+    toNormalizedConstraint,
     toRawConstraintForLegacy,
     toListNode,
     typeRef,
@@ -64,7 +73,7 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Graph qualified as Graph
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot (..))
-import MLF.Elab.Pipeline (defaultTraceConfig)
+import MLF.Elab.Pipeline (TraceConfig, defaultTraceConfig)
 import MLF.Frontend.ConstraintGen (AnnExpr (..), ConstraintResult (..), generateConstraints)
 import MLF.Frontend.Normalize (normalizeExpr)
 import MLF.Frontend.Syntax (NormSurfaceExpr, SrcTy (..), SrcType, SurfaceExpr, VarName, mkSrcBound)
@@ -186,8 +195,8 @@ runToPresolutionDetailedDefault ::
   Either String (ConstraintResult 'Raw, Constraint 'Raw, PresolutionResult)
 runToPresolutionDetailedDefault poly expr = do
   result@ConstraintResult {crConstraint = c0} <- runConstraintDefault poly expr
-  let c1 = normalize c0
-  (cAcyclic, acyc) <- firstShowE (checkAcyclicity c1)
+  let c1 = CNormalize.normalize c0
+  (cAcyclic, acyc) <- firstShowE (Acyc.checkAcyclicity c1)
   pres <- firstShowE (computePresolution defaultTraceConfig acyc cAcyclic)
   pure (result, toRawConstraintForLegacy cAcyclic, pres)
 
@@ -276,3 +285,36 @@ collectVarNodes name = go
       ALet _ _ _ _ _ rhs body _ -> go rhs ++ go body
       AAnn expr _ _ -> go expr
       AUnfold expr _ _ -> go expr
+
+-- | Normalize a constraint and erase the phase index back to 'Raw.
+-- Intentional phase erasure for test convenience.
+normalizeRaw :: Constraint 'Raw -> Constraint 'Raw
+normalizeRaw = toRawConstraintForLegacy . CNormalize.normalize
+
+-- | Check acyclicity and erase the phase index back to 'Raw.
+-- Intentional phase erasure for test convenience.
+checkAcyclicityRaw :: Constraint 'Raw -> Either Acyc.CycleError Acyc.AcyclicityResult
+checkAcyclicityRaw = fmap snd . Acyc.checkAcyclicity . toNormalizedConstraint
+
+-- | Break cycles, check acyclicity, and erase the phase index back to 'Raw.
+-- Intentional phase erasure for test convenience.
+breakCyclesAndCheckAcyclicityRaw ::
+  Constraint 'Raw -> Either Acyc.CycleError (Constraint 'Raw, Acyc.AcyclicityResult)
+breakCyclesAndCheckAcyclicityRaw =
+  fmap (\(constraint, result) -> (toRawConstraintForLegacy constraint, result))
+    . Acyc.breakCyclesAndCheckAcyclicity
+    . toNormalizedConstraint
+
+-- | Compute presolution from a 'Raw constraint, performing normalization and
+-- acyclicity checking internally. Intentional phase erasure for test convenience.
+computePresolutionRaw ::
+  TraceConfig ->
+  Acyc.AcyclicityResult ->
+  Constraint 'Raw ->
+  Either PresolutionError PresolutionResult
+computePresolutionRaw traceCfg acycResult c =
+  computePresolution traceCfg acycResult (toAcyclicConstraint (toNormalizedConstraint c))
+
+-- | Solve unification constraints (thin wrapper around 'solveUnifyResult').
+solveUnifyRaw :: TraceConfig -> Constraint p -> Either SolveError (SolveResult p)
+solveUnifyRaw = solveUnifyResult

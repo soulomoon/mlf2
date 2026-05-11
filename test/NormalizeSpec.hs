@@ -8,12 +8,8 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Test.Hspec
 
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Normalize qualified as Normalize
 import MLF.Constraint.Types.Phase (Phase(Raw))
-import SpecUtil (emptyConstraint, lookupNodeMaybe, nodeMapFromList, nodeMapSingleton, nodeMapSize)
-
-normalize :: Constraint 'Raw -> Constraint 'Raw
-normalize = toRawConstraintForLegacy . Normalize.normalize
+import SpecUtil (emptyConstraint, lookupNodeMaybe, nodeMapFromList, nodeMapSingleton, nodeMapSize, normalizeRaw)
 
 spec :: Spec
 spec = describe "Phase 2 — Normalization" $ do
@@ -25,7 +21,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapSingleton 0 node
                     , cInstEdges = [reflexiveEdge]
                     }
-            cInstEdges (normalize constraint) `shouldBe` []
+            cInstEdges (normalizeRaw constraint) `shouldBe` []
 
         it "keeps non-reflexive inst edges between variables" $ do
             -- α ≤ β where both are variables: can't graft, keep the edge
@@ -36,7 +32,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                     , cInstEdges = [edge]
                     }
-            length (cInstEdges (normalize constraint)) `shouldBe` 1
+            length (cInstEdges (normalizeRaw constraint)) `shouldBe` 1
 
         it "handles mixed reflexive and non-reflexive inst edges" $ do
             -- α ≤ α (reflexive, drop)
@@ -56,7 +52,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodes
                     , cInstEdges = instEdges
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- All edges are consumed:
             -- Edge 0: dropped (reflexive)
             -- Edge 2: converts β ≤ Int → β = Int (merged)
@@ -65,7 +61,7 @@ spec = describe "Phase 2 — Normalization" $ do
 
     describe "Fixed-point behavior" $ do
         it "reaches fixed point on empty constraint" $ do
-            let result = normalize emptyConstraint
+            let result = normalizeRaw emptyConstraint
             result `shouldBe` emptyConstraint
 
         it "is idempotent (applying twice gives same result)" $ do
@@ -78,8 +74,8 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodes
                     , cInstEdges = edges
                     }
-                once = normalize constraint
-                twice = normalize once
+                once = normalizeRaw constraint
+                twice = normalizeRaw once
             twice `shouldBe` once
 
     describe "Grafting" $ do
@@ -95,7 +91,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         [(0, varNode), (1, domNode), (2, codNode), (3, arrowNode)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- The inst edge should be consumed (grafted)
             cInstEdges result `shouldBe` []
             -- New arrow node should exist that unifies with α
@@ -111,7 +107,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, varNode), (1, baseNode)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Inst edge is converted to unify edge and merged
             cInstEdges result `shouldBe` []
             cUnifyEdges result `shouldBe` []
@@ -130,7 +126,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         ]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Type error: keep the inst edge to signal unsolved occurs-check
             length (cInstEdges result) `shouldBe` 1
 
@@ -148,7 +144,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         [ (0, varNode), (1, forallNode), (2, intNode), (3, arrowNode) ]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             length (cInstEdges result) `shouldBe` 1
 
         it "rejects grafting when RHS Expansion contains the LHS variable (occurs-check)" $ do
@@ -163,7 +159,7 @@ spec = describe "Phase 2 — Normalization" $ do
                          [ (0, varNode), (1, expNode), (2, intNode), (3, arrowNode) ]
                      , cInstEdges = [edge]
                      }
-                 result = normalize constraint
+                 result = normalizeRaw constraint
              length (cInstEdges result) `shouldBe` 1
 
         it "decomposes arrow ≤ arrow into component unifications" $ do
@@ -182,7 +178,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         ]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Arrow ≤ Arrow becomes α = Int, β = Bool, all merged
             cInstEdges result `shouldBe` []
             cUnifyEdges result `shouldBe` []
@@ -196,7 +192,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Same base types: edge is consumed, no error
             cInstEdges result `shouldBe` []
             cUnifyEdges result `shouldBe` []
@@ -210,7 +206,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Type error: incompatible base types, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
@@ -225,7 +221,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, dom), (1, cod), (2, arr), (3, base)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Type error: arrow vs base, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
@@ -240,7 +236,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, base), (1, dom), (2, cod), (3, arr)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Type error: base vs arrow, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
@@ -256,7 +252,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 -- Edge is consumed by union-find
                 cUnifyEdges result `shouldBe` []
 
@@ -290,7 +286,7 @@ spec = describe "Phase 2 — Normalization" $ do
                                     ]
                             , cUnifyEdges = [edge]
                             }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
 
                 cUnifyEdges result `shouldBe` []
                 IntMap.lookup (nodeRefKey (typeRef vInner)) (cBindParents result)
@@ -306,7 +302,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapFromList [(0, node1), (1, node2), (2, node3)]
                         , cUnifyEdges = edges
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
         -- Var = Structure cases
@@ -323,7 +319,7 @@ spec = describe "Phase 2 — Normalization" $ do
                             [(0, varNode), (1, domNode), (2, codNode), (3, arrNode)]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
             it "unifies arrow with variable (same as var = arrow)" $ do
@@ -338,7 +334,7 @@ spec = describe "Phase 2 — Normalization" $ do
                             [(0, varNode), (1, domNode), (2, codNode), (3, arrNode)]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
             it "unifies variable with base type" $ do
@@ -350,7 +346,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapFromList [(0, varNode), (1, baseNode)]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
             it "unifies base type with variable (symmetric)" $ do
@@ -362,7 +358,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapFromList [(0, varNode), (1, baseNode)]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
         -- Arrow = Arrow cases
@@ -383,7 +379,7 @@ spec = describe "Phase 2 — Normalization" $ do
                             ]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
             it "merges nested arrows recursively" $ do
@@ -406,7 +402,7 @@ spec = describe "Phase 2 — Normalization" $ do
                             ]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 -- All edges resolved: α = Int, β = Bool, γ = δ
                 cUnifyEdges result `shouldBe` []
 
@@ -421,7 +417,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
             it "reports error for incompatible base types" $ do
@@ -433,7 +429,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapFromList [(0, node1), (1, node2)]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 length (cUnifyEdges result) `shouldBe` 1
 
         -- Forall = Forall cases
@@ -460,7 +456,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         , cUnifyEdges = [edge]
                         , cBindParents = bindParents
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
             it "reports error when binder arity mismatches" $ do
@@ -492,7 +488,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         , cUnifyEdges = [edge]
                         , cBindParents = bindParents
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 length (cUnifyEdges result) `shouldBe` 1
 
         -- Expansion = Expansion cases
@@ -509,7 +505,7 @@ spec = describe "Phase 2 — Normalization" $ do
                             [ (0, var1), (1, exp1), (2, var2), (3, exp2) ]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
             it "reports error when expansion vars mismatch" $ do
@@ -524,7 +520,7 @@ spec = describe "Phase 2 — Normalization" $ do
                             [ (0, exp1), (1, exp2), (2, var1), (3, var2) ]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 length (cUnifyEdges result) `shouldBe` 1
 
         -- Incompatible structure cases (type errors)
@@ -540,7 +536,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapFromList [(0, dom), (1, cod), (2, arr), (3, base)]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 length (cUnifyEdges result) `shouldBe` 1
 
             it "reports error for Base = Arrow" $ do
@@ -554,7 +550,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapFromList [(0, dom), (1, cod), (2, arr), (3, base)]
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 length (cUnifyEdges result) `shouldBe` 1
 
         -- Complex / edge cases
@@ -569,7 +565,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapFromList [(0, alpha), (1, beta), (2, intNode)]
                         , cUnifyEdges = edges
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
             it "handles multiple unifications of same variable" $ do
@@ -582,7 +578,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapFromList [(0, alpha), (1, int1), (2, int2)]
                         , cUnifyEdges = edges
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
             it "detects error in chained unifications" $ do
@@ -595,7 +591,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapFromList [(0, alpha), (1, intNode), (2, boolNode)]
                         , cUnifyEdges = edges
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 -- After α = Int, we have α → Int. Then Int = Bool is a type error.
                 length (cUnifyEdges result) `shouldBe` 1
 
@@ -607,7 +603,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         { cNodes = nodeMapSingleton 0 alpha
                         , cUnifyEdges = [edge]
                         }
-                    result = normalize constraint
+                    result = normalizeRaw constraint
                 cUnifyEdges result `shouldBe` []
 
     describe "TyCon grafting and decomposition" $ do
@@ -622,7 +618,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         [(0, varNode), (1, intNode), (2, listNode)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- The inst edge should be consumed (grafted)
             cInstEdges result `shouldBe` []
             -- New TyCon node should exist that unifies with α
@@ -641,7 +637,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         [(0, alpha), (1, intNode), (2, list1), (3, list2)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- TyCon ≤ TyCon becomes α = Int, all merged
             cInstEdges result `shouldBe` []
             cUnifyEdges result `shouldBe` []
@@ -658,7 +654,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         [(0, alpha), (1, intNode), (2, list1), (3, maybe2)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Type error: different constructors, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
@@ -675,7 +671,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         [(0, alpha), (1, intNode), (2, boolNode), (3, list1), (4, arr)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Type error: TyCon vs Arrow, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
@@ -692,7 +688,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         [(0, alpha), (1, intNode), (2, boolNode), (3, arr), (4, list1)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Type error: Arrow vs TyCon, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
@@ -707,7 +703,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         [(0, alpha), (1, intNode), (2, list1)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Type error: TyCon vs Base, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
@@ -722,7 +718,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         [(0, alpha), (1, intNode), (2, list1)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Type error: Base vs TyCon, edge is kept
             length (cInstEdges result) `shouldBe` 1
 
@@ -740,7 +736,7 @@ spec = describe "Phase 2 — Normalization" $ do
                         [(0, alpha), (1, beta), (2, intNode), (3, boolNode), (4, either1), (5, either2)]
                     , cInstEdges = [edge]
                     }
-                result = normalize constraint
+                result = normalizeRaw constraint
             -- Either ≤ Either becomes α = Int, β = Bool, all merged
             cInstEdges result `shouldBe` []
             cUnifyEdges result `shouldBe` []
@@ -751,7 +747,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 n1 = TyVar { tnId = NodeId 1, tnBound = Nothing }
                 e = InstEdge (EdgeId 7) (NodeId 0) (NodeId 1)
                 c0 = emptyConstraint { cNodes = nodeMapFromList [(0, n0), (1, n1)], cInstEdges = [e] }
-                c1 = normalize c0
+                c1 = normalizeRaw c0
             case cInstEdges c1 of
                 [InstEdge eid l r] -> do
                     eid `shouldBe` EdgeId 7
@@ -771,7 +767,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, base), (1, arr), (2, dom), (3, cod)]
                     , cInstEdges = [e]
                     }
-                c1 = normalize c0
+                c1 = normalizeRaw c0
             case cInstEdges c1 of
                 [InstEdge _ l _] ->
                     case lookupNodeMaybe (cNodes c1) l of
@@ -785,7 +781,7 @@ spec = describe "Phase 2 — Normalization" $ do
                 n2 = TyVar { tnId = NodeId 2, tnBound = Nothing }
                 e0 = InstEdge (EdgeId 1) (NodeId 0) (NodeId 1)
                 e1 = InstEdge (EdgeId 2) (NodeId 0) (NodeId 2)
-                c1 = normalize (emptyConstraint { cNodes = nodeMapFromList [(0,n0),(1,n1),(2,n2)], cInstEdges = [e0,e1] })
+                c1 = normalizeRaw (emptyConstraint { cNodes = nodeMapFromList [(0,n0),(1,n1),(2,n2)], cInstEdges = [e0,e1] })
                 expVars =
                     [ s
                     | InstEdge _ l _ <- cInstEdges c1
@@ -803,7 +799,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, n0), (1, n1)]
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-                c' = normalize c
+                c' = normalizeRaw c
             cUnifyEdges c' `shouldBe` []
 
         it "O11-UNIFY-STRUCT" $ do
@@ -814,7 +810,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, n0), (1, n1)]
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-                c' = normalize c
+                c' = normalizeRaw c
             cUnifyEdges c' `shouldBe` []
 
         it "O12-NORM-GRAFT" $ do
@@ -826,7 +822,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, var), (1, base)]
                     , cInstEdges = [edge]
                     }
-                c' = normalize c
+                c' = normalizeRaw c
             -- After grafting, the inst edge is consumed (converted to unify edge and resolved)
             cInstEdges c' `shouldBe` []
 
@@ -838,7 +834,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, n0), (1, n1)]
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-                c' = normalize c
+                c' = normalizeRaw c
             cUnifyEdges c' `shouldBe` []
 
         it "O12-NORM-DROP" $ do
@@ -849,7 +845,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapSingleton 0 node
                     , cInstEdges = [reflexiveEdge]
                     }
-            cInstEdges (normalize c) `shouldBe` []
+            cInstEdges (normalizeRaw c) `shouldBe` []
 
         it "O12-NORM-FIXPOINT" $ do
             -- Normalize to fixed point: applying normalize twice yields same result
@@ -860,7 +856,7 @@ spec = describe "Phase 2 — Normalization" $ do
                     { cNodes = nodeMapFromList [(0, n0), (1, n1)]
                     , cInstEdges = [edge]
                     }
-                c1 = normalize c
-                c2 = normalize c1
+                c1 = normalizeRaw c
+                c2 = normalizeRaw c1
             cInstEdges c1 `shouldBe` cInstEdges c2
             cUnifyEdges c1 `shouldBe` cUnifyEdges c2

@@ -13,22 +13,21 @@ import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
+    , PresolutionError
     , PresolutionResult(..)
     )
-import MLF.Constraint.Presolution qualified as PresolutionPhase
 import MLF.Constraint.Presolution.Base (PresolutionUf(..))
 import MLF.Constraint.Presolution.TestSupport
     ( toListInterior
     , validateTranslatablePresolution
     )
-import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), Constraint(..), EdgeId(..), ExpVarId(..), InstEdge(..), NodeId(..), TyNode(..), UnifyEdge(..), toAcyclicConstraint, toNormalizedConstraint)
+import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), Constraint(..), EdgeId(..), ExpVarId(..), InstEdge(..), NodeId(..), TyNode(..), UnifyEdge(..))
 import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWitness(..))
-import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Unify.Closure (SolveError(..), runUnifyClosureWithSeed)
 import MLF.Frontend.Syntax (Expr(..), Lit(..))
-import MLF.Elab.Pipeline (TraceConfig)
 import SpecUtil
     ( bindParentsFromPairs
+    , computePresolutionRaw
     , defaultTraceConfig
     , emptyConstraint
     , inferBindParents
@@ -37,13 +36,6 @@ import SpecUtil
     , rootedConstraint
     , runToPresolutionDefault
     )
-
-computePresolution :: TraceConfig -> AcyclicityResult -> Constraint 'Raw -> Either PresolutionPhase.PresolutionError PresolutionResult
-computePresolution traceCfg acyclicity constraint =
-    PresolutionPhase.computePresolution
-        traceCfg
-        acyclicity
-        (toAcyclicConstraint (toNormalizedConstraint constraint))
 
 spec :: Spec
 spec = describe "Phase 4 thesis-exact unification closure" $ do
@@ -90,7 +82,7 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
                         , cUnifyEdges = [UnifyEdge targetId boolId]
                         }
             acyc = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
-        computePresolution defaultTraceConfig acyc constraint `shouldSatisfy` isLeft
+        computePresolutionRaw defaultTraceConfig acyc constraint `shouldSatisfy` isLeft
 
     it "honors seeded UF equivalence when draining closure" $ do
         let n0 = NodeId 0
@@ -185,7 +177,7 @@ spec = describe "Phase 4 thesis-exact unification closure" $ do
                     { arSortedEdges = [edge]
                     , arDepGraph = undefined
                     }
-        pres <- requireRight (computePresolution defaultTraceConfig acyc constraint)
+        pres <- requireRight (computePresolutionRaw defaultTraceConfig acyc constraint)
         let weakenTargetsForWitness :: EdgeWitness -> [NodeId]
             weakenTargetsForWitness ew =
                 [ n

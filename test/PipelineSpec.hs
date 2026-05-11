@@ -15,11 +15,9 @@ import Data.Map.Strict qualified as Map
 import Data.Maybe (catMaybes, isJust, listToMaybe)
 import Data.Set qualified as Set
 import MLF.Binding.Tree qualified as Binding
-import MLF.Constraint.Acyclicity (breakCyclesAndCheckAcyclicity)
 import MLF.Constraint.Canonicalizer (canonicalizeNode, canonicalizerFrom)
 import MLF.Constraint.Finalize qualified as Finalize
 import MLF.Constraint.NodeAccess qualified as NodeAccess
-import MLF.Constraint.Normalize qualified as ConstraintNormalize
 import MLF.Constraint.Presolution
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents (..))
 import MLF.Constraint.Presolution.TestSupport
@@ -80,6 +78,7 @@ import MLF.Types.Elab (Ty (..), containsArrowTy, containsForallTy)
 import SolvedFacadeTestUtil qualified as SolvedTest
 import SpecUtil
   ( PipelineArtifacts (..),
+    breakCyclesAndCheckAcyclicityRaw,
     collectVarNodes,
     defaultTraceConfig,
     emptyConstraint,
@@ -293,8 +292,7 @@ automaticMuConstraint :: SurfaceExpr -> IO (Constraint 'Raw)
 automaticMuConstraint expr = do
   ConstraintResult {crConstraint = c0} <-
     requireRight (runConstraintDefault Set.empty expr)
-  let c1 = ConstraintNormalize.normalize c0
-  toRawConstraintForLegacy . fst <$> requireRight (breakCyclesAndCheckAcyclicity c1)
+  fst <$> requireRight (breakCyclesAndCheckAcyclicityRaw c0)
 
 constraintContainsTyMu :: Constraint 'Raw -> Bool
 constraintContainsTyMu constraint =

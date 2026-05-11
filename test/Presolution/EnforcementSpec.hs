@@ -8,31 +8,22 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Presolution
-    ( PresolutionResult(..)
-    , PresolutionError(..)
+    ( PresolutionError(..)
+    , PresolutionResult(..)
     )
-import MLF.Constraint.Presolution qualified as PresolutionPhase
 import MLF.Constraint.Presolution.TestSupport
     ( translatableWeakenedNodes
     , validateTranslatablePresolution
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
-import MLF.Constraint.Types.Phase (Phase(Raw))
-import MLF.Elab.Pipeline (TraceConfig)
 import SpecUtil
-    ( defaultTraceConfig
+    ( computePresolutionRaw
+    , defaultTraceConfig
     , emptyConstraint
     , bindParentsFromPairs
     , nodeMapFromList
     , rootedConstraint
     )
-
-computePresolution :: TraceConfig -> AcyclicityResult -> Constraint 'Raw -> Either PresolutionError PresolutionResult
-computePresolution traceCfg acyclicity constraint =
-    PresolutionPhase.computePresolution
-        traceCfg
-        acyclicity
-        (toAcyclicConstraint (toNormalizedConstraint constraint))
 
 spec :: Spec
 spec = describe "Translatable presolution enforcement" $ do
@@ -53,7 +44,7 @@ spec = describe "Translatable presolution enforcement" $ do
             constraint = rootedConstraint emptyConstraint { cNodes = nodes, cBindParents = bindParents }
             acyclicityRes = AcyclicityResult { arSortedEdges = [], arDepGraph = undefined }
 
-        case computePresolution defaultTraceConfig acyclicityRes constraint of
+        case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
             Left err -> expectationFailure ("computePresolution failed: " ++ show err)
             Right pr -> do
                 let bp = cBindParents (prConstraint pr)
@@ -91,7 +82,7 @@ spec = describe "Translatable presolution enforcement" $ do
                     }
             acyclicityRes = AcyclicityResult { arSortedEdges = [], arDepGraph = undefined }
 
-        case computePresolution defaultTraceConfig acyclicityRes constraint of
+        case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
             Left err -> expectationFailure ("computePresolution failed: " ++ show err)
             Right pr -> do
                 let bp = cBindParents (prConstraint pr)

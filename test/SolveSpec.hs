@@ -10,6 +10,7 @@ import qualified Data.List.NonEmpty as NonEmpty
 import Test.QuickCheck (choose, conjoin, counterexample, forAll, property, (===))
 
 import MLF.Binding.Tree qualified as Binding
+import MLF.Elab.Pipeline (TraceConfig)
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Solve
@@ -26,7 +27,6 @@ import MLF.Constraint.Solve
     , solveUnifyResultWithSnapshot
     , validateSolvedGraphStrict
     )
-import MLF.Elab.Pipeline (TraceConfig)
 import SpecUtil
     ( defaultTraceConfig
     , emptyConstraint
@@ -35,10 +35,8 @@ import SpecUtil
     , nodeMapFromList
     , nodeMapSize
     , rootedConstraint
+    , solveUnifyRaw
     )
-
-solveUnify :: TraceConfig -> Constraint p -> Either SolveError (SolveResult p)
-solveUnify = solveUnifyResult
 
 solveUnifyWithSnapshot :: TraceConfig -> Constraint p -> Either SolveError (SolveOutput p)
 solveUnifyWithSnapshot = solveUnifyResultWithSnapshot
@@ -163,7 +161,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            case solveUnify defaultTraceConfig constraint of
+            case solveUnifyRaw defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res -> do
                     let sc = resultConstraint res
@@ -183,7 +181,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            case solveUnify defaultTraceConfig constraintVV of
+            case solveUnifyRaw defaultTraceConfig constraintVV of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res -> do
                     let sc = resultConstraint res
@@ -220,7 +218,7 @@ spec = describe "Phase 5 -- Solve" $ do
                         , cUnifyEdges = [UnifyEdge vOuter vInner]
                         }
 
-            case solveUnify defaultTraceConfig constraint of
+            case solveUnifyRaw defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res -> do
                     let sc = resultConstraint res
@@ -243,7 +241,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            case solveUnify defaultTraceConfig constraintVA of
+            case solveUnifyRaw defaultTraceConfig constraintVA of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res -> do
                     let sc = resultConstraint res
@@ -267,7 +265,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            case solveUnify defaultTraceConfig constraint of
+            case solveUnifyRaw defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res -> do
                     let sc = resultConstraint res
@@ -286,7 +284,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (OccursCheckFailed (NodeId 0) (NodeId 1))
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (OccursCheckFailed (NodeId 0) (NodeId 1))
 
         it "fails occurs-check even after earlier variable unions" $ do
             let base = TyBase (NodeId 3) (BaseTy "Int")
@@ -305,7 +303,7 @@ spec = describe "Phase 5 -- Solve" $ do
                                     , UnifyEdge (NodeId 1) (NodeId 2)
                                     ]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (OccursCheckFailed (NodeId 1) (NodeId 2))
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (OccursCheckFailed (NodeId 1) (NodeId 2))
 
     describe "Constructor clashes" $ do
         it "detects constructor clashes (arrow vs base)" $ do
@@ -323,7 +321,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (tnId arrow) (tnId base)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (ConstructorClash arrow base)
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (ConstructorClash arrow base)
 
         it "detects constructor clashes (base vs forall)" $ do
             let base = TyBase (NodeId 0) (BaseTy "Int")
@@ -338,7 +336,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (tnId base) (tnId forallNode)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (ConstructorClash base forallNode)
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (ConstructorClash base forallNode)
 
         it "detects constructor clash between arrow and forall" $ do
             let dom = TyBase (NodeId 2) (BaseTy "Int")
@@ -355,7 +353,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (tnId arrow) (tnId forallNode)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (ConstructorClash arrow forallNode)
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (ConstructorClash arrow forallNode)
 
         it "reports base clash when base constructors differ" $ do
             let bInt = TyBase (NodeId 0) (BaseTy "Int")
@@ -365,7 +363,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (BaseClash (BaseTy "Int") (BaseTy "Bool"))
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (BaseClash (BaseTy "Int") (BaseTy "Bool"))
 
     describe "TyCon handling" $ do
         it "unifies TyCon structurally when heads and arities match" $ do
@@ -385,7 +383,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 2) (NodeId 3)]
                     }
-            case solveUnify defaultTraceConfig constraint of
+            case solveUnifyRaw defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res -> do
                     let sc = resultConstraint res
@@ -415,7 +413,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 4) (NodeId 5)]
                     }
-            case solveUnify defaultTraceConfig constraint of
+            case solveUnifyRaw defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res -> do
                     let sc = resultConstraint res
@@ -441,7 +439,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 2) (NodeId 3)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (TyConClash (BaseTy "List") (BaseTy "Maybe"))
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (TyConClash (BaseTy "List") (BaseTy "Maybe"))
 
         it "detects TyCon arity mismatch" $ do
             let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
@@ -463,7 +461,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 3) (NodeId 4)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (TyConArityMismatch (BaseTy "Pair") 2 1)
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (TyConArityMismatch (BaseTy "Pair") 2 1)
 
         it "detects constructor clash (TyCon vs TyBase)" $ do
             let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
@@ -479,7 +477,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 2) (NodeId 1)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (ConstructorClash list1 intNode)
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (ConstructorClash list1 intNode)
 
         it "detects constructor clash (TyCon vs TyArrow)" $ do
             let alpha = TyVar { tnId = NodeId 0, tnBound = Nothing }
@@ -499,7 +497,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 3) (NodeId 4)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (ConstructorClash list1 arrow)
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (ConstructorClash list1 arrow)
 
         it "fails occurs-check when variable appears under TyCon" $ do
             -- α = List α should fail occurs-check
@@ -514,7 +512,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (OccursCheckFailed (NodeId 0) (NodeId 1))
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (OccursCheckFailed (NodeId 0) (NodeId 1))
 
         it "fails occurs-check when variable appears nested under TyCon" $ do
             -- α = Either Int (List α) should fail occurs-check
@@ -533,7 +531,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 3)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (OccursCheckFailed (NodeId 0) (NodeId 3))
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (OccursCheckFailed (NodeId 0) (NodeId 3))
 
     describe "Forall handling" $ do
         it "fails when forall nodes have mismatched binder arity" $ do
@@ -561,7 +559,7 @@ spec = describe "Phase 5 -- Solve" $ do
                             IntMap.insert (nodeRefKey (typeRef (tnId gamma))) (typeRef (tnId forall2), BindFlex) bp0
                     , cUnifyEdges = [UnifyEdge (tnId forall1) (tnId forall2)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (ForallArityMismatch 1 2)
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (ForallArityMismatch 1 2)
 
         it "succeeds when forall arity matches and bodies agree" $ do
             let body1 = TyBase (NodeId 2) (BaseTy "Int")
@@ -578,7 +576,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (tnId forall1) (tnId forall2)]
                     }
-            case solveUnify defaultTraceConfig constraint of
+            case solveUnifyRaw defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res ->
                     let sc = resultConstraint res in
@@ -599,7 +597,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (tnId forall1) (tnId forall2)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (BaseClash (BaseTy "Int") (BaseTy "Bool"))
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (BaseClash (BaseTy "Int") (BaseTy "Bool"))
 
         it "succeeds with structured bodies (arrows) when arity matches" $ do
             let d1 = TyBase (NodeId 4) (BaseTy "Int")
@@ -619,7 +617,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (tnId f1) (tnId f2)]
                     }
-            case solveUnify defaultTraceConfig constraint of
+            case solveUnifyRaw defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res ->
                     let sc = resultConstraint res in
@@ -634,7 +632,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     , cInstEdges = [instEdge]
                     }
-            case solveUnify defaultTraceConfig constraint of
+            case solveUnifyRaw defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res -> do
                     let sc = resultConstraint res
@@ -657,7 +655,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 2) (NodeId 4)]
                     }
-            case solveUnify defaultTraceConfig constraint of
+            case solveUnifyRaw defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res -> do
                     let sc = resultConstraint res
@@ -674,7 +672,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList [(0, var)]
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 99)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (MissingNode (NodeId 99))
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (MissingNode (NodeId 99))
 
         it "rejects TyExp nodes reaching the solver" $ do
             let body = TyBase (NodeId 1) (BaseTy "Int")
@@ -687,7 +685,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (tnId expNode) (tnId body)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (UnexpectedExpNode (tnId expNode))
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (UnexpectedExpNode (tnId expNode))
 
     describe "Validation Edge Cases" $ do
         it "reports unexpected TyExp in TyExp-TyExp clash" $ do
@@ -701,7 +699,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            solveUnify defaultTraceConfig constraint `shouldBe` Left (UnexpectedExpNode (NodeId 0))
+            solveUnifyRaw defaultTraceConfig constraint `shouldBe` Left (UnexpectedExpNode (NodeId 0))
 
         it "validates: reports MissingNode when child is missing" $ do
             -- Arrow points to non-existent dom
@@ -743,7 +741,7 @@ spec = describe "Phase 5 -- Solve" $ do
                 constraint = rootedConstraint $ emptyConstraint                    { cNodes = nodeMapFromList [(0, var), (1, base)]
                     , cUnifyEdges = [UnifyEdge (tnId var) (tnId base)]
                     }
-            case solveUnify defaultTraceConfig constraint of
+            case solveUnifyRaw defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res ->
                     validateSolvedGraphStrict res `shouldBe` []
@@ -776,7 +774,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            case solveUnify defaultTraceConfig c of
+            case solveUnifyRaw defaultTraceConfig c of
                 Right res ->
                     let sc = resultConstraint res in cUnifyEdges sc `shouldBe` []
                 Left err -> expectationFailure $ "solveUnify failed: " ++ show err
@@ -792,7 +790,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1), UnifyEdge (NodeId 1) (NodeId 2)]
                     }
-            case solveUnify defaultTraceConfig c of
+            case solveUnifyRaw defaultTraceConfig c of
                 Right res ->
                     let sc = resultConstraint res in cUnifyEdges sc `shouldBe` []
                 Left err -> expectationFailure $ "solveUnify failed: " ++ show err
@@ -807,7 +805,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            case solveUnify defaultTraceConfig c of
+            case solveUnifyRaw defaultTraceConfig c of
                 Right res ->
                     let uf = resultUnionFind res in
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
@@ -823,7 +821,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            case solveUnify defaultTraceConfig c of
+            case solveUnifyRaw defaultTraceConfig c of
                 Right res ->
                     let uf = resultUnionFind res in
                     IntMap.lookup 0 uf `shouldBe` Just (NodeId 1)
@@ -846,7 +844,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = bp
                     , cUnifyEdges = [UnifyEdge (NodeId 0) (NodeId 1)]
                     }
-            case solveUnify defaultTraceConfig c of
+            case solveUnifyRaw defaultTraceConfig c of
                 Right res -> do
                     -- Unify edges should be drained after harmonization
                     cUnifyEdges (resultConstraint res) `shouldBe` []
@@ -868,7 +866,7 @@ spec = describe "Phase 5 -- Solve" $ do
                     , cBindParents = inferBindParents nodes
                     , cUnifyEdges = [UnifyEdge (NodeId 4) (NodeId 5)]
                     }
-            case solveUnify defaultTraceConfig c of
+            case solveUnifyRaw defaultTraceConfig c of
                 Right res -> do
                     let sc = resultConstraint res
                         uf = resultUnionFind res
@@ -894,7 +892,7 @@ spec = describe "Phase 5 -- Solve" $ do
         it "O07-GENUNIF: batch harmonization raises chained equivalence classes to their LCA" $ property $
             forAll (choose (1, 8)) $ \depth ->
                 let constraint = genUnificationConstraint depth
-                 in case solveUnify defaultTraceConfig constraint of
+                 in case solveUnifyRaw defaultTraceConfig constraint of
                         Left err -> counterexample ("Unexpected solve error: " ++ show err) False
                         Right res ->
                             let sc = resultConstraint res
@@ -938,7 +936,7 @@ spec = describe "Phase 5 -- Solve" $ do
                         , UnifyEdge (NodeId 1) (NodeId 2)
                         ]
                     }
-            case solveUnify defaultTraceConfig constraint of
+            case solveUnifyRaw defaultTraceConfig constraint of
                 Left err -> expectationFailure $ "Unexpected solve error: " ++ show err
                 Right res -> do
                     let sc = resultConstraint res

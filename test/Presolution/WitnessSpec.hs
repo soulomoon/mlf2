@@ -34,7 +34,6 @@ import MLF.Constraint.Presolution
     , PresolutionResult(..)
     , EdgeTrace(..)
     )
-import MLF.Constraint.Presolution qualified as PresolutionPhase
 import MLF.Constraint.Presolution.TestSupport
     ( PresolutionState(..)
     , validateReplayMapTraceContract
@@ -44,12 +43,11 @@ import MLF.Constraint.Presolution.TestSupport
     , fromListInterior
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
-import MLF.Constraint.Types.Phase (Phase(Raw))
 import qualified MLF.Constraint.Inert as Inert
 import qualified MLF.Binding.Tree as Binding
-import MLF.Elab.Pipeline (TraceConfig)
 import SpecUtil
     ( bindParentsFromPairs
+    , computePresolutionRaw
     , defaultTraceConfig
     , emptyConstraint
     , inferBindParents
@@ -67,13 +65,6 @@ import Presolution.Util
     , genInstanceOp
     , hasRedundantOps
     )
-
-computePresolution :: TraceConfig -> AcyclicityResult -> Constraint 'Raw -> Either PresolutionPhase.PresolutionError PresolutionResult
-computePresolution traceCfg acyclicity constraint =
-    PresolutionPhase.computePresolution
-        traceCfg
-        acyclicity
-        (toAcyclicConstraint (toNormalizedConstraint constraint))
 
 spec :: Spec
 spec = do
@@ -293,7 +284,7 @@ spec = do
                         , arDepGraph = undefined
                         }
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure $ "Presolution failed: " ++ show err
                 Right PresolutionResult{ prEdgeExpansions = exps, prEdgeWitnesses = ews } -> do
                     case IntMap.lookup edgeId exps of
@@ -1612,7 +1603,7 @@ spec = do
                         }
                 acyclicityRes = AcyclicityResult { arSortedEdges = [edge], arDepGraph = undefined }
 
-            case computePresolution defaultTraceConfig acyclicityRes constraint of
+            case computePresolutionRaw defaultTraceConfig acyclicityRes constraint of
                 Left err -> expectationFailure ("Presolution failed: " ++ show err)
                 Right PresolutionResult{ prEdgeExpansions = exps, prEdgeWitnesses = ews } -> do
                     case IntMap.lookup 0 exps of
