@@ -17,7 +17,7 @@ import MLF.Constraint.Solve
     ( SolveOutput(..)
     , SolveResult(..)
     , SolveSnapshot(..)
-    , solveUnifyWithSnapshot
+    , solveUnifyResultWithSnapshot
     )
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
 import MLF.Constraint.Solved
@@ -56,7 +56,6 @@ import SpecUtil
     , runToPresolutionDefault
     , rootedConstraint
     )
-import MLF.Constraint.Types.Phase (Phase(Raw))
 
 -- | Build a small solved graph by hand:
 --
@@ -115,7 +114,7 @@ snapshotEquiv =
                 ]
             }
         ids = [NodeId 0, NodeId 1, NodeId 2, NodeId 3, NodeId 4, NodeId 99]
-    in case solveUnifyWithSnapshot defaultTraceConfig constraint of
+    in case solveUnifyResultWithSnapshot defaultTraceConfig constraint of
         Left err -> Left ("Unexpected solve error: " ++ show err)
         Right out ->
             case fromSolveOutput out of
@@ -252,7 +251,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                                 ++ err
                             )
                     Right pres ->
-                        case solveUnifyWithSnapshot defaultTraceConfig (prConstraint pres) of
+                        case solveUnifyResultWithSnapshot defaultTraceConfig (prConstraint pres) of
                             Left err ->
                                 expectationFailure
                                     ( "Solve failed for backend equivalence case: "
@@ -551,7 +550,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                         `shouldBe` Nothing
 
         it "fromSolveOutput matches explicit pre-rewrite snapshot construction" $ do
-            case solveUnifyWithSnapshot defaultTraceConfig (rootedConstraint emptyConstraint) of
+            case solveUnifyResultWithSnapshot defaultTraceConfig (rootedConstraint emptyConstraint) of
                 Left err -> expectationFailure ("Unexpected solve error: " ++ show err)
                 Right out ->
                     do

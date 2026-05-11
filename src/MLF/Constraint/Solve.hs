@@ -50,20 +50,32 @@ solveUnify :: TraceConfig -> Constraint 'Presolved -> Either SolveError SolvedIn
 solveUnify traceCfg c0 = solveUnifyWithSnapshot traceCfg c0 >>= SolvedInternal.fromSolveOutput
 
 -- | Legacy result-shaped solve helper for low-level tests and validators.
+--   Production callers should use 'solveUnify' (which returns the opaque
+--   'MLF.Constraint.Solved.Solved') instead.  This helper remains
+--   polymorphic for compatibility call sites that construct constraints at
+--   non-presolved phantom phases.
 solveUnifyResult :: TraceConfig -> Constraint p -> Either SolveError (SolveResult p)
 solveUnifyResult traceCfg c0 = soResult <$> solveUnifyResultWithSnapshot traceCfg c0
 
--- | Rebuild a validated legacy solve result from a pre-rewrite snapshot.
--- This keeps snapshot-driven consumers independent of `soResult.srConstraint`.
+-- | Legacy compatibility helper: rebuild a validated solve result from a
+--   pre-rewrite snapshot.  Production callers should use 'solveUnify' or
+--   'solveUnifyWithSnapshot' instead.  This helper remains polymorphic
+--   for test and compatibility call sites.
 solveResultFromSnapshot :: SolveSnapshot p -> Either SolveError (SolveResult p)
 solveResultFromSnapshot SolveSnapshot { snapUnionFind = uf, snapPreRewriteConstraint = preRewrite } =
     finalizeConstraintWithUF uf preRewrite
 
 -- | `solveUnify` plus a pre-rewrite snapshot for staged equivalence-backend construction.
-solveUnifyWithSnapshot :: TraceConfig -> Constraint p -> Either SolveError (SolveOutput p)
+--   Consumes a presolved constraint and returns a presolved output suitable for
+--   'MLF.Constraint.Solved.fromSolveOutput'.
+solveUnifyWithSnapshot :: TraceConfig -> Constraint 'Presolved -> Either SolveError (SolveOutput 'Presolved)
 solveUnifyWithSnapshot = solveUnifyResultWithSnapshot
 
 -- | Legacy snapshot-enabled helper that preserves the caller's phantom phase.
+--   Production callers should use 'solveUnify' or 'solveUnifyWithSnapshot'
+--   (both constrained to 'Presolved).  This helper remains polymorphic for
+--   test and compatibility call sites that construct constraints at other
+--   phantom phases.
 solveUnifyResultWithSnapshot :: TraceConfig -> Constraint p -> Either SolveError (SolveOutput p)
 solveUnifyResultWithSnapshot traceCfg c0 = do
     let debugSolveBinding = traceBinding traceCfg

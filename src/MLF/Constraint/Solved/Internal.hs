@@ -123,9 +123,14 @@ newtype Solved = Solved {unSolved :: SolvedBackend 'Raw}
 -- | Construct an Equiv backend directly from a constraint and
 -- union-find map. The input constraint is used as both original and
 -- canonical; callers should only use this when no solve replay is needed.
+--
+-- Compatibility bridge: the phantom phase is erased via
+-- 'toRawConstraintForLegacy' because the 'Solved' backend stores
+-- constraints at 'Raw internally.  Production callers should prefer
+-- 'fromSolveOutput' (which consumes presolved solve output).
 fromConstraintAndUf :: Constraint p -> IntMap NodeId -> Solved
 fromConstraintAndUf c uf =
-  let cRaw = toRawConstraintForLegacy c
+  let cRaw = toRawConstraintForLegacy c  -- phase erasure for internal 'Raw backend
       canonMap = buildCanonicalMap uf cRaw
       equivClasses = buildEquivClasses canonMap cRaw
    in Solved
@@ -145,7 +150,10 @@ fromConstraintAndUf c uf =
             ebOriginalConstraint = cRaw
           }
 
--- | Backward-compatible alias used by tests and legacy call sites.
+-- | Test-only alias for 'fromConstraintAndUf'.
+--   Not part of the production 'MLF.Constraint.Solved' facade; kept here
+--   for backward compatibility with test helpers that build a 'Solved'
+--   directly from a 'Raw constraint and union-find map.
 mkTestSolved :: Constraint 'Raw -> IntMap NodeId -> Solved
 mkTestSolved = fromConstraintAndUf
 
@@ -167,7 +175,7 @@ fromPreRewriteState = fromPreRewriteStateStrict
 -- | Strict snapshot replay used by production solve output conversion.
 fromPreRewriteStateStrict :: IntMap NodeId -> Constraint p -> Either SolveError Solved
 fromPreRewriteStateStrict uf preRewrite = do
-  let preRewriteRaw = toRawConstraintForLegacy preRewrite
+  let preRewriteRaw = toRawConstraintForLegacy preRewrite  -- phase erasure for internal 'Raw backend
   let snapshot =
         SolveSnapshot
           { snapUnionFind = uf,
@@ -305,9 +313,13 @@ lookupVarBound s@(Solved EquivBackend {ebOriginalConstraint = c}) nid =
 -- | Rebuild a Solved with a different constraint, preserving the
 -- canonical map. Used by callers that modify the constraint
 -- (e.g., alias insertion, canonicalization).
+--
+-- Compatibility bridge: the phantom phase is erased via
+-- 'toRawConstraintForLegacy' because the 'Solved' backend stores
+-- constraints at 'Raw internally.
 rebuildWithConstraint :: Solved -> Constraint p -> Solved
 rebuildWithConstraint (Solved eb) c =
-  Solved (setCanonicalConstraint (toRawConstraintForLegacy c) eb)
+  Solved (setCanonicalConstraint (toRawConstraintForLegacy c) eb)  -- phase erasure for internal 'Raw backend
 
 -- -----------------------------------------------------------------
 -- Mutation helpers

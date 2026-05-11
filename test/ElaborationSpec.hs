@@ -37,7 +37,7 @@ import MLF.Constraint.Presolution.TestSupport
     insertCopy,
     lookupCopy,
   )
-import MLF.Constraint.Solve (solveUnifyWithSnapshot)
+import MLF.Constraint.Solve (solveUnifyResultWithSnapshot)
 import MLF.Constraint.Solved qualified as Solved
 import MLF.Constraint.Types.Graph
   ( BaseTy (..),
@@ -1324,7 +1324,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   cEliminatedVars = IntSet.singleton (getNodeId v)
                 }
 
-      solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
+      solveOut <- requireRight (solveUnifyResultWithSnapshot defaultTraceConfig c)
       solved <- requireRight (Solved.fromSolveOutput solveOut)
       (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
       sch
@@ -1354,7 +1354,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   cEliminatedVars = IntSet.singleton (getNodeId v)
                 }
 
-      solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
+      solveOut <- requireRight (solveUnifyResultWithSnapshot defaultTraceConfig c)
       solved <- requireRight (Solved.fromSolveOutput solveOut)
       (sch, _subst) <- requireRight (generalizeAt solved (typeRef forallNode) forallNode)
       Elab.prettyDisplay sch `shouldBe` "∀(a ⩾ ⊥) a -> a"
@@ -1382,7 +1382,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                       ]
                 }
 
-      solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
+      solveOut <- requireRight (solveUnifyResultWithSnapshot defaultTraceConfig c)
       solved <- requireRight (Solved.fromSolveOutput solveOut)
       -- Inter-binder alias bounds are now normalized to unbounded
       -- (see Note [Inter-binder alias bounds in recursive types] in ReifyPlan.hs)
@@ -1419,7 +1419,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   cUnifyEdges = [UnifyEdge alpha intNode]
                 }
 
-      solveOut <- requireRight (solveUnifyWithSnapshot defaultTraceConfig c)
+      solveOut <- requireRight (solveUnifyResultWithSnapshot defaultTraceConfig c)
       solved <- requireRight (Solved.fromSolveOutput solveOut)
 
       -- After solving, canonical(alpha) should be intNode
