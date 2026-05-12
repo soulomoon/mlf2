@@ -44,6 +44,11 @@
   partial applications now run through shared backend parity.
 
 ### Changed
+- Moved elaboration-side generalization preparation into
+  `MLF.Elab.Run.Generalize.Prepare`, which now produces a shared
+  `PreparedGeneralizationArtifact` for elaboration, root generalization, and
+  result-type reconstruction while leaving `MLF.Elab.Run.Pipeline` as the
+  phase orchestrator.
 - Tightened the Phase 4 presolution boundary so the public entry/output remains
   `Constraint 'Acyclic` to `Constraint 'Presolved`, with the internal raw
   in-progress bridge named privately and final presolved construction delayed

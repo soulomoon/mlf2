@@ -144,6 +144,11 @@ runtime invariants as compile-time types:
 - Legacy expansion-to-instantiation translation lives in `MLF.Elab.Legacy` and is re-exported by `MLF.Elab.Elaborate` and `MLF.Elab.Pipeline`.
 - Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops` and `StateAccess`; edge processing is split across planner/interpreter passes with typed `EdgePlan`.
 - Elaboration entrypoints bundle inputs as `ElabConfig`/`ElabEnv`, and tracing is explicit via `TraceConfig`.
+- `MLF.Elab.Run.Generalize.Prepare` owns the elaboration-side Generalization
+  Preparation step. It produces the `PreparedGeneralizationArtifact` consumed
+  by elaboration, root-scheme generalization, and result-type reconstruction,
+  while keeping redirect/canonicalization, copy-node recovery, scope overrides,
+  and the transitional acyclic-base phase bridge out of `MLF.Elab.Run.Pipeline`.
 
 ## Typed backend IR and lowering boundary
 

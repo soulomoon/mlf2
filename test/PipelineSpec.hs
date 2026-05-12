@@ -871,11 +871,24 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       elabSrc `shouldSatisfy` isInfixOf "eeEdgeArtifacts :: EdgeArtifacts"
       resultTypeTypesSrc `shouldSatisfy` isInfixOf "rtcEdgeArtifacts :: EdgeArtifacts"
 
-    it "assembly helper guard: pipeline and driver expose the remaining prep helpers explicitly" $ do
+    it "assembly helper guard: generalization preparation owns shared artifact assembly" $ do
       pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+      prepareSrc <- readFile "src/MLF/Elab/Run/Generalize/Prepare.hs"
       driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
-      pipelineSrc `shouldSatisfy` isInfixOf "data TraceCopyArtifacts = TraceCopyArtifacts"
-      pipelineSrc `shouldSatisfy` isInfixOf "prepareTraceCopyArtifacts"
+      pipelineSrc `shouldSatisfy` isInfixOf "prepareGeneralizationArtifact"
+      forM_
+        [ "data TraceCopyArtifacts = TraceCopyArtifacts",
+          "prepareTraceCopyArtifacts",
+          "castConstraint",
+          "constraintForGeneralization",
+          "instantiationCopyNodes",
+          "letScopeOverrides"
+        ]
+        $ \marker ->
+          pipelineSrc `shouldSatisfy` (not . isInfixOf marker)
+      prepareSrc `shouldSatisfy` isInfixOf "data PreparedGeneralizationArtifact"
+      prepareSrc `shouldSatisfy` isInfixOf "prepareTraceCopyArtifacts"
+      prepareSrc `shouldSatisfy` isInfixOf "pgaAcyclicBaseConstraint :: Constraint 'Presolved"
       driverSrc `shouldSatisfy` isInfixOf "mkInitialPresolutionState ::"
       driverSrc `shouldSatisfy` isInfixOf "tyExpNodeIds ::"
 

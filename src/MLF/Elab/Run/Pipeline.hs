@@ -18,24 +18,14 @@ module MLF.Elab.Run.Pipeline
 where
 
 import qualified Data.IntMap.Strict as IntMap
-import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Acyclicity (breakCyclesAndCheckAcyclicity)
-import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode)
-import qualified MLF.Constraint.Finalize as Finalize
 import MLF.Constraint.Normalize (normalize)
-import MLF.Constraint.Presolution
-  ( EdgeTrace (..),
-    PresolutionResult (..),
-    computePresolution,
-  )
-import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
-import MLF.Constraint.Presolution.View (PresolutionView, pvCanonical)
-import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Types.Graph (BaseTy (..), Constraint, NodeId (..), PolySyms, castConstraint, cNodes, getEdgeId, getNodeId, lookupNodeIn)
-import MLF.Constraint.Types.Phase (Phase(Presolved, Raw))
-import MLF.Constraint.Types.Presolution (PresolutionSnapshot (..))
+import MLF.Constraint.Presolution (computePresolution)
+import MLF.Constraint.Presolution.Base (EdgeArtifacts (eaEdgeWitnesses))
+import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..), PolySyms, getEdgeId, getNodeId)
+import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Elaborate (ElabConfig (..), ElabEnv (..), elaborateWithEnv)
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
@@ -48,24 +38,15 @@ import MLF.Elab.PipelineError
     fromSolveError,
     fromTypeCheckError,
   )
-import MLF.Elab.Run.Annotation (annNode, redirectAndCanonicalizeAnn)
-import MLF.Elab.Run.Generalize
-  ( constraintForGeneralization,
-    generalizeAtWithBuilder,
-    instantiationCopyNodes,
+import MLF.Elab.Run.Annotation (annNode)
+import MLF.Elab.Run.Generalize.Prepare
+  ( PreparedGeneralizationArtifact (..),
+    prepareGeneralizationArtifact,
   )
-import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.ResultType (computeResultTypeFallback, computeResultTypeFromAnn, mkResultTypeInputs)
 import MLF.Elab.Run.Scope
-  ( letScopeOverrides,
-    resolveCanonicalScope,
+  ( resolveCanonicalScope,
     schemeBodyTarget,
-  )
-import MLF.Elab.Run.Util
-  ( canonicalizeExpansion,
-    canonicalizeTrace,
-    canonicalizeWitness,
-    makeCanonicalizer,
   )
 import MLF.Elab.TermClosure
   ( closeTermWithSchemeSubstIfNeeded,
@@ -90,18 +71,6 @@ import MLF.Frontend.Syntax (NormSrcType, NormSurfaceExpr, StructBound)
 import qualified MLF.Frontend.Syntax as Surface
 import MLF.Reify.TypeOps (freeTypeVarsType, freshNameLike, substTypeCapture)
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
-
-data SnapshotViews = SnapshotViews
-  { svSolvedClean :: Solved.Solved,
-    svPresolutionViewClean :: PresolutionView 'Presolved,
-    svCanonNode :: Canonicalizer
-  }
-
-data TraceCopyArtifacts = TraceCopyArtifacts
-  { tcaEdgeTracesForCopy :: IntMap.IntMap EdgeTrace,
-    tcaInstCopyNodes :: IntSet.IntSet,
-    tcaInstCopyMapFull :: IntMap.IntMap NodeId
-  }
 
 data PipelineElabDetailedResult = PipelineElabDetailedResult
   { pedTerm :: ElabTerm,
@@ -234,31 +203,16 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
   let c1 = normalize c0
   (cAcyclic, acyc) <- fromCycleError (breakCyclesAndCheckAcyclicity c1)
   pres <- fromPresolutionError (computePresolution traceCfg acyc cAcyclic)
-  SnapshotViews
-    { svSolvedClean = solvedClean,
-      svPresolutionViewClean = presolutionViewClean,
-      svCanonNode = canonNode
-    } <-
-    prepareSnapshotViews pres
-  -- | Named phase bridge: the acyclic base constraint must share a phase
-  -- index with the presolved view for constraintForGeneralization.
-  -- The constraint graph data is structurally identical across phases;
-  -- only the phantom type tag differs.
-  let cAcyclicAsPresolved = castConstraint cAcyclic :: Constraint 'Presolved
-  let planBuilder = prPlanBuilder pres
-  TraceCopyArtifacts
-    { tcaInstCopyNodes = instCopyNodes,
-      tcaInstCopyMapFull = instCopyMapFull
-    } <-
-    pure (prepareTraceCopyArtifacts cAcyclic presolutionViewClean (prRedirects pres) canonNode (prEdgeTraces pres))
-  let (constraintForGen, bindParentsGa) =
-        constraintForGeneralization traceCfg presolutionViewClean (prRedirects pres) instCopyNodes instCopyMapFull cAcyclicAsPresolved ann
-  presolutionViewForGen <- fromSolveError (Finalize.finalizePresolutionViewFromSnapshot constraintForGen (Solved.canonicalMap solvedClean))
-  let generalizeAtWithView mbGa =
-        generalizeAtWithBuilder
-          planBuilder
-          mbGa
-          presolutionViewForGen
+  prepared <-
+    fromSolveError $
+      prepareGeneralizationArtifact traceCfg cAcyclic pres ann
+  let presolutionViewForGen = pgaPresolutionView prepared
+      bindParentsGa = pgaBindParentsGa prepared
+      generalizeAtWithView = pgaGeneralizeAt prepared
+      edgeArtifacts = pgaEdgeArtifacts prepared
+      scopeOverrides = pgaScopeOverrides prepared
+      annCanon = pgaAnnotated prepared
+      acyclicBaseForGeneralization = pgaAcyclicBaseConstraint prepared
   -- Build authoritative SchemeInfo map and TypeCheck.Env from external
   -- source types.  We derive schemes directly from the caller-supplied
   -- NormSrcType values (which preserve lowerType naming) instead of
@@ -269,20 +223,6 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
           { TypeCheck.termEnv = Map.map (schemeToType . siScheme) initialSchemeInfos,
             TypeCheck.typeEnv = Map.empty
           }
-  let annCanon = redirectAndCanonicalizeAnn (canonicalizeNode canonNode) (prRedirects pres) ann
-  let edgeArtifacts =
-        EdgeArtifacts
-          { eaEdgeExpansions = IntMap.map (canonicalizeExpansion canonNode) (prEdgeExpansions pres),
-            eaEdgeWitnesses = IntMap.map (canonicalizeWitness canonNode) (prEdgeWitnesses pres),
-            eaEdgeTraces = IntMap.map (canonicalizeTrace canonNode) (prEdgeTraces pres)
-          }
-  let scopeOverrides =
-        letScopeOverrides
-          cAcyclicAsPresolved
-          constraintForGen
-          presolutionViewClean
-          (prRedirects pres)
-          annCanon
   let elabConfig =
         ElabConfig
           { ecTraceConfig = traceCfg,
@@ -296,7 +236,7 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
             eeScopeOverrides = scopeOverrides,
             eeAnnSourceTypes =
               IntMap.fromList
-                [ (getNodeId (canonicalizeNode canonNode nid), ty)
+                [ (getNodeId (pgaAnnNodeCanonical prepared nid), ty)
                   | (k, ty) <- IntMap.toList annSourceTypes,
                     let nid = NodeId k
                 ],
@@ -312,7 +252,11 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
   rootScope <-
     fromElabError $
       bindingToElab $
-        resolveCanonicalScope cAcyclicAsPresolved presolutionViewForGen (prRedirects pres) (annNode authoritativeAnnPreFinal)
+        resolveCanonicalScope
+          acyclicBaseForGeneralization
+          presolutionViewForGen
+          (pgaRedirects prepared)
+          (annNode authoritativeAnnPreFinal)
   let rootTarget = schemeBodyTarget presolutionViewForGen (annNode authoritativeAnnCanonFinal)
   (rootScheme, rootSubst) <-
     fromElabError $
@@ -320,16 +264,15 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
   let termSubst = substInTerm rootSubst term
 
   -- Build context for result type computation
-  let canonical = pvCanonical presolutionViewForGen
-      resultTypeInputs =
+  let resultTypeInputs =
         mkResultTypeInputs
-          canonical
+          (pgaCanonical prepared)
           edgeArtifacts
           presolutionViewForGen
           bindParentsGa
-          planBuilder
-          cAcyclicAsPresolved
-          (prRedirects pres)
+          (pgaPlanBuilder prepared)
+          acyclicBaseForGeneralization
+          (pgaRedirects prepared)
           traceCfg
       retainedChildAuthoritativeCandidate =
         case preserveRetainedChildAuthoritativeResult termSubst of
@@ -516,52 +459,6 @@ renameTypeVarInTerm old new term =
         ETyInst t inst -> ETyInst (renameTypeVarInTerm old new t) (renameInst inst)
         ERoll ty body -> ERoll (renameTy ty) (renameTypeVarInTerm old new body)
         EUnroll body -> EUnroll (renameTypeVarInTerm old new body)
-
-prepareSnapshotViews :: PresolutionResult -> Either PipelineError SnapshotViews
-prepareSnapshotViews pres = do
-  let preRewrite = snapshotConstraint pres
-  solvedClean <- fromSolveError (Finalize.finalizeSolvedFromSnapshot preRewrite (snapshotUnionFind pres))
-  presolutionViewClean <- fromSolveError (Finalize.finalizePresolutionViewFromSnapshot preRewrite (snapshotUnionFind pres))
-  let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
-  pure
-    SnapshotViews
-      { svSolvedClean = solvedClean,
-        svPresolutionViewClean = presolutionViewClean,
-        svCanonNode = canonNode
-      }
-
-prepareTraceCopyArtifacts ::
-  Constraint p ->
-  PresolutionView q ->
-  IntMap.IntMap NodeId ->
-  Canonicalizer ->
-  IntMap.IntMap EdgeTrace ->
-  TraceCopyArtifacts
-prepareTraceCopyArtifacts baseConstraint presolutionView redirects canonNode edgeTraces =
-  let adoptNode = canonicalizeNode canonNode
-      baseNodes = cNodes baseConstraint
-      edgeTracesForCopy =
-        IntMap.filter
-          ( \tr ->
-              case lookupNodeIn baseNodes (etRoot tr) of
-                Just _ -> True
-                Nothing -> False
-          )
-          edgeTraces
-      instCopyNodes =
-        instantiationCopyNodes presolutionView redirects edgeTracesForCopy
-      instCopyMapFull =
-        let baseNamedKeysAll = collectBaseNamedKeys baseConstraint
-            traceMaps =
-              map
-                (buildTraceCopyMap baseConstraint baseNamedKeysAll adoptNode)
-                (IntMap.elems edgeTracesForCopy)
-         in foldl' IntMap.union IntMap.empty traceMaps
-   in TraceCopyArtifacts
-        { tcaEdgeTracesForCopy = edgeTracesForCopy,
-          tcaInstCopyNodes = instCopyNodes,
-          tcaInstCopyMapFull = instCopyMapFull
-        }
 
 authoritativeRootAnn :: ElabTerm -> AnnExpr -> AnnExpr
 authoritativeRootAnn term annExpr =

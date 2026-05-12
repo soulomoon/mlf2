@@ -246,6 +246,7 @@ library mlf2-internal
                       MLF.Elab.Run.Generalize.Phase2,
                       MLF.Elab.Run.Generalize.Phase3,
                       MLF.Elab.Run.Generalize.Phase4,
+                      MLF.Elab.Run.Generalize.Prepare,
                       MLF.Elab.Run.Generalize.Types,
                       MLF.Elab.Run.Instantiation,
                       MLF.Elab.Run.Pipeline,
