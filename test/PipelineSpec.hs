@@ -15,9 +15,11 @@ import Data.Map.Strict qualified as Map
 import Data.Maybe (catMaybes, isJust, listToMaybe)
 import Data.Set qualified as Set
 import MLF.Binding.Tree qualified as Binding
+import MLF.Constraint.Acyclicity qualified as Acyc
 import MLF.Constraint.Canonicalizer (canonicalizeNode, canonicalizerFrom)
 import MLF.Constraint.Finalize qualified as Finalize
 import MLF.Constraint.NodeAccess qualified as NodeAccess
+import MLF.Constraint.Normalize qualified as CNormalize
 import MLF.Constraint.Presolution
 import MLF.Constraint.Presolution.Plan.Context (GaBindParents (..))
 import MLF.Constraint.Presolution.TestSupport
@@ -49,6 +51,10 @@ import MLF.Elab.Pipeline
     pattern Forall,
   )
 import MLF.Elab.Pipeline qualified as Elab
+import MLF.Elab.Run.Generalize.Prepare
+  ( PreparedGeneralizationArtifact (..),
+    prepareGeneralizationArtifact,
+  )
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.ResultType
   ( ResultTypeInputs (..),
@@ -64,6 +70,7 @@ import MLF.Elab.Run.ResultType.Util
     selectUniqueCandidate,
     selectUniqueCandidateBy,
   )
+import MLF.Elab.Run.Scope (resolveCanonicalScope, schemeBodyTarget)
 import MLF.Elab.Run.Util
   ( canonicalizeExpansion,
     canonicalizeTrace,
@@ -82,6 +89,7 @@ import SpecUtil
     collectVarNodes,
     defaultTraceConfig,
     emptyConstraint,
+    firstShowE,
     mkForalls,
     requireRight,
     runConstraintDefault,
@@ -6131,6 +6139,88 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           let nodes = cNodes (Solved.originalConstraint res)
           baseNames nodes `shouldContain` [BaseTy "Int"]
           noExpNodes nodes
+
+    it "prepared generalization artifact drives redirecting instantiation behavior" $ do
+      let expr =
+            ELet
+              "id"
+              (ELam "x" (EVar "x"))
+              ( ELet
+                  "a"
+                  (EApp (EVar "id") (ELit (LInt 1)))
+                  (EApp (EVar "id") (ELit (LBool True)))
+              )
+      ConstraintResult {crConstraint = c0, crAnnotated = ann} <-
+        requireRight (runConstraintDefault defaultPolySyms expr)
+      let cNorm = CNormalize.normalize c0
+      (cAcyclic, acyc) <-
+        requireRight (firstShowE (Acyc.breakCyclesAndCheckAcyclicity cNorm))
+      pres <-
+        requireRight (firstShowE (computePresolution defaultTraceConfig acyc cAcyclic))
+      artifact <-
+        requireRight
+          (firstShowE (prepareGeneralizationArtifact defaultTraceConfig cAcyclic pres ann))
+      let redirects = prRedirects pres
+          redirectedAnn = applyRedirectsToAnn redirects ann
+          canonicalizedAnn = canonicalizeAnn (pgaAnnNodeCanonical artifact) redirectedAnn
+          GaBindParents
+            { gaBaseConstraint = baseConstraint,
+              gaSolvedToBase = solvedToBase
+            } = pgaBindParentsGa artifact
+          baseNamedKeysAll = collectBaseNamedKeys (pgaAcyclicBaseConstraint artifact)
+          baseCopyPairs =
+            [ (baseKey, copyN)
+              | tr <- IntMap.elems (prEdgeTraces pres),
+                (baseKey, copyN) <- IntMap.toList (getCopyMapping (etCopyMap tr)),
+                IntSet.member baseKey baseNamedKeysAll
+            ]
+      redirects `shouldSatisfy` (not . IntMap.null)
+      pgaAnnotated artifact `shouldBe` canonicalizedAnn
+      annNodeOccurrences (pgaAnnotated artifact)
+        `shouldBe` map (pgaAnnNodeCanonical artifact) (annNodeOccurrences redirectedAnn)
+      baseConstraint `shouldBe` pgaAcyclicBaseConstraint artifact
+      baseNamedKeysAll `shouldSatisfy` (not . IntSet.null)
+      baseCopyPairs `shouldSatisfy` (not . null)
+      forM_ baseCopyPairs $ \(_baseKey, copyN) -> do
+        let copyKey = getNodeId (pgaAnnNodeCanonical artifact copyN)
+        case IntMap.lookup copyKey solvedToBase of
+          Nothing ->
+            expectationFailure ("Prepared artifact missed copy provenance for " ++ show copyN)
+          Just actualBase ->
+            lookupNodeIn (cNodes baseConstraint) actualBase `shouldSatisfy` isJust
+      rootScope <-
+        requireRight
+          ( firstShowE
+              ( resolveCanonicalScope
+                  (pgaAcyclicBaseConstraint artifact)
+                  (pgaPresolutionView artifact)
+                  (pgaRedirects artifact)
+                  (annRootNode ann)
+              )
+          )
+      let rootTarget =
+            schemeBodyTarget
+              (pgaPresolutionView artifact)
+              (annRootNode (pgaAnnotated artifact))
+          resultTypeInputs =
+            mkResultTypeInputs
+              (pgaCanonical artifact)
+              (pgaEdgeArtifacts artifact)
+              (pgaPresolutionView artifact)
+              (pgaBindParentsGa artifact)
+              (pgaPlanBuilder artifact)
+              (pgaAcyclicBaseConstraint artifact)
+              (pgaRedirects artifact)
+              defaultTraceConfig
+      case pgaGeneralizeAt artifact (Just (pgaBindParentsGa artifact)) rootScope rootTarget of
+        Right (Forall _ ty, _subst) ->
+          pretty ty `shouldSatisfy` ("Bool" `isInfixOf`)
+        Left err ->
+          expectationFailure ("Prepared artifact generalize-at failed: " ++ show err)
+      resultTy <-
+        requireRight
+          (firstShowE (computeResultTypeFallback resultTypeInputs (pgaAnnotated artifact) ann))
+      pretty resultTy `shouldSatisfy` ("Bool" `isInfixOf`)
 
     it "tracks instantiation copy maps for named binders" $ do
       -- Non-trivial instantiation: polymorphic id used at two types

@@ -149,6 +149,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.Base,
                       MLF.Elab.Run.Annotation,
                       MLF.Elab.Run.Generalize,
+                      MLF.Elab.Run.Generalize.Prepare,
                       MLF.Elab.Types
     other-modules:    MLF.Constraint.Normalize.Internal,
                        MLF.Constraint.Normalize.Graft,
@@ -246,7 +247,6 @@ library mlf2-internal
                       MLF.Elab.Run.Generalize.Phase2,
                       MLF.Elab.Run.Generalize.Phase3,
                       MLF.Elab.Run.Generalize.Phase4,
-                      MLF.Elab.Run.Generalize.Prepare,
                       MLF.Elab.Run.Generalize.Types,
                       MLF.Elab.Run.Instantiation,
                       MLF.Elab.Run.Pipeline,
