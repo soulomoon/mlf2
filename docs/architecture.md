@@ -48,6 +48,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI/file runner as an explicit import target
 - `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates pure checked `.mlfp` bindings through the existing xMLF runtime, executes checked `main : IO Unit` actions through the reserved IO primitive boundary, and renders recovered closed ADT values with source constructor syntax
 - `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before LLVM lowering
+- `MLF.Backend.StructuralRecursiveData` — private backend matcher authority for structural recursive ADT identity and payload-shape evidence shared by IR validation, conversion, and LLVM lowering
 - `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion, explicit ADT construct/case recovery, and closure conversion where the checked xMLF shape is unambiguous
 - `MLF.Backend.LLVM` — repo-local LLVM backend facade over a small typed LLVM AST, lowerer, and pretty-printer for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
@@ -124,9 +125,10 @@ runtime invariants as compile-time types:
   returns `Constraint 'Acyclic`, presolution returns `Constraint 'Presolved`,
   and solve consumes presolved constraints to produce the opaque `Solved`
   abstraction. Directional transition helpers in `MLF.Constraint.Types.Graph`
-  encode those boundaries; `castConstraint` remains only as a quarantined legacy
-  escape hatch, and raw-view bridges are named where older elaboration/query code
-  still expects the historical raw surface.
+  encode those boundaries. `castConstraint` and raw-view bridges are transitional
+  compatibility debt, not target architecture; when the surrounding slice touches
+  them, remove outdated consumers rather than relocating adapters unless a
+  paper-backed invariant still requires the bridge.
 
 - **`ForallSpec`** (`MLF.Constraint.Types.Witness`): `fsBinderCount` was removed;
   binder count is derived from `length fsBounds`. `mkForallSpec` validates
@@ -141,7 +143,7 @@ runtime invariants as compile-time types:
 - Core graph node/edge/binding identifiers and types live in `MLF.Constraint.Types.Graph`; witness metadata lives in `MLF.Constraint.Types.Witness`; presolution-only state/types live in `MLF.Constraint.Types.Presolution`.
 - Shared unification flow lives in `MLF.Constraint.Unify.Core`; shared structural decomposition lives in `MLF.Constraint.Unify.Decompose`.
 - Prefer `MLF.Constraint.Canonicalizer` for redirect + union-find canonicalization instead of ad hoc chase helpers.
-- Legacy expansion-to-instantiation translation lives in `MLF.Elab.Legacy` and is re-exported by `MLF.Elab.Elaborate` and `MLF.Elab.Pipeline`.
+- Legacy expansion-to-instantiation translation, parser aliases, and parser support for non-canonical legacy syntax are compatibility surfaces, not protected architecture. Frame cleanup that spans those surfaces as Legacy Surface Retirement; Snapshot Finalization is only the read-model/finalized-snapshot sub-slice. Retire reached compatibility paths consistently across frontend eMLF and explicit xMLF parsers unless the thesis requires the older spelling or adapter; see `docs/adr/2026-05-14-legacy-surface-retirement.md`.
 - Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops` and `StateAccess`; edge processing is split across planner/interpreter passes with typed `EdgePlan`.
 - Elaboration entrypoints bundle inputs as `ElabConfig`/`ElabEnv`, and tracing is explicit via `TraceConfig`.
 - `MLF.Elab.Run.Generalize.Prepare` owns the elaboration-side Generalization
@@ -207,6 +209,14 @@ Runtime tags, field slots, closure-record storage for function-like fields,
 and nullary tag-only representation stay private to LLVM/native lowering.
 Checked-program conversion must not assign runtime tag values, field offsets,
 boxing/storage policy, or layout-only witnesses.
+
+Structural recursive ADT identity and payload-shape matching is also a private
+backend-owned concern. `MLF.Backend.StructuralRecursiveData` is the shared
+matcher authority used by backend IR validation, checked-program conversion,
+and LLVM lowering. It keeps source-local name recovery and representation
+normalization in conversion, returns derived match/mismatch evidence for the
+current adapter operation, and does not create a second public backend IR; see
+`docs/adr/2026-05-14-backend-structural-recursive-data-matching.md`.
 
 The row-5 primitive/eager contract is explicit as well. The current primitive
 surface is the closed reserved runtime-binding set
@@ -344,11 +354,11 @@ In the current codebase, `PresolutionView` is the primary read-only runtime/inte
 
 | Must stay somewhere | Can move out now | Safe to retire from `Solved` surface |
 |---|---|---|
-| Opaque solved boundary + replay-faithful construction: `Solved`, `fromSolveOutput`, `fromPreRewriteState`. These still encode the finalized pre-rewrite → canonical solved boundary. | Compatibility/no-replay builders: `fromConstraintAndUf`, `rebuildWithConstraint`, `fromSolved`, `solvedFromView`. These should stay only in local compat owners such as `MLF.Constraint.Finalize`, `MLF.Constraint.Presolution.View`, `MLF.Constraint.Presolution.Plan`, and `MLF.Reify.Core`. | Test-only constructor alias: `mkTestSolved`. If retained, it belongs in test helpers rather than on the production `Solved` API. |
+| Opaque solved boundary + replay-faithful construction: `Solved`, `fromSolveOutput`, `fromPreRewriteState`. These still encode the finalized pre-rewrite → canonical solved boundary. | Compatibility/no-replay builders: `fromConstraintAndUf`, `rebuildWithConstraint`, `fromSolved`, `solvedFromView`. These are deletion targets for Snapshot Finalization cleanup, not APIs to preserve by moving into broader compat owners. | Test-only constructor alias: `mkTestSolved`. If retained, it belongs in test helpers rather than on the production `Solved` API. |
 | Original ↔ canonical boundary primitives: `canonical`, `canonicalMap`, `originalConstraint`, `canonicalConstraint`. The thesis-exact phase distinction depends on these capabilities remaining explicit somewhere. | Read-query wrappers already mirrored by `PresolutionView`: `lookupNode`, `lookupBindParent`, `bindParents`, `lookupVarBound`, `genNodes`. These should migrate with the read-only solved/view boundary rather than remain core `Solved` surface area. | Pure enumeration helpers: `allNodes`, `instEdges`. These are primarily useful for tests/audits and do not justify production `Solved` surface area. |
 | Finalized/view construction entrypoints: `fromPresolutionResult`, `finalizeSolvedFromSnapshot`, `finalizeSolvedForConstraint`. The system still needs explicit constructors for finalized solved/view artifacts. | Finalize-local or reify-facing helpers: `pruneBindParentsSolved`, `weakenedVars`, `isEliminatedVar`, `canonicalizedBindParents`. These are still needed, but they belong with finalization or reify-owned canonical-read helpers. | Raw canonical container accessors: `canonicalBindParents`, `canonicalGenNodes`. No meaningful live production surface depends on them. |
 | Strict solved validation capability: `validateCanonicalGraphStrict`. The post-finalization solved-graph invariant must keep an explicit home even if it eventually moves out of `Solved`. | Local compatibility state that should narrow to simpler data: `geRes :: Solved` should collapse to the `canonicalMap` it actually uses. | Dead mutation hooks: `rebuildWithNodes`, `rebuildWithBindParents`, `rebuildWithGenNodes`. These no longer have live external callers. |
-| A narrow solved boundary still remains justified for legacy/order/reify consumers until they gain equally explicit replacements (`MLF.Elab.Legacy`, `MLF.Util.Order`, and the remaining original/canonical reads in `Reify.*`). | Any remaining solved↔view adapters should stay local to their owning boundary modules and continue shrinking instead of expanding the shared abstraction. | Audit/test-only original-domain helpers: `classMembers`, `originalNode`, `originalBindParent`, `wasOriginalBinder`, `validateOriginalCanonicalAgreement`. These may stay in audit/test helpers, but they do not need to remain part of the production `Solved` API. |
+| A narrow solved boundary still remains justified for order/reify consumers until they gain equally explicit replacements. Legacy-only consumers should be retired as part of the cleanup even when that broadens the slice. | Any remaining solved↔view adapters are same-slice migration aids only; the target is removal or replacement with explicit finalization/read-model entrypoints. | Audit/test-only original-domain helpers: `classMembers`, `originalNode`, `originalBindParent`, `wasOriginalBinder`, `validateOriginalCanonicalAgreement`. These may stay in audit/test helpers, but they do not need to remain part of the production `Solved` API. |
 
 ### Practical consequence
 
