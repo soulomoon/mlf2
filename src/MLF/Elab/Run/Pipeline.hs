@@ -25,6 +25,7 @@ import MLF.Constraint.Presolution.Base (EdgeArtifacts (eaEdgeWitnesses))
 import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..), PolySyms, getEdgeId, getNodeId)
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Elaborate (ElabConfig (..), ElabEnv (..), elaborateWithEnv)
+import MLF.Elab.Generalize (GaBindParents (..))
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
@@ -202,7 +203,7 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
       edgeArtifacts = pgaEdgeArtifacts prepared
       scopeOverrides = pgaScopeOverrides prepared
       annCanon = pgaAnnotated prepared
-      acyclicBaseForGeneralization = pgaAcyclicBaseConstraint prepared
+      acyclicBaseForGeneralization = gaBaseConstraint bindParentsGa
   -- Build authoritative SchemeInfo map and TypeCheck.Env from external
   -- source types.  We derive schemes directly from the caller-supplied
   -- NormSrcType values (which preserve lowerType naming) instead of

@@ -60,7 +60,8 @@ The artifact intentionally exposes the few shared values the current consumers
 need, while hiding the mechanics that produce them:
 
 * the directional phase bridge from the acyclic base graph to the prepared
-  presolved phase;
+  presolved phase, retained on `GaBindParents` instead of duplicated on the
+  outer artifact;
 * instantiation copy-node and base-copy-map recovery from edge traces;
 * the redirect plus union-find canonicalizer used for annotations and edge
   artifacts;
@@ -68,10 +69,11 @@ need, while hiding the mechanics that produce them:
 * let-scope override comparison between the acyclic base graph and the
   generalization graph.
 
-`pgaAcyclicBaseConstraint` is transitional.  Result-type reconstruction still
-expects the thesis base graph in the same phantom phase as the prepared view,
-so the artifact names that graph explicitly instead of leaking phase conversion
-back to the pipeline.
+Result-type reconstruction still expects the thesis base graph in the same
+phantom phase as the prepared view, but that graph already lives on
+`pgaBindParentsGa.gaBaseConstraint`. The artifact therefore keeps the phase
+bridge owner-local to `GaBindParents` instead of duplicating the base graph on
+the outer record.
 -}
 data PreparedGeneralizationArtifact = PreparedGeneralizationArtifact
     { pgaPresolutionView :: PresolutionView 'Presolved
@@ -82,7 +84,6 @@ data PreparedGeneralizationArtifact = PreparedGeneralizationArtifact
     , pgaAnnotated :: AnnExpr
     , pgaAnnNodeCanonical :: NodeId -> NodeId
     , pgaCanonical :: NodeId -> NodeId
-    , pgaAcyclicBaseConstraint :: Constraint 'Presolved
     , pgaPlanBuilder :: PresolutionPlanBuilder
     , pgaRedirects :: IntMap.IntMap NodeId
     }
@@ -153,7 +154,6 @@ prepareGeneralizationArtifact traceCfg acyclicBase pres ann = do
             , pgaAnnotated = annCanon
             , pgaAnnNodeCanonical = annNodeCanonical
             , pgaCanonical = pvCanonical presolutionViewForGen
-            , pgaAcyclicBaseConstraint = acyclicBaseForGeneralization
             , pgaPlanBuilder = planBuilder
             , pgaRedirects = prRedirects pres
             }

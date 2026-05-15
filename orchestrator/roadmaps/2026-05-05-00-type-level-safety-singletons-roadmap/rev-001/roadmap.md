@@ -251,7 +251,7 @@ scope unless a later semantic roadmap update explicitly approves them.
 - Extraction notes: a lawful round may split production constructor use from
   fixture migration if the blast radius is high.
 
-### [pending] 6. Integration And Cleanup
+### [done] 6. Integration And Cleanup
 
 - Milestone id: `milestone-6`
 - Depends on: `milestone-3`, `milestone-4`, `milestone-5`
@@ -267,7 +267,7 @@ scope unless a later semantic roadmap update explicitly approves them.
   `update-roadmap`.
 #### Completion Pointers: milestone-6
 
-none yet
+- round-237 retired the duplicated generalization-preparation base-constraint shim, aligned the accepted type-level safety seams across guidance and guards, and passed focused closeout checks plus the full cabal gate.
 
 #### Candidate Direction: Contract And Cleanup Closeout
 

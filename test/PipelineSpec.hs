@@ -862,7 +862,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           pipelineSrc `shouldSatisfy` (not . isInfixOf marker)
       prepareSrc `shouldSatisfy` isInfixOf "data PreparedGeneralizationArtifact"
       prepareSrc `shouldSatisfy` isInfixOf "prepareTraceCopyArtifacts"
-      prepareSrc `shouldSatisfy` isInfixOf "pgaAcyclicBaseConstraint :: Constraint 'Presolved"
+      prepareSrc `shouldSatisfy` isInfixOf "pgaBindParentsGa :: GaBindParents 'Presolved"
+      prepareSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
+      pipelineSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
       prepareSrc `shouldSatisfy` (not . isInfixOf "castConstraint")
       driverSrc `shouldSatisfy` isInfixOf "mkInitialPresolutionState ::"
       driverSrc `shouldSatisfy` isInfixOf "tyExpNodeIds ::"
@@ -6019,7 +6021,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             { gaBaseConstraint = baseConstraint,
               gaSolvedToBase = solvedToBase
             } = pgaBindParentsGa artifact
-          baseNamedKeysAll = collectBaseNamedKeys (pgaAcyclicBaseConstraint artifact)
+          baseNamedKeysAll = collectBaseNamedKeys baseConstraint
           baseCopyPairs =
             [ (baseKey, copyN)
               | tr <- IntMap.elems (prEdgeTraces pres),
@@ -6030,7 +6032,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       pgaAnnotated artifact `shouldBe` canonicalizedAnn
       annNodeOccurrences (pgaAnnotated artifact)
         `shouldBe` map (pgaAnnNodeCanonical artifact) (annNodeOccurrences redirectedAnn)
-      baseConstraint `shouldBe` pgaAcyclicBaseConstraint artifact
       baseNamedKeysAll `shouldSatisfy` (not . IntSet.null)
       baseCopyPairs `shouldSatisfy` (not . null)
       forM_ baseCopyPairs $ \(_baseKey, copyN) -> do
@@ -6044,7 +6045,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         requireRight
           ( firstShowE
               ( resolveCanonicalScope
-                  (pgaAcyclicBaseConstraint artifact)
+                  baseConstraint
                   (pgaPresolutionView artifact)
                   (pgaRedirects artifact)
                   (annRootNode ann)
@@ -6061,7 +6062,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               (pgaPresolutionView artifact)
               (pgaBindParentsGa artifact)
               (pgaPlanBuilder artifact)
-              (pgaAcyclicBaseConstraint artifact)
+              baseConstraint
               (pgaRedirects artifact)
               defaultTraceConfig
       case pgaGeneralizeAt artifact (Just (pgaBindParentsGa artifact)) rootScope rootTarget of

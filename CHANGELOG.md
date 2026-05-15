@@ -73,6 +73,12 @@
   helpers, while the few remaining raw internal backends keep phase erasure
   owner-local to solved construction, presolution in-progress state, research,
   or test support.
+- Retired the redundant
+  `PreparedGeneralizationArtifact.pgaAcyclicBaseConstraint` shim. The
+  generalization/result-type path now reads the preserved base graph through
+  `GaBindParents.gaBaseConstraint`, and the repository guidance documents the
+  retained owner-local seams instead of duplicating that graph on the outer
+  preparation artifact.
 - Retired result-shaped solve compatibility from the `MLF.Constraint.Solve`
   facade. The solve output now carries only the pre-rewrite snapshot required
   for staged solved construction, and low-level white-box tests use the named

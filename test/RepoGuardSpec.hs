@@ -62,6 +62,25 @@ spec = describe "Repository guardrails" $ do
     graphSrc <- readFile "src/MLF/Constraint/Types/Graph.hs"
     graphSrc `shouldSatisfy` (not . isInfixOf "toRawConstraintForLegacy")
 
+  it "type-level safety guidance stays synchronized with the audited owner-local seams" $ do
+    agentsSrc <- readFile "AGENTS.md"
+    architectureSrc <- readFile "docs/architecture.md"
+    prepareSrc <- readFile "src/MLF/Elab/Run/Generalize/Prepare.hs"
+    pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
+    witnessInternalSrc <- readFile "src/MLF/Constraint/Types/Witness/Internal.hs"
+    forM_
+      [ agentsSrc
+      , architectureSrc
+      ]
+      $ \src -> do
+        src `shouldSatisfy` isInfixOf "NodeRefTag"
+        src `shouldSatisfy` isInfixOf "mkUncheckedInstanceWitness"
+        src `shouldSatisfy` isInfixOf "gaBaseConstraint"
+    prepareSrc `shouldSatisfy` isInfixOf "pgaBindParentsGa :: GaBindParents 'Presolved"
+    prepareSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
+    pipelineSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
+    witnessInternalSrc `shouldSatisfy` isInfixOf "mkUncheckedInstanceWitness :: [InstanceOp] -> InstanceWitness"
+
   it "presolution Phase 4 state stays phase-indexed and raw-bridge free" $ do
     baseSrc <- readFile "src/MLF/Constraint/Presolution/Base.hs"
     stateAccessSrc <- readFile "src/MLF/Constraint/Presolution/StateAccess.hs"

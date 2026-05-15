@@ -146,8 +146,9 @@ runtime invariants as compile-time types:
   `mkEdgeWitness` currently enforces the construction-time invariant the live
   production path can prove directly (non-negative intro counts). Finalized
   `InstanceWitness` values now require a normalization-owned validated-ops
-  token before `mkInstanceWitness` can mint them, while pre-normalization
-  accumulation stays on explicit owner-local seams. Context-heavy Ω
+  token before `mkInstanceWitness` can mint them, while
+  `mkUncheckedInstanceWitness` stays on the explicit owner-local
+  pre-normalization seam. Context-heavy Ω
   normalization and Φ translation checks that are not subsumed by that token
   remain downstream owners.
 
@@ -165,7 +166,8 @@ runtime invariants as compile-time types:
   Preparation step. It produces the `PreparedGeneralizationArtifact` consumed
   by elaboration, root-scheme generalization, and result-type reconstruction,
   while keeping redirect/canonicalization, copy-node recovery, scope overrides,
-  and the transitional acyclic-base phase bridge out of `MLF.Elab.Run.Pipeline`.
+  and the owner-local base-constraint projection on
+  `GaBindParents.gaBaseConstraint` out of `MLF.Elab.Run.Pipeline`.
 
 ## Typed backend IR and lowering boundary
 

@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-237",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-6",
+  "direction_id": "direction-6a-integration-cleanup",
+  "extracted_item_id": "item-6a-closeout-audit-and-guard-alignment",
+  "summary": "Audit the accepted type-level safety integration seams, retire any truly remaining broad migration shim if it is locally redundant, and otherwise close milestone-6 through guidance, guard, and full-gate evidence alignment.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

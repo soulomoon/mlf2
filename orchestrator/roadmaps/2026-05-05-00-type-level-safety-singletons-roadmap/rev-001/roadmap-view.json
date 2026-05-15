@@ -76,7 +76,7 @@
     {
       "milestone_id": "milestone-6",
       "title": "Integration And Cleanup",
-      "status": "pending",
+            "status": "done",
       "depends_on": [
         "milestone-3",
         "milestone-4",
@@ -201,7 +201,7 @@
     },
     "milestone-6": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 6. Integration And Cleanup"
+            "selector": "### [done] 6. Integration And Cleanup"
     },
     "milestone-6-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",

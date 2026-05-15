@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-237",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-6",
+  "direction_id": "direction-6a-integration-cleanup",
+  "extracted_item_id": "item-6a-closeout-audit-and-guard-alignment",
+  "plan_path": "orchestrator/rounds/round-237/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}
