@@ -9,15 +9,10 @@ module MLF.Parse.Common (
     lowerIdent,
     upperIdent,
     canonicalForallTok,
-    forallTok,
     canonicalGeTok,
     canonicalLambdaTok,
-    lambdaTok,
     canonicalBigLambdaTok,
-    bigLambdaTok,
-    geTok,
     canonicalBottomTok,
-    bottomTok,
     pLit,
     pString,
 ) where
@@ -36,7 +31,6 @@ import Text.Megaparsec
     , manyTill
     , satisfy
     , try
-    , (<|>)
     )
 import qualified Text.Megaparsec.Char as C
 import qualified Text.Megaparsec.Char.Lexer as L
@@ -99,32 +93,17 @@ isIdentContinue c =
 canonicalForallTok :: Parser ()
 canonicalForallTok = void (symbol "∀")
 
-forallTok :: Parser ()
-forallTok = void (symbol "∀" <|> symbol "forall")
-
 canonicalLambdaTok :: Parser ()
 canonicalLambdaTok = void (symbol "λ")
-
-lambdaTok :: Parser ()
-lambdaTok = void (symbol "λ" <|> symbol "\\")
 
 canonicalBigLambdaTok :: Parser ()
 canonicalBigLambdaTok = void (symbol "Λ")
 
-bigLambdaTok :: Parser ()
-bigLambdaTok = void (symbol "Λ" <|> symbol "Lambda")
-
 canonicalGeTok :: Parser ()
 canonicalGeTok = void (symbol "⩾")
 
-geTok :: Parser ()
-geTok = void (symbol "⩾" <|> symbol ">=")
-
 canonicalBottomTok :: Parser ()
 canonicalBottomTok = void (symbol "⊥")
-
-bottomTok :: Parser ()
-bottomTok = void (symbol "⊥" <|> symbol "_|_" <|> symbol "bottom")
 
 pLit :: Parser Lit
 pLit =

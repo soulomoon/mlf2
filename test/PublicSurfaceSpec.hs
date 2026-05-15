@@ -43,7 +43,7 @@ spec = describe "Public surface contracts" $ do
       let src =
             unlines
               [ "module Main export (main) {",
-                "  def main : Int = let id = \\x x in id 1;",
+                "  def main : Int = let id = λx x in id 1;",
                 "}"
               ]
       expectRight (parseRawProgram src) $ \program ->

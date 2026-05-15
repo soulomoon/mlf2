@@ -55,8 +55,8 @@ Term        ::= x
 
 ## Retired Legacy Syntax
 
-These former compatibility forms are parse errors on the raw eMLF and explicit
-xMLF parser APIs:
+These former compatibility forms are parse errors on the raw eMLF, explicit
+xMLF, and `.mlfp` parser APIs where the token or grammar family applies:
 
 - ASCII token aliases: `\`, `forall`, `>=`, `_|_`, `bottom`, `Lambda`,
   `epsilon`, and `1`.
@@ -120,16 +120,14 @@ SrcType      ::= lIdent
                | UIdent SrcTypeAtom*
                | lIdent SrcTypeAtom+
                | SrcType "->" SrcType
-               | "forall" Binder+ "." SrcType
                | "∀" Binder+ "." SrcType
-               | "mu" lIdent "." SrcType
                | "μ" lIdent "." SrcType
                | "⊥"
 SrcTypeAtom  ::= lIdent | UIdent | "⊥" | "(" SrcType ")"
-Binder       ::= lIdent | "(" lIdent "⩾" SrcType ")" | "(" lIdent ">=" SrcType ")"
+Binder       ::= lIdent | "(" lIdent "⩾" SrcType ")"
 
 Expr         ::= QName | Literal
-               | "\" Param Expr
+               | "λ" Param Expr
                | Expr Expr
                | "let" lIdent [":" SrcType] "=" Expr "in" Expr
                | "case" Expr "of" "{" Alt (";" Alt)* "}"

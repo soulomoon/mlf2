@@ -126,7 +126,7 @@ prettyExpr expr = go 0 expr
     go prec term = case term of
         EVar name -> name
         ELit lit -> prettyLit lit
-        ELam param body -> paren (prec > 0) ("\\" ++ prettyParam param ++ " " ++ go 0 body)
+        ELam param body -> paren (prec > 0) ("λ" ++ prettyParam param ++ " " ++ go 0 body)
         EApp fun arg -> paren (prec > 1) (go 1 fun ++ " " ++ goArg arg)
         ELet name ann rhs body ->
             paren (prec > 0)

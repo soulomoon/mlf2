@@ -5,14 +5,14 @@ module Core export (Nat, zero, succ, peel, isZero) {
 
   def zero : Nat = Zero;
 
-  def succ : Nat -> Nat = \(n : Nat) Succ n;
+  def succ : Nat -> Nat = λ(n : Nat) Succ n;
 
-  def peel : Nat -> Nat = \(n : Nat) case n of {
+  def peel : Nat -> Nat = λ(n : Nat) case n of {
     Zero -> Zero;
     Succ inner -> inner
   };
 
-  def isZero : Nat -> Bool = \(n : Nat) case n of {
+  def isZero : Nat -> Bool = λ(n : Nat) case n of {
     Zero -> true;
     Succ _ -> false
   };

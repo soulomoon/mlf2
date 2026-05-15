@@ -3,12 +3,12 @@ module NatPlain export (Nat(..), isZero, peel, main) {
       Zero : Nat
     | Succ : Nat -> Nat;
 
-  def isZero : Nat -> Bool = \(n : Nat) case n of {
+  def isZero : Nat -> Bool = λ(n : Nat) case n of {
     Zero -> true;
     Succ _ -> false
   };
 
-  def peel : Nat -> Nat = \(n : Nat) case n of {
+  def peel : Nat -> Nat = λ(n : Nat) case n of {
     Zero -> Zero;
     Succ inner -> inner
   };

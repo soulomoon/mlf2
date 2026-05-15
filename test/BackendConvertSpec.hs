@@ -52,7 +52,7 @@ spec = describe "MLF.Backend.Convert" $ do
         unlines
           [ "module Main export (main) {",
             "  import Prelude exposing (Unit(..), IO, pure);",
-            "  def discard : IO Unit -> Unit = \\(_action : IO Unit) Unit;",
+            "  def discard : IO Unit -> Unit = λ(_action : IO Unit) Unit;",
             "  def main : Unit = discard (pure Unit);",
             "}"
           ]
@@ -66,7 +66,7 @@ spec = describe "MLF.Backend.Convert" $ do
         unlines
           [ "module Main export (main) {",
             "  import Prelude exposing (Unit(..), IO);",
-            "  def main : Unit = (\\(_action : IO Unit) Unit) (__io_pure Unit);",
+            "  def main : Unit = (λ(_action : IO Unit) Unit) (__io_pure Unit);",
             "}"
           ]
     checked <- requireRight (checkProgram (withPrelude program))
@@ -902,7 +902,7 @@ simpleFunctionProgram :: String
 simpleFunctionProgram =
   unlines
     [ "module Main export (main) {",
-      "  def id : Int -> Int = \\x x;",
+      "  def id : Int -> Int = λx x;",
       "  def main : Int = id 1;",
       "}"
     ]
@@ -915,8 +915,8 @@ recursiveLetCaptureProgram =
       "      Zero : Nat",
       "    | Succ : Nat -> Nat;",
       "",
-      "  def main : Nat -> Nat = \\(seed : Nat)",
-      "    let peel : Nat -> Nat = \\(n : Nat) case n of {",
+      "  def main : Nat -> Nat = λ(seed : Nat)",
+      "    let peel : Nat -> Nat = λ(n : Nat) case n of {",
       "      Zero -> seed;",
       "      Succ inner -> peel inner",
       "    } in peel seed;",
@@ -932,8 +932,8 @@ nestedRecursiveLetCaptureProgram =
       "    | Succ : Nat -> Nat;",
       "",
       "  def main : Nat -> Nat =",
-      "    let peel : Nat -> Nat = \\(n : Nat)",
-      "      let bounce : Nat -> Nat = \\(m : Nat) case m of {",
+      "    let peel : Nat -> Nat = λ(n : Nat)",
+      "      let bounce : Nat -> Nat = λ(m : Nat) case m of {",
       "        Zero -> peel Zero;",
       "        Succ inner -> bounce inner",
       "      } in case n of {",
@@ -982,7 +982,7 @@ functionCaseProgram =
       "      Box : Int -> Box;",
       "",
       "  def main : Int -> Int = case Box 0 of {",
-      "    Box n -> \\x x",
+      "    Box n -> λx x",
       "  };",
       "}"
     ]
@@ -1004,7 +1004,7 @@ gadtResultConstructorProgram =
   unlines
     [ "module Main export (Box(..), main) {",
       "  data Box a =",
-      "      Box : forall (b >= Int). b -> Box b;",
+      "      Box : ∀ (b ⩾ Int). b -> Box b;",
       "",
       "  def main : Box Int = Box 1;",
       "}"
@@ -1037,7 +1037,7 @@ hiddenOwnerConstructorImportProgram =
       "      NothingF : MaybeF f a",
       "    | JustF : f a -> MaybeF f a;",
       "",
-      "  def accept : MaybeF Box Bool -> Bool = \\value case value of {",
+      "  def accept : MaybeF Box Bool -> Bool = λvalue case value of {",
       "    NothingF -> true;",
       "    JustF box -> true",
       "  };",
@@ -1045,7 +1045,7 @@ hiddenOwnerConstructorImportProgram =
       "",
       "module Main export (main) {",
       "  import Core exposing (NothingF, accept);",
-      "  def id : forall a. a -> a = \\x x;",
+      "  def id : ∀ a. a -> a = λx x;",
       "  def main : Bool = accept (id NothingF);",
       "}"
     ]
@@ -1063,7 +1063,7 @@ hiddenEqEvidenceProgram =
       "    | Succ : Nat -> Nat",
       "    deriving Eq;",
       "",
-      "  def same : Eq a => a -> a -> Bool = \\x \\y eq x y;",
+      "  def same : Eq a => a -> a -> Bool = λx λy eq x y;",
       "  def main : Bool = same Zero Zero;",
       "}"
     ]
@@ -1086,7 +1086,7 @@ parameterizedEqEvidenceProgram =
       "    | Some : a -> Option a;",
       "",
       "  instance Eq a => Eq (Option a) {",
-      "    eq = \\left \\right case left of {",
+      "    eq = λleft λright case left of {",
       "      None -> case right of {",
       "        None -> true;",
       "        Some _ -> false",
@@ -1132,8 +1132,8 @@ topLevelRecursiveHigherOrderProgram =
       "      Zero : Nat",
       "    | Succ : Nat -> Nat;",
       "",
-      "  def idInt : Int -> Int = \\(x : Int) x;",
-      "  def loop : (Int -> Int) -> Nat -> Int = \\(f : Int -> Int) \\(n : Nat) case n of {",
+      "  def idInt : Int -> Int = λ(x : Int) x;",
+      "  def loop : (Int -> Int) -> Nat -> Int = λ(f : Int -> Int) λ(n : Nat) case n of {",
       "    Zero -> f 1;",
       "    Succ inner -> loop f inner",
       "  };",
@@ -1150,8 +1150,8 @@ localRecursiveHigherOrderProgram =
       "    | Succ : Nat -> Nat;",
       "",
       "  def main : Int =",
-      "    let idInt : Int -> Int = \\(x : Int) x in",
-      "    let loop : (Int -> Int) -> Nat -> Int = \\(f : Int -> Int) \\(n : Nat) case n of {",
+      "    let idInt : Int -> Int = λ(x : Int) x in",
+      "    let loop : (Int -> Int) -> Nat -> Int = λ(f : Int -> Int) λ(n : Nat) case n of {",
       "      Zero -> f 1;",
       "      Succ inner -> loop f inner",
       "    } in",
@@ -1164,7 +1164,7 @@ constructorForallApplicationProgram =
   unlines
     [ "module Main export (Pack(..), main) {",
       "  data Pack =",
-      "      Pack : forall a. a -> Pack;",
+      "      Pack : ∀ a. a -> Pack;",
       "",
       "  def main : Pack = Pack 1;",
       "}"
@@ -1198,7 +1198,7 @@ boundedConstructorForallProgram =
   unlines
     [ "module Main export (Pack(..), main) {",
       "  data Pack =",
-      "      Pack : forall (a >= Int). a -> Pack;",
+      "      Pack : ∀ (a ⩾ Int). a -> Pack;",
       "",
       "  def main : Pack = Pack 1;",
       "}"
@@ -1209,9 +1209,9 @@ dependentBoundedConstructorForallProgram =
   unlines
     [ "module Main export (Pack(..), main) {",
       "  data Pack =",
-      "      Pack : forall (a >= Int -> Int). a -> Pack;",
+      "      Pack : ∀ (a ⩾ Int -> Int). a -> Pack;",
       "",
-      "  def id : Int -> Int = \\x x;",
+      "  def id : Int -> Int = λx x;",
       "  def main : Pack = Pack id;",
       "}"
     ]
@@ -1312,7 +1312,7 @@ returnedClosureProgram =
   unlines
     [ "module Main export (main) {",
       "  def main : Int -> Int =",
-      "    let captured : Int = 41 in \\(x : Int) captured;",
+      "    let captured : Int = 41 in λ(x : Int) captured;",
       "}"
     ]
 
@@ -1321,7 +1321,7 @@ closureAliasCallProgram =
   unlines
     [ "module Main export (main) {",
       "  def main : Int =",
-      "    let f : Int -> Int = \\(x : Int) x in",
+      "    let f : Int -> Int = λ(x : Int) x in",
       "    let g : Int -> Int = f in",
       "    g 7;",
       "}"
@@ -1333,7 +1333,7 @@ capturedClosureCallProgram =
     [ "module Main export (main) {",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let f : Int -> Int = λ(x : Int) captured in",
       "    let g : Int -> Int = f in",
       "    g 0;",
       "}"
@@ -1343,10 +1343,10 @@ functionParameterClosureCallProgram :: String
 functionParameterClosureCallProgram =
   unlines
     [ "module Main export (main) {",
-      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def use : (Int -> Int) -> Int = λ(f : Int -> Int) f 1;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let f : Int -> Int = λ(x : Int) captured in",
       "    use f;",
       "}"
     ]
@@ -1355,7 +1355,7 @@ topLevelClosureCallProgram :: String
 topLevelClosureCallProgram =
   unlines
     [ "module Main export (main) {",
-      "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
+      "  def maker : Int -> Int = let captured : Int = 41 in λ(x : Int) captured;",
       "  def main : Int = maker 0;",
       "}"
     ]
@@ -1364,7 +1364,7 @@ polymorphicTopLevelClosureCallProgram :: String
 polymorphicTopLevelClosureCallProgram =
   unlines
     [ "module Main export (main) {",
-      "  def maker : forall a. a -> Int = let captured : Int = 41 in \\(x : a) captured;",
+      "  def maker : ∀ a. a -> Int = let captured : Int = 41 in λ(x : a) captured;",
       "  def main : Int = maker 0;",
       "}"
     ]
@@ -1373,12 +1373,12 @@ functionParameterNestedClosureAliasCallProgram :: String
 functionParameterNestedClosureAliasCallProgram =
   unlines
     [ "module Main export (main) {",
-      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "  def use : (Int -> Int) -> Int = λ(f : Int -> Int)",
       "    let g : Int -> Int = (let h : Int -> Int = f in h) in",
       "    g 1;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let f : Int -> Int = λ(x : Int) captured in",
       "    use f;",
       "}"
     ]
@@ -1387,13 +1387,13 @@ shadowedClosureLocalProgram :: String
 shadowedClosureLocalProgram =
   unlines
     [ "module Main export (main) {",
-      "  def id : Int -> Int = \\(x : Int) x;",
-      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "  def id : Int -> Int = λ(x : Int) x;",
+      "  def use : (Int -> Int) -> Int = λ(f : Int -> Int)",
       "    let h : Int -> Int = let f : Int -> Int = id in f in",
       "    h 0;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let f : Int -> Int = λ(x : Int) captured in",
       "    use f;",
       "}"
     ]
@@ -1403,13 +1403,13 @@ shadowedCaseClosureLocalProgram =
   unlines
     [ "module Main export (FnBox(..), main) {",
       "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
-      "  def id : Int -> Int = \\(x : Int) x;",
-      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "  def id : Int -> Int = λ(x : Int) x;",
+      "  def use : (Int -> Int) -> Int = λ(f : Int -> Int)",
       "    let g : Int -> Int = case FnBox id of { FnBox f -> f } in",
       "    g 0;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let f : Int -> Int = λ(x : Int) captured in",
       "    use f;",
       "}"
     ]
@@ -1419,8 +1419,8 @@ shadowedGlobalClosureHeadProgram =
   unlines
     [ "module Main export (FnBox(..), main) {",
       "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
-      "  def f : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
-      "  def id : Int -> Int = \\(x : Int) x;",
+      "  def f : Int -> Int = let captured : Int = 41 in λ(x : Int) captured;",
+      "  def id : Int -> Int = λ(x : Int) x;",
       "  def main : Int = case FnBox id of { FnBox f -> f 0 };",
       "}"
     ]
@@ -1432,7 +1432,7 @@ closureValuedConstructorFieldProgram =
       "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let f : Int -> Int = λ(x : Int) captured in",
       "    case FnBox f of { FnBox g -> g 0 };",
       "}"
     ]
@@ -1443,7 +1443,7 @@ returnedLetLambdaClosureProgram =
     [ "module Main export (main) {",
       "  def main : Int -> Int -> Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int -> Int = \\(x : Int) let y : Int = captured in \\(z : Int) y in",
+      "    let f : Int -> Int -> Int = λ(x : Int) let y : Int = captured in λ(z : Int) y in",
       "    f;",
       "}"
     ]
@@ -1475,7 +1475,7 @@ directLocalCallProgram =
   unlines
     [ "module Main export (main) {",
       "  def main : Int =",
-      "    let f : Int -> Int = \\(x : Int) x in f 7;",
+      "    let f : Int -> Int = λ(x : Int) x in f 7;",
       "}"
     ]
 
@@ -1483,8 +1483,8 @@ localDirectAliasPartialApplicationBaseProgram :: String
 localDirectAliasPartialApplicationBaseProgram =
   unlines
     [ "module Main export (main) {",
-      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def keepLeft : Int -> Int -> Int = λx λy x;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
       "  def main : Int = apply (keepLeft 1);",
       "}"
     ]
@@ -1504,7 +1504,7 @@ liftedRecursiveHelpersClosureNameProgram :: String
 liftedRecursiveHelpersClosureNameProgram =
   unlines
     [ "module Main export (main) {",
-      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def use : (Int -> Int) -> Int = λ(f : Int -> Int) f 1;",
       "  def main : Int = 0;",
       "}"
     ]

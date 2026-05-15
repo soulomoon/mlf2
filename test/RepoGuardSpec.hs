@@ -106,6 +106,47 @@ spec = describe "Repository guardrails" $ do
       $ \marker ->
         syntaxSrc `shouldSatisfy` (not . isInfixOf marker)
 
+  it "shared parser tokens expose canonical spellings only" $ do
+    commonSrc <- readFile "src/MLF/Parse/Common.hs"
+    forM_
+      [ "forallTok :: Parser ()",
+        "lambdaTok :: Parser ()",
+        "bigLambdaTok :: Parser ()",
+        "geTok :: Parser ()",
+        "bottomTok :: Parser ()",
+        "symbol \"forall\"",
+        "symbol \"\\\\\"",
+        "symbol \"Lambda\"",
+        "symbol \">=\"",
+        "symbol \"_|_\"",
+        "symbol \"bottom\""
+      ]
+      $ \marker ->
+        commonSrc `shouldSatisfy` (not . isInfixOf marker)
+    forM_
+      [ "canonicalForallTok :: Parser ()",
+        "canonicalLambdaTok :: Parser ()",
+        "canonicalBigLambdaTok :: Parser ()",
+        "canonicalGeTok :: Parser ()",
+        "canonicalBottomTok :: Parser ()"
+      ]
+      $ \marker ->
+        commonSrc `shouldSatisfy` isInfixOf marker
+
+  it "program parser keeps retired token aliases local to rejection tests" $ do
+    programParseSrc <- readFile "src/MLF/Frontend/Parse/Program.hs"
+    forM_
+      [ "symbol \"forall\"",
+        "symbol \"\\\\\"",
+        "symbol \">=\"",
+        "symbol \"mu\"",
+        "programForallTok",
+        "programGeTok",
+        "programLambdaTok"
+      ]
+      $ \marker ->
+        programParseSrc `shouldSatisfy` (not . isInfixOf marker)
+
   it "MLF.API no longer exports pipeline/runtime helpers and MLF.Pipeline owns them" $ do
     apiSrc <- readFile "src-public/MLF/API.hs"
     pipelineSrc <- readFile "src-public/MLF/Pipeline.hs"

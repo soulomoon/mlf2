@@ -8,9 +8,9 @@ module RecursiveExistential export (Nat(..), Expr(..), SomeExpr(..), unwrapSome,
     | Step : Expr a -> Expr a;
 
   data SomeExpr =
-      SomeExpr : forall a. Expr a -> SomeExpr;
+      SomeExpr : ∀ a. Expr a -> SomeExpr;
 
-  def unwrapSome : SomeExpr -> Bool = \(boxed) case boxed of {
+  def unwrapSome : SomeExpr -> Bool = λ(boxed) case boxed of {
     SomeExpr expr -> case expr of {
       DoneNat _ -> true;
       Step next -> unwrapSome (SomeExpr next)

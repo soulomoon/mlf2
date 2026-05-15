@@ -12,17 +12,17 @@ module ComplexRecursiveProgram export (Eq, Nat(..), Tree(..), eq, mirror, leftDe
       Leaf : Tree
     | Branch : Tree -> Tree -> Tree;
 
-  def mirror : Tree -> Tree = \(tree : Tree) case tree of {
+  def mirror : Tree -> Tree = λ(tree : Tree) case tree of {
     Leaf -> Leaf;
     Branch left right -> Branch (mirror right) (mirror left)
   };
 
-  def leftDepth : Tree -> Nat = \(tree : Tree) case tree of {
+  def leftDepth : Tree -> Nat = λ(tree : Tree) case tree of {
     Leaf -> Zero;
     Branch left _ -> Succ (leftDepth left)
   };
 
-  def rightDepth : Tree -> Nat = \(tree : Tree) case tree of {
+  def rightDepth : Tree -> Nat = λ(tree : Tree) case tree of {
     Leaf -> Zero;
     Branch _ right -> Succ (rightDepth right)
   };

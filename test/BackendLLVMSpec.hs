@@ -1669,7 +1669,7 @@ simpleFunctionProgram :: String
 simpleFunctionProgram =
   unlines
     [ "module Main export (id, main) {",
-      "  def id : Int -> Int = \\x x;",
+      "  def id : Int -> Int = λx x;",
       "  def main : Int = id 1;",
       "}"
     ]
@@ -1697,7 +1697,7 @@ ioDirectPrimitiveMainProgram =
   unlines
     [ "module Main export (main) {",
       "  import Prelude exposing (Unit(..), IO);",
-      "  def main : IO Unit = __io_bind (__io_pure Unit) (\\(_done : Unit) __io_putStrLn \"world\");",
+      "  def main : IO Unit = __io_bind (__io_pure Unit) (λ(_done : Unit) __io_putStrLn \"world\");",
       "}"
     ]
 
@@ -1706,8 +1706,8 @@ ioNestedPrimitiveMainProgram =
   unlines
     [ "module Main export (afterSecond, afterFirst, main) {",
       "  import Prelude exposing (Unit(..), IO);",
-      "  def afterSecond : Unit -> IO Unit = \\(_second : Unit) __io_putStrLn \"third\";",
-      "  def afterFirst : Unit -> IO Unit = \\(_first : Unit) __io_bind (__io_putStrLn \"second\") afterSecond;",
+      "  def afterSecond : Unit -> IO Unit = λ(_second : Unit) __io_putStrLn \"third\";",
+      "  def afterFirst : Unit -> IO Unit = λ(_first : Unit) __io_bind (__io_putStrLn \"second\") afterSecond;",
       "  def main : IO Unit = __io_bind (__io_putStrLn \"first\") afterFirst;",
       "}"
     ]
@@ -1744,7 +1744,7 @@ ioReadFileMainProgram =
   unlines
     [ "module Main export (main) {",
       "  import Prelude exposing (Unit(..), IO, readFile, putStrLn);",
-      "  def main : IO Unit = __io_bind (readFile \"/tmp/mlf2-test-read-input.txt\") (\\(contents : String) putStrLn contents);",
+      "  def main : IO Unit = __io_bind (readFile \"/tmp/mlf2-test-read-input.txt\") (λ(contents : String) putStrLn contents);",
       "}"
     ]
 
@@ -1771,7 +1771,7 @@ ioWriteIORefProgram =
   unlines
     [ "module Main export (writeIt, main) {",
       "  import Prelude exposing (Unit(..), IO, writeIORef, pure);",
-      "  def writeIt : IORef String -> String -> IO Unit = \\(ref : IORef String) \\(val : String) writeIORef ref val;",
+      "  def writeIt : IORef String -> String -> IO Unit = λ(ref : IORef String) λ(val : String) writeIORef ref val;",
       "  def main : IO Unit = pure Unit;",
       "}"
     ]
@@ -1790,7 +1790,7 @@ ioReadIORefProgram =
   unlines
     [ "module Main export (readIt, main) {",
       "  import Prelude exposing (Unit(..), IO, readIORef, pure);",
-      "  def readIt : IORef String -> IO String = \\(ref : IORef String) readIORef ref;",
+      "  def readIt : IORef String -> IO String = λ(ref : IORef String) readIORef ref;",
       "  def main : IO Unit = pure Unit;",
       "}"
     ]
@@ -1800,7 +1800,7 @@ pureMainIODependencyProgram =
   unlines
     [ "module Main export (main) {",
       "  import Prelude exposing (Unit(..), IO, pure);",
-      "  def discard : IO Unit -> Unit = \\(_action : IO Unit) Unit;",
+      "  def discard : IO Unit -> Unit = λ(_action : IO Unit) Unit;",
       "  def main : Unit = discard (pure Unit);",
       "}"
     ]
@@ -1810,7 +1810,7 @@ pureMainDirectIOPrimitiveProgram =
   unlines
     [ "module Main export (main) {",
       "  import Prelude exposing (Unit(..), IO);",
-      "  def main : Unit = (\\(_action : IO Unit) Unit) (__io_pure Unit);",
+      "  def main : Unit = (λ(_action : IO Unit) Unit) (__io_pure Unit);",
       "}"
     ]
 
@@ -1907,12 +1907,12 @@ recursiveListProgram =
       "      RNil : RList",
       "    | RCons : Nat -> RList -> RList;",
       "",
-      "  def tailOrNil : RList -> RList = \\(xs : RList) case xs of {",
+      "  def tailOrNil : RList -> RList = λ(xs : RList) case xs of {",
       "    RNil -> RNil;",
       "    RCons _ rest -> rest",
       "  };",
       "",
-      "  def isNil : RList -> Bool = \\(xs : RList) case xs of {",
+      "  def isNil : RList -> Bool = λ(xs : RList) case xs of {",
       "    RNil -> true;",
       "    RCons _ _ -> false",
       "  };",
@@ -1926,9 +1926,9 @@ localFirstClassPolymorphismProgram =
   unlines
     [ "module Main export (main) {",
       "  def main : Bool =",
-      "    let usePoly : (forall a. a -> a) -> Bool =",
-      "      \\(poly : forall a. a -> a) let keepInt = poly 1 in poly true",
-      "    in let id : forall a. a -> a = \\x x in usePoly id;",
+      "    let usePoly : (∀ a. a -> a) -> Bool =",
+      "      λ(poly : ∀ a. a -> a) let keepInt = poly 1 in poly true",
+      "    in let id : ∀ a. a -> a = λx x in usePoly id;",
       "}"
     ]
 
@@ -1936,7 +1936,7 @@ sourceEscapingPolymorphicMainProgram :: String
 sourceEscapingPolymorphicMainProgram =
   unlines
     [ "module Main export (main) {",
-      "  def main : forall a. a -> a = \\x x;",
+      "  def main : ∀ a. a -> a = λx x;",
       "}"
     ]
 
@@ -1944,8 +1944,8 @@ firstClassFunctionArgumentProgram :: String
 firstClassFunctionArgumentProgram =
   unlines
     [ "module Main export (main) {",
-      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
-      "  def main : Int = use (\\(x : Int) x);",
+      "  def use : (Int -> Int) -> Int = λ(f : Int -> Int) f 1;",
+      "  def main : Int = use (λ(x : Int) x);",
       "}"
     ]
 
@@ -1953,8 +1953,8 @@ typeAppliedGlobalStaticAliasProgram :: String
 typeAppliedGlobalStaticAliasProgram =
   unlines
     [ "module Main export (main) {",
-      "  def id : forall a. a -> a = \\x x;",
-      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def id : ∀ a. a -> a = λx x;",
+      "  def use : (Int -> Int) -> Int = λ(f : Int -> Int) f 1;",
       "  def main : Int = use id;",
       "}"
     ]
@@ -1964,9 +1964,9 @@ constructorFirstClassPolymorphismProgram =
   unlines
     [ "module Main export (PolyBox(..), main) {",
       "  data PolyBox =",
-      "      PolyBox : (forall a. a -> a) -> PolyBox;",
+      "      PolyBox : (∀ a. a -> a) -> PolyBox;",
       "",
-      "  def main : Bool = case PolyBox (\\x x) of {",
+      "  def main : Bool = case PolyBox (λx x) of {",
       "    PolyBox poly -> let keepInt = poly 1 in poly true",
       "  };",
       "}"
@@ -2016,11 +2016,11 @@ ordinaryFunctionEvidenceMethodProgram =
       "  }",
       "",
       "  instance C Int {",
-      "    apply = \\f \\x f x;",
+      "    apply = λf λx f x;",
       "  }",
       "",
-      "  def idInt : Int -> Int = \\x x;",
-      "  def use : C a => (a -> a) -> a -> a = \\f \\x apply f x;",
+      "  def idInt : Int -> Int = λx x;",
+      "  def use : C a => (a -> a) -> a -> a = λf λx apply f x;",
       "  def main : Int = use idInt 1;",
       "}"
     ]
@@ -2033,8 +2033,8 @@ sourceTopLevelRecursiveHigherOrderProgram =
       "      Zero : Nat",
       "    | Succ : Nat -> Nat;",
       "",
-      "  def idInt : Int -> Int = \\(x : Int) x;",
-      "  def loop : (Int -> Int) -> Nat -> Int = \\(f : Int -> Int) \\(n : Nat) case n of {",
+      "  def idInt : Int -> Int = λ(x : Int) x;",
+      "  def loop : (Int -> Int) -> Nat -> Int = λ(f : Int -> Int) λ(n : Nat) case n of {",
       "    Zero -> f 1;",
       "    Succ inner -> loop f inner",
       "  };",
@@ -2051,8 +2051,8 @@ sourceLocalRecursiveHigherOrderProgram =
       "    | Succ : Nat -> Nat;",
       "",
       "  def main : Int =",
-      "    let idInt : Int -> Int = \\(x : Int) x in",
-      "    let loop : (Int -> Int) -> Nat -> Int = \\(f : Int -> Int) \\(n : Nat) case n of {",
+      "    let idInt : Int -> Int = λ(x : Int) x in",
+      "    let loop : (Int -> Int) -> Nat -> Int = λ(f : Int -> Int) λ(n : Nat) case n of {",
       "      Zero -> f 1;",
       "      Succ inner -> loop f inner",
       "    } in",
@@ -2069,10 +2069,10 @@ localFunctionEvidenceMethodProgram =
       "  }",
       "",
       "  instance C Int {",
-      "    apply = \\f \\x f x;",
+      "    apply = λf λx f x;",
       "  }",
       "",
-      "  def use : C a => a -> a = \\x let f : a -> a = \\y y in apply f x;",
+      "  def use : C a => a -> a = λx let f : a -> a = λy y in apply f x;",
       "  def main : Int = use 1;",
       "}"
     ]
@@ -4095,7 +4095,7 @@ sourceCapturedClosureCallProgram =
     [ "module Main export (main) {",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let f : Int -> Int = λ(x : Int) captured in",
       "    let g : Int -> Int = f in",
       "    g 0;",
       "}"
@@ -4105,10 +4105,10 @@ sourceFunctionParameterClosureCallProgram :: String
 sourceFunctionParameterClosureCallProgram =
   unlines
     [ "module Main export (main) {",
-      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def use : (Int -> Int) -> Int = λ(f : Int -> Int) f 1;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let f : Int -> Int = λ(x : Int) captured in",
       "    use f;",
       "}"
     ]
@@ -4117,10 +4117,10 @@ sourceFunctionParameterClosureAliasCallProgram :: String
 sourceFunctionParameterClosureAliasCallProgram =
   unlines
     [ "module Main export (main) {",
-      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) let g : Int -> Int = f in g 1;",
+      "  def use : (Int -> Int) -> Int = λ(f : Int -> Int) let g : Int -> Int = f in g 1;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let f : Int -> Int = λ(x : Int) captured in",
       "    use f;",
       "}"
     ]
@@ -4130,7 +4130,7 @@ sourceReturnedClosureProgram =
   unlines
     [ "module Main export (main) {",
       "  def main : Int -> Int =",
-      "    let captured : Int = 41 in \\(x : Int) captured;",
+      "    let captured : Int = 41 in λ(x : Int) captured;",
       "}"
     ]
 
@@ -4138,7 +4138,7 @@ sourceTopLevelClosureCallProgram :: String
 sourceTopLevelClosureCallProgram =
   unlines
     [ "module Main export (main) {",
-      "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
+      "  def maker : Int -> Int = let captured : Int = 41 in λ(x : Int) captured;",
       "  def main : Int = maker 0;",
       "}"
     ]
@@ -4149,7 +4149,7 @@ sourceLocalReturnedClosureCallProgram =
     [ "module Main export (main) {",
       "  def main : Int =",
       "    let make : Int -> (Int -> Int) =",
-      "      \\(base : Int) let captured : Int = base in \\(x : Int) captured in",
+      "      λ(base : Int) let captured : Int = base in λ(x : Int) captured in",
       "    (make 41) 0;",
       "}"
     ]
@@ -4160,7 +4160,7 @@ sourceLetBoundReturnedClosureRecordCallProgram =
     [ "module Main export (main) {",
       "  def main : Int =",
       "    let f : Int -> Int =",
-      "      ((\\(base : Int) let captured : Int = base in \\(x : Int) captured) 41) in",
+      "      ((λ(base : Int) let captured : Int = base in λ(x : Int) captured) 41) in",
       "    f 0;",
       "}"
     ]
@@ -4170,7 +4170,7 @@ sourceDirectReturnedClosureApplicationProgram =
   unlines
     [ "module Main export (main) {",
       "  def main : Int =",
-      "    (\\(base : Int) let captured : Int = base in \\(x : Int) captured) 41 0;",
+      "    (λ(base : Int) let captured : Int = base in λ(x : Int) captured) 41 0;",
       "}"
     ]
 
@@ -4178,8 +4178,8 @@ sourceTopLevelPartialApplicationProgram :: String
 sourceTopLevelPartialApplicationProgram =
   unlines
     [ "module Main export (main) {",
-      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def keepLeft : Int -> Int -> Int = λx λy x;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
       "  def main : Int = apply (keepLeft 1);",
       "}"
     ]
@@ -4188,9 +4188,9 @@ sourceLocalPartialApplicationProgram :: String
 sourceLocalPartialApplicationProgram =
   unlines
     [ "module Main export (main) {",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
       "  def main : Int =",
-      "    let keepLeft : Int -> Int -> Int = \\x \\y x",
+      "    let keepLeft : Int -> Int -> Int = λx λy x",
       "    in apply (keepLeft 1);",
       "}"
     ]
@@ -4199,11 +4199,11 @@ sourcePartialApplicationClosureArgumentProgram :: String
 sourcePartialApplicationClosureArgumentProgram =
   unlines
     [ "module Main export (main) {",
-      "  def choose : (Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def choose : (Int -> Int) -> Int -> Int -> Int = λf λignored λx f x;",
+      "  def apply : (Int -> Int) -> Int = λf f 4;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let inc : Int -> Int = \\(x : Int) captured in",
+      "    let inc : Int -> Int = λ(x : Int) captured in",
       "    apply (choose inc 0);",
       "}"
     ]
@@ -4212,11 +4212,11 @@ sourcePartialApplicationGlobalClosureArgumentProgram :: String
 sourcePartialApplicationGlobalClosureArgumentProgram =
   unlines
     [ "module Main export (main) {",
-      "  def choose : (Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def choose : (Int -> Int) -> Int -> Int -> Int = λf λignored λx f x;",
+      "  def apply : (Int -> Int) -> Int = λf f 4;",
       "  def globalInc : Int -> Int =",
       "    let captured : Int = 41 in",
-      "    \\(x : Int) captured;",
+      "    λ(x : Int) captured;",
       "  def main : Int = apply (choose globalInc 0);",
       "}"
     ]
@@ -4225,9 +4225,9 @@ sourcePartialApplicationClosureParameterProgram :: String
 sourcePartialApplicationClosureParameterProgram =
   unlines
     [ "module Main export (main) {",
-      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
-      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def keepLeft : Int -> Int -> Int = λx λy x;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = λf apply (f 1);",
       "  def main : Int = use keepLeft;",
       "}"
     ]
@@ -4236,9 +4236,9 @@ sourcePartialApplicationClosureDemandAliasProgram :: String
 sourcePartialApplicationClosureDemandAliasProgram =
   unlines
     [ "module Main export (main) {",
-      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
-      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def keepLeft : Int -> Int -> Int = λx λy x;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = λf apply (f 1);",
       "  def useAlias : (Int -> Int -> Int) -> Int = use;",
       "  def main : Int = useAlias keepLeft;",
       "}"
@@ -4248,9 +4248,9 @@ sourcePartialApplicationClosureDemandWrappedAliasProgram :: String
 sourcePartialApplicationClosureDemandWrappedAliasProgram =
   unlines
     [ "module Main export (main) {",
-      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
-      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def keepLeft : Int -> Int -> Int = λx λy x;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = λf apply (f 1);",
       "  def useWrapped : (Int -> Int -> Int) -> Int =",
       "    let f : (Int -> Int -> Int) -> Int = use in f;",
       "  def main : Int = useWrapped keepLeft;",
@@ -4261,10 +4261,10 @@ sourcePartialApplicationClosureDemandEtaAliasProgram :: String
 sourcePartialApplicationClosureDemandEtaAliasProgram =
   unlines
     [ "module Main export (main) {",
-      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
-      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
-      "  def useAfter : Int -> (Int -> Int -> Int) -> Int = \\n use;",
+      "  def keepLeft : Int -> Int -> Int = λx λy x;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = λf apply (f 1);",
+      "  def useAfter : Int -> (Int -> Int -> Int) -> Int = λn use;",
       "  def main : Int = useAfter 0 keepLeft;",
       "}"
     ]
@@ -4273,10 +4273,10 @@ sourcePartialApplicationLocalClosureDemandProgram :: String
 sourcePartialApplicationLocalClosureDemandProgram =
   unlines
     [ "module Main export (main) {",
-      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def keepLeft : Int -> Int -> Int = λx λy x;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
       "  def main : Int =",
-      "    let use : (Int -> Int -> Int) -> Int = \\f apply (f 1)",
+      "    let use : (Int -> Int -> Int) -> Int = λf apply (f 1)",
       "    in use keepLeft;",
       "}"
     ]
@@ -4289,9 +4289,9 @@ sourceClosureDemandAfterEvidenceProgram =
       "  }",
       "  instance Marker Bool {",
       "  }",
-      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
-      "  def use : Marker Bool => (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def keepLeft : Int -> Int -> Int = λx λy x;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
+      "  def use : Marker Bool => (Int -> Int -> Int) -> Int = λf apply (f 1);",
       "  def main : Int = use keepLeft;",
       "}"
     ]
@@ -4304,10 +4304,10 @@ sourceConstrainedPartialApplicationProgram =
       "    pick : a -> a -> a;",
       "  }",
       "  instance Pick Int {",
-      "    pick = \\x \\y x;",
+      "    pick = λx λy x;",
       "  }",
-      "  def keep : Pick Int => Int -> Int -> Int = \\x \\y pick x y;",
-      "  def apply : (Int -> Int) -> Int = \\f f 1;",
+      "  def keep : Pick Int => Int -> Int -> Int = λx λy pick x y;",
+      "  def apply : (Int -> Int) -> Int = λf f 1;",
       "  def main : Int = apply (keep 1);",
       "}"
     ]
@@ -4320,11 +4320,11 @@ sourceConstrainedPartialApplicationAliasProgram =
       "    pick : a -> a -> a;",
       "  }",
       "  instance Pick Int {",
-      "    pick = \\x \\y x;",
+      "    pick = λx λy x;",
       "  }",
-      "  def keep : Pick Int => Int -> Int -> Int = \\x \\y pick x y;",
+      "  def keep : Pick Int => Int -> Int -> Int = λx λy pick x y;",
       "  def keepAlias : Pick Int => Int -> Int -> Int = keep;",
-      "  def apply : (Int -> Int) -> Int = \\f f 1;",
+      "  def apply : (Int -> Int) -> Int = λf f 1;",
       "  def main : Int = apply (keepAlias 1);",
       "}"
     ]
@@ -4333,9 +4333,9 @@ sourcePartialApplicationGeneratedNameCollisionProgram :: String
 sourcePartialApplicationGeneratedNameCollisionProgram =
   unlines
     [ "module Main export (main) {",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
       "  def main : Int =",
-      "    let __mlfp_partial_capture0 : Int -> Int -> Int = \\x \\y x in",
+      "    let __mlfp_partial_capture0 : Int -> Int -> Int = λx λy x in",
       "    apply (__mlfp_partial_capture0 1);",
       "}"
     ]
@@ -4344,9 +4344,9 @@ sourcePartialApplicationDirectFunctionArgumentProgram :: String
 sourcePartialApplicationDirectFunctionArgumentProgram =
   unlines
     [ "module Main export (main) {",
-      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
-      "  def choose : (Int -> Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x ignored;",
-      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def keepLeft : Int -> Int -> Int = λx λy x;",
+      "  def choose : (Int -> Int -> Int) -> Int -> Int -> Int = λf λignored λx f x ignored;",
+      "  def apply : (Int -> Int) -> Int = λf f 4;",
       "  def main : Int = apply (choose keepLeft 0);",
       "}"
     ]
@@ -4355,9 +4355,9 @@ sourceClosureDemandLetHeadedCallProgram :: String
 sourceClosureDemandLetHeadedCallProgram =
   unlines
     [ "module Main export (main) {",
-      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
-      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
+      "  def keepLeft : Int -> Int -> Int = λx λy x;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = λf apply (f 1);",
       "  def main : Int =",
       "    (let f : (Int -> Int -> Int) -> Int = use in f) keepLeft;",
       "}"
@@ -4367,10 +4367,10 @@ sourceClosureDemandEtaCallHeadProgram :: String
 sourceClosureDemandEtaCallHeadProgram =
   unlines
     [ "module Main export (main) {",
-      "  def keepLeft : Int -> Int -> Int = \\x \\y x;",
-      "  def apply : (Int -> Int) -> Int = \\f f 2;",
-      "  def use : (Int -> Int -> Int) -> Int = \\f apply (f 1);",
-      "  def main : Int = (\\(u : Int -> Int -> Int) use u) keepLeft;",
+      "  def keepLeft : Int -> Int -> Int = λx λy x;",
+      "  def apply : (Int -> Int) -> Int = λf f 2;",
+      "  def use : (Int -> Int -> Int) -> Int = λf apply (f 1);",
+      "  def main : Int = (λ(u : Int -> Int -> Int) use u) keepLeft;",
       "}"
     ]
 
@@ -4378,10 +4378,10 @@ sourcePartialApplicationPolymorphicArgumentProgram :: String
 sourcePartialApplicationPolymorphicArgumentProgram =
   unlines
     [ "module Main export (main) {",
-      "  def id : forall a. a -> a = \\x x;",
-      "  def usePoly : (forall a. a -> a) -> Int -> Bool =",
-      "    \\poly \\ignored let keepInt : Int = poly 1 in poly true;",
-      "  def apply : (Int -> Bool) -> Bool = \\f f 0;",
+      "  def id : ∀ a. a -> a = λx x;",
+      "  def usePoly : (∀ a. a -> a) -> Int -> Bool =",
+      "    λpoly λignored let keepInt : Int = poly 1 in poly true;",
+      "  def apply : (Int -> Bool) -> Bool = λf f 0;",
       "  def main : Bool = apply (usePoly id);",
       "}"
     ]
@@ -4390,11 +4390,11 @@ sourcePartialApplicationHigherRankFunctionArgumentProgram :: String
 sourcePartialApplicationHigherRankFunctionArgumentProgram =
   unlines
     [ "module Main export (main) {",
-      "  def id : forall a. a -> a = \\x x;",
-      "  def idScore : (forall a. a -> a) -> Int = \\poly poly 1;",
-      "  def useHigher : ((forall a. a -> a) -> Int) -> Int -> Int =",
-      "    \\score \\ignored score id;",
-      "  def apply : (Int -> Int) -> Int = \\f f 0;",
+      "  def id : ∀ a. a -> a = λx x;",
+      "  def idScore : (∀ a. a -> a) -> Int = λpoly poly 1;",
+      "  def useHigher : ((∀ a. a -> a) -> Int) -> Int -> Int =",
+      "    λscore λignored score id;",
+      "  def apply : (Int -> Int) -> Int = λf f 0;",
       "  def main : Int = apply (useHigher idScore);",
       "}"
     ]
@@ -4403,12 +4403,12 @@ sourceClosureDemandedInlineFunctionArgumentProgram :: String
 sourceClosureDemandedInlineFunctionArgumentProgram =
   unlines
     [ "module Main export (main) {",
-      "  def choose : (Int -> Int -> Int) -> Int -> Int -> Int = \\f \\ignored \\x f x ignored;",
-      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def choose : (Int -> Int -> Int) -> Int -> Int -> Int = λf λignored λx f x ignored;",
+      "  def apply : (Int -> Int) -> Int = λf f 4;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let use : (Int -> Int -> Int) -> Int = \\fn apply (choose fn 0) in",
-      "    use (\\x \\y captured);",
+      "    let use : (Int -> Int -> Int) -> Int = λfn apply (choose fn 0) in",
+      "    use (λx λy captured);",
       "}"
     ]
 
@@ -4416,11 +4416,11 @@ sourcePartialApplicationNonVariableCalleeProgram :: String
 sourcePartialApplicationNonVariableCalleeProgram =
   unlines
     [ "module Main export (main) {",
-      "  def make : Int -> Int -> Int -> Int = \\base \\ignored \\x base;",
-      "  def apply : (Int -> Int) -> Int = \\f f 4;",
+      "  def make : Int -> Int -> Int -> Int = λbase λignored λx base;",
+      "  def apply : (Int -> Int) -> Int = λf f 4;",
       "  def main : Int =",
       "    let base : Int = 1 in",
-      "    apply (((\\z make z) base) 2);",
+      "    apply (((λz make z) base) 2);",
       "}"
     ]
 
@@ -4428,7 +4428,7 @@ sourcePolymorphicTopLevelClosureCallProgram :: String
 sourcePolymorphicTopLevelClosureCallProgram =
   unlines
     [ "module Main export (main) {",
-      "  def maker : forall a. a -> Int = let captured : Int = 41 in \\(x : a) captured;",
+      "  def maker : ∀ a. a -> Int = let captured : Int = 41 in λ(x : a) captured;",
       "  def main : Int = maker 0;",
       "}"
     ]
@@ -4437,8 +4437,8 @@ sourceTopLevelClosureArgumentProgram :: String
 sourceTopLevelClosureArgumentProgram =
   unlines
     [ "module Main export (main) {",
-      "  def maker : Int -> Int = let captured : Int = 41 in \\(x : Int) captured;",
-      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int) f 1;",
+      "  def maker : Int -> Int = let captured : Int = 41 in λ(x : Int) captured;",
+      "  def use : (Int -> Int) -> Int = λ(f : Int -> Int) f 1;",
       "  def main : Int = use maker;",
       "}"
     ]
@@ -4447,12 +4447,12 @@ sourceFunctionParameterNestedClosureAliasCallProgram :: String
 sourceFunctionParameterNestedClosureAliasCallProgram =
   unlines
     [ "module Main export (main) {",
-      "  def use : (Int -> Int) -> Int = \\(f : Int -> Int)",
+      "  def use : (Int -> Int) -> Int = λ(f : Int -> Int)",
       "    let g : Int -> Int = (let h : Int -> Int = f in h) in",
       "    g 1;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let f : Int -> Int = λ(x : Int) captured in",
       "    use f;",
       "}"
     ]
@@ -4463,7 +4463,7 @@ sourceReturnedLetLambdaClosureProgram =
     [ "module Main export (main) {",
       "  def main : Int -> Int -> Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int -> Int = \\(x : Int) let y : Int = captured in \\(z : Int) y in",
+      "    let f : Int -> Int -> Int = λ(x : Int) let y : Int = captured in λ(z : Int) y in",
       "    f;",
       "}"
     ]
@@ -4472,7 +4472,7 @@ sourceReturnedLetLambdaShadowingProgram :: String
 sourceReturnedLetLambdaShadowingProgram =
   unlines
     [ "module Main export (main) {",
-      "  def make : Int -> Int = let y : Int = 1 in \\(y : Int) y;",
+      "  def make : Int -> Int = let y : Int = 1 in λ(y : Int) y;",
       "  def main : Int = make 7;",
       "}"
     ]
@@ -4484,7 +4484,7 @@ sourceClosureValuedConstructorFieldProgram =
       "  data FnBox = FnBox : (Int -> Int) -> FnBox;",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let f : Int -> Int = \\(x : Int) captured in",
+      "    let f : Int -> Int = λ(x : Int) captured in",
       "    case FnBox f of { FnBox g -> g 0 };",
       "}"
     ]
@@ -4497,8 +4497,8 @@ sourceCaseReturnedGlobalFunctionProgram =
       "      ChoiceSome : (Int -> Int) -> Choice",
       "    | ChoiceNone : Choice;",
       "",
-      "  def helper : Int -> Int = \\(x : Int) x;",
-      "  def pick : Choice -> (Int -> Int) = \\(choice : Choice) case choice of {",
+      "  def helper : Int -> Int = λ(x : Int) x;",
+      "  def pick : Choice -> (Int -> Int) = λ(choice : Choice) case choice of {",
       "    ChoiceSome f -> f;",
       "    ChoiceNone -> helper",
       "  };",
@@ -4514,14 +4514,14 @@ sourceCaseParameterClosureFieldProgram =
       "      ChoiceSome : (Int -> Int) -> Choice",
       "    | ChoiceNone : Choice;",
       "",
-      "  def helper : Int -> Int = \\(x : Int) x;",
-      "  def pick : Choice -> (Int -> Int) = \\(choice : Choice) case choice of {",
+      "  def helper : Int -> Int = λ(x : Int) x;",
+      "  def pick : Choice -> (Int -> Int) = λ(choice : Choice) case choice of {",
       "    ChoiceSome f -> f;",
       "    ChoiceNone -> helper",
       "  };",
       "  def main : Int =",
       "    let captured : Int = 41 in",
-      "    let local : Int -> Int = \\(x : Int) captured in",
+      "    let local : Int -> Int = λ(x : Int) captured in",
       "    (pick (ChoiceSome local)) 0;",
       "}"
     ]

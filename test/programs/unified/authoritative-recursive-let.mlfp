@@ -4,7 +4,7 @@ module Main export (Nat(..), main) {
     | Succ : Nat -> Nat;
 
   def main : Bool =
-    let peel : Nat -> Nat = \(n : Nat) case n of {
+    let peel : Nat -> Nat = λ(n : Nat) case n of {
       Zero -> Zero;
       Succ inner -> peel inner
     } in

@@ -75,8 +75,8 @@ _Avoid_: diagnostic text, frontend source error, LLVM lowering error
 - Conversion must normalize source-local structural recursive names to canonical backend data identities before backend validation; unresolved or ambiguous names fail in conversion rather than widening **Backend Structural Recursive Data Matching**.
 - Conversion normalization rewrites backend type shapes to canonical backend names; it does not preserve source-local structural names behind a side map or later recovery hint.
 - Conversion normalization also resolves representation-level nominal data aliases such as `BTCon` versus `BTBase` before **Backend Structural Recursive Data Matching**; the shared matcher compares one canonical backend representation rather than treating representation aliases as peer identity rules.
-- **Backend Structural Recursive Data Matching** tests cover the private matcher directly for exact identity, recursive payload cycle guards, substitution mismatch, extra or missing constructors, and metadata-light evidence limits.
-- Adapter regression tests also validate, convert, and lower the same recursive ADT shape through public backend paths so the validation, conversion, and LLVM lowering adapters cannot drift independently.
+- The **Backend Structural Recursive Data Matching** implementation handoff requires private matcher tests for exact identity, recursive payload cycle guards, substitution mismatch, extra or missing constructors, and metadata-light evidence limits.
+- The implementation handoff also requires adapter regression tests that validate, convert, and lower the same recursive ADT shape through public backend paths so the validation, conversion, and LLVM lowering adapters cannot drift independently.
 
 ## Example Dialogue
 

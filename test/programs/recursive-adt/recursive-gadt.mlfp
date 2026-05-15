@@ -7,7 +7,7 @@ module RecursiveGadt export (Nat(..), Expr(..), doneNow, main) {
       DoneNat : Nat -> Expr Nat
     | Step : Expr a -> Expr a;
 
-  def doneNow : Expr a -> Bool = \(expr) case expr of {
+  def doneNow : Expr a -> Bool = λ(expr) case expr of {
     DoneNat _ -> true;
     Step next -> doneNow next
   };

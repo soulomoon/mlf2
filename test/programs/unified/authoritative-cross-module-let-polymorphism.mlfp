@@ -1,5 +1,5 @@
 module Core export (applyId) {
-  def applyId : Int = let id = \x x in id 1;
+  def applyId : Int = let id = λx x in id 1;
 }
 
 module User export (main) {

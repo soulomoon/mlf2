@@ -45,9 +45,9 @@ path should not convert `PresolutionView` back into `Solved` merely to reify.
 Parser support for legacy syntax and ASCII aliases is also in scope for
 retirement. The accepted language should follow the paper-aligned canonical
 syntax exactly unless a specific thesis-faithfulness reason keeps a spelling.
-This applies uniformly to frontend eMLF and explicit xMLF parsers; keeping
-aliases in one parser family while retiring them in the other is not the target
-language contract.
+This applies uniformly to frontend eMLF, explicit xMLF, and `.mlfp` program
+parsers; keeping aliases in one parser family while retiring them in another is
+not the target language contract.
 
 ## Consequences
 
@@ -57,7 +57,7 @@ language contract.
   grammar shapes or ASCII aliases unless the test documents a paper-backed
   exception.
 - Parser cleanup should retire aliases and legacy grammar shapes consistently in
-  both frontend eMLF and explicit xMLF parser tests.
+  frontend eMLF, explicit xMLF, and `.mlfp` program parser tests.
 - Parser cleanup should add focused rejection tests for retired aliases and
   legacy grammar shapes, alongside positive tests for the canonical Unicode
   syntax.

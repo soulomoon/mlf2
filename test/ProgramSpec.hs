@@ -39,7 +39,7 @@ import Parity.ProgramMatrix
 spec :: Spec
 spec = do
     describe "MLF.Program source type finalization" $ do
-        it "matches variable-headed applications through forall alpha-renaming" $ do
+        it "matches variable-headed applications through ∀ alpha-renaming" $ do
             let expected =
                     STForall
                         "f"
@@ -58,7 +58,7 @@ spec = do
                         )
             sourceForallMatches expected actual `shouldBe` True
 
-        it "matches repeated substitutions whose forall bounds rename their own binder" $ do
+        it "matches repeated substitutions whose ∀ bounds rename their own binder" $ do
             let bounded name =
                     STForall
                         name
@@ -285,7 +285,7 @@ spec = do
                     unlines
                         [ "module Main export (Functor, Higher(..)) {"
                         , "  class Functor (f :: * -> *) {"
-                        , "    identity : forall a. a -> a;"
+                        , "    identity : ∀ a. a -> a;"
                         , "  }"
                         , ""
                         , "  data Higher (p :: * -> * -> *) a ="
@@ -305,7 +305,7 @@ spec = do
                     unlines
                         [ "module Main export (Functor, Higher(..)) {"
                         , "  class Functor (f :: * -> *) {"
-                        , "    map : forall a b. (a -> b) -> f a -> f b;"
+                        , "    map : ∀ a b. (a -> b) -> f a -> f b;"
                         , "  }"
                         , ""
                         , "  data Higher (f :: * -> *) a ="
@@ -345,32 +345,42 @@ spec = do
                 other -> expectationFailure ("unexpected program shape: " ++ show other)
             parseRawProgram (prettyProgram program) `shouldBe` Right program
 
-        it "rejects malformed ascii recursive types before variable-headed application fallback" $ do
-            let programText =
-                    unlines
+        it "rejects retired ASCII token aliases on the program surface" $ do
+            let rejectedPrograms =
+                    [ unlines
                         [ "module Main export (main) {"
-                        , "  def main : mu a = 1;"
+                        , "  def main : forall a. a -> a = λx x;"
                         , "}"
                         ]
-            case parseRawProgram programText of
-                Left err -> renderProgramParseError err `shouldSatisfy` (not . null)
-                Right program -> expectationFailure ("expected parse error, got: " ++ show program)
+                    , unlines
+                        [ "module Main export (main) {"
+                        , "  def main : ∀(a >= Int). a -> a = λx x;"
+                        , "}"
+                        ]
+                    , unlines
+                        [ "module Main export (main) {"
+                        , "  def main : Int = \\x x;"
+                        , "}"
+                        ]
+                    , unlines
+                        [ "module Main export (main) {"
+                        , "  def main : mu a. a = 1;"
+                        , "}"
+                        ]
+                    , unlines
+                        [ "module Main export (main) {"
+                        , "  def main : bottom = 1;"
+                        , "}"
+                        ]
+                    , unlines
+                        [ "module Main export (main) {"
+                        , "  def main : _|_ = 1;"
+                        , "}"
+                        ]
+                    ]
+            mapM_ (`shouldSatisfy` isLeft) (map parseRawProgram rejectedPrograms)
 
-        it "rejects retired bottom aliases on the program surface" $
-            mapM_
-                ( \alias ->
-                    parseRawProgram
-                        ( unlines
-                            [ "module Main export (main) {"
-                            , "  def main : " ++ alias ++ " = 1;"
-                            , "}"
-                            ]
-                        )
-                        `shouldSatisfy` isLeft
-                )
-                ["bottom", "_|_"]
-
-        it "rejects program forall binders without the required dot" $
+        it "rejects program ∀ binders without the required dot" $
             mapM_
                 ( \ty ->
                     parseRawProgram
@@ -382,7 +392,7 @@ spec = do
                         )
                         `shouldSatisfy` isLeft
                 )
-                ["forall a Int", "∀a Int"]
+                ["∀ a Int", "∀a Int"]
 
     describe "MLF.Program shared runtime-success parity surface" $ do
         mapM_ runProgramRuntimeCase programRuntimeSuccessCases
@@ -410,7 +420,7 @@ spec = do
                         [ "module Main export (pureUnit, main) {"
                         , "  import Prelude exposing (Unit(..), IO, Monad, pure, bind, putStrLn);"
                         , "  def pureUnit : IO Unit = pure Unit;"
-                        , "  def after : Unit -> IO Unit = \\_done putStrLn \"world\";"
+                        , "  def after : Unit -> IO Unit = λ_done putStrLn \"world\";"
                         , "  def main : IO Unit = bind (putStrLn \"hello\") after;"
                         , "}"
                         ]
@@ -422,7 +432,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (Unit(..), IO);"
-                        , "  def main : IO Unit = __io_bind (__io_pure Unit) (\\(_n : Unit) __io_putStrLn \"world\");"
+                        , "  def main : IO Unit = __io_bind (__io_pure Unit) (λ(_n : Unit) __io_putStrLn \"world\");"
                         , "}"
                         ]
             checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isRight
@@ -433,7 +443,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (Unit(..), IO);"
-                        , "  def main : IO Unit = __io_bind (__io_pure 1) (\\(_n : Unit) __io_putStrLn \"world\");"
+                        , "  def main : IO Unit = __io_bind (__io_pure 1) (λ(_n : Unit) __io_putStrLn \"world\");"
                         , "}"
                         ]
             checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isLeft
@@ -455,7 +465,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (Unit(..), IO);"
-                        , "  def main : IO Unit = \\x x;"
+                        , "  def main : IO Unit = λx x;"
                         , "}"
                         ]
             checkLocatedProgram (withPreludeLocated identityLocated) `shouldSatisfy` either
@@ -468,7 +478,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (IO);"
-                        , "  def main : forall a. IO a = __io_pure 1;"
+                        , "  def main : ∀ a. IO a = __io_pure 1;"
                         , "}"
                         ]
             checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
@@ -481,7 +491,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (Unit(..), IO, bind, putStrLn);"
-                        , "  def main : IO Unit = bind (__io_pure 1) (\\(_n : Unit) putStrLn \"world\");"
+                        , "  def main : IO Unit = bind (__io_pure 1) (λ(_n : Unit) putStrLn \"world\");"
                         , "}"
                         ]
             checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
@@ -547,7 +557,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (Unit(..), IO, bind, putStrLn);"
-                        , "  def after : Unit -> IO Unit = \\_done putStrLn \"world\";"
+                        , "  def after : Unit -> IO Unit = λ_done putStrLn \"world\";"
                         , "  def main : IO Unit = bind (putStrLn \"hello\") after;"
                         , "}"
                         ]
@@ -559,7 +569,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (Unit(..), IO);"
-                        , "  def main : IO Unit = __io_bind (__io_pure Unit) (\\(_n : Unit) __io_putStrLn \"world\");"
+                        , "  def main : IO Unit = __io_bind (__io_pure Unit) (λ(_n : Unit) __io_putStrLn \"world\");"
                         , "}"
                         ]
             (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "world\n"
@@ -597,7 +607,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (Unit(..), IO, Nat(..), bind, pure, putStrLn);"
-                        , "  def after : Nat -> IO Unit = \\_n putStrLn \"nat\";"
+                        , "  def after : Nat -> IO Unit = λ_n putStrLn \"nat\";"
                         , "  def action : IO Nat = pure Zero;"
                         , "  def main : IO Unit = bind action after;"
                         , "}"
@@ -612,7 +622,7 @@ spec = do
                         , "  import Prelude as P exposing (Unit, IO, bind, pure, putStrLn);"
                         , "  data Foo ="
                         , "      Unit : Int -> Foo;"
-                        , "  def after : Foo -> IO P.Unit = \\_foo putStrLn \"foo\";"
+                        , "  def after : Foo -> IO P.Unit = λ_foo putStrLn \"foo\";"
                         , "  def action : IO Foo = pure (Unit 1);"
                         , "  def main : IO P.Unit = bind action after;"
                         , "}"
@@ -627,7 +637,7 @@ spec = do
                         , "  import Prelude exposing (IO, pure);"
                         , "  data Foo ="
                         , "      Unit : Int -> Foo;"
-                        , "  def mkAction : Int -> IO Foo = \\n pure (Unit n);"
+                        , "  def mkAction : Int -> IO Foo = λn pure (Unit n);"
                         , "}"
                         , ""
                         , "module B export (Bar(..), unused) {"
@@ -640,7 +650,7 @@ spec = do
                         , "  import Prelude exposing (Unit(..), IO, bind, putStrLn);"
                         , "  import A exposing (Foo, mkAction);"
                         , "  def action : IO Foo = mkAction 1;"
-                        , "  def after : Foo -> IO Unit = \\_foo putStrLn \"scoped\";"
+                        , "  def after : Foo -> IO Unit = λ_foo putStrLn \"scoped\";"
                         , "  def main : IO Unit = bind action after;"
                         , "}"
                         ]
@@ -652,7 +662,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (Unit(..), IO, Nat(..), bind, pure, putStrLn);"
-                        , "  def after : Nat -> IO Unit = \\n case n of {"
+                        , "  def after : Nat -> IO Unit = λn case n of {"
                         , "    Zero -> putStrLn \"zero\";"
                         , "    Succ rest -> putStrLn \"succ\""
                         , "  };"
@@ -672,12 +682,12 @@ spec = do
                         , "    speak : a -> IO Unit;"
                         , "  }"
                         , "  instance Speak Nat {"
-                        , "    speak = \\n case n of {"
+                        , "    speak = λn case n of {"
                         , "      Zero -> putStrLn \"zero\";"
                         , "      Succ rest -> putStrLn \"succ\""
                         , "    };"
                         , "  }"
-                        , "  def after : Nat -> IO Unit = \\n speak n;"
+                        , "  def after : Nat -> IO Unit = λn speak n;"
                         , "  def action : IO Nat = pure (Succ Zero);"
                         , "  def main : IO Unit = bind action after;"
                         , "}"
@@ -696,12 +706,12 @@ spec = do
                         , "    speak : a -> IO Unit;"
                         , "  }"
                         , "  instance Speak (Wrap Int) {"
-                        , "    speak = \\w putStrLn \"int\";"
+                        , "    speak = λw putStrLn \"int\";"
                         , "  }"
                         , "  instance Speak (Wrap Bool) {"
-                        , "    speak = \\w putStrLn \"bool\";"
+                        , "    speak = λw putStrLn \"bool\";"
                         , "  }"
-                        , "  def after : Wrap Int -> IO Unit = \\w speak w;"
+                        , "  def after : Wrap Int -> IO Unit = λw speak w;"
                         , "  def action : IO (Wrap Int) = pure (Wrap 1);"
                         , "  def main : IO Unit = bind action after;"
                         , "}"
@@ -714,7 +724,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (Unit(..), IO, Nat(..), Option(..), Eq, bind, eq, pure, putStrLn);"
-                        , "  def after : Option Nat -> IO Unit = \\opt (\\(same : Bool) putStrLn \"eq\") (eq opt opt);"
+                        , "  def after : Option Nat -> IO Unit = λopt (λ(same : Bool) putStrLn \"eq\") (eq opt opt);"
                         , "  def action : IO (Option Nat) = pure (Some Zero);"
                         , "  def main : IO Unit = bind action after;"
                         , "}"
@@ -731,7 +741,7 @@ spec = do
                         , "    eq : a -> a -> Bool;"
                         , "  }"
                         , "  instance Eq Bool {"
-                        , "    eq = \\left \\right true;"
+                        , "    eq = λleft λright true;"
                         , "  }"
                         , "  data Token a ="
                         , "      Token : Token a;"
@@ -744,7 +754,7 @@ spec = do
                         , "    pick = Pair Token;"
                         , "  }"
                         , "  def selected : (Pick Bool, Eq Bool) => Pair Bool Bool = pick;"
-                        , "  def after : Pair Bool Bool -> IO Unit = \\pair case pair of {"
+                        , "  def after : Pair Bool Bool -> IO Unit = λpair case pair of {"
                         , "    Pair _ -> putStrLn \"picked\""
                         , "  };"
                         , "  def action : IO (Pair Bool Bool) = pure selected;"
@@ -761,8 +771,8 @@ spec = do
                         , "  import Prelude exposing (Unit(..), IO, bind, pure, putStrLn);"
                         , "  data Box ="
                         , "      Box : (Int -> Int) -> Box;"
-                        , "  def idFn : Int -> Int = \\(n : Int) n;"
-                        , "  def after : Box -> IO Unit = \\_box putStrLn \"boxed\";"
+                        , "  def idFn : Int -> Int = λ(n : Int) n;"
+                        , "  def after : Box -> IO Unit = λ_box putStrLn \"boxed\";"
                         , "  def action : IO Box = pure (Box idFn);"
                         , "  def main : IO Unit = bind action after;"
                         , "}"
@@ -812,7 +822,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (Unit(..), IO, pure);"
-                        , "  def discard : IO Unit -> Unit = \\(_action : IO Unit) Unit;"
+                        , "  def discard : IO Unit -> Unit = λ(_action : IO Unit) Unit;"
                         , "  def main : Unit = discard (pure Unit);"
                         , "}"
                         ]
@@ -832,7 +842,7 @@ spec = do
                     unlines
                         [ "module Main export (main) {"
                         , "  import Prelude exposing (Unit(..), IO);"
-                        , "  def main : Unit = (\\(_action : IO Unit) Unit) (__io_pure Unit);"
+                        , "  def main : Unit = (λ(_action : IO Unit) Unit) (__io_pure Unit);"
                         , "}"
                         ]
             runLocatedProgram (withPreludeLocated located) `shouldSatisfy` either
@@ -964,7 +974,7 @@ spec = do
             let programText =
                     unlines
                         [ "module Main export (main) {"
-                        , "  def main : Bool = case ((\\x x) true) of {"
+                        , "  def main : Bool = case ((λx x) true) of {"
                         , "    _ -> true"
                         , "  };"
                         , "}"
@@ -1070,11 +1080,11 @@ spec = do
                     unlines
                         [ "module Main export (Functor, Lifted, Higher(..), main) {"
                         , "  class Functor (f :: * -> *) {"
-                        , "    map : forall a b. (a -> b) -> f a -> f b;"
+                        , "    map : ∀ a b. (a -> b) -> f a -> f b;"
                         , "  }"
                         , ""
                         , "  class Lifted (f :: * -> *) {"
-                        , "    lift : Functor f => forall a. f a -> f a;"
+                        , "    lift : Functor f => ∀ a. f a -> f a;"
                         , "  }"
                         , ""
                         , "  data Higher (f :: * -> *) a ="
@@ -1091,15 +1101,15 @@ spec = do
                     unlines
                         [ "module Main export (Functor, Monad, Profunctor, Box(..), Wrap(..), WrappedP(..), MaybeF(..), main) {"
                         , "  class Functor (f :: * -> *) {"
-                        , "    map : forall a b. (a -> b) -> f a -> f b;"
+                        , "    map : ∀ a b. (a -> b) -> f a -> f b;"
                         , "  }"
                         , ""
                         , "  class Monad (m :: * -> *) {"
-                        , "    bind : forall a b. m a -> (a -> m b) -> m b;"
+                        , "    bind : ∀ a b. m a -> (a -> m b) -> m b;"
                         , "  }"
                         , ""
                         , "  class Profunctor (p :: * -> * -> *) {"
-                        , "    dimap : forall a b c d. (a -> b) -> (c -> d) -> p b c -> p a d;"
+                        , "    dimap : ∀ a b c d. (a -> b) -> (c -> d) -> p b c -> p a d;"
                         , "  }"
                         , ""
                         , "  data Box a ="
@@ -1120,7 +1130,7 @@ spec = do
                         , "  }"
                         , ""
                         , "  instance Boxed Box {"
-                        , "    truthy = \\box true;"
+                        , "    truthy = λbox true;"
                         , "  }"
                         , ""
                         , "  class Uses marker {"
@@ -1237,7 +1247,7 @@ spec = do
                     unlines
                         [ "module Main export (Functor, Eq, main) {"
                         , "  class Functor (f :: * -> *) {"
-                        , "    map : forall a. f a -> f a;"
+                        , "    map : ∀ a. f a -> f a;"
                         , "  }"
                         , ""
                         , "  class Eq a {"
@@ -1245,7 +1255,7 @@ spec = do
                         , "  }"
                         , ""
                         , "  instance Functor Bool => Eq Int {"
-                        , "    eq = \\x \\y true;"
+                        , "    eq = λx λy true;"
                         , "  }"
                         , ""
                         , "  def main : Bool = true;"
@@ -1267,7 +1277,7 @@ spec = do
                         , "    | Some : a -> Option a;"
                         , ""
                         , "  instance Eq Option {"
-                        , "    eq = \\x \\y true;"
+                        , "    eq = λx λy true;"
                         , "  }"
                         , ""
                         , "  def main : Bool = true;"
@@ -1281,11 +1291,11 @@ spec = do
                     unlines
                         [ "module Main export (Functor, main) {"
                         , "  class Functor (f :: * -> *) {"
-                        , "    map : forall a. f a -> f a;"
+                        , "    map : ∀ a. f a -> f a;"
                         , "  }"
                         , ""
                         , "  instance Functor Bool {"
-                        , "    map = \\x x;"
+                        , "    map = λx x;"
                         , "  }"
                         , ""
                         , "  def main : Bool = true;"
@@ -1302,7 +1312,7 @@ spec = do
                         , "      None : Option a"
                         , "    | Some : a -> Option a;"
                         , ""
-                        , "  def main : Bool = let ignore = \\x true in ignore None;"
+                        , "  def main : Bool = let ignore = λx true in ignore None;"
                         , "}"
                         ]
             located <- requireLocatedWithFile "ambiguous.mlfp" programText
@@ -1373,7 +1383,7 @@ spec = do
                         , "  data Token ="
                         , "      Token : Token;"
                         , "  instance Eq Token {"
-                        , "    eq = \\x \\y true;"
+                        , "    eq = λx λy true;"
                         , "  }"
                         , "  def answer : Token = Token;"
                         , "}"
@@ -1800,10 +1810,10 @@ spec = do
                         , "module Main export (main) {"
                         , "  import Core as C exposing (Eq, Token(..), eq);"
                         , "  instance Eq Token {"
-                        , "    eq = \\x \\y true;"
+                        , "    eq = λx λy true;"
                         , "  }"
                         , "  instance C.Eq C.Token {"
-                        , "    eq = \\x \\y true;"
+                        , "    eq = λx λy true;"
                         , "  }"
                         , "  def main : Bool = true;"
                         , "}"
@@ -1987,11 +1997,11 @@ spec = do
                         , "  }"
                         , ""
                         , "  instance Eq Bool {"
-                        , "    eq = \\x \\y true;"
+                        , "    eq = λx λy true;"
                         , "  }"
                         , ""
                         , "  instance Eq Bool {"
-                        , "    eq = \\x \\y true;"
+                        , "    eq = λx λy true;"
                         , "  }"
                         , ""
                         , "  def main : Bool = true;"
@@ -2016,7 +2026,7 @@ spec = do
             let programText =
                     unlines
                         [ "module Main export (main) {"
-                        , "  def main : Int = let id = \\x x in id true;"
+                        , "  def main : Int = let id = λx x in id true;"
                         , "}"
                         ]
             program <- requireParsed programText
@@ -2034,7 +2044,7 @@ spec = do
                         , "  data B ="
                         , "      BZ : B;"
                         , ""
-                        , "  def keep : forall a. a -> a = \\x x;"
+                        , "  def keep : ∀ a. a -> a = λx x;"
                         , "  def main : B = keep BZ;"
                         , "}"
                         ]

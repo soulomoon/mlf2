@@ -16,9 +16,9 @@ import MLF.Frontend.Syntax (SrcTy (..), SrcType, mkSrcBound)
 import MLF.Parse.Common
     ( Parser
     , canonicalBottomTok
-    , forallTok
-    , geTok
-    , lambdaTok
+    , canonicalForallTok
+    , canonicalGeTok
+    , canonicalLambdaTok
     , lowerIdent
     , pLit
     , parens
@@ -91,6 +91,9 @@ reservedWords =
 braces :: Parser a -> Parser a
 braces = between (symbol "{") (symbol "}")
 
+programMuTok :: Parser ()
+programMuTok = void (symbol "μ")
+
 semi :: Parser String
 semi = symbol ";"
 
@@ -122,8 +125,8 @@ qualifiedLowerIdent =
 programTypeConfig :: TypeParserConfig SrcType (Maybe SrcType)
 programTypeConfig =
     TypeParserConfig
-        { tpcForallTok = forallTok
-        , tpcGeTok = geTok
+        { tpcForallTok = canonicalForallTok
+        , tpcGeTok = canonicalGeTok
         , tpcSymbol = symbol
         , tpcParens = parens
         , tpcLowerIdent = lowerIdent reservedWords
@@ -139,7 +142,7 @@ programTypeConfig =
         , tpcBoundedBinder = \pTy ->
             parens $ do
                 v <- lowerIdent reservedWords
-                geTok
+                canonicalGeTok
                 bound <- pTy
                 pure (v, Just bound)
         , tpcUnboundedBinder = do
@@ -155,13 +158,13 @@ pType :: Parser SrcType
 pType = try pProgramForall <|> try pProgramMu <|> parseArrowTypeWith programTypeConfig pType
   where
     pProgramForall = do
-        forallTok
+        canonicalForallTok
         binders <- tpcForallBinders programTypeConfig pType
         body <- pType
         pure (foldr (\(v, bnd) acc -> tpcMkForall programTypeConfig v bnd acc) body binders)
 
     pProgramMu = do
-        void (symbol "μ" <|> symbol "mu")
+        programMuTok
         v <- lowerIdent reservedWords
         void (symbol ".")
         STMu v <$> pType
@@ -177,7 +180,7 @@ pLocatedConstrainedType =
         )
         <|> try
             ( do
-                forallTok
+                canonicalForallTok
                 vars <- some (lowerIdent reservedWords)
                 void (symbol ".")
                 (constraints, spans) <- pLocatedConstraintList
@@ -561,7 +564,7 @@ pLet = do
 
 pLambda :: Parser Expr
 pLambda = do
-    lambdaTok
+    canonicalLambdaTok
     param <- pParam
     body <- pExpr
     pure (ELam param body)

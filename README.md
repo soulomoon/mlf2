@@ -85,7 +85,7 @@ The unified `.mlfp` surface includes:
 - `data` declarations with explicit constructor signatures
 - `case` / constructor pattern matching
 - recursive GADT-style constructor result types
-- existential constructors via `forall`
+- existential constructors via `∀`
 - single-parameter typeclasses, class constraints, and schema instances
 - `deriving Eq` for nullary, recursive, and parameterized ADTs whose fields have Eq evidence
 - a built-in Prelude with `Nat`, `Option`, `List`, `Eq`, `Unit`, opaque

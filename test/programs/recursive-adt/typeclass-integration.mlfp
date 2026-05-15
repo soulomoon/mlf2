@@ -8,7 +8,7 @@ module TypeclassIntegration export (Eq, Nat(..), eq, same, main) {
     | Succ : Nat -> Nat;
 
   instance Eq Nat {
-    eq = \(left : Nat) \(right : Nat) case left of {
+    eq = λ(left : Nat) λ(right : Nat) case left of {
       Zero -> case right of {
         Zero -> true;
         Succ _ -> false
@@ -20,7 +20,7 @@ module TypeclassIntegration export (Eq, Nat(..), eq, same, main) {
     };
   }
 
-  def same : Nat -> Nat -> Bool = \(left : Nat) \(right : Nat) eq left right;
+  def same : Nat -> Nat -> Bool = λ(left : Nat) λ(right : Nat) eq left right;
 
   def main : Bool = same (Succ (Succ Zero)) (Succ (Succ Zero));
 }

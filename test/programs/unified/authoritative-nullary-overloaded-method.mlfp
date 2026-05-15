@@ -10,7 +10,7 @@ module Main export (Monoid, Nat(..), mempty, append, main) {
 
   instance Monoid Nat {
     mempty = Zero;
-    append = \left \right left;
+    append = λleft λright left;
   }
 
   def main : Nat = append (mempty : Nat) Zero;

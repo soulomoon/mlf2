@@ -48,6 +48,9 @@
   parser APIs now reject ASCII token aliases and old xMLF/eMLF grammar shapes
   such as `λx. t`, `λx:τ. t`, `Λa. t`, `∀a. τ`, `1`, `epsilon`, `!a`,
   `⟨τ⟩`, and bare type-as-computation forms.
+- Retired `.mlfp` ASCII token aliases as part of Legacy Surface Retirement:
+  program parsing and pretty-printing now use canonical `∀`, `⩾`, `λ`, and
+  `μ` spellings, while `forall`, `>=`, `\`, and `mu` are parse errors.
 - Retired the pass-through `MLF.Elab.Run.ChiQuery` adapter. Elaboration and
   result-type internals now read canonical nodes, bounds, maps, and constraints
   directly through `PresolutionView`, keeping Snapshot Finalization cleanup on
@@ -862,7 +865,7 @@
 - Completed the unannotated iso-recursive successor orchestrator runtime through accepted rounds `round-006` through `round-010`: the live control plane now records all roadmap items as done, the successor track terminates at a bounded `R5` `research-stop` decision for subset `URI-R2-C1`, and `orchestrator/state.json` is back at idle `stage: "done"` with `last_completed_round: "round-010"`.
 - Refreshed the top-level `orchestrator/` into a successor control plane for the approved unannotated iso-recursive research track: the live roadmap now starts at the `R1` gap-map stage, `orchestrator/state.json` is reset to `select-task` while preserving historical `round-005` continuity, and the verification/role prompts now inherit the prior automatic-recursive-inference evidence chain instead of the completed roadmap.
 - Added a top-level `orchestrator/` successor control plane for research-first automatic recursive-type inference on branch `codex/automatic-recursive-type-inference`: the new roadmap, verification contract, role prompts, and state file inherit the completed recursive-types packet as predecessor evidence, and `.worktrees/` is now gitignored for future round worktrees.
-- Added M5 eMLF recursive-annotation surface exposure without pipeline lowering: `SrcTy` now includes `STMu`, the frontend parser/pretty-printer/normalizer accept and emit canonical `μa. τ` surface syntax (`mu a. τ` remains accepted on input), and Phase 1 now rejects normalized recursive annotations explicitly via `RecursiveAnnotationNotSupported` until later M6 lowering work lands.
+- Added M5 eMLF recursive-annotation surface exposure without pipeline lowering: `SrcTy` now includes `STMu`, the frontend parser/pretty-printer/normalizer accept and emit canonical `μa. τ` surface syntax, and Phase 1 now rejects normalized recursive annotations explicitly via `RecursiveAnnotationNotSupported` until later M6 lowering work lands.
 - Added explicit M4 contractiveness validation for elaborated recursive types in Phase 7: `typeCheck` now rejects non-contractive `μ` types across term annotations, let schemes, type-abstraction bounds, instantiation arguments, and `ERoll`, while keeping the v1 policy conservative (`forall` does not count as a guard, arrows/constructors do).
 - Added explicit public xMLF recursive-term surface forms `XRoll`/`XUnroll`, including canonical `roll[τ] e` / `unroll e` parser+pretty support, roundtrip coverage, rejection coverage, and internal XMLF display bridging for recursive runtime terms.
 - Added the recursive-types design artifacts and staged implementation roadmap under `tasks/todo/2026-03-11-recursive-types-design/` and `docs/plans/2026-03-11-recursive-types-roadmap.md`.
