@@ -41,10 +41,10 @@ import MLF.Constraint.Types.Presolution
 import qualified MLF.Util.Order as Order
 import MLF.Util.Trace (traceBindingM)
 
-recordOp :: InstanceOp -> EdgeUnifyM ()
+recordOp :: InstanceOp -> EdgeUnifyM p ()
 recordOp = recordInstanceOp
 
-compareBinderIdsByPrec :: Int -> Int -> EdgeUnifyM Ordering
+compareBinderIdsByPrec :: Int -> Int -> EdgeUnifyM p Ordering
 compareBinderIdsByPrec bid1 bid2 = do
     keys <- gets eusOrderKeys
     binderMeta <- gets eusBinderMeta
@@ -62,7 +62,7 @@ compareBinderIdsByPrec bid1 bid2 = do
         (Nothing, Just _) -> GT
         (Nothing, Nothing) -> compare bid1 bid2
 
-pickRepBinderId :: IntSet.IntSet -> EdgeUnifyM Int
+pickRepBinderId :: IntSet.IntSet -> EdgeUnifyM p Int
 pickRepBinderId bs =
     case IntSet.toList bs of
         [] -> throwPresolutionErrorM (InternalError "pickRepBinderId: empty binder set")
@@ -74,7 +74,7 @@ pickRepBinderId bs =
             LT -> cand
             _ -> best
 
-recordMergesIntoRep :: IntSet.IntSet -> EdgeUnifyM ()
+recordMergesIntoRep :: IntSet.IntSet -> EdgeUnifyM p ()
 recordMergesIntoRep bs
     | IntSet.size bs <= 1 = pure ()
     | otherwise = do
@@ -92,7 +92,7 @@ recordMergesIntoRep bs
                 setVarBoundM b (Just rep)
                 recordEliminate b
   where
-    sortByM :: (a -> a -> EdgeUnifyM Ordering) -> [a] -> EdgeUnifyM [a]
+    sortByM :: (a -> a -> EdgeUnifyM p Ordering) -> [a] -> EdgeUnifyM p [a]
     sortByM _ [] = pure []
     sortByM cmp xs = do
         let insertOne x [] = pure [x]
@@ -115,7 +115,7 @@ Invariant: RaiseMerge emission is forbidden for self-class merges. If operated
 and must not record/source-write `OpMerge n n` side effects.
 -}
 
-unifyAcyclicEdge :: NodeId -> NodeId -> EdgeUnifyM ()
+unifyAcyclicEdge :: NodeId -> NodeId -> EdgeUnifyM p ()
 unifyAcyclicEdge n1 n2 = do
     root1 <- findRootM n1
     root2 <- findRootM n2
@@ -217,7 +217,7 @@ unifyAcyclicEdge n1 n2 = do
 --
 -- All queries use the current canonical graph state (UF roots, binding tree,
 -- interior set) — no precomputed snapshots.
-shouldRecordRaiseMerge :: NodeId -> NodeId -> EdgeUnifyM Bool
+shouldRecordRaiseMerge :: NodeId -> NodeId -> EdgeUnifyM p Bool
 shouldRecordRaiseMerge binder ext = do
     already <- isEliminated binder
     if already
@@ -278,12 +278,12 @@ shouldRecordRaiseMerge binder ext = do
                                     pure (above || not inInterior)
                 _ -> pure False
 
-debugEdgeUnify :: String -> EdgeUnifyM ()
+debugEdgeUnify :: String -> EdgeUnifyM p ()
 debugEdgeUnify msg = do
     cfg <- ask
     traceBindingM cfg msg
 
-unifyStructureEdge :: NodeId -> NodeId -> EdgeUnifyM ()
+unifyStructureEdge :: NodeId -> NodeId -> EdgeUnifyM p ()
 unifyStructureEdge n1 n2 = do
     root1 <- findRootM n1
     root2 <- findRootM n2
@@ -384,7 +384,7 @@ unifyStructureEdge n1 n2 = do
                     _ ->
                         unifyStructureChildren node1 node2
 
-isBinderMetaRoot :: NodeId -> EdgeUnifyM Bool
+isBinderMetaRoot :: NodeId -> EdgeUnifyM p Bool
 isBinderMetaRoot root = do
     metaRoots <- gets eusBinderMeta >>= mapM findRootM . IntMap.elems
     let metaSet = IntSet.fromList (map getNodeId metaRoots)

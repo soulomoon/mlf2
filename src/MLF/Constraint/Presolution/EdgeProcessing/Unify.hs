@@ -103,7 +103,7 @@ data EdgeExpansionResult = EdgeExpansionResult
 runExpansionUnify ::
   EdgeExpansionInput ->
   [InstanceOp] ->
-  PresolutionM EdgeExpansionResult
+  PresolutionM p EdgeExpansionResult
 runExpansionUnify input baseOps =
   let gid = eeiGenId input
       edgeId = eeiEdgeId input
@@ -205,14 +205,14 @@ runExpansionUnify input baseOps =
           throwError (InternalError ("runExpansionUnify: expected TyExp for edge " ++ show edgeId))
 
 -- | Set a binding parent if the parent is upper than the child in the binding tree.
-setBindParentIfUpper :: NodeId -> NodeRef -> PresolutionM ()
+setBindParentIfUpper :: NodeId -> NodeRef -> PresolutionM p ()
 setBindParentIfUpper child parent = do
   cBind <- getConstraint
   when (Binding.isUpper cBind parent (TypeRef child)) $
     setBindParentM (TypeRef child) (parent, BindFlex)
 
 -- | Debug binding operations (uses explicit trace config).
-debugBindParents :: String -> PresolutionM ()
+debugBindParents :: String -> PresolutionM p ()
 debugBindParents msg = do
   cfg <- ask
   traceBindingM cfg msg

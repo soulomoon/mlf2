@@ -1,5 +1,6 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE TypeFamilies #-}
 
 {- |
 Module      : MLF.Constraint.Presolution.EdgeUnify.State
@@ -70,7 +71,7 @@ data EdgeUnifyState = EdgeUnifyState
     , eusOps :: [InstanceOp]
     }
 
-type EdgeUnifyM = StateT EdgeUnifyState PresolutionM
+type EdgeUnifyM p = StateT EdgeUnifyState (PresolutionM p)
 
 insertInteriorKey :: Int -> InteriorNodes -> InteriorNodes
 insertInteriorKey k (InteriorNodes s) = InteriorNodes (IntSet.insert k s)
@@ -84,7 +85,7 @@ nullInteriorNodes (InteriorNodes s) = IntSet.null s
 -- | Typeclass for monads that support edge-local unification operations.
 -- This allows functions to be polymorphic over the concrete monad stack,
 -- reducing the need for explicit lift calls.
-class Monad m => MonadEdgeUnify m where
+class MonadPresolution m => MonadEdgeUnify m where
     getEdgeUnifyState :: m EdgeUnifyState
     putEdgeUnifyState :: EdgeUnifyState -> m ()
     modifyEdgeUnifyState :: (EdgeUnifyState -> EdgeUnifyState) -> m ()
@@ -93,7 +94,7 @@ class Monad m => MonadEdgeUnify m where
     getBinderMeta :: m (IntMap NodeId)
     getOrderKeys :: m (IntMap Order.OrderKey)
     recordInstanceOp :: InstanceOp -> m ()
-    liftPresolution :: PresolutionM a -> m a
+    liftPresolution :: PresolutionM (PresolutionPhaseOf m) a -> m a
     findRootM :: NodeId -> m NodeId
     unifyAcyclicRawWithRaiseTracePreferM :: Maybe NodeId -> NodeId -> NodeId -> m [NodeId]
     lookupVarBoundM :: NodeId -> m (Maybe NodeId)
@@ -103,7 +104,7 @@ class Monad m => MonadEdgeUnify m where
     isBoundAboveInBindingTreeM :: NodeId -> NodeId -> m Bool
     queuePendingWeakenM :: NodeId -> m ()
 
-instance MonadEdgeUnify EdgeUnifyM where
+instance MonadEdgeUnify (EdgeUnifyM p) where
     getEdgeUnifyState = get
     putEdgeUnifyState = put
     modifyEdgeUnifyState = modify
@@ -134,15 +135,6 @@ instance MonadEdgeUnify EdgeUnifyM where
         owner <- gets eusPendingWeakenOwner
         liftPresolution $ queuePendingWeakenWithOwner owner nid
 
-instance MonadPresolution EdgeUnifyM where
-    getConstraint = lift getConstraint
-    modifyConstraint f = lift (modifyConstraint f)
-    getPresolutionState = lift getPresolutionState
-    putPresolutionState st = lift (putPresolutionState st)
-    throwPresolutionError err = lift (throwPresolutionError err)
-    modifyPresolution f = lift (modifyPresolution f)
-    bindExpansionArgs root pairs = lift (bindExpansionArgs root pairs)
-
 -- | Build an ω executor environment for χe base ops (Graft/Merge/Weaken).
 --
 -- This is used to execute the base operations induced directly by
@@ -154,7 +146,7 @@ instance MonadPresolution EdgeUnifyM where
 -- `Weaken` occurs after other
 -- operations on nodes below it. Executing it eagerly can preempt the unification
 -- that should be witnessed as `RaiseMerge`.
-mkOmegaExecEnv :: CopyMap -> OmegaExec.OmegaExecEnv EdgeUnifyM
+mkOmegaExecEnv :: CopyMap -> OmegaExec.OmegaExecEnv (EdgeUnifyM p)
 mkOmegaExecEnv copyMap =
     OmegaExec.OmegaExecEnv
         { OmegaExec.omegaMetaFor = metaFor
@@ -171,7 +163,7 @@ mkOmegaExecEnv copyMap =
         , OmegaExec.omegaWeakenMeta = \meta -> queuePendingWeakenM meta
         }
   where
-    metaFor :: NodeId -> EdgeUnifyM NodeId
+    metaFor :: NodeId -> EdgeUnifyM p NodeId
     metaFor bv =
         case lookupCopy bv copyMap of
             Just m -> pure m
@@ -179,7 +171,7 @@ mkOmegaExecEnv copyMap =
                 throwPresolutionErrorM
                     (InternalError ("mkOmegaExecEnv: missing copy for binder " ++ show bv))
 
-queuePendingWeakenWithOwner :: PendingWeakenOwner -> NodeId -> PresolutionM ()
+queuePendingWeakenWithOwner :: PendingWeakenOwner -> NodeId -> PresolutionM p ()
 queuePendingWeakenWithOwner owner nid =
     modify' $ \st ->
         st
@@ -192,7 +184,7 @@ queuePendingWeakenWithOwner owner nid =
                     (psPendingWeakenOwners st)
             }
 
-applyPendingWeaken :: NodeId -> PresolutionM ()
+applyPendingWeaken :: NodeId -> PresolutionM p ()
 applyPendingWeaken nid0 = do
     retriable <- applyAtTarget nid0
     when retriable $ do
@@ -202,7 +194,7 @@ applyPendingWeaken nid0 = do
             _ <- applyAtTarget nidCanon
             pure ()
   where
-    applyAtTarget :: NodeId -> PresolutionM Bool
+    applyAtTarget :: NodeId -> PresolutionM p Bool
     applyAtTarget target = do
         c0 <- getConstraint
         case Binding.lookupBindParent c0 (typeRef target) of
@@ -220,7 +212,7 @@ applyPendingWeaken nid0 = do
 -- | Edge-local union like 'unifyAcyclicEdge', but without emitting merge-like
 -- witness ops. This is used to *execute* base `Merge` operations (already
 -- recorded in Ω) without accidentally introducing an opposing Phase-2 merge.
-unifyAcyclicEdgeNoMerge :: NodeId -> NodeId -> EdgeUnifyM ()
+unifyAcyclicEdgeNoMerge :: NodeId -> NodeId -> EdgeUnifyM p ()
 unifyAcyclicEdgeNoMerge n1 n2 = do
     root1 <- findRootM n1
     root2 <- findRootM n2
@@ -272,7 +264,7 @@ initEdgeUnifyState
     -> InteriorSet
     -> NodeId
     -> PendingWeakenOwner
-    -> PresolutionM EdgeUnifyState
+    -> PresolutionM p EdgeUnifyState
 initEdgeUnifyState binderArgs interior edgeRoot pendingOwner = do
     inheritedPendingWeakens <- gets psPendingWeakens
     roots <- forM (IntSet.toList interior) $ \i -> Ops.findRoot (NodeId i)
@@ -332,7 +324,7 @@ initEdgeUnifyState binderArgs interior edgeRoot pendingOwner = do
         , eusOps = []
         }
 
-flushInheritedPendingWeakensOnce :: EdgeUnifyM Bool
+flushInheritedPendingWeakensOnce :: EdgeUnifyM p Bool
 flushInheritedPendingWeakensOnce = do
     inherited <- gets eusInheritedPendingWeakens
     if IntSet.null inherited
@@ -354,12 +346,12 @@ flushInheritedPendingWeakensOnce = do
                                 }
                     pure True
 
-unifyWithLockedFallback :: Maybe NodeId -> NodeId -> NodeId -> EdgeUnifyM [NodeId]
+unifyWithLockedFallback :: Maybe NodeId -> NodeId -> NodeId -> EdgeUnifyM p [NodeId]
 unifyWithLockedFallback prefer left right =
     unifyAcyclicRawWithRaiseTracePreferM prefer left right
         `catchError` handleLocked
   where
-    forceUnionWithoutRaise :: EdgeUnifyM [NodeId]
+    forceUnionWithoutRaise :: EdgeUnifyM p [NodeId]
     forceUnionWithoutRaise = do
         rootLeft <- findRootM left
         rootRight <- findRootM right
@@ -378,7 +370,7 @@ unifyWithLockedFallback prefer left right =
                         }
         pure []
 
-    retryAfterFlush :: EdgeUnifyM [NodeId]
+    retryAfterFlush :: EdgeUnifyM p [NodeId]
     retryAfterFlush = do
         recovered <- flushInheritedPendingWeakensOnce
         if recovered
@@ -390,7 +382,7 @@ unifyWithLockedFallback prefer left right =
                             _ -> throwPresolutionErrorM retryErr
             else forceUnionWithoutRaise
 
-    trySwap :: EdgeUnifyM [NodeId]
+    trySwap :: EdgeUnifyM p [NodeId]
     trySwap =
         unifyAcyclicRawWithRaiseTracePreferM prefer right left
             `catchError` \swapErr ->
@@ -398,22 +390,22 @@ unifyWithLockedFallback prefer left right =
                     BindingTreeError OperationOnLockedNode{} -> retryAfterFlush
                     _ -> throwPresolutionErrorM swapErr
 
-    handleLocked :: PresolutionError -> EdgeUnifyM [NodeId]
+    handleLocked :: PresolutionError -> EdgeUnifyM p [NodeId]
     handleLocked err =
         case err of
             BindingTreeError OperationOnLockedNode{} -> trySwap
             _ -> throwPresolutionErrorM err
 
-recordEliminate :: NodeId -> EdgeUnifyM ()
+recordEliminate :: NodeId -> EdgeUnifyM p ()
 recordEliminate bv = do
     dropVarBindM bv
     modify $ \st ->
         st { eusEliminatedBinders = IntSet.insert (getNodeId bv) (eusEliminatedBinders st) }
 
-isEliminated :: NodeId -> EdgeUnifyM Bool
+isEliminated :: NodeId -> EdgeUnifyM p Bool
 isEliminated bv = gets (IntSet.member (getNodeId bv) . eusEliminatedBinders)
 
-recordRaisesFromTrace :: InteriorNodes -> [NodeId] -> EdgeUnifyM ()
+recordRaisesFromTrace :: InteriorNodes -> [NodeId] -> EdgeUnifyM p ()
 recordRaisesFromTrace interiorNodes raiseTrace =
     forM_ raiseTrace $ \nid ->
         when (memberInterior nid interiorNodes) $ do
@@ -422,7 +414,7 @@ recordRaisesFromTrace interiorNodes raiseTrace =
             when (not already && not isLocked) $
                 recordInstanceOp (OpRaise nid)
 
-preferBinderMetaRoot :: NodeId -> NodeId -> EdgeUnifyM (Maybe NodeId)
+preferBinderMetaRoot :: NodeId -> NodeId -> EdgeUnifyM p (Maybe NodeId)
 preferBinderMetaRoot root1 root2 = do
     st <- get
     metaRoots <- forM (IntMap.elems (eusBinderMeta st)) findRootM
@@ -434,10 +426,10 @@ preferBinderMetaRoot root1 root2 = do
         (False, True) -> Just root2
         _ -> Nothing
 
-checkNodeLocked :: NodeId -> EdgeUnifyM Bool
+checkNodeLocked :: NodeId -> EdgeUnifyM p Bool
 checkNodeLocked nid = lift $ do
     (c0, canonical) <- getConstraintAndCanonical
-    let lookupParent :: NodeId -> PresolutionM (Maybe (NodeId, BindFlag))
+    let lookupParent :: NodeId -> PresolutionM p (Maybe (NodeId, BindFlag))
         lookupParent n = do
             mbParent <- liftBindingError $ Binding.lookupBindParentUnder canonical c0 (typeRef n)
             pure $ case mbParent of
@@ -445,7 +437,7 @@ checkNodeLocked nid = lift $ do
                 Just (TypeRef parent, flag) -> Just (parent, flag)
                 Just (GenRef _, _flag) -> Nothing
 
-        goStrict :: NodeId -> PresolutionM Bool
+        goStrict :: NodeId -> PresolutionM p Bool
         goStrict n = do
             mbParent <- lookupParent n
             case mbParent of
@@ -458,7 +450,7 @@ checkNodeLocked nid = lift $ do
         Nothing -> pure False
         Just (parent, _flag) -> goStrict parent
 
-isBoundAboveInBindingTree :: NodeId -> NodeId -> PresolutionM Bool
+isBoundAboveInBindingTree :: NodeId -> NodeId -> PresolutionM p Bool
 isBoundAboveInBindingTree edgeRoot ext = do
     (c0, canonical) <- getConstraintAndCanonical
     let edgeRootC = canonical edgeRoot

@@ -55,7 +55,7 @@ data CopyState = CopyState
     , csInterior :: IntSet.IntSet
     }
 
-expansionCopySetsM :: NodeId -> PresolutionM (GenNodeId, IntSet.IntSet, IntSet.IntSet)
+expansionCopySetsM :: NodeId -> PresolutionM p (GenNodeId, IntSet.IntSet, IntSet.IntSet)
 expansionCopySetsM bodyId = do
     (c0, canonical) <- getConstraintAndCanonical
     let bodyC = canonical bodyId
@@ -177,7 +177,7 @@ Failure mode
         instantiation total on well-formed graphs.
 -}
 -- | Instantiate a scheme by copying the graph and replacing bound variables.
-instantiateScheme :: NodeId -> [(NodeId, NodeId)] -> PresolutionM NodeId
+instantiateScheme :: NodeId -> [(NodeId, NodeId)] -> PresolutionM p NodeId
 instantiateScheme bodyId substList = do
     (root, _copyMap, _interior, _frontier) <- instantiateSchemeWithMode False bodyId substList
     pure root
@@ -191,7 +191,7 @@ instantiateScheme bodyId substList = do
 -- when expanding an instantiation edge, we copy exactly the nodes "structurally
 -- strictly under g and in I(g)" and preserve binding edges/flags for copied nodes.
 -- The expansion root is bound at the same binder as the target node.
-instantiateSchemeWithTrace :: NodeId -> [(NodeId, NodeId)] -> PresolutionM (NodeId, CopyMap, IntSet.IntSet, IntSet.IntSet)
+instantiateSchemeWithTrace :: NodeId -> [(NodeId, NodeId)] -> PresolutionM p (NodeId, CopyMap, IntSet.IntSet, IntSet.IntSet)
 instantiateSchemeWithTrace bodyId substList =
     instantiateSchemeWithMode True bodyId substList
 
@@ -199,7 +199,7 @@ instantiateSchemeWithMode
     :: Bool
     -> NodeId
     -> [(NodeId, NodeId)]
-    -> PresolutionM (NodeId, CopyMap, IntSet.IntSet, IntSet.IntSet)
+    -> PresolutionM p (NodeId, CopyMap, IntSet.IntSet, IntSet.IntSet)
 instantiateSchemeWithMode replaceFrontier bodyId substList = do
     (c0, canonical) <- getConstraintAndCanonical
 
@@ -274,7 +274,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
         -> IntSet.IntSet
         -> CopyMap
         -> IntSet.IntSet
-        -> PresolutionM ()
+        -> PresolutionM p ()
     resetBindingsForCopies canonical c0 gid schemeRootId copyRoot frontierSet cmap0 substKeys = do
         let cmap =
                 IntMap.fromListWith
@@ -345,20 +345,20 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                                                         else rootBinder
                                         setBindParentM childRef (parentFinal, flag)
 
-    recordNew :: NodeId -> StateT CopyState PresolutionM ()
+    recordNew :: NodeId -> StateT CopyState (PresolutionM p) ()
     recordNew freshId =
         modify $ \st ->
             st { csInterior = IntSet.insert (getNodeId freshId) (csInterior st) }
 
-    recordCopy :: NodeId -> NodeId -> StateT CopyState PresolutionM ()
+    recordCopy :: NodeId -> NodeId -> StateT CopyState (PresolutionM p) ()
     recordCopy srcNid copiedId =
         modify $ \st ->
             st { csCopyMap = IntMap.insert (getNodeId srcNid) copiedId (csCopyMap st) }
 
-    cacheLookup :: NodeId -> StateT CopyState PresolutionM (Maybe NodeId)
+    cacheLookup :: NodeId -> StateT CopyState (PresolutionM p) (Maybe NodeId)
     cacheLookup srcNid = gets (IntMap.lookup (getNodeId srcNid) . csCache)
 
-    cacheInsert :: NodeId -> NodeId -> StateT CopyState PresolutionM ()
+    cacheInsert :: NodeId -> NodeId -> StateT CopyState (PresolutionM p) ()
     cacheInsert srcNid freshId =
         modify $ \st ->
             st { csCache = IntMap.insert (getNodeId srcNid) freshId (csCache st) }
@@ -370,7 +370,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
         -> (NodeId -> NodeId)
         -> IntMap NodeId
         -> NodeId
-        -> StateT CopyState PresolutionM NodeId
+        -> StateT CopyState (PresolutionM p) NodeId
     copyNode copyInterior frontierSet degenerateRoot canonical subst nid = do
         mbCached <- cacheLookup nid
         case mbCached of
@@ -472,7 +472,7 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
 -- If the target has a binding parent, we copy that binding to the expansion root.
 -- If the target is a binding root (no parent), the expansion root also becomes
 -- a binding root (we don't set a binding parent for it).
-bindExpansionRootLikeTarget :: NodeId -> NodeId -> PresolutionM NodeRef
+bindExpansionRootLikeTarget :: NodeId -> NodeId -> PresolutionM p NodeRef
 bindExpansionRootLikeTarget expansionRoot targetNode = do
     (c, canonical) <- getConstraintAndCanonical
     let expansionRootC = canonical expansionRoot
@@ -516,7 +516,7 @@ bindExpansionRootLikeTarget expansionRoot targetNode = do
 --
 -- This maintains the binding tree invariant that all non-term-dag-root nodes
 -- have binding parents.
-bindUnboundCopiedNodes :: CopyMap -> IntSet.IntSet -> NodeId -> PresolutionM ()
+bindUnboundCopiedNodes :: CopyMap -> IntSet.IntSet -> NodeId -> PresolutionM p ()
 bindUnboundCopiedNodes copyMap interior expansionRoot = do
     (c0, canonical) <- getConstraintAndCanonical
     let expansionRootC = canonical expansionRoot

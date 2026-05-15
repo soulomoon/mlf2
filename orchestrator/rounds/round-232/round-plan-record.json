@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-232",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-phase-indexed-constraint",
+  "extracted_item_id": "item-3a-phase4-raw-bridge-retirement",
+  "plan_path": "orchestrator/rounds/round-232/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

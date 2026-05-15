@@ -50,7 +50,7 @@ import MLF.Constraint.Unify.Closure (SolveError, UnifyClosureResult(..), runUnif
 import MLF.Util.Trace (TraceConfig)
 
 -- | The main loop processing sorted instantiation edges.
-runPresolutionLoop :: TraceConfig -> [InstEdge] -> PresolutionM ()
+runPresolutionLoop :: TraceConfig -> [InstEdge] -> PresolutionM p ()
 runPresolutionLoop traceCfg edges = do
     drainPendingUnifyClosure traceCfg
     mbLastOwner <- foldM (runScheduledEdge traceCfg) Nothing edges
@@ -58,17 +58,17 @@ runPresolutionLoop traceCfg edges = do
     assertNoPendingUnifyEdges "after-inst-edge-closure" Nothing
 
 -- | Process a single instantiation edge.
-processInstEdge :: InstEdge -> PresolutionM ()
+processInstEdge :: InstEdge -> PresolutionM p ()
 processInstEdge edge = do
     plan <- prepareInstEdgePlan edge
     executeEdgePlan plan
 
-prepareInstEdgePlan :: InstEdge -> PresolutionM EdgePlan
+prepareInstEdgePlan :: InstEdge -> PresolutionM p EdgePlan
 prepareInstEdgePlan edge = do
     requireValidBindingTree
     planEdge edge
 
-runScheduledEdge :: TraceConfig -> Maybe GenNodeId -> InstEdge -> PresolutionM (Maybe GenNodeId)
+runScheduledEdge :: TraceConfig -> Maybe GenNodeId -> InstEdge -> PresolutionM p (Maybe GenNodeId)
 runScheduledEdge traceCfg mbActiveOwner edge = do
     assertNoPendingUnifyEdgesOnly "before-inst-edge" (Just edge)
     plan <- prepareInstEdgePlan edge
@@ -83,7 +83,7 @@ runScheduledEdge traceCfg mbActiveOwner edge = do
 --
 -- Flush only when crossing owner groups (or exiting the edge loop) so pending
 -- weakens remain edge-local within an owner but cannot leak across boundaries.
-scheduleWeakensByOwnerBoundary :: Maybe GenNodeId -> Maybe GenNodeId -> Maybe InstEdge -> PresolutionM ()
+scheduleWeakensByOwnerBoundary :: Maybe GenNodeId -> Maybe GenNodeId -> Maybe InstEdge -> PresolutionM p ()
 scheduleWeakensByOwnerBoundary mbCurrentOwner mbNextOwner mbEdge =
     when (ownerBoundaryChanged mbCurrentOwner mbNextOwner) $ do
         assertNoPendingUnifyEdgesOnly "owner-boundary-before-weaken-flush" mbEdge
@@ -105,7 +105,7 @@ assertNoPendingWeakensOutsideOwnerBoundary
     -> PendingWeakenOwner
     -> Maybe GenNodeId
     -> Maybe InstEdge
-    -> PresolutionM ()
+    -> PresolutionM p ()
 assertNoPendingWeakensOutsideOwnerBoundary phase boundaryOwner mbNextOwner mbEdge = do
     owners <- pendingWeakenOwners
     let allowedAfterBoundary = case mbNextOwner of
@@ -131,7 +131,7 @@ assertNoPendingWeakensOutsideOwnerBoundary phase boundaryOwner mbNextOwner mbEdg
         Nothing -> ""
         Just edge -> " at edge " ++ show edge
 
-drainPendingUnifyClosure :: TraceConfig -> PresolutionM ()
+drainPendingUnifyClosure :: TraceConfig -> PresolutionM p ()
 drainPendingUnifyClosure traceCfg = do
     pendingUnify <- getPendingUnifyEdgesM
     if null pendingUnify
@@ -143,7 +143,7 @@ drainPendingUnifyClosure traceCfg = do
             closure <- either (throwPresolutionError . closureError) pure closureResult
             putConstraintAndUnionFind (ucConstraint closure) (ucUnionFind closure)
 
-assertNoPendingUnifyEdges :: String -> Maybe InstEdge -> PresolutionM ()
+assertNoPendingUnifyEdges :: String -> Maybe InstEdge -> PresolutionM p ()
 assertNoPendingUnifyEdges phase mbEdge = do
     pendingUnify <- getPendingUnifyEdgesM
     pendingWeakens <- getPendingWeakensM
@@ -168,7 +168,7 @@ assertNoPendingUnifyEdges phase mbEdge = do
         Nothing -> ""
         Just edge -> " at edge " ++ show edge
 
-assertNoPendingUnifyEdgesOnly :: String -> Maybe InstEdge -> PresolutionM ()
+assertNoPendingUnifyEdgesOnly :: String -> Maybe InstEdge -> PresolutionM p ()
 assertNoPendingUnifyEdgesOnly phase mbEdge = do
     pendingUnify <- getPendingUnifyEdgesM
     pendingWeakens <- getPendingWeakensM

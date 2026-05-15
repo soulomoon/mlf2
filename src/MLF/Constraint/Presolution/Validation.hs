@@ -108,7 +108,7 @@ bindingToPres :: Either BindingError a -> Either PresolutionError a
 bindingToPres = either (Left . BindingTreeError) Right
 
 -- | Convert binding errors to presolution errors in monadic context.
-bindingToPresM :: Either BindingError a -> PresolutionM a
+bindingToPresM :: Either BindingError a -> PresolutionM p a
 bindingToPresM = liftBindingError
 
 -- | Rigidify a translatable presolution by converting flexible bindings to rigid.
@@ -119,7 +119,7 @@ bindingToPresM = liftBindingError
 -- 2. Rigidify arrow nodes
 -- 3. Rigidify scheme roots
 -- 4. Rigidify non-interior flexible children
-rigidifyTranslatablePresolutionM :: PresolutionM ()
+rigidifyTranslatablePresolutionM :: PresolutionM p ()
 rigidifyTranslatablePresolutionM = do
     c0 <- getConstraint
     c1 <- bindingToPresM (Inert.weakenInertNodes c0)

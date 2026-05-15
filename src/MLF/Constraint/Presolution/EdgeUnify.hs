@@ -57,7 +57,7 @@ runEdgeUnifyForTest
     -> IntSet.IntSet -- ^ interior nodes (I(r))
     -> NodeId -- ^ left node to unify
     -> NodeId -- ^ right node to unify
-    -> PresolutionM [InstanceOp]
+    -> PresolutionM p [InstanceOp]
 runEdgeUnifyForTest edgeRoot interior n1 n2 = do
     requireValidBindingTree
     eu0 <- initEdgeUnifyState [] interior edgeRoot PendingWeakenOwnerUnknown
@@ -69,9 +69,9 @@ runEdgeUnifyForTest edgeRoot interior n1 n2 = do
 -- This preserves existing pre/post ordering while giving callers a single
 -- edge-local execution entrypoint.
 executeEdgeLocalOmegaOps
-    :: OmegaExec.OmegaExecEnv EdgeUnifyM
+    :: OmegaExec.OmegaExecEnv (EdgeUnifyM p)
     -> [InstanceOp]
-    -> EdgeUnifyM a
-    -> EdgeUnifyM a
+    -> EdgeUnifyM p a
+    -> EdgeUnifyM p a
 executeEdgeLocalOmegaOps omegaEnv baseOps action = do
     Omega.executeEdgeLocalOmegaOps omegaEnv baseOps action

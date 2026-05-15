@@ -58,15 +58,15 @@ import MLF.Constraint.Presolution.Unify (unifyAcyclic)
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 
 -- | Record a witness for an instantiation edge.
-recordEdgeWitness :: EdgeId -> EdgeWitness -> PresolutionM ()
+recordEdgeWitness :: EdgeId -> EdgeWitness -> PresolutionM p ()
 recordEdgeWitness (EdgeId eid) w =
     modify $ \st -> st { psEdgeWitnesses = IntMap.insert eid w (psEdgeWitnesses st) }
 
-recordEdgeTrace :: EdgeId -> EdgeTrace -> PresolutionM ()
+recordEdgeTrace :: EdgeId -> EdgeTrace -> PresolutionM p ()
 recordEdgeTrace (EdgeId eid) tr =
     modify $ \st -> st { psEdgeTraces = IntMap.insert eid tr (psEdgeTraces st) }
 
-canonicalizeEdgeTraceInteriorsM :: PresolutionM ()
+canonicalizeEdgeTraceInteriorsM :: PresolutionM p ()
 canonicalizeEdgeTraceInteriorsM = do
     canonical <- getCanonical
     let canonInterior tr =
@@ -78,7 +78,7 @@ canonicalizeEdgeTraceInteriorsM = do
             in tr { etInterior = interior' }
     modify' $ \st -> st { psEdgeTraces = IntMap.map canonInterior (psEdgeTraces st) }
 
-unifyStructure :: NodeId -> NodeId -> PresolutionM ()
+unifyStructure :: NodeId -> NodeId -> PresolutionM p ()
 unifyStructure n1 n2 = do
     root1 <- findRoot n1
     root2 <- findRoot n2
@@ -106,7 +106,7 @@ unifyStructure n1 n2 = do
             _ ->
                 unifyStructureNonExp node1 node2
   where
-    unifyExpansionNode :: TyNode -> NodeId -> PresolutionM ()
+    unifyExpansionNode :: TyNode -> NodeId -> PresolutionM p ()
     unifyExpansionNode expNode@TyExp { tnExpVar = expVar, tnBody = expBody } targetId = do
         (c0, canonical) <- getConstraintAndCanonical
         gid <- findSchemeIntroducerM canonical c0 expBody
@@ -167,7 +167,7 @@ unifyStructure n1 n2 = do
                 unifyAcyclic (tnId expNode) resNodeId
     unifyExpansionNode _ _ =
         error "unifyExpansionNode: expected TyExp node"
-    unifyStructureNonExp :: TyNode -> TyNode -> PresolutionM ()
+    unifyStructureNonExp :: TyNode -> TyNode -> PresolutionM p ()
     unifyStructureNonExp node1 node2 = do
         let isVarNode node = case node of
                 TyVar{} -> True
@@ -213,13 +213,13 @@ unifyStructure n1 n2 = do
                     _ ->
                         unifyStructureChildren node1 node2
 
-    unifyStructureChildren :: TyNode -> TyNode -> PresolutionM ()
+    unifyStructureChildren :: TyNode -> TyNode -> PresolutionM p ()
     unifyStructureChildren node1 node2 =
         case UnifyDecompose.decomposeUnifyChildren node1 node2 of
             Right edges -> mapM_ (\edge -> unifyStructure (uniLeft edge) (uniRight edge)) edges
             Left _ -> pure ()
 
-isSchemeRootNode :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PresolutionM Bool
+isSchemeRootNode :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PresolutionM p Bool
 isSchemeRootNode canonical c0 nid =
     case Binding.lookupBindParentUnder canonical c0 (typeRef nid) of
         Left _ -> pure False
@@ -229,7 +229,7 @@ isSchemeRootNode canonical c0 nid =
                 Just gen -> pure (nid `elem` map canonical (gnSchemes gen))
         _ -> pure False
 
-getBindingPermission :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PresolutionM (Bool, Maybe GenNodeId)
+getBindingPermission :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PresolutionM p (Bool, Maybe GenNodeId)
 getBindingPermission canonical c0 nid =
     case Binding.lookupBindParentUnder canonical c0 (typeRef nid) of
         Left err -> throwError (BindingTreeError err)
@@ -237,7 +237,7 @@ getBindingPermission canonical c0 nid =
         Right (Just (GenRef gid, BindRigid)) -> pure (False, Just gid)
         _ -> pure (False, Nothing)
 
-solveNonExpInstantiation :: NodeId -> NodeId -> PresolutionM ()
+solveNonExpInstantiation :: NodeId -> NodeId -> PresolutionM p ()
 solveNonExpInstantiation lhs rhs = do
     lhsNode <- getCanonicalNode lhs
     rhsNode <- getCanonicalNode rhs
@@ -249,7 +249,7 @@ solveNonExpInstantiation lhs rhs = do
             solveBoundVarInstantiation lhs rhs bnd
         _ -> unifyStructure lhs rhs
 
-solveUnboundVarInstantiation :: NodeId -> NodeId -> PresolutionM ()
+solveUnboundVarInstantiation :: NodeId -> NodeId -> PresolutionM p ()
 solveUnboundVarInstantiation lhs rhs = do
     (c0, canonical) <- getConstraintAndCanonical
     let lhsC = canonical lhs
@@ -261,7 +261,7 @@ solveUnboundVarInstantiation lhs rhs = do
         then setVarBound rhsC (Just lhsC)
         else unifyStructure lhs rhs
 
-solveBoundVarInstantiation :: NodeId -> NodeId -> NodeId -> PresolutionM ()
+solveBoundVarInstantiation :: NodeId -> NodeId -> NodeId -> PresolutionM p ()
 solveBoundVarInstantiation lhs rhs bnd = do
     (c0, canonical) <- getConstraintAndCanonical
     let lhsC = canonical lhs
@@ -275,13 +275,13 @@ solveBoundVarInstantiation lhs rhs bnd = do
                 else unifyStructure lhs rhs
         _ -> unifyStructure lhs rhs
 
-checkOccurs :: (NodeId -> NodeId) -> Constraint p -> NodeId -> NodeId -> PresolutionM Bool
+checkOccurs :: (NodeId -> NodeId) -> Constraint p -> NodeId -> NodeId -> PresolutionM p Bool
 checkOccurs canonical c0 rhsC lhsC =
     case Traversal.occursInUnder canonical (NodeAccess.lookupNode c0) rhsC lhsC of
         Left _ -> pure True
         Right ok -> pure ok
 
-debugBindParents :: String -> PresolutionM ()
+debugBindParents :: String -> PresolutionM p ()
 debugBindParents msg = do
     cfg <- ask
     traceBindingM cfg msg

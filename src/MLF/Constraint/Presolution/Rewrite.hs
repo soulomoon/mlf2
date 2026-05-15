@@ -37,7 +37,6 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Canonicalizer (Canonicalizer, canonicalizeNode)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base (EdgeTrace(..), PresolutionError(..), PresolutionM)
@@ -160,8 +159,8 @@ rewriteGenNodes canonical nodes0 gen0 =
         (IntMap.fromListWith const (map rewriteOne (IntMap.elems (getGenNodeMap gen0))))
 
 -- | Environment for rebuilding bind parents.
-data RebuildBindParentsEnv = RebuildBindParentsEnv
-    { rbpOriginalConstraint :: !(Constraint 'Raw)
+data RebuildBindParentsEnv p = RebuildBindParentsEnv
+    { rbpOriginalConstraint :: !(Constraint p)
       -- ^ The original constraint before rewriting
     , rbpNewNodes :: !(IntMap TyNode)
       -- ^ The rewritten nodes (TyExp removed)
@@ -180,7 +179,7 @@ data RebuildBindParentsEnv = RebuildBindParentsEnv
 -- 2. Resolve conflicts when multiple parents map to the same child
 -- 3. Ensure all nodes have valid parents in the rewritten graph
 -- 4. Fix any parent references that violate the binding tree invariant
-rebuildBindParents :: RebuildBindParentsEnv -> PresolutionM BindParents
+rebuildBindParents :: RebuildBindParentsEnv p -> PresolutionM q BindParents
 rebuildBindParents env = do
     let c = rbpOriginalConstraint env
         newNodes = rbpNewNodes env
@@ -226,7 +225,7 @@ rebuildBindParents env = do
             ]
 
     -- Choose valid parent for each child
-    let chooseBindParent :: NodeRef -> NodeRef -> PresolutionM NodeRef
+    let chooseBindParent :: NodeRef -> NodeRef -> PresolutionM p NodeRef
         chooseBindParent childRef parent0 =
             case childRef of
                 GenRef _ ->
@@ -309,7 +308,7 @@ rebuildBindParents env = do
                                                     ++ show parent0
                                                     ++ ")"
 
-    let insertOne :: BindParents -> (Int, (NodeRef, BindFlag)) -> PresolutionM BindParents
+    let insertOne :: BindParents -> (Int, (NodeRef, BindFlag)) -> PresolutionM p BindParents
         insertOne bp (childKey, (parent, flag)) =
             case IntMap.lookup childKey bp of
                 Nothing -> pure (IntMap.insert childKey (parent, flag) bp)
@@ -436,7 +435,7 @@ rebuildBindParents env = do
     pure (fixUpper bp1)
 
 -- | Debug binding operations (uses global trace config).
-debugBindParents :: String -> a -> PresolutionM a
+debugBindParents :: String -> a -> PresolutionM p a
 debugBindParents msg value = do
     cfg <- ask
     traceBindingM cfg msg

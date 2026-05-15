@@ -1,6 +1,8 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE TypeFamilies #-}
 
 module MLF.Constraint.Presolution.Base (
     PresolutionUf(..),
@@ -47,9 +49,9 @@ module MLF.Constraint.Presolution.Base (
 ) where
 
 import Control.Applicative ((<|>))
-import Control.Monad.State (StateT, get, gets, modify', put, runStateT)
-import Control.Monad.Reader (ReaderT, ask, lift, runReaderT)
-import Control.Monad.Except (throwError)
+import Control.Monad.State (MonadState, StateT, get, gets, modify', put, runStateT)
+import Control.Monad.Reader (MonadReader, ReaderT, ask, lift, runReaderT)
+import Control.Monad.Except (MonadError, throwError)
 import Control.Monad (forM_, when)
 import Data.IntMap.Strict (IntMap)
 import qualified Data.IntMap.Strict as IntMap
@@ -61,7 +63,7 @@ import qualified MLF.Binding.Path as BindingPath
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Phase (Phase(Presolved, Raw))
+import MLF.Constraint.Types.Phase (Phase(Presolved))
 import qualified MLF.Constraint.Types.Graph as Types
 import MLF.Constraint.Types.Witness (EdgeWitness, Expansion, ForallSpec, ReplayContract)
 import MLF.Constraint.Types.Presolution (Presolution, PresolutionSnapshot (..))
@@ -153,8 +155,8 @@ data TranslatabilityIssue
     deriving (Eq, Show)
 
 -- | State maintained during the presolution process.
-data PresolutionState = PresolutionState
-    { psConstraint :: Constraint 'Raw
+data PresolutionState p = PresolutionState
+    { psConstraint :: Constraint p
     , psPresolution :: Presolution
     , psUnionFind :: IntMap NodeId
     , psNextNodeId :: Int
@@ -289,11 +291,18 @@ unionTrace (m1, s1, f1) (m2, s2, f2) =
     (m1 <> m2, IntSet.union s1 s2, IntSet.union f1 f2)
 
 -- | The Presolution monad.
-type PresolutionM = ReaderT TraceConfig (StateT PresolutionState (Either PresolutionError))
+newtype PresolutionM p a = PresolutionM
+    { unPresolutionM :: ReaderT TraceConfig (StateT (PresolutionState p) (Either PresolutionError)) a
+    }
+    deriving (Functor, Applicative, Monad, MonadReader TraceConfig, MonadState (PresolutionState p), MonadError PresolutionError)
 
 -- | Run a PresolutionM action with an initial state (testing helper).
-runPresolutionM :: TraceConfig -> PresolutionState -> PresolutionM a -> Either PresolutionError (a, PresolutionState)
-runPresolutionM cfg st action = runStateT (runReaderT action cfg) st
+runPresolutionM
+    :: TraceConfig
+    -> PresolutionState p
+    -> PresolutionM p a
+    -> Either PresolutionError (a, PresolutionState p)
+runPresolutionM cfg st action = runStateT (runReaderT (unPresolutionM action) cfg) st
 
 {- Note [Presolution foundation]
 Presolution state access is intentionally layered to keep the core algorithms
@@ -323,14 +332,17 @@ redundant helpers will be removed.
 -- This allows functions to be polymorphic over the concrete monad stack,
 -- reducing the need for explicit lift calls.
 class Monad m => MonadPresolution m where
+    type PresolutionPhaseOf m :: Phase
     -- | Get the current constraint.
-    getConstraint :: m (Constraint 'Raw)
+    getConstraint :: m (Constraint (PresolutionPhaseOf m))
     -- | Modify the constraint with a function.
-    modifyConstraint :: (Constraint 'Raw -> Constraint 'Raw) -> m ()
+    modifyConstraint
+        :: (Constraint (PresolutionPhaseOf m) -> Constraint (PresolutionPhaseOf m))
+        -> m ()
     -- | Get the full presolution state.
-    getPresolutionState :: m PresolutionState
+    getPresolutionState :: m (PresolutionState (PresolutionPhaseOf m))
     -- | Put a new presolution state.
-    putPresolutionState :: PresolutionState -> m ()
+    putPresolutionState :: PresolutionState (PresolutionPhaseOf m) -> m ()
     -- | Throw a presolution error.
     throwPresolutionError :: PresolutionError -> m a
     -- | Modify the presolution state with a function.
@@ -340,7 +352,8 @@ class Monad m => MonadPresolution m where
     bindExpansionArgs :: NodeId -> [(NodeId, NodeId)] -> m ()
 
 -- | Instance for the concrete PresolutionM monad.
-instance {-# OVERLAPPING #-} MonadPresolution PresolutionM where
+instance {-# OVERLAPPING #-} MonadPresolution (PresolutionM p) where
+    type PresolutionPhaseOf (PresolutionM p) = p
     getConstraint = gets psConstraint
     modifyConstraint f = modify' $ \st -> st { psConstraint = f (psConstraint st) }
     getPresolutionState = get
@@ -379,16 +392,16 @@ instance {-# OVERLAPPING #-} MonadPresolution PresolutionM where
 
 bindingPathToRootUnderM
     :: (NodeId -> NodeId)
-    -> Constraint p
+    -> Constraint q
     -> NodeRef
-    -> PresolutionM [NodeRef]
+    -> PresolutionM p [NodeRef]
 bindingPathToRootUnderM canonical c start =
     case BindingCanonical.withQuotientBindParents "bindingPathToRootUnderM" canonical c start $ \startC bindParents ->
         BindingPath.bindingPathToRootLocal bindParents startC of
         Left err -> throwError (BindingTreeError err)
         Right path -> pure path
 
-requireValidBindingTree :: PresolutionM ()
+requireValidBindingTree :: PresolutionM p ()
 requireValidBindingTree = do
     ensureBindingParents
     c0 <- gets psConstraint
@@ -398,7 +411,7 @@ requireValidBindingTree = do
         Left err -> throwError (BindingTreeError err)
         Right () -> pure ()
 
-ensureBindingParents :: PresolutionM ()
+ensureBindingParents :: PresolutionM p ()
 ensureBindingParents = do
     st0 <- get
     let c0 = psConstraint st0
@@ -535,7 +548,7 @@ ensureBindingParents = do
                 bp2 = fixUpper bp1
             put st0 { psConstraint = c0 { cBindParents = bp2 } }
 
-edgeInteriorExact :: NodeId -> PresolutionM IntSet.IntSet
+edgeInteriorExact :: NodeId -> PresolutionM p IntSet.IntSet
 edgeInteriorExact root0 = do
     c0 <- gets psConstraint
     uf <- gets psUnionFind
@@ -578,7 +591,7 @@ traceInteriorRootRef canonical c0 root0 =
         Just gid -> genRef gid
         Nothing -> typeRef rootC
 
-orderedBindersRawM :: NodeId -> PresolutionM [NodeId]
+orderedBindersRawM :: NodeId -> PresolutionM p [NodeId]
 orderedBindersRawM binder0 = do
     c0 <- gets psConstraint
     case Binding.orderedBinders id c0 (typeRef binder0) of
@@ -587,7 +600,7 @@ orderedBindersRawM binder0 = do
 
 -- | Resolve the instantiation binders for a node, skipping vacuous ∀ nodes.
 -- Returns the body root to instantiate and the ordered binder list.
-instantiationBindersM :: GenNodeId -> NodeId -> PresolutionM (NodeId, [NodeId])
+instantiationBindersM :: GenNodeId -> NodeId -> PresolutionM p (NodeId, [NodeId])
 instantiationBindersM gid nid0 = do
     st <- get
     let c0 = psConstraint st
@@ -651,7 +664,7 @@ instantiationBindersM gid nid0 = do
 -- definition where binders come from the gen node's scope (s = hg·i).
 --
 -- This replaces the heuristic @implicitBindersM@ with explicit provenance.
-instantiationBindersFromGenM :: GenNodeId -> NodeId -> PresolutionM (NodeId, [NodeId])
+instantiationBindersFromGenM :: GenNodeId -> NodeId -> PresolutionM p (NodeId, [NodeId])
 instantiationBindersFromGenM gid bodyRoot0 = do
     st <- get
     let c0 = psConstraint st
@@ -715,7 +728,7 @@ instantiationBindersFromGenM gid bodyRoot0 = do
 
     pure (bodyC, candidates)
 
-forallSpecM :: NodeId -> PresolutionM ForallSpec
+forallSpecM :: NodeId -> PresolutionM p ForallSpec
 forallSpecM binder0 = do
     c0 <- gets psConstraint
     uf0 <- gets psUnionFind
@@ -725,7 +738,7 @@ forallSpecM binder0 = do
         Right fs -> pure fs
 
 -- | Debug binders using explicit trace config.
-debugBinders :: String -> PresolutionM ()
+debugBinders :: String -> PresolutionM p ()
 debugBinders msg = do
     cfg <- ask
     traceBindingM cfg msg
@@ -777,6 +790,17 @@ untypable constraints or weaker principal solutions (thesis line ~13400:
 -- | MonadPresolution instance for ReaderT, allowing presolution operations
 -- to be used within ReaderT transformers without explicit lift.
 instance {-# OVERLAPPABLE #-} MonadPresolution m => MonadPresolution (ReaderT r m) where
+    type PresolutionPhaseOf (ReaderT r m) = PresolutionPhaseOf m
+    getConstraint = lift getConstraint
+    modifyConstraint f = lift (modifyConstraint f)
+    getPresolutionState = lift getPresolutionState
+    putPresolutionState st = lift (putPresolutionState st)
+    throwPresolutionError err = lift (throwPresolutionError err)
+    modifyPresolution f = lift (modifyPresolution f)
+    bindExpansionArgs root pairs = lift (bindExpansionArgs root pairs)
+
+instance {-# OVERLAPPABLE #-} MonadPresolution m => MonadPresolution (StateT s m) where
+    type PresolutionPhaseOf (StateT s m) = PresolutionPhaseOf m
     getConstraint = lift getConstraint
     modifyConstraint f = lift (modifyConstraint f)
     getPresolutionState = lift getPresolutionState

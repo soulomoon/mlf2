@@ -35,7 +35,7 @@ import MLF.Constraint.Presolution.Expansion (
     )
 
 -- | Apply final expansions to all TyExp nodes and record their replacements.
-materializeExpansions :: PresolutionM (IntMap NodeId)
+materializeExpansions :: PresolutionM p (IntMap NodeId)
 materializeExpansions = do
     (c0, canonical) <- getConstraintAndCanonical
     let exps =

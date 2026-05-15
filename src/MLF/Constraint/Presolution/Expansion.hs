@@ -72,13 +72,13 @@ import MLF.Constraint.Presolution.Unify (unifyAcyclic)
 import MLF.Util.Trace (traceBindingM)
 
 -- | Get the current expansion for an expansion variable.
-getExpansion :: ExpVarId -> PresolutionM Expansion
+getExpansion :: ExpVarId -> PresolutionM p Expansion
 getExpansion s = do
     Presolution m <- gets psPresolution
     return $ fromMaybe ExpIdentity (IntMap.lookup (getExpVarId s) m)
 
 -- | Set the expansion for an expansion variable.
-setExpansion :: ExpVarId -> Expansion -> PresolutionM ()
+setExpansion :: ExpVarId -> Expansion -> PresolutionM p ()
 setExpansion s expansion = do
     modify $ \st ->
         st
@@ -87,13 +87,13 @@ setExpansion s expansion = do
                     IntMap.insert (getExpVarId s) expansion (getAssignments (psPresolution st))
             }
 
-recordEdgeExpansion :: EdgeId -> Expansion -> PresolutionM ()
+recordEdgeExpansion :: EdgeId -> Expansion -> PresolutionM p ()
 recordEdgeExpansion (EdgeId eid) expn =
     modify $ \st -> st { psEdgeExpansions = IntMap.insert eid expn (psEdgeExpansions st) }
 
 -- | Merge two expansions for the same variable.
 -- This may trigger unifications if we merge two Instantiates.
-mergeExpansions :: ExpVarId -> Expansion -> Expansion -> PresolutionM Expansion
+mergeExpansions :: ExpVarId -> Expansion -> Expansion -> PresolutionM p Expansion
 mergeExpansions _v e1 e2 = case (e1, e2) of
     (ExpIdentity, _) -> pure e2
     (_, ExpIdentity) -> pure e1
@@ -185,11 +185,11 @@ alone would lose required polymorphism; ∀ alone would quantify at the wrong
 level. The sequence preserves sharing outside the binder and remains the least
 expansion that satisfies the edge (principality argument in §5).
 -}
-nearestGenAncestor :: NodeId -> PresolutionM (Maybe GenNodeId)
+nearestGenAncestor :: NodeId -> PresolutionM p (Maybe GenNodeId)
 nearestGenAncestor nid0 = do
     canonical <- getCanonical
     let start = typeRef (canonical nid0)
-        go :: IntSet.IntSet -> NodeRef -> PresolutionM (Maybe GenNodeId)
+        go :: IntSet.IntSet -> NodeRef -> PresolutionM p (Maybe GenNodeId)
         go visited ref
             | IntSet.member (nodeRefKey ref) visited =
                 pure Nothing
@@ -202,7 +202,7 @@ nearestGenAncestor nid0 = do
                         go (IntSet.insert (nodeRefKey ref) visited) (typeRef (canonical parent))
     go IntSet.empty start
 
-decideMinimalExpansion :: GenNodeId -> Bool -> TyNode -> TyNode -> PresolutionM (Expansion, [(NodeId, NodeId)])
+decideMinimalExpansion :: GenNodeId -> Bool -> TyNode -> TyNode -> PresolutionM p (Expansion, [(NodeId, NodeId)])
 decideMinimalExpansion gid allowTrivial (TyExp { tnBody = bodyId }) targetNode = do
     (bodyRoot, boundVars) <- instantiationBindersM gid bodyId
     debugExpansion
@@ -279,7 +279,7 @@ decideMinimalExpansion gid allowTrivial (TyExp { tnBody = bodyId }) targetNode =
 
 decideMinimalExpansion _ _ _ _ = return (ExpIdentity, [])
 
-debugExpansion :: String -> PresolutionM ()
+debugExpansion :: String -> PresolutionM p ()
 debugExpansion msg = do
     cfg <- ask
     traceBindingM cfg msg
@@ -290,7 +290,7 @@ debugExpansion msg = do
 --     plus the unifications it triggers) so later edges see the refined graph.
 --   • materializeExpansions: after all edges are processed, rewrite the graph to
 --     erase TyExp nodes and clear inst edges before Solve.
-applyExpansion :: GenNodeId -> Expansion -> TyNode -> PresolutionM NodeId
+applyExpansion :: GenNodeId -> Expansion -> TyNode -> PresolutionM p NodeId
 applyExpansion gid expansion expNode =
     let start =
             case expNode of
@@ -299,14 +299,14 @@ applyExpansion gid expansion expNode =
         action = expansionAction expansion
     in action expNode start
   where
-    wrapForall :: [ForallSpec] -> NodeId -> PresolutionM NodeId
+    wrapForall :: [ForallSpec] -> NodeId -> PresolutionM p NodeId
     wrapForall [] nid = return nid
     wrapForall (spec:ls) nid = do
         newId <- introduceForallFromSpec spec nid
         wrapForall ls newId
 
     -- Allow composing over an already-expanded node (not necessarily TyExp)
-    expansionAction :: Expansion -> TyNode -> NodeId -> PresolutionM NodeId
+    expansionAction :: Expansion -> TyNode -> NodeId -> PresolutionM p NodeId
     expansionAction = cata alg
       where
         alg layer = case layer of
@@ -347,7 +347,7 @@ applyExpansion gid expansion expNode =
 -- | Apply an expansion like 'applyExpansion', but also return a (coarse) trace
 -- of the expansion interior I(r): instantiation args, copied nodes, and any
 -- freshly introduced ∀ wrappers.
-applyExpansionTraced :: GenNodeId -> Expansion -> TyNode -> PresolutionM (NodeId, (CopyMap, InteriorSet, FrontierSet))
+applyExpansionTraced :: GenNodeId -> Expansion -> TyNode -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
 applyExpansionTraced gid expansion expNode =
     let start =
             case expNode of
@@ -356,14 +356,14 @@ applyExpansionTraced gid expansion expNode =
         action = expansionActionTraced expansion
     in action expNode start
   where
-    wrapForallTraced :: [ForallSpec] -> NodeId -> PresolutionM (NodeId, (CopyMap, InteriorSet, FrontierSet))
+    wrapForallTraced :: [ForallSpec] -> NodeId -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
     wrapForallTraced [] nid = pure (nid, emptyTrace)
     wrapForallTraced (spec:ls) nid = do
         newId <- introduceForallFromSpec spec nid
         (outer, (cmap, interior, frontier)) <- wrapForallTraced ls newId
         pure (outer, (cmap, IntSet.insert (getNodeId newId) interior, frontier))
 
-    expansionActionTraced :: Expansion -> TyNode -> NodeId -> PresolutionM (NodeId, (CopyMap, InteriorSet, FrontierSet))
+    expansionActionTraced :: Expansion -> TyNode -> NodeId -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
     expansionActionTraced = cata alg
       where
         alg layer = case layer of
@@ -412,7 +412,7 @@ applyExpansionTraced gid expansion expNode =
     -- In particular, `ExpInstantiate` copies the body by substituting binders with
     -- fresh binder-meta variables, and copies their instance bounds onto the
     -- instantiation arguments (via `MLF.Constraint.VarStore`).
-applyExpansionEdgeTraced :: GenNodeId -> Expansion -> TyNode -> PresolutionM (NodeId, (CopyMap, InteriorSet, FrontierSet))
+applyExpansionEdgeTraced :: GenNodeId -> Expansion -> TyNode -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
 applyExpansionEdgeTraced gid expansion expNode =
     let start =
             case expNode of
@@ -421,18 +421,18 @@ applyExpansionEdgeTraced gid expansion expNode =
         action = expansionActionEdgeTraced expansion
     in action expNode start
   where
-    binderMetaAt :: NodeId -> NodeId -> PresolutionM NodeId
+    binderMetaAt :: NodeId -> NodeId -> PresolutionM p NodeId
     binderMetaAt _arg _bv =
         createFreshVar
 
-    wrapForallTraced :: [ForallSpec] -> NodeId -> PresolutionM (NodeId, (CopyMap, InteriorSet, FrontierSet))
+    wrapForallTraced :: [ForallSpec] -> NodeId -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
     wrapForallTraced [] nid = pure (nid, emptyTrace)
     wrapForallTraced (spec:ls) nid = do
         newId <- introduceForallFromSpec spec nid
         (outer, (cmap, interior, frontier)) <- wrapForallTraced ls newId
         pure (outer, (cmap, IntSet.insert (getNodeId newId) interior, frontier))
 
-    expansionActionEdgeTraced :: Expansion -> TyNode -> NodeId -> PresolutionM (NodeId, (CopyMap, InteriorSet, FrontierSet))
+    expansionActionEdgeTraced :: Expansion -> TyNode -> NodeId -> PresolutionM p (NodeId, (CopyMap, InteriorSet, FrontierSet))
     expansionActionEdgeTraced = cata alg
       where
         alg layer = case layer of
@@ -508,7 +508,7 @@ applyExpansionEdgeTraced gid expansion expNode =
                                 (root, cmap0, interior0, frontier0) <- instantiateSchemeWithTrace bodyRoot binderMetas
                                 (cmapB, interiorB, frontierB) <- copyBinderBounds binderMetas binderArgs
                                 pure (root, (cmap0 <> cmapB, IntSet.union interior0 interiorB, IntSet.union frontier0 frontierB))
-copyBinderBounds :: [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> PresolutionM (CopyMap, InteriorSet, FrontierSet)
+copyBinderBounds :: [(NodeId, NodeId)] -> [(NodeId, NodeId)] -> PresolutionM p (CopyMap, InteriorSet, FrontierSet)
 copyBinderBounds binderMetas binderArgs = do
     let binderMetaMap = IntMap.fromList [(getNodeId bv, meta) | (bv, meta) <- binderMetas]
         binderArgMap = IntMap.fromList [(getNodeId bv, arg) | (bv, arg) <- binderArgs]

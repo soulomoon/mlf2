@@ -83,7 +83,7 @@ data EdgeWitnessInput = EdgeWitnessInput
     ewiDepth :: Int
   }
 
-edgeWitnessPlan :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM EdgeWitnessPlan
+edgeWitnessPlan :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM p EdgeWitnessPlan
 edgeWitnessPlan gid leftId leftRaw expn = do
   let root = case leftRaw of
         TyExp {tnBody = b} -> b
@@ -95,7 +95,7 @@ buildEdgeWitness ::
   EdgeWitnessInput ->
   [InstanceOp] ->
   [InstanceOp] ->
-  PresolutionM EdgeWitness
+  PresolutionM p EdgeWitness
 buildEdgeWitness input baseOps extraOps = do
   let eid = ewiEdgeId input
       left = ewiSrcNode input
@@ -116,7 +116,7 @@ buildEdgeTrace ::
   GenNodeId ->
   Expansion ->
   (CopyMap, InteriorSet, FrontierSet) ->
-  PresolutionM EdgeTrace
+  PresolutionM p EdgeTrace
 buildEdgeTrace input gid expn (copyMap0, _interior0, _frontier0) = do
   let left = ewiSrcNode input
       leftRaw = ewiLeftRaw input
@@ -146,7 +146,7 @@ buildEdgeTrace input gid expn (copyMap0, _interior0, _frontier0) = do
         etCopyMap = copyMap0
       }
 
-binderArgsFromExpansion :: GenNodeId -> TyNode -> Expansion -> PresolutionM [(NodeId, NodeId)]
+binderArgsFromExpansion :: GenNodeId -> TyNode -> Expansion -> PresolutionM p [(NodeId, NodeId)]
 binderArgsFromExpansion gid leftRaw expn = do
   let isTyVarBinder nid = do
         n <- getCanonicalNode nid
@@ -182,7 +182,7 @@ binderArgsFromExpansion gid leftRaw expn = do
   cataM alg expn
 
 -- | Convert a presolution expansion recipe into a forall-intro count and omega ops.
-witnessFromExpansion :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM (Int, [InstanceOp])
+witnessFromExpansion :: GenNodeId -> NodeId -> TyNode -> Expansion -> PresolutionM p (Int, [InstanceOp])
 witnessFromExpansion gid _root leftRaw expn = do
   let (_hasForall, stepper) = cata (witnessAlg leftRaw) expn
   steps <- stepper
@@ -192,8 +192,8 @@ witnessFromExpansion gid _root leftRaw expn = do
   where
     witnessAlg ::
       TyNode ->
-      ExpansionF (Bool, PresolutionM (Int, [InstanceOp])) ->
-      (Bool, PresolutionM (Int, [InstanceOp]))
+      ExpansionF (Bool, PresolutionM p (Int, [InstanceOp])) ->
+      (Bool, PresolutionM p (Int, [InstanceOp]))
     witnessAlg lr layer = case layer of
       ExpIdentityF ->
         (False, pure (0, []))
@@ -234,7 +234,7 @@ witnessFromExpansion gid _root leftRaw expn = do
       [NodeId] -> -- binders at this instantiation site
       ([InstanceOp], [InstanceOp], [InstanceOp]) ->
       (NodeId, NodeId) -> -- (arg, binder)
-      PresolutionM ([InstanceOp], [InstanceOp], [InstanceOp])
+      PresolutionM p ([InstanceOp], [InstanceOp], [InstanceOp])
     classify binders (gAcc, mAcc, wAcc) (arg, bv) = do
       mbBound <- binderBound bv
       let weakenOp = [OpWeaken bv]
@@ -252,7 +252,7 @@ witnessFromExpansion gid _root leftRaw expn = do
             -- quantifier via InstElim — thesis-exact behavior.
             else pure (gAcc, mAcc, wAcc ++ weakenOp)
 
-    binderBound :: NodeId -> PresolutionM (Maybe NodeId)
+    binderBound :: NodeId -> PresolutionM p (Maybe NodeId)
     binderBound bv = do
       n <- getCanonicalNode bv
       case n of
@@ -260,7 +260,7 @@ witnessFromExpansion gid _root leftRaw expn = do
           lookupVarBound bv
         _ -> pure Nothing
 
-    isTyVar :: NodeId -> PresolutionM Bool
+    isTyVar :: NodeId -> PresolutionM p Bool
     isTyVar nid = do
       n <- getCanonicalNode nid
       pure $ case n of

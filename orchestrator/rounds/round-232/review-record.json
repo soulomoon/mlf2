@@ -1,0 +1,36 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-232",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-phase-indexed-constraint",
+  "extracted_item_id": "item-3a-phase4-raw-bridge-retirement",
+  "decision": "approved",
+  "evidence_summary": "Round-232 stays inside the selected milestone-3 Phase-4 boundary-hardening scope, retires the remaining presolution raw bridge by phase-indexing PresolutionState, PresolutionM, MonadPresolution, and StateAccess, keeps computePresolution on Constraint 'Acyclic while emitting Constraint 'Presolved, leaves solve/backend and src-public surfaces untouched, adds focused raw-bridge regression guards, and passes git diff --check plus cabal build all && cabal test with 2567 examples and 0 failures. The integrated milestone-3 completion signal is now satisfied, so closeout may remain status-only and move milestone-3 from pending to done.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-3",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-3"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-232 retired the Phase 4 raw bridge, phase-indexed the presolution working state and helpers, kept the driver on the Acyclic -> Presolved boundary, added focused regression guards, and passed the full cabal gate."
+      }
+    ],
+    "history_entries": [
+      {
+        "anchor_id": "roadmap-history-completed-rounds",
+        "text": "round-232 completed milestone-3 by removing the remaining Phase-4 raw presolution bridge, keeping the presolution state typed end to end, and passing focused checks plus the full cabal gate."
+      }
+    ],
+    "semantic_update_required_reason": null
+  }
+}

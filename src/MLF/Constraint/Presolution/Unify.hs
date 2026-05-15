@@ -29,7 +29,7 @@ import MLF.Constraint.Presolution.StateAccess (getConstraintAndCanonical)
 
 -- | Lightweight reachability to prevent emitting a unification that would
 -- immediately create a self-reference (occurs-check for presolution).
-occursIn :: NodeId -> NodeId -> PresolutionM Bool
+occursIn :: NodeId -> NodeId -> PresolutionM p Bool
 occursIn needle start = do
     (c, canonical) <- getConstraintAndCanonical
     let nodes = cNodes c
@@ -47,10 +47,10 @@ occursIn needle start = do
 -- Returns the exact raised-node trace (with multiplicity) induced by binding-edge
 -- harmonization. Presolution records `OpRaise` based on this trace (filtered to
 -- interior nodes and not under rigid binders).
-unifyAcyclicRawWithRaiseTrace :: NodeId -> NodeId -> PresolutionM [NodeId]
+unifyAcyclicRawWithRaiseTrace :: NodeId -> NodeId -> PresolutionM p [NodeId]
 unifyAcyclicRawWithRaiseTrace = unifyAcyclicRawWithRaiseTracePrefer Nothing
 
-unifyAcyclicRawWithRaiseTracePrefer :: Maybe NodeId -> NodeId -> NodeId -> PresolutionM [NodeId]
+unifyAcyclicRawWithRaiseTracePrefer :: Maybe NodeId -> NodeId -> NodeId -> PresolutionM p [NodeId]
 unifyAcyclicRawWithRaiseTracePrefer prefer n1 n2 = do
     root1 <- findRoot n1
     root2 <- findRoot n2
@@ -58,7 +58,7 @@ unifyAcyclicRawWithRaiseTracePrefer prefer n1 n2 = do
         then pure []
         else unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2
 
-unifyAcyclicRootsWithRaiseTracePrefer :: Maybe NodeId -> NodeId -> NodeId -> PresolutionM [NodeId]
+unifyAcyclicRootsWithRaiseTracePrefer :: Maybe NodeId -> NodeId -> NodeId -> PresolutionM p [NodeId]
 unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2 = do
     occurs12 <- occursIn root1 root2
     when occurs12 $ throwError $ OccursCheckPresolution root1 root2
@@ -114,7 +114,7 @@ unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2 = do
 
     pure trace0
 
-unifyAcyclicRawWithRaiseCounts :: NodeId -> NodeId -> PresolutionM (Int, Int)
+unifyAcyclicRawWithRaiseCounts :: NodeId -> NodeId -> PresolutionM p (Int, Int)
 unifyAcyclicRawWithRaiseCounts n1 n2 = do
     root1 <- findRoot n1
     root2 <- findRoot n2
@@ -127,10 +127,10 @@ unifyAcyclicRawWithRaiseCounts n1 n2 = do
             pure (k1, k2)
 
 -- | Union-Find merge with occurs-check.
-unifyAcyclicRaw :: NodeId -> NodeId -> PresolutionM ()
+unifyAcyclicRaw :: NodeId -> NodeId -> PresolutionM p ()
 unifyAcyclicRaw n1 n2 = do
     _ <- unifyAcyclicRawWithRaiseCounts n1 n2
     pure ()
 
-unifyAcyclic :: NodeId -> NodeId -> PresolutionM ()
+unifyAcyclic :: NodeId -> NodeId -> PresolutionM p ()
 unifyAcyclic = unifyAcyclicRaw

@@ -44,7 +44,7 @@ binders (which would violate the binding-tree invariant that term-DAG roots
 have no binding parent).
 -}
 
-introduceForallFromSpec :: ForallSpec -> NodeId -> PresolutionM NodeId
+introduceForallFromSpec :: ForallSpec -> NodeId -> PresolutionM p NodeId
 introduceForallFromSpec spec bodyRoot = do
     (c0, canonical) <- getConstraintAndCanonical
     let bodyC = canonical bodyRoot
@@ -62,7 +62,7 @@ introduceForallFromSpec spec bodyRoot = do
     bindForallBindersFromSpec newId bodyC spec
     pure newId
 
-rewireStructuralParents :: (NodeId -> NodeId) -> NodeId -> NodeId -> PresolutionM ()
+rewireStructuralParents :: (NodeId -> NodeId) -> NodeId -> NodeId -> PresolutionM p ()
 rewireStructuralParents canonical old new =
     modifyConstraint $ \c0 ->
         let nodes0 = cNodes c0
@@ -86,7 +86,7 @@ rewireStructuralParents canonical old new =
                     ]
         in c0 { cNodes = nodes1 }
 
-bindForallBindersFromSpec :: NodeId -> NodeId -> ForallSpec -> PresolutionM ()
+bindForallBindersFromSpec :: NodeId -> NodeId -> ForallSpec -> PresolutionM p ()
 bindForallBindersFromSpec forallId bodyRoot ForallSpec{ fsBounds = bounds } = do
     (c0, canonical) <- getConstraintAndCanonical
     let nodes0 = cNodes c0

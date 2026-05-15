@@ -31,17 +31,17 @@ import qualified MLF.Witness.OmegaExec as OmegaExec
 -- This preserves existing pre/post ordering while giving callers a single
 -- edge-local execution entrypoint.
 executeEdgeLocalOmegaOps
-    :: OmegaExec.OmegaExecEnv EdgeUnifyM
+    :: OmegaExec.OmegaExecEnv (EdgeUnifyM p)
     -> [InstanceOp]
-    -> EdgeUnifyM a
-    -> EdgeUnifyM a
+    -> EdgeUnifyM p a
+    -> EdgeUnifyM p a
 executeEdgeLocalOmegaOps omegaEnv baseOps action = do
     OmegaExec.executeOmegaBaseOpsPre omegaEnv baseOps
     out <- action
     OmegaExec.executeOmegaBaseOpsPost omegaEnv baseOps
     pure out
 
-pendingWeakenOwners :: PresolutionM [PendingWeakenOwner]
+pendingWeakenOwners :: PresolutionM p [PendingWeakenOwner]
 pendingWeakenOwners = do
     st <- getPresolutionState
     let pending = psPendingWeakens st
@@ -57,14 +57,14 @@ pendingWeakenOwners = do
 -- Owner-boundary scheduling behavior:
 -- * pending nodes owned by the given boundary owner are flushed now
 -- * all other pending nodes remain queued
-flushPendingWeakensAtOwnerBoundary :: PendingWeakenOwner -> PresolutionM ()
+flushPendingWeakensAtOwnerBoundary :: PendingWeakenOwner -> PresolutionM p ()
 flushPendingWeakensAtOwnerBoundary owner =
     flushPendingWeakensWhere shouldFlush
   where
     shouldFlush bucket =
         bucket == owner || bucket == PendingWeakenOwnerUnknown
 
-flushPendingWeakensWhere :: (PendingWeakenOwner -> Bool) -> PresolutionM ()
+flushPendingWeakensWhere :: (PendingWeakenOwner -> Bool) -> PresolutionM p ()
 flushPendingWeakensWhere shouldFlush = do
     st0 <- getPresolutionState
     let pending = psPendingWeakens st0

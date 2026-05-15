@@ -36,7 +36,7 @@ import MLF.Constraint.Types.Witness (BoundRef (..), EdgeWitness (..), Expansion,
 import qualified MLF.Util.Order as Order
 
 -- | Normalize edge witnesses against the finalized presolution constraint.
-normalizeEdgeWitnessesM :: PresolutionM ()
+normalizeEdgeWitnessesM :: PresolutionM p ()
 normalizeEdgeWitnessesM = do
   (c0, canonical) <- getConstraintAndCanonical
   traces <- gets psEdgeTraces

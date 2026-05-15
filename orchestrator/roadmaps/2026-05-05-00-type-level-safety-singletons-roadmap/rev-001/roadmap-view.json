@@ -34,7 +34,7 @@
     {
       "milestone_id": "milestone-3",
       "title": "Phase-Indexed Constraint Type",
-      "status": "pending",
+            "status": "done",
       "depends_on": [
         "milestone-2"
       ],
@@ -177,7 +177,7 @@
     },
     "milestone-3": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 3. Phase-Indexed Constraint Type"
+            "selector": "### [done] 3. Phase-Indexed Constraint Type"
     },
     "milestone-3-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",

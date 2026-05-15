@@ -1433,7 +1433,7 @@ boundFromType ty =
     Elab.TForall v mb body -> Elab.TForall v mb body
     Elab.TMu v body -> Elab.TMu v body
 
-emptyPresolutionState :: Constraint 'Raw -> PresolutionState
+emptyPresolutionState :: Constraint 'Raw -> PresolutionState 'Raw
 emptyPresolutionState c =
   PresolutionState
     c

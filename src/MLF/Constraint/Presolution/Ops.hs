@@ -34,7 +34,7 @@ import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base (PresolutionM, PresolutionError(..), PresolutionState(..))
 
 -- | Allocate a fresh NodeId from the presolution state counter.
-createFreshNodeId :: PresolutionM NodeId
+createFreshNodeId :: PresolutionM p NodeId
 createFreshNodeId = do
     st <- get
     let nid = NodeId (psNextNodeId st)
@@ -42,7 +42,7 @@ createFreshNodeId = do
     pure nid
 
 -- | Register a node in the constraint’s node map.
-registerNode :: NodeId -> TyNode -> PresolutionM ()
+registerNode :: NodeId -> TyNode -> PresolutionM p ()
 registerNode nid node =
     modify' $ \st ->
         let c0 = psConstraint st
@@ -53,7 +53,7 @@ registerNode nid node =
 --
 -- Paper alignment (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1):
 -- this mutates the explicit binding tree relation `cBindParents`.
-setBindParentM :: NodeRef -> (NodeRef, BindFlag) -> PresolutionM ()
+setBindParentM :: NodeRef -> (NodeRef, BindFlag) -> PresolutionM p ()
 setBindParentM child parentInfo =
     modify' $ \st ->
         let c0 = psConstraint st
@@ -61,7 +61,7 @@ setBindParentM child parentInfo =
         in st { psConstraint = c1 }
 
 -- | Lookup a node in the term-DAG or fail.
-getNode :: NodeId -> PresolutionM TyNode
+getNode :: NodeId -> PresolutionM p TyNode
 getNode nid = do
     nodes <- gets (cNodes . psConstraint)
     case lookupNode nid nodes of
@@ -69,7 +69,7 @@ getNode nid = do
         Nothing -> throwError $ NodeLookupFailed nid
 
 -- | Find the canonical representative of a node (with path compression).
-findRoot :: NodeId -> PresolutionM NodeId
+findRoot :: NodeId -> PresolutionM p NodeId
 findRoot nid = do
     uf <- gets psUnionFind
     let (root, uf') = UnionFind.findRootWithCompression uf nid
@@ -77,7 +77,7 @@ findRoot nid = do
     pure root
 
 -- | Lookup a node at its current canonical representative.
-getCanonicalNode :: NodeId -> PresolutionM TyNode
+getCanonicalNode :: NodeId -> PresolutionM p TyNode
 getCanonicalNode nid = do
     rootId <- findRoot nid
     nodes <- gets (cNodes . psConstraint)
@@ -88,14 +88,14 @@ getCanonicalNode nid = do
 -- | Lookup the instance bound of a variable (⊥ represented as 'Nothing').
 --
 -- Uses canonical representatives so aliasing through UF stays coherent.
-lookupVarBound :: NodeId -> PresolutionM (Maybe NodeId)
+lookupVarBound :: NodeId -> PresolutionM p (Maybe NodeId)
 lookupVarBound bv = do
     root <- findRoot bv
     c <- gets psConstraint
     pure (VarStore.lookupVarBound c root)
 
 -- | Helper to create a fresh variable node.
-createFreshVar :: PresolutionM NodeId
+createFreshVar :: PresolutionM p NodeId
 createFreshVar = do
     nid <- createFreshNodeId
     let node = TyVar { tnId = nid, tnBound = Nothing }
@@ -106,7 +106,7 @@ createFreshVar = do
 --
 -- Missing keys are treated as ⊥; updates use UF roots so bounds follow
 -- canonical representatives.
-setVarBound :: NodeId -> Maybe NodeId -> PresolutionM ()
+setVarBound :: NodeId -> Maybe NodeId -> PresolutionM p ()
 setVarBound vid mb = do
     node <- getNode vid
     case node of
@@ -120,7 +120,7 @@ setVarBound vid mb = do
         _ -> pure ()
 
 -- | Mark a type variable as eliminated so elaboration will not re-quantify it.
-dropVarBind :: NodeId -> PresolutionM ()
+dropVarBind :: NodeId -> PresolutionM p ()
 dropVarBind vid = do
     node <- getNode vid
     case node of

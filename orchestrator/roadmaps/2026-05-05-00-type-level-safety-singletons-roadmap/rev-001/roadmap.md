@@ -145,7 +145,7 @@ scope unless a later semantic roadmap update explicitly approves them.
 - Extraction notes: inspect current cabal, `Phase`, and test coverage before
   deciding whether this is implementation, test, or closeout work.
 
-### [pending] 3. Phase-Indexed Constraint Type
+### [done] 3. Phase-Indexed Constraint Type
 
 - Milestone id: `milestone-3`
 - Depends on: `milestone-2`
@@ -163,7 +163,7 @@ scope unless a later semantic roadmap update explicitly approves them.
   selectors precise.
 #### Completion Pointers: milestone-3
 
-none yet
+- round-232 retired the Phase 4 raw bridge, phase-indexed the presolution working state and helpers, kept the driver on the Acyclic -> Presolved boundary, added focused regression guards, and passed the full cabal gate.
 
 #### Candidate Direction: Constraint Phase Boundary Hardening
 

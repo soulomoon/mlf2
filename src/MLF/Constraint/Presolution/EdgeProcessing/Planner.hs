@@ -33,7 +33,7 @@ import MLF.Util.Trace (traceBindingM)
 -- Reads the canonicalized left and right nodes and per-edge flags
 -- ('cLetEdges') from the presolution state, then
 -- rejects non-`TyExp` left nodes (fail-fast invariant).
-planEdge :: InstEdge -> PresolutionM EdgePlan
+planEdge :: InstEdge -> PresolutionM p EdgePlan
 planEdge edge = do
     cfg <- ask
     (constraint0, canonical) <- getConstraintAndCanonical
@@ -108,7 +108,7 @@ planEdge edge = do
 -- Ownership is always derived from the wrapped body root.  Synthesized
 -- wrappers no longer get a wrapper-root recovery path; missing body-root
 -- ownership fails fast so the planner remains thesis-authoritative.
-resolveSchemeOwnerGen :: (NodeId -> NodeId) -> Constraint p -> ResolvedTyExp -> PresolutionM GenNodeId
+resolveSchemeOwnerGen :: (NodeId -> NodeId) -> Constraint p -> ResolvedTyExp -> PresolutionM p GenNodeId
 resolveSchemeOwnerGen canonical constraint0 leftTyExp =
     findSchemeIntroducerM canonical constraint0 (rteBodyId leftTyExp)
 

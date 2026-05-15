@@ -44,7 +44,7 @@ import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 
 -- | Execute a resolved edge plan.
-executeEdgePlan :: EdgePlan -> PresolutionM ()
+executeEdgePlan :: EdgePlan -> PresolutionM p ()
 executeEdgePlan plan =
   catchError (executeUnifiedExpansionPath plan) (throwError . toExecError)
 
@@ -56,7 +56,7 @@ toExecError err = ExecError err
 -- | Unified expansion-oriented execution path.
 --
 -- Frontend TyExp edges all use the same minimal-expansion + unification flow.
-executeUnifiedExpansionPath :: EdgePlan -> PresolutionM ()
+executeUnifiedExpansionPath :: EdgePlan -> PresolutionM p ()
 executeUnifiedExpansionPath plan = do
   let leftTyExp = eprLeftTyExp plan
       edge = eprEdge plan

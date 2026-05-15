@@ -62,6 +62,37 @@ spec = describe "Repository guardrails" $ do
     graphSrc <- readFile "src/MLF/Constraint/Types/Graph.hs"
     graphSrc `shouldSatisfy` (not . isInfixOf "toRawConstraintForLegacy")
 
+  it "presolution Phase 4 state stays phase-indexed and raw-bridge free" $ do
+    baseSrc <- readFile "src/MLF/Constraint/Presolution/Base.hs"
+    stateAccessSrc <- readFile "src/MLF/Constraint/Presolution/StateAccess.hs"
+    driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
+    forM_
+      [ "data PresolutionState p = PresolutionState",
+        "psConstraint :: Constraint p",
+        "newtype PresolutionM p a = PresolutionM",
+        "type PresolutionPhaseOf m :: Phase"
+      ]
+      $ \marker ->
+        baseSrc `shouldSatisfy` isInfixOf marker
+    forM_
+      [ "getConstraintAndCanonical :: PresolutionM p (Constraint p, NodeId -> NodeId)",
+        "putConstraintAndUnionFind :: Constraint p -> IntMap NodeId -> PresolutionM p ()"
+      ]
+      $ \marker ->
+        stateAccessSrc `shouldSatisfy` isInfixOf marker
+    driverSrc `shouldSatisfy` isInfixOf "mkInitialPresolutionState :: Constraint 'Acyclic -> PresolutionState 'Acyclic"
+    forM_
+      [ "presolutionInProgressRawBridge",
+        "psConstraint :: Constraint 'Raw",
+        "getConstraintAndCanonical :: PresolutionM 'Raw",
+        "getConstraintAndUnionFind :: PresolutionM 'Raw",
+        "putConstraintAndUnionFind :: Constraint 'Raw"
+      ]
+      $ \marker -> do
+        baseSrc `shouldSatisfy` (not . isInfixOf marker)
+        stateAccessSrc `shouldSatisfy` (not . isInfixOf marker)
+        driverSrc `shouldSatisfy` (not . isInfixOf marker)
+
   it "solve facade retires result-shaped compatibility helpers" $ do
     solveSrc <- readFile "src/MLF/Constraint/Solve.hs"
     forM_

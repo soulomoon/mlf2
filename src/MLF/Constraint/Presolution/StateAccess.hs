@@ -76,7 +76,6 @@ import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Presolution.Base (
     PendingWeakenOwner(..),
     PresolutionM,
@@ -100,7 +99,7 @@ import MLF.Constraint.Presolution.Base (
 -- uf <- gets psUnionFind
 -- let canonical = UnionFind.frWith uf
 -- @
-getCanonical :: PresolutionM (NodeId -> NodeId)
+getCanonical :: PresolutionM p (NodeId -> NodeId)
 getCanonical = do
     uf <- gets psUnionFind
     pure (UnionFind.frWith uf)
@@ -116,19 +115,19 @@ getCanonical = do
 -- uf <- gets psUnionFind
 -- let canonical = UnionFind.frWith uf
 -- @
-getConstraintAndCanonical :: PresolutionM (Constraint 'Raw, NodeId -> NodeId)
+getConstraintAndCanonical :: PresolutionM p (Constraint p, NodeId -> NodeId)
 getConstraintAndCanonical = do
     c <- gets psConstraint
     uf <- gets psUnionFind
     pure (c, UnionFind.frWith uf)
 
-getConstraintAndUnionFind :: PresolutionM (Constraint 'Raw, IntMap NodeId)
+getConstraintAndUnionFind :: PresolutionM p (Constraint p, IntMap NodeId)
 getConstraintAndUnionFind = do
     c <- gets psConstraint
     uf <- gets psUnionFind
     pure (c, uf)
 
-putConstraintAndUnionFind :: Constraint 'Raw -> IntMap NodeId -> PresolutionM ()
+putConstraintAndUnionFind :: Constraint p -> IntMap NodeId -> PresolutionM p ()
 putConstraintAndUnionFind constraint uf = do
     modify' $ \st ->
         st
@@ -136,10 +135,10 @@ putConstraintAndUnionFind constraint uf = do
             , psUnionFind = uf
             }
 
-getPendingUnifyEdgesM :: PresolutionM [UnifyEdge]
+getPendingUnifyEdgesM :: PresolutionM p [UnifyEdge]
 getPendingUnifyEdgesM = cUnifyEdges . fst <$> getConstraintAndUnionFind
 
-getPendingWeakensM :: PresolutionM IntSet
+getPendingWeakensM :: PresolutionM p IntSet
 getPendingWeakensM = gets psPendingWeakens
 
 -- -----------------------------------------------------------------------------
@@ -149,7 +148,7 @@ getPendingWeakensM = gets psPendingWeakens
 -- | Lift a BindingError to PresolutionError.
 --
 -- Use this when you need custom error handling for binding operations.
-liftBindingError :: Either BindingError a -> PresolutionM a
+liftBindingError :: Either BindingError a -> PresolutionM p a
 liftBindingError = \case
     Left err -> throwError (BindingTreeError err)
     Right result -> pure result
@@ -164,7 +163,7 @@ liftBindingError = \case
 --     Left err -> throwError (BindingTreeError err)
 --     Right result -> ...
 -- @
-lookupBindParentM :: NodeRef -> PresolutionM (Maybe (NodeRef, BindFlag))
+lookupBindParentM :: NodeRef -> PresolutionM p (Maybe (NodeRef, BindFlag))
 lookupBindParentM ref = do
     (c, canonical) <- getConstraintAndCanonical
     liftBindingError $ Binding.lookupBindParentUnder canonical c ref
@@ -173,7 +172,7 @@ lookupBindParentM ref = do
 --
 -- Returns the path as a list of NodeRefs, starting with the given node
 -- and ending with a root.
-bindingPathToRootM :: NodeRef -> PresolutionM [NodeRef]
+bindingPathToRootM :: NodeRef -> PresolutionM p [NodeRef]
 bindingPathToRootM start = do
     (c, canonical) <- getConstraintAndCanonical
     go canonical c IntSet.empty [start] start
@@ -194,7 +193,7 @@ bindingPathToRootM start = do
 -- | Compute the interior I(r): all nodes transitively bound to r.
 --
 -- The returned set contains canonical node keys.
-interiorOfM :: NodeRef -> PresolutionM IntSet
+interiorOfM :: NodeRef -> PresolutionM p IntSet
 interiorOfM root = do
     (c, canonical) <- getConstraintAndCanonical
     liftBindingError $ Binding.interiorOfUnder canonical c root
@@ -202,7 +201,7 @@ interiorOfM root = do
 -- | Get flexibly-bound TyVar children of a binder node.
 --
 -- This corresponds to Q(n) in the paper, restricted to variable nodes.
-boundFlexChildrenM :: NodeRef -> PresolutionM [NodeId]
+boundFlexChildrenM :: NodeRef -> PresolutionM p [NodeId]
 boundFlexChildrenM binder = do
     (c, canonical) <- getConstraintAndCanonical
     liftBindingError $ Binding.boundFlexChildrenUnder canonical c binder
@@ -210,19 +209,19 @@ boundFlexChildrenM binder = do
 -- | Get flexibly-bound children (any node type) of a binder node.
 --
 -- TyExp is internal and skipped; TyBase/TyBottom are atomic.
-boundFlexChildrenAllM :: NodeRef -> PresolutionM [NodeId]
+boundFlexChildrenAllM :: NodeRef -> PresolutionM p [NodeId]
 boundFlexChildrenAllM binder = do
     (c, canonical) <- getConstraintAndCanonical
     liftBindingError $ Binding.boundFlexChildrenAllUnder canonical c binder
 
 -- | Get ordered binders for a binder node (leftmost-lowermost, paper ≺).
-orderedBindersM :: NodeRef -> PresolutionM [NodeId]
+orderedBindersM :: NodeRef -> PresolutionM p [NodeId]
 orderedBindersM binder = do
     (c, canonical) <- getConstraintAndCanonical
     liftBindingError $ Binding.orderedBinders canonical c binder
 
 -- | Validate binding-tree invariants on the quotient graph.
-checkBindingTreeM :: PresolutionM ()
+checkBindingTreeM :: PresolutionM p ()
 checkBindingTreeM = do
     (c, canonical) <- getConstraintAndCanonical
     liftBindingError $ Binding.checkBindingTreeUnder canonical c
@@ -234,7 +233,7 @@ checkBindingTreeM = do
 -- | Look up a type node using canonical representative.
 --
 -- Returns 'Nothing' if the node doesn't exist.
-lookupNodeCanonM :: NodeId -> PresolutionM (Maybe TyNode)
+lookupNodeCanonM :: NodeId -> PresolutionM p (Maybe TyNode)
 lookupNodeCanonM nid = do
     (c, canonical) <- getConstraintAndCanonical
     pure $ NodeAccess.lookupNodeCanon canonical c nid
@@ -242,7 +241,7 @@ lookupNodeCanonM nid = do
 -- | Look up a gen node using canonical representative.
 --
 -- Returns 'Nothing' if the gen node doesn't exist.
-lookupGenNodeCanonM :: GenNodeId -> PresolutionM (Maybe GenNode)
+lookupGenNodeCanonM :: GenNodeId -> PresolutionM p (Maybe GenNode)
 lookupGenNodeCanonM gid = do
     c <- gets psConstraint
     pure $ NodeAccess.lookupGenNode c gid
@@ -250,7 +249,7 @@ lookupGenNodeCanonM gid = do
 -- | Look up a node at its canonical representative, failing if not found.
 --
 -- This is a common pattern that combines findRoot + lookup.
-getCanonicalNodeM :: NodeId -> PresolutionM TyNode
+getCanonicalNodeM :: NodeId -> PresolutionM p TyNode
 getCanonicalNodeM nid = do
     (c, canonical) <- getConstraintAndCanonical
     let canonNid = canonical nid
@@ -267,7 +266,7 @@ getCanonicalNodeM nid = do
 -- This is intentionally total: unknown/malformed paths map to
 -- 'PendingWeakenOwnerUnknown' so owner-aware scheduling can remain
 -- conservative when a scheme owner cannot be proven.
-pendingWeakenOwnerM :: NodeId -> PresolutionM PendingWeakenOwner
+pendingWeakenOwnerM :: NodeId -> PresolutionM p PendingWeakenOwner
 pendingWeakenOwnerM nid = do
     (c, canonical) <- getConstraintAndCanonical
     pure (pendingWeakenOwnerUnder canonical c nid)
@@ -291,7 +290,7 @@ pendingWeakenOwnerUnder canonical c0 nid0 = go IntSet.empty (typeRef (canonical 
 -- This is used to identify which ∀-scheme "owns" a given body root during
 -- instantiation.  The function canonicalizes the root, walks the binding path
 -- upward, and returns the first 'GenNodeId' encountered.
-findSchemeIntroducerM :: (NodeId -> NodeId) -> Constraint p -> NodeId -> PresolutionM GenNodeId
+findSchemeIntroducerM :: (NodeId -> NodeId) -> Constraint q -> NodeId -> PresolutionM p GenNodeId
 findSchemeIntroducerM canonical c0 root0 = do
     let root = canonical root0
     path <- bindingPathToRootUnderM canonical c0 (typeRef root)

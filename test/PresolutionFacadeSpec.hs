@@ -46,21 +46,30 @@ spec = describe "MLF.Constraint.Presolution facade" $ do
         edgeProcessingSrc `shouldSatisfy` isInfixOf "MLF.Constraint.Presolution.EdgeUnify.Omega"
         edgeProcessingSrc `shouldSatisfy` isInfixOf "pendingWeakenOwners"
 
-    it "keeps the Phase 4 boundary typed and the raw state bridge private" $ do
+    it "keeps the Phase 4 boundary typed without a raw state bridge" $ do
         driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
         baseSrc <- readFile "src/MLF/Constraint/Presolution/Base.hs"
+        stateAccessSrc <- readFile "src/MLF/Constraint/Presolution/StateAccess.hs"
         typesSrc <- readFile "src/MLF/Constraint/Types/Presolution.hs"
         viewSrc <- readFile "src/MLF/Constraint/Presolution/View.hs"
 
         driverSrc `shouldSatisfy` isInfixOf computePresolutionSignature
+        driverSrc `shouldSatisfy` isInfixOf "mkInitialPresolutionState :: Constraint 'Acyclic -> PresolutionState 'Acyclic"
+        driverSrc `shouldSatisfy` (not . isInfixOf "presolutionInProgressRawBridge")
+        baseSrc `shouldSatisfy` isInfixOf "data PresolutionState p = PresolutionState"
+        baseSrc `shouldSatisfy` isInfixOf "psConstraint :: Constraint p"
+        baseSrc `shouldSatisfy` isInfixOf "newtype PresolutionM p a = PresolutionM"
+        baseSrc `shouldSatisfy` isInfixOf "type PresolutionPhaseOf m :: Phase"
+        baseSrc `shouldSatisfy` isInfixOf "type PresolutionPhaseOf (PresolutionM p) = p"
         baseSrc `shouldSatisfy` isInfixOf "prConstraint :: Constraint 'Presolved"
+        stateAccessSrc `shouldSatisfy` isInfixOf "getConstraintAndCanonical :: PresolutionM p (Constraint p, NodeId -> NodeId)"
+        stateAccessSrc `shouldSatisfy` isInfixOf "getConstraintAndUnionFind :: PresolutionM p (Constraint p, IntMap NodeId)"
+        stateAccessSrc `shouldSatisfy` isInfixOf "putConstraintAndUnionFind :: Constraint p -> IntMap NodeId -> PresolutionM p ()"
         typesSrc `shouldSatisfy` isInfixOf "snapshotConstraint :: a -> Constraint 'Presolved"
         viewSrc `shouldSatisfy` isInfixOf "fromPresolutionResult :: PresolutionSnapshot a => a -> PresolutionView 'Presolved"
-        driverSrc `shouldSatisfy` isInfixOf "Note [Presolution in-progress raw bridge]"
-        driverSrc `shouldSatisfy` isInfixOf "presolutionInProgressRawBridge :: Constraint 'Acyclic -> Constraint 'Raw"
         markerLine "let presolvedConstraint =" driverSrc
             `shouldSatisfy`
-                (> markerLine "validateReplayMapTraceContract canonical constraint finalRawConstraint eid tr" driverSrc)
+                (> markerLine "validateReplayMapTraceContract canonical constraint finalConstraint eid tr" driverSrc)
 
     it "snapshot-finalization guard: Presolution.View does not expose fromSolved" $ do
         viewSrc <- readFile "src/MLF/Constraint/Presolution/View.hs"

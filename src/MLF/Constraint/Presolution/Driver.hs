@@ -46,7 +46,7 @@ import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Canonicalizer (canonicalizerFrom, chaseRedirectsStable)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Phase (Phase(Acyclic, Raw))
+import MLF.Constraint.Types.Phase (Phase(Acyclic))
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base
@@ -102,20 +102,20 @@ computePresolution traceCfg acyclicityResult constraint = do
     (redirects, finalState) <- runPresolutionM traceCfg presState $ do
         runFinalizationStage
 
-    let finalRawConstraint = psConstraint finalState
-    when (not (null (cUnifyEdges finalRawConstraint))) $
-        Left (ResidualUnifyEdges (cUnifyEdges finalRawConstraint))
-    when (not (null (cInstEdges finalRawConstraint))) $
-        Left (ResidualInstEdges (cInstEdges finalRawConstraint))
+    let finalConstraint = psConstraint finalState
+    when (not (null (cUnifyEdges finalConstraint))) $
+        Left (ResidualUnifyEdges (cUnifyEdges finalConstraint))
+    when (not (null (cInstEdges finalConstraint))) $
+        Left (ResidualInstEdges (cInstEdges finalConstraint))
     let residualTyExpNodes =
-            tyExpNodeIds finalRawConstraint
+            tyExpNodeIds finalConstraint
     when (not (null residualTyExpNodes)) $
         Left (ResidualTyExpNodes residualTyExpNodes)
-    validateTranslatablePresolution finalRawConstraint
+    validateTranslatablePresolution finalConstraint
 
     let edgeArtifacts =
             dropTrivialSchemeEdges
-                finalRawConstraint
+                finalConstraint
                 (EdgeArtifacts (psEdgeExpansions finalState) (psEdgeWitnesses finalState) (psEdgeTraces finalState))
         edgeWitnesses = eaEdgeWitnesses edgeArtifacts
         edgeTraces = eaEdgeTraces edgeArtifacts
@@ -124,7 +124,7 @@ computePresolution traceCfg acyclicityResult constraint = do
             IntSet.fromList
                 [ getEdgeId (instEdgeId edge)
                 | edge <- cInstEdges constraint
-                , IntSet.notMember (getEdgeId (instEdgeId edge)) (cLetEdges finalRawConstraint)
+                , IntSet.notMember (getEdgeId (instEdgeId edge)) (cLetEdges finalConstraint)
                 ]
         witnessKeys = IntSet.fromList (IntMap.keys edgeWitnesses)
         traceKeys = IntSet.fromList (IntMap.keys edgeTraces)
@@ -139,11 +139,9 @@ computePresolution traceCfg acyclicityResult constraint = do
         Left (MissingEdgeTraces missingTraces)
     forM_ (IntMap.toList edgeTraces) $ \(eid, tr) ->
         when (IntSet.member eid nonTrivialEdgeKeys) $ do
-            validateReplayMapTraceContract canonical constraint finalRawConstraint eid tr
+            validateReplayMapTraceContract canonical constraint finalConstraint eid tr
 
-    let presolvedConstraint =
-            toPresolvedConstraint
-                (toAcyclicConstraint (toNormalizedConstraint finalRawConstraint))
+    let presolvedConstraint = toPresolvedConstraint finalConstraint
 
     return PresolutionResult
         { prConstraint = presolvedConstraint
@@ -155,7 +153,7 @@ computePresolution traceCfg acyclicityResult constraint = do
         , prPlanBuilder = PresolutionPlanBuilder (buildGeneralizePlans traceCfg)
         }
 
-runFinalizationStage :: PresolutionM (IntMap NodeId)
+runFinalizationStage :: PresolutionM 'Acyclic (IntMap NodeId)
 runFinalizationStage = do
     assertFinalizationBoundary "pre-materialization"
     mapping <- materializeExpansions
@@ -174,7 +172,7 @@ runFinalizationStage = do
     assertFinalizationBoundary "post-witness-normalization"
     pure redirects
 
-assertFinalizationBoundary :: String -> PresolutionM ()
+assertFinalizationBoundary :: String -> PresolutionM 'Acyclic ()
 assertFinalizationBoundary phase = do
     st <- getPresolutionState
     let pendingWeakens = psPendingWeakens st
@@ -191,7 +189,7 @@ assertFinalizationBoundary phase = do
                         , "pending unify edges: " ++ show pendingUnify
                         ]
 
-assertMaterializationCoverage :: IntMap NodeId -> PresolutionM ()
+assertMaterializationCoverage :: IntMap NodeId -> PresolutionM 'Acyclic ()
 assertMaterializationCoverage mapping = do
     c <- getConstraint
     let missing =
@@ -204,7 +202,7 @@ assertMaterializationCoverage mapping = do
             InternalError $
                 "materialization coverage missing TyExp nodes: " ++ show missing
 
-assertNoResidualTyExp :: String -> PresolutionM ()
+assertNoResidualTyExp :: String -> PresolutionM 'Acyclic ()
 assertNoResidualTyExp phase = do
     c <- getConstraint
     let residual = tyExpNodeIds c
@@ -213,7 +211,7 @@ assertNoResidualTyExp phase = do
             InternalError $
                 phase ++ ": residual TyExp nodes " ++ show residual
 
-assertWitnessTraceDomain :: String -> PresolutionM ()
+assertWitnessTraceDomain :: String -> PresolutionM 'Acyclic ()
 assertWitnessTraceDomain phase = do
     st <- getPresolutionState
     let witnessKeys = IntSet.fromList (IntMap.keys (psEdgeWitnesses st))
@@ -351,7 +349,7 @@ validateReplayMapTraceContract canonical _sourceConstraint finalConstraint eid t
 -- union-find canonicalization, collapsing duplicates (preferring structure over
 -- vars), and clearing instantiation edges (consumed in presolution).
 -- Returns the canonicalized redirect map.
-rewriteConstraint :: IntMap NodeId -> PresolutionM (IntMap NodeId)
+rewriteConstraint :: IntMap NodeId -> PresolutionM 'Acyclic (IntMap NodeId)
 rewriteConstraint mapping = do
     (c, canonicalUf) <- getConstraintAndCanonical
     st <- getPresolutionState
@@ -478,10 +476,10 @@ rewriteConstraint mapping = do
 
     return fullRedirects
 
-mkInitialPresolutionState :: Constraint 'Acyclic -> PresolutionState
+mkInitialPresolutionState :: Constraint 'Acyclic -> PresolutionState 'Acyclic
 mkInitialPresolutionState constraint =
     PresolutionState
-        { psConstraint = presolutionInProgressRawBridge constraint
+        { psConstraint = constraint
         , psPresolution = Presolution IntMap.empty
         , psUnionFind = IntMap.empty
         , psNextNodeId = maxNodeIdKeyOr0 constraint + 1
@@ -491,28 +489,6 @@ mkInitialPresolutionState constraint =
         , psEdgeExpansions = IntMap.empty
         , psEdgeWitnesses = IntMap.empty
         , psEdgeTraces = IntMap.empty
-        }
-
-{- Note [Presolution in-progress raw bridge]
-The Phase 4 entrypoint is typed as `Constraint 'Acyclic -> PresolutionResult`,
-and the published result exposes `Constraint 'Presolved`. Internally, the
-presolution loop still shares older mutation helpers whose state type is
-`Constraint 'Raw`; keep that phase erasure private and named so new callers do
-not depend on the raw in-progress representation.
--}
-presolutionInProgressRawBridge :: Constraint 'Acyclic -> Constraint 'Raw
-presolutionInProgressRawBridge c =
-    Constraint
-        { cNodes = cNodes c
-        , cInstEdges = cInstEdges c
-        , cUnifyEdges = cUnifyEdges c
-        , cBindParents = cBindParents c
-        , cPolySyms = cPolySyms c
-        , cEliminatedVars = cEliminatedVars c
-        , cWeakenedVars = cWeakenedVars c
-        , cAnnEdges = cAnnEdges c
-        , cLetEdges = cLetEdges c
-        , cGenNodes = cGenNodes c
         }
 
 tyExpNodeIds :: Constraint p -> [NodeId]
