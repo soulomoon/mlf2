@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-230",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-noderefgadt-reftag-kind",
+  "extracted_item_id": "milestone-1-closeout-audit-and-guard",
+  "summary": "Audit HEAD against the milestone-1 NodeRef completion signal, close any last owner-local untyped type-only seam, and harden the mixed-seam evidence needed for milestone closeout.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

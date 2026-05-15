@@ -95,7 +95,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
             let c = emptyConstraint
                     { cNodes = nodeMapSingleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
                     }
-            getBindFlag c (typeRef (NodeId 0)) `shouldBe` Nothing
+            getBindFlag c (TypeRefTag (NodeId 0)) `shouldBe` Nothing
 
         it "getBindFlag returns the flag for non-root nodes" $ do
             let c = emptyConstraint
@@ -105,14 +105,14 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         ]
                     , cBindParents = IntMap.singleton (nodeRefKey (typeRef (NodeId 1))) (typeRef (NodeId 0), BindFlex)
                     }
-            getBindFlag c (typeRef (NodeId 1)) `shouldBe` Just BindFlex
+            getBindFlag c (TypeRefTag (NodeId 1)) `shouldBe` Just BindFlex
 
     describe "isInstantiable" $ do
         it "returns False for root nodes" $ do
             let c = emptyConstraint
                     { cNodes = nodeMapSingleton 0 (TyVar { tnId = NodeId 0, tnBound = Nothing })
                     }
-            isInstantiable c (typeRef (NodeId 0)) `shouldBe` Right False
+            isInstantiable c (TypeRefTag (NodeId 0)) `shouldBe` Right False
 
         it "returns True for flexibly bound nodes with all-flex path" $ do
             let c = emptyConstraint
@@ -126,8 +126,8 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         , bp (NodeId 2) (NodeId 1) BindFlex
                         ]
                     }
-            isInstantiable c (typeRef (NodeId 2)) `shouldBe` Right True
-            isInstantiable c (typeRef (NodeId 1)) `shouldBe` Right True
+            isInstantiable c (TypeRefTag (NodeId 2)) `shouldBe` Right True
+            isInstantiable c (TypeRefTag (NodeId 1)) `shouldBe` Right True
 
         it "returns False for nodes with rigid edge in path" $ do
             let c = emptyConstraint
@@ -141,8 +141,8 @@ spec = describe "MLF.Binding.GraphOps" $ do
                         , bp (NodeId 2) (NodeId 1) BindFlex
                         ]
                     }
-            isInstantiable c (typeRef (NodeId 2)) `shouldBe` Right False
-            isInstantiable c (typeRef (NodeId 1)) `shouldBe` Right False
+            isInstantiable c (TypeRefTag (NodeId 2)) `shouldBe` Right False
+            isInstantiable c (TypeRefTag (NodeId 1)) `shouldBe` Right False
 
     describe "applyWeaken" $ do
         it "changes flexible to rigid" $ do
@@ -156,7 +156,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
             case applyWeaken (TypeRefTag (NodeId 1)) c of
                 Right (c', op) -> do
                     op `shouldBe` OpWeaken (NodeId 1)
-                    getBindFlag c' (typeRef (NodeId 1)) `shouldBe` Just BindRigid
+                    getBindFlag c' (TypeRefTag (NodeId 1)) `shouldBe` Just BindRigid
                 Left err -> expectationFailure $ "Expected success, got: " ++ show err
 
         it "fails on root nodes" $ do
@@ -250,7 +250,7 @@ spec = describe "MLF.Binding.GraphOps" $ do
             case applyRaiseStep (TypeRefTag (NodeId 2)) c of
                 Right (c', Just _) -> do
                     -- Flag should still be BindFlex
-                    getBindFlag c' (typeRef (NodeId 2)) `shouldBe` Just BindFlex
+                    getBindFlag c' (TypeRefTag (NodeId 2)) `shouldBe` Just BindFlex
                 other -> expectationFailure $ "Expected success, got: " ++ show other
 
     describe "applyRaiseTo" $ do
@@ -290,6 +290,25 @@ spec = describe "MLF.Binding.GraphOps" $ do
                 Right (c', ops) -> do
                     ops `shouldBe` []
                     lookupBindParent c' (typeRef (NodeId 1)) `shouldBe` Just (typeRef (NodeId 0), BindFlex)
+                Left err -> expectationFailure $ "Expected success, got: " ++ show err
+
+        it "keeps mixed ancestor targets on the retained NodeRef seam" $ do
+            let nodes = nodeMapFromList
+                    [ (0, TyForall (NodeId 0) (NodeId 1))
+                    , (1, TyForall (NodeId 1) (NodeId 2))
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
+                    ]
+                c = attachRootGen (NodeId 0) $ emptyConstraint
+                    { cNodes = nodes
+                    , cBindParents = IntMap.fromList
+                        [ bp (NodeId 1) (NodeId 0) BindFlex
+                        , bp (NodeId 2) (NodeId 1) BindFlex
+                        ]
+                    }
+            case applyRaiseTo (TypeRefTag (NodeId 2)) rootGenRef c of
+                Right (c', ops) -> do
+                    length ops `shouldBe` 2
+                    lookupBindParent c' (typeRef (NodeId 2)) `shouldBe` Just (rootGenRef, BindFlex)
                 Left err -> expectationFailure $ "Expected success, got: " ++ show err
 
         it "fails when target is not an ancestor" $ do

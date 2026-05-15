@@ -68,8 +68,8 @@ import MLF.Binding.Tree (isUnderRigidBinder, lookupBindParent, setBindParent, bi
 -- | Get the binding flag for a node.
 --
 -- Returns 'Nothing' if the node is a binding root.
-getBindFlag :: Constraint p -> NodeRef -> Maybe BindFlag
-getBindFlag c nid = fmap snd (lookupBindParent c nid)
+getBindFlag :: Constraint p -> NodeRefTag 'TypeTag -> Maybe BindFlag
+getBindFlag c tag = fmap snd (lookupBindParent c (fromNodeRefTag tag))
 
 -- | Check if a node is instantiable (all-flexible binding path).
 --
@@ -79,8 +79,9 @@ getBindFlag c nid = fmap snd (lookupBindParent c nid)
 --
 -- Paper reference: instantiable nodes have no rigid edges on their binding
 -- path (full-flexible flag path).
-isInstantiable :: Constraint p -> NodeRef -> Either BindingError Bool
-isInstantiable c nid = do
+isInstantiable :: Constraint p -> NodeRefTag 'TypeTag -> Either BindingError Bool
+isInstantiable c tag = do
+    let nid = fromNodeRefTag tag
     -- Check if it's a root (roots cannot be raised)
     if isBindingRoot c nid
         then return False
@@ -104,9 +105,9 @@ isInstantiable c nid = do
 -- Note: Raise operations in this module check only *strict* rigid ancestors
 -- via `isUnderRigidBinder`, so a restricted node (own edge rigid) is treated
 -- as locked here but can still be raised.
-isLocked :: Constraint p -> NodeRef -> Either BindingError Bool
-isLocked c nid = do
-    instantiable <- isInstantiable c nid
+isLocked :: Constraint p -> NodeRefTag 'TypeTag -> Either BindingError Bool
+isLocked c tag = do
+    instantiable <- isInstantiable c tag
     return (not instantiable)
 
 -- | Apply the Weaken operation to a node.
@@ -122,7 +123,7 @@ isLocked c nid = do
 -- Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.1)
 applyWeaken :: NodeRefTag 'TypeTag -> Constraint p -> Either BindingError (Constraint p, InstanceOp)
 applyWeaken tag c = do
-    let nid = TypeRef (nodeIdFromTypeRef tag)
+    let nid = fromNodeRefTag tag
         nidT = nodeIdFromTypeRef tag
     -- Check that the node has a binding parent
     case lookupBindParent c nid of
@@ -154,7 +155,7 @@ applyWeaken tag c = do
 -- "slide over" semantics
 applyRaiseStep :: NodeRefTag 'TypeTag -> Constraint p -> Either BindingError (Constraint p, Maybe InstanceOp)
 applyRaiseStep tag c = do
-    let nid = TypeRef (nodeIdFromTypeRef tag)
+    let nid = fromNodeRefTag tag
         nidT = nodeIdFromTypeRef tag
     -- Check that the node has a binding parent
     case lookupBindParent c nid of
@@ -192,10 +193,14 @@ applyRaiseStep tag c = do
 --
 -- Returns the updated constraint and the list of Raise operations applied.
 --
+-- The child stays type-indexed, but the target remains the mixed 'NodeRef'
+-- seam because a valid ancestor can still be either a type binder or the
+-- retained gen-root boundary.
+--
 -- Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.1)
 applyRaiseTo :: NodeRefTag 'TypeTag -> NodeRef -> Constraint p -> Either BindingError (Constraint p, [InstanceOp])
 applyRaiseTo tag target c = do
-    let nid = TypeRef (nodeIdFromTypeRef tag)
+    let nid = fromNodeRefTag tag
     -- Verify target is an ancestor of nid
     path <- bindingPathToRoot c nid
     let pathSet = IntSet.fromList $ map nodeRefKey path
