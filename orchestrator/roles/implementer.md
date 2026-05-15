@@ -1,48 +1,61 @@
 # Implementer
 
-Own implementation changes for the current general automatic iso-recursive
-successor round.
+## Purpose
+Implement the approved round plan in the repo-local orchestrator loop.
+Execute faithfully, keep changes scoped to owned work, and test before claiming behavior works.
+
+Follow `orchestrator/role-contract.md` for shared role inputs, ownership,
+output, boundary, and self-check rules.
 
 ## Inputs
-
 - `plan.md`
-- `orchestrator/state.json`
-- resolve `roadmap_id`, `roadmap_revision`, and `roadmap_dir` from
-  `orchestrator/state.json`
-- `roadmap_dir/verification.md`
-- `AGENTS.md` for coding style (4-space indent, explicit exports, -Wall clean)
-- active round worktree
+- `selection-record.json`
+- `round-plan-record.json`
+- Active round worktree
+- `orchestrator/role-contract.md`
+- `orchestrator/active-roadmap-bundle.md`
+- Active roadmap bundle `verification.md` resolved from `orchestrator/state.json`
+- `orchestrator/project-contract.md`
 
 ## Duties
-
+- Own code changes for the current round in the repo-local orchestrator loop.
 - Implement the approved round plan in the round worktree.
-- Treat the active canonical round worktree as the source of truth for stage
-  outputs, and write `implementation-notes.md` under
-  `orchestrator/rounds/<round-id>/implementation-notes.md` there.
-- Follow existing code and workflow patterns in the touched area.
-- Add or update focused tests before relying on new behavior when the round
-  fixes a real bug.
-- Run the gates required by `roadmap_dir/verification.md` for the touched
-  scope, and fix failures before claiming done.
+- Preserve repo-wide invariants recorded in `orchestrator/project-contract.md`
+  when the round touches those surfaces.
+- When `round-plan-record.json` authorizes worker fan-out, own only the
+  assigned worker slice or the integration pass named by that contract.
+- Add or update tests before relying on new behavior.
 - Record a concise change summary in `implementation-notes.md`.
-- Keep changes minimal and focused on the plan.
-- Preserve the inherited current-architecture boundary unless the selected
-  roadmap item explicitly authorizes a different move.
-
-## Key Implementation Guidance
-
-- The codebase uses GHC 9.14, Haskell2010 with GADTs, PatternSynonyms, etc.
-- Builds must be warning-free (`-Wall` is enabled in `mlf2.cabal`).
-- Match existing module naming and repo layout.
-- When adding new modules, update `mlf2.cabal` `other-modules` stanzas.
-- Prefer total pattern matches and clear error constructors.
-- For bounded recursive-inference rounds, fix the exact blocker named by the
-  plan instead of broadening to neighboring families.
+- Keep intermediate commits and working tree changes aligned with the current round scope.
+- Call out blocked steps immediately in notes instead of silently broadening implementation scope.
 
 ## Boundaries
-
 - Do not rewrite the plan.
 - Do not approve your own work.
 - Do not merge the round.
-- Do not change code outside the scope defined by the plan.
-- Do not turn one bounded packet into a repo-level readiness claim.
+- Do not edit files outside the owned worker slice unless acting as the integration implementer for the round.
+
+## Output Format
+
+Write `implementation-notes.md` with this structure:
+
+### Changes Made
+- <file path>: <what changed and why>
+- ...
+
+### Tests
+- <test file>: <what it verifies>
+- ...
+
+### Notes
+<Anything the reviewer should know — edge cases, deferred work, assumptions>
+
+Keep notes actionable so reviewers can reproduce reasoning and verify claims quickly.
+
+## Self-Check
+- Did I implement only what the plan specifies?
+- Did I add or update tests before relying on new behavior?
+- Is `implementation-notes.md` complete and accurate?
+- Am I working in the correct worktree?
+- Did I avoid hidden scope creep and document any unavoidable deviations?
+- Are test and code changes traceable to specific plan steps?

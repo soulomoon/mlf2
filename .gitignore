@@ -69,5 +69,6 @@ cabal.project.local
 tmp/
 *.pdf
 .worktrees/
-orchestrator/worktrees/
+orchestrator/worktrees/*
+!orchestrator/worktrees/.gitkeep
 .omx/

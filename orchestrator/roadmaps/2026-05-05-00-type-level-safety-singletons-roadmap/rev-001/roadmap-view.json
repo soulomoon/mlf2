@@ -1,0 +1,215 @@
+{
+  "schema_version": "roadmap-view-v1",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "roadmap_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+  "milestones": [
+    {
+      "milestone_id": "milestone-1",
+      "title": "NodeRef GADT And RefTag Boundary",
+      "status": "pending",
+      "depends_on": [],
+      "parallel_lane": "lane-main",
+      "status_anchor": "milestone-1",
+      "completion_anchor": "milestone-1-completion",
+      "direction_ids": [
+        "direction-1a-noderefgadt-reftag-kind"
+      ]
+    },
+    {
+      "milestone_id": "milestone-2",
+      "title": "Phase Kind And Singletons Foundation",
+      "status": "pending",
+      "depends_on": [
+        "milestone-1"
+      ],
+      "parallel_lane": "lane-main",
+      "status_anchor": "milestone-2",
+      "completion_anchor": "milestone-2-completion",
+      "direction_ids": [
+        "direction-2a-phase-singletons-foundation"
+      ]
+    },
+    {
+      "milestone_id": "milestone-3",
+      "title": "Phase-Indexed Constraint Type",
+      "status": "pending",
+      "depends_on": [
+        "milestone-2"
+      ],
+      "parallel_lane": "lane-main",
+      "status_anchor": "milestone-3",
+      "completion_anchor": "milestone-3-completion",
+      "direction_ids": [
+        "direction-3a-phase-indexed-constraint"
+      ]
+    },
+    {
+      "milestone_id": "milestone-4",
+      "title": "ForallSpec Binder Safety",
+      "status": "pending",
+      "depends_on": [
+        "milestone-3"
+      ],
+      "parallel_lane": "lane-main",
+      "status_anchor": "milestone-4",
+      "completion_anchor": "milestone-4-completion",
+      "direction_ids": [
+        "direction-4a-forallspec-binder-safety"
+      ]
+    },
+    {
+      "milestone_id": "milestone-5",
+      "title": "Witness Smart Constructors",
+      "status": "pending",
+      "depends_on": [
+        "milestone-1"
+      ],
+      "parallel_lane": "lane-main",
+      "status_anchor": "milestone-5",
+      "completion_anchor": "milestone-5-completion",
+      "direction_ids": [
+        "direction-5a-witness-constructor-invariants"
+      ]
+    },
+    {
+      "milestone_id": "milestone-6",
+      "title": "Integration And Cleanup",
+      "status": "pending",
+      "depends_on": [
+        "milestone-3",
+        "milestone-4",
+        "milestone-5"
+      ],
+      "parallel_lane": "lane-main",
+      "status_anchor": "milestone-6",
+      "completion_anchor": "milestone-6-completion",
+      "direction_ids": [
+        "direction-6a-integration-cleanup"
+      ]
+    }
+  ],
+  "directions": [
+    {
+      "direction_id": "direction-1a-noderefgadt-reftag-kind",
+      "milestone_id": "milestone-1",
+      "summary": "Reconcile the current NodeRef / NodeRefTag implementation with the roadmap's type-safe reference goal.",
+      "preconditions": [
+        "Inspect current NodeRef, NodeRefTag, SomeNodeRef, and binding operations at HEAD."
+      ],
+      "parallel_hints": [
+        "Use lane-main; shared reference definitions make parallel code edits risky."
+      ]
+    },
+    {
+      "direction_id": "direction-2a-phase-singletons-foundation",
+      "milestone_id": "milestone-2",
+      "summary": "Verify and harden the Phase singleton foundation.",
+      "preconditions": [
+        "Milestone 1 is complete or the selected round proves phase work is independent of unfinished NodeRef migration."
+      ],
+      "parallel_hints": [
+        "Use lane-main unless the selected work is docs/test-only."
+      ]
+    },
+    {
+      "direction_id": "direction-3a-phase-indexed-constraint",
+      "milestone_id": "milestone-3",
+      "summary": "Finish or validate the phase-indexed constraint graph and phase transition entrypoints.",
+      "preconditions": [
+        "Phase is available and the current Constraint type has been inspected."
+      ],
+      "parallel_hints": [
+        "Use lane-main; broad type signatures make concurrent edits risky."
+      ]
+    },
+    {
+      "direction_id": "direction-4a-forallspec-binder-safety",
+      "milestone_id": "milestone-4",
+      "summary": "Audit and close remaining binder-count and partial-indexing risks around ForallSpec.",
+      "preconditions": [
+        "Phase-indexed constraint boundary is stable enough that presolution and elaboration signatures will not churn underneath the round."
+      ],
+      "parallel_hints": [
+        "Read-only audit and later code work may be split; code changes stay serial by default."
+      ]
+    },
+    {
+      "direction_id": "direction-5a-witness-constructor-invariants",
+      "milestone_id": "milestone-5",
+      "summary": "Finish smart-constructor enforcement and validation for witness values.",
+      "preconditions": [
+        "Current EdgeWitness, InstanceWitness, presolution witness construction, and test fixture construction have been inspected."
+      ],
+      "parallel_hints": [
+        "Use lane-main; tests and production constructors share exported surfaces."
+      ]
+    },
+    {
+      "direction_id": "direction-6a-integration-cleanup",
+      "milestone_id": "milestone-6",
+      "summary": "Align docs, tests, and migration-shim cleanup with the accepted type-level safety implementation.",
+      "preconditions": [
+        "Milestones 3, 4, and 5 have reviewer-approved closeout or the selected round is explicitly a closeout audit."
+      ],
+      "parallel_hints": [
+        "Documentation-only follow-ups can be isolated; final closeout remains serial."
+      ]
+    }
+  ],
+  "anchors": {
+    "milestone-1": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 1. NodeRef GADT And RefTag Boundary"
+    },
+    "milestone-1-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-1"
+    },
+    "milestone-2": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 2. Phase Kind And Singletons Foundation"
+    },
+    "milestone-2-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-2"
+    },
+    "milestone-3": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 3. Phase-Indexed Constraint Type"
+    },
+    "milestone-3-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-3"
+    },
+    "milestone-4": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 4. ForallSpec Binder Safety"
+    },
+    "milestone-4-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-4"
+    },
+    "milestone-5": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 5. Witness Smart Constructors"
+    },
+    "milestone-5-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-5"
+    },
+    "milestone-6": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 6. Integration And Cleanup"
+    },
+    "milestone-6-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-6"
+    },
+    "roadmap-history-completed-rounds": {
+      "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/roadmap-history.md",
+      "selector": "## Completed Rounds"
+    }
+  }
+}
