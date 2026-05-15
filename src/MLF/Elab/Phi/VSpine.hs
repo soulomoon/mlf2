@@ -18,6 +18,7 @@ module MLF.Elab.Phi.VSpine (
     vSpineIds,
     vSpineLength,
     vSpineNull,
+    vSpineBinderAt,
     vSpineNameAt,
     vSpineBoundAt,
     vSpineIdAt,
@@ -70,14 +71,36 @@ vSpineLength = length . vsBinders
 vSpineNull :: VSpine -> Bool
 vSpineNull = null . vsBinders
 
-vSpineNameAt :: VSpine -> Int -> String
-vSpineNameAt vs i = let (n, _, _) = vsBinders vs !! i in n
+vSpineBinderAt :: VSpine -> Int -> Either ElabError (String, Maybe BoundType, Maybe NodeId)
+vSpineBinderAt vs i
+    | i < 0 || i >= len =
+        Left $
+            PhiInvariantError $
+                "VSpine: binder index " ++ show i ++ " out of range for spine length " ++ show len
+    | otherwise =
+        case drop i (vsBinders vs) of
+            binder : _ -> Right binder
+            [] ->
+                Left $
+                    PhiInvariantError $
+                        "VSpine: binder index " ++ show i ++ " out of range for spine length " ++ show len
+  where
+    len = vSpineLength vs
 
-vSpineBoundAt :: VSpine -> Int -> Maybe BoundType
-vSpineBoundAt vs i = let (_, b, _) = vsBinders vs !! i in b
+vSpineNameAt :: VSpine -> Int -> Either ElabError String
+vSpineNameAt vs i = do
+    (n, _, _) <- vSpineBinderAt vs i
+    pure n
 
-vSpineIdAt :: VSpine -> Int -> Maybe NodeId
-vSpineIdAt vs i = let (_, _, mid) = vsBinders vs !! i in mid
+vSpineBoundAt :: VSpine -> Int -> Either ElabError (Maybe BoundType)
+vSpineBoundAt vs i = do
+    (_, b, _) <- vSpineBinderAt vs i
+    pure b
+
+vSpineIdAt :: VSpine -> Int -> Either ElabError (Maybe NodeId)
+vSpineIdAt vs i = do
+    (_, _, mid) <- vSpineBinderAt vs i
+    pure mid
 
 -- Mutators
 

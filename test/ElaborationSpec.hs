@@ -65,6 +65,7 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Pipeline qualified as Elab
+import MLF.Elab.Phi.TestSupport qualified as PhiTestSupport
 import MLF.Elab.Run.ResultType
   ( ResultTypeInputs (..),
     computeResultTypeFallback,
@@ -4801,6 +4802,50 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         phi `shouldNotBe` Elab.InstId
         out <- requireRight (Elab.applyInstantiation (Elab.schemeToType scheme) phi)
         Elab.pretty out `shouldSatisfy` ("Int" `isInfixOf`)
+
+      describe "binder-spine safety" $ do
+        it "detects quantified-type and identity-spine mismatches before reorder reads binders" $ do
+          let ty =
+                Elab.TForall
+                  "a"
+                  Nothing
+                  (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+              ids = [Just (NodeId 1)]
+              vs = PhiTestSupport.mkVSpine ty ids
+          case PhiTestSupport.assertSpineSync vs ty ids of
+            Left (Elab.PhiInvariantError msg) -> do
+              msg `shouldSatisfy` ("VSpine desync (names)" `isInfixOf`)
+              msg `shouldSatisfy` ("[\"a\",\"b\"]" `isInfixOf`)
+            Left err ->
+              expectationFailure ("Expected PhiInvariantError, got " ++ show err)
+            Right () ->
+              expectationFailure "Expected binder-spine mismatch to fail"
+
+        it "reports out-of-range binder reads through PhiInvariantError" $ do
+          let ty =
+                Elab.TForall
+                  "a"
+                  Nothing
+                  (Elab.TForall "b" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+              vs = PhiTestSupport.mkVSpine ty [Just (NodeId 1), Just (NodeId 2)]
+          case PhiTestSupport.vSpineNameAt vs 2 of
+            Left (Elab.PhiInvariantError msg) -> do
+              msg `shouldSatisfy` ("VSpine: binder index 2 out of range" `isInfixOf`)
+              msg `shouldSatisfy` ("spine length 2" `isInfixOf`)
+            Left err ->
+              expectationFailure ("Expected PhiInvariantError, got " ++ show err)
+            Right name ->
+              expectationFailure ("Expected out-of-range failure, got binder " ++ show name)
+
+        it "preserves valid binder names, bounds, and identities through checked access" $ do
+          let boundA = boundFromType (Elab.TBase (BaseTy "Int"))
+              ty =
+                Elab.TForall
+                  "a"
+                  Nothing
+                  (Elab.TForall "b" (Just boundA) (Elab.TArrow (Elab.TVar "a") (Elab.TVar "b")))
+              vs = PhiTestSupport.mkVSpine ty [Just (NodeId 1), Just (NodeId 2)]
+          PhiTestSupport.vSpineBinderAt vs 1 `shouldBe` Right ("b", Just boundA, Just (NodeId 2))
 
       it "scheme-aware Φ can target a non-front binder (reordering before instantiation)" $ do
         -- Build a constraint graph with proper nested TyForall structure for ∀a. ∀b. a -> b

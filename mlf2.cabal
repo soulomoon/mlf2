@@ -153,6 +153,7 @@ library mlf2-internal
                       MLF.Elab.Run.Annotation,
                       MLF.Elab.Run.Generalize,
                       MLF.Elab.Run.Generalize.Prepare,
+                      MLF.Elab.Phi.TestSupport,
                       MLF.Elab.Types
     other-modules:    MLF.Constraint.Normalize.Internal,
                        MLF.Constraint.Normalize.Graft,

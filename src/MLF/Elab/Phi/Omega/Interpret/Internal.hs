@@ -76,7 +76,23 @@ import MLF.Elab.Phi.Omega.Domain
     resolveTraceBinderTarget,
   )
 import MLF.Elab.Phi.Omega.Normalize (collapseAdjacentPairs, normalizeInst)
-import MLF.Elab.Phi.VSpine (BodyShape (..), VSpine (..), mkVSpine, vSpineBoundAt, vSpineBounds, vSpineIds, vSpineLength, vSpineNameAt, vSpineNames, vSpineNull, vsDeleteAt, vsInsertAt, vsUpdateBound)
+import MLF.Elab.Phi.VSpine
+  ( BodyShape (..),
+    VSpine (..),
+    assertSpineSync,
+    mkVSpine,
+    vSpineBinderAt,
+    vSpineBoundAt,
+    vSpineIdAt,
+    vSpineIds,
+    vSpineLength,
+    vSpineNameAt,
+    vSpineNames,
+    vSpineNull,
+    vsDeleteAt,
+    vsInsertAt,
+    vsUpdateBound
+  )
 import MLF.Elab.Run.Instantiation (containsForallType, inferInstAppArgsFromScheme)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Types
@@ -620,8 +636,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     reorderBindersByPrec :: ElabType -> [Maybe NodeId] -> Either ElabError (Instantiation, ElabType, [Maybe NodeId])
     reorderBindersByPrec ty ids = do
       let vs0 = mkVSpine ty ids
-      when (vSpineLength vs0 /= length ids) $
-        Left (PhiInvariantError "PhiReorder: binder spine / identity list length mismatch")
+      assertSpineSync vs0 ty ids
       if vSpineLength vs0 < 2
         then Right (InstId, ty, ids)
         else do
@@ -654,43 +669,44 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                     if null missingKeyBinders
                       then orderKeysActive
                       else orderKeys
-              desired <- desiredBinderOrder orderKeysForSort vs0 ids
+              desired <- desiredBinderOrder orderKeysForSort vs0
               reorderTo vs0 ty ids desired
 
-    desiredBinderOrder :: IntMap.IntMap Order.OrderKey -> VSpine -> [Maybe NodeId] -> Either ElabError [Maybe NodeId]
-    desiredBinderOrder orderKeysActive vs0 ids = do
-      let names = vSpineNames vs0
-          bounds = vSpineBounds vs0
-          n = vSpineLength vs0
+    desiredBinderOrder :: IntMap.IntMap Order.OrderKey -> VSpine -> Either ElabError [Maybe NodeId]
+    desiredBinderOrder orderKeysActive vs0 = do
+      let n = vSpineLength vs0
+      binders <- mapM (vSpineBinderAt vs0) [0 .. n - 1]
+      let binderMap = IntMap.fromList (zip [0 ..] binders)
+          names = [name | (name, _, _) <- binders]
           nameIndex nm = elemIndex nm names
 
           -- Bound dependencies: if a occurs free in b's bound, then a must appear before b.
           depsFor :: Int -> [Int]
           depsFor i =
-            case bounds !! i of
-              Nothing -> []
-              Just bnd ->
+            case IntMap.lookup i binderMap of
+              Just (binderName, Just bnd, _) ->
                 [ j
                   | v <- freeTypeVarsList bnd,
-                    v /= names !! i,
+                    v /= binderName,
                     Just j <- [nameIndex v]
                 ]
+              _ -> []
 
           cmpIdx :: Int -> Int -> Ordering
           cmpIdx i j =
-            case (ids !! i, ids !! j) of
-              (Just a, Just b)
+            case (IntMap.lookup i binderMap, IntMap.lookup j binderMap) of
+              (Just (_, _, Just a), Just (_, _, Just b))
                 | not (isSchemeBinder a) || not (isSchemeBinder b) ->
                     compare i j
-              (Just a, Just b) ->
+              (Just (_, _, Just a), Just (_, _, Just b)) ->
                 let ca = canonicalNode a
                     cb = canonicalNode b
                  in case Order.compareNodesByOrderKey orderKeysActive ca cb of
                       Right ord -> ord
                       Left _ -> compare i j -- fallback if missing key
-              (Just _, Nothing) -> LT
-              (Nothing, Just _) -> GT
-              (Nothing, Nothing) -> compare i j
+              (Just (_, _, Just _), _) -> LT
+              (_, Just (_, _, Just _)) -> GT
+              _ -> compare i j
           indices = [0 .. n - 1]
 
       idxs <-
@@ -703,7 +719,15 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
           Left (InstantiationError "PhiReorder: cycle in bound dependencies") ->
             Right (sortBy cmpIdx indices)
           Left err -> Left err
-      pure [ids !! i | i <- idxs]
+      mapM
+        (\i -> case IntMap.lookup i binderMap of
+            Just (_, _, mid) -> Right mid
+            Nothing ->
+              Left $
+                PhiInvariantError $
+                  "PhiReorder: binder index " ++ show i ++ " out of range during reorder"
+        )
+        idxs
 
     reorderTo :: VSpine -> ElabType -> [Maybe NodeId] -> [Maybe NodeId] -> Either ElabError (Instantiation, ElabType, [Maybe NodeId])
     reorderTo _vs0 ty ids desired = bubbleReorderTo "reorderBindersByPrec" ty ids desired
@@ -769,7 +793,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                           "  canonical: " ++ show bvC
                         ]
                   Just i -> do
-                    let mbBound = vSpineBoundAt vs i
+                    mbBound <- vSpineBoundAt vs i
                     if mbBound /= Just TBottom && mbBound /= Nothing
                       then do
                         argTy <- reifyTypeArg namedSet' Nothing (canonicalNode arg)
@@ -1050,12 +1074,8 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
              in case debugPhi ("OpRaise: binderIndex=" ++ show mbIndex) mbIndex of
                   Just i -> do
                     -- Spine binder case
-                    when (i < 0 || i >= vSpineLength vs) $
-                      Left (PhiInvariantError "OpRaise: binder index out of range")
-
+                    (boundName, mbBound, _) <- vSpineBinderAt vs i
                     let names = vSpineNames vs
-                        mbBound = vSpineBoundAt vs i
-                        boundName = vSpineNameAt vs i
                         inferredMap = inferredArgMap namedSet'
                         inferredBound =
                           Map.lookup boundName inferredMap
@@ -1099,7 +1119,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
 
                     let vsNoN = vsDeleteAt i vs
                         newBound = either (const Nothing) Just (elabToBound boundTy)
-                        vs' = vsInsertAt insertIndex (vSpineNameAt vs i, newBound, Just nC) vsNoN
+                        vs' = vsInsertAt insertIndex (boundName, newBound, Just nC) vsNoN
                     go binderKeys namedSet' vs' (inst : accum) rest lookupBinder
                   Nothing -> do
                     -- Non-spine node case: select an insertion point `m = min-prec{...}` (Fig. 10)
@@ -1142,8 +1162,9 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
 
                         findCandidate :: [Int] -> Either ElabError (Maybe (Int, [ContextStep]))
                         findCandidate [] = Right Nothing
-                        findCandidate (i : is) =
-                          case ids !! i of
+                        findCandidate (i : is) = do
+                          spineNode <- vSpineIdAt vs i
+                          case spineNode of
                             Nothing -> findCandidate is
                             Just mNode -> do
                               ctxOrErr <-
@@ -1259,10 +1280,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
     binderNameFor :: IntSet.IntSet -> VSpine -> NodeId -> (NodeId -> Maybe String) -> Either ElabError String
     binderNameFor binderKeys vs nid lookupBinder =
       case lookupBinderIndex' binderKeys (vSpineIds vs) nid of
-        Just i
-          | i >= vSpineLength vs ->
-              Left (PhiInvariantError "binderNameFor: index out of range")
-          | otherwise -> Right (vSpineNameAt vs i)
+        Just i -> vSpineNameAt vs i
         Nothing ->
           Right (fromMaybe ("t" ++ show (getNodeId nid)) (lookupBinder nid))
 
