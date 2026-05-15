@@ -989,6 +989,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
     it "presolution witness assembly guard" $ do
       interpreterSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs"
       witnessSrc <- readFile "src/MLF/Constraint/Presolution/Witness.hs"
+      witnessInternalSrc <- readFile "src/MLF/Constraint/Types/Witness/Internal.hs"
       witnessSurfaceSrc <- readFile "src/MLF/Constraint/Types/Witness.hs"
       witnessSupportSrc <- readFile "src/MLF/Constraint/Types/Witness/TestSupport.hs"
       witnessNormSrc <- readFile "src/MLF/Constraint/Presolution/WitnessNorm.hs"
@@ -1001,6 +1002,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       witnessSrc `shouldSatisfy` isInfixOf "edgeWitnessPlan ::"
       witnessSrc `shouldSatisfy` isInfixOf "buildEdgeTrace"
       witnessSrc `shouldSatisfy` isInfixOf "buildEdgeWitness"
+      witnessSrc `shouldSatisfy` isInfixOf "validatedInstanceOpsAfterNormalization :: [InstanceOp] -> ValidatedInstanceOps"
+      witnessSrc `shouldSatisfy` isInfixOf "WitnessInternal.mkUncheckedInstanceWitness ops"
+      witnessInternalSrc `shouldSatisfy` isInfixOf "newtype ValidatedInstanceOps = ValidatedInstanceOps [InstanceOp]"
+      witnessInternalSrc `shouldSatisfy` isInfixOf "mkInstanceWitness :: ValidatedInstanceOps -> InstanceWitness"
+      witnessInternalSrc `shouldSatisfy` isInfixOf "mkUncheckedInstanceWitness :: [InstanceOp] -> InstanceWitness"
       witnessSurfaceSrc `shouldSatisfy` (not . isInfixOf "InstanceWitness(..)")
       witnessSurfaceSrc `shouldSatisfy` (not . isInfixOf "EdgeWitness(..)")
       witnessSurfaceSrc `shouldSatisfy` isInfixOf "getInstanceOps"
@@ -1009,6 +1015,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       witnessSupportSrc `shouldSatisfy` isInfixOf "InstanceWitness(..)"
       witnessSupportSrc `shouldSatisfy` isInfixOf "EdgeWitness(..)"
       witnessNormSrc `shouldSatisfy` isInfixOf "mkEdgeWitness"
+      witnessNormSrc `shouldSatisfy` isInfixOf "validateNormalizedWitness envPost opsNormContract"
+      witnessNormSrc `shouldSatisfy` isInfixOf "validatedInstanceOpsAfterNormalization opsFinal"
       witnessNormSrc `shouldSatisfy` (not . isInfixOf "w0 {ewForallIntros = ewForallIntros w0, ewWitness = iw}")
       rewriteSrc `shouldSatisfy` isInfixOf "mkEdgeWitness"
       rewriteSrc `shouldSatisfy` (not . isInfixOf "{ ewLeft = canonical (ewLeft w)")

@@ -578,7 +578,7 @@ normalizeEdgeWitnessesM = do
                   }
             )
             mbTrace
-    let iw = mkInstanceWitness opsFinal
+    let iw = mkInstanceWitness (Witness.validatedInstanceOpsAfterNormalization opsFinal)
         witness' =
             case mkEdgeWitness (ewEdgeId w0) (ewLeft w0) (ewRight w0) (ewRoot w0) (ewForallIntros w0) iw of
                 Left err ->

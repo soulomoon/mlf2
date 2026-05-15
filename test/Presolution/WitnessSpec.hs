@@ -14,6 +14,7 @@ import MLF.Constraint.Types.Witness
     , ForallSpec(..)
     , InstanceOp(..)
     , ReplayContract(..)
+    , mkInstanceWitness
     )
 import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Constraint.Presolution.Witness
@@ -25,6 +26,7 @@ import MLF.Constraint.Presolution.Witness
     , normalizeInstanceOpsFull
     , reorderWeakenWithEnv
     , validateNormalizedWitness
+    , validatedInstanceOpsAfterNormalization
     , witnessFromExpansion
     )
 import MLF.Constraint.Types.Presolution (Presolution(..))
@@ -635,7 +637,13 @@ spec = do
             in forAll genOps $ \ops ->
                 case normalizeInstanceOpsFull env ops of
                     Left _ -> property True
-                    Right ops' -> validateNormalizedWitness env ops' === Right ()
+                    Right ops' ->
+                        conjoin
+                            [ validateNormalizedWitness env ops' === Right ()
+                            , getInstanceOps
+                                (mkInstanceWitness (validatedInstanceOpsAfterNormalization ops'))
+                                === ops'
+                            ]
 
         it "allows ops on binders that are later eliminated (paper normalization only)" $ do
             let c = mkNormalizeConstraint

@@ -1,0 +1,36 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-236",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-5",
+  "direction_id": "direction-5a-witness-constructor-invariants",
+  "extracted_item_id": "item-5a-instance-witness-validation-seam",
+  "decision": "approved",
+  "evidence_summary": "Round-236 stays inside the selected milestone-5 witness-validation seam, changes mkInstanceWitness to require a validation-owned ValidatedInstanceOps token on the default production path, keeps unchecked pre-normalization accumulation on an explicit owner-local seam, rebuilds finalized witnesses in WitnessNorm only after validateNormalizedWitness succeeds, adds source and behavior guards for the split, preserves strict replay, no-replay, and Phi soundness behavior, leaves src-public unchanged, and passes git diff --check, focused witness selectors, and cabal build all && cabal test with 2572 examples and 0 failures. Together with round-235's constructor-boundary freeze, the milestone-5 completion signal is now satisfied, so status-only closeout should move milestone-5 from in-progress to done.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-5",
+        "expected_current_status": "in-progress",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-5"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-5-completion",
+        "text": "round-236 closed the finalized InstanceWitness validation seam by requiring a validation-owned token for mkInstanceWitness, keeping unchecked accumulation owner-local, preserving non-subsumed downstream validation, and passing focused witness checks plus the full cabal gate."
+      }
+    ],
+    "history_entries": [
+      {
+        "anchor_id": "roadmap-history-completed-rounds",
+        "text": "round-236 completed milestone-5 by closing the finalized InstanceWitness validation seam on top of round-235's constructor-boundary freeze and passing focused witness checks plus the full cabal gate."
+      }
+    ],
+    "semantic_update_required_reason": null
+  }
+}

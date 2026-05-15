@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-236",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-5",
+  "direction_id": "direction-5a-witness-constructor-invariants",
+  "extracted_item_id": "item-5a-instance-witness-validation-seam",
+  "summary": "Harden production InstanceWitness construction so finalized witness ops are minted only through the normalization-owned validation seam.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

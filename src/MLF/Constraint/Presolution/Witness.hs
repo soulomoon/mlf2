@@ -25,6 +25,7 @@ module MLF.Constraint.Presolution.Witness
     reorderWeakenWithEnv,
     assertNoStandaloneGrafts,
     validateNormalizedWitness,
+    validatedInstanceOpsAfterNormalization,
     OmegaNormalizeEnv (..),
     OmegaNormalizeError (..),
   )
@@ -60,7 +61,17 @@ import MLF.Constraint.Types.Graph
     getNodeId,
     nodeRefFromKey,
   )
-import MLF.Constraint.Types.Witness (EdgeWitness, Expansion (..), ExpansionF (..), InstanceOp (..), ReplayContract (..), forallSpecBinderCount, mkEdgeWitness, mkInstanceWitness)
+import qualified MLF.Constraint.Types.Witness.Internal as WitnessInternal
+import MLF.Constraint.Types.Witness
+  ( EdgeWitness,
+    Expansion (..),
+    ExpansionF (..),
+    InstanceOp (..),
+    ReplayContract (..),
+    ValidatedInstanceOps,
+    forallSpecBinderCount,
+    mkEdgeWitness
+  )
 import MLF.Util.RecursionSchemes (cataM)
 
 -- | Precompute the base forall-intro count and ops for a witness.
@@ -106,10 +117,14 @@ buildEdgeWitness input baseOps extraOps = do
         TyExp {tnBody = b} -> b
         _ -> left
       (intros, ops) = integratePhase2Steps (introCount, baseOps) extraOps
-  let iw = mkInstanceWitness ops
+  let iw = WitnessInternal.mkUncheckedInstanceWitness ops
   case mkEdgeWitness eid left right root intros iw of
     Left err -> throwError (InternalError ("buildEdgeWitness: " ++ show err))
     Right w -> pure w
+
+validatedInstanceOpsAfterNormalization :: [InstanceOp] -> ValidatedInstanceOps
+validatedInstanceOpsAfterNormalization =
+  WitnessInternal.validatedInstanceOpsAfterNormalization
 
 buildEdgeTrace ::
   EdgeWitnessInput ->

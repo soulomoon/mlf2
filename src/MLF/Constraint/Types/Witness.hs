@@ -19,6 +19,7 @@ module MLF.Constraint.Types.Witness (
     ExpansionF(..),
     InstanceOp(..),
     InstanceWitness,
+    ValidatedInstanceOps,
     getInstanceOps,
     mkInstanceWitness,
     EdgeWitness,

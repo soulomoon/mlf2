@@ -21,7 +21,10 @@ module MLF.Constraint.Types.Witness.Internal (
     ExpansionF(..),
     InstanceOp(..),
     InstanceWitness(..),
+    ValidatedInstanceOps,
+    validatedInstanceOpsAfterNormalization,
     mkInstanceWitness,
+    mkUncheckedInstanceWitness,
     EdgeWitness(..),
     mkEdgeWitness,
     WitnessError(..),
@@ -151,6 +154,13 @@ data InstanceOp
 newtype InstanceWitness = InstanceWitness { getInstanceOps :: [InstanceOp] }
     deriving (Eq, Show)
 
+-- | Instance ops that already passed the normalization-owned validation lane.
+--
+-- This token keeps finalized consumer-facing witness construction distinct from
+-- pre-normalization accumulation.
+newtype ValidatedInstanceOps = ValidatedInstanceOps [InstanceOp]
+    deriving (Eq, Show)
+
 -- | Per-instantiation-edge witness metadata.
 --
 -- This is the data that Phase 6 uses to reconstruct an xMLF instantiation for
@@ -177,9 +187,17 @@ data WitnessError
     = NegativeForallIntros Int
     deriving (Eq, Show)
 
--- | Smart constructor for `InstanceWitness`.
-mkInstanceWitness :: [InstanceOp] -> InstanceWitness
-mkInstanceWitness = InstanceWitness
+-- | Package finalized ops after the matching normalization/validation lane.
+validatedInstanceOpsAfterNormalization :: [InstanceOp] -> ValidatedInstanceOps
+validatedInstanceOpsAfterNormalization = ValidatedInstanceOps
+
+-- | Smart constructor for finalized `InstanceWitness` values.
+mkInstanceWitness :: ValidatedInstanceOps -> InstanceWitness
+mkInstanceWitness (ValidatedInstanceOps ops) = InstanceWitness ops
+
+-- | Owner-local unchecked construction seam for pre-normalization witnesses.
+mkUncheckedInstanceWitness :: [InstanceOp] -> InstanceWitness
+mkUncheckedInstanceWitness = InstanceWitness
 
 -- | Smart constructor for `EdgeWitness`.
 -- Validates that `ewForallIntros` is non-negative.

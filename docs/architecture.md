@@ -144,8 +144,12 @@ runtime invariants as compile-time types:
   witness constructors live only behind
   `MLF.Constraint.Types.Witness.TestSupport` for deliberate test fixtures.
   `mkEdgeWitness` currently enforces the construction-time invariant the live
-  production path can prove directly (non-negative intro counts); context-heavy
-  Ω normalization and Φ translation checks remain downstream owners.
+  production path can prove directly (non-negative intro counts). Finalized
+  `InstanceWitness` values now require a normalization-owned validated-ops
+  token before `mkInstanceWitness` can mint them, while pre-normalization
+  accumulation stays on explicit owner-local seams. Context-heavy Ω
+  normalization and Φ translation checks that are not subsumed by that token
+  remain downstream owners.
 
 ## Shared ownership notes
 
