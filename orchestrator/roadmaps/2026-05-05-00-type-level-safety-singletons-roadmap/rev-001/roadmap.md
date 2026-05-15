@@ -179,7 +179,7 @@ scope unless a later semantic roadmap update explicitly approves them.
   compatibility helpers are not.
 - Extraction notes: use focused compile/build slices before the full gate.
 
-### [in-progress] 4. ForallSpec Binder Safety
+### [done] 4. ForallSpec Binder Safety
 
 - Milestone id: `milestone-4`
 - Depends on: `milestone-3`
@@ -197,6 +197,7 @@ scope unless a later semantic roadmap update explicitly approves them.
 #### Completion Pointers: milestone-4
 
 - round-233 totalized the selected Phi/Omega binder-spine reads, added binder-spine mismatch and out-of-range regressions through a narrow internal test seam, and passed focused Phi checks plus the full cabal gate.
+- round-234 removed the remaining Sigma partial binder-order indexing, added explicit InstantiationError regressions for missing and short source binder orders, and together with round-233 closes milestone-4 while keeping ForallSpec binder count derived from fsBounds.
 
 #### Candidate Direction: ForallSpec Shape And Indexing Audit
 

@@ -2970,12 +2970,47 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               Left err -> expectationFailure (show err)
               Right out -> canonType out `shouldBe` canonType tgt
 
-      it "fails when target binder identity is not present in the source" $ do
+      it "reports missing target binder identities through InstantiationError" $ do
         let src = Elab.TForall "a" Nothing (Elab.TVar "a")
             tgt = Elab.TForall "b" Nothing (Elab.TVar "b")
         case Elab.sigmaReorder src tgt of
-          Left _ -> pure ()
+          Left (Elab.InstantiationError msg) ->
+            msg `shouldBe` "sigmaReorder: desired binder not found in source"
+          Left err ->
+            expectationFailure ("Expected InstantiationError, got " ++ show err)
           Right sig -> expectationFailure ("Expected failure, got: " ++ show sig)
+
+      it "reports missing target binder identities through the spine reorder helper" $ do
+        let binders = [("a", Nothing), ("b", Nothing)]
+            ids = ["a", "b"]
+        case PhiTestSupport.reorderSpineTo "spineReorder" binders ids ["c", "a"] of
+          Left (Elab.InstantiationError msg) ->
+            msg `shouldBe` "spineReorder: desired binder not found in source"
+          Left err ->
+            expectationFailure ("Expected InstantiationError, got " ++ show err)
+          Right (_sig, binders', ids') ->
+            expectationFailure
+              ( "Expected failure, got binders="
+                  ++ show binders'
+                  ++ " ids="
+                  ++ show ids'
+              )
+
+      it "fails closed when the desired binder order is longer than the source spine" $ do
+        let binders = [("a", Nothing)]
+            ids = ["a"]
+        case PhiTestSupport.reorderSpineTo "spineReorder" binders ids ["a", "b"] of
+          Left (Elab.InstantiationError msg) ->
+            msg `shouldBe` "spineReorder: type has only 1 binders"
+          Left err ->
+            expectationFailure ("Expected InstantiationError, got " ++ show err)
+          Right (_sig, binders', ids') ->
+            expectationFailure
+              ( "Expected failure, got binders="
+                  ++ show binders'
+                  ++ " ids="
+                  ++ show ids'
+              )
 
       it "O15-REORDER-REQUIRED: applies Σ reordering even without Raise when Typ/Typexp differ" $ do
         -- Thesis Def. 15.3.4: ϕR (aka Σ(g)) is required whenever the scheme

@@ -46,6 +46,19 @@ swapAdjacent i xs =
         (a : b : rs) -> pre ++ (b : a : rs)
         _ -> xs
 
+checkedReorderBinderPair :: String -> [a] -> [a] -> Int -> Either ElabError (Maybe (a, a))
+checkedReorderBinderPair context sourceIds desiredIds idx =
+    case drop idx desiredIds of
+        [] -> Right Nothing
+        desiredBinder : _ ->
+            case drop idx sourceIds of
+                currentBinder : _ -> Right (Just (currentBinder, desiredBinder))
+                [] ->
+                    Left
+                        ( InstantiationError
+                            (context ++ ": type has only " ++ show (length sourceIds) ++ " binders")
+                        )
+
 bubbleReorderTo
     :: Eq a
     => String
@@ -55,19 +68,20 @@ bubbleReorderTo
     -> Either ElabError (Instantiation, ElabType, [a])
 bubbleReorderTo context ty0 ids0 desired0 = go InstId ty0 ids0 0
   where
-    go acc ty ids idx
-        | idx >= length desired0 = Right (acc, ty, ids)
-        | length ids < length desired0 =
-            Left (InstantiationError (context ++ ": type has only " ++ show (length ids) ++ " binders"))
-        | ids !! idx == desired0 !! idx = go acc ty ids (idx + 1)
-        | otherwise =
-            case elemIndex (desired0 !! idx) (drop idx ids) of
-                Nothing ->
-                    Left (InstantiationError (context ++ ": desired binder not found in source"))
-                Just off -> do
-                    let k = idx + off
-                    (acc', ty', ids') <- bubbleLeft acc ty ids k idx
-                    go acc' ty' ids' (idx + 1)
+    go acc ty ids idx = do
+        step <- checkedReorderBinderPair context ids desired0 idx
+        case step of
+            Nothing -> Right (acc, ty, ids)
+            Just (currentBinder, desiredBinder) ->
+                if currentBinder == desiredBinder
+                    then go acc ty ids (idx + 1)
+                    else case elemIndex desiredBinder (drop idx ids) of
+                        Nothing ->
+                            Left (InstantiationError (context ++ ": desired binder not found in source"))
+                        Just off -> do
+                            let k = idx + off
+                            (acc', ty', ids') <- bubbleLeft acc ty ids k idx
+                            go acc' ty' ids' (idx + 1)
 
     bubbleLeft acc ty ids k idx
         | k <= idx = Right (acc, ty, ids)
@@ -88,19 +102,20 @@ bubbleReorderToFromSpine
     -> Either ElabError (Instantiation, [(String, Maybe BoundType)], [a])
 bubbleReorderToFromSpine context binders0 ids0 desired0 = go InstId binders0 ids0 0
   where
-    go acc binders ids idx
-        | idx >= length desired0 = Right (acc, binders, ids)
-        | length ids < length desired0 =
-            Left (InstantiationError (context ++ ": type has only " ++ show (length ids) ++ " binders"))
-        | ids !! idx == desired0 !! idx = go acc binders ids (idx + 1)
-        | otherwise =
-            case elemIndex (desired0 !! idx) (drop idx ids) of
-                Nothing ->
-                    Left (InstantiationError (context ++ ": desired binder not found in source"))
-                Just off -> do
-                    let k = idx + off
-                    (acc', binders', ids') <- bubbleLeft acc binders ids k idx
-                    go acc' binders' ids' (idx + 1)
+    go acc binders ids idx = do
+        step <- checkedReorderBinderPair context ids desired0 idx
+        case step of
+            Nothing -> Right (acc, binders, ids)
+            Just (currentBinder, desiredBinder) ->
+                if currentBinder == desiredBinder
+                    then go acc binders ids (idx + 1)
+                    else case elemIndex desiredBinder (drop idx ids) of
+                        Nothing ->
+                            Left (InstantiationError (context ++ ": desired binder not found in source"))
+                        Just off -> do
+                            let k = idx + off
+                            (acc', binders', ids') <- bubbleLeft acc binders ids k idx
+                            go acc' binders' ids' (idx + 1)
 
     bubbleLeft acc binders ids k idx
         | k <= idx = Right (acc, binders, ids)

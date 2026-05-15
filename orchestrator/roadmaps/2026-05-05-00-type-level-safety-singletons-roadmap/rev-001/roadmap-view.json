@@ -48,7 +48,7 @@
     {
       "milestone_id": "milestone-4",
       "title": "ForallSpec Binder Safety",
-            "status": "in-progress",
+            "status": "done",
       "depends_on": [
         "milestone-3"
       ],
@@ -185,7 +185,7 @@
     },
     "milestone-4": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
-            "selector": "### [in-progress] 4. ForallSpec Binder Safety"
+            "selector": "### [done] 4. ForallSpec Binder Safety"
     },
     "milestone-4-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
