@@ -119,17 +119,19 @@ runtime invariants as compile-time types:
 
 - **Phase-indexed `Constraint`** (`MLF.Constraint.Types.Graph`): `Constraint` is
   parameterized by a phantom `Phase` (`'Raw | 'Normalized | 'Acyclic | 'Presolved | 'Solved`).
-  The `Phase` kind is defined in `MLF.Constraint.Types.Phase` with `singletons-th`
-  generated singletons. The main phase entrypoints now make the phase progression
-  explicit: normalization returns `Constraint 'Normalized`, acyclicity checking
-  returns `Constraint 'Acyclic`, presolution returns `Constraint 'Presolved`,
-  and solve consumes presolved constraints to produce the opaque `Solved`
-  abstraction. Directional transition helpers in `MLF.Constraint.Types.Graph`
-  encode those boundaries. The old generic graph-level phase escape hatches
-  have been retired; any remaining phase erasure is owner-local and named for
-  the backend that still stores raw constraints internally, such as solved
-  construction, presolution in-progress state, research, or test support.
-  Broad raw-view adapters are retired rather than preserved as public
+  The dedicated singleton owner is `MLF.Constraint.Types.Phase.Singletons`,
+  and `MLF.Constraint.Types.Phase` re-exports that singleton surface together
+  with the `Next` transition family. The main phase entrypoints now make the
+  phase progression explicit: normalization returns `Constraint 'Normalized`,
+  acyclicity checking returns `Constraint 'Acyclic`, presolution returns
+  `Constraint 'Presolved`, and solve consumes presolved constraints to produce
+  the opaque `Solved` abstraction. Directional transition helpers in
+  `MLF.Constraint.Types.Graph` encode those boundaries. The old generic
+  graph-level phase escape hatches have been retired; any remaining phase
+  erasure is owner-local and named for the backend that still stores raw
+  constraints internally, such as solved construction, presolution in-progress
+  state, research, or test support. Broad raw-view adapters are retired rather
+  than preserved as public
   read-model surfaces.
 
 - **`ForallSpec`** (`MLF.Constraint.Types.Witness`): `fsBinderCount` was removed;

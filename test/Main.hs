@@ -44,6 +44,7 @@ import PresolutionFacadeSpec qualified
 import PresolutionSpec qualified
 import Property.QuickCheckPropertySpec qualified
 import PublicSurfaceSpec qualified
+import PhaseSingletonsSpec qualified
 import ReduceSpec qualified
 import Reify.CoreSpec qualified
 import Reify.NamedSpec qualified
@@ -74,6 +75,7 @@ main :: IO ()
 main = do
   presolutionMarker <- newIORef False
   hspec $ do
+    PhaseSingletonsSpec.spec
     ConstraintGenSpec.spec
     NormalizeSpec.spec
     AcyclicitySpec.spec

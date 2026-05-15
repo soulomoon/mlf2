@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-231",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-phase-singletons-foundation",
+  "extracted_item_id": "phase-singletons-module-split-and-smoke-proof",
+  "plan_path": "orchestrator/rounds/round-231/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

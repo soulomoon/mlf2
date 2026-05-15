@@ -1,0 +1,36 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-231",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-phase-singletons-foundation",
+  "extracted_item_id": "phase-singletons-module-split-and-smoke-proof",
+  "decision": "approved",
+  "evidence_summary": "Round-231 stays inside the selected milestone-2 singleton-foundation scope, isolates the singleton boilerplate in a dedicated Phase.Singletons owner while preserving MLF.Constraint.Types.Phase as the stable caller-facing re-export boundary, leaves src-public unchanged, proves the exported singleton constructors and Next progression through a focused smoke spec that imports only MLF.Constraint.Types.Phase, and passes git diff --check plus cabal build all && cabal test with 2566 examples and 0 failures. The milestone-2 completion signal is now satisfied, so closeout may remain status-only and move milestone-2 from pending to done.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-2",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-2"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-2-completion",
+        "text": "round-231 split the phase singleton boilerplate into a dedicated owner, preserved MLF.Constraint.Types.Phase as the stable re-export boundary, added focused singleton smoke coverage, and passed the full cabal gate."
+      }
+    ],
+    "history_entries": [
+      {
+        "anchor_id": "roadmap-history-completed-rounds",
+        "text": "round-231 completed milestone-2 by isolating the phase singleton owner, preserving the top-level Phase boundary, and proving the singleton foundation with focused smoke coverage plus the full cabal gate."
+      }
+    ],
+    "semantic_update_required_reason": null
+  }
+}

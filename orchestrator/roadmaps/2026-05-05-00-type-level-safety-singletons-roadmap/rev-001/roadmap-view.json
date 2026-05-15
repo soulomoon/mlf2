@@ -20,7 +20,7 @@
     {
       "milestone_id": "milestone-2",
       "title": "Phase Kind And Singletons Foundation",
-      "status": "pending",
+            "status": "done",
       "depends_on": [
         "milestone-1"
       ],
@@ -169,7 +169,7 @@
     },
     "milestone-2": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 2. Phase Kind And Singletons Foundation"
+            "selector": "### [done] 2. Phase Kind And Singletons Foundation"
     },
     "milestone-2-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",

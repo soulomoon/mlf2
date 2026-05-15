@@ -115,7 +115,7 @@ scope unless a later semantic roadmap update explicitly approves them.
   stronger GADT shape or document and enforce the accepted mixed-key seam if
   current architecture requires it.
 
-### [pending] 2. Phase Kind And Singletons Foundation
+### [done] 2. Phase Kind And Singletons Foundation
 
 - Milestone id: `milestone-2`
 - Depends on: `milestone-1`
@@ -130,7 +130,7 @@ scope unless a later semantic roadmap update explicitly approves them.
   Template Haskell across unrelated modules.
 #### Completion Pointers: milestone-2
 
-none yet
+- round-231 split the phase singleton boilerplate into a dedicated owner, preserved MLF.Constraint.Types.Phase as the stable re-export boundary, added focused singleton smoke coverage, and passed the full cabal gate.
 
 #### Candidate Direction: Singleton Phase Scaffold
 

@@ -14,3 +14,4 @@ Roadmap family: `2026-05-05-00-type-level-safety-singletons-roadmap`
 
 - round-229 advanced milestone-1 in-progress by reconciling the Binding.Adjustment typed-child boundary and bounded callers.
 - round-230 completed milestone-1 by auditing the remaining NodeRef boundary, typing GraphOps predicates, and confirming the retained mixed NodeRef seam is limited to binding-tree storage and ancestor or parent targets.
+- round-231 completed milestone-2 by isolating the phase singleton owner, preserving the top-level Phase boundary, and proving the singleton foundation with focused smoke coverage plus the full cabal gate.
