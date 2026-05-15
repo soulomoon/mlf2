@@ -12,4 +12,4 @@ Roadmap family: `2026-05-05-00-type-level-safety-singletons-roadmap`
 
 ## Completed Rounds
 
-none discovered yet
+- round-229 advanced milestone-1 in-progress by reconciling the Binding.Adjustment typed-child boundary and bounded callers.

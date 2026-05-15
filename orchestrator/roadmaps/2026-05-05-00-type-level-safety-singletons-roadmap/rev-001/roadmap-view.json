@@ -8,7 +8,7 @@
     {
       "milestone_id": "milestone-1",
       "title": "NodeRef GADT And RefTag Boundary",
-      "status": "pending",
+            "status": "in-progress",
       "depends_on": [],
       "parallel_lane": "lane-main",
       "status_anchor": "milestone-1",
@@ -161,7 +161,7 @@
   "anchors": {
     "milestone-1": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 1. NodeRef GADT And RefTag Boundary"
+            "selector": "### [in-progress] 1. NodeRef GADT And RefTag Boundary"
     },
     "milestone-1-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",

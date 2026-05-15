@@ -1295,7 +1295,7 @@ bindingAdjustmentSpec = describe "MLF.Binding.Adjustment" $ do
             forAll (choose (3, 15)) $ \n -> do
                 c <- generate (genConstraintWithBinderChain n)
                 -- Pick two non-root nodes to harmonize
-                let nonRoots = filter (not . isBindingRoot c) (map typeRef (allNodeIds c))
+                let nonRoots = map TypeRefTag $ filter (not . isBindingRoot c . typeRef) (allNodeIds c)
                 case nonRoots of
                     (n1:n2:_) -> do
                         case BindingAdjustment.harmonizeBindParentsWithTrace n1 n2 c of
@@ -1310,7 +1310,7 @@ bindingAdjustmentSpec = describe "MLF.Binding.Adjustment" $ do
             forAll (choose (3, 15)) $ \n -> do
                 c <- generate (genConstraintWithBinderChain n)
                 -- Pick two non-root nodes to harmonize
-                let nonRoots = filter (not . isBindingRoot c) (map typeRef (allNodeIds c))
+                let nonRoots = map TypeRefTag $ filter (not . isBindingRoot c . typeRef) (allNodeIds c)
                 case nonRoots of
                     (n1:n2:_) -> do
                         case BindingAdjustment.harmonizeBindParentsWithTrace n1 n2 c of
@@ -1331,9 +1331,7 @@ bindingAdjustmentSpec = describe "MLF.Binding.Adjustment" $ do
                                         let nodesToCheck =
                                                 IntSet.toList $
                                                     IntSet.fromList $
-                                                        [ getNodeId nid
-                                                        | TypeRef nid <- [n1, n2]
-                                                        ]
+                                                        map (getNodeId . nodeIdFromTypeRef) [n1, n2]
                                                         ++ map getNodeId trace
                                         forM_ nodesToCheck $ \nidInt -> do
                                             let nid = NodeId nidInt
@@ -1370,7 +1368,7 @@ bindingAdjustmentSpec = describe "MLF.Binding.Adjustment" $ do
                                 , (NodeId 3, NodeId 0, BindFlex)
                                 ]
                         }
-            BindingAdjustment.harmonizeBindParentsWithTrace (typeRef (NodeId 2)) (typeRef (NodeId 3)) c
+            BindingAdjustment.harmonizeBindParentsWithTrace (TypeRefTag (NodeId 2)) (TypeRefTag (NodeId 3)) c
                 `shouldBe` Left (OperationOnLockedNode (typeRef (NodeId 2)))
 
         it "fails when no binding LCA exists" $ do
@@ -1391,7 +1389,7 @@ bindingAdjustmentSpec = describe "MLF.Binding.Adjustment" $ do
                                 , (NodeId 3, NodeId 2, BindFlex)
                                 ]
                         }
-            BindingAdjustment.harmonizeBindParentsWithTrace (typeRef (NodeId 1)) (typeRef (NodeId 3)) c
+            BindingAdjustment.harmonizeBindParentsWithTrace (TypeRefTag (NodeId 1)) (TypeRefTag (NodeId 3)) c
                 `shouldBe` Left (NoCommonAncestor (TypeRef (NodeId 0)) (TypeRef (NodeId 2)))
 
         it "harmonization with empty binding edges yields an empty Raise trace" $ do
@@ -1405,7 +1403,7 @@ bindingAdjustmentSpec = describe "MLF.Binding.Adjustment" $ do
                     , cBindParents = IntMap.empty  -- No binding parents
                     }
 
-            case BindingAdjustment.harmonizeBindParentsWithTrace (typeRef (NodeId 1)) (typeRef (NodeId 3)) c of
+            case BindingAdjustment.harmonizeBindParentsWithTrace (TypeRefTag (NodeId 1)) (TypeRefTag (NodeId 3)) c of
                 Right (_c', trace) -> trace `shouldBe` []
                 Left err -> expectationFailure $ "Expected success, got: " ++ show err
 
@@ -1421,6 +1419,24 @@ bindingAdjustmentSpec = describe "MLF.Binding.Adjustment" $ do
                     , (NodeId 2, NodeId 0, BindFlex)
                     ]
                 c = rootedConstraint emptyConstraint { cNodes = nodes, cBindParents = bp }
-            case BindingAdjustment.harmonizeBindParentsWithTrace (typeRef (NodeId 1)) (typeRef (NodeId 2)) c of
+            case BindingAdjustment.harmonizeBindParentsWithTrace (TypeRefTag (NodeId 1)) (TypeRefTag (NodeId 2)) c of
                 Right (_c', _trace) -> pure ()
                 Left err -> expectationFailure $ "harmonize failed: " ++ show err
+
+    describe "raiseToParentWithCount" $ do
+        it "keeps mixed ancestor targets on the retained NodeRef seam" $ do
+            let nodes = nodeMapFromList
+                    [ (0, TyForall (NodeId 0) (NodeId 1))
+                    , (1, TyForall (NodeId 1) (NodeId 2))
+                    , (2, TyVar { tnId = NodeId 2, tnBound = Nothing })
+                    ]
+                bp = bindParentsFromPairs
+                    [ (NodeId 1, NodeId 0, BindFlex)
+                    , (NodeId 2, NodeId 1, BindFlex)
+                    ]
+                c = rootedConstraint emptyConstraint { cNodes = nodes, cBindParents = bp }
+            case BindingAdjustment.raiseToParentWithCount (TypeRefTag (NodeId 2)) (genRef (GenNodeId 0)) c of
+                Right (c', trace) -> do
+                    trace `shouldBe` [NodeId 2, NodeId 2]
+                    lookupBindParent c' (typeRef (NodeId 2)) `shouldBe` Just (genRef (GenNodeId 0), BindFlex)
+                Left err -> expectationFailure $ "raiseToParentWithCount failed: " ++ show err

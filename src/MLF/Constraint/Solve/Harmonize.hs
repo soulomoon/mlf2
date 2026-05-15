@@ -7,8 +7,6 @@ import qualified Data.IntMap.Strict as IntMap
 
 import qualified MLF.Binding.Adjustment as BindingAdjustment
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Unify.Closure (SolveError(..))
 import qualified MLF.Util.UnionFind as UnionFind
 
@@ -21,7 +19,7 @@ batchHarmonizeConstraint uf c0 =
     harmonizeOne :: Either SolveError (Constraint p) -> [NodeId] -> Either SolveError (Constraint p)
     harmonizeOne acc members = do
         cBefore <- acc
-        let refs = map typeRef members
+        let refs = map TypeRefTag members
         case BindingAdjustment.harmonizeBindParentsMulti refs cBefore of
             Left err -> Left (BindingTreeError err)
             Right (cAfter, _trace) -> Right cAfter

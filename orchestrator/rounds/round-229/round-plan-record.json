@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-229",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-noderefgadt-reftag-kind",
+  "extracted_item_id": "binding-adjustment-typed-child-ref-boundary",
+  "plan_path": "orchestrator/rounds/round-229/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

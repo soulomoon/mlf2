@@ -139,7 +139,7 @@ runUnifyClosureWithSeed traceCfg ufSeed c0 = do
     harmonizeClass :: [NodeId] -> SolveM p ()
     harmonizeClass members = do
         cBefore <- gets suConstraint
-        let refs = map typeRef members
+        let refs = map TypeRefTag members
         case BindingAdjustment.harmonizeBindParentsMulti refs cBefore of
             Left err -> throwError (BindingTreeError err)
             Right (c', _trace) -> modify' $ \s -> s { suConstraint = c' }

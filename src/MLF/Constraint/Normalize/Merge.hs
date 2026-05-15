@@ -35,6 +35,7 @@ import MLF.Constraint.Types.Graph
     , NodeId
     , NodeMap
     , NodeRef (..)
+    , NodeRefTag (..)
     , TyNode (..)
     , UnifyEdge
     , lookupNodeIn
@@ -173,7 +174,7 @@ normalizeRepresentative left leftNode right rightNode = case (leftNode, rightNod
     (TyVar {}, TyVar {}) -> do
         modify' $ \s ->
             let c0 = nsConstraint s
-                c1 = BindingAdjustment.harmonizeBindParents (typeRef left) (typeRef right) c0
+                c1 = BindingAdjustment.harmonizeBindParents (TypeRefTag left) (TypeRefTag right) c0
             in s { nsConstraint = c1 }
         pure (left, right)
     (TyVar {}, TyExp { tnBody = b }) -> do

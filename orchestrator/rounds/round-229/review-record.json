@@ -1,0 +1,36 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-229",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-noderefgadt-reftag-kind",
+  "extracted_item_id": "binding-adjustment-typed-child-ref-boundary",
+  "decision": "approved",
+  "evidence_summary": "Round-229 stays inside the selected Binding.Adjustment typed-child boundary scope, removes the local requireTypeRef runtime discriminator, migrates the bounded production callers to TypeRefTag child refs, preserves the retained mixed NodeRef seam only on ancestor or parent targets, leaves src-public unchanged, and passes git diff --check, focused harmonize/applyRaiseTo/raiseToParentWithCount slices, and cabal build all && cabal test with 2563 examples and 0 failures. Milestone-1 should advance to in-progress, not done, because this extracted item does not by itself prove the broader repo-wide milestone completion signal.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-1",
+        "expected_current_status": "pending",
+        "target_status": "in-progress",
+        "roadmap_view_anchor": "milestone-1"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-1-completion",
+        "text": "round-229 typed the Binding.Adjustment child-ref boundary, migrated the bounded callers, and kept mixed ancestor targets on the retained NodeRef seam; evidence: focused binding/graph-op slices plus full cabal gate."
+      }
+    ],
+    "history_entries": [
+      {
+        "anchor_id": "roadmap-history-completed-rounds",
+        "text": "round-229 advanced milestone-1 in-progress by reconciling the Binding.Adjustment typed-child boundary and bounded callers."
+      }
+    ],
+    "semantic_update_required_reason": null
+  }
+}

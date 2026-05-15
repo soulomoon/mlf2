@@ -46,19 +46,8 @@ module MLF.Binding.Adjustment (
 ) where
 
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Binding.Tree (isUnderRigidBinder, lookupBindParent, bindingLCA, isBindingRoot)
 import MLF.Binding.GraphOps (applyRaiseStep)
-
--- | Convert a 'NodeRef' to a typed reference, failing on gen nodes.
-requireTypeRef :: NodeRef -> Either BindingError (NodeRefTag 'TypeTag)
-requireTypeRef ref = case ref of
-    TypeRef nid -> Right (TypeRefTag nid)
-    GenRef _ ->
-        Left $
-            InvalidBindingTree $
-                "binding-tree operation expects a type node, got gen node " ++ show ref
 
 -- | Harmonize the binding parents of two nodes by raising them to their LCA.
 --
@@ -76,34 +65,33 @@ requireTypeRef ref = case ref of
 --
 -- Paper reference: @papers/these-finale-english.txt@ (see @papers/xmlf.txt@ §3.4)
 harmonizeBindParentsWithTrace
-    :: NodeRef -> NodeRef -> Constraint p
+    :: NodeRefTag 'TypeTag -> NodeRefTag 'TypeTag -> Constraint p
     -> Either BindingError (Constraint p, [NodeId])
-harmonizeBindParentsWithTrace n1 n2 c0 = do
-    _ <- requireTypeRef n1
-    _ <- requireTypeRef n2
+harmonizeBindParentsWithTrace n1Tag n2Tag c0 =
     -- Get binding parents for both nodes
-    let mbParent1 = lookupBindParent c0 n1
+    let n1 = fromNodeRefTag n1Tag
+        n2 = fromNodeRefTag n2Tag
+        mbParent1 = lookupBindParent c0 n1
         mbParent2 = lookupBindParent c0 n2
-
-    case (mbParent1, mbParent2) of
+    in case (mbParent1, mbParent2) of
         -- Both are roots: nothing to harmonize in the binding tree.
         (Nothing, Nothing) -> return (c0, [])
 
         -- One is a root: raise the other until its parent is also a root.
         (Nothing, Just (_p2, _)) -> do
-            (c2, trace2) <- raiseToRoot n2 c0
+            (c2, trace2) <- raiseToRoot n2Tag c0
             return (c2, trace2)
 
         (Just (_p1, _), Nothing) -> do
-            (c2, trace1) <- raiseToRoot n1 c0
+            (c2, trace1) <- raiseToRoot n1Tag c0
             return (c2, trace1)
 
         -- Both have parents: find LCA and raise both.
         (Just (p1, _), Just (p2, _)) ->
             case bindingLCA c0 p1 p2 of
                 Right lca -> do
-                    (c2, trace1) <- raiseToParentWithCount n1 lca c0
-                    (c3, trace2) <- raiseToParentWithCount n2 lca c2
+                    (c2, trace1) <- raiseToParentWithCount n1Tag lca c0
+                    (c3, trace2) <- raiseToParentWithCount n2Tag lca c2
                     return (c3, trace1 ++ trace2)
                 Left err ->
                     Left err
@@ -113,7 +101,7 @@ harmonizeBindParentsWithTrace n1 n2 c0 = do
 -- This is a convenience wrapper around 'harmonizeBindParentsWithTrace'.
 -- On error, returns the original constraint unchanged (consistent with
 -- 'raiseToParent' and the normalization pipeline's error-deferral strategy).
-harmonizeBindParents :: NodeRef -> NodeRef -> Constraint p -> Constraint p
+harmonizeBindParents :: NodeRefTag 'TypeTag -> NodeRefTag 'TypeTag -> Constraint p -> Constraint p
 harmonizeBindParents n1 n2 c =
     case harmonizeBindParentsWithTrace n1 n2 c of
         Right (c', _) -> c'
@@ -121,14 +109,14 @@ harmonizeBindParents n1 n2 c =
 
 -- | Harmonize binding parents for multiple nodes simultaneously.
 --
--- Given a list of NodeRefs (members of an equivalence class), compute the
+-- Given a list of type-node refs (members of an equivalence class), compute the
 -- LCA of all their bind parents and raise every member to that LCA.
 -- This is the generalized Rebind from thesis Section 7.6.2: one Rebind
 -- per equivalence class instead of one per pair.
 --
 -- Returns the updated constraint and the combined raise trace.
 harmonizeBindParentsMulti
-    :: [NodeRef] -> Constraint p
+    :: [NodeRefTag 'TypeTag] -> Constraint p
     -> Either BindingError (Constraint p, [NodeId])
 harmonizeBindParentsMulti [] c = Right (c, [])
 harmonizeBindParentsMulti [_] c = Right (c, [])
@@ -136,16 +124,25 @@ harmonizeBindParentsMulti refs c0 = do
     -- Collect all bind parents
     let parents =
             [ p
-            | ref <- refs
+            | refTag <- refs
+            , let ref = fromNodeRefTag refTag
             , Just (p, _) <- [lookupBindParent c0 ref]
             ]
-        roots = [ref | ref <- refs, Nothing == lookupBindParent c0 ref]
+        roots =
+            [ refTag
+            | refTag <- refs
+            , Nothing == lookupBindParent c0 (fromNodeRefTag refTag)
+            ]
     case (parents, roots) of
         -- All are roots: nothing to do
         ([], _) -> Right (c0, [])
         -- Some are roots: raise all non-roots to root level
         (_, (_:_)) -> do
-            let nonRoots = [ref | ref <- refs, Nothing /= lookupBindParent c0 ref]
+            let nonRoots =
+                    [ refTag
+                    | refTag <- refs
+                    , Nothing /= lookupBindParent c0 (fromNodeRefTag refTag)
+                    ]
             go c0 [] nonRoots
         -- All have parents: fold LCA pairwise, then raise all to it
         (p1:pRest, []) -> do
@@ -172,12 +169,11 @@ harmonizeBindParentsMulti refs c0 = do
 -- Returns the updated constraint and the list of nodes that were raised
 -- (with multiplicity).
 raiseToParentWithCount
-    :: NodeRef -> NodeRef -> Constraint p
+    :: NodeRefTag 'TypeTag -> NodeRef -> Constraint p
     -> Either BindingError (Constraint p, [NodeId])
 raiseToParentWithCount ref target c0 = do
-    tag <- requireTypeRef ref
-    let nid = TypeRef (nodeIdFromTypeRef tag)
-        nidT = nodeIdFromTypeRef tag
+    let nid = fromNodeRefTag ref
+        nidT = nodeIdFromTypeRef ref
     go nid nidT c0 []
   where
     go nid nidT constraint trace =
@@ -192,7 +188,7 @@ raiseToParentWithCount ref target c0 = do
                         if locked
                             then Left (OperationOnLockedNode nid)
                             else do
-                                result <- applyRaiseStep (TypeRefTag nidT) constraint
+                                result <- applyRaiseStep ref constraint
                                 case result of
                                     (constraint', Just _) ->
                                         go nid nidT constraint' (nidT : trace)
@@ -200,18 +196,17 @@ raiseToParentWithCount ref target c0 = do
                                         Left (RaiseNotPossible nid)
 
 -- | Raise a node to the target parent (convenience wrapper).
-raiseToParent :: NodeRef -> NodeRef -> Constraint p -> Constraint p
+raiseToParent :: NodeRefTag 'TypeTag -> NodeRef -> Constraint p -> Constraint p
 raiseToParent nid target c =
     case raiseToParentWithCount nid target c of
         Right (c', _) -> c'
         Left _ -> c
 
 -- | Raise a node until its parent is a root.
-raiseToRoot :: NodeRef -> Constraint p -> Either BindingError (Constraint p, [NodeId])
+raiseToRoot :: NodeRefTag 'TypeTag -> Constraint p -> Either BindingError (Constraint p, [NodeId])
 raiseToRoot ref c0 = do
-    tag <- requireTypeRef ref
-    let nid = TypeRef (nodeIdFromTypeRef tag)
-        nidT = nodeIdFromTypeRef tag
+    let nid = fromNodeRefTag ref
+        nidT = nodeIdFromTypeRef ref
     go nid nidT c0 []
   where
     go nid nidT constraint trace =
@@ -221,14 +216,14 @@ raiseToRoot ref c0 = do
             Just (parent, _) ->
                 if isBindingRoot constraint parent
                     then return (constraint, reverse trace)
-                else do
-                    locked <- isUnderRigidBinder constraint nid
-                    if locked
-                        then Left (OperationOnLockedNode nid)
-                        else do
-                            result <- applyRaiseStep (TypeRefTag nidT) constraint
-                            case result of
-                                (constraint', Just _) ->
-                                    go nid nidT constraint' (nidT : trace)
-                                (_constraint', Nothing) ->
-                                    Left (RaiseNotPossible nid)
+                    else do
+                        locked <- isUnderRigidBinder constraint nid
+                        if locked
+                            then Left (OperationOnLockedNode nid)
+                            else do
+                                result <- applyRaiseStep ref constraint
+                                case result of
+                                    (constraint', Just _) ->
+                                        go nid nidT constraint' (nidT : trace)
+                                    (_constraint', Nothing) ->
+                                        Left (RaiseNotPossible nid)

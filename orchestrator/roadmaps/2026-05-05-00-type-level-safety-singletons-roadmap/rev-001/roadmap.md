@@ -79,7 +79,7 @@ scope unless a later semantic roadmap update explicitly approves them.
 
 ## Milestones
 
-### [pending] 1. NodeRef GADT And RefTag Boundary
+### [in-progress] 1. NodeRef GADT And RefTag Boundary
 
 - Milestone id: `milestone-1`
 - Depends on: none
@@ -97,7 +97,7 @@ scope unless a later semantic roadmap update explicitly approves them.
   may already exist in the codebase.
 #### Completion Pointers: milestone-1
 
-none yet
+- round-229 typed the Binding.Adjustment child-ref boundary, migrated the bounded callers, and kept mixed ancestor targets on the retained NodeRef seam; evidence: focused binding/graph-op slices plus full cabal gate.
 
 #### Candidate Direction: Typed NodeRef Boundary Reconciliation
 

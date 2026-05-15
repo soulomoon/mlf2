@@ -70,7 +70,7 @@ unifyAcyclicRootsWithRaiseTracePrefer prefer root1 root2 = do
     let c0 = psConstraint st0
 
     (c1, trace0) <-
-        case BindingAdjustment.harmonizeBindParentsWithTrace (typeRef root1) (typeRef root2) c0 of
+        case BindingAdjustment.harmonizeBindParentsWithTrace (TypeRefTag root1) (TypeRefTag root2) c0 of
             Left err -> throwError (BindingTreeError err)
             Right result -> pure result
 
