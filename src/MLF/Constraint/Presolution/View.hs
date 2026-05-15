@@ -4,8 +4,6 @@ module MLF.Constraint.Presolution.View (
     SnapshotPreparation(..),
     buildPresolutionView,
     fromPresolutionResult,
-    fromSolved,
-    toRawPresolutionViewForLegacy,
     prepareSnapshotPreparation,
     prepareSnapshotPreparationFromParts
 ) where
@@ -16,7 +14,6 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Canonicalization.Shared (buildCanonicalMap, equivCanonical)
 import MLF.Constraint.Solve (rewriteConstraintWithUF)
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
     ( BindFlag
     , BindParents
@@ -24,7 +21,6 @@ import MLF.Constraint.Types.Graph
     , NodeId(..)
     , NodeRef
     , TyNode(..)
-    , toRawConstraintForLegacy
     )
 import MLF.Constraint.Types.Phase (Phase(..))
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
@@ -53,34 +49,6 @@ fromPresolutionResult :: PresolutionSnapshot a => a -> PresolutionView 'Presolve
 fromPresolutionResult pres =
     let prepared = prepareSnapshotPreparation pres
     in buildPresolutionView prepared (rewriteConstraintWithUF (spSanitizedUf prepared) (spConstraint prepared))
-
-fromSolved :: Solved.Solved -> PresolutionView 'Raw
-fromSolved solved =
-    let constraint = Solved.originalConstraint solved
-        canonical = Solved.canonical solved
-    in PresolutionView
-        { pvConstraint = constraint
-        , pvCanonicalMap = Solved.canonicalMap solved
-        , pvCanonical = canonical
-        , pvLookupNode = \nid -> NodeAccess.lookupNode constraint (canonical nid)
-        , pvLookupVarBound = \nid -> NodeAccess.lookupVarBound constraint (canonical nid)
-        , pvLookupBindParent = NodeAccess.lookupBindParent constraint
-        , pvBindParents = cBindParents constraint
-        , pvCanonicalConstraint = Solved.canonicalConstraint solved
-        }
-
-toRawPresolutionViewForLegacy :: PresolutionView p -> PresolutionView 'Raw
-toRawPresolutionViewForLegacy view =
-    PresolutionView
-        { pvConstraint = toRawConstraintForLegacy (pvConstraint view)
-        , pvCanonicalMap = pvCanonicalMap view
-        , pvCanonical = pvCanonical view
-        , pvLookupNode = pvLookupNode view
-        , pvLookupVarBound = pvLookupVarBound view
-        , pvLookupBindParent = pvLookupBindParent view
-        , pvBindParents = pvBindParents view
-        , pvCanonicalConstraint = toRawConstraintForLegacy (pvCanonicalConstraint view)
-        }
 
 prepareSnapshotPreparation :: PresolutionSnapshot a => a -> SnapshotPreparation 'Presolved
 prepareSnapshotPreparation pres =

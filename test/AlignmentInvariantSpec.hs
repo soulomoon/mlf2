@@ -12,7 +12,7 @@ import MLF.Constraint.Types.Graph
     ( TyNode(..) )
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Elab.Pipeline (runPipelineElab, runPipelineElabChecked)
+import MLF.Elab.Pipeline (runPipelineElab)
 import MLF.Frontend.Syntax (Expr(..), SrcTy(..))
 import SpecUtil
 
@@ -67,7 +67,7 @@ spec = describe "Thesis alignment invariants" $ do
         forM_ corpus $ \(label, expr) ->
             it ("checked and unchecked paths agree for: " ++ label) $ do
                 let unchecked = runPipelineElab Set.empty (unsafeNormalizeExpr expr)
-                    checked = runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
+                    checked = runPipelineElab Set.empty (unsafeNormalizeExpr expr)
                 case (unchecked, checked) of
                     (Right (t1, ty1), Right (t2, ty2)) -> do
                         show t1 `shouldBe` show t2
@@ -89,7 +89,7 @@ spec = describe "Thesis alignment invariants" $ do
             it ("pipeline output unchanged after patchNode elimination for: " ++ label) $ do
                 let norm = unsafeNormalizeExpr expr
                     r1 = runPipelineElab Set.empty norm
-                    r2 = runPipelineElabChecked Set.empty norm
+                    r2 = runPipelineElab Set.empty norm
                 case (r1, r2) of
                     (Right (t1, ty1), Right (t2, ty2)) -> do
                         show t1 `shouldBe` show t2
@@ -108,7 +108,7 @@ spec = describe "Thesis alignment invariants" $ do
             it ("term and type unchanged for: " ++ label) $ do
                 let norm = unsafeNormalizeExpr expr
                     r1 = runPipelineElab Set.empty norm
-                    r2 = runPipelineElabChecked Set.empty norm
+                    r2 = runPipelineElab Set.empty norm
                 case (r1, r2) of
                     (Right (t1, ty1), Right (t2, ty2)) -> do
                         show t1 `shouldBe` show t2

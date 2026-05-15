@@ -77,8 +77,6 @@ import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Util.UnionFind as UnionFind
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Phase (Phase(Raw))
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base (
     PendingWeakenOwner(..),
     PresolutionM,
@@ -268,7 +266,7 @@ getCanonicalNodeM nid = do
 --
 -- This is intentionally total: unknown/malformed paths map to
 -- 'PendingWeakenOwnerUnknown' so owner-aware scheduling can remain
--- compatibility-first during migration.
+-- conservative when a scheme owner cannot be proven.
 pendingWeakenOwnerM :: NodeId -> PresolutionM PendingWeakenOwner
 pendingWeakenOwnerM nid = do
     (c, canonical) <- getConstraintAndCanonical

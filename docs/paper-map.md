@@ -54,7 +54,7 @@ This ledger is the canonical rule-to-code-to-test index for thesis Chapters 4–
   - per-edge propagation/interpreter step,
   - post-edge closure drain when pending unify work exists.
 - Presolution exposes UF metadata separately (`prUnionFind`) while publishing `prConstraint :: Constraint 'Presolved`; the raw in-progress graph remains a named private bridge inside Phase 4, not the translation boundary.
-- Production Phase 6 consumes presolution-native finalized snapshots/views from that typed presolved result (`finalizeSolvedFromSnapshot`, `finalizePresolutionViewFromSnapshot`); legacy raw views are explicit compatibility adapters around those finalized artifacts.
+- Production Phase 6 consumes presolution-native finalized snapshots/views from that typed presolved result (`finalizeSolvedFromSnapshot`, `finalizePresolutionViewFromSnapshot`); broad legacy raw-view adapters around those finalized artifacts are retired, and any remaining raw projection is kept explicit at the narrow constraint comparison/input point that still requires it.
 
 ## Section-to-Module Mapping
 

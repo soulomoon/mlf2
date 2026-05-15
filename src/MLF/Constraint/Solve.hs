@@ -15,15 +15,10 @@ unification. The implementation is split across focused child modules:
 module MLF.Constraint.Solve (
     SolveError(..),
     UnifyClosureResult(..),
-    SolveSnapshot(..),
-    SolveOutput(..),
-    SolveResult(..),
+    SolveOutput,
     runUnifyClosure,
     solveUnify,
-    solveUnifyResult,
     solveUnifyWithSnapshot,
-    solveUnifyResultWithSnapshot,
-    solveResultFromSnapshot,
     finalizeConstraintWithUF,
     validateSolvedGraph,
     validateSolvedGraphStrict,
@@ -32,82 +27,22 @@ module MLF.Constraint.Solve (
     frWith
 ) where
 
-import qualified Data.IntMap.Strict as IntMap
-
-import qualified MLF.Binding.Tree as Binding
-import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Solve.Finalize (finalizeConstraintWithUF, frWith, repairNonUpperParents, rewriteConstraintWithUF, validateSolvedGraph, validateSolvedGraphStrict)
-import MLF.Constraint.Solve.Internal (SolveOutput(..), SolveResult(..), SolveSnapshot(..))
+import MLF.Constraint.Solve.Internal (SolveOutput)
+import MLF.Constraint.Solve.Output (solveOutputWithSnapshot)
 import MLF.Constraint.Solve.Worklist (SolveError(..), UnifyClosureResult(..), runUnifyClosure)
-import MLF.Constraint.Types.Graph (Constraint, NodeId(..), cBindParents, nodeRefKey, typeRef)
+import MLF.Constraint.Types.Graph (Constraint)
 import MLF.Constraint.Types.Phase (Phase(Presolved))
-import qualified MLF.Constraint.Solved.Internal as SolvedInternal
-import MLF.Util.Trace (TraceConfig, traceBinding)
+import qualified MLF.Constraint.Solved as Solved
+import MLF.Util.Trace (TraceConfig)
 
 -- | Drain all unification edges; assumes instantiation work was already done
 -- by earlier phases. Returns the solved abstraction for post-solve queries.
-solveUnify :: TraceConfig -> Constraint 'Presolved -> Either SolveError SolvedInternal.Solved
-solveUnify traceCfg c0 = solveUnifyWithSnapshot traceCfg c0 >>= SolvedInternal.fromSolveOutput
-
--- | Legacy result-shaped solve helper for low-level tests and validators.
---   Production callers should use 'solveUnify' (which returns the opaque
---   'MLF.Constraint.Solved.Solved') instead.  This helper remains
---   polymorphic for compatibility call sites that construct constraints at
---   non-presolved phantom phases.
-solveUnifyResult :: TraceConfig -> Constraint p -> Either SolveError (SolveResult p)
-solveUnifyResult traceCfg c0 = soResult <$> solveUnifyResultWithSnapshot traceCfg c0
-
--- | Legacy compatibility helper: rebuild a validated solve result from a
---   pre-rewrite snapshot.  Production callers should use 'solveUnify' or
---   'solveUnifyWithSnapshot' instead.  This helper remains polymorphic
---   for test and compatibility call sites.
-solveResultFromSnapshot :: SolveSnapshot p -> Either SolveError (SolveResult p)
-solveResultFromSnapshot SolveSnapshot { snapUnionFind = uf, snapPreRewriteConstraint = preRewrite } =
-    finalizeConstraintWithUF uf preRewrite
+solveUnify :: TraceConfig -> Constraint 'Presolved -> Either SolveError Solved.Solved
+solveUnify traceCfg c0 = solveUnifyWithSnapshot traceCfg c0 >>= Solved.fromSolveOutput
 
 -- | `solveUnify` plus a pre-rewrite snapshot for staged equivalence-backend construction.
 --   Consumes a presolved constraint and returns a presolved output suitable for
 --   'MLF.Constraint.Solved.fromSolveOutput'.
 solveUnifyWithSnapshot :: TraceConfig -> Constraint 'Presolved -> Either SolveError (SolveOutput 'Presolved)
-solveUnifyWithSnapshot = solveUnifyResultWithSnapshot
-
--- | Legacy snapshot-enabled helper that preserves the caller's phantom phase.
---   Production callers should use 'solveUnify' or 'solveUnifyWithSnapshot'
---   (both constrained to 'Presolved).  This helper remains polymorphic for
---   test and compatibility call sites that construct constraints at other
---   phantom phases.
-solveUnifyResultWithSnapshot :: TraceConfig -> Constraint p -> Either SolveError (SolveOutput p)
-solveUnifyResultWithSnapshot traceCfg c0 = do
-    let debugSolveBinding = traceBinding traceCfg
-        c0' = repairNonUpperParents c0
-        probeIds = [NodeId 2, NodeId 3]
-        probeInfo =
-            [ ( pid
-              , NodeAccess.lookupNode c0' pid
-              , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents c0')
-              )
-            | pid <- probeIds
-            ]
-    case debugSolveBinding ("solveUnify: pre-check probe " ++ show probeInfo) () of
-        () -> pure ()
-    closure <- runUnifyClosure traceCfg c0'
-    let snapshot =
-            SolveSnapshot
-                { snapUnionFind = ucUnionFind closure
-                , snapPreRewriteConstraint = ucConstraint closure
-                }
-    res <- solveResultFromSnapshot snapshot
-    let solvedConstraint = srConstraint res
-        probeInfo' =
-            [ ( pid
-              , NodeAccess.lookupNode solvedConstraint pid
-              , IntMap.lookup (nodeRefKey (typeRef pid)) (cBindParents solvedConstraint)
-              )
-            | pid <- probeIds
-            ]
-    case Binding.checkBindingTree solvedConstraint of
-        Left err -> Left (BindingTreeError err)
-        Right () -> do
-            case debugSolveBinding ("solveUnify: post-check probe " ++ show probeInfo') () of
-                () -> pure ()
-            pure SolveOutput { soResult = res, soSnapshot = snapshot }
+solveUnifyWithSnapshot = solveOutputWithSnapshot

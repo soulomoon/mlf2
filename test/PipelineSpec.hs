@@ -45,7 +45,7 @@ import MLF.Elab.Pipeline
     normalize,
     renderPipelineError,
     runPipelineElab,
-    runPipelineElabChecked,
+    runPipelineElab,
     step,
     typeCheck,
     pattern Forall,
@@ -89,6 +89,7 @@ import SpecUtil
     collectVarNodes,
     defaultTraceConfig,
     emptyConstraint,
+    eraseConstraintPhaseForTest,
     firstShowE,
     mkForalls,
     requireRight,
@@ -121,6 +122,9 @@ expectStrictPipelineFailure label result =
     Right (_term, ty) ->
       expectationFailure
         ("Expected strict failure for " ++ label ++ ", but got type " ++ show ty)
+
+viewFromSolved :: Solved -> PresolutionViewBoundary.PresolutionView 'Raw
+viewFromSolved = Finalize.presolutionViewFromSolved
 
 matchesRecursiveArrow :: ElabType -> ElabType -> Bool
 matchesRecursiveArrow actual expected = case (actual, expected) of
@@ -225,76 +229,27 @@ iterateStep t = case step t of
   Nothing -> []
   Just t' -> t' : iterateStep t'
 
-expectAlignedPipelineSuccessType :: SurfaceExpr -> IO ElabType
-expectAlignedPipelineSuccessType expr =
+expectCanonicalPipelineSuccessType :: SurfaceExpr -> IO ElabType
+expectCanonicalPipelineSuccessType expr =
   let normExpr = unsafeNormalizeExpr expr
-      unchecked = runPipelineElab Set.empty normExpr
-      checked = runPipelineElabChecked Set.empty normExpr
-      bothFailed errUnchecked errChecked =
-        expectationFailure
-          ( unlines
-              [ "Expected both authoritative pipeline entrypoints to succeed.",
-                "unchecked: " ++ renderPipelineError errUnchecked,
-                "checked: " ++ renderPipelineError errChecked
-              ]
-          )
-          *> pure TBottom
-      uncheckedFailed errUnchecked =
-        expectationFailure
-          ( unlines
-              [ "Unchecked pipeline failed while checked pipeline succeeded.",
-                "unchecked: " ++ renderPipelineError errUnchecked
-              ]
-          )
-          *> pure TBottom
-      checkedFailed errChecked =
-        expectationFailure
-          ( unlines
-              [ "Checked pipeline failed while unchecked pipeline succeeded.",
-                "checked: " ++ renderPipelineError errChecked
-              ]
-          )
-          *> pure TBottom
-   in case (unchecked, checked) of
-        (Left errUnchecked, Left errChecked) -> bothFailed errUnchecked errChecked
-        (Left errUnchecked, Right _) -> uncheckedFailed errUnchecked
-        (Right _, Left errChecked) -> checkedFailed errChecked
-        (Right (termUnchecked, tyUnchecked), Right (termChecked, tyChecked)) -> do
-          typeCheck termUnchecked `shouldBe` Right tyUnchecked
-          typeCheck termChecked `shouldBe` Right tyChecked
-          tyUnchecked `shouldBe` tyChecked
-          pure tyChecked
+   in case runPipelineElab Set.empty normExpr of
+        Left err ->
+          expectationFailure ("Expected canonical pipeline to succeed: " ++ renderPipelineError err)
+            *> pure TBottom
+        Right (term, ty) -> do
+          typeCheck term `shouldBe` Right ty
+          pure ty
 
-expectAlignedPipelinePastPhase3 :: SurfaceExpr -> Expectation
-expectAlignedPipelinePastPhase3 expr =
+expectCanonicalPipelinePastPhase3 :: SurfaceExpr -> Expectation
+expectCanonicalPipelinePastPhase3 expr =
   let normExpr = unsafeNormalizeExpr expr
-      unchecked = runPipelineElab Set.empty normExpr
-      checked = runPipelineElabChecked Set.empty normExpr
       assertNotPhase3 err =
         renderPipelineError err
           `shouldSatisfy` (not . isInfixOf "Phase 3 (acyclicity)")
-   in case (unchecked, checked) of
-        (Left errUnchecked, Left errChecked) -> do
-          assertNotPhase3 errUnchecked
-          assertNotPhase3 errChecked
-        (Left errUnchecked, Right _) ->
-          expectationFailure
-            ( unlines
-                [ "Unchecked pipeline failed while checked pipeline succeeded.",
-                  "unchecked: " ++ renderPipelineError errUnchecked
-                ]
-            )
-        (Right _, Left errChecked) ->
-          expectationFailure
-            ( unlines
-                [ "Checked pipeline failed while unchecked pipeline succeeded.",
-                  "checked: " ++ renderPipelineError errChecked
-                ]
-            )
-        (Right (termUnchecked, tyUnchecked), Right (termChecked, tyChecked)) -> do
-          typeCheck termUnchecked `shouldBe` Right tyUnchecked
-          typeCheck termChecked `shouldBe` Right tyChecked
-          tyUnchecked `shouldBe` tyChecked
+   in case runPipelineElab Set.empty normExpr of
+        Left err -> assertNotPhase3 err
+        Right (term, ty) ->
+          typeCheck term `shouldBe` Right ty
 
 automaticMuConstraint :: SurfaceExpr -> IO (Constraint 'Raw)
 automaticMuConstraint expr = do
@@ -355,7 +310,7 @@ resultTypeInputsForArtifacts
                 eaEdgeWitnesses = edgeWitnesses,
                 eaEdgeTraces = edgeTraces
               }
-            (PresolutionViewBoundary.fromSolved solvedClean)
+            (viewFromSolved solvedClean)
             bindParentsGa
             (defaultPlanBuilder defaultTraceConfig)
             c1
@@ -443,7 +398,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   [GenRef gid] -> genRef gid
                   roots -> error ("PipelineSpec: unexpected binding roots " ++ show roots)
           let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
-          case generalizeAt (PresolutionViewBoundary.fromSolved res) scopeRoot root' of
+          case generalizeAt (viewFromSolved res) scopeRoot root' of
             Right (Forall binds ty, _subst) -> do
               binds `shouldBe` []
               let tyStr = pretty ty
@@ -465,7 +420,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           case ann of
             ALet _ schemeGen schemeRoot _ _ _ _ _ -> do
               let generalizeAt = generalizeAtWithBuilder (defaultPlanBuilder defaultTraceConfig) Nothing
-              case generalizeAt (PresolutionViewBoundary.fromSolved res) (genRef schemeGen) schemeRoot of
+              case generalizeAt (viewFromSolved res) (genRef schemeGen) schemeRoot of
                 Right scheme -> show scheme `shouldSatisfy` ("Forall" `isInfixOf`)
                 Left err -> expectationFailure $ "Generalize error: " ++ show err
             _ -> expectationFailure "Expected ALet annotation"
@@ -482,7 +437,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           nodes = fromListNode [(var0, baseNode), (var1, listNode)]
           constraint = emptyConstraint {cNodes = nodes}
           res = SolvedTest.mkTestSolved constraint IntMap.empty
-      case reifyType (PresolutionViewBoundary.fromSolved res) var1 of
+      case reifyType (viewFromSolved res) var1 of
         Right ty ->
           case ty of
             TCon con args -> do
@@ -508,7 +463,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           nodes = fromListNode [(var0, intNode), (var1, maybeNode), (var2, listNode)]
           constraint = emptyConstraint {cNodes = nodes}
           res = SolvedTest.mkTestSolved constraint IntMap.empty
-      case reifyType (PresolutionViewBoundary.fromSolved res) var2 of
+      case reifyType (viewFromSolved res) var2 of
         Right ty ->
           case ty of
             TCon outerCon outerArgs -> do
@@ -545,7 +500,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           -- NO bind-parent entry for muVarId under muId
           constraint = emptyConstraint {cNodes = nodes}
           solved = SolvedTest.mkTestSolved constraint IntMap.empty
-      case reifyType (PresolutionViewBoundary.fromSolved solved) muId of
+      case reifyType (viewFromSolved solved) muId of
         Right ty -> do
           -- Should produce a TMu wrapping the body type
           case ty of
@@ -558,6 +513,24 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             "Non-local proxy TyMu reify should not error: " ++ show err
 
   describe "Integration Tests" $ do
+    it "snapshot-finalization guard: ChiQuery pass-through adapter is retired" $ do
+      chiQueryExists <- doesFileExist "src/MLF/Elab/Run/ChiQuery.hs"
+      cabalSrc <- readFile "mlf2.cabal"
+      chiQueryExists `shouldBe` False
+      cabalSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Run.ChiQuery")
+
+    it "legacy-surface guard: legacy elaboration conversion module is retired" $ do
+      legacyExists <- doesFileExist "src/MLF/Elab/Legacy.hs"
+      cabalSrc <- readFile "mlf2.cabal"
+      elaborateSrc <- readFile "src/MLF/Elab/Elaborate.hs"
+      annotationSrc <- readFile "src/MLF/Elab/Elaborate/Annotation.hs"
+      publicPipelineSrc <- readFile "src-public/MLF/Pipeline.hs"
+      legacyExists `shouldBe` False
+      cabalSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Legacy")
+      elaborateSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Legacy")
+      annotationSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Legacy")
+      publicPipelineSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Legacy")
+
     it "chi-first guard: Elaborate internals avoid local solved materialization" $ do
       src <- readFile "src/MLF/Elab/Elaborate.hs"
       src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
@@ -630,7 +603,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
 
     it "row2 absolute thesis-exact guard" $ do
       pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-      chiQuerySrc <- readFile "src/MLF/Elab/Run/ChiQuery.hs"
       viewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"
       annSrc <- readFile "src/MLF/Elab/Run/ResultType/Ann.hs"
       fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
@@ -686,10 +658,6 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       isInfixOf "rtvPresolutionViewOverlay ::" viewSrc `shouldBe` True
       isInfixOf "fromSolved solvedClean" pipelineSrc `shouldBe` False
       isInfixOf "fromSolved solvedForGen" pipelineSrc `shouldBe` False
-      isInfixOf "chiSolvedCompat" chiQuerySrc `shouldBe` False
-      isInfixOf "chiSolved ::" chiQuerySrc `shouldBe` False
-      isInfixOf "Solved.fromConstraintAndUf" chiQuerySrc `shouldBe` False
-      isInfixOf "Solved.rebuildWithConstraint" chiQuerySrc `shouldBe` False
 
     it "chi-p global cleanup guard: runtime elaboration helpers no longer import fromSolved" $ do
       scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
@@ -697,10 +665,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       generalizeSrc <- readFile "src/MLF/Elab/Run/Generalize.hs"
       resultTypeUtilSrc <- readFile "src/MLF/Elab/Run/ResultType/Util.hs"
       reifySrc <- readFile "src/MLF/Reify/Core.hs"
-      legacySrc <- readFile "src/MLF/Elab/Legacy.hs"
       forM_ [scopeSrc, typeOpsSrc, generalizeSrc, resultTypeUtilSrc, reifySrc] $ \src ->
         src `shouldSatisfy` (not . isInfixOf "fromSolved")
-      legacySrc `shouldSatisfy` isInfixOf "fromSolved"
 
     it "chi-p wrapper retirement guard: primary helper signatures are PresolutionView p-native" $ do
       scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
@@ -897,6 +863,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       prepareSrc `shouldSatisfy` isInfixOf "data PreparedGeneralizationArtifact"
       prepareSrc `shouldSatisfy` isInfixOf "prepareTraceCopyArtifacts"
       prepareSrc `shouldSatisfy` isInfixOf "pgaAcyclicBaseConstraint :: Constraint 'Presolved"
+      prepareSrc `shouldSatisfy` (not . isInfixOf "castConstraint")
       driverSrc `shouldSatisfy` isInfixOf "mkInitialPresolutionState ::"
       driverSrc `shouldSatisfy` isInfixOf "tyExpNodeIds ::"
 
@@ -1113,15 +1080,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       generalizeSrc <- readFile "src/MLF/Elab/Run/Generalize.hs"
       resultTypeUtilSrc <- readFile "src/MLF/Elab/Run/ResultType/Util.hs"
       reifySrc <- readFile "src/MLF/Reify/Core.hs"
-      legacySrc <- readFile "src/MLF/Elab/Legacy.hs"
       boundarySrc <- readFile "src/MLF/Constraint/Presolution/View.hs"
       scopeSrc `shouldSatisfy` (not . isInfixOf "fromSolved")
       typeOpsSrc `shouldSatisfy` (not . isInfixOf "fromSolved")
       generalizeSrc `shouldSatisfy` (not . isInfixOf "fromSolved")
       resultTypeUtilSrc `shouldSatisfy` (not . isInfixOf "fromSolved")
       reifySrc `shouldSatisfy` (not . isInfixOf "fromSolved")
-      legacySrc `shouldSatisfy` isInfixOf "fromSolved"
-      boundarySrc `shouldSatisfy` isInfixOf "fromSolved ::"
+      boundarySrc `shouldSatisfy` (not . isInfixOf "fromSolved ::")
 
     it "chi-first guard: duplicate ...View aliases are retired from runtime and reify modules" $ do
       scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
@@ -1156,37 +1121,41 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         resultTypeUtilSrc `shouldSatisfy` (not . isInfixOf marker)
         reifySrc `shouldSatisfy` (not . isInfixOf marker)
 
-    it "chi-first guard: internals use shared ChiQuery facade" $ do
+    it "snapshot-finalization guard: internals use PresolutionView read model directly" $ do
       elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
       rtViewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"
-      elabSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
-      rtViewSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
+      elabSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Run.ChiQuery")
+      rtViewSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Run.ChiQuery")
+      elabSrc `shouldSatisfy` isInfixOf "pvCanonical presolutionView"
+      rtViewSrc `shouldSatisfy` isInfixOf "pvCanonicalConstraint presolutionView"
 
-    it "chi-first guard: ChiQuery no longer defines chiCanonicalBindParents" $ do
-      chiSrc <- readFile "src/MLF/Elab/Run/ChiQuery.hs"
+    it "snapshot-finalization guard: ResultType fallback does not call the retired ChiQuery adapter" $ do
       fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
-      chiSrc `shouldSatisfy` (not . isInfixOf "chiCanonicalBindParents")
-      fallbackSrc `shouldSatisfy` (not . isInfixOf "ChiQuery.chiCanonicalBindParents")
+      fallbackSrc `shouldSatisfy` (not . isInfixOf "ChiQuery.")
 
-    it "chi-first guard: ChiQuery no longer exposes chiLookupBindParent or chiBindParents" $ do
-      chiSrc <- readFile "src/MLF/Elab/Run/ChiQuery.hs"
+    it "snapshot-finalization guard: production modules do not import the retired ChiQuery adapter" $ do
       forM_
-        [ "chiLookupBindParent,",
-          "chiLookupBindParent ::",
-          "chiBindParents",
-          "chiBindParents ::"
+        [ "src/MLF/Elab/Elaborate.hs",
+          "src/MLF/Elab/Elaborate/Scope.hs",
+          "src/MLF/Elab/Elaborate/Annotation.hs",
+          "src/MLF/Elab/Run/Scope.hs",
+          "src/MLF/Elab/Run/ResultType.hs",
+          "src/MLF/Elab/Run/ResultType/View.hs",
+          "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
         ]
-        $ \marker ->
-          chiSrc `shouldSatisfy` (not . isInfixOf marker)
+        $ \path -> do
+          src <- readFile path
+          src `shouldSatisfy` (not . isInfixOf "MLF.Elab.Run.ChiQuery")
+          src `shouldSatisfy` (not . isInfixOf "ChiQuery.")
 
-    it "single-solved refactor keeps checked pipeline authoritative on representative corpus" $ do
-      forM_ representativeMigrationCorpus assertCheckedAuthoritative
+    it "single-solved refactor keeps canonical pipeline authoritative on representative corpus" $ do
+      forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
 
     it "chi-first ResultType|checked-authoritative keeps representative corpus parity" $ do
-      forM_ representativeMigrationCorpus assertCheckedAuthoritative
+      forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
 
     it "checked-authoritative keeps representative corpus parity" $ do
-      forM_ representativeMigrationCorpus assertCheckedAuthoritative
+      forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
 
     it "Pipeline \\(Phases 1-5\\)|Dual-path verification|chi-first integration keeps boundary wiring explicit" $ do
       elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
@@ -1206,8 +1175,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
       rtViewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"
       rtSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
-      elabSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
-      rtViewSrc `shouldSatisfy` isInfixOf "MLF.Elab.Run.ChiQuery"
+      elabSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Run.ChiQuery")
+      rtViewSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Run.ChiQuery")
       rtViewSrc `shouldSatisfy` (not . isInfixOf "rtvSchemeBodyTarget")
       elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
       rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
@@ -1239,7 +1208,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
     it "canonical scope helper reuses the primary owner path" $ do
       scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
       scopeSrc `shouldSatisfy` (not . isInfixOf "bindingPathToRootFromBindParents")
-      scopeSrc `shouldSatisfy` isInfixOf "bindingScopeRef (ChiQuery.chiCanonicalConstraint presolutionView) root"
+      scopeSrc `shouldSatisfy` isInfixOf "bindingScopeRef (pvCanonicalConstraint presolutionView) root"
 
     it "result-type root peeling stays single-sourced" $ do
       rtSrc <- readFile "src/MLF/Elab/Run/ResultType.hs"
@@ -1289,22 +1258,20 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       schemeSection `shouldSatisfy` (not . isInfixOf "case ChiQuery.chiLookupNode presolutionView bndC of")
 
     it "Phase 6 — Elaborate|ResultType|Dual-path verification gate stays green" $ do
-      forM_ representativeMigrationCorpus assertCheckedAuthoritative
+      forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
 
     it "migration guardrail: thesis-core boundary matches legacy outcome" $ do
       forM_ representativeMigrationCorpus $ \expr -> do
         artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
         let pres = paPresolution artifacts
-            view = PresolutionViewBoundary.toRawPresolutionViewForLegacy (PresolutionViewBoundary.fromPresolutionResult pres)
+            view = PresolutionViewBoundary.fromPresolutionResult pres
             legacy = paSolved artifacts
-            thesisCoreValidated = Finalize.stepSolvedFromPresolutionView view
-        validateStrict thesisCoreValidated
         validateStrict legacy
         assertViewParity view legacy
 
     describe "Dual-path verification" $ do
       it "production entrypoint remains checked-authoritative on representative corpus" $ do
-        forM_ representativeMigrationCorpus assertCheckedAuthoritative
+        forM_ representativeMigrationCorpus assertCanonicalPipelineTypeChecks
 
       it "runtime callgraph forbids legacy snapshot APIs in production run-path modules" $ do
         runModules <- loadRunPathModules
@@ -1343,7 +1310,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       forM_ corpus $ \expr -> do
         artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)
         let solved = paSolved artifacts
-            view = PresolutionViewBoundary.fromSolved solved
+            view = viewFromSolved solved
             nodeIds = map fst (toListNode (cNodes (Solved.originalConstraint solved)))
             probeIds = nodeIds ++ [NodeId 999]
             probeRefs = map typeRef probeIds
@@ -1384,7 +1351,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         runPipelineElab Set.empty (unsafeNormalizeExpr expr)
           `shouldSatisfy` isRight
 
-    it "annotation-heavy path still reports checked-authoritative type" $ do
+    it "annotation-heavy path still reports canonical checked type" $ do
       let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
           expr = ELamAnn "x" recursiveAnn (EVar "x")
           expectedTy =
@@ -1393,48 +1360,31 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               (TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int"))))
       case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
         Left err -> expectationFailure (renderPipelineError err)
-        Right (termUnchecked, tyUnchecked) -> do
-          typeCheck termUnchecked `shouldBe` Right tyUnchecked
-          case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-            Left err -> expectationFailure (renderPipelineError err)
-            Right (termChecked, tyChecked) -> do
-              typeCheck termChecked `shouldBe` Right tyChecked
-              tyUnchecked `shouldBe` tyChecked
-              tyChecked `shouldSatisfy` matchesRecursiveArrow expectedTy
+        Right (term, ty) -> do
+          typeCheck term `shouldBe` Right ty
+          ty `shouldSatisfy` matchesRecursiveArrow expectedTy
 
     it "keeps recursive lets out of the Phase 3 cycle-error path" $ do
       let expr = ELet "f" (ELam "x" (EApp (EVar "f") (EVar "x"))) (EVar "f")
-          pipelineRuns =
-            [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-              ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-            ]
-      forM_ pipelineRuns $ \(_label, result) ->
-        case result of
-          Left err ->
-            renderPipelineError err
-              `shouldSatisfy` (not . isInfixOf "Phase 3 (acyclicity)")
-          Right _ -> pure ()
+      case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
+        Left err ->
+          renderPipelineError err
+            `shouldSatisfy` (not . isInfixOf "Phase 3 (acyclicity)")
+        Right _ -> pure ()
 
     it "keeps the non-recursive identity control stable" $ do
       let expr = ELam "x" (EVar "x")
       case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-        Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
-        Right (_termUnchecked, tyUnchecked) -> do
-          containsMu tyUnchecked `shouldBe` False
-          tyUnchecked `shouldSatisfy` containsArrowTy
-          tyUnchecked `shouldSatisfy` containsForallTy
-          case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-            Left errChecked -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError errChecked)
-            Right (_termChecked, tyChecked) -> do
-              tyUnchecked `shouldBe` tyChecked
-              containsMu tyChecked `shouldBe` False
-              tyChecked `shouldSatisfy` containsArrowTy
-              tyChecked `shouldSatisfy` containsForallTy
+        Left err -> expectationFailure ("Canonical pipeline failed:\n" ++ renderPipelineError err)
+        Right (_term, ty) -> do
+          containsMu ty `shouldBe` False
+          ty `shouldSatisfy` containsArrowTy
+          ty `shouldSatisfy` containsForallTy
 
     describe "Automatic μ-introduction (item-2)" $ do
-      it "self-recursive function infers μ on both authoritative entrypoints" $ do
+      it "self-recursive function infers μ on the canonical pipeline entrypoint" $ do
         let expr = ELet "f" (ELam "x" (EApp (EVar "f") (EVar "x"))) (EVar "f")
-        expectAlignedPipelinePastPhase3 expr
+        expectCanonicalPipelinePastPhase3 expr
         cBroken <- automaticMuConstraint expr
         cBroken `shouldSatisfy` constraintContainsTyMu
 
@@ -1444,7 +1394,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 "f"
                 (ELet "g" (ELam "x" (EApp (EVar "f") (EVar "x"))) (EVar "g"))
                 (EVar "f")
-        expectAlignedPipelinePastPhase3 expr
+        expectCanonicalPipelinePastPhase3 expr
         cBroken <- automaticMuConstraint expr
         cBroken `shouldNotSatisfy` constraintContainsTyMu
 
@@ -1454,13 +1404,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 "lst"
                 (ELam "x" (ELam "xs" (EApp (EApp (EVar "lst") (EVar "x")) (EVar "xs"))))
                 (EVar "lst")
-        expectAlignedPipelinePastPhase3 expr
+        expectCanonicalPipelinePastPhase3 expr
         cBroken <- automaticMuConstraint expr
         cBroken `shouldNotSatisfy` constraintContainsTyMu
 
-      it "non-recursive control expression stays μ-free on both authoritative entrypoints" $ do
+      it "non-recursive control expression stays μ-free on the canonical pipeline entrypoint" $ do
         let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` False
         ty `shouldSatisfy` containsArrowTy
         ty `shouldSatisfy` containsForallTy
@@ -1472,39 +1422,32 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         let expr = ELet "f" (ELam "x" (EApp (EVar "f") (EVar "x"))) (EVar "f")
         case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
           Left err -> expectationFailure (renderPipelineError err)
-          Right (termUnchecked, tyUnchecked) -> do
-            unless (containsMu tyUnchecked) $
+          Right (term, ty) -> do
+            unless (containsMu ty) $
               expectationFailure
                 ( "expected TMu in type, got: "
-                    ++ show tyUnchecked
+                    ++ show ty
                     ++ " term: "
-                    ++ show termUnchecked
+                    ++ show term
                 )
-            unless (containsRollTerm termUnchecked) $
-              expectationFailure ("expected ERoll in term: " ++ show termUnchecked)
-            unless (containsUnrollTerm termUnchecked) $
-              expectationFailure ("expected EUnroll in term: " ++ show termUnchecked)
-            typeCheck termUnchecked `shouldBe` Right tyUnchecked
-            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-              Left err -> expectationFailure (renderPipelineError err)
-              Right (termChecked, tyChecked) -> do
-                tyChecked `shouldBe` tyUnchecked
-                typeCheck termChecked `shouldBe` Right tyChecked
+            unless (containsRollTerm term) $
+              expectationFailure ("expected ERoll in term: " ++ show term)
+            unless (containsUnrollTerm term) $
+              expectationFailure ("expected EUnroll in term: " ++ show term)
+            typeCheck term `shouldBe` Right ty
 
     describe "Automatic μ-introduction (item-4 edge cases)" $ do
-      it "preserves returned nested recursive helper fixed points on both authoritative entrypoints" $ do
+      it "preserves returned nested recursive helper fixed points on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "f"
                 (ELam "x" (ELet "g" (ELam "y" (EApp (EVar "f") (EApp (EVar "g") (EVar "y")))) (EVar "g")))
                 (EVar "f")
-        expectAlignedPipelinePastPhase3 expr
+        expectCanonicalPipelinePastPhase3 expr
         cBroken <- automaticMuConstraint expr
         constraintContainsTyMu cBroken `shouldBe` True
         let pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1538,21 +1481,15 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 "f"
                 (EAnn (ELam "x" (EApp (EVar "f") (EVar "x"))) ann)
                 (EVar "f")
-        expectAlignedPipelinePastPhase3 expr
+        expectCanonicalPipelinePastPhase3 expr
         cBroken <- automaticMuConstraint expr
         constraintContainsTyMu cBroken `shouldBe` False
         case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
           Left err -> do
             let rendered = renderPipelineError err
             rendered `shouldSatisfy` (not . isInfixOf "Phase 3 (acyclicity)")
-          Right (termUnchecked, tyUnchecked) -> do
-            typeCheck termUnchecked `shouldBe` Right tyUnchecked
-            case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-              Left errChecked -> do
-                let rendered = renderPipelineError errChecked
-                rendered `shouldSatisfy` (not . isInfixOf "Phase 3 (acyclicity)")
-              Right (termChecked, tyChecked) -> do
-                typeCheck termChecked `shouldBe` Right tyChecked
+          Right (term, ty) ->
+            typeCheck term `shouldBe` Right ty
 
       it "preserves visible μ across μ/∀ interaction when a contractive recursive witness already exists" $ do
         let expr =
@@ -1560,13 +1497,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 "id"
                 (ELam "x" (EVar "x"))
                 (ELet "f" (ELam "x" (EApp (EVar "f") (EApp (EVar "id") (EVar "x")))) (EVar "f"))
-        expectAlignedPipelinePastPhase3 expr
+        expectCanonicalPipelinePastPhase3 expr
         cBroken <- automaticMuConstraint expr
         constraintContainsTyMu cBroken `shouldBe` True
         let pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1585,9 +1520,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELam "x" (EVar "x"))
                 (ELet "f" (EApp (EVar "id") (EVar "f")) (EVar "f"))
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left _ -> pure ()
@@ -1605,9 +1538,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELam "x" (EVar "x"))
                 (ELet "g" (EApp (EVar "id") (ELamAnn "x" badRecursiveAnn (EVar "x"))) (EVar "g"))
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left _ -> pure ()
@@ -1615,16 +1546,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               expectationFailure
                 (label ++ " unexpectedly accepted non-contractive mediated μ annotation with type " ++ show ty)
 
-      it "URI-R2-C1 unannotated carrier: direct recursiveArrowInt admits a visible recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 unannotated carrier: direct recursiveArrowInt admits a visible recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "f"
                 (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
                 (EVar "f")
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1645,16 +1574,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 unannotated carrier: direct recursiveArrowBool admits a visible recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 unannotated carrier: direct recursiveArrowBool admits a visible recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "f"
                 (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True))))
                 (EVar "f")
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1682,9 +1609,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELam "x" (EVar "x"))
                 (ELet "f" (EApp (EVar "id") (EVar "f")) (EVar "f"))
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(_label, result) ->
           case result of
             Left _ -> pure ()
@@ -1692,7 +1617,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               containsMu ty `shouldBe` False
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 non-local identity consumer: direct id application preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 non-local identity consumer: direct id application preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -1703,9 +1628,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EApp (EVar "id") (EVar "f"))
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1726,7 +1649,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 non-local identity consumer: direct id application preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 non-local identity consumer: direct id application preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -1737,9 +1660,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EApp (EVar "id") (EVar "f"))
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1760,7 +1681,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 owner-local identity consumer: let-aliased recursive Int carrier survives id application on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-local identity consumer: let-aliased recursive Int carrier survives id application on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -1771,9 +1692,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELet "hold" (EVar "f") (EApp (EVar "id") (EVar "hold")))
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1794,7 +1713,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 owner-local identity consumer: let-aliased recursive Bool carrier survives id application on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-local identity consumer: let-aliased recursive Bool carrier survives id application on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -1805,9 +1724,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELet "hold" (EVar "f") (EApp (EVar "id") (EVar "hold")))
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1828,7 +1745,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 identity consumer wrapper: named wrap preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 identity consumer wrapper: named wrap preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -1843,9 +1760,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1866,7 +1781,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 identity consumer wrapper: named wrap preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 identity consumer wrapper: named wrap preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -1881,9 +1796,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1904,7 +1817,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 nested identity consumer wrapper: repeated id application preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 nested identity consumer wrapper: repeated id application preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -1919,9 +1832,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1942,7 +1853,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 nested identity consumer wrapper: repeated id application preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 nested identity consumer wrapper: repeated id application preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -1957,9 +1868,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -1980,7 +1889,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 staged identity consumer wrapper: let-bound id result preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 staged identity consumer wrapper: let-bound id result preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -1995,9 +1904,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2018,7 +1925,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 staged identity consumer wrapper: let-bound id result preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 staged identity consumer wrapper: let-bound id result preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -2033,9 +1940,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2056,7 +1961,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 local helper identity consumer wrapper: let-bound helper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 local helper identity consumer wrapper: let-bound helper preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -2071,9 +1976,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2094,7 +1997,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 local helper identity consumer wrapper: let-bound helper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 local helper identity consumer wrapper: let-bound helper preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -2109,9 +2012,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2132,16 +2033,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 reconstruction: same-lane alias wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 reconstruction: same-lane alias wrapper preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "f"
                 (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LInt 0))))
                 (ELet "hold" (EVar "f") (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "hold")) (EVar "u")))
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2162,16 +2061,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 reconstruction: same-lane alias wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 reconstruction: same-lane alias wrapper preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "f"
                 (ELam "x" (ELet "_" (EApp (EVar "f") (EVar "x")) (ELit (LBool True))))
                 (ELet "hold" (EVar "f") (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "hold")) (EVar "u")))
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2192,7 +2089,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 nested-forall carrier: same-wrapper identity preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 nested-forall carrier: same-wrapper identity preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -2203,9 +2100,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EApp (ELam "y" (EVar "y")) (EVar "f"))
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2226,7 +2121,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 nested-forall carrier: same-wrapper identity preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 nested-forall carrier: same-wrapper identity preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -2237,9 +2132,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EApp (ELam "y" (EVar "y")) (EVar "f"))
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2260,7 +2153,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 eta-mediated carrier: transparent eta wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 eta-mediated carrier: transparent eta wrapper preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "wrap"
@@ -2271,9 +2164,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EVar "f")
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2294,7 +2185,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 eta-mediated carrier: transparent eta wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 eta-mediated carrier: transparent eta wrapper preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "wrap"
@@ -2305,9 +2196,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EVar "f")
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2328,7 +2217,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 eta-mediated carrier: let-aliased transparent eta wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 eta-mediated carrier: let-aliased transparent eta wrapper preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "wrap"
@@ -2339,9 +2228,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EVar "f")
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2362,7 +2249,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 eta-mediated carrier: let-aliased transparent eta wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 eta-mediated carrier: let-aliased transparent eta wrapper preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "wrap"
@@ -2373,9 +2260,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EVar "f")
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2480,9 +2365,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               )
           expectUriR2C1OwnerSensitiveNonLocalTransparentMediation label expectedCarrier expr = do
             let pipelineRuns =
-                  [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                    ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-                  ]
+                  [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
             forM_ pipelineRuns $ \(entryLabel, result) ->
               case result of
                 Left err ->
@@ -2507,31 +2390,31 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                       )
                   typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: direct transparent wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: direct transparent wrapper preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveIntCarrier
           (ownerSensitiveNonLocalTransparentExpr transparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentIntRhs)
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: direct transparent wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: direct transparent wrapper preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveBoolCarrier
           (ownerSensitiveNonLocalTransparentExpr transparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs)
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: let-aliased transparent wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: let-aliased transparent wrapper preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveIntCarrier
           (ownerSensitiveNonLocalTransparentExpr aliasedTransparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentIntRhs)
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: let-aliased transparent wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: let-aliased transparent wrapper preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveBoolCarrier
           (ownerSensitiveNonLocalTransparentExpr aliasedTransparentMediatorWrap uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs)
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked transparent wrappers preserve the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked transparent wrappers preserve the recursive Int carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveIntCarrier
@@ -2541,7 +2424,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
           )
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked transparent wrappers preserve the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked transparent wrappers preserve the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveBoolCarrier
@@ -2551,7 +2434,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
           )
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked let-aliased transparent wrappers preserve the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked let-aliased transparent wrappers preserve the recursive Int carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveIntCarrier
@@ -2561,7 +2444,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
           )
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked let-aliased transparent wrappers preserve the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: stacked let-aliased transparent wrappers preserve the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveBoolCarrier
@@ -2635,7 +2518,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
           )
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed direct and let-aliased stacked wrappers preserve the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed direct and let-aliased stacked wrappers preserve the recursive Int carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveIntCarrier
@@ -2645,7 +2528,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
           )
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed direct and let-aliased stacked wrappers preserve the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed direct and let-aliased stacked wrappers preserve the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveBoolCarrier
@@ -2655,7 +2538,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
           )
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed let-aliased and direct stacked wrappers preserve the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed let-aliased and direct stacked wrappers preserve the recursive Int carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveIntCarrier
@@ -2665,7 +2548,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
           )
 
-      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed let-aliased and direct stacked wrappers preserve the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 owner-sensitive non-local transparent mediation: mixed let-aliased and direct stacked wrappers preserve the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1OwnerSensitiveNonLocalTransparentMediation
           "URI-R2-C1 owner-sensitive non-local transparent mediation"
           expectedUriR2C1RecursiveBoolCarrier
@@ -2765,9 +2648,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               )
           expectUriR2C1CombinedWrapper label expectedCarrier expr = do
             let pipelineRuns =
-                  [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                    ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-                  ]
+                  [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
             forM_ pipelineRuns $ \(entryLabel, result) ->
               case result of
                 Left err ->
@@ -2792,7 +2673,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                       )
                   typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus transparent eta wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus transparent eta wrapper preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -2807,9 +2688,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2830,7 +2709,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus transparent eta wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus transparent eta wrapper preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -2845,9 +2724,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2868,7 +2745,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus let-aliased transparent eta wrapper preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus let-aliased transparent eta wrapper preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -2883,9 +2760,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2906,7 +2781,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus let-aliased transparent eta wrapper preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus let-aliased transparent eta wrapper preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "id"
@@ -2921,9 +2796,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -2972,9 +2845,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3023,9 +2894,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3074,9 +2943,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3125,9 +2992,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3180,9 +3045,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3235,9 +3098,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3294,9 +3155,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3353,9 +3212,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3376,7 +3233,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus stacked transparent eta mediators preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked transparent eta mediators preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1CombinedWrapper
           "URI-R2-C1 combined wrapper"
           expectedUriR2C1RecursiveIntCarrier
@@ -3386,7 +3243,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
           )
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus stacked transparent eta mediators preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked transparent eta mediators preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1CombinedWrapper
           "URI-R2-C1 combined wrapper"
           expectedUriR2C1RecursiveBoolCarrier
@@ -3396,7 +3253,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
           )
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus stacked let-aliased transparent eta mediators preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked let-aliased transparent eta mediators preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1CombinedWrapper
           "URI-R2-C1 combined wrapper"
           expectedUriR2C1RecursiveIntCarrier
@@ -3406,7 +3263,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
           )
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus stacked let-aliased transparent eta mediators preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus stacked let-aliased transparent eta mediators preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1CombinedWrapper
           "URI-R2-C1 combined wrapper"
           expectedUriR2C1RecursiveBoolCarrier
@@ -3416,7 +3273,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
           )
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus mixed direct and let-aliased stacked transparent eta mediators preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed direct and let-aliased stacked transparent eta mediators preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1CombinedWrapper
           "URI-R2-C1 combined wrapper"
           expectedUriR2C1RecursiveIntCarrier
@@ -3426,7 +3283,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
           )
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus mixed direct and let-aliased stacked transparent eta mediators preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed direct and let-aliased stacked transparent eta mediators preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1CombinedWrapper
           "URI-R2-C1 combined wrapper"
           expectedUriR2C1RecursiveBoolCarrier
@@ -3436,7 +3293,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
           )
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus mixed let-aliased and direct stacked transparent eta mediators preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed let-aliased and direct stacked transparent eta mediators preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1CombinedWrapper
           "URI-R2-C1 combined wrapper"
           expectedUriR2C1RecursiveIntCarrier
@@ -3446,7 +3303,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentIntRhs
           )
 
-      it "URI-R2-C1 combined wrapper: identity consumer plus mixed let-aliased and direct stacked transparent eta mediators preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 combined wrapper: identity consumer plus mixed let-aliased and direct stacked transparent eta mediators preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         expectUriR2C1CombinedWrapper
           "URI-R2-C1 combined wrapper"
           expectedUriR2C1RecursiveBoolCarrier
@@ -3496,7 +3353,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               uriR2C1OwnerSensitiveNonLocalTransparentBoolRhs
           )
 
-      it "URI-R2-C1 reconstruction: deeper same-lane alias chain preserves the recursive Int carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 reconstruction: deeper same-lane alias chain preserves the recursive Int carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "f"
@@ -3515,9 +3372,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3538,7 +3393,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 reconstruction: deeper same-lane alias chain preserves the recursive Bool carrier on both authoritative entrypoints" $ do
+      it "URI-R2-C1 reconstruction: deeper same-lane alias chain preserves the recursive Bool carrier on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "f"
@@ -3557,9 +3412,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3580,7 +3433,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 nested recursive helper: preserves recursive Int codomain on both authoritative entrypoints" $ do
+      it "URI-R2-C1 nested recursive helper: preserves recursive Int codomain on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "f"
@@ -3594,9 +3447,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 )
                 (EVar "f")
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3617,7 +3468,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 nested recursive helper: preserves recursive Bool codomain on both authoritative entrypoints" $ do
+      it "URI-R2-C1 nested recursive helper: preserves recursive Bool codomain on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "f"
@@ -3631,9 +3482,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 )
                 (EVar "f")
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3654,7 +3503,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 ambiguity reject: direct self-app and returned-helper clusters stay fail-closed on both authoritative entrypoints" $ do
+      it "URI-R2-C1 ambiguity reject: direct self-app and returned-helper clusters stay fail-closed on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "f"
@@ -3672,9 +3521,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 )
                 (EVar "f")
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(_label, result) ->
           case result of
             Left _ -> pure ()
@@ -3682,16 +3529,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               containsMu ty `shouldBe` False
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 higher-order recursion: preserves visible recursive structure on both authoritative entrypoints" $ do
+      it "URI-R2-C1 higher-order recursion: preserves visible recursive structure on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "f"
                 (ELam "x" (ELam "y" (EApp (EApp (EVar "f") (EVar "x")) (EVar "y"))))
                 (EVar "f")
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3706,16 +3551,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   (label ++ " URI-R2-C1 higher-order recursion: expected TMu in type, got " ++ show ty)
               typeCheck term `shouldBe` Right ty
 
-      it "URI-R2-C1 recursive data-like constructor shape: preserves visible recursive structure on both authoritative entrypoints" $ do
+      it "URI-R2-C1 recursive data-like constructor shape: preserves visible recursive structure on the canonical pipeline entrypoint" $ do
         let expr =
               ELet
                 "lst"
                 (ELam "x" (ELam "xs" (EApp (EApp (EVar "lst") (EVar "x")) (EVar "xs"))))
                 (EVar "lst")
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -3739,13 +3582,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 "f"
                 (ELam "x" (ELam "y" (EApp (EApp (EVar "f") (EVar "x")) (EVar "y"))))
                 (EVar "f")
-        expectAlignedPipelinePastPhase3 expr
+        expectCanonicalPipelinePastPhase3 expr
         cBroken <- automaticMuConstraint expr
         constraintContainsTyMu cBroken `shouldBe` False
         let pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(_label, result) ->
           case result of
             Left err -> do
@@ -3759,11 +3600,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       it "keeps already-annotated μ behavior stable" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr = ELet "k" (ELamAnn "x" recursiveAnn (EVar "x")) (EVar "k")
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
         case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
           Left err -> expectationFailure (renderPipelineError err)
-          Right (term, tyUnchecked) -> typeCheck term `shouldBe` Right tyUnchecked
+          Right (term, canonicalTy) -> typeCheck term `shouldBe` Right canonicalTy
 
     describe "Phase 7 reduction of auto-inferred recursive terms (item-1)" $ do
       it "isValue recognizes ERoll wrapping a value as a value" $ do
@@ -3858,9 +3699,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               case typeCheck nf of
                 Right nfTy -> nfTy `shouldBe` ty
                 Left _ -> pure () -- some normal forms lose let-scheme context
-      it "runPipelineElabChecked succeeds for self-recursive definition" $ do
+      it "runPipelineElab succeeds for self-recursive definition" $ do
         let expr = ELet "f" (ELam "x" (EApp (EVar "f") (EVar "x"))) (EVar "f")
-        case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+        case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
           Left err -> expectationFailure (renderPipelineError err)
           Right (term, ty) -> do
             containsMu ty `shouldBe` True
@@ -4242,9 +4083,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               TArrow (TMu _ _) (TMu _ _) -> True
               _ -> False
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
@@ -4263,9 +4102,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int"))))
                 (TMu "a" (TArrow (TVar "a") (TBase (BaseTy "Int"))))
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
@@ -4548,7 +4385,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   ++ show other
               )
 
-      it "sameLaneClearBoundaryExpr clears Phase 6 elaboration on both authoritative entrypoints" $ do
+      it "sameLaneClearBoundaryExpr clears Phase 6 elaboration on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             sameLaneClearBoundaryExpr =
               ELet
@@ -4556,9 +4393,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELamAnn "x" recursiveAnn (EVar "x"))
                 (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))]
         let collapsedTy = TForall "a" Nothing (TVar "a")
         forM_ pipelineRuns $ \(label, result) ->
           case result of
@@ -4566,7 +4401,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Right (_term, ty) ->
               ty `shouldSatisfy` (/= collapsedTy)
 
-      it "sameLaneClearBoundaryExpr authoritative public output stays recursive on both entrypoints without collapsing to forall identity" $ do
+      it "sameLaneClearBoundaryExpr authoritative public output stays recursive on the canonical pipeline entrypoint without collapsing to forall identity" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             sameLaneClearBoundaryExpr =
               ELet
@@ -4575,7 +4410,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "k")) (EVar "u"))
             collapsedTy = TForall "a" Nothing (TVar "a")
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
         when (uncheckedTy == collapsedTy) $
           expectationFailure
             ( "unchecked term collapsed: "
@@ -4593,7 +4428,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         containsMu uncheckedTy `shouldBe` True
         containsMu checkedTy `shouldBe` True
 
-      it "sameLaneAliasFrameClearBoundaryExpr preserves predecessor alias-frame truth on both authoritative entrypoints" $ do
+      it "sameLaneAliasFrameClearBoundaryExpr preserves predecessor alias-frame truth on the canonical pipeline entrypoint" $ do
         termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
         termClosureSrc `shouldSatisfy` isInfixOf "isClearBoundaryRetainedChildRhs :: String -> ElabTerm -> Bool"
         termClosureSrc `shouldSatisfy` isInfixOf "isClearBoundaryRetainedChildRhs source childRhs"
@@ -4609,7 +4444,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "hold")) (EVar "u"))
                 )
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
         typeCheck checkedTerm `shouldBe` Right checkedTy
         uncheckedTy `shouldBe` checkedTy
@@ -4619,7 +4454,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneDoubleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet on both authoritative entrypoints" $ do
+      it "sameLaneDoubleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet on the canonical pipeline entrypoint" $ do
         termClosureSrc <- readFile "src/MLF/Elab/TermClosure.hs"
         termClosureSrc `shouldSatisfy` isInfixOf "remainingAliasFrames > 0"
         termClosureSrc `shouldSatisfy` isInfixOf "&& isAliasFrameRhs childRhs"
@@ -4643,7 +4478,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
         typeCheck checkedTerm `shouldBe` Right checkedTy
         uncheckedTy `shouldBe` checkedTy
@@ -4653,7 +4488,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneTripleAliasFrameClearBoundaryExpr is the next milestone-3 representative broader-positive clear-boundary packet after the merged double-alias anchor on both authoritative entrypoints" $ do
+      it "sameLaneTripleAliasFrameClearBoundaryExpr is the next milestone-3 representative broader-positive clear-boundary packet after the merged double-alias anchor on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -4673,7 +4508,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
         typeCheck checkedTerm `shouldBe` Right checkedTy
         uncheckedTy `shouldBe` checkedTy
@@ -4683,7 +4518,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneQuadrupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged triple-alias anchor on both authoritative entrypoints" $ do
+      it "sameLaneQuadrupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged triple-alias anchor on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -4707,7 +4542,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
         typeCheck checkedTerm `shouldBe` Right checkedTy
         uncheckedTy `shouldBe` checkedTy
@@ -4717,7 +4552,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneQuintupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quadruple-alias anchor on both authoritative entrypoints" $ do
+      it "sameLaneQuintupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quadruple-alias anchor on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -4745,7 +4580,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
         typeCheck checkedTerm `shouldBe` Right checkedTy
         uncheckedTy `shouldBe` checkedTy
@@ -4755,7 +4590,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneSextupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quintuple-alias anchor on both authoritative entrypoints" $ do
+      it "sameLaneSextupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quintuple-alias anchor on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -4787,7 +4622,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
         typeCheck checkedTerm `shouldBe` Right checkedTy
         uncheckedTy `shouldBe` checkedTy
@@ -4797,7 +4632,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneSeptupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged sextuple-alias anchor on both authoritative entrypoints" $ do
+      it "sameLaneSeptupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged sextuple-alias anchor on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -4833,7 +4668,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
         typeCheck checkedTerm `shouldBe` Right checkedTy
         uncheckedTy `shouldBe` checkedTy
@@ -4843,7 +4678,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneOctupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged septuple-alias anchor on both authoritative entrypoints" $ do
+      it "sameLaneOctupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged septuple-alias anchor on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -4883,7 +4718,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
         typeCheck checkedTerm `shouldBe` Right checkedTy
         uncheckedTy `shouldBe` checkedTy
@@ -4893,7 +4728,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneNonupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged octuple-alias anchor on both authoritative entrypoints" $ do
+      it "sameLaneNonupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged octuple-alias anchor on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -4937,7 +4772,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
         typeCheck checkedTerm `shouldBe` Right checkedTy
         uncheckedTy `shouldBe` checkedTy
@@ -4947,7 +4782,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           expectedSameLaneAliasFrameClearBoundaryArrow
           `shouldBe` True
 
-      it "sameLaneDecupleAliasFrameClearBoundaryExpr is the next broader-positive owner-sensitive clear-boundary packet on both authoritative entrypoints" $ do
+      it "sameLaneDecupleAliasFrameClearBoundaryExpr is the next broader-positive owner-sensitive clear-boundary packet on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -4995,7 +4830,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     )
                 )
         (uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         typeCheck uncheckedTerm `shouldBe` Right uncheckedTy
         typeCheck checkedTerm `shouldBe` Right checkedTy
         uncheckedTy `shouldBe` checkedTy
@@ -5246,7 +5081,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         fallbackTy <- requireRight (computeResultTypeFallback inputs bodyCanon bodyPre)
         containsMu fallbackTy `shouldBe` True
 
-      it "same-wrapper nested-forall packet preserves recursive output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall packet preserves recursive output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -5257,10 +5092,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                     (EApp (EVar "id") (ELamAnn "x" recursiveAnn (EVar "x")))
                     (EApp (ELam "y" (EVar "y")) (EVar "k"))
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
-      it "same-wrapper nested-forall plus owner-local alias frame preserves recursive output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus owner-local alias frame preserves recursive output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -5275,10 +5110,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         (ELet "u" (EApp (ELam "y" (EVar "y")) (EVar "hold")) (EVar "u"))
                     )
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
-      it "same-wrapper nested-forall plus decuple owner-local alias frames preserves recursive output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus decuple owner-local alias frames preserves recursive output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             aliasChain aliases source =
               case aliases of
@@ -5298,10 +5133,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         "k"
                     )
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
-      it "same-wrapper nested-forall plus transparent eta mediator preserves recursive Int output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus transparent eta mediator preserves recursive Int output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet
@@ -5320,10 +5155,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         )
                     )
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
-      it "same-wrapper nested-forall plus transparent eta mediator preserves recursive Bool output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus transparent eta mediator preserves recursive Bool output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
             expr =
               ELet
@@ -5342,7 +5177,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         )
                     )
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "same-wrapper nested-forall plus transparent eta mediator stays recursive through a decuple owner-local alias chain" $ do
@@ -5373,7 +5208,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         )
                     )
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "same-wrapper nested-forall plus let-aliased transparent eta mediator stays recursive through a decuple owner-local alias chain" $ do
@@ -5404,7 +5239,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         )
                     )
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "same-wrapper nested-forall plus transparent eta mediator stays recursively Bool-typed through a decuple owner-local alias chain" $ do
@@ -5435,7 +5270,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         )
                     )
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       let sameWrapperNestedForallStackedTransparentExpr wrap1 wrap2 recursiveAnn =
@@ -5490,44 +5325,44 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                   )
               )
 
-      it "same-wrapper nested-forall plus stacked transparent eta mediators preserves recursive Int output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus stacked transparent eta mediators preserves recursive Int output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               sameWrapperNestedForallStackedTransparentExpr
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
-      it "same-wrapper nested-forall plus stacked transparent eta mediators preserves recursive Bool output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus stacked transparent eta mediators preserves recursive Bool output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
             expr =
               sameWrapperNestedForallStackedTransparentExpr
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
-      it "same-wrapper nested-forall plus stacked let-aliased transparent eta mediators preserves recursive Int output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus stacked let-aliased transparent eta mediators preserves recursive Int output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             aliasedWrap =
               ELam
                 "h"
                 (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
             expr = sameWrapperNestedForallStackedTransparentExpr aliasedWrap aliasedWrap recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
-      it "same-wrapper nested-forall plus stacked let-aliased transparent eta mediators preserves recursive Bool output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus stacked let-aliased transparent eta mediators preserves recursive Bool output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
             aliasedWrap =
               ELam
                 "h"
                 (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
             expr = sameWrapperNestedForallStackedTransparentExpr aliasedWrap aliasedWrap recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "same-wrapper nested-forall plus stacked let-aliased transparent eta mediators stays recursive through a decuple owner-local alias chain" $ do
@@ -5537,7 +5372,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 "h"
                 (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
             expr = sameWrapperNestedForallStackedTransparentAliasChainExpr aliasedWrap aliasedWrap recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "same-wrapper nested-forall plus stacked let-aliased transparent eta mediators stays recursively Bool-typed through a decuple owner-local alias chain" $ do
@@ -5547,10 +5382,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 "h"
                 (ELet "mid" (EVar "h") (ELam "z" (EApp (EVar "mid") (EVar "z"))))
             expr = sameWrapperNestedForallStackedTransparentAliasChainExpr aliasedWrap aliasedWrap recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
-      it "same-wrapper nested-forall plus mixed direct and let-aliased stacked transparent eta mediators preserves recursive Int output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus mixed direct and let-aliased stacked transparent eta mediators preserves recursive Int output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             aliasedWrap =
               ELam
@@ -5561,10 +5396,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 aliasedWrap
                 recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
-      it "same-wrapper nested-forall plus mixed direct and let-aliased stacked transparent eta mediators preserves recursive Bool output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus mixed direct and let-aliased stacked transparent eta mediators preserves recursive Bool output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
             aliasedWrap =
               ELam
@@ -5575,10 +5410,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 aliasedWrap
                 recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
-      it "same-wrapper nested-forall plus mixed let-aliased and direct stacked transparent eta mediators preserves recursive Int output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus mixed let-aliased and direct stacked transparent eta mediators preserves recursive Int output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             aliasedWrap =
               ELam
@@ -5589,10 +5424,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 aliasedWrap
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
-      it "same-wrapper nested-forall plus mixed let-aliased and direct stacked transparent eta mediators preserves recursive Bool output on both authoritative entrypoints" $ do
+      it "same-wrapper nested-forall plus mixed let-aliased and direct stacked transparent eta mediators preserves recursive Bool output on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Bool"))
             aliasedWrap =
               ELam
@@ -5603,7 +5438,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 aliasedWrap
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "same-wrapper nested-forall plus mixed direct and let-aliased stacked transparent eta mediators stays recursive through a decuple owner-local alias chain" $ do
@@ -5617,7 +5452,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 aliasedWrap
                 recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "same-wrapper nested-forall plus mixed direct and let-aliased stacked transparent eta mediators stays recursively Bool-typed through a decuple owner-local alias chain" $ do
@@ -5631,7 +5466,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 aliasedWrap
                 recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "same-wrapper nested-forall plus mixed let-aliased and direct stacked transparent eta mediators stays recursive through a decuple owner-local alias chain" $ do
@@ -5645,7 +5480,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 aliasedWrap
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "same-wrapper nested-forall plus mixed let-aliased and direct stacked transparent eta mediators stays recursively Bool-typed through a decuple owner-local alias chain" $ do
@@ -5659,7 +5494,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 aliasedWrap
                 (ELam "h" (ELam "z" (EApp (EVar "h") (EVar "z"))))
                 recursiveAnn
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "sibling transparent eta mediators do not poison direct recursive wrapper application" $ do
@@ -5685,9 +5520,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         )
                     )
                 )
-        ty1 <- expectAlignedPipelineSuccessType (directExpr "wrap1")
+        ty1 <- expectCanonicalPipelineSuccessType (directExpr "wrap1")
         containsMu ty1 `shouldBe` True
-        ty2 <- expectAlignedPipelineSuccessType (directExpr "wrap2")
+        ty2 <- expectCanonicalPipelineSuccessType (directExpr "wrap2")
         containsMu ty2 `shouldBe` True
 
       it "sibling let-aliased transparent eta mediators do not poison direct recursive wrapper application" $ do
@@ -5717,9 +5552,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         )
                     )
                 )
-        ty1 <- expectAlignedPipelineSuccessType (directExpr "wrap1")
+        ty1 <- expectCanonicalPipelineSuccessType (directExpr "wrap1")
         containsMu ty1 `shouldBe` True
-        ty2 <- expectAlignedPipelineSuccessType (directExpr "wrap2")
+        ty2 <- expectCanonicalPipelineSuccessType (directExpr "wrap2")
         containsMu ty2 `shouldBe` True
 
       it "sibling let-aliased transparent eta mediators do not poison direct recursive Bool wrapper application" $ do
@@ -5749,7 +5584,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         )
                     )
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "sibling let-aliased transparent eta mediators do not poison direct recursive wrapper application through a decuple owner-local alias chain" $ do
@@ -5788,7 +5623,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         )
                     )
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "sibling let-aliased transparent eta mediators do not poison direct recursive Bool wrapper application through a decuple owner-local alias chain" $ do
@@ -5827,7 +5662,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         )
                     )
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "same-wrapper nested-forall plus let-aliased transparent eta mediator stays recursively Bool-typed through a decuple owner-local alias chain" $ do
@@ -5858,7 +5693,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                         )
                     )
                 )
-        ty <- expectAlignedPipelineSuccessType expr
+        ty <- expectCanonicalPipelineSuccessType expr
         containsMu ty `shouldBe` True
 
       it "keeps local empty-candidate scheme-alias/base-like fallback on the local TypeRef lane" $ do
@@ -5889,13 +5724,13 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         fallbackTy `shouldBe` TBase (BaseTy "Int")
         containsMu fallbackTy `shouldBe` False
 
-      it "keeps the selected non-local scheme-alias/base-like packet recursive on both authoritative pipeline entrypoints" $ do
+      it "keeps the selected non-local scheme-alias/base-like packet recursive on the canonical pipeline entrypoint" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
             expr =
               ELet "k" (ELamAnn "x" recursiveAnn (EVar "x")) (EVar "k")
             blockedTy = TForall "a" Nothing (TArrow (TVar "a") (TVar "a"))
         (_uncheckedTerm, uncheckedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-        (_checkedTerm, checkedTy) <- requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (_checkedTerm, checkedTy) <- requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         uncheckedTy `shouldNotBe` blockedTy
         checkedTy `shouldNotBe` blockedTy
         containsMu uncheckedTy `shouldBe` True
@@ -5962,9 +5797,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         fallbackTy <- requireRight (computeResultTypeFallback inputs annCanon annPre)
         containsMu fallbackTy `shouldBe` False
         let pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err -> expectationFailure (label ++ ": " ++ renderPipelineError err)
@@ -6066,9 +5899,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 (ELamAnn "x" recursiveAnn (EVar "x"))
                 (EApp (EVar "g") (EVar "g"))
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Left err ->
@@ -6087,9 +5918,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             muTy = TMu "t6" (TArrow (TVar "t6") (TBase (BaseTy "Int")))
             expectedTy = TArrow muTy muTy
             pipelineRuns =
-              [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr expr)),
-                ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-              ]
+              [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr expr))]
         forM_ pipelineRuns $ \(label, result) ->
           case result of
             Right (_term, ty) ->
@@ -6473,11 +6302,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         annRootNode annCanonical `shouldSatisfy` (\nid -> canonicalize nid == nid)
     case runPipelineElab Set.empty canonicalizePathExpr of
       Left err -> expectationFailure (renderPipelineError err)
-      Right (_term, ty) ->
-        case runPipelineElabChecked Set.empty canonicalizePathExpr of
-          Left errChecked -> expectationFailure (renderPipelineError errChecked)
-          Right (_termChecked, tyChecked) -> do
-            ty `shouldBe` tyChecked
+      Right (_term, _ty) -> pure ()
 
   it "generalizes reused constructors via make const" $ do
     -- let make x = (\z -> x) in let c1 = make 2 in let c2 = make False in c1 True
@@ -6520,7 +6345,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             )
     expectStrictPipelineFailure
       "make let-c1-apply-bool"
-      (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+      (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
 
   it "make let-c1-apply-bool prunes the stale non-root OpWeaken before Phi" $ do
     let expr =
@@ -6556,7 +6381,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
     etBinderArgs tr0 `shouldBe` []
     etBinderReplayMap tr0 `shouldBe` IntMap.empty
     Binding.orderedBinders id (prConstraint pres) (typeRef c1SchemeRoot) `shouldBe` Right []
-    case generalizeAt (PresolutionViewBoundary.fromSolved solved) (genRef c1Gen) c1SchemeRoot of
+    case generalizeAt (viewFromSolved solved) (genRef c1Gen) c1SchemeRoot of
       Right (Forall binds ty, _subst) -> do
         binds `shouldBe` []
         pretty ty `shouldSatisfy` ("Int" `isInfixOf`)
@@ -6583,7 +6408,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
       expectStrictPipelineFailure
         "BUG-2026-02-08-004 checked"
-        (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
 
   it "A6 parity: bounded alias + coercion-heavy path agrees across unchecked, checked, and typeCheck" $ do
     let rhs = ELam "x" (ELam "y" (EVar "x"))
@@ -6612,24 +6437,17 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               expectationFailure
                 ("Expected forall a. a -> a -> a, got: " ++ show other)
     case runPipelineElab Set.empty normExpr of
-      Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
+      Left err -> expectationFailure ("Canonical pipeline failed:\n" ++ renderPipelineError err)
       Right (term, ty) -> do
         expectPolyBinaryId ty
-        checkedFromUnchecked <-
+        checkedByTypeChecker <-
           case typeCheck term of
-            Left tcErr -> expectationFailure ("typeCheck(unchecked term) failed: " ++ show tcErr) >> fail "typeCheck failed"
+            Left tcErr -> expectationFailure ("typeCheck(canonical term) failed: " ++ show tcErr) >> fail "typeCheck failed"
             Right out -> pure out
-        expectPolyBinaryId checkedFromUnchecked
-        case runPipelineElabChecked Set.empty normExpr of
-          Left errChecked -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError errChecked)
-          Right (termChecked, tyChecked) -> do
-            expectPolyBinaryId tyChecked
-            checkedFromUnchecked `shouldBe` tyChecked
-            case typeCheck termChecked of
-              Left tcErr -> expectationFailure ("typeCheck(checked term) failed: " ++ show tcErr)
-              Right out -> out `shouldBe` tyChecked
+        expectPolyBinaryId checkedByTypeChecker
+        checkedByTypeChecker `shouldBe` ty
 
-  it "BUG-2026-02-17-002: applied bounded-coercion path elaborates to Int in unchecked and checked pipelines" $ do
+  it "BUG-2026-02-17-002: applied bounded-coercion path elaborates to Int in the canonical pipeline" $ do
     let rhs = ELam "x" (ELam "y" (EVar "x"))
         schemeTy =
           mkForalls
@@ -6659,8 +6477,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             Right (term, ty) -> do
               ty `shouldBe` expectedTy
               typeCheck term `shouldBe` Right expectedTy
-    expectInt "unchecked pipeline" (runPipelineElab Set.empty normExpr)
-    expectInt "checked pipeline" (runPipelineElabChecked Set.empty normExpr)
+    expectInt "canonical pipeline" (runPipelineElab Set.empty normExpr)
 
   describe "BUG-2026-02-06-002 sentinel matrix" $ do
     let makeFactory = ELam "x" (ELam "y" (EVar "x"))
@@ -6686,7 +6503,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             )
 
         runChecked expr =
-          runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
+          runPipelineElab Set.empty (unsafeNormalizeExpr expr)
 
     it "make-only still elaborates as polymorphic factory" $
       case runChecked makeOnlyExpr of
@@ -6729,7 +6546,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             )
 
         runChecked expr =
-          runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr)
+          runPipelineElab Set.empty (unsafeNormalizeExpr expr)
 
     it "make-only elaborates as polymorphic factory" $
       case runChecked makeOnlyExpr of
@@ -6782,35 +6599,27 @@ spec = describe "Pipeline (Phases 1-5)" $ do
     it "gate: make let-c1-apply-bool path now fails fast (no mismatch fallback)" $
       expectStrictPipelineFailure
         "atomic gate checked"
-        (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
+        (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
 
     it "gate: let-c1-apply-bool sentinel matrix now fails fast" $
       expectStrictPipelineFailure
         "atomic gate sentinel"
-        (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
+        (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
 
     it "gate: let-c1-apply-bool strict target matrix now fails fast" $
       expectStrictPipelineFailure
         "atomic gate strict-target"
-        (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
-
-    it "gate: checked-authoritative invariant now fails fast on fallback-dependent path" $ do
-      expectStrictPipelineFailure
-        "atomic gate unchecked authoritative"
-        (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
-      expectStrictPipelineFailure
-        "atomic gate checked authoritative"
-        (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
-
-    it "gate: thesis target unchecked pipeline now fails fast" $
-      expectStrictPipelineFailure
-        "atomic gate thesis unchecked"
         (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
 
-    it "gate: thesis target checked pipeline now fails fast" $
+    it "gate: canonical checked invariant now fails fast on fallback-dependent path" $ do
       expectStrictPipelineFailure
-        "atomic gate thesis checked"
-        (runPipelineElabChecked Set.empty (unsafeNormalizeExpr bugExpr))
+        "atomic gate canonical authoritative"
+        (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
+
+    it "gate: thesis target canonical pipeline now fails fast" $
+      expectStrictPipelineFailure
+        "atomic gate thesis canonical"
+        (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
 
     it "gate: \\y. let id = (\\x. x) in id y has type forall a. a -> a" $
       case runPipelineElab Set.empty (unsafeNormalizeExpr lambdaLetIdExpr) of
@@ -6856,7 +6665,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
               (EAnn (ELam "x" (EVar "x")) ann)
               (EApp (EVar "f") (ELit (LInt 7)))
       case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
-        Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
+        Left err -> expectationFailure ("Canonical pipeline failed:\n" ++ renderPipelineError err)
         Right (term, _ty) -> do
           ty0 <-
             case typeCheck term of
@@ -7107,19 +6916,14 @@ representativeMigrationCorpus =
       (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
   ]
 
-assertCheckedAuthoritative :: SurfaceExpr -> Expectation
-assertCheckedAuthoritative expr =
+assertCanonicalPipelineTypeChecks :: SurfaceExpr -> Expectation
+assertCanonicalPipelineTypeChecks expr =
   case runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
     Left err -> expectationFailure (renderPipelineError err)
-    Right (termUnchecked, tyUnchecked) -> do
-      typeCheck termUnchecked `shouldBe` Right tyUnchecked
-      case runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
-        Left err -> expectationFailure (renderPipelineError err)
-        Right (termChecked, tyChecked) -> do
-          typeCheck termChecked `shouldBe` Right tyChecked
-          tyUnchecked `shouldBe` tyChecked
+    Right (term, ty) ->
+      typeCheck term `shouldBe` Right ty
 
-assertViewParity :: PresolutionViewBoundary.PresolutionView 'Raw -> Solved -> Expectation
+assertViewParity :: PresolutionViewBoundary.PresolutionView p -> Solved -> Expectation
 assertViewParity view legacy = do
   let sharedLiveDomain =
         IntSet.intersection
@@ -7127,7 +6931,7 @@ assertViewParity view legacy = do
           (liveNodeKeySet (Solved.originalConstraint legacy))
   projectCanonicalMap sharedLiveDomain (pvCanonicalMap view)
     `shouldBe` projectCanonicalMap sharedLiveDomain (Solved.canonicalMap legacy)
-  pvCanonicalConstraint view `shouldBe` Solved.canonicalConstraint legacy
+  eraseConstraintPhaseForTest (pvCanonicalConstraint view) `shouldBe` Solved.canonicalConstraint legacy
 
   let thesisNodes =
         map
@@ -7160,7 +6964,7 @@ projectCanonicalMap domain =
         && IntSet.member (nodeIdToKey rep) domain
         && rep /= NodeId key
 
-liveNodeKeySet :: Constraint 'Raw -> IntSet.IntSet
+liveNodeKeySet :: Constraint p -> IntSet.IntSet
 liveNodeKeySet constraint =
   IntSet.fromList
     [ nodeIdToKey nid

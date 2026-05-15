@@ -111,8 +111,10 @@ library mlf2-internal
                       MLF.Constraint.Presolution.EdgeProcessing.Planner,
                       MLF.Constraint.Presolution.EdgeProcessing.Interpreter,
                       MLF.Constraint.Solve,
+                      MLF.Constraint.Solve.TestSupport,
                       MLF.Constraint.Unify.Closure,
                       MLF.Constraint.Solved,
+                      MLF.Constraint.Solved.TestSupport,
                       MLF.Elab.Pipeline,
                       MLF.Elab.Generalize,
                       MLF.Elab.Run.Provenance,
@@ -199,6 +201,7 @@ library mlf2-internal
                       MLF.Constraint.Presolution.WitnessNorm,
                       MLF.Constraint.Presolution.WitnessValidation,
                       MLF.Constraint.Solve.Internal,
+                      MLF.Constraint.Solve.Output,
                       MLF.Constraint.Solve.Worklist,
                       MLF.Constraint.Solve.Harmonize,
                       MLF.Constraint.Solve.Finalize,
@@ -223,7 +226,6 @@ library mlf2-internal
                       MLF.Elab.Elaborate.Scope,
                       MLF.Elab.Elaborate.Annotation,
                       MLF.Elab.TermClosure,
-                      MLF.Elab.Legacy,
                       MLF.Elab.Phi,
                       MLF.Elab.Phi.Context,
                       MLF.Elab.Phi.Env,
@@ -238,7 +240,6 @@ library mlf2-internal
                       MLF.Elab.PipelineError,
                       MLF.Elab.Reduce,
                       MLF.Elab.Run,
-                      MLF.Elab.Run.ChiQuery,
                       MLF.Elab.Run.Debug,
                       MLF.Elab.Run.Generalize.Common,
                       MLF.Elab.Run.Generalize.Constraint,
@@ -315,7 +316,6 @@ library
 
     -- Modules exported by the public library.
     exposed-modules:  MLF.API,
-                      MLF.Program,
                       MLF.Pipeline,
                       MLF.XMLF
 

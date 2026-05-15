@@ -25,13 +25,10 @@ import MLF.Backend.LLVM
 import qualified MLF.Backend.LLVM.Lower as Lower
 import MLF.Backend.LLVM.Ppr (renderLLVMModule)
 import MLF.Constraint.Types.Graph (BaseTy (..))
+import MLF.API (parseRawProgram, renderProgramParseError)
 import MLF.Frontend.Program.Types (CheckedProgram)
 import MLF.Frontend.Syntax (Lit (..))
-import MLF.Program
-  ( checkProgram,
-    parseRawProgram,
-    renderProgramParseError,
-  )
+import MLF.Pipeline (checkProgram)
 import MLF.Program.CLI (emitBackendFile, emitNativeFile)
 import Parity.ProgramMatrix
   ( ProgramMatrixCase (..),

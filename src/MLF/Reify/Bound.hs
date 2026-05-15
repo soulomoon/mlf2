@@ -10,27 +10,20 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (fromMaybe)
 
-import MLF.Constraint.Finalize (presolutionViewFromSnapshot)
-import MLF.Constraint.Presolution.View (PresolutionView)
+import qualified MLF.Constraint.Finalize as Finalize
+import MLF.Constraint.Presolution.View (PresolutionView (..))
 import MLF.Constraint.Solved (Solved)
-import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import qualified MLF.Reify.Type as ReifyType
-import MLF.Reify.Type (ReifyRoot(..), reifyWith, reifyWithAs, solvedFromView)
+import MLF.Reify.Type (ReifyRoot(..), reifyWith, reifyWithAs)
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError(..))
 
-reifyBoundWithNamesSolved
-    :: Solved
-    -> IntMap.IntMap String
-    -> NodeId
-    -> Either ElabError ElabType
-reifyBoundWithNamesSolved solved subst =
-    reifyWith "reifyBoundWithNames" solved varNameFor isNamed RootBound
+reifyBoundWithNames :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
+reifyBoundWithNames presolutionView subst =
+    reifyWith "reifyBoundWithNames" presolutionView varNameFor isNamed RootBound
   where
-    canonical = Solved.canonical solved
+    canonical = pvCanonical presolutionView
 
     nameFor (NodeId i) = "t" ++ show i
 
@@ -41,25 +34,13 @@ reifyBoundWithNamesSolved solved subst =
 
     isNamed nodeId = IntMap.member (getNodeId (canonical nodeId)) subst
 
-reifyBoundWithNames :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
-reifyBoundWithNames presolutionView subst nid =
-    reifyBoundWithNamesSolved (solvedFromView presolutionView) subst nid
-
 
 reifyBoundWithNamesBound :: PresolutionView p -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
-reifyBoundWithNamesBound presolutionView subst nid =
-    reifyBoundWithNamesBoundSolved (solvedFromView presolutionView) subst nid
-
-reifyBoundWithNamesBoundSolved
-    :: Solved
-    -> IntMap.IntMap String
-    -> NodeId
-    -> Either ElabError BoundType
-reifyBoundWithNamesBoundSolved solved subst =
-    reifyWithAs "reifyBoundWithNamesBound" solved varNameFor isNamed RootBound
+reifyBoundWithNamesBound presolutionView subst =
+    reifyWithAs "reifyBoundWithNamesBound" presolutionView varNameFor isNamed RootBound
         (\ty -> either (Left . InstantiationError) Right (elabToBound ty))
   where
-    canonical = Solved.canonical solved
+    canonical = pvCanonical presolutionView
 
     nameFor (NodeId i) = "t" ++ show i
 
@@ -73,12 +54,12 @@ reifyBoundWithNamesBoundSolved solved subst =
 -- | Reify a node for use as a binder bound on an explicit constraint (Schi_p on base graphs).
 reifyBoundWithNamesOnConstraint :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError ElabType
 reifyBoundWithNamesOnConstraint constraint subst nid =
-    let presolutionView = presolutionViewFromSnapshot constraint IntMap.empty
+    let presolutionView = Finalize.presolutionViewFromSnapshot constraint IntMap.empty
     in reifyBoundWithNames presolutionView subst nid
 
 reifyBoundWithNamesOnConstraintBound :: Constraint p -> IntMap.IntMap String -> NodeId -> Either ElabError BoundType
 reifyBoundWithNamesOnConstraintBound constraint subst nid =
-    let presolutionView = presolutionViewFromSnapshot constraint IntMap.empty
+    let presolutionView = Finalize.presolutionViewFromSnapshot constraint IntMap.empty
     in reifyBoundWithNamesBound presolutionView subst nid
 
 freeVars :: Solved -> NodeId -> IntSet.IntSet -> IntSet.IntSet

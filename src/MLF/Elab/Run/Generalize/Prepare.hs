@@ -23,9 +23,9 @@ import MLF.Constraint.Types.Graph
     ( Constraint
     , NodeId
     , NodeRef
-    , castConstraint
     , cNodes
     , lookupNodeIn
+    , toPresolvedConstraint
     )
 import MLF.Constraint.Types.Phase (Phase(Acyclic, Presolved))
 import MLF.Constraint.Types.Presolution (PresolutionSnapshot(..))
@@ -59,8 +59,8 @@ canonical edge artifacts as unrelated local values.
 The artifact intentionally exposes the few shared values the current consumers
 need, while hiding the mechanics that produce them:
 
-* the legacy phase bridge from the acyclic base graph to the prepared presolved
-  phase;
+* the directional phase bridge from the acyclic base graph to the prepared
+  presolved phase;
 * instantiation copy-node and base-copy-map recovery from edge traces;
 * the redirect plus union-find canonicalizer used for annotations and edge
   artifacts;
@@ -70,7 +70,7 @@ need, while hiding the mechanics that produce them:
 
 `pgaAcyclicBaseConstraint` is transitional.  Result-type reconstruction still
 expects the thesis base graph in the same phantom phase as the prepared view,
-so the artifact names that graph explicitly instead of leaking `castConstraint`
+so the artifact names that graph explicitly instead of leaking phase conversion
 back to the pipeline.
 -}
 data PreparedGeneralizationArtifact = PreparedGeneralizationArtifact
@@ -98,7 +98,7 @@ prepareGeneralizationArtifact traceCfg acyclicBase pres ann = do
     solvedClean <- Finalize.finalizeSolvedFromSnapshot preRewrite (snapshotUnionFind pres)
     presolutionViewClean <- Finalize.finalizePresolutionViewFromSnapshot preRewrite (snapshotUnionFind pres)
     let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
-        acyclicBaseForGeneralization = castConstraint acyclicBase :: Constraint 'Presolved
+        acyclicBaseForGeneralization = toPresolvedConstraint acyclicBase
         planBuilder = prPlanBuilder pres
         TraceCopyArtifacts
             { tcaInstCopyNodes = instCopyNodes

@@ -4,6 +4,7 @@ module ScopeSpec (spec) where
 import qualified Data.IntMap.Strict as IntMap
 import Test.Hspec
 
+import qualified MLF.Constraint.Finalize as Finalize
 import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
 import MLF.Constraint.Types.Graph
     ( BindFlag(..)
@@ -21,7 +22,6 @@ import MLF.Constraint.Types.Graph
     , typeRef
     )
 import MLF.Elab.Run.Scope (bindingScopeRef, generalizeTargetNode, resolveCanonicalScope, schemeBodyTarget)
-import qualified SolvedFacadeTestUtil as SolvedTest
 import SpecUtil (emptyConstraint, nodeMapFromList)
 import MLF.Constraint.Types.Phase (Phase(Raw))
 
@@ -39,8 +39,8 @@ spec = do
             let root = NodeId 1
                 cycleNode = NodeId 2
                 constraint = cyclicConstraint root cycleNode
-                solved = SolvedTest.mkTestSolved constraint IntMap.empty
-            resolveCanonicalScope constraint (PresolutionViewBoundary.fromSolved solved) IntMap.empty root
+                view = presolutionView constraint IntMap.empty
+            resolveCanonicalScope constraint view IntMap.empty root
                 `shouldSatisfy` isBindingCycleError
 
     describe "schemeBodyTarget" $ do
@@ -160,7 +160,7 @@ isBindingCycleError result = case result of
 
 presolutionView :: Constraint 'Raw -> IntMap.IntMap NodeId -> PresolutionViewBoundary.PresolutionView 'Raw
 presolutionView constraint uf =
-    PresolutionViewBoundary.fromSolved (SolvedTest.mkTestSolved constraint uf)
+    Finalize.presolutionViewFromSnapshot constraint uf
 
 cyclicConstraint :: NodeId -> NodeId -> Constraint 'Raw
 cyclicConstraint n1 n2 =

@@ -14,7 +14,6 @@ import MLF.Elab.Pipeline
     , TypeCheckError(..)
     , renderPipelineError
     , runPipelineElab
-    , runPipelineElabChecked
     , schemeFromType
     , typeCheck
     )
@@ -206,16 +205,10 @@ spec = describe "Phase 7 typecheck" $ do
                         _ -> False
 
             case runPipelineElab Set.empty normExpr of
-                Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err)
-                Right (uncheckedTerm, uncheckedTy) -> do
-                    uncheckedTy `shouldSatisfy` isPolyBinaryId
-                    case runPipelineElabChecked Set.empty normExpr of
-                        Left errChecked -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError errChecked)
-                        Right (checkedTerm, checkedTy) -> do
-                            checkedTy `shouldSatisfy` isPolyBinaryId
-                            uncheckedTy `shouldBe` checkedTy
-                            typeCheck uncheckedTerm `shouldBe` Right checkedTy
-                            typeCheck checkedTerm `shouldBe` Right checkedTy
+                Left err -> expectationFailure ("Canonical pipeline failed:\n" ++ renderPipelineError err)
+                Right (term, ty) -> do
+                    ty `shouldSatisfy` isPolyBinaryId
+                    typeCheck term `shouldBe` Right ty
 
         it "dual annotated coercion consumers fail fast on unresolved non-root OpWeaken" $ do
             let useInt =
@@ -245,5 +238,4 @@ spec = describe "Phase 7 typecheck" $ do
                             expectationFailure
                                 (label ++ " unexpectedly succeeded with type-checked term: " ++ show (term, ty))
 
-            expectPipelineFailure "unchecked pipeline" (runPipelineElab Set.empty normExpr)
-            expectPipelineFailure "checked pipeline" (runPipelineElabChecked Set.empty normExpr)
+            expectPipelineFailure "canonical pipeline" (runPipelineElab Set.empty normExpr)

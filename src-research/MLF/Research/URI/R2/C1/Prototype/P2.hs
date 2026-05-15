@@ -28,16 +28,15 @@ import MLF.Constraint.Presolution
     , computePresolution
     )
 import MLF.Constraint.Presolution.Base (EdgeArtifacts(..))
-import MLF.Constraint.Presolution.View (toRawPresolutionViewForLegacy)
 import MLF.Constraint.Types.Graph
-    ( EdgeId
+    ( Constraint(..)
+    , EdgeId
     , NodeId(..)
     , NodeRef
     , cNodes
     , getEdgeId
     , getNodeId
     , lookupNodeIn
-    , toRawConstraintForLegacy
     )
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Presolution (snapshotConstraint, snapshotUnionFind)
@@ -90,6 +89,21 @@ data P2CheckArtifact = P2CheckArtifact
     , p2caEvidenceRef :: FilePath
     }
     deriving (Eq, Show)
+
+eraseConstraintPhaseForResearch :: Constraint p -> Constraint 'Raw
+eraseConstraintPhaseForResearch c =
+    Constraint
+        { cNodes = cNodes c
+        , cInstEdges = cInstEdges c
+        , cUnifyEdges = cUnifyEdges c
+        , cBindParents = cBindParents c
+        , cPolySyms = cPolySyms c
+        , cEliminatedVars = cEliminatedVars c
+        , cWeakenedVars = cWeakenedVars c
+        , cAnnEdges = cAnnEdges c
+        , cLetEdges = cLetEdges c
+        , cGenNodes = cGenNodes c
+        }
 
 data P2Execution = P2Execution
     { p2AppReport :: PrototypeReport
@@ -351,11 +365,16 @@ prepareScenarioContext = do
     let c1 = normalize c0
     (cAcyclic, acyclic) <- firstShow (checkAcyclicity c1)
     pres <- firstShow (computePresolution defaultTraceConfig acyclic cAcyclic)
-    solvedClean <- firstShow (Finalize.finalizeSolvedFromSnapshot (snapshotConstraint pres) (snapshotUnionFind pres))
-    presolutionViewClean <- toRawPresolutionViewForLegacy <$> firstShow (Finalize.finalizePresolutionViewFromSnapshot (snapshotConstraint pres) (snapshotUnionFind pres))
+    solvedClean <-
+        firstShow
+            (Finalize.finalizeSolvedFromSnapshot (snapshotConstraint pres) (snapshotUnionFind pres))
+    let cPresolvedRaw = eraseConstraintPhaseForResearch (snapshotConstraint pres)
+    presolutionViewClean <-
+        firstShow
+            (Finalize.finalizePresolutionViewFromSnapshot cPresolvedRaw (snapshotUnionFind pres))
     let canonNode = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
         canonical = canonicalizeNode canonNode
-        cBaseRaw = toRawConstraintForLegacy cAcyclic
+        cBaseRaw = eraseConstraintPhaseForResearch cAcyclic
         baseNamedKeysAll = collectBaseNamedKeys cBaseRaw
         edgeTracesForCopy =
             IntMap.filter

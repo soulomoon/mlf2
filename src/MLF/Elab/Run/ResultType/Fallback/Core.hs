@@ -37,7 +37,6 @@ import MLF.Constraint.Types.Witness (EdgeWitness (..))
 import MLF.Elab.Generalize (GaBindParents (..))
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Run.Annotation (annNode)
-import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, debugWhenCondM, debugWhenM)
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Run.Generalize.Common (canonicalSchemeRootOwners)
@@ -146,7 +145,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
   let (rootForTypeAnn, rootForTypePreAnn) =
         resultTypeRoots
           canonical
-          (ChiQuery.chiConstraint presolutionView)
+          (pvConstraint presolutionView)
           c1
           annCanon
           ann
@@ -460,7 +459,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
       let canonicalFinal = rtcCanonical ctx
           rootFinal = canonicalFinal rootC
           nodesFinal = cNodes (pvConstraint presolutionViewFinal)
-          genNodesFinal = map snd (toListGen (cGenNodes (ChiQuery.chiConstraint presolutionViewFinal)))
+          genNodesFinal = map snd (toListGen (cGenNodes (pvConstraint presolutionViewFinal)))
           targetPresolutionView =
             if rootBindingIsLocalType
               then presolutionViewFinal

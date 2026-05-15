@@ -44,6 +44,51 @@
   partial applications now run through shared backend parity.
 
 ### Changed
+- Retired legacy raw eMLF and explicit xMLF parser compatibility syntax:
+  parser APIs now reject ASCII token aliases and old xMLF/eMLF grammar shapes
+  such as `λx. t`, `λx:τ. t`, `Λa. t`, `∀a. τ`, `1`, `epsilon`, `!a`,
+  `⟨τ⟩`, and bare type-as-computation forms.
+- Retired the pass-through `MLF.Elab.Run.ChiQuery` adapter. Elaboration and
+  result-type internals now read canonical nodes, bounds, maps, and constraints
+  directly through `PresolutionView`, keeping Snapshot Finalization cleanup on
+  the canonical read-model surface instead of preserving a compatibility
+  query facade.
+- Retired the reify-local `solvedFromView` adapter, the reify core's
+  view-to-solved round trip, and
+  `MLF.Constraint.Finalize.stepSolvedFromPresolutionView`. Reification now
+  consumes `PresolutionView` directly as its read model instead of
+  reconstructing `Solved` from a view. Low-level solved fixtures now use the
+  explicit `MLF.Constraint.Solved.TestSupport` seam.
+- Retired `MLF.Constraint.Presolution.View.fromSolved`; solved-to-view callers
+  now construct read models through `MLF.Constraint.Finalize`.
+- Retired the broad `MLF.Constraint.Presolution.View.toRawPresolutionViewForLegacy`
+  adapter. Migration checks now consume typed `PresolutionView` values directly,
+  and the research P2 lane keeps its raw requirement as an explicit
+  constraint-level finalization input instead of converting an entire view.
+- Retired the generic graph-level phase escape hatches `castConstraint` and
+  `toRawConstraintForLegacy`. Real phase transitions now use directional graph
+  helpers, while the few remaining raw internal backends keep phase erasure
+  owner-local to solved construction, presolution in-progress state, research,
+  or test support.
+- Retired result-shaped solve compatibility from the `MLF.Constraint.Solve`
+  facade. The solve output now carries only the pre-rewrite snapshot required
+  for staged solved construction, and low-level white-box tests use the named
+  `MLF.Constraint.Solve.TestSupport` seam for `SolveResult` fixtures.
+- Retired frontend AST compatibility conveniences that were no longer live:
+  `RawSrcType`, raw `CoreExpr`, and the `NST*`/`SB*` normalized pattern
+  synonyms. The remaining `SurfaceExpr`, `NormSurfaceExpr`, and `NormCoreExpr`
+  names are the canonical staged syntax synonyms.
+- Retired the `MLF.Elab.Legacy` compatibility module and its dead solved-typed
+  `expansionToInst` export. The remaining expansion-argument translation helper
+  is now local to annotation elaboration, where it is actually used.
+- Retired checker-authoritative compatibility aliases from the public
+  `MLF.Pipeline` facade and the internal elaboration pipeline. Downstream users
+  and internal checked-pipeline tests now use the canonical `runPipelineElab` /
+  `runPipelineElabWithConfig` entrypoints directly; the detailed unchecked
+  entrypoint remains only where callers need its distinct unchecked behavior.
+- Retired the public `MLF.Program` compatibility shim. `.mlfp` parsing and
+  pretty-printing stay on `MLF.API`, while checking and runtime entrypoints
+  stay on `MLF.Pipeline`.
 - Moved elaboration-side generalization preparation into
   `MLF.Elab.Run.Generalize.Prepare`, which now produces a shared
   `PreparedGeneralizationArtifact` for elaboration, root generalization, and
@@ -56,9 +101,7 @@
 - Replaced several tautological or smoke-only tests with structural assertions
   for backend conversion, binding canonicalization, elaboration, pipeline
   normalization, presolution witness operation generation, reification, and type
-  soundness. The strengthened bottom-type parser coverage also fixed shared
-  type parsing so `_|_`/`bottom` spellings are recognized as bottom before
-  lowercase identifier parsing.
+  soundness.
 - Closed the backend IR executable-boundary family on merged `710c92eb`: all seven backend-boundary mechanism-table rows are now explicitly settled, row 7 is owned by the dedicated `backend-boundary mechanism table and closeout ledger stay synchronized` repository guard plus repo-facing note sync, the preserved boundary remains one executable eager backend IR with no public `LowerableBackend.IR` and no lazy STG machinery, and no new backend feature or public boundary was introduced.
 - Fixed checked-source recursive higher-order LLVM flows so monomorphic
   top-level functions and closed lifted local helpers pass function-valued
@@ -301,10 +344,10 @@
   `cabal build all && cabal test` (`1616 examples, 0 failures`).
 - Hardened the unified `.mlfp` eMLF/xMLF contract. Executable bindings are now
   documented and guarded as `SurfaceExpr -> runPipelineElabWithEnv -> xMLF
-  typecheck -> normalize/run`, `runPipelineElabChecked` is documented as a
-  compatibility alias for the checker-authoritative shared pipeline, and
-  constructor declarations now fail early when their result type is not headed
-  by the owning data type with the required arity.
+  typecheck -> normalize/run`, the checker-authoritative shared pipeline is
+  guarded through the canonical elaboration entrypoint, and constructor
+  declarations now fail early when their result type is not headed by the
+  owning data type with the required arity.
 - Repaired the `.mlfp` ProgramSpec regression cluster while keeping `.mlfp`
   on the shared old eMLF/typecheck route: no new surface forms, no direct
   `.mlfp -> ElabTerm` fallback, no permissive `EUnroll`, and no broad
@@ -641,8 +684,8 @@
   honestly claim general automatic iso-recursive inference inside its
   inherited explicit-only production boundary: added a direct
   `P2` representative-support harness covering both the exact `C1` non-local
-  `Int` packet and a second route-pure non-local `Bool` packet on
-  `runPipelineElab` / `runPipelineElabChecked`, published superseding
+  `Int` packet and a second route-pure non-local `Bool` packet on the canonical
+  `runPipelineElab` path, published superseding
   current-state positive-family and repo-level readiness artifacts under
   `docs/plans/2026-04-11-*`, and synced `implementation_notes.md` / `TODO.md`
   to the refreshed current ledger. Validated with

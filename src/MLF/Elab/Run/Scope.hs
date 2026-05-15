@@ -14,7 +14,7 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.Maybe (listToMaybe)
 import qualified MLF.Binding.Tree as Binding
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Presolution (PresolutionView)
+import MLF.Constraint.Presolution (PresolutionView (..))
 import MLF.Constraint.Types.Graph
   ( BindingError (..), Constraint,
     NodeId (..),
@@ -24,7 +24,6 @@ import MLF.Constraint.Types.Graph
     gnSchemes,
     typeRef,
   )
-import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.Util (chaseRedirects)
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MLF.Frontend.ConstraintGen.Types (AnnExprF (..))
@@ -63,7 +62,7 @@ bindingScopeRef constraint root = do
 -- | Canonical-domain variant of 'bindingScopeRef' that traverses canonical bind-parents from a presolution view.
 bindingScopeRefCanonical :: PresolutionView p -> NodeId -> Either BindingError NodeRef
 bindingScopeRefCanonical presolutionView root =
-  bindingScopeRef (ChiQuery.chiCanonicalConstraint presolutionView) root
+  bindingScopeRef (pvCanonicalConstraint presolutionView) root
 
 {- Note [S vs S' target selection]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -96,13 +95,13 @@ data TargetUnwrapInfo = TargetUnwrapInfo
 
 targetUnwrapInfo :: PresolutionView p -> NodeId -> TargetUnwrapInfo
 targetUnwrapInfo presolutionView target =
-  let canonical = ChiQuery.chiCanonical presolutionView
+  let canonical = pvCanonical presolutionView
       targetC = canonical target
-      targetNode = ChiQuery.chiLookupNode presolutionView targetC
+      targetNode = pvLookupNode presolutionView targetC
       boundCanonical = case targetNode of
         Just TyVar {tnBound = Just bnd} -> Just (canonical bnd)
         _ -> Nothing
-      boundNode = boundCanonical >>= ChiQuery.chiLookupNode presolutionView
+      boundNode = boundCanonical >>= pvLookupNode presolutionView
    in TargetUnwrapInfo
         { tuiTargetCanonical = targetC,
           tuiTargetNode = targetNode,
@@ -112,7 +111,7 @@ targetUnwrapInfo presolutionView target =
 
 generalizeTargetNode :: PresolutionView p -> NodeId -> NodeId
 generalizeTargetNode presolutionView target =
-  let canonical = ChiQuery.chiCanonical presolutionView
+  let canonical = pvCanonical presolutionView
       info = targetUnwrapInfo presolutionView target
    in case tuiTargetNode info of
         Just TyVar {tnBound = Just _} ->
@@ -125,8 +124,8 @@ generalizeTargetNode presolutionView target =
 
 schemeBodyTarget :: PresolutionView p -> NodeId -> NodeId
 schemeBodyTarget presolutionView target =
-  let constraint = ChiQuery.chiConstraint presolutionView
-      canonical = ChiQuery.chiCanonical presolutionView
+  let constraint = pvConstraint presolutionView
+      canonical = pvCanonical presolutionView
       info = targetUnwrapInfo presolutionView target
       targetC = tuiTargetCanonical info
       isSchemeRoot =
@@ -139,8 +138,8 @@ schemeBodyTarget presolutionView target =
           [ (getNodeId (canonical bnd), root)
             | gen <- NodeAccess.allGenNodes constraint,
               root <- gnSchemes gen,
-              Just bnd <- [ChiQuery.chiLookupVarBound presolutionView root],
-              case ChiQuery.chiLookupNode presolutionView (canonical bnd) of
+              Just bnd <- [pvLookupVarBound presolutionView root],
+              case pvLookupNode presolutionView (canonical bnd) of
                 Just TyBase {} -> False
                 Just TyBottom {} -> False
                 _ -> True
@@ -188,7 +187,7 @@ canonicalizeScopeRef presolutionView redirects scopeRef =
   case scopeRef of
     GenRef gid -> GenRef gid
     TypeRef nid ->
-      let canonical = ChiQuery.chiCanonical presolutionView
+      let canonical = pvCanonical presolutionView
        in TypeRef (canonical (chaseRedirects redirects nid))
 
 resolveCanonicalScope :: Constraint p -> PresolutionView p -> IntMap.IntMap NodeId -> NodeId -> Either BindingError NodeRef
@@ -198,7 +197,7 @@ resolveCanonicalScope constraint presolutionView redirects scopeRoot = do
 
 letScopeOverrides :: Constraint p -> Constraint p -> PresolutionView p -> IntMap.IntMap NodeId -> AnnExpr -> IntMap.IntMap NodeRef
 letScopeOverrides base solvedForGen presolutionView redirects ann =
-  let canonical = ChiQuery.chiCanonical presolutionView
+  let canonical = pvCanonical presolutionView
       addOverride acc schemeRootId =
         case bindingScopeRef base schemeRootId of
           Right scope0 ->

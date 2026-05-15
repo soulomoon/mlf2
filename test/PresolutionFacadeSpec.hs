@@ -62,6 +62,18 @@ spec = describe "MLF.Constraint.Presolution facade" $ do
             `shouldSatisfy`
                 (> markerLine "validateReplayMapTraceContract canonical constraint finalRawConstraint eid tr" driverSrc)
 
+    it "snapshot-finalization guard: Presolution.View does not expose fromSolved" $ do
+        viewSrc <- readFile "src/MLF/Constraint/Presolution/View.hs"
+        viewSrc `shouldSatisfy` (not . isInfixOf "fromSolved")
+
+    it "snapshot-finalization guard: Presolution.View does not expose raw-view legacy adapters" $ do
+        viewSrc <- readFile "src/MLF/Constraint/Presolution/View.hs"
+        viewSrc `shouldSatisfy` (not . isInfixOf "toRawPresolutionViewForLegacy")
+
+    it "snapshot-finalization guard: Finalize does not expose view-to-solved reconstruction" $ do
+        finalizeSrc <- readFile "src/MLF/Constraint/Finalize.hs"
+        finalizeSrc `shouldSatisfy` (not . isInfixOf "stepSolvedFromPresolutionView")
+
 bannedMarkers :: [String]
 bannedMarkers =
     [ "PresolutionState(..)"

@@ -15,7 +15,7 @@ import MLF.Frontend.Syntax.Program
 import MLF.Frontend.Syntax (SrcTy (..), SrcType, mkSrcBound)
 import MLF.Parse.Common
     ( Parser
-    , bottomTok
+    , canonicalBottomTok
     , forallTok
     , geTok
     , lambdaTok
@@ -83,6 +83,7 @@ reservedWords =
         , "mu"
         , "of"
         , "as"
+        , "bottom"
         , "true"
         , "false"
         ]
@@ -127,7 +128,7 @@ programTypeConfig =
         , tpcParens = parens
         , tpcLowerIdent = lowerIdent reservedWords
         , tpcUpperIdent = qualifiedUpperIdent
-        , tpcBottomTok = bottomTok
+        , tpcBottomTok = canonicalBottomTok
         , tpcMkVar = STVar
         , tpcMkArrow = STArrow
         , tpcMkBase = STBase
@@ -146,7 +147,7 @@ programTypeConfig =
             pure (v, Nothing)
         , tpcForallBinders = \pTy -> do
             binders <- some (try ((tpcBoundedBinder programTypeConfig) pTy) <|> tpcUnboundedBinder programTypeConfig)
-            void (optional (symbol "."))
+            void (symbol ".")
             pure binders
         }
 

@@ -20,7 +20,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 import MLF.Constraint.BindingUtil (bindingPathToRootLocal)
-import MLF.Constraint.Presolution (PresolutionView)
+import MLF.Constraint.Presolution (PresolutionView (..))
 import MLF.Constraint.Types.Graph
   ( NodeId,
     NodeRef (..),
@@ -31,7 +31,6 @@ import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Generalize (GaBindParents (..))
 import MLF.Elab.Inst (schemeToType)
 import qualified MLF.Elab.Inst as Inst
-import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.Scope (generalizeTargetNode, schemeBodyTarget)
 import MLF.Elab.Run.TypeOps (inlineBoundVarsType)
 import MLF.Elab.Types
@@ -63,7 +62,7 @@ scopeRootForNode scopeContext nodeId =
     Just ref -> pure ref
     Nothing -> scopeRootFromBase scopeContext nodeId
   where
-    canonical = ChiQuery.chiCanonical presolutionView
+    canonical = pvCanonical presolutionView
     presolutionView = scPresolutionView scopeContext
 
 scopeRootFromBase :: ScopeContext p -> NodeId -> Either ElabError NodeRef
@@ -78,7 +77,7 @@ scopeRootFromBase scopeContext root =
   where
     presolutionView = scPresolutionView scopeContext
     gaParents = scGaParents scopeContext
-    canonical = ChiQuery.chiCanonical presolutionView
+    canonical = pvCanonical presolutionView
 
 generalizeAtNode :: ScopeContext p -> NodeId -> Either ElabError (ElabScheme, IntMap.IntMap String)
 generalizeAtNode scopeContext nodeId = do
@@ -114,18 +113,18 @@ reifyNodeTypeDirect scopeContext nodeId = do
   reifyTypeForParam presolutionView namedSet (canonical nodeId)
   where
     presolutionView = scPresolutionView scopeContext
-    canonical = ChiQuery.chiCanonical presolutionView
+    canonical = pvCanonical presolutionView
 
 reifyNodeTypePreferringBound :: ScopeContext p -> NodeId -> Either ElabError ElabType
 reifyNodeTypePreferringBound scopeContext nodeId = do
   namedSet <- namedNodes presolutionView
   let nodeC = canonical nodeId
-  case ChiQuery.chiLookupVarBound presolutionView nodeC of
+  case pvLookupVarBound presolutionView nodeC of
     Just bnd -> reifyTypeForParam presolutionView namedSet bnd
     Nothing -> reifyTypeForParam presolutionView namedSet nodeC
   where
     presolutionView = scPresolutionView scopeContext
-    canonical = ChiQuery.chiCanonical presolutionView
+    canonical = pvCanonical presolutionView
 
 reifyTargetType :: ScopeContext p -> IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
 reifyTargetType scopeContext namedSetReify schemeInfo nodeId =
@@ -137,7 +136,7 @@ reifyTargetType scopeContext namedSetReify schemeInfo nodeId =
 reifyTargetNodeType :: ScopeContext p -> IntSet.IntSet -> SchemeInfo -> NodeId -> Either ElabError ElabType
 reifyTargetNodeType scopeContext namedSetReify schemeInfo nodeId =
   let presolutionView = scPresolutionView scopeContext
-      canonical = ChiQuery.chiCanonical presolutionView
+      canonical = pvCanonical presolutionView
       subst = siSubst schemeInfo
       targetNode = canonical nodeId
    in reifyTypeWithNamedSetNoFallback presolutionView subst namedSetReify targetNode
@@ -151,5 +150,5 @@ reifyTypeForParam presolutionView namedSet nodeId = do
 inlineBaseBounds :: PresolutionView p -> ElabType -> ElabType
 inlineBaseBounds presolutionView =
   inlineBaseBoundsType
-    (ChiQuery.chiConstraint presolutionView)
-    (ChiQuery.chiCanonical presolutionView)
+    (pvConstraint presolutionView)
+    (pvCanonical presolutionView)

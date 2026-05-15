@@ -1,7 +1,7 @@
 {-# LANGUAGE DataKinds #-}
 module RepoGuardSpec (spec) where
 
-import Control.Monad (forM_)
+import Control.Monad (forM, forM_)
 import Data.List (intercalate, isInfixOf, isSuffixOf, sort)
 import System.Directory (doesFileExist, listDirectory)
 import System.FilePath (dropExtension, makeRelative, splitDirectories, takeExtension, (</>))
@@ -27,6 +27,85 @@ spec = describe "Repository guardrails" $ do
     offenders <- findImportOffenders ["src", "src-public", "test", "app"]
     offenders `shouldBe` []
 
+  it "legacy MLF.Program compatibility shim is removed" $ do
+    doesFileExist "src-public/MLF/Program.hs" >>= (`shouldBe` False)
+    cabalSrc <- readFile "mlf2.cabal"
+    readmeSrc <- readFile "README.md"
+    architectureSrc <- readFile "docs/architecture.md"
+    syntaxSrc <- readFile "docs/syntax.md"
+    repoDiagramSrc <- readFile "docs/repo-architecture-diagram.html"
+    moduleDiagramSrc <- readFile "docs/module-dependency-diagram.html"
+    detailedGraphSrc <- readFile "docs/detailed-module-import-graph.html"
+    cabalSrc `shouldSatisfy` (not . isInfixOf "MLF.Program,")
+    forM_
+      [ readmeSrc,
+        architectureSrc,
+        syntaxSrc,
+        repoDiagramSrc,
+        moduleDiagramSrc
+      ]
+      $ \src ->
+        src `shouldSatisfy` (not . isInfixOf "MLF.Program")
+    forM_
+      [ "src-public/MLF/Program.hs",
+        ">MLF.Program<",
+        "`MLF.Program`,"
+      ]
+      $ \marker ->
+        detailedGraphSrc `shouldSatisfy` (not . isInfixOf marker)
+
+  it "generic constraint phase cast is retired from the graph surface" $ do
+    graphSrc <- readFile "src/MLF/Constraint/Types/Graph.hs"
+    graphSrc `shouldSatisfy` (not . isInfixOf "castConstraint")
+
+  it "legacy raw constraint bridge is retired from the graph surface" $ do
+    graphSrc <- readFile "src/MLF/Constraint/Types/Graph.hs"
+    graphSrc `shouldSatisfy` (not . isInfixOf "toRawConstraintForLegacy")
+
+  it "solve facade retires result-shaped compatibility helpers" $ do
+    solveSrc <- readFile "src/MLF/Constraint/Solve.hs"
+    forM_
+      [ "solveUnifyResult",
+        "solveUnifyResultWithSnapshot",
+        "solveResultFromSnapshot",
+        "SolveResult(..)",
+        "SolveSnapshot(..)"
+      ]
+      $ \marker ->
+        solveSrc `shouldSatisfy` (not . isInfixOf marker)
+
+  it "solve output does not retain a result-shaped compatibility payload" $ do
+    internalSrc <- readFile "src/MLF/Constraint/Solve/Internal.hs"
+    internalSrc `shouldSatisfy` (not . isInfixOf "soResult")
+
+  it "solve output owner stays snapshot-only" $ do
+    outputSrc <- readFile "src/MLF/Constraint/Solve/Output.hs"
+    forM_
+      [ "solveUnifyResult",
+        "solveResultFromSnapshot",
+        "Result-shaped helper"
+      ]
+      $ \marker ->
+        outputSrc `shouldSatisfy` (not . isInfixOf marker)
+
+  it "solver and solved internals stay behind owner and test-support seams" $ do
+    offenders <- findConstraintBoundaryImportOffenders
+    offenders `shouldBe` []
+
+  it "frontend syntax retires backward-compatible raw aliases and normalized patterns" $ do
+    syntaxSrc <- readFile "src/MLF/Frontend/Syntax.hs"
+    forM_
+      [ "RawSrcType",
+        "\n    CoreExpr,",
+        "\ntype CoreExpr =",
+        "pattern NST",
+        "pattern SB",
+        "backward-compatible",
+        "Backward-compatible"
+      ]
+      $ \marker ->
+        syntaxSrc `shouldSatisfy` (not . isInfixOf marker)
+
   it "MLF.API no longer exports pipeline/runtime helpers and MLF.Pipeline owns them" $ do
     apiSrc <- readFile "src-public/MLF/API.hs"
     pipelineSrc <- readFile "src-public/MLF/Pipeline.hs"
@@ -39,9 +118,7 @@ spec = describe "Repository guardrails" $ do
         "PipelineError(..)",
         "renderPipelineError",
         "runPipelineElab",
-        "runPipelineElabChecked",
         "runPipelineElabWithConfig",
-        "runPipelineElabCheckedWithConfig",
         "typeCheck",
         "step",
         "\n    , normalize\n",
@@ -60,15 +137,13 @@ spec = describe "Repository guardrails" $ do
     forM_
       [ "- `MLF.API` — surface syntax plus eMLF / `.mlfp` parsing, pretty-printing, and normalization helpers",
         "- `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API, including `.mlfp` elaboration/checking on the shared eMLF/xMLF path",
-        "- `MLF.Program` — thin compatibility re-export for the same unified `.mlfp` surface",
         "- `MLF.XMLF` — xMLF syntax, parser, and pretty-printer"
       ]
       $ \marker ->
         readmeSrc `shouldSatisfy` isInfixOf marker
     forM_
       [ "- `MLF.API` — umbrella frontend module (surface syntax + eMLF / `.mlfp` parse/pretty + normalization helpers)",
-        "- `MLF.Pipeline` — canonical pipeline/runtime module (e.g. `inferConstraintGraph`, `runPipelineElab`, `typeCheck`, `step`, `normalize`, `.mlfp` elaboration/checking/runtime)",
-        "- `MLF.Program` — compatibility shim re-exporting the same unified `.mlfp` surface",
+        "- `MLF.Pipeline` — canonical pipeline/runtime module (e.g. `inferConstraintGraph`, `runPipelineElab`, `runPipelineElabWithConfig`, `typeCheck`, `step`, `normalize`, `.mlfp` elaboration/checking/runtime)",
         "- `MLF.XMLF` — explicit xMLF syntax, parser, and pretty-printing helpers"
       ]
       $ \marker ->
@@ -145,8 +220,8 @@ spec = describe "Repository guardrails" $ do
     finalizeSrc `shouldSatisfy` isInfixOf "runPipelineElabDetailedUncheckedWithExternalBindings"
     finalizeSrc `shouldSatisfy` isInfixOf "normalizeExpr surfaceExpr"
     finalizeSrc `shouldSatisfy` isInfixOf "typeCheckWithEnv caseRewriteEnv rewritten"
-    pipelineRunSrc `shouldSatisfy` isInfixOf "Compatibility alias"
-    pipelineRunSrc `shouldSatisfy` isInfixOf "runPipelineElabCheckedWithConfig = runPipelineElabWithConfig"
+    pipelineRunSrc `shouldSatisfy` (not . isInfixOf "Compatibility alias")
+    pipelineRunSrc `shouldSatisfy` (not . isInfixOf "runPipelineElabChecked")
     forM_
       [ "where possible and only emits direct",
         "direct `ElabTerm`s for constructs",
@@ -412,6 +487,72 @@ hasMyLibImport path = do
   src <- readFile path
   pure (path, any (== "import MyLib") (map trimImport (lines src)))
 
+findConstraintBoundaryImportOffenders :: IO [String]
+findConstraintBoundaryImportOffenders = do
+  hsFiles <- concat <$> mapM collectHsFiles ["src", "src-public", "app"]
+  fmap sort . fmap concat $
+    forM hsFiles $ \path -> do
+      src <- readFile path
+      pure
+        [ path ++ " imports " ++ moduleName
+        | moduleName <- importedModules src,
+          not (isAllowedConstraintBoundaryImport path moduleName)
+        ]
+
+isAllowedConstraintBoundaryImport :: FilePath -> String -> Bool
+isAllowedConstraintBoundaryImport path moduleName =
+  case moduleName of
+    "MLF.Constraint.Solve.Internal" ->
+      path
+        `elem` [ "src/MLF/Constraint/Finalize.hs",
+                 "src/MLF/Constraint/Solve.hs",
+                 "src/MLF/Constraint/Solved/Internal.hs"
+               ]
+        || "src/MLF/Constraint/Solve/" `isPathPrefixOf` path
+    "MLF.Constraint.Solved.Internal" ->
+      path
+        `elem` [ "src/MLF/Constraint/Finalize.hs",
+                 "src/MLF/Constraint/Solved.hs",
+                 "src/MLF/Constraint/Solved/TestSupport.hs"
+               ]
+        || "src/MLF/Constraint/Solved/" `isPathPrefixOf` path
+    "MLF.Constraint.Solve.TestSupport" -> False
+    "MLF.Constraint.Solved.TestSupport" -> False
+    _ -> True
+
+importedModules :: String -> [String]
+importedModules src =
+  [ moduleName
+  | line <- lines src,
+    Just moduleName <- [parseImportModule line]
+  ]
+
+parseImportModule :: String -> Maybe String
+parseImportModule line =
+  case words (stripLineComment line) of
+    "import" : rest -> firstModuleToken rest
+    _ -> Nothing
+  where
+    firstModuleToken [] = Nothing
+    firstModuleToken (tok : toks)
+      | tok `elem` ["qualified", "safe", "as", "hiding"] = firstModuleToken toks
+      | "\"" `isPrefixOfToken` tok = firstModuleToken toks
+      | "." `isInfixOf` tok = Just (normalizeModuleToken tok)
+      | otherwise = firstModuleToken toks
+
+stripLineComment :: String -> String
+stripLineComment [] = []
+stripLineComment ('-' : '-' : _) = []
+stripLineComment (c : cs) = c : stripLineComment cs
+
+isPrefixOfToken :: String -> String -> Bool
+isPrefixOfToken prefix token =
+  take (length prefix) token == prefix
+
+isPathPrefixOf :: FilePath -> FilePath -> Bool
+isPathPrefixOf prefix path =
+  take (length prefix) path == prefix
+
 collectHsFiles :: FilePath -> IO [FilePath]
 collectHsFiles root = do
   entries <- listDirectory root
@@ -432,13 +573,6 @@ dropFieldPrefix line =
   case break (== ':') line of
     (_field, ':' : rest) -> rest
     _ -> line
-
-parseImportModule :: String -> Maybe String
-parseImportModule line =
-  case words (trim line) of
-    ("import" : "qualified" : modName : _) -> Just modName
-    ("import" : modName : _) -> Just modName
-    _ -> Nothing
 
 trimImport :: String -> String
 trimImport = unwords . take 2 . words

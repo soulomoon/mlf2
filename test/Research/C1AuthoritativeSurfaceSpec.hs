@@ -7,8 +7,6 @@ import Test.Hspec
 
 import qualified MLF.Constraint.Finalize as Finalize
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import qualified MLF.Constraint.Presolution.View as PresolutionView
-import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
@@ -34,7 +32,7 @@ import MLF.Elab.Pipeline
     ( applyRedirectsToAnn
     , canonicalizeAnn
     , runPipelineElab
-    , runPipelineElabChecked
+    , runPipelineElab
     )
 import MLF.Elab.Run.ResultType
     ( ResultTypeInputs(..)
@@ -76,7 +74,7 @@ spec =
             (_uncheckedTerm, uncheckedTy) <-
                 requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1IntExpr))
             (_checkedTerm, checkedTy) <-
-                requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr c1IntExpr))
+                requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1IntExpr))
             uncheckedTy `shouldNotBe` blocked
             checkedTy `shouldNotBe` blocked
             containsMu uncheckedTy `shouldBe` True
@@ -92,7 +90,7 @@ spec =
             (_uncheckedTerm, uncheckedTy) <-
                 requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1BoolExpr))
             (_checkedTerm, checkedTy) <-
-                requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr c1BoolExpr))
+                requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr c1BoolExpr))
             uncheckedTy `shouldNotBe` blocked
             checkedTy `shouldNotBe` blocked
             containsMu uncheckedTy `shouldBe` True
@@ -234,7 +232,7 @@ resultTypeInputsForArtifacts
                     , eaEdgeWitnesses = edgeWitnesses
                     , eaEdgeTraces = edgeTraces
                     }
-                (PresolutionViewBoundary.fromSolved solvedClean)
+                (Finalize.presolutionViewFromSolved solvedClean)
                 bindParentsGa
                 (defaultPlanBuilder defaultTraceConfig)
                 c1

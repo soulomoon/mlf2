@@ -1,8 +1,6 @@
 module MLF.Elab.Run
   ( runPipelineElab,
-    runPipelineElabChecked,
     runPipelineElabWithConfig,
-    runPipelineElabCheckedWithConfig,
     runPipelineElabWithEnv,
     runPipelineElabWithConfigAndEnv,
     applyRedirectsToAnn,
@@ -14,8 +12,6 @@ where
 import MLF.Elab.Run.Annotation (applyRedirectsToAnn, canonicalizeAnn)
 import MLF.Elab.Run.Pipeline
   ( runPipelineElab,
-    runPipelineElabChecked,
-    runPipelineElabCheckedWithConfig,
     runPipelineElabWithConfig,
     runPipelineElabWithConfigAndEnv,
     runPipelineElabWithEnv,

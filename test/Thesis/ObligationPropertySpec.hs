@@ -38,7 +38,8 @@ import MLF.Constraint.Presolution.Witness
     reorderWeakenWithEnv,
     validateNormalizedWitness,
   )
-import MLF.Constraint.Solve (SolveResult (..), frWith)
+import MLF.Constraint.Solve (frWith)
+import MLF.Constraint.Solve.TestSupport (SolveResult (..))
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
@@ -613,7 +614,7 @@ propElabLetVar _size =
 
 propElabAbs :: Int -> Property
 propElabAbs _size =
-  case Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr (Surf.ELam "x" (Surf.EVar "x"))) of
+  case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr (Surf.ELam "x" (Surf.EVar "x"))) of
     Right (Elab.ETyAbs {}, ty) -> ty === polyIdTy
     other -> counterexample (show other) False
 
@@ -1310,7 +1311,7 @@ applyShouldBe ty inst expected =
 
 elaboratesTo :: Surf.SurfaceExpr -> Elab.ElabType -> Property
 elaboratesTo expr expected =
-  case Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr) of
+  case Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr) of
     Right (term, ty) ->
       conjoin
         [ ty === expected,

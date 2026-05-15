@@ -8,7 +8,7 @@ import Test.Hspec
 
 import MLF.Constraint.Presolution (PresolutionResult(..), EdgeTrace(..))
 import MLF.Constraint.Types.Graph (BaseTy(..), typeRef)
-import MLF.Elab.Pipeline (runPipelineElab, runPipelineElabChecked)
+import MLF.Elab.Pipeline (runPipelineElab, typeCheck)
 import MLF.Frontend.Syntax (Expr(..), SrcTy(..), Lit(..))
 import MLF.Types.Elab (Ty(..))
 import qualified MLF.Binding.Tree as Binding
@@ -79,7 +79,7 @@ spec = describe "Phi alignment" $ do
                     Right _ -> pure ()
 
     describe "C4: A6 bounded-alias coercion regressions stay green" $ do
-        it "bounded-alias coercion path succeeds in unchecked and checked pipelines" $ do
+        it "bounded-alias coercion path succeeds in the canonical pipeline" $ do
             let rhs = ELam "x" (ELam "y" (EVar "x"))
                 schemeTy =
                     mkForalls
@@ -96,13 +96,11 @@ spec = describe "Phi alignment" $ do
                 normExpr = unsafeNormalizeExpr expr
             case runPipelineElab Set.empty normExpr of
                 Left err -> expectationFailure (show err)
-                Right (_, tyUnchecked) ->
-                    case runPipelineElabChecked Set.empty normExpr of
-                        Left err -> expectationFailure (show err)
-                        Right (_, tyChecked) ->
-                            show tyUnchecked `shouldBe` show tyChecked
+                Right (term, ty) -> do
+                    typeCheck term `shouldBe` Right ty
+                    show ty `shouldNotBe` ""
 
-        it "applied bounded-coercion path succeeds in unchecked and checked pipelines" $ do
+        it "applied bounded-coercion path succeeds in the canonical pipeline" $ do
             let rhs = ELam "x" (ELam "y" (EVar "x"))
                 schemeTy =
                     mkForalls
@@ -124,7 +122,7 @@ spec = describe "Phi alignment" $ do
                     case result of
                         Left err ->
                             expectationFailure (label ++ " failed: " ++ show err)
-                        Right (_, ty) ->
+                        Right (term, ty) -> do
                             ty `shouldBe` expectedTy
-            expectInt "unchecked pipeline" (runPipelineElab Set.empty normExpr)
-            expectInt "checked pipeline" (runPipelineElabChecked Set.empty normExpr)
+                            typeCheck term `shouldBe` Right expectedTy
+            expectInt "canonical pipeline" (runPipelineElab Set.empty normExpr)

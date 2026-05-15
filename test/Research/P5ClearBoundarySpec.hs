@@ -7,7 +7,6 @@ import Test.Hspec
 
 import qualified MLF.Constraint.Finalize as Finalize
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Presolution
@@ -36,7 +35,7 @@ import MLF.Elab.Pipeline
     , canonicalizeAnn
     , renderPipelineError
     , runPipelineElab
-    , runPipelineElabChecked
+    , runPipelineElab
     )
 import MLF.Elab.Run.ResultType
     ( ResultTypeInputs(..)
@@ -123,11 +122,9 @@ spec =
             fallbackTy <- fallbackType nestedForallContrastExpr
             containsMu fallbackTy `shouldBe` True
 
-        it "sameLaneClearBoundaryExpr is the first explicit milestone-3 representative broader-positive clear-boundary packet on both authoritative entrypoints" $ do
+        it "sameLaneClearBoundaryExpr is the first explicit milestone-3 representative broader-positive clear-boundary packet on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -137,11 +134,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameLaneAliasFrameClearBoundaryExpr alias-frame clear-boundary packet preserves recursive output on both authoritative entrypoints" $ do
+        it "sameLaneAliasFrameClearBoundaryExpr alias-frame clear-boundary packet preserves recursive output on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -151,11 +146,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameLaneDoubleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet on both authoritative entrypoints" $ do
+        it "sameLaneDoubleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDoubleAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneDoubleAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDoubleAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -165,11 +158,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameLaneTripleAliasFrameClearBoundaryExpr is the next milestone-3 representative broader-positive clear-boundary packet after the merged double-alias anchor on both authoritative entrypoints" $ do
+        it "sameLaneTripleAliasFrameClearBoundaryExpr is the next milestone-3 representative broader-positive clear-boundary packet after the merged double-alias anchor on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneTripleAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneTripleAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneTripleAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -179,11 +170,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameLaneQuadrupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged triple-alias anchor on both authoritative entrypoints" $ do
+        it "sameLaneQuadrupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged triple-alias anchor on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuadrupleAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneQuadrupleAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuadrupleAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -193,11 +182,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameLaneQuintupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quadruple-alias anchor on both authoritative entrypoints" $ do
+        it "sameLaneQuintupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quadruple-alias anchor on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuintupleAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneQuintupleAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneQuintupleAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -207,11 +194,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameLaneSextupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quintuple-alias anchor on both authoritative entrypoints" $ do
+        it "sameLaneSextupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged quintuple-alias anchor on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSextupleAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -221,11 +206,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameLaneSeptupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged sextuple-alias anchor on both authoritative entrypoints" $ do
+        it "sameLaneSeptupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged sextuple-alias anchor on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSeptupleAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneSeptupleAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneSeptupleAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -235,11 +218,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameLaneOctupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged septuple-alias anchor on both authoritative entrypoints" $ do
+        it "sameLaneOctupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged septuple-alias anchor on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneOctupleAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneOctupleAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneOctupleAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -249,11 +230,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameLaneNonupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged octuple-alias anchor on both authoritative entrypoints" $ do
+        it "sameLaneNonupleAliasFrameClearBoundaryExpr is the next explicit milestone-3 representative broader-positive clear-boundary packet after the merged octuple-alias anchor on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneNonupleAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneNonupleAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneNonupleAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -263,11 +242,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameLaneDecupleAliasFrameClearBoundaryExpr is the next broader-positive owner-sensitive clear-boundary packet on both authoritative entrypoints" $ do
+        it "sameLaneDecupleAliasFrameClearBoundaryExpr is the next broader-positive owner-sensitive clear-boundary packet on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDecupleAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameLaneDecupleAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameLaneDecupleAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -277,11 +254,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameWrapperNestedForallAliasFrameClearBoundaryExpr keeps the combined nested-forall plus owner-local alias packet recursive on both authoritative entrypoints" $ do
+        it "sameWrapperNestedForallAliasFrameClearBoundaryExpr keeps the combined nested-forall plus owner-local alias packet recursive on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameWrapperNestedForallAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -291,11 +266,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr keeps the combined nested-forall plus decuple owner-local alias packet recursive on both authoritative entrypoints" $ do
+        it "sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr keeps the combined nested-forall plus decuple owner-local alias packet recursive on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr sameWrapperNestedForallDecupleAliasFrameClearBoundaryExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -305,11 +278,9 @@ spec =
                 )
                 pipelineRuns
 
-        it "selected same-wrapper nested-forall preserved merged-baseline packet stays recursive on both authoritative entrypoints" $ do
+        it "selected same-wrapper nested-forall preserved merged-baseline packet stays recursive on the canonical pipeline entrypoint" $ do
             let pipelineRuns =
-                    [ ("unchecked", runPipelineElab Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))
-                    , ("checked", runPipelineElabChecked Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))
-                    ]
+                    [("canonical", runPipelineElab Set.empty (unsafeNormalizeExpr nestedForallContrastExpr))]
             mapM_
                 (\(label, result) -> case result of
                     Left err ->
@@ -781,7 +752,7 @@ resultTypeInputsForArtifacts
                     , eaEdgeWitnesses = edgeWitnesses
                     , eaEdgeTraces = edgeTraces
                     }
-                (PresolutionViewBoundary.fromSolved solvedClean)
+                (Finalize.presolutionViewFromSolved solvedClean)
                 bindParentsGa
                 (defaultPlanBuilder defaultTraceConfig)
                 c1

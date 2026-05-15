@@ -39,9 +39,7 @@ module MLF.Elab.Pipeline
     -- * Witness translation (production path)
     phiFromEdgeWitnessWithTrace,
     runPipelineElab,
-    runPipelineElabChecked,
     runPipelineElabWithConfig,
-    runPipelineElabCheckedWithConfig,
     runPipelineElabWithEnv,
     runPipelineElabWithConfigAndEnv,
     ExternalEnv,
@@ -89,8 +87,6 @@ import MLF.Elab.Run
     canonicalizeAnn,
     chaseRedirects,
     runPipelineElab,
-    runPipelineElabChecked,
-    runPipelineElabCheckedWithConfig,
     runPipelineElabWithConfig,
     runPipelineElabWithConfigAndEnv,
     runPipelineElabWithEnv,

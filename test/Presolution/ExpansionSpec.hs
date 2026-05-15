@@ -25,7 +25,8 @@ import MLF.Constraint.Presolution.TestSupport
     , runPresolutionM
     )
 import MLF.Constraint.Acyclicity (AcyclicityResult(..))
-import MLF.Constraint.Solve (SolveResult(..), validateSolvedGraphStrict)
+import MLF.Constraint.Solve (validateSolvedGraphStrict)
+import MLF.Constraint.Solve.TestSupport (SolveResult(..))
 import qualified MLF.Binding.Tree as Binding
 import SpecUtil
     ( computePresolutionRaw

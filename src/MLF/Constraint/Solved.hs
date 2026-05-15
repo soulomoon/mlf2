@@ -3,7 +3,7 @@ Module      : MLF.Constraint.Solved
 Description : Opaque abstraction over solved constraint graphs
 
 Thin public facade over the internal solved-graph implementation.
-Compatibility builders that are only needed by local owner modules live in
+Owner-local construction primitives that are only needed by finalization live in
 `MLF.Constraint.Solved.Internal`; this facade only re-exports the long-term
 `Solved` surface.
 -}

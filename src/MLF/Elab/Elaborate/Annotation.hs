@@ -22,7 +22,7 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
-import MLF.Constraint.Presolution (EdgeTrace (..))
+import MLF.Constraint.Presolution (EdgeTrace (..), PresolutionView (..))
 import MLF.Constraint.Types.Graph
   ( BaseTy (..),
     EdgeId (..),
@@ -38,13 +38,11 @@ import MLF.Elab.Elaborate.Scope
   )
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
 import qualified MLF.Elab.Inst as Inst
-import MLF.Elab.Legacy (expInstantiateArgsToInstNoFallback)
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Phi.Omega.Normalize (normalizeInst)
 import MLF.Elab.Run.Annotation (adjustAnnotationInst)
-import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
-import MLF.Elab.Run.TypeOps (inlineBoundVarsType)
+import MLF.Elab.Run.TypeOps (inlineBoundVarsType, inlineBoundVarsTypeForBound)
 import MLF.Elab.TermClosure
   ( alignTermTypeVarsToScheme,
     alignTermTypeVarsToTopTyAbs,
@@ -71,7 +69,15 @@ import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen.Types (AnnExpr (..))
 import MLF.Frontend.Syntax (NormSrcType, SrcBound (..), SrcNorm (NormN), SrcTy (..), StructBound, VarName)
 import MLF.Reify.Core (reifyTypeWithNamedSetNoFallback)
-import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarsType, freshNameLike, parseNameId, substTypeCapture)
+import MLF.Reify.TypeOps
+  ( alphaEqType,
+    churchAwareEqType,
+    freeTypeVarsType,
+    freshNameLike,
+    parseNameId,
+    resolveBaseBoundForInstConstraint,
+    substTypeCapture,
+  )
 import MLF.Util.Trace (TraceConfig, traceGeneralize)
 
 data AnnotationContext (p :: Phase) = AnnotationContext
@@ -103,6 +109,33 @@ stripUnusedTopTyAbs term =
               | v `notElem` freeTypeVarsType bodyTy -> body'
             _ -> term'
     _ -> term
+
+expInstantiateArgsToInstNoFallback ::
+  PresolutionView p ->
+  IntSet.IntSet ->
+  [NodeId] ->
+  Either ElabError Instantiation
+expInstantiateArgsToInstNoFallback presolutionView namedSet args = do
+  tys <- mapM reifyArg args
+  instAppsFromTypes presolutionView tys
+  where
+    constraint = pvConstraint presolutionView
+    canonical = pvCanonical presolutionView
+    resolveBaseBound = resolveBaseBoundForInstConstraint constraint canonical
+    reifyArg arg =
+      let argC = canonical arg
+       in case resolveBaseBound argC of
+            Just baseC ->
+              reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet baseC
+            Nothing ->
+              reifyTypeWithNamedSetNoFallback presolutionView IntMap.empty namedSet argC
+
+instAppsFromTypes :: PresolutionView p -> [ElabType] -> Either ElabError Instantiation
+instAppsFromTypes presolutionView tys =
+  let tys' = map (inlineBoundVarsTypeForBound presolutionView) tys
+   in if null tys'
+        then Right InstId
+        else Right $ foldr1 InstSeq (map InstApp tys')
 
 sourceAnnIsPolymorphic :: Map.Map VarName SchemeInfo -> AnnExpr -> Bool
 sourceAnnIsPolymorphic env sourceAnn =
@@ -478,7 +511,7 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
         let substForPhi = maybe IntMap.empty siSubst mSchemeInfo
             resolvePhiVar v = do
               nid <- parseNameId v
-              bnd <- ChiQuery.chiLookupVarBound presolutionView (canonical (NodeId nid))
+              bnd <- pvLookupVarBound presolutionView (canonical (NodeId nid))
               either
                 (const Nothing)
                 Just
@@ -600,7 +633,7 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
     edgeWitnesses = acEdgeWitnesses annotationContext
     edgeTraces = acEdgeTraces annotationContext
     edgeExpansions = acEdgeExpansions annotationContext
-    canonical = ChiQuery.chiCanonical presolutionView
+    canonical = pvCanonical presolutionView
     debugGeneralize :: String -> a -> a
     debugGeneralize = traceGeneralize traceCfg
 
@@ -727,7 +760,7 @@ reifyInst annotationContext namedSetReify env funAnn (EdgeId eid) =
         reifyArg nodeId =
           let nodeC = canonical nodeId
               tyE =
-                case ChiQuery.chiLookupVarBound presolutionView nodeC of
+                case pvLookupVarBound presolutionView nodeC of
                   Just bnd -> reifyTypeWithNamedSetNoFallback presolutionView subst namedSet bnd
                   Nothing -> reifyTypeWithNamedSetNoFallback presolutionView subst namedSet nodeC
            in either (const Nothing) Just tyE

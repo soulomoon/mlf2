@@ -6,7 +6,6 @@ import Data.List (isInfixOf)
 import Test.Hspec
 
 import MLF.Constraint.Types.Graph (BaseTy(..))
-import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Generalize
     ( selectSolvedOrderWithShadow
     , shadowCompareTypes

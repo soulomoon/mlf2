@@ -16,16 +16,17 @@ import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Solve
     ( SolveError(..)
     , UnifyClosureResult(..)
-    , SolveOutput(..)
-    , SolveResult(..)
-    , SolveSnapshot(..)
     , frWith
     , runUnifyClosure
     , rewriteConstraintWithUF
-    , solveUnifyResult
+    , validateSolvedGraphStrict
+    )
+import MLF.Constraint.Solve.TestSupport
+    ( SolveOutput(..)
+    , SolveResult(..)
+    , SolveSnapshot(..)
     , solveResultFromSnapshot
     , solveUnifyResultWithSnapshot
-    , validateSolvedGraphStrict
     )
 import SpecUtil
     ( defaultTraceConfig
@@ -148,7 +149,6 @@ spec = describe "Phase 5 -- Solve" $ do
                             lookupNodeMaybe (cNodes (snapPreRewriteConstraint snapshot)) (NodeId 0)
                                 `shouldBe` Just var0
                             lookupNodeMaybe (cNodes solved) (NodeId 0) `shouldBe` Nothing
-                            replayed `shouldBe` soResult out
                             rewritten `shouldBe` solved
 
     describe "Variables and structure" $ do

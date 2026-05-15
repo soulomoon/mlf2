@@ -11,18 +11,16 @@ module SolvedFacadeTestUtil (
 
 import qualified Data.IntMap.Strict as IntMap
 
-import MLF.Constraint.Finalize
-    ( presolutionViewFromSnapshot
-    , stepSolvedFromPresolutionView
-    )
 import MLF.Constraint.Solve
     ( SolveError
-    , SolveOutput(..)
+    )
+import MLF.Constraint.Solve.TestSupport
+    ( SolveOutput(..)
     , SolveSnapshot(..)
-    , solveResultFromSnapshot
     )
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
+import qualified MLF.Constraint.Solved.TestSupport as SolvedTestSupport
 import MLF.Constraint.Types.Graph
     ( BindFlag
     , Constraint
@@ -35,8 +33,7 @@ import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Phase (Phase(Raw))
 
 mkTestSolved :: Constraint 'Raw -> IntMap.IntMap NodeId -> Solved.Solved
-mkTestSolved constraint uf =
-    stepSolvedFromPresolutionView (presolutionViewFromSnapshot constraint uf)
+mkTestSolved = SolvedTestSupport.mkTestSolved
 
 solvedFromSnapshot :: IntMap.IntMap NodeId -> Constraint p -> Either SolveError Solved.Solved
 solvedFromSnapshot uf constraint = do
@@ -45,11 +42,9 @@ solvedFromSnapshot uf constraint = do
                 { snapUnionFind = uf
                 , snapPreRewriteConstraint = constraint
                 }
-    replayed <- solveResultFromSnapshot snapshot
     Solved.fromSolveOutput
         SolveOutput
-            { soResult = replayed
-            , soSnapshot = snapshot
+            { soSnapshot = snapshot
             }
 
 classMembers :: Solved.Solved -> NodeId -> [NodeId]

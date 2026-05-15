@@ -169,8 +169,8 @@ data PresolutionState = PresolutionState
 
 -- | Ownership bucket used by owner-aware pending-weaken scheduling.
 --
--- `PendingWeakenOwnerUnknown` keeps compatibility with legacy behavior where a
--- pending weaken target may not resolve to any enclosing scheme owner.
+-- `PendingWeakenOwnerUnknown` represents a pending weaken target whose
+-- enclosing scheme owner cannot be resolved.
 data PendingWeakenOwner
     = PendingWeakenOwnerGen !GenNodeId
     | PendingWeakenOwnerUnknown
@@ -314,10 +314,9 @@ paper-faithful while avoiding ad-hoc state plumbing:
     Instead, extend the helper modules above when a common access pattern is
     missing.
 
-Deprecation plan: legacy helper functions and direct state access remain for
-now, but callers should be migrated to the foundation modules as we converge
-presolution layers (see US-019). Once migrated, redundant helpers will be
-removed.
+Layering plan: direct state access should continue moving toward the
+foundation modules as presolution layers converge (see US-019). Once migrated,
+redundant helpers will be removed.
 -}
 
 -- | Typeclass for monads that support presolution operations.
@@ -597,14 +596,14 @@ instantiationBindersM gid nid0 = do
         nid = canonical nid0
         cache0 = psBinderCache st
         nodes = cNodes c0
-        lookupNode = Types.lookupNode nid nodes
+        nodeAtNid = Types.lookupNode nid nodes
     case IntMap.lookup (getNodeId nid) cache0 of
         Just binders ->
             if null binders
                 then pure (nid, binders)
                 else do
                     let root =
-                            case lookupNode of
+                            case nodeAtNid of
                                 Just TyForall{ tnBody = inner } -> canonical inner
                                 _ -> nid
                     let debugMsg =
@@ -614,7 +613,7 @@ instantiationBindersM gid nid0 = do
                                 ++ show root
                     debugBinders debugMsg
                     pure (root, binders)
-        Nothing -> case lookupNode of
+        Nothing -> case nodeAtNid of
             Nothing -> throwError (NodeLookupFailed nid)
             Just node -> case node of
                 TyForall { tnId = forallId, tnBody = inner } -> do

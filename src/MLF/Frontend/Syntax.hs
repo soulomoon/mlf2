@@ -3,10 +3,8 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE KindSignatures #-}
-{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE ViewPatterns #-}
 
 module MLF.Frontend.Syntax
   ( VarName,
@@ -20,11 +18,8 @@ module MLF.Frontend.Syntax
     Expr (..),
     SurfaceExprF (..),
 
-    -- * Raw expression aliases (backward-compatible)
+    -- * Staged expression synonyms
     SurfaceExpr,
-    CoreExpr,
-
-    -- * Normalized expression aliases
     NormSurfaceExpr,
     NormCoreExpr,
 
@@ -49,24 +44,6 @@ module MLF.Frontend.Syntax
     unNormBound,
     NormSrcType,
     StructBound,
-    RawSrcType,
-
-    -- * Backward-compatible normalized patterns
-    pattern NSTVar,
-    pattern NSTArrow,
-    pattern NSTBase,
-    pattern NSTCon,
-    pattern NSTVarApp,
-    pattern NSTForall,
-    pattern NSTMu,
-    pattern NSTBottom,
-    pattern SBArrow,
-    pattern SBBase,
-    pattern SBCon,
-    pattern SBVarApp,
-    pattern SBForall,
-    pattern SBMu,
-    pattern SBBottom,
 
     -- * Metadata
     AnnotatedExpr (..),
@@ -258,9 +235,6 @@ type NormSrcType = SrcTy 'NormN 'TopVarAllowed
 
 type StructBound = SrcTy 'NormN 'TopVarDisallowed
 
--- | Backward-compatible alias: 'RawSrcType' = 'SrcType'.
-type RawSrcType = SrcType
-
 resolvedSrcTypeToSrcType :: ResolvedSrcTy n v -> SrcTy n v
 resolvedSrcTypeToSrcType ty =
   case ty of
@@ -309,59 +283,6 @@ mkNormBound = SrcBound
 
 unNormBound :: SrcBound 'NormN -> StructBound
 unNormBound (SrcBound b) = b
-
-pattern NSTVar :: String -> NormSrcType
-pattern NSTVar v = STVar v
-
-pattern NSTArrow :: NormSrcType -> NormSrcType -> NormSrcType
-pattern NSTArrow a b = STArrow a b
-
-pattern NSTBase :: String -> NormSrcType
-pattern NSTBase b = STBase b
-
-pattern NSTCon :: String -> NonEmpty NormSrcType -> NormSrcType
-pattern NSTCon c args = STCon c args
-
-pattern NSTVarApp :: String -> NonEmpty NormSrcType -> NormSrcType
-pattern NSTVarApp v args = STVarApp v args
-
-pattern NSTForall :: String -> Maybe StructBound -> NormSrcType -> NormSrcType
-pattern NSTForall v mb body <- STForall v (fmap unNormBound -> mb) body
-  where
-    NSTForall v mb body = STForall v (fmap mkNormBound mb) body
-
-pattern NSTMu :: String -> NormSrcType -> NormSrcType
-pattern NSTMu v body = STMu v body
-
-pattern NSTBottom :: NormSrcType
-pattern NSTBottom = STBottom
-
-pattern SBArrow :: NormSrcType -> NormSrcType -> StructBound
-pattern SBArrow a b = STArrow a b
-
-pattern SBBase :: String -> StructBound
-pattern SBBase b = STBase b
-
-pattern SBCon :: String -> NonEmpty NormSrcType -> StructBound
-pattern SBCon c args = STCon c args
-
-pattern SBVarApp :: String -> NonEmpty NormSrcType -> StructBound
-pattern SBVarApp v args = STVarApp v args
-
-pattern SBForall :: String -> Maybe StructBound -> NormSrcType -> StructBound
-pattern SBForall v mb body <- STForall v (fmap unNormBound -> mb) body
-  where
-    SBForall v mb body = STForall v (fmap mkNormBound mb) body
-
-pattern SBMu :: String -> NormSrcType -> StructBound
-pattern SBMu v body = STMu v body
-
-pattern SBBottom :: StructBound
-pattern SBBottom = STBottom
-
-{-# COMPLETE NSTVar, NSTArrow, NSTBase, NSTCon, NSTVarApp, NSTForall, NSTMu, NSTBottom #-}
-
-{-# COMPLETE SBArrow, SBBase, SBCon, SBVarApp, SBForall, SBMu, SBBottom #-}
 
 data SrcTypeF a
   = STVarF String
@@ -478,11 +399,8 @@ instance Corecursive (Expr 'Surface ty) where
     ELamAnnSurfaceF v ty body -> ELamAnn v ty body
     EAnnSurfaceF expr0 ty -> EAnn expr0 ty
 
--- | Raw surface expression (backward-compatible alias).
+-- | Raw surface expression accepted by the parser.
 type SurfaceExpr = Expr 'Surface SrcType
-
--- | Raw core expression (backward-compatible alias).
-type CoreExpr = Expr 'Core SrcType
 
 -- | Normalized surface expression (alias bounds inlined).
 type NormSurfaceExpr = Expr 'Surface NormSrcType

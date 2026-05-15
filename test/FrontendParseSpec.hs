@@ -67,10 +67,19 @@ spec = describe "Frontend eMLF parser" $ do
             let ty = STForall "a" Nothing (STArrow (STVar "a") (STVar "a"))
             parseRawEmlfExpr "λ(x : ∀a. a -> a) x" `shouldBe` Right (ELamAnn "x" ty (EVar "x"))
 
-        it "parses recursive annotations with ascii mu syntax" $ do
+        it "rejects legacy lambda syntax" $
+            parseRawEmlfExpr "λx. x" `shouldSatisfy` isLeft
+
+        it "rejects ASCII lambda aliases" $
+            parseRawEmlfExpr "\\(x) x" `shouldSatisfy` isLeft
+
+        it "parses recursive annotations with Unicode mu syntax" $ do
             let ty = STMu "a" (STArrow (STVar "a") (STBase "Int"))
-            parseRawEmlfExpr "λ(x : mu a. a -> Int) x"
+            parseRawEmlfExpr "λ(x : μa. a -> Int) x"
                 `shouldBe` Right (ELamAnn "x" ty (EVar "x"))
+
+        it "rejects ASCII mu aliases" $
+            parseRawEmlfExpr "λ(x : mu a. a -> Int) x" `shouldSatisfy` isLeft
 
         it "parses let-expression" $
             parseRawEmlfExpr "let id = λ(x) x in id" `shouldBe` Right (ELet "id" (ELam "x" (EVar "x")) (EVar "id"))
@@ -89,9 +98,12 @@ spec = describe "Frontend eMLF parser" $ do
             parseRawEmlfExpr "let mu = x in mu" `shouldSatisfy` isLeft
 
     describe "raw types" $ do
-        it "parses raw forall binder and keeps raw alias type" $
-            parseRawEmlfType "forall a. a -> a"
+        it "parses raw Unicode forall binder and keeps raw alias type" $
+            parseRawEmlfType "∀a. a -> a"
                 `shouldBe` Right (STForall "a" Nothing (STArrow (STVar "a") (STVar "a")))
+
+        it "rejects ASCII forall aliases" $
+            parseRawEmlfType "forall a. a -> a" `shouldSatisfy` isLeft
 
         it "parses arrow types as right associative" $
             parseRawEmlfType "a -> b -> c"
@@ -103,6 +115,12 @@ spec = describe "Frontend eMLF parser" $ do
                     ( STForall "a" Nothing
                         (STForall "b" (Just (mkSrcBound (STBase "Int"))) (STArrow (STVar "a") (STVar "b")))
                     )
+
+        it "rejects forall binders without the required dot" $
+            parseRawEmlfType "∀a Int" `shouldSatisfy` isLeft
+
+        it "rejects ASCII bound aliases" $
+            parseRawEmlfType "∀(a >= Int). a" `shouldSatisfy` isLeft
 
         it "parses constructor application" $
             parseRawEmlfType "List Int" `shouldBe` Right (STCon "List" (STBase "Int" :| []))
@@ -120,7 +138,7 @@ spec = describe "Frontend eMLF parser" $ do
         it "parses arrow and forall arguments to variable-headed applications when parenthesized" $ do
             parseRawEmlfType "f (a -> b)"
                 `shouldBe` Right (STVarApp "f" (STArrow (STVar "a") (STVar "b") :| []))
-            parseRawEmlfType "f (forall a. a -> a)"
+            parseRawEmlfType "f (∀a. a -> a)"
                 `shouldBe` Right
                     ( STVarApp
                         "f"
@@ -130,6 +148,10 @@ spec = describe "Frontend eMLF parser" $ do
         it "parses unicode mu recursive types" $
             parseRawEmlfType "μa. List a"
                 `shouldBe` Right (STMu "a" (STCon "List" (STVar "a" :| [])))
+
+        it "rejects ASCII bottom aliases" $
+            forM_ ["bottom", "_|_"] $ \src ->
+                parseRawEmlfType src `shouldSatisfy` isLeft
 
         it "rejects malformed forall binders" $
             parseRawEmlfType "∀(a) a" `shouldSatisfy` isLeft

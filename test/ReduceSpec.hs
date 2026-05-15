@@ -15,7 +15,6 @@ import MLF.Elab.Pipeline
     , normalize
     , renderPipelineError
     , runPipelineElab
-    , runPipelineElabChecked
     , schemeFromType
     , step
     , typeCheck
@@ -158,25 +157,16 @@ spec = do
                             dom == dom' && dom' == cod
                         _ -> False
 
-            uncheckedRes <- case runPipelineElab Set.empty normExpr of
-                Left err -> expectationFailure ("Unchecked pipeline failed:\n" ++ renderPipelineError err) >> fail "unchecked pipeline failed"
-                Right out -> pure out
-            checkedRes <- case runPipelineElabChecked Set.empty normExpr of
-                Left err -> expectationFailure ("Checked pipeline failed:\n" ++ renderPipelineError err) >> fail "checked pipeline failed"
+            canonicalRes <- case runPipelineElab Set.empty normExpr of
+                Left err -> expectationFailure ("Canonical pipeline failed:\n" ++ renderPipelineError err) >> fail "canonical pipeline failed"
                 Right out -> pure out
 
-            let (uncheckedTerm, uncheckedTy) = uncheckedRes
-                (checkedTerm, checkedTy) = checkedRes
-                uncheckedNorm = normalize uncheckedTerm
-                checkedNorm = normalize checkedTerm
+            let (canonicalTerm, canonicalTy) = canonicalRes
+                canonicalNorm = normalize canonicalTerm
 
-            uncheckedTy `shouldSatisfy` isPolyBinaryId
-            checkedTy `shouldSatisfy` isPolyBinaryId
-            uncheckedTy `shouldBe` checkedTy
-            uncheckedNormTy <- requireRight (typeCheck uncheckedNorm)
-            checkedNormTy <- requireRight (typeCheck checkedNorm)
-            uncheckedNormTy `shouldSatisfy` isPolyBinaryId
-            checkedNormTy `shouldSatisfy` isPolyBinaryId
+            canonicalTy `shouldSatisfy` isPolyBinaryId
+            canonicalNormTy <- requireRight (typeCheck canonicalNorm)
+            canonicalNormTy `shouldSatisfy` isPolyBinaryId
 
         it "dual annotated coercion consumers fail fast on unresolved non-root OpWeaken" $ do
             let useInt =
@@ -206,5 +196,4 @@ spec = do
                             expectationFailure
                                 (label ++ " unexpectedly succeeded with type-checked term: " ++ show (term, ty))
 
-            expectPipelineFailure "unchecked pipeline" (runPipelineElab Set.empty normExpr)
-            expectPipelineFailure "checked pipeline" (runPipelineElabChecked Set.empty normExpr)
+            expectPipelineFailure "canonical pipeline" (runPipelineElab Set.empty normExpr)

@@ -440,9 +440,9 @@ applyGeneralizePlan plan reifyPlanWrapper = do
 
           -- Reification helpers
           -- Note [Identity canonical for scheme reification]:
-          -- The OnConstraint path uses fromConstraintAndUf with empty union-find
-          -- (identity canonical). We pass the original constraint so that
-          -- solved-away binders are preserved in scheme types.
+          -- The OnConstraint path builds an identity PresolutionView over the
+          -- original constraint so that solved-away binders are preserved in
+          -- scheme types.
           reifyWithOrig origC substRoot substMap _constraintArg resArg
             | useConstraintReify =
                 case reifyTypeWithNamesNoFallbackOnConstraint origC substMap substRoot of

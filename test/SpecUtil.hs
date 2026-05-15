@@ -28,6 +28,7 @@ module SpecUtil
     lookupNodeIO,
     mkForalls,
     -- * Phase-erasing test wrappers
+    eraseConstraintPhaseForTest,
     normalizeRaw,
     checkAcyclicityRaw,
     breakCyclesAndCheckAcyclicityRaw,
@@ -44,7 +45,8 @@ import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Acyclicity qualified as Acyc
 import MLF.Constraint.Normalize qualified as CNormalize
 import MLF.Constraint.Presolution (PresolutionError, PresolutionResult (..), computePresolution)
-import MLF.Constraint.Solve (SolveError, SolveResult, solveUnifyResult)
+import MLF.Constraint.Solve (SolveError)
+import MLF.Constraint.Solve.TestSupport (SolveResult, solveUnifyResult)
 import MLF.Constraint.Solved qualified as Solved
 import MLF.Constraint.Types.Graph
   ( BindFlag (..),
@@ -66,7 +68,6 @@ import MLF.Constraint.Types.Graph
     structuralChildren,
     toAcyclicConstraint,
     toNormalizedConstraint,
-    toRawConstraintForLegacy,
     toListNode,
     typeRef,
   )
@@ -93,6 +94,21 @@ emptyConstraint =
       cAnnEdges = IntSet.empty,
       cLetEdges = IntSet.empty,
       cGenNodes = fromListGen []
+    }
+
+eraseConstraintPhaseForTest :: Constraint p -> Constraint 'Raw
+eraseConstraintPhaseForTest c =
+  Constraint
+    { cNodes = cNodes c,
+      cInstEdges = cInstEdges c,
+      cUnifyEdges = cUnifyEdges c,
+      cBindParents = cBindParents c,
+      cPolySyms = cPolySyms c,
+      cEliminatedVars = cEliminatedVars c,
+      cWeakenedVars = cWeakenedVars c,
+      cAnnEdges = cAnnEdges c,
+      cLetEdges = cLetEdges c,
+      cGenNodes = cGenNodes c
     }
 
 nodeMapFromList :: [(Int, TyNode)] -> NodeMap TyNode
@@ -198,7 +214,7 @@ runToPresolutionDetailedDefault poly expr = do
   let c1 = CNormalize.normalize c0
   (cAcyclic, acyc) <- firstShowE (Acyc.checkAcyclicity c1)
   pres <- firstShowE (computePresolution defaultTraceConfig acyc cAcyclic)
-  pure (result, toRawConstraintForLegacy cAcyclic, pres)
+  pure (result, eraseConstraintPhaseForTest cAcyclic, pres)
 
 runToPresolutionDefault :: PolySyms -> SurfaceExpr -> Either String PresolutionResult
 runToPresolutionDefault poly expr = do
@@ -289,7 +305,7 @@ collectVarNodes name = go
 -- | Normalize a constraint and erase the phase index back to 'Raw.
 -- Intentional phase erasure for test convenience.
 normalizeRaw :: Constraint 'Raw -> Constraint 'Raw
-normalizeRaw = toRawConstraintForLegacy . CNormalize.normalize
+normalizeRaw = eraseConstraintPhaseForTest . CNormalize.normalize
 
 -- | Check acyclicity and erase the phase index back to 'Raw.
 -- Intentional phase erasure for test convenience.
@@ -301,7 +317,7 @@ checkAcyclicityRaw = fmap snd . Acyc.checkAcyclicity . toNormalizedConstraint
 breakCyclesAndCheckAcyclicityRaw ::
   Constraint 'Raw -> Either Acyc.CycleError (Constraint 'Raw, Acyc.AcyclicityResult)
 breakCyclesAndCheckAcyclicityRaw =
-  fmap (\(constraint, result) -> (toRawConstraintForLegacy constraint, result))
+  fmap (\(constraint, result) -> (eraseConstraintPhaseForTest constraint, result))
     . Acyc.breakCyclesAndCheckAcyclicity
     . toNormalizedConstraint
 

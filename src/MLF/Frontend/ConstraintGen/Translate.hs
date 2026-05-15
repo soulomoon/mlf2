@@ -19,8 +19,6 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (listToMaybe)
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Frontend.ConstraintGen.Emit
 import qualified MLF.Frontend.ConstraintGen.Scope as Scope
 import MLF.Frontend.ConstraintGen.State (BuildState (..), ConstraintM, ScopeFrame)

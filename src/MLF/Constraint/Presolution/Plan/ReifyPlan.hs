@@ -25,8 +25,6 @@ import MLF.Constraint.Presolution.Plan.Normalize (containsForall)
 import qualified MLF.Constraint.Presolution.Plan.SchemeRoots as SchemeRoots
 import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Reify.Core
   ( reifyBoundWithNames,
@@ -178,7 +176,7 @@ buildReifyPlan ReifyPlanInput {..} =
                   | (baseKey, solvedKey) <- IntMap.toList rpiBaseGammaRep,
                     Just name <- [IntMap.lookup solvedKey substBaseLocal]
                   ]
-                fromSolvedPref =
+                solvedPreference =
                   [ (getNodeId baseN, name)
                   | (solvedKey, name) <- IntMap.toList substBaseLocal,
                     Just baseN <- [IntMap.lookup solvedKey rpiSolvedToBasePref]
@@ -191,7 +189,7 @@ buildReifyPlan ReifyPlanInput {..} =
                   ]
              in IntMap.unions
                   [ IntMap.fromListWith (\_ old -> old) fromBaseRep,
-                    IntMap.fromListWith (\_ old -> old) fromSolvedPref,
+                    IntMap.fromListWith (\_ old -> old) solvedPreference,
                     IntMap.fromListWith (\_ old -> old) fromBaseToSolved
                   ]
           Nothing -> IntMap.empty

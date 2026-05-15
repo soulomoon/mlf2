@@ -6,7 +6,6 @@
 module MLF.Elab.Elaborate
   ( ElabConfig (ElabConfig, ecTraceConfig, ecGeneralizeAtWith),
     ElabEnv (..),
-    expansionToInst,
     elaborateWithEnv,
   )
 where
@@ -14,7 +13,7 @@ where
 import Data.Functor.Foldable (para)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Map.Strict as Map
-import MLF.Constraint.Presolution (EdgeTrace, PresolutionView)
+import MLF.Constraint.Presolution (EdgeTrace, PresolutionView (..))
 import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
 import MLF.Constraint.Types.Graph (NodeRef)
 import MLF.Constraint.Types.Phase (Phase)
@@ -29,8 +28,6 @@ import MLF.Elab.Elaborate.Algebra
 import MLF.Elab.Elaborate.Annotation (AnnotationContext (..))
 import MLF.Elab.Elaborate.Scope (GeneralizeAtWith, ScopeContext (..))
 import MLF.Elab.Generalize (GaBindParents)
-import MLF.Elab.Legacy (expansionToInst)
-import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Types (ElabError, ElabTerm, SchemeInfo)
 import MLF.Frontend.ConstraintGen.Types (AnnExpr)
 import MLF.Frontend.Syntax (NormSrcType, VarName)
@@ -88,7 +85,7 @@ elaborateWithEnv config elabEnv ann = do
           { algPresolutionView = presolutionView,
             algTraceConfig = ecTraceConfig config,
             algCanonical = canonical,
-            algResolvedLambdaParamNode = resolvedLambdaParamNode canonical chiLookupNode,
+            algResolvedLambdaParamNode = resolvedLambdaParamNode canonical lookupNode,
             algAnnotationContext = annotationContext,
             algNamedSetReify = namedSet,
             algAnnSourceTypes = eeAnnSourceTypes elabEnv
@@ -97,5 +94,5 @@ elaborateWithEnv config elabEnv ann = do
   runElab (Map.map (`mkEnvBinding` False) (eeInitialTermEnv elabEnv))
   where
     presolutionView = eePresolutionView elabEnv
-    canonical = ChiQuery.chiCanonical presolutionView
-    chiLookupNode = ChiQuery.chiLookupNode presolutionView
+    canonical = pvCanonical presolutionView
+    lookupNode = pvLookupNode presolutionView

@@ -1,11 +1,14 @@
+{-# LANGUAGE DataKinds #-}
+
 module MLF.Constraint.Finalize (
     stepSanitizeSnapshotUf,
     stepCanonicalizeConstraint,
-    stepSolvedFromPresolutionView,
     stepPruneSolvedBindParents,
     stepValidateSolvedStrict,
     presolutionViewFromSnapshot,
+    presolutionViewFromSolved,
     finalizePresolutionViewFromSnapshot,
+    validateCanonicalSnapshotStrict,
     finalizeSolvedFromSnapshot,
     finalizeSolvedForConstraint
 ) where
@@ -13,17 +16,20 @@ module MLF.Constraint.Finalize (
 import Data.IntMap.Strict (IntMap)
 
 import qualified MLF.Binding.Tree as Binding
+import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution.View
     ( PresolutionView(..)
     , SnapshotPreparation(..)
     , buildPresolutionView
     , prepareSnapshotPreparationFromParts
     )
-import MLF.Constraint.Solve (SolveError, SolveResult(..))
+import MLF.Constraint.Solve (SolveError)
 import qualified MLF.Constraint.Solve as Solve
+import MLF.Constraint.Solve.Internal (SolveResult(..))
 import qualified MLF.Constraint.Solved.Internal as SolvedInternal
 import qualified MLF.Constraint.Solved as Solved
-import MLF.Constraint.Types.Graph (Constraint, NodeId)
+import MLF.Constraint.Types.Graph (Constraint(..), NodeId)
+import MLF.Constraint.Types.Phase (Phase(Raw))
 
 stepSanitizeSnapshotUf :: Constraint p -> IntMap NodeId -> IntMap NodeId
 stepSanitizeSnapshotUf constraint uf =
@@ -39,6 +45,21 @@ presolutionViewFromSnapshot constraint uf =
     let prepared = prepareSnapshotPreparationFromParts constraint uf
     in buildPresolutionView prepared (stepCanonicalizeConstraint constraint (spSanitizedUf prepared))
 
+presolutionViewFromSolved :: Solved.Solved -> PresolutionView 'Raw
+presolutionViewFromSolved solved =
+    let constraint = Solved.originalConstraint solved
+        canonical = Solved.canonical solved
+    in PresolutionView
+        { pvConstraint = constraint
+        , pvCanonicalMap = Solved.canonicalMap solved
+        , pvCanonical = canonical
+        , pvLookupNode = \nid -> NodeAccess.lookupNode constraint (canonical nid)
+        , pvLookupVarBound = \nid -> NodeAccess.lookupVarBound constraint (canonical nid)
+        , pvLookupBindParent = NodeAccess.lookupBindParent constraint
+        , pvBindParents = cBindParents constraint
+        , pvCanonicalConstraint = Solved.canonicalConstraint solved
+        }
+
 finalizePresolutionViewFromSnapshot :: Constraint p -> IntMap NodeId -> Either SolveError (PresolutionView p)
 finalizePresolutionViewFromSnapshot constraint uf = do
     let prepared0 = prepareSnapshotPreparationFromParts constraint uf
@@ -47,13 +68,13 @@ finalizePresolutionViewFromSnapshot constraint uf = do
     let preparedFinal = prepareSnapshotPreparationFromParts constraint ufFinal
     pure (buildPresolutionView preparedFinal canonicalConstraint)
 
-stepSolvedFromPresolutionView :: PresolutionView p -> Solved.Solved
-stepSolvedFromPresolutionView presolutionView =
-    let constraint = pvConstraint presolutionView
-        canonicalMap = pvCanonicalMap presolutionView
-        canonicalConstraint = stepCanonicalizeConstraint constraint canonicalMap
-        solved0 = SolvedInternal.fromConstraintAndUf constraint canonicalMap
-    in SolvedInternal.rebuildWithConstraint solved0 canonicalConstraint
+validateCanonicalSnapshotStrict :: Constraint p -> IntMap NodeId -> [String]
+validateCanonicalSnapshotStrict canonicalConstraint canonicalMap =
+    Solve.validateSolvedGraphStrict
+        SolveResult
+            { srConstraint = canonicalConstraint
+            , srUnionFind = canonicalMap
+            }
 
 stepPruneSolvedBindParents :: Solved.Solved -> Solved.Solved
 stepPruneSolvedBindParents = SolvedInternal.pruneBindParentsSolved

@@ -10,7 +10,7 @@ The pipeline takes eMLF terms, builds and solves graphic constraints, and elabor
 ## Repository layout
 
 - `src/` — internal implementation (`MLF.Frontend.*`, `MLF.Constraint.*`, `MLF.Elab.*`, etc.)
-- `src-public/` — public API modules (`MLF.API`, `MLF.Program`, `MLF.Pipeline`, `MLF.XMLF`)
+- `src-public/` — public API modules (`MLF.API`, `MLF.Pipeline`, `MLF.XMLF`)
 - `app/` — executable entrypoint (`mlf2`)
 - `test/` — Hspec test suite
 - `tasks/` — active/archive task execution logs
@@ -66,7 +66,6 @@ CI reuses the same repo commands; there is no CI-only verification logic.
 
 - `MLF.API` — surface syntax plus eMLF / `.mlfp` parsing, pretty-printing, and normalization helpers
 - `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API, including `.mlfp` elaboration/checking on the shared eMLF/xMLF path
-- `MLF.Program` — thin compatibility re-export for the same unified `.mlfp` surface
 - `MLF.XMLF` — xMLF syntax, parser, and pretty-printer
 
 Active multi-step work is tracked under `tasks/todo/`; root-level `task_plan.md`,
@@ -79,7 +78,6 @@ workflow.
 
 - `MLF.API` parses and pretty-prints `.mlfp` programs
 - `MLF.Pipeline` elaborates `.mlfp` programs onto the existing eMLF/xMLF path and checks them with the existing MLF typechecker
-- `MLF.Program` remains available only as a thin compatibility re-export
 
 The unified `.mlfp` surface includes:
 

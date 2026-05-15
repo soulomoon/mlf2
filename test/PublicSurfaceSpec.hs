@@ -32,7 +32,7 @@ spec = describe "Public surface contracts" $ do
         normalizeType ty `shouldBe` Right (STVar "a")
 
     it "normalizes recursive raw surface types through the umbrella API" $ do
-      expectRight (parseRawEmlfType "mu a. ∀(b ⩾ a). b") $ \ty ->
+      expectRight (parseRawEmlfType "μa. ∀(b ⩾ a). b") $ \ty ->
         normalizeType ty `shouldBe` Right (STMu "a" (STVar "a"))
 
     it "keeps frontend-only conveniences on the umbrella API" $ do
@@ -50,6 +50,10 @@ spec = describe "Public surface contracts" $ do
         parseRawProgram (prettyProgram program) `shouldBe` Right program
 
   describe "MLF.Pipeline" $ do
+    it "does not export checker-authoritative compatibility aliases" $ do
+      pipelineSrc <- readFile "src-public/MLF/Pipeline.hs"
+      T.pack pipelineSrc `shouldSatisfy` (not . T.isInfixOf (T.pack "runPipelineElabChecked"))
+
     it "elaborates normalized programs through the focused pipeline surface" $ do
       expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
         expectRight (Pipeline.runPipelineElab Set.empty expr) $ \(term, ty) -> do
@@ -75,7 +79,7 @@ spec = describe "Public surface contracts" $ do
 
     it "owns checked runtime helpers and pipeline diagnostics" $ do
       expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
-        expectRight (Pipeline.runPipelineElabChecked Set.empty expr) $ \(term, ty) -> do
+        expectRight (Pipeline.runPipelineElab Set.empty expr) $ \(term, ty) -> do
           Pipeline.typeCheck term `shouldBe` Right ty
           Pipeline.isValue term `shouldBe` True
 

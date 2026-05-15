@@ -93,8 +93,6 @@ module MLF.Constraint.Types.Graph (
     toAcyclicConstraint,
     toPresolvedConstraint,
     toSolvedConstraint,
-    toRawConstraintForLegacy,
-    castConstraint,
 ) where
 
 import Data.IntSet (IntSet)
@@ -127,7 +125,7 @@ bounds on the `TyVar` itself.
 --
 -- The phantom type parameter @p :: Phase@ tracks which pipeline stage the
 -- constraint has reached. Phase entrypoints should use the directional
--- transition helpers below rather than the legacy 'castConstraint'.
+-- transition helpers below.
 data Constraint (p :: Phase) = Constraint
         { cNodes :: NodeMap TyNode
             -- ^ The hash-consed DAG of graphic type nodes. Every structural operation
@@ -226,18 +224,3 @@ toPresolvedConstraint = rephaseConstraint
 -- | Phase 5 boundary: presolved constraints have been solved.
 toSolvedConstraint :: Constraint 'Presolved -> Constraint 'Solved
 toSolvedConstraint = rephaseConstraint
-
--- | Compatibility bridge for legacy readers that still expose raw constraints.
---
--- This should stay near solved/elaboration compatibility boundaries. New phase
--- transitions should use the directional helpers above.
-toRawConstraintForLegacy :: Constraint p -> Constraint 'Raw
-toRawConstraintForLegacy = rephaseConstraint
-
--- | Cast the phase index of a 'Constraint'.
---
--- Compatibility escape hatch only. Prefer the directional transition helpers
--- above, or a local compatibility bridge that documents why phase erasure is
--- required.
-castConstraint :: Constraint p -> Constraint q
-castConstraint = rephaseConstraint

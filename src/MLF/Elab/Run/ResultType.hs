@@ -16,17 +16,14 @@ module MLF.Elab.Run.ResultType
 where
 
 import qualified Data.IntMap.Strict as IntMap
-import MLF.Constraint.Presolution (PresolutionPlanBuilder)
+import MLF.Constraint.Presolution (PresolutionPlanBuilder, PresolutionView (..))
 import MLF.Constraint.Presolution.Base (EdgeArtifacts (..))
-import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Types.Graph
   ( Constraint,
     EdgeId (..),
     NodeId (..),
   )
-import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Generalize (GaBindParents)
-import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme)
 import qualified MLF.Elab.Run.ResultType.Ann as Ann
 import qualified MLF.Elab.Run.ResultType.Fallback as Fallback
@@ -95,7 +92,7 @@ computeResultTypeDispatch ctx view annCanon ann = do
   let (rootForTypeAnn, rootForTypePreAnn) =
         resultTypeRoots
           (rtcCanonical ctx)
-          (ChiQuery.chiConstraint (rtcPresolutionView ctx))
+          (pvConstraint (rtcPresolutionView ctx))
           (rtcBaseConstraint ctx)
           annCanon
           ann

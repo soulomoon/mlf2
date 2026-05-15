@@ -2,50 +2,11 @@
 
 This document is the syntax source of truth for parser and pretty-printer behavior.
 
-## Transition Compatibility Reference
+## Canonical Parser Syntax (Paper-Aligned)
 
-Canonical xMLF pretty-printers now emit the paper-aligned syntax described below. The legacy `MLF.Elab.Types.Pretty` output is retained here only as a parser-compatibility reference; current internal and CLI pretty-print paths no longer emit these spellings.
-
-### Legacy Type Syntax
-
-```ebnf
-Type        ::= Var
-              | Base
-              | Type "->" Type
-              | "∀" Var "." Type
-              | "∀(" Var "⩾" Type ")." Type
-              | "⊥"
-              | Con Type+
-```
-
-### Legacy Instantiation Syntax
-
-```ebnf
-Inst        ::= "1"
-              | "⟨" Type "⟩"
-              | Type                  -- legacy InstBot shape
-              | "O"
-              | "N"
-              | "!" Var
-              | "∀(" Var "⩾) " Inst
-              | "∀(⩾ " Inst ")"
-              | Inst "; " Inst
-```
-
-### Legacy Term Syntax
-
-```ebnf
-Term        ::= Var
-              | IntLit | BoolLit | StringLit
-              | "λ" Var ":" Type ". " Term
-              | "(" Term ") " Term
-              | "let " Var " : " Scheme " = " Term " in " Term
-              | "Λ" Var ". " Term
-              | "Λ(" Var "⩾" Type "). " Term
-              | Term " [" Inst "]"
-```
-
-## Canonical Target Syntax (Paper-Aligned)
+The raw eMLF and explicit xMLF parser APIs accept the canonical Unicode syntax
+below. Legacy grammar forms and ASCII aliases are rejected; compatibility
+spellings are not a standing parser contract.
 
 ### eMLF (from `emlf_typeing_rules.md`)
 
@@ -92,26 +53,16 @@ Term        ::= x
               | "let " x " = " Term " in " Term
 ```
 
-### Accepted ASCII Aliases
+## Retired Legacy Syntax
 
-- `\` for `λ`
-- `forall` for `∀`
-- `>=` for `⩾`
-- `_|_` or `bottom` for `⊥`
-- `epsilon` or `1` for `ε` (legacy acceptance)
-- legacy `⟨τ⟩` and `!a` are accepted in xMLF parser as transition syntax
+These former compatibility forms are parse errors on the raw eMLF and explicit
+xMLF parser APIs:
 
-## Delta Table (Legacy -> Canonical)
-
-| Legacy | Canonical |
-|---|---|
-| `1` | `ε` |
-| `⟨τ⟩` | `∀(⩾ ⊲τ); N` |
-| bare `τ` as InstBot | `⊲τ` |
-| `!a` | `a⊳` |
-| `Λa. t` | `Λ(a ⩾ ⊥) t` |
-| `∀a. τ` (xMLF pretty) | `∀(a ⩾ ⊥) τ` |
-| `λx:τ. t` | `λ(x : τ) t` |
+- ASCII token aliases: `\`, `forall`, `>=`, `_|_`, `bottom`, `Lambda`,
+  `epsilon`, and `1`.
+- eMLF legacy lambdas such as `λx. t` and `λx:τ. t`.
+- xMLF legacy computations such as `!a`, `⟨τ⟩`, and bare `τ` as a computation.
+- xMLF legacy type and term forms such as `∀a. τ`, `Λa. t`, and `λx:τ. t`.
 
 ## Normalization Rules
 
@@ -120,7 +71,9 @@ Term        ::= x
 - Application is left-associative.
 - xMLF computation composition `;` is left-associative.
 - Parentheses are emitted only when required by precedence.
-- Reserved words: `let`, `in`, `forall`, `true`, `false`, `epsilon`.
+- Reserved words include active keywords and retired spellings that must fail as
+  identifiers, including `let`, `in`, `mu`, `forall`, `bottom`, `true`,
+  `false`, `epsilon`, `roll`, and `unroll` where applicable.
 - Comments accepted in parsers: `-- ...` and `{- ... -}`.
 
 ## Implementation Extensions
@@ -128,15 +81,15 @@ Term        ::= x
 - eMLF supports literals (`Int`, `Bool`, `String`) as expression atoms.
 - eMLF parser accepts `let x : τ = e in b` and desugars to `let x = (e : τ) in b`.
 - xMLF term/type syntax includes base types as uppercase 0-ary constructors (e.g. `Int`, `Bool`).
-- xMLF parser accepts legacy instantiation tokens (`1`, `⟨τ⟩`, `!a`) for transition, but pretty-printing is canonical.
+- xMLF parser accepts recursive term forms `roll[τ] t` and `unroll t`.
 - `ElabTerm` carries let schemes (`ELet String ElabScheme ...`); pretty output keeps `let x : scheme = ... in ...` as a repository-specific extension for debugging fidelity.
 
 ## Unified `.mlfp` Program Surface
 
 `.mlfp` is now a unified frontend/pipeline entrypoint rather than a separate
 language lane. `MLF.API` owns `.mlfp` parse/pretty, `MLF.Pipeline` elaborates
-`.mlfp` through the shared eMLF/xMLF path, and `MLF.Program` survives only as
-a compatibility shim. The Phase-0 freeze lives in
+`.mlfp` through the shared eMLF/xMLF path, and the old public program re-export
+shim has been retired. The Phase-0 freeze lives in
 `docs/plans/2026-04-13-recursive-adt-syntax-freeze.md`; the implementation
 currently accepts the following core shapes:
 

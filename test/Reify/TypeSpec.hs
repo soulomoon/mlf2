@@ -4,9 +4,10 @@
 module Reify.TypeSpec (spec) where
 
 import Data.IntSet qualified as IntSet
-import Data.List (isPrefixOf)
+import Data.List (isInfixOf, isPrefixOf)
 import Data.Set qualified as Set
-import MLF.Constraint.Presolution.View (PresolutionView, fromSolved)
+import MLF.Constraint.Finalize qualified as Finalize
+import MLF.Constraint.Presolution.View (PresolutionView (..))
 import MLF.Constraint.Solved qualified as Solved
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..), getNodeId)
@@ -17,7 +18,6 @@ import MLF.Reify.Type
     reifyType,
     reifyWith,
     reifyWithAs,
-    solvedFromView,
   )
 import MLF.Types.Elab (ElabType, Ty (..))
 import MLF.Util.ElabError (ElabError (..))
@@ -35,10 +35,21 @@ pipelineFor expr = requireRight (runPipelineArtifactsDefault Set.empty expr)
 
 -- | Helper: build PresolutionView 'Raw from a Solved value.
 viewFor :: Solved.Solved -> PresolutionView 'Raw
-viewFor = fromSolved
+viewFor = Finalize.presolutionViewFromSolved
 
 spec :: Spec
 spec = describe "MLF.Reify.Type" $ do
+  describe "Snapshot Finalization ownership" $ do
+    it "does not expose a local solvedFromView adapter" $ do
+      src <- readFile "src/MLF/Reify/Type.hs"
+      src `shouldSatisfy` (not . isInfixOf "solvedFromView")
+
+    it "does not reconstruct Solved from PresolutionView in reify entrypoints" $ do
+      typeSrc <- readFile "src/MLF/Reify/Type.hs"
+      boundSrc <- readFile "src/MLF/Reify/Bound.hs"
+      typeSrc `shouldSatisfy` (not . isInfixOf "stepSolvedFromPresolutionView")
+      boundSrc `shouldSatisfy` (not . isInfixOf "stepSolvedFromPresolutionView")
+
   describe "reifyType" $ do
     it "reifies a literal expression to a base type" $ do
       artifacts <- pipelineFor (ELit (LInt 42))
@@ -80,31 +91,24 @@ spec = describe "MLF.Reify.Type" $ do
       expectRight (reifyType view root) $ \ty ->
         ty `shouldSatisfy` isBaseType
 
-  describe "solvedFromView" $ do
-    it "produces a Solved with matching original constraint for identity" $ do
+  describe "Snapshot Finalization read model construction" $ do
+    it "preserves the solved original constraint for identity" $ do
       artifacts <- pipelineFor (ELam "x" (EVar "x"))
       let solved = paSolved artifacts
           view = viewFor solved
-          solved' = solvedFromView view
-      -- The original constraint should match
-      Solved.originalConstraint solved'
-        `shouldBe` Solved.originalConstraint solved
+      pvConstraint view `shouldBe` Solved.originalConstraint solved
 
-    it "produces a Solved with matching canonical constraint for identity" $ do
+    it "preserves the solved canonical constraint for identity" $ do
       artifacts <- pipelineFor (ELam "x" (EVar "x"))
       let solved = paSolved artifacts
           view = viewFor solved
-          solved' = solvedFromView view
-      Solved.canonicalConstraint solved'
-        `shouldBe` Solved.canonicalConstraint solved
+      pvCanonicalConstraint view `shouldBe` Solved.canonicalConstraint solved
 
-    it "roundtrips through view for literal expression" $ do
+    it "preserves the solved original constraint for literal expression" $ do
       artifacts <- pipelineFor (ELit (LInt 0))
       let solved = paSolved artifacts
           view = viewFor solved
-          solved' = solvedFromView view
-      Solved.originalConstraint solved'
-        `shouldBe` Solved.originalConstraint solved
+      pvConstraint view `shouldBe` Solved.originalConstraint solved
 
   describe "freeVars" $ do
     it "returns empty for a literal node" $ do
@@ -136,60 +140,66 @@ spec = describe "MLF.Reify.Type" $ do
     it "reifies identity with custom var names" $ do
       artifacts <- pipelineFor (ELam "x" (EVar "x"))
       let solved = paSolved artifacts
+          view = viewFor solved
           root = paRoot artifacts
           nameFor (NodeId i) = "v" ++ show i
           isNamed _ = False
-      expectRight (reifyWith "test" solved nameFor isNamed RootType root) $ \ty ->
+      expectRight (reifyWith "test" view nameFor isNamed RootType root) $ \ty ->
         ty `shouldSatisfy` isPrefixedVarType "v"
     it "reifies literal with RootType" $ do
       artifacts <- pipelineFor (ELit (LInt 7))
       let solved = paSolved artifacts
+          view = viewFor solved
           root = paRoot artifacts
           nameFor (NodeId i) = "n" ++ show i
           isNamed _ = False
-      expectRight (reifyWith "test" solved nameFor isNamed RootType root) $ \ty ->
+      expectRight (reifyWith "test" view nameFor isNamed RootType root) $ \ty ->
         ty `shouldSatisfy` isBaseType
 
     it "reifies literal with RootBound" $ do
       artifacts <- pipelineFor (ELit (LInt 7))
       let solved = paSolved artifacts
+          view = viewFor solved
           root = paRoot artifacts
           nameFor (NodeId i) = "n" ++ show i
           isNamed _ = False
-      expectRight (reifyWith "test" solved nameFor isNamed RootBound root) $ \ty ->
+      expectRight (reifyWith "test" view nameFor isNamed RootBound root) $ \ty ->
         ty `shouldSatisfy` isBaseType
 
   describe "reifyWithAs" $ do
     it "applies conversion function after reification" $ do
       artifacts <- pipelineFor (ELit (LInt 1))
       let solved = paSolved artifacts
+          view = viewFor solved
           root = paRoot artifacts
           nameFor (NodeId i) = "t" ++ show i
           isNamed _ = False
           asString :: ElabType -> Either ElabError String
           asString ty = Right (show ty)
-      expectRight (reifyWithAs "test" solved nameFor isNamed RootType asString root) $ \s ->
+      expectRight (reifyWithAs "test" view nameFor isNamed RootType asString root) $ \s ->
         s `shouldBe` show (TBase (BaseTy "Int"))
 
     it "propagates conversion failure" $ do
       artifacts <- pipelineFor (ELit (LInt 1))
       let solved = paSolved artifacts
+          view = viewFor solved
           root = paRoot artifacts
           nameFor (NodeId i) = "t" ++ show i
           isNamed _ = False
           failConvert :: ElabType -> Either ElabError String
           failConvert _ = Left (InstantiationError "test-fail")
-      case reifyWithAs "test" solved nameFor isNamed RootType failConvert root of
+      case reifyWithAs "test" view nameFor isNamed RootType failConvert root of
         Left _ -> pure () -- expected
         Right _ -> expectationFailure "Expected conversion failure"
 
     it "succeeds with identity conversion" $ do
       artifacts <- pipelineFor (ELit (LInt 1))
       let solved = paSolved artifacts
+          view = viewFor solved
           root = paRoot artifacts
           nameFor (NodeId i) = "t" ++ show i
           isNamed _ = False
-      expectRight (reifyWithAs "test" solved nameFor isNamed RootType Right root) $ \ty ->
+      expectRight (reifyWithAs "test" view nameFor isNamed RootType Right root) $ \ty ->
         ty `shouldSatisfy` isBaseType
 
 -- Predicates for structural assertions on ElabType

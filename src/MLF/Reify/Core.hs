@@ -52,7 +52,7 @@ reifyTypeWithNamedSetNoFallback = Type.reifyTypeWithNamedSetNoFallback
 
 reifyWithAs
     :: String
-    -> Solved
+    -> PresolutionView p
     -> (NodeId -> String)
     -> (NodeId -> Bool)
     -> ReifyRoot

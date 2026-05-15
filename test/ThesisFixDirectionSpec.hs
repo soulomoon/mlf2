@@ -31,8 +31,5 @@ assertPipelineStrictFailure label runPipeline =
 
 spec :: Spec
 spec = describe "BUG-2026-02-06-002 thesis target" $ do
-    it "unchecked pipeline now fails fast without fallback recovery" $
-        assertPipelineStrictFailure "unchecked pipeline" runPipelineElab
-
-    it "checked pipeline now fails fast without fallback recovery" $
-        assertPipelineStrictFailure "checked pipeline" runPipelineElabChecked
+    it "canonical pipeline now fails fast without fallback recovery" $
+        assertPipelineStrictFailure "canonical pipeline" runPipelineElab

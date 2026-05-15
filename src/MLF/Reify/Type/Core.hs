@@ -38,13 +38,10 @@ import Control.Monad (foldM, unless)
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
 import qualified Data.List.NonEmpty as NE
-import MLF.Binding.Tree (lookupBindParent)
 import qualified MLF.Constraint.Canonicalize as Canonicalize
-import MLF.Constraint.Solved (Solved)
-import qualified MLF.Constraint.Solved as Solved
+import MLF.Constraint.Presolution.View (PresolutionView (..))
 import qualified MLF.Constraint.Traversal as Traversal
 import MLF.Constraint.Types.Graph hiding (lookupNode)
-import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Reify.Cache
 import MLF.Reify.Named (softenedBindParentsUnder)
 import MLF.Types.Elab
@@ -59,24 +56,24 @@ data ReifyRoot
 
 reifyWith ::
   String ->
-  Solved ->
+  PresolutionView p ->
   (NodeId -> String) ->
   (NodeId -> Bool) ->
   ReifyRoot ->
   NodeId ->
   Either ElabError ElabType
-reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
+reifyWith _contextLabel presolutionView nameForVar isNamed rootMode nid =
   let start = case rootMode of
         RootType -> goType
         RootTypeNoFallback -> goTypeNoFallback
         RootBound -> goBoundRoot
    in snd <$> start emptyCache (canonical nid)
   where
-    originalConstraint = Solved.originalConstraint solved
-    canonicalConstraint = Solved.canonicalConstraint solved
+    originalConstraint = pvConstraint presolutionView
+    canonicalConstraint = pvCanonicalConstraint presolutionView
     nodes = cNodes canonicalConstraint
-    canonical = Solved.canonical solved
-    lookupVarBoundS queryNid = VarStore.lookupVarBound originalConstraint (canonical queryNid)
+    canonical = pvCanonical presolutionView
+    lookupVarBoundS = pvLookupVarBound presolutionView
     originalGenNodes = cGenNodes originalConstraint
     weakened = cWeakenedVars canonicalConstraint
     isEliminatedVarS queryNid = IntSet.member (getNodeId queryNid) (cEliminatedVars canonicalConstraint)
@@ -617,7 +614,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
               _ -> bindersReachable0
           binderKeys = map (getNodeId . canonical) bindersReachable
           binderSet = IntSet.fromList binderKeys
-          orderKeys = Order.orderKeysFromRoot solved orderRoot
+          orderKeys = Order.orderKeysFromConstraintWith canonical originalConstraint orderRoot Nothing
           missing =
             [ NodeId k
               | k <- binderKeys,
@@ -625,7 +622,7 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
             ]
           depsFor k =
             [ d
-              | d <- IntSet.toList (freeVars solved (NodeId k) IntSet.empty),
+              | d <- IntSet.toList (freeVarsInView presolutionView (NodeId k) IntSet.empty),
                 IntSet.member d binderSet,
                 d /= k
             ]
@@ -682,27 +679,27 @@ reifyWith _contextLabel solved nameForVar isNamed rootMode nid =
 
 reifyWithAs ::
   String ->
-  Solved ->
+  PresolutionView p ->
   (NodeId -> String) ->
   (NodeId -> Bool) ->
   ReifyRoot ->
   (ElabType -> Either ElabError a) ->
   NodeId ->
   Either ElabError a
-reifyWithAs contextLabel solved nameForVar isNamed rootMode convert nid =
-  convert =<< reifyWith contextLabel solved nameForVar isNamed rootMode nid
+reifyWithAs contextLabel presolutionView nameForVar isNamed rootMode convert nid =
+  convert =<< reifyWith contextLabel presolutionView nameForVar isNamed rootMode nid
 
-freeVars :: Solved -> NodeId -> IntSet.IntSet -> IntSet.IntSet
-freeVars solved nid visited
+freeVarsInView :: PresolutionView p -> NodeId -> IntSet.IntSet -> IntSet.IntSet
+freeVarsInView presolutionView nid visited
   | IntSet.member key visited = IntSet.empty
   | otherwise =
       let visited' = IntSet.insert key visited
        in case lookupNodeIn nodes (canonical nid) of
             Nothing -> IntSet.empty
             Just TyVar {} ->
-              case VarStore.lookupVarBound constraint (canonical nid) of
+              case pvLookupVarBound presolutionView (canonical nid) of
                 Nothing -> IntSet.empty
-                Just bnd -> freeVars solved (canonical bnd) visited'
+                Just bnd -> freeVarsInView presolutionView (canonical bnd) visited'
             Just TyBase {} -> IntSet.empty
             Just TyBottom {} -> IntSet.empty
             Just TyArrow {tnDom = d, tnCod = c} ->
@@ -715,14 +712,14 @@ freeVars solved nid visited
             Just TyMu {tnBody = b} ->
               freeVarsChild visited' b
             Just TyExp {tnBody = b} ->
-              freeVars solved (canonical b) visited'
+              freeVarsInView presolutionView (canonical b) visited'
   where
-    constraint = Solved.originalConstraint solved
+    constraint = pvConstraint presolutionView
     nodes = cNodes constraint
-    canonical = Solved.canonical solved
+    canonical = pvCanonical presolutionView
     key = getNodeId (canonical nid)
 
     freeVarsChild visited' child =
-      case lookupBindParent constraint (typeRef (canonical child)) of
-        Just (_, BindRigid) -> freeVars solved (canonical child) visited'
+      case pvLookupBindParent presolutionView (typeRef (canonical child)) of
+        Just (_, BindRigid) -> freeVarsInView presolutionView (canonical child) visited'
         _ -> IntSet.singleton (getNodeId (canonical child))

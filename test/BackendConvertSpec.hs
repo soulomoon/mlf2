@@ -8,9 +8,18 @@ import MLF.Backend.Convert
 import MLF.Backend.IR
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import qualified MLF.Elab.Types as Elab
-import MLF.Frontend.Program.Types (ConstructorInfo (..), DataInfo (..))
+import MLF.API (parseRawProgram, renderProgramParseError)
+import MLF.Frontend.Program.Prelude (withPrelude)
+import MLF.Frontend.Program.Types
+  ( CheckedBinding (..),
+    CheckedModule (..),
+    CheckedProgram (..),
+    ConstructorInfo (..),
+    DataInfo (..),
+  )
 import MLF.Frontend.Syntax (Lit (..), SrcTy (..), SrcType)
-import MLF.Program
+import MLF.Frontend.Syntax.Program (Program)
+import MLF.Pipeline (checkProgram)
 import System.Directory (createDirectoryIfMissing)
 import System.Environment (lookupEnv)
 import System.FilePath (takeDirectory)

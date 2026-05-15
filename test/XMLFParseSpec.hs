@@ -1,5 +1,6 @@
 module XMLFParseSpec (spec) where
 
+import Control.Monad (forM_)
 import Data.List.NonEmpty (NonEmpty (..))
 import Test.Hspec
 
@@ -27,15 +28,41 @@ spec = describe "xMLF parser" $ do
             parseXmlfType "μa. a -> Int"
                 `shouldBe` Right (XTMu "a" (XTArrow (XTVar "a") (XTBase "Int")))
 
+        it "rejects ASCII forall aliases" $
+            parseXmlfType "forall (a ⩾ Int) a" `shouldSatisfy` isLeft
+
+        it "rejects ASCII bound aliases" $
+            parseXmlfType "∀(a >= Int) a" `shouldSatisfy` isLeft
+
+        it "rejects ASCII bottom aliases" $
+            forM_ ["bottom", "_|_"] $ \src ->
+                parseXmlfType src `shouldSatisfy` isLeft
+
+        it "rejects ASCII mu aliases" $
+            parseXmlfType "mu a. a -> Int" `shouldSatisfy` isLeft
+
+        it "rejects legacy unbounded forall syntax" $
+            parseXmlfType "∀a. a" `shouldSatisfy` isLeft
+
     describe "computations" $ do
-        it "parses canonical computations" $
+        it "parses canonical computations" $ do
+            parseXmlfComp "ε" `shouldBe` Right XCId
+            parseXmlfComp "a⊳" `shouldBe` Right (XCHyp "a")
             parseXmlfComp "∀(⩾ ⊲Int); N"
                 `shouldBe` Right (XCSeq (XCInner (XCBot (XTBase "Int"))) XCElim)
 
-        it "parses legacy computation aliases for transition" $ do
-            parseXmlfComp "1" `shouldBe` Right XCId
-            parseXmlfComp "!a" `shouldBe` Right (XCHyp "a")
-            parseXmlfComp "⟨Int⟩" `shouldBe` Right (XCSeq (XCInner (XCBot (XTBase "Int"))) XCElim)
+        it "rejects legacy identity computation aliases" $
+            forM_ ["1", "epsilon"] $ \src ->
+                parseXmlfComp src `shouldSatisfy` isLeft
+
+        it "rejects legacy hypothesis computation syntax" $
+            parseXmlfComp "!a" `shouldSatisfy` isLeft
+
+        it "rejects legacy bracketed computation syntax" $
+            parseXmlfComp "⟨Int⟩" `shouldSatisfy` isLeft
+
+        it "rejects bare type-as-computation syntax" $
+            parseXmlfComp "Int" `shouldSatisfy` isLeft
 
         it "rejects malformed outer computation" $
             parseXmlfComp "∀(a ⩾ Int) N" `shouldSatisfy` isLeft
@@ -54,6 +81,18 @@ spec = describe "xMLF parser" $ do
             let src = "let id = λ(x : Int) x in id 1"
                 expected = XLet "id" (XLam "x" (XTBase "Int") (XVar "x")) (XApp (XVar "id") (XLit (LInt 1)))
             parseXmlfTerm src `shouldBe` Right expected
+
+        it "rejects legacy lambda syntax" $
+            parseXmlfTerm "λx:Int. x" `shouldSatisfy` isLeft
+
+        it "rejects ASCII lambda aliases" $
+            parseXmlfTerm "\\(x : Int) x" `shouldSatisfy` isLeft
+
+        it "rejects legacy type abstraction syntax" $
+            parseXmlfTerm "Λa. x" `shouldSatisfy` isLeft
+
+        it "rejects ASCII type abstraction aliases" $
+            parseXmlfTerm "Lambda(a ⩾ ⊥) x" `shouldSatisfy` isLeft
 
         it "parses recursive roll terms with recursive types" $ do
             let src = "roll[μself. self -> Int] x"

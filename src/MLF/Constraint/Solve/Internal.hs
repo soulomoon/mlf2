@@ -23,11 +23,8 @@ data SolveResult p = SolveResult { srConstraint :: Constraint p   -- ^ Constrain
     }
     deriving (Eq, Show)
 
--- | Full solve output with:
---   * `soSnapshot`: primary data for staged `Solved` construction.
---   * `soResult`: legacy compatibility payload for `SolveResult p` call sites.
+-- | Snapshot-bearing solve output for staged `Solved` construction.
 data SolveOutput p = SolveOutput
-    { soResult :: SolveResult p
-    , soSnapshot :: SolveSnapshot p
+    { soSnapshot :: SolveSnapshot p
     }
     deriving (Eq, Show)

@@ -4,7 +4,8 @@ module Reify.CoreSpec (spec) where
 
 import Data.IntSet qualified as IntSet
 import Data.Set qualified as Set
-import MLF.Constraint.Presolution.View (PresolutionView, fromSolved)
+import MLF.Constraint.Finalize qualified as Finalize
+import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Solved qualified as Solved
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Types.Graph (NodeId (..), getNodeId)
@@ -24,7 +25,7 @@ import Test.Hspec
 pipelineFor :: PipelineArtifacts -> (Solved.Solved, PresolutionView 'Raw, NodeId)
 pipelineFor artifacts =
   let solved = paSolved artifacts
-      view = fromSolved solved
+      view = Finalize.presolutionViewFromSolved solved
       root = paRoot artifacts
    in (solved, view, root)
 

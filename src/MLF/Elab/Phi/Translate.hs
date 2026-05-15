@@ -43,7 +43,6 @@ import Data.Maybe (listToMaybe)
 
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Types.Phase (Phase)
 import MLF.Elab.Types
 import MLF.Elab.Generalize (GaBindParents(..))

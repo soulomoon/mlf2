@@ -22,19 +22,18 @@ import Text.Megaparsec
     , eof
     , errorBundlePretty
     , many
-    , optional
     , parse
     , try
     , (<|>)
     )
 import MLF.Parse.Common
     ( Parser
-    , bigLambdaTok
-    , bottomTok
     , brackets
-    , forallTok
-    , geTok
-    , lambdaTok
+    , canonicalBigLambdaTok
+    , canonicalBottomTok
+    , canonicalForallTok
+    , canonicalGeTok
+    , canonicalLambdaTok
     , lowerIdent
     , parens
     , pLit
@@ -80,10 +79,11 @@ reservedWords =
         , "false"
         , "forall"
         , "epsilon"
+        , "bottom"
         ]
 
 muTok :: Parser ()
-muTok = void (symbol "μ" <|> symbol "mu")
+muTok = void (symbol "μ")
 
 botCompTok :: Parser ()
 botCompTok = void (symbol "⊲")
@@ -94,13 +94,13 @@ hypCompTok = void (symbol "⊳")
 xmlfTypeConfig :: TypeParserConfig XmlfType XmlfType
 xmlfTypeConfig =
     TypeParserConfig
-        { tpcForallTok = forallTok
-        , tpcGeTok = geTok
+        { tpcForallTok = canonicalForallTok
+        , tpcGeTok = canonicalGeTok
         , tpcSymbol = symbol
         , tpcParens = parens
         , tpcLowerIdent = lowerIdent reservedWords
         , tpcUpperIdent = upperIdent reservedWords
-        , tpcBottomTok = bottomTok
+        , tpcBottomTok = canonicalBottomTok
         , tpcMkVar = XTVar
         , tpcMkArrow = XTArrow
         , tpcMkBase = XTBase
@@ -111,31 +111,20 @@ xmlfTypeConfig =
         , tpcBoundedBinder = \pTy ->
             parens $ do
                 v <- lowerIdent reservedWords
-                geTok
+                canonicalGeTok
                 bound <- pTy
                 pure (v, bound)
-        , tpcUnboundedBinder = do
-            v <- lowerIdent reservedWords
-            pure (v, XTBottom)
+        , tpcUnboundedBinder = fail "xMLF forall binders require explicit bounds"
         , tpcForallBinders = \pTy -> do
-            firstBinder <- try ((tpcBoundedBinder xmlfTypeConfig) pTy) <|> tpcUnboundedBinder xmlfTypeConfig
-            restBinders <- optional . try $ do
-                more <- many (try ((tpcBoundedBinder xmlfTypeConfig) pTy) <|> tpcUnboundedBinder xmlfTypeConfig)
-                void (symbol ".")
-                pure more
-            case restBinders of
-                Nothing -> void (optional (symbol "."))
-                Just _ -> pure ()
-            pure $ case restBinders of
-                Nothing -> [firstBinder]
-                Just more -> firstBinder : more
+            binder <- (tpcBoundedBinder xmlfTypeConfig) pTy
+            pure [binder]
         }
 
 pType :: Parser XmlfType
 pType = try pForallType <|> try pMuType <|> pArrowType
   where
     pForallType = try $ do
-        forallTok
+        canonicalForallTok
         binders <- tpcForallBinders xmlfTypeConfig pType
         body <- pType
         pure (foldr (\(v, bnd) acc -> XTForall v bnd acc) body binders)
@@ -147,15 +136,6 @@ pType = try pForallType <|> try pMuType <|> pArrowType
         XTMu v <$> pType
 
     pArrowType = parseArrowTypeWith xmlfTypeConfig pType
-
-pTypeNoTopForall :: Parser XmlfType
-pTypeNoTopForall = try pMuType <|> parseArrowTypeWith xmlfTypeConfig pType
-  where
-    pMuType = do
-        muTok
-        v <- lowerIdent reservedWords
-        void (symbol ".")
-        XTMu v <$> pType
 
 pComp :: Parser XmlfComp
 pComp = do
@@ -169,18 +149,15 @@ pCompAtom =
         [ parens pComp
         , try pCompInner
         , try pCompOuter
-        , try pCompLegacyApp
         , pCompIntro
         , pCompElim
         , pCompId
-        , try pCompHypLegacy
         , try pCompHyp
         , try pCompBot
-        , pCompTypeSugar
         ]
 
 pCompId :: Parser XmlfComp
-pCompId = XCId <$ (symbol "ε" <|> symbol "epsilon" <|> symbol "1")
+pCompId = XCId <$ symbol "ε"
 
 pCompIntro :: Parser XmlfComp
 pCompIntro = XCIntro <$ symbol "O"
@@ -199,45 +176,25 @@ pCompHyp = do
     hypCompTok
     pure (XCHyp v)
 
-pCompHypLegacy :: Parser XmlfComp
-pCompHypLegacy = do
-    void (symbol "!")
-    XCHyp <$> lowerIdent reservedWords
-
 pCompInner :: Parser XmlfComp
 pCompInner = do
-    forallTok
+    canonicalForallTok
     c <- parens $ do
-        geTok
+        canonicalGeTok
         pComp
     pure (XCInner c)
 
 pCompOuter :: Parser XmlfComp
 pCompOuter = do
-    forallTok
+    canonicalForallTok
     (v, c) <- do
         v <- parens $ do
             name <- lowerIdent reservedWords
-            geTok
+            canonicalGeTok
             pure name
         comp <- pCompAtom
         pure (v, comp)
     pure (XCOuter v c)
-
-pCompLegacyApp :: Parser XmlfComp
-pCompLegacyApp = do
-    ty <- do
-        void (symbol "⟨")
-        ty0 <- pType
-        void (symbol "⟩")
-        pure ty0
-    pure (compFromType ty)
-
-pCompTypeSugar :: Parser XmlfComp
-pCompTypeSugar = compFromType <$> pTypeNoTopForall
-
-compFromType :: XmlfType -> XmlfComp
-compFromType ty = XCSeq (XCInner (XCBot ty)) XCElim
 
 pTerm :: Parser XmlfTerm
 pTerm = choice [try pLet, try pLam, try pTyAbs, pApp]
@@ -253,11 +210,11 @@ pLet = do
     pure (XLet v rhs body)
 
 pLam :: Parser XmlfTerm
-pLam = try pLamParen <|> pLamLegacy
+pLam = pLamParen
 
 pLamParen :: Parser XmlfTerm
 pLamParen = do
-    lambdaTok
+    canonicalLambdaTok
     (v, ty) <- parens $ do
         name <- lowerIdent reservedWords
         void (symbol ":")
@@ -266,37 +223,19 @@ pLamParen = do
     body <- pTerm
     pure (XLam v ty body)
 
-pLamLegacy :: Parser XmlfTerm
-pLamLegacy = do
-    lambdaTok
-    v <- lowerIdent reservedWords
-    void (symbol ":")
-    ty <- pType
-    void (symbol ".")
-    body <- pTerm
-    pure (XLam v ty body)
-
 pTyAbs :: Parser XmlfTerm
-pTyAbs = try pTyAbsParen <|> pTyAbsLegacy
+pTyAbs = pTyAbsParen
 
 pTyAbsParen :: Parser XmlfTerm
 pTyAbsParen = do
-    bigLambdaTok
+    canonicalBigLambdaTok
     (v, bound) <- parens $ do
         name <- lowerIdent reservedWords
-        geTok
+        canonicalGeTok
         b <- pType
         pure (name, b)
     body <- pTerm
     pure (XTyAbs v bound body)
-
-pTyAbsLegacy :: Parser XmlfTerm
-pTyAbsLegacy = do
-    bigLambdaTok
-    v <- lowerIdent reservedWords
-    void (symbol ".")
-    body <- pTerm
-    pure (XTyAbs v XTBottom body)
 
 pApp :: Parser XmlfTerm
 pApp = do

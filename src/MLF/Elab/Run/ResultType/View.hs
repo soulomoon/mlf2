@@ -12,16 +12,14 @@ module MLF.Elab.Run.ResultType.View (
 
 import qualified Data.IntMap.Strict as IntMap
 
+import qualified MLF.Constraint.Finalize as Finalize
 import MLF.Constraint.Presolution (PresolutionView(..))
-import MLF.Constraint.Solve (SolveResult(..))
-import qualified MLF.Constraint.Solve as Solve
 import MLF.Constraint.Types.Graph
     ( NodeId(..)
     , TyNode(..)
     , getNodeId
     )
 import MLF.Constraint.Types.Phase (Phase)
-import qualified MLF.Elab.Run.ChiQuery as ChiQuery
 import MLF.Elab.Run.ResultType.Types (ResultTypeInputs(..))
 import MLF.Util.ElabError (ElabError(..))
 
@@ -33,10 +31,9 @@ data ResultTypeView (p :: Phase) = ResultTypeView
 buildResultTypeView :: ResultTypeInputs p -> Either ElabError (ResultTypeView p)
 buildResultTypeView inputs = do
     let presolutionView = rtcPresolutionView inputs
-    case Solve.validateSolvedGraphStrict
-        SolveResult { srConstraint = ChiQuery.chiCanonicalConstraint presolutionView
-            , srUnionFind = ChiQuery.chiCanonicalMap presolutionView
-            } of
+    case Finalize.validateCanonicalSnapshotStrict
+            (pvCanonicalConstraint presolutionView)
+            (pvCanonicalMap presolutionView) of
         [] -> pure ()
         violations -> Left (ValidationFailed violations)
     pure ResultTypeView
@@ -56,7 +53,7 @@ rtvWithBoundOverlay rootNid baseBound view =
 
 rtvLookupNode :: ResultTypeView p -> NodeId -> Maybe TyNode
 rtvLookupNode view nid =
-    case ChiQuery.chiLookupNode (rtvPresolutionView view) nid of
+    case pvLookupNode (rtvPresolutionView view) nid of
         Just TyVar{ tnId = varId, tnBound = Nothing } ->
             case overlayBound view nid of
                 Just bnd -> Just TyVar{ tnId = varId, tnBound = Just bnd }
@@ -67,7 +64,7 @@ rtvLookupVarBound :: ResultTypeView p -> NodeId -> Maybe NodeId
 rtvLookupVarBound view nid =
     case overlayBound view nid of
         Just bnd -> Just bnd
-        Nothing -> ChiQuery.chiLookupVarBound (rtvPresolutionView view) nid
+        Nothing -> pvLookupVarBound (rtvPresolutionView view) nid
 
 rtvPresolutionView :: ResultTypeView p -> PresolutionView p
 rtvPresolutionView = rtcPresolutionView . rtvInputs0

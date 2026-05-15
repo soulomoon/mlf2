@@ -13,7 +13,6 @@ import MLF.Constraint.Acyclicity (AcyclicityResult(..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
-    , PresolutionError
     , PresolutionResult(..)
     )
 import MLF.Constraint.Presolution.Base (PresolutionUf(..))

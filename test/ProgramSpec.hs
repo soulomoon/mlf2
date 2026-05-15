@@ -4,7 +4,14 @@ import Data.Either (isLeft, isRight)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
-import MLF.API (Lit (..), SrcTy (..))
+import MLF.API
+    ( Lit (..)
+    , SrcTy (..)
+    , parseLocatedProgramWithFile
+    , parseRawProgram
+    , prettyProgram
+    , renderProgramParseError
+    )
 import MLF.Frontend.Program.Check (checkResolvedProgram)
 import MLF.Frontend.Program.Elaborate (lowerType, mkElaborateScope)
 import MLF.Frontend.Program.Finalize
@@ -19,8 +26,10 @@ import MLF.Frontend.Program.Types
     , constructorOwnerRuntimeTypeTrackable
     , mkResolvedSymbol
     )
+import MLF.Frontend.Program.Prelude (withPrelude, withPreludeLocated)
 import MLF.Frontend.Syntax (ResolvedSrcTy (..), mkSrcBound)
-import MLF.Program
+import MLF.Frontend.Syntax.Program
+import MLF.Pipeline
 import qualified MLF.Types.Elab as Elab
 import MLF.Program.CLI (runProgramFile)
 import Test.Hspec
@@ -346,6 +355,34 @@ spec = do
             case parseRawProgram programText of
                 Left err -> renderProgramParseError err `shouldSatisfy` (not . null)
                 Right program -> expectationFailure ("expected parse error, got: " ++ show program)
+
+        it "rejects retired bottom aliases on the program surface" $
+            mapM_
+                ( \alias ->
+                    parseRawProgram
+                        ( unlines
+                            [ "module Main export (main) {"
+                            , "  def main : " ++ alias ++ " = 1;"
+                            , "}"
+                            ]
+                        )
+                        `shouldSatisfy` isLeft
+                )
+                ["bottom", "_|_"]
+
+        it "rejects program forall binders without the required dot" $
+            mapM_
+                ( \ty ->
+                    parseRawProgram
+                        ( unlines
+                            [ "module Main export (main) {"
+                            , "  def main : " ++ ty ++ " = 1;"
+                            , "}"
+                            ]
+                        )
+                        `shouldSatisfy` isLeft
+                )
+                ["forall a Int", "∀a Int"]
 
     describe "MLF.Program shared runtime-success parity surface" $ do
         mapM_ runProgramRuntimeCase programRuntimeSuccessCases

@@ -2547,12 +2547,12 @@ mkOut :: (Env -> Either ElabError ElabTerm) -> ElabOut
 mkOut f = ElabOut f f
 
 resolvedLambdaParamNode :: (NodeId -> NodeId) -> (NodeId -> Maybe TyNode) -> NodeId -> Maybe NodeId
-resolvedLambdaParamNode canonical chiLookupNode lamNodeId =
+resolvedLambdaParamNode canonical lookupNode lamNodeId =
   let lamC = canonical lamNodeId
-   in case chiLookupNode lamC of
+   in case lookupNode lamC of
         Just TyArrow {tnDom = dom} -> Just dom
         Just TyVar {tnBound = Just bnd} ->
-          case chiLookupNode (canonical bnd) of
+          case lookupNode (canonical bnd) of
             Just TyArrow {tnDom = dom} -> Just dom
             _ -> Nothing
         _ -> Nothing

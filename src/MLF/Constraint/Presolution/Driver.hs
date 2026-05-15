@@ -501,7 +501,19 @@ presolution loop still shares older mutation helpers whose state type is
 not depend on the raw in-progress representation.
 -}
 presolutionInProgressRawBridge :: Constraint 'Acyclic -> Constraint 'Raw
-presolutionInProgressRawBridge = toRawConstraintForLegacy
+presolutionInProgressRawBridge c =
+    Constraint
+        { cNodes = cNodes c
+        , cInstEdges = cInstEdges c
+        , cUnifyEdges = cUnifyEdges c
+        , cBindParents = cBindParents c
+        , cPolySyms = cPolySyms c
+        , cEliminatedVars = cEliminatedVars c
+        , cWeakenedVars = cWeakenedVars c
+        , cAnnEdges = cAnnEdges c
+        , cLetEdges = cLetEdges c
+        , cGenNodes = cGenNodes c
+        }
 
 tyExpNodeIds :: Constraint p -> [NodeId]
 tyExpNodeIds c =

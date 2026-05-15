@@ -166,7 +166,7 @@ Decision cases (as implemented):
 Level/scope notes: instantiation only introduces fresh nodes for the bound
 variables of the source ∀; shared nodes beyond that scope stay shared. The
 result is an Expansion (possibly composed) plus the deferred unifications
-required for compatibility.
+required by the component constraints.
 -}
 {- Note [Forall Level Mismatch → Compose]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

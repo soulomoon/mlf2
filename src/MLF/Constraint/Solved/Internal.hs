@@ -86,7 +86,6 @@ import MLF.Constraint.Types.Graph
     WeakenedVars,
     genNodeKey,
     nodeRefFromKey,
-    toRawConstraintForLegacy,
   )
 import Prelude hiding (lookup)
 
@@ -120,17 +119,33 @@ data SolvedBackend p
 newtype Solved = Solved {unSolved :: SolvedBackend 'Raw}
   deriving (Eq, Show)
 
+constraintForSolvedBackend :: Constraint p -> Constraint 'Raw
+constraintForSolvedBackend c =
+  Constraint
+    { cNodes = cNodes c,
+      cInstEdges = cInstEdges c,
+      cUnifyEdges = cUnifyEdges c,
+      cBindParents = cBindParents c,
+      cPolySyms = cPolySyms c,
+      cEliminatedVars = cEliminatedVars c,
+      cWeakenedVars = cWeakenedVars c,
+      cAnnEdges = cAnnEdges c,
+      cLetEdges = cLetEdges c,
+      cGenNodes = cGenNodes c
+    }
+
 -- | Construct an Equiv backend directly from a constraint and
 -- union-find map. The input constraint is used as both original and
--- canonical; callers should only use this when no solve replay is needed.
+-- initial canonical graph.
 --
--- Compatibility bridge: the phantom phase is erased via
--- 'toRawConstraintForLegacy' because the 'Solved' backend stores
--- constraints at 'Raw internally.  Production callers should prefer
--- 'fromSolveOutput' (which consumes presolved solve output).
+-- This is an owner-local construction primitive for 'MLF.Constraint.Finalize'
+-- and explicit solved test support. It is not a production facade: callers
+-- outside finalization should prefer 'fromSolveOutput' or Finalize-owned
+-- entrypoints. The phantom phase is erased here because the 'Solved' backend
+-- stores constraints at 'Raw internally.
 fromConstraintAndUf :: Constraint p -> IntMap NodeId -> Solved
 fromConstraintAndUf c uf =
-  let cRaw = toRawConstraintForLegacy c  -- phase erasure for internal 'Raw backend
+  let cRaw = constraintForSolvedBackend c
       canonMap = buildCanonicalMap uf cRaw
       equivClasses = buildEquivClasses canonMap cRaw
    in Solved
@@ -152,8 +167,8 @@ fromConstraintAndUf c uf =
 
 -- | Test-only alias for 'fromConstraintAndUf'.
 --   Not part of the production 'MLF.Constraint.Solved' facade; kept here
---   for backward compatibility with test helpers that build a 'Solved'
---   directly from a 'Raw constraint and union-find map.
+--   for low-level fixtures that intentionally build a 'Solved' directly from
+--   a 'Raw constraint and union-find map.
 mkTestSolved :: Constraint 'Raw -> IntMap NodeId -> Solved
 mkTestSolved = fromConstraintAndUf
 
@@ -175,7 +190,7 @@ fromPreRewriteState = fromPreRewriteStateStrict
 -- | Strict snapshot replay used by production solve output conversion.
 fromPreRewriteStateStrict :: IntMap NodeId -> Constraint p -> Either SolveError Solved
 fromPreRewriteStateStrict uf preRewrite = do
-  let preRewriteRaw = toRawConstraintForLegacy preRewrite  -- phase erasure for internal 'Raw backend
+  let preRewriteRaw = constraintForSolvedBackend preRewrite
   let snapshot =
         SolveSnapshot
           { snapUnionFind = uf,
@@ -314,12 +329,12 @@ lookupVarBound s@(Solved EquivBackend {ebOriginalConstraint = c}) nid =
 -- canonical map. Used by callers that modify the constraint
 -- (e.g., alias insertion, canonicalization).
 --
--- Compatibility bridge: the phantom phase is erased via
--- 'toRawConstraintForLegacy' because the 'Solved' backend stores
--- constraints at 'Raw internally.
+-- Owner-local construction primitive for finalized canonical constraints. The
+-- phantom phase is erased here because the 'Solved' backend stores constraints
+-- at 'Raw internally.
 rebuildWithConstraint :: Solved -> Constraint p -> Solved
 rebuildWithConstraint (Solved eb) c =
-  Solved (setCanonicalConstraint (toRawConstraintForLegacy c) eb)  -- phase erasure for internal 'Raw backend
+  Solved (setCanonicalConstraint (constraintForSolvedBackend c) eb)
 
 -- -----------------------------------------------------------------
 -- Mutation helpers

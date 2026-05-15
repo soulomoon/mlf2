@@ -3,9 +3,7 @@
 
 module MLF.Elab.Run.Pipeline
   ( runPipelineElab,
-    runPipelineElabChecked,
     runPipelineElabWithConfig,
-    runPipelineElabCheckedWithConfig,
     runPipelineElabWithEnv,
     runPipelineElabWithConfigAndEnv,
     PipelineElabDetailedResult (..),
@@ -142,17 +140,9 @@ validateDirectRecursiveAnnotations = goExpr
 runPipelineElab :: PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElab = runPipelineElabWithConfig defaultPipelineConfig
 
-runPipelineElabChecked :: PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
-runPipelineElabChecked = runPipelineElabCheckedWithConfig defaultPipelineConfig
-
 runPipelineElabWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
 runPipelineElabWithConfig config polySyms expr =
   detailedPair <$> runPipelineElabWith True (pcTraceConfig config) Map.empty (generateConstraints polySyms) expr
-
--- Compatibility alias: the shared pipeline now reports the typechecker result
--- as authoritative, so the checked entrypoint no longer selects a second path.
-runPipelineElabCheckedWithConfig :: PipelineConfig -> PolySyms -> NormSurfaceExpr -> Either PipelineError (ElabTerm, ElabType)
-runPipelineElabCheckedWithConfig = runPipelineElabWithConfig
 
 -- | Run the pipeline with an external environment of type assumptions
 -- for free variables, avoiding the ELamAnn wrapping approach.

@@ -13,9 +13,8 @@ import qualified MLF.Constraint.Presolution.View as PresolutionViewBoundary
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Presolution (PresolutionResult(..))
 import qualified MLF.Constraint.NodeAccess as NodeAccess
-import MLF.Constraint.Solve
+import MLF.Constraint.Solve.TestSupport
     ( SolveOutput(..)
-    , SolveResult(..)
     , SolveSnapshot(..)
     , solveUnifyResultWithSnapshot
     )
@@ -562,7 +561,7 @@ spec = describe "MLF.Constraint.Solved" $ do
                         actual <- requireRight (fromSolveOutput out)
                         actual `shouldBe` explicit
 
-        it "fromSolveOutput derives canonical constraint from snapshot, not soResult payload" $ do
+        it "fromSolveOutput derives canonical constraint from the snapshot-only output" $ do
             let var0 = TyVar { tnId = NodeId 0, tnBound = Nothing }
                 base1 = TyBase (NodeId 1) (BaseTy "Int")
                 outputRootGen = GenNode (GenNodeId 0) [NodeId 1]
@@ -576,15 +575,9 @@ spec = describe "MLF.Constraint.Solved" $ do
                     , cGenNodes = fromListGen [(GenNodeId 0, outputRootGen)]
                     }
                 snapshotUf = IntMap.fromList [(0, NodeId 1)]
-                poisonedUf = IntMap.fromList [(0, NodeId 0)]
-                poisonedConstraint = emptyConstraint
-                    { cNodes = nodeMapFromList [(99, TyBase (NodeId 99) (BaseTy "Poison"))] }
                 out =
                     SolveOutput
-                        { soResult = SolveResult { srConstraint = poisonedConstraint
-                            , srUnionFind = poisonedUf
-                            }
-                        , soSnapshot =
+                        { soSnapshot =
                             SolveSnapshot
                                 { snapUnionFind = snapshotUf
                                 , snapPreRewriteConstraint = preRewriteForOutput

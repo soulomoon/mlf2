@@ -5,6 +5,7 @@ module ElaborationSpec (spec) where
 
 import Control.Applicative ((<|>))
 import Control.Monad (forM_, unless, when)
+import Data.Either (isLeft)
 import Data.IntMap.Strict qualified as IntMap
 import Data.IntSet qualified as IntSet
 import Data.List (isInfixOf, stripPrefix)
@@ -14,7 +15,6 @@ import MLF.Binding.Canonicalization qualified as BindCanon
 import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
 import MLF.Constraint.Finalize qualified as Finalize
-import MLF.Constraint.NodeAccess qualified as NodeAccess
 import MLF.Constraint.Presolution
   ( EdgeTrace (..),
     PresolutionPlanBuilder (..),
@@ -37,7 +37,7 @@ import MLF.Constraint.Presolution.TestSupport
     insertCopy,
     lookupCopy,
   )
-import MLF.Constraint.Solve (solveUnifyResultWithSnapshot)
+import MLF.Constraint.Solve.TestSupport (solveUnifyResultWithSnapshot)
 import MLF.Constraint.Solved qualified as Solved
 import MLF.Constraint.Types.Graph
   ( BaseTy (..),
@@ -197,19 +197,7 @@ mkSolved :: Constraint 'Raw -> IntMap.IntMap NodeId -> Solved.Solved
 mkSolved = SolvedTest.mkTestSolved
 
 presolutionViewFromSolved :: Solved.Solved -> PresolutionView 'Raw
-presolutionViewFromSolved solved =
-  let constraint = Solved.originalConstraint solved
-      canonical = Solved.canonical solved
-   in PresolutionView
-        { pvConstraint = constraint,
-          pvCanonicalMap = Solved.canonicalMap solved,
-          pvCanonical = canonical,
-          pvLookupNode = \nid -> NodeAccess.lookupNode constraint (canonical nid),
-          pvLookupVarBound = \nid -> NodeAccess.lookupVarBound constraint (canonical nid),
-          pvLookupBindParent = NodeAccess.lookupBindParent constraint,
-          pvBindParents = cBindParents constraint,
-          pvCanonicalConstraint = Solved.canonicalConstraint solved
-        }
+presolutionViewFromSolved = Finalize.presolutionViewFromSolved
 
 edgeTraceFixtureFromWitness :: EdgeWitness -> EdgeTrace
 edgeTraceFixtureFromWitness ew =
@@ -582,7 +570,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             ]
       forM_ corpus $ \expr -> do
         _ <- requirePipeline expr
-        _ <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        _ <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         pure ()
 
     it "row1 closeout guard|checked-authoritative keeps representative corpus parity: ElabEnv no longer includes eeSolvedCompat" $ do
@@ -1280,14 +1268,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
               (Elab.TBase (BaseTy "Int"))
       ty `shouldAlphaEqType` expected
-      (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+      (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
       checkedTy `shouldAlphaEqType` ty
 
     it "elaborates first-class polymorphic parameter used at Int and Bool" $ do
-      -- \poly : (∀a. a -> a). let keepInt = poly 1 in poly true
+      -- λ(poly : ∀a. a -> a) let keepInt = poly 1 in poly true
       -- This needs the argument itself to remain polymorphic after being passed
       -- as a value; ordinary rank-1 let-polymorphism is not enough.
-      let source = "\\(poly : forall a. a -> a) let keepInt = poly 1 in poly true"
+      let source = "λ(poly : ∀a. a -> a) let keepInt = poly 1 in poly true"
       expr <-
         case parseRawEmlfExpr source of
           Left err -> expectationFailure (renderEmlfParseError err) >> fail "parse failed"
@@ -1299,7 +1287,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               (Elab.TForall "a" Nothing (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a")))
               (Elab.TBase (BaseTy "Bool"))
       ty `shouldAlphaEqType` expected
-      (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+      (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
       checkedTy `shouldAlphaEqType` ty
 
   describe "Elaboration bookkeeping (eliminated vars)" $ do
@@ -1735,10 +1723,10 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
           st = STForall "a" (Just (mkSrcBound bound)) (STVar "a")
       st `shouldBe` STForall "a" (Just (mkSrcBound bound)) (STVar "a")
 
-    it "parses all bottom-type spellings as STBottom" $ do
+    it "parses canonical bottom syntax as STBottom" $ do
       parseRawEmlfType "⊥" `shouldBe` Right STBottom
-      parseRawEmlfType "_|_" `shouldBe` Right STBottom
-      parseRawEmlfType "bottom" `shouldBe` Right STBottom
+      parseRawEmlfType "_|_" `shouldSatisfy` isLeft
+      parseRawEmlfType "bottom" `shouldSatisfy` isLeft
 
     it "represents nested STForall with multiple binders" $ do
       let binds = [("a", Nothing), ("b", Just (STBase "Int"))]
@@ -2783,8 +2771,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               Right (term, ty) -> do
                 Elab.typeCheck term `shouldBe` Right ty
                 containsMuTy ty `shouldBe` True
-      assertPipeline "unchecked" Elab.runPipelineElab
-      assertPipeline "checked" Elab.runPipelineElabChecked
+      assertPipeline "canonical" Elab.runPipelineElab
 
   describe "Paper ≺ ordering (leftmost-lowermost)" $ do
     it "generalizeAt orders binders by ≺ (not by NodeId)" $ do
@@ -6168,16 +6155,16 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             "runPipelineElab"
             (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
           expectStrictOpWeakenFailure
-            "runPipelineElabChecked"
-            (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+            "runPipelineElab"
+            (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
 
         assertBothPipelinesReject expr = do
           expectStrictRejection
             "runPipelineElab"
             (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
           expectStrictRejection
-            "runPipelineElabChecked"
-            (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+            "runPipelineElab"
+            (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
 
     it "let id = (\\x. x) in id id should have type ∀a. a -> a" $ do
       let expr =
@@ -6291,7 +6278,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
       ty `shouldAlphaEqType` expected
 
-    it "bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in unchecked and checked pipelines" $ do
+    it "bounded aliasing (b ⩾ a) elaborates to ∀a. a -> a -> a in the canonical pipeline" $ do
       -- This corresponds to aliasing a bounded variable to an existing binder:
       --   ∀a. ∀(b ⩾ a). a -> b -> a  ≤  ∀a. a -> a -> a
       let rhs = ELam "x" (ELam "y" (EVar "x"))
@@ -6317,10 +6304,8 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                   (Elab.TArrow (Elab.TVar "a") (Elab.TVar "a"))
               )
 
-      (_uncheckedTerm, uncheckedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
-      (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
-      uncheckedTy `shouldAlphaEqType` expected
-      checkedTy `shouldAlphaEqType` expected
+      (_term, ty) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+      ty `shouldAlphaEqType` expected
 
     it "term annotation can instantiate a polymorphic result" $ do
       -- Paper view (`papers/these-finale-english.txt`; see `papers/xmlf.txt` §3.1):
@@ -6358,7 +6343,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               (ELamAnn "x" (STBase "Int") (EVar "x"))
               (ELit (LInt 1))
       _ <- requirePipeline expr
-      _ <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+      _ <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
       pure ()
 
     it "BUG-2026-02-06-001 mapped-base elaboration remains Int for nested let + annotated lambda" $ do
@@ -6814,7 +6799,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
       checkedFromUnchecked <- requireRight (Elab.typeCheck term)
       checkedFromUnchecked `shouldBe` Elab.TBase (BaseTy "Int")
       ty `shouldBe` Elab.TBase (BaseTy "Int")
-      (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+      (_checkedTerm, checkedTy) <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
       checkedTy `shouldBe` Elab.TBase (BaseTy "Int")
 
     it "explicit forall annotation preserves foralls in bounds" $ do
@@ -6953,7 +6938,7 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
               "f"
               (EAnn (ELam "x" (EVar "x")) ann)
               (EApp (EVar "f") (ELit (LInt 42)))
-      result <- requireRight (Elab.runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+      result <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
       snd result `shouldBe` Elab.TBase (BaseTy "Int")
 
     it "letScopeOverrides inserts override on base-vs-solved scope divergence" $ do

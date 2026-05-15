@@ -1,5 +1,4 @@
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE PatternSynonyms #-}
 
 -- |
 -- Module      : MLF.API

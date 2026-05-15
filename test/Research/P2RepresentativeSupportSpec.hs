@@ -5,7 +5,7 @@ import Test.Hspec
 
 import MLF.Elab.Pipeline
     ( runPipelineElab
-    , runPipelineElabChecked
+    , runPipelineElab
     )
 import MLF.Frontend.Syntax
 import MLF.Types.Elab
@@ -99,7 +99,7 @@ expectRecursiveAuthoritativeSupport expr = do
     (_uncheckedTerm, uncheckedTy) <-
         requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
     (_checkedTerm, checkedTy) <-
-        requireRight (runPipelineElabChecked Set.empty (unsafeNormalizeExpr expr))
+        requireRight (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
     uncheckedTy `shouldNotBe` blocked
     checkedTy `shouldNotBe` blocked
     containsMu uncheckedTy `shouldBe` True

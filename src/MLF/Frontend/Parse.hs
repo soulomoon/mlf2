@@ -44,10 +44,10 @@ import Text.Megaparsec
     )
 import MLF.Parse.Common
     ( Parser
-    , bottomTok
-    , forallTok
-    , geTok
-    , lambdaTok
+    , canonicalBottomTok
+    , canonicalForallTok
+    , canonicalGeTok
+    , canonicalLambdaTok
     , lowerIdent
     , parens
     , pLit
@@ -128,24 +128,25 @@ reservedWords =
         [ "let"
         , "in"
         , "mu"
+        , "bottom"
         , "true"
         , "false"
         , "forall"
         ]
 
 muTok :: Parser ()
-muTok = void (symbol "μ" <|> symbol "mu")
+muTok = void (symbol "μ")
 
 frontendTypeConfig :: TypeParserConfig SrcType (Maybe SrcType)
 frontendTypeConfig =
     TypeParserConfig
-        { tpcForallTok = forallTok
-        , tpcGeTok = geTok
+        { tpcForallTok = canonicalForallTok
+        , tpcGeTok = canonicalGeTok
         , tpcSymbol = symbol
         , tpcParens = parens
         , tpcLowerIdent = lowerIdent reservedWords
         , tpcUpperIdent = upperIdent reservedWords
-        , tpcBottomTok = bottomTok
+        , tpcBottomTok = canonicalBottomTok
         , tpcMkVar = STVar
         , tpcMkArrow = STArrow
         , tpcMkBase = STBase
@@ -156,7 +157,7 @@ frontendTypeConfig =
         , tpcBoundedBinder = \pTy ->
             parens $ do
                 v <- lowerIdent reservedWords
-                geTok
+                canonicalGeTok
                 bound <- pTy
                 pure (v, Just bound)
         , tpcUnboundedBinder = do
@@ -164,7 +165,7 @@ frontendTypeConfig =
             pure (v, Nothing)
         , tpcForallBinders = \pTy -> do
             binders <- some (try ((tpcBoundedBinder frontendTypeConfig) pTy) <|> tpcUnboundedBinder frontendTypeConfig)
-            void (optional (symbol "."))
+            void (symbol ".")
             pure binders
         }
 
@@ -172,7 +173,7 @@ pType :: Parser SrcType
 pType = try pFrontendForall <|> try pFrontendMu <|> parseArrowTypeWith frontendTypeConfig pType
   where
     pFrontendForall = do
-        forallTok
+        canonicalForallTok
         binders <- tpcForallBinders frontendTypeConfig pType
         body <- pType
         pure (foldr (\(v, bnd) acc -> tpcMkForall frontendTypeConfig v bnd acc) body binders)
@@ -200,26 +201,15 @@ pLet = do
         Just annTy -> ELet v (EAnn rhs annTy) body
 
 pLambda :: Parser SurfaceExpr
-pLambda = try pLambdaParen <|> pLambdaLegacy
+pLambda = pLambdaParen
 
 pLambdaParen :: Parser SurfaceExpr
 pLambdaParen = do
-    lambdaTok
+    canonicalLambdaTok
     (v, mTy) <- parens $ do
         name <- lowerIdent reservedWords
         mAnn <- optional (symbol ":" *> pType)
         pure (name, mAnn)
-    body <- pExpr
-    pure $ case mTy of
-        Nothing -> ELam v body
-        Just ty -> ELamAnn v ty body
-
-pLambdaLegacy :: Parser SurfaceExpr
-pLambdaLegacy = do
-    lambdaTok
-    v <- lowerIdent reservedWords
-    mTy <- optional (symbol ":" *> pType)
-    void (symbol ".")
     body <- pExpr
     pure $ case mTy of
         Nothing -> ELam v body

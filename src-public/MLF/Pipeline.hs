@@ -49,11 +49,7 @@ module MLF.Pipeline
     , pipelineErrorPhase
     , pipelineErrorPhaseName
     , runPipelineElab
-    -- Compatibility alias for the checker-authoritative shared pipeline.
-    , runPipelineElabChecked
     , runPipelineElabWithConfig
-    -- Compatibility alias for the checker-authoritative shared pipeline.
-    , runPipelineElabCheckedWithConfig
     -- * Phase 7 helpers
     , typeCheck
     , step
@@ -132,7 +128,6 @@ import MLF.Frontend.Program.Run
     )
 import MLF.Constraint.Types.Graph (BaseTy(..), PolySyms)
 import MLF.Constraint.Types.Phase (Phase(Raw))
--- Keep legacy elaboration conversion helpers quarantined in MLF.Elab.Legacy.
 import MLF.Elab.Pipeline
     ( ElabError (..)
     , ElabScheme
@@ -152,9 +147,7 @@ import MLF.Elab.Pipeline
     , normalize
     , renderPipelineError
     , runPipelineElab
-    , runPipelineElabChecked
     , runPipelineElabWithConfig
-    , runPipelineElabCheckedWithConfig
     , schemeFromType
     , step
     , typeCheck
