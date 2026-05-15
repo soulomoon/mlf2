@@ -18,3 +18,4 @@ Roadmap family: `2026-05-05-00-type-level-safety-singletons-roadmap`
 - round-232 completed milestone-3 by removing the remaining Phase-4 raw presolution bridge, keeping the presolution state typed end to end, and passing focused checks plus the full cabal gate.
 - round-233 moved milestone-4 in-progress by totalizing the selected Phi binder-spine access path, adding regression coverage, and passing focused checks plus the full cabal gate.
 - round-234 completed milestone-4 by totalizing Sigma binder reordering, preserving the fsBounds-derived ForallSpec contract, and passing focused Sigma/Phi selectors plus the full cabal gate.
+- round-235 moved milestone-5 in-progress by freezing the production witness-constructor boundary, preserving explicit malformed-fixture seams, and passing focused witness checks plus the full cabal gate.

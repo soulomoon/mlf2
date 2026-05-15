@@ -32,7 +32,19 @@ import MLF.Constraint.Presolution.Witness
   )
 import qualified MLF.Constraint.Presolution.Witness as Witness
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness (BoundRef (..), EdgeWitness (..), Expansion, ForallSpec (..), InstanceOp (..), InstanceWitness (..), mkInstanceWitness, ReplayContract (..))
+import MLF.Constraint.Types.Witness
+    ( InstanceOp(..)
+    , ReplayContract(..)
+    , ewEdgeId
+    , ewForallIntros
+    , ewLeft
+    , ewRight
+    , ewRoot
+    , ewWitness
+    , getInstanceOps
+    , mkEdgeWitness
+    , mkInstanceWitness
+    )
 import qualified MLF.Util.Order as Order
 
 -- | Normalize edge witnesses against the finalized presolution constraint.
@@ -567,7 +579,13 @@ normalizeEdgeWitnessesM = do
             )
             mbTrace
     let iw = mkInstanceWitness opsFinal
-    pure (eid, w0 {ewForallIntros = ewForallIntros w0, ewWitness = iw}, trace')
+        witness' =
+            case mkEdgeWitness (ewEdgeId w0) (ewLeft w0) (ewRight w0) (ewRoot w0) (ewForallIntros w0) iw of
+                Left err ->
+                    error ("normalizeEdgeWitnessesM rebuilt invalid witness: " ++ show err)
+                Right witness ->
+                    witness
+    pure (eid, witness', trace')
   let witnessMap =
         IntMap.fromList
           [ (eid, witness)

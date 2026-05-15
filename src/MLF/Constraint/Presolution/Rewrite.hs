@@ -70,13 +70,17 @@ canonicalizeWitness :: Canonicalizer -> EdgeWitness -> EdgeWitness
 canonicalizeWitness canon w =
     let -- Contract: preserve source-domain provenance (`ewWitness`)
         -- and canonicalize only structural lookup fields.
-    in w
-        { ewLeft = canonical (ewLeft w)
-        , ewRight = canonical (ewRight w)
-        , ewRoot = canonical (ewRoot w)
-        , ewForallIntros = ewForallIntros w
-        , ewWitness = ewWitness w
-        }
+    in case mkEdgeWitness
+            (ewEdgeId w)
+            (canonical (ewLeft w))
+            (canonical (ewRight w))
+            (canonical (ewRoot w))
+            (ewForallIntros w)
+            (ewWitness w) of
+        Left err ->
+            error ("canonicalizeWitness rebuilt invalid witness: " ++ show err)
+        Right witness ->
+            witness
   where
     canonical = canonicalizeNode canon
 

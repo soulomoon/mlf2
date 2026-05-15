@@ -21,7 +21,8 @@ import MLF.Constraint.Presolution.TestSupport
     , validateTranslatablePresolution
     )
 import MLF.Constraint.Types.Graph (BaseTy(..), BindFlag(..), Constraint(..), EdgeId(..), ExpVarId(..), InstEdge(..), NodeId(..), TyNode(..), UnifyEdge(..))
-import MLF.Constraint.Types.Witness (EdgeWitness(..), InstanceOp(..), InstanceWitness(..))
+import MLF.Constraint.Types.Witness (InstanceOp(..))
+import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Constraint.Unify.Closure (SolveError(..), runUnifyClosureWithSeed)
 import MLF.Frontend.Syntax (Expr(..), Lit(..))
 import SpecUtil

@@ -60,7 +60,7 @@ import MLF.Constraint.Types.Graph
     getNodeId,
     nodeRefFromKey,
   )
-import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..), ExpansionF (..), ForallSpec (..), forallSpecBinderCount, InstanceOp (..), InstanceWitness (..), mkEdgeWitness, mkInstanceWitness, ReplayContract (..))
+import MLF.Constraint.Types.Witness (EdgeWitness, Expansion (..), ExpansionF (..), InstanceOp (..), ReplayContract (..), forallSpecBinderCount, mkEdgeWitness, mkInstanceWitness)
 import MLF.Util.RecursionSchemes (cataM)
 
 -- | Precompute the base forall-intro count and ops for a witness.

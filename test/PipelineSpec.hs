@@ -989,6 +989,10 @@ spec = describe "Pipeline (Phases 1-5)" $ do
     it "presolution witness assembly guard" $ do
       interpreterSrc <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Interpreter.hs"
       witnessSrc <- readFile "src/MLF/Constraint/Presolution/Witness.hs"
+      witnessSurfaceSrc <- readFile "src/MLF/Constraint/Types/Witness.hs"
+      witnessSupportSrc <- readFile "src/MLF/Constraint/Types/Witness/TestSupport.hs"
+      witnessNormSrc <- readFile "src/MLF/Constraint/Presolution/WitnessNorm.hs"
+      rewriteSrc <- readFile "src/MLF/Constraint/Presolution/Rewrite.hs"
       cabalSrc <- readFile "mlf2.cabal"
       wrapperExists <- doesFileExist "src/MLF/Constraint/Presolution/EdgeProcessing/Witness.hs"
       wrapperExists `shouldBe` False
@@ -997,6 +1001,17 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       witnessSrc `shouldSatisfy` isInfixOf "edgeWitnessPlan ::"
       witnessSrc `shouldSatisfy` isInfixOf "buildEdgeTrace"
       witnessSrc `shouldSatisfy` isInfixOf "buildEdgeWitness"
+      witnessSurfaceSrc `shouldSatisfy` (not . isInfixOf "InstanceWitness(..)")
+      witnessSurfaceSrc `shouldSatisfy` (not . isInfixOf "EdgeWitness(..)")
+      witnessSurfaceSrc `shouldSatisfy` isInfixOf "getInstanceOps"
+      witnessSurfaceSrc `shouldSatisfy` isInfixOf "ewEdgeId"
+      witnessSupportSrc `shouldSatisfy` isInfixOf "module MLF.Constraint.Types.Witness.TestSupport"
+      witnessSupportSrc `shouldSatisfy` isInfixOf "InstanceWitness(..)"
+      witnessSupportSrc `shouldSatisfy` isInfixOf "EdgeWitness(..)"
+      witnessNormSrc `shouldSatisfy` isInfixOf "mkEdgeWitness"
+      witnessNormSrc `shouldSatisfy` (not . isInfixOf "w0 {ewForallIntros = ewForallIntros w0, ewWitness = iw}")
+      rewriteSrc `shouldSatisfy` isInfixOf "mkEdgeWitness"
+      rewriteSrc `shouldSatisfy` (not . isInfixOf "{ ewLeft = canonical (ewLeft w)")
       cabalSrc `shouldSatisfy` (not . isInfixOf "MLF.Constraint.Presolution.EdgeProcessing.Witness")
 
     it "row4 per-edge propagation thesis-exact guard: Interpreter removes synthesized-wrapper branch markers" $ do

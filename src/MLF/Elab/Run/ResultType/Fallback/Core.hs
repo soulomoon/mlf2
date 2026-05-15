@@ -33,7 +33,7 @@ import MLF.Constraint.Types.Graph
     toListGen,
     toListNode,
   )
-import MLF.Constraint.Types.Witness (EdgeWitness (..))
+import MLF.Constraint.Types.Witness (ewRight)
 import MLF.Elab.Generalize (GaBindParents (..))
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Run.Annotation (annNode)

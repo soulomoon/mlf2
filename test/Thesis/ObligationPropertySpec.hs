@@ -42,6 +42,7 @@ import MLF.Constraint.Solve (frWith)
 import MLF.Constraint.Solve.TestSupport (SolveResult (..))
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
+import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Constraint.Unify.Decompose (decomposeUnifyChildren)

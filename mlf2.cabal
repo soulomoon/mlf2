@@ -66,6 +66,7 @@ library mlf2-internal
                       MLF.Constraint.Types.Graph.Binding,
                       MLF.Constraint.Types.Graph.Accessors,
                       MLF.Constraint.Types.Witness,
+                      MLF.Constraint.Types.Witness.TestSupport,
                       MLF.Constraint.Types.Presolution,
                       MLF.Constraint.Types.Phase,
                       MLF.Constraint.Types.Phase.Singletons,
@@ -156,6 +157,7 @@ library mlf2-internal
                       MLF.Elab.Phi.TestSupport,
                       MLF.Elab.Types
     other-modules:    MLF.Constraint.Normalize.Internal,
+                      MLF.Constraint.Types.Witness.Internal,
                        MLF.Constraint.Normalize.Graft,
                        MLF.Constraint.Normalize.Merge,
                        MLF.Constraint.Solved.Internal,

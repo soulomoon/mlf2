@@ -138,9 +138,14 @@ runtime invariants as compile-time types:
   binder count is derived from `length fsBounds`. `mkForallSpec` validates
   non-empty bounds.
 
-- **Witness smart constructors** (`MLF.Constraint.Types.Witness`):
-  `mkEdgeWitness` and `mkInstanceWitness` validate well-formedness at
-  construction time. `WitnessError` describes invariant violations.
+- **Witness construction boundary** (`MLF.Constraint.Types.Witness`):
+  the default production surface exports abstract `EdgeWitness` /
+  `InstanceWitness` types plus smart constructors and read-side accessors. Raw
+  witness constructors live only behind
+  `MLF.Constraint.Types.Witness.TestSupport` for deliberate test fixtures.
+  `mkEdgeWitness` currently enforces the construction-time invariant the live
+  production path can prove directly (non-negative intro counts); context-heavy
+  Ω normalization and Φ translation checks remain downstream owners.
 
 ## Shared ownership notes
 

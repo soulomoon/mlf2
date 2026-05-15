@@ -62,7 +62,12 @@ import MLF.Constraint.Types.Graph
     toListNode,
     typeRef,
   )
-import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..), InstanceOp (..), InstanceWitness (..), ReplayContract (..))
+import MLF.Constraint.Types.Witness
+  ( Expansion (..),
+    InstanceOp (..),
+    ReplayContract (..)
+  )
+import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness (..), InstanceWitness (..))
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Elab.Phi.TestSupport qualified as PhiTestSupport

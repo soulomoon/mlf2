@@ -16,15 +16,13 @@ import MLF.Constraint.Presolution.TestSupport (CopyMapping(..), fromListInterior
 import MLF.Constraint.Types.Graph (EdgeId(..), NodeId(..))
 import MLF.Constraint.Types.Witness
     ( BoundRef(..)
-    , EdgeWitness(..)
     , Expansion(..)
     , ForallSpec(..)
     , InstanceOp(..)
-    , InstanceWitness(..)
     , ReplayContract(..)
     )
+import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Elab.Run.Util (canonicalizeExpansion, canonicalizeTrace, canonicalizeWitness)
-import MLF.Constraint.Types.Phase (Phase(Raw))
 
 newtype UnionFindMap = UnionFindMap (IntMap.IntMap NodeId)
     deriving (Show)

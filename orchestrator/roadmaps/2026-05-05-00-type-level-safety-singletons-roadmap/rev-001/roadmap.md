@@ -215,7 +215,7 @@ scope unless a later semantic roadmap update explicitly approves them.
   must document why it satisfies the safety goal and add tests for the actual
   risk.
 
-### [pending] 5. Witness Smart Constructors
+### [in-progress] 5. Witness Smart Constructors
 
 - Milestone id: `milestone-5`
 - Depends on: `milestone-1`
@@ -232,7 +232,7 @@ scope unless a later semantic roadmap update explicitly approves them.
   conflicts with active presolution rewrites.
 #### Completion Pointers: milestone-5
 
-none yet
+- round-235 froze production witness construction behind abstract witness types plus explicit smart constructors, moved malformed fixtures to a test-only seam, rebuilt production reassembly through mkEdgeWitness, and passed focused guard suites plus the full cabal gate.
 
 #### Candidate Direction: Witness Construction Invariant Closure
 

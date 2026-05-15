@@ -10,13 +10,12 @@ import qualified Data.Set as Set
 
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
-    ( EdgeWitness(..)
-    , Expansion(..)
+    ( Expansion(..)
     , ForallSpec(..)
     , InstanceOp(..)
-    , InstanceWitness(..)
     , ReplayContract(..)
     )
+import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Constraint.Presolution.Witness
     ( OmegaNormalizeEnv(..)
     , OmegaNormalizeError(..)

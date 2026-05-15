@@ -8,11 +8,8 @@ import qualified Data.IntSet as IntSet
 
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Presolution (Presolution(..))
-import MLF.Constraint.Types.Witness
-    ( EdgeWitness(..)
-    , InstanceOp(..)
-    , InstanceWitness(..)
-    )
+import MLF.Constraint.Types.Witness (InstanceOp(..))
+import MLF.Constraint.Types.Witness.TestSupport (EdgeWitness(..), InstanceWitness(..))
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
     , PresolutionError(..)

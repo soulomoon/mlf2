@@ -29,7 +29,7 @@ import MLF.Constraint.Types.Graph
     NodeId (..),
   )
 import MLF.Constraint.Types.Phase (Phase)
-import MLF.Constraint.Types.Witness (EdgeWitness (..), Expansion (..))
+import MLF.Constraint.Types.Witness (EdgeWitness, Expansion (..), ewLeft, ewRight)
 import MLF.Elab.Elaborate.Scope
   ( ScopeContext (..),
     generalizeAtNode,

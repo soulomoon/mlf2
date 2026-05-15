@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-235",
+  "roadmap_id": "2026-05-05-00-type-level-safety-singletons-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001",
+  "milestone_id": "milestone-5",
+  "direction_id": "direction-5a-witness-constructor-invariants",
+  "extracted_item_id": "item-5a-production-constructor-boundary-freeze",
+  "plan_path": "orchestrator/rounds/round-235/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

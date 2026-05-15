@@ -62,7 +62,7 @@
     {
       "milestone_id": "milestone-5",
       "title": "Witness Smart Constructors",
-      "status": "pending",
+            "status": "in-progress",
       "depends_on": [
         "milestone-1"
       ],
@@ -193,7 +193,7 @@
     },
     "milestone-5": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 5. Witness Smart Constructors"
+            "selector": "### [in-progress] 5. Witness Smart Constructors"
     },
     "milestone-5-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-05-00-type-level-safety-singletons-roadmap/rev-001/roadmap.md",

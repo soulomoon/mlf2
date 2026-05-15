@@ -590,6 +590,7 @@ isAllowedConstraintBoundaryImport path moduleName =
         || "src/MLF/Constraint/Solved/" `isPathPrefixOf` path
     "MLF.Constraint.Solve.TestSupport" -> False
     "MLF.Constraint.Solved.TestSupport" -> False
+    "MLF.Constraint.Types.Witness.TestSupport" -> False
     _ -> True
 
 importedModules :: String -> [String]
