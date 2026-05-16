@@ -1,0 +1,220 @@
+{
+  "schema_version": "roadmap-view-v1",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "roadmap_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+  "milestones": [
+    {
+      "milestone_id": "milestone-1",
+      "title": "Primitive Inventory Module",
+      "status": "pending",
+      "depends_on": [],
+      "parallel_lane": "lane-backend-runtime",
+      "status_anchor": "milestone-1",
+      "completion_anchor": "milestone-1-completion",
+      "direction_ids": [
+        "direction-1a-primitive-inventory-module"
+      ]
+    },
+    {
+      "milestone_id": "milestone-2",
+      "title": "Backend Callable-Shape Module",
+      "status": "pending",
+      "depends_on": [
+        "milestone-1"
+      ],
+      "parallel_lane": "lane-backend-runtime",
+      "status_anchor": "milestone-2",
+      "completion_anchor": "milestone-2-completion",
+      "direction_ids": [
+        "direction-2a-backend-callable-shape-module"
+      ]
+    },
+    {
+      "milestone_id": "milestone-3",
+      "title": "Native Parity Policy Module",
+      "status": "pending",
+      "depends_on": [
+        "milestone-1",
+        "milestone-2"
+      ],
+      "parallel_lane": "lane-backend-runtime",
+      "status_anchor": "milestone-3",
+      "completion_anchor": "milestone-3-completion",
+      "direction_ids": [
+        "direction-3a-native-parity-policy-module"
+      ]
+    },
+    {
+      "milestone_id": "milestone-4",
+      "title": "CLI Emission Preparation",
+      "status": "pending",
+      "depends_on": [
+        "milestone-1",
+        "milestone-2",
+        "milestone-3"
+      ],
+      "parallel_lane": "lane-backend-runtime",
+      "status_anchor": "milestone-4",
+      "completion_anchor": "milestone-4-completion",
+      "direction_ids": [
+        "direction-4a-cli-emission-preparation"
+      ]
+    },
+    {
+      "milestone_id": "milestone-5",
+      "title": "Prepared Generalization Artifact Depth",
+      "status": "pending",
+      "depends_on": [
+        "milestone-4"
+      ],
+      "parallel_lane": "lane-elaboration",
+      "status_anchor": "milestone-5",
+      "completion_anchor": "milestone-5-completion",
+      "direction_ids": [
+        "direction-5a-prepared-generalization-artifact-depth"
+      ]
+    },
+    {
+      "milestone_id": "milestone-6",
+      "title": "Snapshot Finalization Seam",
+      "status": "pending",
+      "depends_on": [
+        "milestone-5"
+      ],
+      "parallel_lane": "lane-elaboration",
+      "status_anchor": "milestone-6",
+      "completion_anchor": "milestone-6-completion",
+      "direction_ids": [
+        "direction-6a-snapshot-finalization-seam"
+      ]
+    }
+  ],
+  "directions": [
+    {
+      "direction_id": "direction-1a-primitive-inventory-module",
+      "milestone_id": "milestone-1",
+      "summary": "Move primitive reserved names, source/backend typing, and native emission support policy behind one private owner Module.",
+      "preconditions": [
+        "Inspect frontend builtins, backend IR validation, backend conversion, LLVM lowering, docs, and primitive-related tests at HEAD."
+      ],
+      "parallel_hints": [
+        "Use lane-backend-runtime serially by default; docs-only inventory can run in lane-docs only if it does not modify source or tests."
+      ]
+    },
+    {
+      "direction_id": "direction-2a-backend-callable-shape-module",
+      "milestone_id": "milestone-2",
+      "summary": "Centralize callable-shape facts used by MLF.Backend.IR, MLF.Backend.Convert, and MLF.Backend.LLVM.Lower.",
+      "preconditions": [
+        "Inspect backendCallableHead, conversion callable classification, lowering callable checks, and callable tests at HEAD.",
+        "Complete milestone-1 or prove callable-shape work does not depend on primitive inventory ownership."
+      ],
+      "parallel_hints": [
+        "Use lane-backend-runtime serially; shared backend classification changes can affect multiple compilation paths."
+      ]
+    },
+    {
+      "direction_id": "direction-3a-native-parity-policy-module",
+      "milestone_id": "milestone-3",
+      "summary": "Place backend/native/object-code parity policy beside ProgramMatrix and make backend tests consume it.",
+      "preconditions": [
+        "Inspect ProgramMatrix, ProgramSpec, BackendLLVMSpec, frozen parity helpers, LLVMToolSupport, and native/tool availability checks at HEAD.",
+        "Complete milestones 1 and 2 or prove the parity round only inventories current policy without changing behavior."
+      ],
+      "parallel_hints": [
+        "Use lane-backend-runtime serially by default; pure policy inventory may run in lane-docs only if it does not change coverage."
+      ]
+    },
+    {
+      "direction_id": "direction-4a-cli-emission-preparation",
+      "milestone_id": "milestone-4",
+      "summary": "Extract backend-emission semantic preparation from CLI orchestration into a backend-owned Adapter.",
+      "preconditions": [
+        "Inspect CLI source loading, Prelude retention pruning, checked-program conversion, backend rendering paths, app/Main.hs, and backend emission tests at HEAD.",
+        "Complete milestones 1 through 3 or prove the selected CLI slice is isolated from primitive, callable-shape, and parity policy."
+      ],
+      "parallel_hints": [
+        "Use lane-backend-runtime serially; CLI, backend conversion, and tests share execution paths."
+      ]
+    },
+    {
+      "direction_id": "direction-5a-prepared-generalization-artifact-depth",
+      "milestone_id": "milestone-5",
+      "summary": "Replace raw-field coupling around the Prepared Generalization Artifact with capability Adapters for the known consumers.",
+      "preconditions": [
+        "Inspect MLF.Elab.Run.Generalize.Prepare, MLF.Elab.Run.Pipeline, result-type reconstruction, root generalization, and focused generalization/elaboration tests at HEAD."
+      ],
+      "parallel_hints": [
+        "Use lane-elaboration serially; elaboration signatures are shared and can churn across many callers."
+      ]
+    },
+    {
+      "direction_id": "direction-6a-snapshot-finalization-seam",
+      "milestone_id": "milestone-6",
+      "summary": "Tighten the production MLF.Constraint.Finalize Interface and move internal/testing mechanics behind owner-local seams.",
+      "preconditions": [
+        "Inspect MLF.Constraint.Finalize, MLF.Constraint.Presolution.View, MLF.Constraint.Solved.Internal, solved/test-support modules, reify tests, and Snapshot Finalization guard tests at HEAD.",
+        "Complete milestone-5 or prove the selected Snapshot Finalization slice is independent of Prepared Generalization Artifact ownership."
+      ],
+      "parallel_hints": [
+        "Use lane-elaboration serially; this touches constraint finalization, presolution read-model access, solved internals, and tests."
+      ]
+    }
+  ],
+  "anchors": {
+    "milestone-1": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 1. Primitive Inventory Module"
+    },
+    "milestone-1-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-1"
+    },
+    "milestone-2": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 2. Backend Callable-Shape Module"
+    },
+    "milestone-2-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-2"
+    },
+    "milestone-3": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 3. Native Parity Policy Module"
+    },
+    "milestone-3-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-3"
+    },
+    "milestone-4": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 4. CLI Emission Preparation"
+    },
+    "milestone-4-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-4"
+    },
+    "milestone-5": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 5. Prepared Generalization Artifact Depth"
+    },
+    "milestone-5-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-5"
+    },
+    "milestone-6": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 6. Snapshot Finalization Seam"
+    },
+    "milestone-6-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-6"
+    },
+    "roadmap-history-completed-rounds": {
+      "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/roadmap-history.md",
+      "selector": "## Completed Rounds"
+    }
+  }
+}

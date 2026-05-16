@@ -40,6 +40,13 @@ stable contracts instead of restating them in every role or roadmap file.
   preserving retired legacy syntax as aliases, adding broad raw-view
   compatibility bridges, introducing duplicate public backend IR layers, or
   importing lazy-runtime/STG machinery by default.
+- Accepted ADRs are binding context for future architecture rounds. Legacy
+  Surface Retirement and Backend Structural Recursive Data Matching are settled
+  directions, not fresh candidate-discovery topics.
+- Architecture deepening rounds should consolidate duplicated ownership into
+  existing domain owners and `docs/architecture.md` before introducing new
+  owner modules; any new owner must be justified by a selected roadmap
+  direction and covered by focused tests or review evidence.
 - Compatibility promises: none discovered yet
 
 ## Verification Anchors
@@ -62,6 +69,9 @@ stable contracts instead of restating them in every role or roadmap file.
 - Baseline commands that protect shared contracts: `git diff --check`,
   focused tests named by the round plan, and `cabal build all && cabal test`
   for behavior-changing work.
+- Architecture deepening rounds must name the ownership boundary they changed,
+  prove that callers now depend on that owner instead of duplicating policy,
+  and update `docs/architecture.md` when module ownership changes.
 
 ## Update Rule
 
