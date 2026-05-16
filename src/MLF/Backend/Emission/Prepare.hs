@@ -4,6 +4,8 @@ module MLF.Backend.Emission.Prepare
     ( BackendEmissionPreparationError (..)
     , renderBackendEmissionPreparationError
     , prepareBackendEmissionFromSource
+    , prepareBackendEmissionFromProgramPackage
+    , prepareBackendEmissionFromLocatedPackage
     , prepareCheckedProgramForBackendEmission
     ) where
 
@@ -19,8 +21,15 @@ import MLF.Frontend.Parse.Program
     , parseLocatedProgramWithFile
     , renderProgramParseError
     )
-import MLF.Frontend.Program.Check (checkLocatedProgramPackage)
-import MLF.Frontend.Program.Package (trivialLocatedProgramPackage)
+import MLF.Frontend.Program.Check
+    ( checkLocatedProgramPackage
+    , checkProgramPackage
+    )
+import MLF.Frontend.Program.Package
+    ( LocatedProgramPackage
+    , ProgramPackage
+    , trivialLocatedProgramPackage
+    )
 import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
 import MLF.Frontend.Program.Types
     ( CheckedBinding (..)
@@ -29,6 +38,7 @@ import MLF.Frontend.Program.Types
     , ConstructorInfo (..)
     , DataInfo (..)
     , ProgramDiagnostic
+    , ProgramError
     , ResolvedProgram (..)
     , ResolvedReference (..)
     , ResolvedReferenceKind (..)
@@ -38,6 +48,7 @@ import MLF.Frontend.Program.Types
     , SymbolOwnerIdentity (..)
     , resolvedModuleName
     , resolvedModuleReferences
+    , diagnosticForProgramError
     , renderProgramDiagnostic
     )
 import MLF.Frontend.Syntax (SrcBound (..), SrcType, SrcTy (..))
@@ -45,6 +56,7 @@ import MLF.Frontend.Syntax (SrcBound (..), SrcType, SrcTy (..))
 data BackendEmissionPreparationError
     = BackendEmissionProgramParseError ProgramParseError
     | BackendEmissionProgramDiagnostic ProgramDiagnostic
+    | BackendEmissionProgramError ProgramError
     deriving (Eq, Show)
 
 renderBackendEmissionPreparationError :: BackendEmissionPreparationError -> String
@@ -54,6 +66,8 @@ renderBackendEmissionPreparationError err =
             renderProgramParseError parseErr
         BackendEmissionProgramDiagnostic diagnostic ->
             renderProgramDiagnostic diagnostic
+        BackendEmissionProgramError programErr ->
+            renderProgramDiagnostic (diagnosticForProgramError Nothing programErr)
 
 prepareBackendEmissionFromSource ::
     FilePath -> String -> Either BackendEmissionPreparationError CheckedProgram
@@ -61,10 +75,20 @@ prepareBackendEmissionFromSource path source = do
     program <-
         first BackendEmissionProgramParseError
             (parseLocatedProgramWithFile path source)
-    checked <-
-        first BackendEmissionProgramDiagnostic
-            (checkLocatedProgramPackage (withPreludeLocatedPackage (trivialLocatedProgramPackage program)))
-    pure (prepareCheckedProgramForBackendEmission checked)
+    prepareBackendEmissionFromLocatedPackage
+        (withPreludeLocatedPackage (trivialLocatedProgramPackage program))
+
+prepareBackendEmissionFromProgramPackage ::
+    ProgramPackage -> Either BackendEmissionPreparationError CheckedProgram
+prepareBackendEmissionFromProgramPackage package =
+    prepareCheckedProgramForBackendEmission
+        <$> first BackendEmissionProgramError (checkProgramPackage package)
+
+prepareBackendEmissionFromLocatedPackage ::
+    LocatedProgramPackage -> Either BackendEmissionPreparationError CheckedProgram
+prepareBackendEmissionFromLocatedPackage package =
+    prepareCheckedProgramForBackendEmission
+        <$> first BackendEmissionProgramDiagnostic (checkLocatedProgramPackage package)
 
 prepareCheckedProgramForBackendEmission :: CheckedProgram -> CheckedProgram
 prepareCheckedProgramForBackendEmission checked =

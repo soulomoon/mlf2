@@ -2,12 +2,21 @@
 
 module BackendLLVMSpec (spec) where
 
-import Control.Exception (evaluate)
-import Control.Monad (forM_, when)
+import Control.Exception (bracket, evaluate)
+import Control.Monad (forM_, replicateM, when)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Set as Set
+import System.Directory
+  ( createDirectory,
+    createDirectoryIfMissing,
+    getTemporaryDirectory,
+    removeDirectoryRecursive,
+    removeFile,
+  )
 import System.Exit (ExitCode (..))
+import System.FilePath ((</>), takeDirectory)
+import System.IO (hClose, openTempFile)
 import System.Timeout (timeout)
 import Test.Hspec
 
@@ -28,7 +37,7 @@ import MLF.API (parseRawProgram, renderProgramParseError)
 import MLF.Frontend.Program.Types (CheckedProgram)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Pipeline (checkProgram)
-import MLF.Program.CLI (emitBackendFile, emitNativeFile)
+import MLF.Program.CLI (emitBackendArgs, emitBackendFile, emitNativeFile)
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import Parity.ProgramMatrix
   ( ProgramMatrixCase (..),
@@ -63,6 +72,22 @@ spec = describe "MLF.Backend.LLVM" $ do
     output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
     output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
     validateLLVMAssembly output
+
+  it "emits LLVM IR from the CLI package entrypoint" $
+    withTempPackageRoots 2 $ \roots ->
+      case roots of
+        [mainRoot, libRoot] -> do
+          _ <- writePackageFile mainRoot "Main.mlfp" llvmPackageMainSource
+          _ <- writePackageFile libRoot "Lib.mlfp" llvmPackageLibSource
+
+          output <- requireRight =<< emitBackendArgs [mainRoot, "--search-path", libRoot]
+
+          output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
+          output `shouldSatisfy` isInfixOf "define i64 @\"Lib__two\"()"
+          output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
+          validateLLVMAssembly output
+        _ ->
+          expectationFailure ("expected two roots, got " ++ show roots)
 
   describe "IO backend contract" $ do
     it "accepts checked main : IO Unit and emits native LLVM" $ do
@@ -6438,6 +6463,46 @@ nativeRunMismatch label result =
       "stderr:",
       nativeRunStderr result
     ]
+
+llvmPackageLibSource :: String
+llvmPackageLibSource =
+  unlines
+    [ "module Lib export (two) {",
+      "  def two : Int = 2;",
+      "}"
+    ]
+
+llvmPackageMainSource :: String
+llvmPackageMainSource =
+  unlines
+    [ "module Main export (main) {",
+      "  import Lib exposing (two);",
+      "  def main : Int = two;",
+      "}"
+    ]
+
+withTempPackageRoots :: Int -> ([FilePath] -> IO a) -> IO a
+withTempPackageRoots count action =
+  bracket
+    (replicateM count createTempPackageRoot)
+    (mapM_ removeDirectoryRecursive)
+    action
+
+createTempPackageRoot :: IO FilePath
+createTempPackageRoot = do
+  tempDir <- getTemporaryDirectory
+  (path, handle) <- openTempFile tempDir "mlf2-llvm-package-root"
+  hClose handle
+  removeFile path
+  createDirectory path
+  pure path
+
+writePackageFile :: FilePath -> FilePath -> String -> IO FilePath
+writePackageFile root relativePath contents = do
+  let path = root </> relativePath
+  createDirectoryIfMissing True (takeDirectory path)
+  writeFile path contents
+  pure path
 
 requireChecked :: String -> IO CheckedProgram
 requireChecked input =

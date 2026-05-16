@@ -75,12 +75,30 @@ module MLF.Pipeline
     , sameResolvedSymbol
     , Value(..)
     , ProgramRunResult(..)
+    , PackageId(..)
+    , PackageRoot(..)
+    , PackageSearchPath(..)
+    , ProgramPackageDiscoveryError(..)
+    , ProgramSourceUnit(..)
+    , LocatedProgramSourceUnit(..)
+    , ProgramPackage(..)
+    , LocatedProgramPackage(..)
+    , discoverLocatedProgramPackage
+    , discoverLocatedProgramPackageFromSearchPath
+    , trivialProgramPackage
+    , trivialLocatedProgramPackage
     , checkProgram
+    , checkProgramPackage
     , checkLocatedProgram
+    , checkLocatedProgramPackage
     , runProgram
+    , runProgramPackage
     , runLocatedProgram
+    , runLocatedProgramPackage
     , runProgramOutput
+    , runProgramPackageOutput
     , runLocatedProgramOutput
+    , runLocatedProgramPackageOutput
     , programRunOutput
     , renderProgramDiagnostic
     , prettyValue
@@ -114,7 +132,23 @@ import MLF.Frontend.Program.Types
     )
 import MLF.Frontend.Program.Check
     ( checkLocatedProgram
+    , checkLocatedProgramPackage
     , checkProgram
+    , checkProgramPackage
+    )
+import MLF.Frontend.Program.Package
+    ( LocatedProgramPackage(..)
+    , LocatedProgramSourceUnit(..)
+    , PackageId(..)
+    , PackageRoot(..)
+    , PackageSearchPath(..)
+    , ProgramPackage(..)
+    , ProgramPackageDiscoveryError(..)
+    , ProgramSourceUnit(..)
+    , discoverLocatedProgramPackage
+    , discoverLocatedProgramPackageFromSearchPath
+    , trivialLocatedProgramPackage
+    , trivialProgramPackage
     )
 import MLF.Frontend.Program.Run
     ( ProgramRunResult(..)
@@ -122,9 +156,13 @@ import MLF.Frontend.Program.Run
     , prettyValue
     , programRunOutput
     , runLocatedProgram
+    , runLocatedProgramPackage
     , runLocatedProgramOutput
+    , runLocatedProgramPackageOutput
     , runProgram
+    , runProgramPackage
     , runProgramOutput
+    , runProgramPackageOutput
     )
 import MLF.Constraint.Types.Graph (BaseTy(..), PolySyms)
 import MLF.Constraint.Types.Phase (Phase(Raw))

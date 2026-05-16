@@ -25,13 +25,17 @@ module User export (main) {
 }
 ```
 
-Imports may refer to modules declared later in the same file. A parsed `.mlfp`
-`Program` is one compilation unit: imports resolve only against modules in that
-same program. The CLI runner parses one source file and prepends the built-in
-`Prelude` as an explicit module before checking. There is no filesystem module
-discovery, persisted interface file, stable `.mlfp` ABI, linker, or separate
-module compilation mode yet. Hidden constructors remain hidden: importing
-`Nat(..)` from a module that exported only `Nat` is a visibility error.
+Imports may refer to modules declared later in the same file or in another
+`.mlfp` file discovered under an explicitly selected local package root. A
+parsed `.mlfp` `Program` remains an in-memory package projection: imports
+resolve only against modules in the file/root/search-path package. The CLI
+accepts either a single file, which is treated as a trivial local package source
+unit, or a directory root plus optional ordered `--search-path <root>` entries;
+it prepends the built-in `Prelude` as an explicit module before checking. There
+is no package manager, remote dependency system, persisted interface file,
+stable `.mlfp` ABI, linker, or separate module compilation mode yet. Hidden
+constructors remain hidden: importing `Nat(..)` from a module that exported only
+`Nat` is a visibility error.
 
 Imports can be qualified and aliased:
 
@@ -366,16 +370,18 @@ constructor metadata consistency for construct/case nodes.
 The executable exposes this boundary with:
 
 ```bash
-cabal run mlf2 -- emit-backend path/to/file.mlfp
+cabal run mlf2 -- emit-backend path/to/file-or-root --search-path path/to/extra-root
 ```
 
-Like `run-program`, `emit-backend` parses one source file and prepends the
-built-in Prelude as an explicit module before checking. The emitted text is
-LLVM IR for the supported backend subset, not a stable ABI or a promise of
-final executable linking. IO values remain outside the LLVM contract: checked
-`main : IO Unit`, direct `__io_*` primitive calls, and pure `main` bindings
-whose reachable dependencies mention IO fail before LLVM is emitted. The
-source-facing surface remains primarily first-order: checked first-order
+Like `check-program`, `run-program`, and `emit-native`, `emit-backend` loads a
+single file as a trivial package source unit or discovers `.mlfp` files under
+the selected local roots, then prepends the built-in Prelude as an explicit
+module before checking. The emitted text is LLVM IR for the supported backend
+subset, not a stable ABI or a promise of final executable linking. IO values
+remain outside the LLVM contract: checked `main : IO Unit`, direct `__io_*`
+primitive calls, and pure `main` bindings whose reachable dependencies mention
+IO fail before LLVM is emitted. The source-facing surface remains primarily
+first-order: checked first-order
 function bindings, saturated direct calls, literals, variables, SSA-style lets,
 type abstraction/application after specialization, ADT construction, and ADT
 case analysis.
@@ -397,8 +403,8 @@ Unsupported backend LLVM expression at binding "main": escaping lambda
 ## Built-In Prelude
 
 There is a source-level `Prelude` module supplied by the program layer. It is
-not imported implicitly by the checker APIs. The CLI/file runner prepends the
-built-in module so user files can explicitly import it:
+not imported implicitly by the checker APIs. The CLI package entrypoints prepend
+the built-in module so user files can explicitly import it:
 
 ```mlf
 module Main export (main) {

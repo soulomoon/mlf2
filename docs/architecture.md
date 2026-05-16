@@ -8,7 +8,7 @@ Goal: keep the implementation paper-faithful to the thesis and document any devi
 Downstream code should import:
 
 - `MLF.API` — umbrella frontend module (surface syntax + eMLF / `.mlfp` parse/pretty + normalization helpers)
-- `MLF.Pipeline` — canonical pipeline/runtime module (e.g. `inferConstraintGraph`, `runPipelineElab`, `runPipelineElabWithConfig`, `typeCheck`, `step`, `normalize`, `.mlfp` elaboration/checking/runtime)
+- `MLF.Pipeline` — canonical pipeline/runtime module (e.g. `inferConstraintGraph`, `runPipelineElab`, `runPipelineElabWithConfig`, `typeCheck`, `step`, `normalize`, `.mlfp` package discovery/checking/runtime)
 - `MLF.XMLF` — explicit xMLF syntax, parser, and pretty-printing helpers
 
 Public modules live under `src-public/` and the public Cabal library only exposes:
@@ -47,13 +47,13 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Check` — module/import/class/data environment assembly for `.mlfp`, including static validation that may fail before the eMLF pipeline
 - `MLF.Frontend.Program.Elaborate` — lowers executable `.mlfp` bindings to surface eMLF `SurfaceExpr`
 - `MLF.Frontend.Program.Finalize` — normalizes lowered surface eMLF, calls the internal detailed eMLF pipeline entrypoints with program-owned external binding modes, resolves `.mlfp` deferred obligations, and accepts rewritten terms only after the xMLF typecheck guard
-- `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI/file runner as an explicit import target
+- `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI package entrypoints as an explicit import target
 - `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates pure checked `.mlfp` bindings through the existing xMLF runtime, executes checked `main : IO Unit` actions through the reserved IO primitive boundary, and renders recovered closed ADT values with source constructor syntax
 - `MLF.Primitive.Inventory` — private owner for builtin type names/kinds, opaque builtin metadata, shared source/backend primitive signatures, and native support classification for lowerable reserved primitives. `MLF.Frontend.Program.Builtins`, `MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower` adapt this inventory; LLVM lowering still owns wrapper/runtime implementation details downstream.
 - `MLF.Backend.CallableShape` — private owner for direct-vs-closure callable-head classification shared by `MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower`; it centralizes callable-head policy without creating a second executable backend IR surface
 - `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before LLVM lowering
 - `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion, explicit ADT construct/case recovery, and closure conversion where the checked xMLF shape is unambiguous
-- `MLF.Backend.Emission.Prepare` — private adapter for backend-emission semantic preparation from a caller-provided source string: parsing with a display path, Prelude injection, checking, and backend-owned Prelude retention pruning before LLVM rendering
+- `MLF.Backend.Emission.Prepare` — private adapter for backend-emission semantic preparation from a caller-provided source string or located package before LLVM rendering
 - `MLF.Backend.LLVM` — repo-local LLVM backend facade over a small typed LLVM AST, lowerer, and pretty-printer for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
 - Structural recursive ADT matching currently remains adapter-local in `MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower`. The accepted target is one private backend matcher module named `MLF.Backend.StructuralRecursiveData`, but that module is not yet present in the current codebase.
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
@@ -66,16 +66,16 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Types.*` — elaborated/runtime term and type representations
 - `MLF.Util.*` — shared utilities (order keys, union-find, etc.)
 
-The `.mlfp` package/module owner is `MLF.Frontend.Program.Package`. Current
-one-file `.mlfp` inputs are represented as trivial package source units, then
-projected into the existing in-memory `Program` artifact at the checker/resolver
-edge. The package owner can discover `.mlfp` files under ordered explicit local
-roots/search paths, retain source paths, reject duplicate modules across
-searched roots with source-path context, build a module-to-file graph, reject
-missing or cyclic module imports, and project modules in dependency order so
-imports are checked before importers. `MLF.Frontend.Program.Interface` owns the
-private checked module interface artifact that `Check` uses for prior-module
-import visibility and package consistency validation. The artifact records
+The `.mlfp` package/module owner is `MLF.Frontend.Program.Package`. One-file
+`.mlfp` inputs are represented as trivial package source units, while directory
+inputs and explicit search-path roots are represented as ordered local package
+roots. The package owner can discover `.mlfp` files under those roots/search
+paths, retain source paths, reject duplicate modules across searched roots with
+source-path context, build a module-to-file graph, reject missing or cyclic
+module imports, and project modules in dependency order so imports are checked
+before importers. `MLF.Frontend.Program.Interface` owns the private checked
+module interface artifact that `Check` uses for prior-module import visibility
+and package consistency validation. The artifact records
 checked exports, local data/class summaries, visible instances, source paths,
 and direct `PackageModuleId` dependencies; validation fails closed when graph
 order, source paths, dependencies, or exported symbol ownership do not match the
@@ -92,12 +92,14 @@ Stale source, stale dependency-interface, and malformed interface cases fail
 closed with module/interface names instead of falling back to modification-time,
 file-size, hidden-global, or source-reparse heuristics. `Finalize` consumes the
 assembled program scope, and `Run` evaluates all checked module bindings
-together. There is no persisted interface file format, package manager, remote
-dependency system, stable `.mlfp` ABI, linker, CLI package mode, or public
-package API today. Future separate compilation should be introduced only through
-the package/interface/build-graph owners and explicit compiler-owned artifacts
-that carry checked xMLF/runtime payloads rather than by peeking at source outside
-the package projection.
+together. `MLF.Program.CLI` and the narrow public `MLF.Pipeline` package
+functions route check/run/backend-entry preparation through this package owner.
+There is no persisted interface file format, package manager, remote dependency
+system, stable `.mlfp` ABI, linker, or separate compilation mode today. Future
+separate compilation should be introduced only through the package, interface,
+and build-graph owners and explicit compiler-owned artifacts that carry checked
+xMLF/runtime payloads rather than by peeking at source outside the package
+projection.
 
 No active executable or test component depends on historical research modules.
 
@@ -373,8 +375,8 @@ tools or LLVM 14-era tools run with `-opaque-pointers`.
 
 The backend has two emission contracts. Both raw and native emission still
 consume the same backend IR program. Raw emission keeps the checked `.mlfp`
-`main` as an ordinary module-qualified LLVM function and is the stable IR
-inspection surface. Native emission adds a C ABI `i32 @main()` wrapper around a
+`main` as an ordinary module-qualified LLVM function and is the current internal
+IR inspection surface. Native emission adds a C ABI `i32 @main()` wrapper around a
 zero-argument checked `.mlfp` `main`, renders supported pure `Int`, `Bool`, and
 first-order ADT results to stdout using the same value text as `ProgramSpec`,
 prints one trailing newline, writes no stderr on success, and returns process
@@ -392,15 +394,16 @@ native executable run, and required LLVM/native tools without widening
 production backend APIs.
 
 `MLF.Backend.Emission.Prepare` owns the shared semantic preparation step for
-raw and native backend emission: parsing a provided source string with the
-caller's display path, injecting the source-level Prelude, checking the
-program, and pruning the checked Prelude module to the binding and data
-dependency closure required by backend rendering. The CLI adapter in
-`src/MLF/Program/CLI.hs` remains the file and command owner for `emit-backend`
-and `emit-native`: it reads the requested file, delegates semantic preparation
-to the backend adapter, renders through `MLF.Backend.LLVM`, and presents
-user-facing errors. Runtime execution through `run-program` stays in that CLI
-adapter and `MLF.Frontend.Program.Run`.
+raw and native backend emission: source-string callers parse with a display path
+and become located trivial packages, while package callers pass an already
+discovered located package. Both paths check the package and prune the checked
+Prelude module to the binding and data dependency closure required by backend
+rendering. The CLI adapter in `src/MLF/Program/CLI.hs` remains the command and
+file-or-root owner for `check-program`, `run-program`, `emit-backend`, and
+`emit-native`: it parses `--search-path`, loads file inputs as trivial packages
+or directory inputs as local package roots, injects the source-level Prelude,
+delegates semantic preparation or runtime execution, and presents user-facing
+errors.
 
 The explicit closure ABI is private to the backend IR-to-LLVM path. A closure
 value is a heap pointer to a two-word record containing a code pointer and an

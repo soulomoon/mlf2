@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-249",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001",
+  "milestone_id": "milestone-5",
+  "direction_id": "direction-5a-cli-api-package-migration",
+  "extracted_item_id": "round-249-cli-api-package-migration",
+  "plan_path": "orchestrator/rounds/round-249/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

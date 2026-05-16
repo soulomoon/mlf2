@@ -11,10 +11,11 @@ import MLF.Pipeline
     , runPipelineElabWithConfig
     )
 import MLF.Program.CLI
-    ( emitBackendFile
-    , emitNativeFile
+    ( checkProgramArgs
+    , emitBackendArgs
+    , emitNativeArgs
     , programCliUsage
-    , runProgramFile
+    , runProgramArgs
     )
 
 main :: IO ()
@@ -23,18 +24,14 @@ main = do
     case args of
         [] ->
             runDefaultDemo >>= putStrLn
-        ["run-program", path] ->
-            runProgramFile path >>= either die putStr
-        ["run-program"] ->
-            die programCliUsage
-        ["emit-backend", path] ->
-            emitBackendFile path >>= either die putStr
-        ["emit-backend"] ->
-            die programCliUsage
-        ["emit-native", path] ->
-            emitNativeFile path >>= either die putStr
-        ["emit-native"] ->
-            die programCliUsage
+        "check-program" : commandArgs ->
+            checkProgramArgs commandArgs >>= either die putStr
+        "run-program" : commandArgs ->
+            runProgramArgs commandArgs >>= either die putStr
+        "emit-backend" : commandArgs ->
+            emitBackendArgs commandArgs >>= either die putStr
+        "emit-native" : commandArgs ->
+            emitNativeArgs commandArgs >>= either die putStr
         ["--help"] ->
             putStrLn programCliUsage
         "--research-entrypoint" : _ ->

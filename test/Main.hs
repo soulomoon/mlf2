@@ -33,6 +33,7 @@ import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
 import PipelineSpec qualified
 import ProgramPackageBuildGraphSpec qualified
+import ProgramCliPackageSpec qualified
 import ProgramInterfaceSpec qualified
 import ProgramPackageSpec qualified
 import ProgramPackageDiscoverySpec qualified
@@ -110,6 +111,7 @@ main = do
     BackendLLVMSpec.spec
     ProgramInterfaceSpec.spec
     ProgramPackageBuildGraphSpec.spec
+    ProgramCliPackageSpec.spec
     ProgramPackageSpec.spec
     ProgramPackageDiscoverySpec.spec
     ProgramSpec.spec

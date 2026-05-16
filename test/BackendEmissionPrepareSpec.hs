@@ -9,14 +9,26 @@ import Test.Hspec
 
 import LLVMToolSupport (validateLLVMAssembly)
 import MLF.Backend.Emission.Prepare
-    ( prepareBackendEmissionFromSource
+    ( prepareBackendEmissionFromLocatedPackage
+    , prepareBackendEmissionFromSource
     )
+import MLF.Frontend.Parse.Program
+    ( parseLocatedProgramWithFile
+    , renderProgramParseError
+    )
+import MLF.Frontend.Program.Package
+    ( LocatedProgramPackage (..)
+    , PackageId (..)
+    , locatedProgramSourceUnitFromLocated
+    )
+import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
 import MLF.Backend.LLVM (renderCheckedProgramLLVM)
 import MLF.Frontend.Program.Types
     ( CheckedBinding (..)
     , CheckedModule (..)
     , CheckedProgram (..)
     )
+import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
 
 spec :: Spec
 spec =
@@ -26,6 +38,27 @@ spec =
             output <- requireRight (renderCheckedProgramLLVM checked)
 
             output `shouldSatisfy` isInfixOf "; mlf2 LLVM backend v0"
+            output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
+            validateLLVMAssembly output
+
+        it "prepares and renders backend LLVM from a located package" $ do
+            lib <- requireLocated "src/Lib.mlfp" libProgram
+            main <- requireLocated "app/Main.mlfp" mainImportsLibProgram
+            let package =
+                    withPreludeLocatedPackage
+                        LocatedProgramPackage
+                            { locatedProgramPackageId = PackageId "backend-package"
+                            , locatedProgramPackageSourceUnits =
+                                [ locatedProgramSourceUnitFromLocated lib
+                                , locatedProgramSourceUnitFromLocated main
+                                ]
+                            }
+
+            checked <- requireRight (prepareBackendEmissionFromLocatedPackage package)
+            output <- requireRight (renderCheckedProgramLLVM checked)
+
+            map checkedModuleName (checkedProgramModules checked) `shouldBe` ["Prelude", "Lib", "Main"]
+            output `shouldSatisfy` isInfixOf "define i64 @\"Lib__two\"()"
             output `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
             validateLLVMAssembly output
 
@@ -52,6 +85,29 @@ unitProgram =
         , "  def main : Unit = Unit;"
         , "}"
         ]
+
+libProgram :: String
+libProgram =
+    unlines
+        [ "module Lib export (two) {"
+        , "  def two : Int = 2;"
+        , "}"
+        ]
+
+mainImportsLibProgram :: String
+mainImportsLibProgram =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Lib exposing (two);"
+        , "  def main : Int = two;"
+        , "}"
+        ]
+
+requireLocated :: FilePath -> String -> IO ProgramSyntax.LocatedProgram
+requireLocated path source =
+    case parseLocatedProgramWithFile path source of
+        Left err -> expectationFailure (renderProgramParseError err) >> fail "parse failed"
+        Right located -> pure located
 
 requirePreludeModule :: CheckedProgram -> IO CheckedModule
 requirePreludeModule checked =

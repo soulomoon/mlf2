@@ -65,7 +65,7 @@ CI reuses the same repo commands; there is no CI-only verification logic.
 ## Public entry points
 
 - `MLF.API` — surface syntax plus eMLF / `.mlfp` parsing, pretty-printing, and normalization helpers
-- `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API, including `.mlfp` elaboration/checking on the shared eMLF/xMLF path
+- `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API, including local `.mlfp` package discovery/checking/runtime on the shared eMLF/xMLF path
 - `MLF.XMLF` — xMLF syntax, parser, and pretty-printer
 
 Active multi-step work is tracked under `tasks/todo/`; root-level `task_plan.md`,
@@ -77,7 +77,7 @@ workflow.
 `.mlfp` programs now share the main frontend/pipeline ownership boundary:
 
 - `MLF.API` parses and pretty-prints `.mlfp` programs
-- `MLF.Pipeline` elaborates `.mlfp` programs onto the existing eMLF/xMLF path and checks them with the existing MLF typechecker
+- `MLF.Pipeline` elaborates `.mlfp` programs and local `.mlfp` packages onto the existing eMLF/xMLF path and checks them with the existing MLF typechecker
 
 The unified `.mlfp` surface includes:
 
@@ -91,11 +91,12 @@ The unified `.mlfp` surface includes:
 - a built-in Prelude with `Nat`, `Option`, `List`, `Eq`, `Unit`, opaque
   `IO`, minimal `Monad IO`, `pure`, `bind`, `putStrLn`, `and`, and `id`
 
-`.mlfp` modules are same-compilation-unit modules today: imports resolve among
-modules in the parsed program, with the CLI runner adding the built-in Prelude
-as an explicit module. Separate module compilation and interface files are not
-supported yet; see `docs/mlfp-language-reference.md` for the user-facing module
-contract.
+`.mlfp` modules are same-local-package modules today: imports resolve among
+modules in the input file or the discovered `.mlfp` files under the selected
+local root/search-path roots, with the CLI adding the built-in Prelude as an
+explicit module. Separate module compilation and persisted interface files are
+not supported yet; see `docs/mlfp-language-reference.md` for the user-facing
+module contract.
 
 Internally, `.mlfp` now reuses the old MLF ownership boundary:
 
@@ -117,10 +118,23 @@ The current user-facing `.mlfp` language contract is documented in
 The first-class-polymorphism program example lives at
 `test/programs/unified/first-class-polymorphism.mlfp`.
 
-Run a program file directly from the executable:
+Check a program file or local package root from the executable:
+
+```bash
+cabal run mlf2 -- check-program test/programs/recursive-adt/plain-recursive-nat.mlfp
+```
+
+Run a program file or local package root directly from the executable:
 
 ```bash
 cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp
+```
+
+Directory inputs are discovered as local package roots. Additional roots are
+searched in order:
+
+```bash
+cabal run mlf2 -- run-program app-package --search-path lib-package
 ```
 
 Emit LLVM IR for a checked program:
@@ -134,6 +148,12 @@ Emit LLVM IR with a native process entrypoint:
 ```bash
 cabal run mlf2 -- emit-native test/programs/unified/authoritative-let-polymorphism.mlfp
 ```
+
+The `.mlfp` CLI accepts a file as a trivial local package source unit or a
+directory as a local package root for `check-program`, `run-program`,
+`emit-backend`, and `emit-native`. This is local filesystem package projection
+only: there is no package manager, registry, remote dependency solver, stable
+`.mlfp` ABI, or linker guarantee.
 
 `emit-backend` keeps the raw backend contract: the checked `.mlfp` `main`
 binding remains a module-qualified LLVM function such as `Main__main`.

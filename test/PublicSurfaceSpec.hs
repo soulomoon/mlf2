@@ -6,11 +6,22 @@ import Data.List.NonEmpty (NonEmpty (..))
 import Data.List (isInfixOf)
 import Data.Set qualified as Set
 import Data.Text qualified as T
+import Control.Exception (bracket)
+import Control.Monad (replicateM)
 import MLF.API
 import MLF.API qualified as API
 import MLF.Constraint.NodeAccess qualified as NodeAccess
 import MLF.Pipeline qualified as Pipeline
 import MLF.XMLF
+import System.Directory
+    ( createDirectory
+    , createDirectoryIfMissing
+    , getTemporaryDirectory
+    , removeDirectoryRecursive
+    , removeFile
+    )
+import System.FilePath ((</>), takeDirectory)
+import System.IO (hClose, openTempFile)
 import Test.Hspec
 
 spec :: Spec
@@ -25,6 +36,7 @@ spec = describe "Public surface contracts" $ do
         ]
     concat publicSources `shouldNotSatisfy` isInfixOf "MLF.Frontend.Program.Interface"
     concat publicSources `shouldNotSatisfy` isInfixOf "MLF.Frontend.Program.BuildGraph"
+    concat publicSources `shouldNotSatisfy` isInfixOf "MLF.Program.CLI"
 
   describe "MLF.API" $ do
     it "roundtrips raw surface expressions through parse(pretty(expr))" $ do
@@ -121,6 +133,24 @@ spec = describe "Public surface contracts" $ do
         expectRight (Pipeline.runProgram program) $ \value ->
           Pipeline.prettyValue value `shouldBe` "true"
 
+    it "discovers, checks, and runs local .mlfp packages through the public package surface" $
+      withTempPackageRoots 2 $ \case
+        [mainRoot, libRoot] -> do
+          _ <- writePackageFile mainRoot "Main.mlfp" publicMainSource
+          _ <- writePackageFile libRoot "Lib.mlfp" publicLibSource
+          package <-
+            requireRight
+              =<< Pipeline.discoverLocatedProgramPackageFromSearchPath
+                (Pipeline.PackageId "public-package")
+                (Pipeline.PackageSearchPath [Pipeline.PackageRoot mainRoot, Pipeline.PackageRoot libRoot])
+
+          expectRight (Pipeline.checkLocatedProgramPackage package) $ \checked ->
+            Pipeline.checkedProgramMain checked `shouldBe` "Main__main"
+          expectRight (Pipeline.runLocatedProgramPackage package) $ \value ->
+            Pipeline.prettyValue value `shouldBe` "2"
+        roots ->
+          expectationFailure ("expected two roots, got " ++ show roots)
+
   describe "MLF.Pipeline (error formatting)" $ do
     it "formatPipelineError produces structured Text output" $ do
       let err = Pipeline.PipelineConstraintError (Pipeline.UnknownVariable "x")
@@ -187,6 +217,52 @@ expectRight result k =
   case result of
     Left err -> expectationFailure ("Expected Right, got Left " ++ show err)
     Right value -> k value
+
+requireRight :: (Show err) => Either err a -> IO a
+requireRight result =
+  case result of
+    Left err -> expectationFailure ("Expected Right, got Left " ++ show err) >> fail "unexpected Left"
+    Right value -> pure value
+
+publicLibSource :: String
+publicLibSource =
+  unlines
+    [ "module Lib export (two) {",
+      "  def two : Int = 2;",
+      "}"
+    ]
+
+publicMainSource :: String
+publicMainSource =
+  unlines
+    [ "module Main export (main) {",
+      "  import Lib exposing (two);",
+      "  def main : Int = two;",
+      "}"
+    ]
+
+withTempPackageRoots :: Int -> ([FilePath] -> IO a) -> IO a
+withTempPackageRoots count action =
+  bracket
+    (replicateM count createTempPackageRoot)
+    (mapM_ removeDirectoryRecursive)
+    action
+
+createTempPackageRoot :: IO FilePath
+createTempPackageRoot = do
+  tempDir <- getTemporaryDirectory
+  (path, handle) <- openTempFile tempDir "mlf2-public-package-root"
+  hClose handle
+  removeFile path
+  createDirectory path
+  pure path
+
+writePackageFile :: FilePath -> FilePath -> String -> IO FilePath
+writePackageFile root relativePath contents = do
+  let path = root </> relativePath
+  createDirectoryIfMissing True (takeDirectory path)
+  writeFile path contents
+  pure path
 
 hasRecursiveArrow :: Pipeline.ElabType -> Bool
 hasRecursiveArrow ty = case ty of

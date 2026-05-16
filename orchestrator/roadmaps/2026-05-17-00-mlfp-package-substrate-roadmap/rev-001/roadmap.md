@@ -278,7 +278,7 @@ rounds unless controller state and a selected plan explicitly allow it.
 - Extraction notes: begin with local package root and cache-key design, then
   add stale-interface and dependency invalidation tests.
 
-### [pending] 5. CLI And Public Entry Point Migration
+### [done] 5. CLI And Public Entry Point Migration
 
 - Milestone id: `milestone-5`
 - Depends on: `milestone-1`, `milestone-2`, `milestone-3`, `milestone-4`
@@ -296,7 +296,7 @@ rounds unless controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-5
 
-- none yet
+- Completed by round-249; evidence: CLI and public `.mlfp` package check/run/backend/native adapters use local package mode across file, root, and ordered search-path inputs, preserve one-file inputs as trivial packages, keep private interface/build-graph/backend lowering internals out of public APIs, and pass focused plus full Cabal validation.
 
 #### Candidate Direction: CLI API Package Migration
 

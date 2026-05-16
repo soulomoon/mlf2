@@ -64,7 +64,7 @@
     {
       "milestone_id": "milestone-5",
       "title": "CLI And Public Entry Point Migration",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-1",
         "milestone-2",
@@ -196,7 +196,7 @@
     },
     "milestone-5-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 5. CLI And Public Entry Point Migration"
+      "selector": "### [done] 5. CLI And Public Entry Point Migration"
     },
     "milestone-5-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",

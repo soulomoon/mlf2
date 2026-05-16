@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-249",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001",
+  "milestone_id": "milestone-5",
+  "direction_id": "direction-5a-cli-api-package-migration",
+  "extracted_item_id": "round-249-cli-api-package-migration",
+  "summary": "Route CLI and narrow public .mlfp check/runtime adapters through package mode, adding local package check/run/backend/native entrypoints while preserving one-file inputs as trivial packages.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

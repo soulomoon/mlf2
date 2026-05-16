@@ -400,6 +400,7 @@ test-suite mlf2-test
                       Parity.ProgramMatrix.NativePolicy,
                       ProgramInterfaceSpec,
                       ProgramPackageBuildGraphSpec,
+                      ProgramCliPackageSpec,
                       ProgramPackageSpec,
                       ProgramPackageDiscoverySpec,
                       ProgramSpec,

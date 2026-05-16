@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-249",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001",
+  "milestone_id": "milestone-5",
+  "direction_id": "direction-5a-cli-api-package-migration",
+  "extracted_item_id": "round-249-cli-api-package-migration",
+  "decision": "approved",
+  "evidence_summary": "Focused CLI package migration, package owner/discovery/build-graph, backend preparation, LLVM file/package entrypoint, and public-surface tests passed; git diff --check passed; cabal build all && cabal test passed with 2470 examples; the diff routes CLI and public .mlfp package check/run/backend/native adapters through local package mode while preserving file inputs as trivial packages and keeping private interface/build graph/backend lowering internals out of the public surface.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-5",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-5-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-5-completion",
+        "text": "Completed by round-249; evidence: CLI and public .mlfp package check/run/backend/native adapters use local package mode across file, root, and ordered search-path inputs, preserve one-file inputs as trivial packages, keep private interface/build-graph/backend lowering internals out of public APIs, and pass focused plus full Cabal validation."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

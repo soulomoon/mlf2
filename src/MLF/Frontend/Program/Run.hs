@@ -4,9 +4,13 @@ module MLF.Frontend.Program.Run
   ( Value (..),
     ProgramRunResult (..),
     runProgram,
+    runProgramPackage,
     runLocatedProgram,
+    runLocatedProgramPackage,
     runProgramOutput,
+    runProgramPackageOutput,
     runLocatedProgramOutput,
+    runLocatedProgramPackageOutput,
     programRunOutput,
     prettyValue,
   )
@@ -18,7 +22,7 @@ import Data.List (find, intercalate)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Elab.Pipeline (ElabTerm (..), Pretty (..), Ty (..), freeTypeVarsType, normalize, schemeFromType, typeCheck)
-import MLF.Frontend.Program.Check (checkLocatedProgram, checkProgram)
+import MLF.Frontend.Program.Check (checkLocatedProgram, checkLocatedProgramPackage, checkProgram, checkProgramPackage)
 import MLF.Frontend.Program.Elaborate
   ( ElaborateScope,
     classInfoForConstraint,
@@ -34,6 +38,11 @@ import MLF.Frontend.Program.Elaborate
   )
 import MLF.Frontend.Program.Finalize (recoverSourceType)
 import qualified MLF.Frontend.Program.Builtins as Builtins
+import MLF.Frontend.Program.Package
+  ( LocatedProgramPackage,
+    ProgramPackage,
+    locatedProgramPackageProgram,
+  )
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     ClassInfo (..),
@@ -86,6 +95,11 @@ runProgram program = do
   checked <- checkProgram program
   runCheckedPureProgram checked
 
+runProgramPackage :: ProgramPackage -> Either ProgramError Value
+runProgramPackage package = do
+  checked <- checkProgramPackage package
+  runCheckedPureProgram checked
+
 runLocatedProgram :: ProgramSyntax.LocatedProgram -> Either ProgramDiagnostic Value
 runLocatedProgram located = do
   checked <- checkLocatedProgram located
@@ -93,9 +107,21 @@ runLocatedProgram located = do
     Left err -> Left (diagnosticForProgramError (Just located) err)
     Right value -> pure value
 
+runLocatedProgramPackage :: LocatedProgramPackage -> Either ProgramDiagnostic Value
+runLocatedProgramPackage package = do
+  checked <- checkLocatedProgramPackage package
+  case runCheckedPureProgram checked of
+    Left err -> Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err)
+    Right value -> pure value
+
 runProgramOutput :: ProgramSyntax.Program -> Either ProgramError ProgramRunResult
 runProgramOutput program = do
   checked <- checkProgram program
+  runCheckedProgramOutput checked
+
+runProgramPackageOutput :: ProgramPackage -> Either ProgramError ProgramRunResult
+runProgramPackageOutput package = do
+  checked <- checkProgramPackage package
   runCheckedProgramOutput checked
 
 runLocatedProgramOutput :: ProgramSyntax.LocatedProgram -> Either ProgramDiagnostic ProgramRunResult
@@ -103,6 +129,13 @@ runLocatedProgramOutput located = do
   checked <- checkLocatedProgram located
   case runCheckedProgramOutput checked of
     Left err -> Left (diagnosticForProgramError (Just located) err)
+    Right result -> pure result
+
+runLocatedProgramPackageOutput :: LocatedProgramPackage -> Either ProgramDiagnostic ProgramRunResult
+runLocatedProgramPackageOutput package = do
+  checked <- checkLocatedProgramPackage package
+  case runCheckedProgramOutput checked of
+    Left err -> Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err)
     Right result -> pure result
 
 programRunOutput :: ProgramRunResult -> String
