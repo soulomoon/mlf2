@@ -47,7 +47,12 @@ stable contracts instead of restating them in every role or roadmap file.
   existing domain owners and `docs/architecture.md` before introducing new
   owner modules; any new owner must be justified by a selected roadmap
   direction and covered by focused tests or review evidence.
-- Compatibility promises: none discovered yet
+- Package-substrate work for `.mlfp` should treat package/module semantics as
+  the intended durable program model. Existing one-file examples may remain
+  only as trivial package inputs, not as a second semantic mode with its own
+  resolver/checker contract.
+- Compatibility promises: no durable promise to preserve the old one-file
+  `.mlfp` program model as a separate mode.
 
 ## Verification Anchors
 
@@ -72,6 +77,10 @@ stable contracts instead of restating them in every role or roadmap file.
 - Architecture deepening rounds must name the ownership boundary they changed,
   prove that callers now depend on that owner instead of duplicating policy,
   and update `docs/architecture.md` when module ownership changes.
+- Package-substrate rounds must prove package/module/interface behavior with
+  focused tests before the full gate, and must classify user-facing support by
+  source checking, interpreter/runtime, backend/native, object code, and
+  package build mode when those layers differ.
 
 ## Update Rule
 

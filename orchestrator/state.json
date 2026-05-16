@@ -1,10 +1,10 @@
 {
   "contract_version": "orchestrator-v2",
   "base_branch": "master",
-  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
   "roadmap_revision": "rev-001",
-  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
-  "controller_stage": "done",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001",
+  "controller_stage": "dispatch-rounds",
   "max_parallel_rounds": 1,
   "active_rounds": [],
   "roadmap_update": null,
