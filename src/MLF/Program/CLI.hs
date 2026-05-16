@@ -36,7 +36,6 @@ import MLF.Frontend.Program.Types
     , CheckedProgram (..)
     , ConstructorInfo (..)
     , DataInfo (..)
-    , ResolvedModule (..)
     , ResolvedProgram (..)
     , ResolvedReference (..)
     , ResolvedReferenceKind (..)
@@ -44,6 +43,8 @@ import MLF.Frontend.Program.Types
     , SymbolIdentity (..)
     , SymbolNamespace (..)
     , SymbolOwnerIdentity (..)
+    , resolvedModuleName
+    , resolvedModuleReferences
     , renderProgramDiagnostic
     )
 import MLF.Frontend.Syntax (SrcBound (..), SrcType, SrcTy (..))

@@ -110,14 +110,23 @@ resolveModule (priorExports, resolvedRev) mod0 = do
   exports <- buildExports mod0 locals
   let resolved =
         ResolvedModule
-          { resolvedModuleName = P.moduleName mod0,
-            resolvedModuleSyntax = resolvedSyntax,
-            resolvedModuleLocalValues = localValues locals,
-            resolvedModuleLocalTypes = localTypes locals,
-            resolvedModuleLocalClasses = localClasses locals,
-            resolvedModuleScope = fullScope,
-            resolvedModuleExports = exports,
-            resolvedModuleReferences = references
+          { resolvedModuleSemantic =
+              ResolvedSemanticModule
+                { resolvedSemanticModuleName = P.moduleName mod0,
+                  resolvedSemanticModuleSyntax = resolvedSyntax,
+                  resolvedSemanticModuleLocalSymbols =
+                    ResolvedLocalSymbols
+                      { resolvedLocalValues = localValues locals,
+                        resolvedLocalTypes = localTypes locals,
+                        resolvedLocalClasses = localClasses locals
+                      },
+                  resolvedSemanticModuleScope = fullScope,
+                  resolvedSemanticModuleExports = exports
+                },
+            resolvedModuleDiagnosticAdapter =
+              ResolvedModuleDiagnosticAdapter
+                { resolvedDiagnosticReferences = references
+                }
           }
   pure (Map.insert (P.moduleName mod0) exports priorExports, resolved : resolvedRev)
 

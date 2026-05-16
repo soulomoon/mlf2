@@ -22,7 +22,6 @@ import MLF.Constraint.Types.Graph
     cBindParents,
     cGenNodes,
     cNodes,
-    fromListNode,
     genNodeKey,
     getEdgeId,
     getNodeId,
@@ -34,7 +33,6 @@ import MLF.Constraint.Types.Graph
     toListNode,
   )
 import MLF.Constraint.Types.Witness (ewRight)
-import MLF.Elab.Generalize (GaBindParents (..))
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Run.Annotation (annNode)
 import MLF.Elab.Run.Debug (debugGaScope, debugGaScopeEnabled, debugWhenCondM, debugWhenM)
@@ -51,18 +49,11 @@ import MLF.Elab.Run.ResultType.Util
     candidateSelectionIsAmbiguous,
     candidateSelectionValue,
     collectEdges,
-    generalizeWithPlan,
     resultTypeRoots,
     selectUniqueCandidate,
     stripAnn,
   )
 import qualified MLF.Elab.Run.ResultType.View as View
-import MLF.Elab.Run.Scope
-  ( bindingScopeRefCanonical,
-    canonicalizeScopeRef,
-    resolveCanonicalScope,
-    schemeBodyTarget,
-  )
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 
@@ -131,7 +122,6 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
       bindParentsGa = rtcBindParentsGa ctx
       planBuilder = rtcPlanBuilder ctx
       c1 = rtcBaseConstraint ctx
-      redirects = rtcRedirects ctx
       traceCfg = rtcTraceConfig ctx
       generalizeAtWith mbGa =
         generalizeAtWithBuilder planBuilder mbGa presolutionView
@@ -425,23 +415,23 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
       {- Note [Bound overlay for fallback target refinement]
          ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
          For the boundTarget case we model the root's inferred bound as an
-         overlay at the result-type view boundary, then materialize a
-         solved view from that overlay when needed.  This keeps fallback
-         logic read-oriented and avoids local rebuildWithNodes patching. -}
+         overlay at the result-type view boundary, then query through the
+         overlay-aware view when needed.  This keeps fallback logic
+         read-oriented and avoids local rebuildWithNodes patching. -}
       let viewFinalBounded =
             case boundTarget of
               Nothing -> viewBase
               Just baseN -> View.rtvWithBoundOverlay rootC baseN viewBase
           presolutionViewFinal = View.rtvPresolutionViewOverlay viewFinalBounded
       let scopeRootNodePre = rootForTypePre
-      scopeRootPre <- bindingToElab (resolveCanonicalScope c1 presolutionViewFinal redirects scopeRootNodePre)
+      scopeRootPre <- View.rtvResolveCanonicalScope viewFinalBounded scopeRootNodePre
       let rootBindingIsLocalType =
-            case bindingScopeRefCanonical presolutionViewFinal rootC of
+            case View.rtvBindingScopeRefCanonical viewFinalBounded rootC of
               Right TypeRef {} -> True
               _ -> False
       let scopeRootPost =
-            case bindingScopeRefCanonical presolutionViewFinal rootC of
-              Right ref -> canonicalizeScopeRef presolutionViewFinal redirects ref
+            case View.rtvBindingScopeRefCanonical viewFinalBounded rootC of
+              Right ref -> View.rtvScopeRefCanonical viewFinalBounded ref
               Left _ -> scopeRootPre
           scopeRoot = scopeRootPre
       debugWhenCondM
@@ -460,14 +450,15 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
           rootFinal = canonicalFinal rootC
           nodesFinal = cNodes (pvConstraint presolutionViewFinal)
           genNodesFinal = map snd (toListGen (cGenNodes (pvConstraint presolutionViewFinal)))
-          targetPresolutionView =
+          targetView =
             if rootBindingIsLocalType
-              then presolutionViewFinal
-              else presolutionView
-          retainedChildPresolutionView =
+              then viewFinalBounded
+              else viewBase
+          retainedChildView =
             if rootBindingIsLocalType
-              then rtcPresolutionView ctx
-              else targetPresolutionView
+              then viewBase
+              else targetView
+          retainedChildPresolutionView = View.rtvPresolutionViewOverlay retainedChildView
           rootBound =
             case lookupNodeIn nodesFinal rootFinal of
               Just TyVar {tnBound = Just bnd} -> Just (canonicalFinal bnd)
@@ -570,14 +561,14 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
             case baseTargetCandidate of
               Just resolvedBaseC -> classifyBaseTargetAdmission resolvedBaseC
               Nothing -> Nothing
-          boundVarTargetRoot = canonicalFinal (schemeBodyTarget targetPresolutionView rootC)
+          boundVarTargetRoot = canonicalFinal (View.rtvSchemeBodyTarget targetView rootC)
           (schemeRootSetFinal, schemeRootOwnerFinal) =
             canonicalSchemeRootOwners
               canonicalFinal
               (IntMap.fromList [(genNodeKey (gnId gen), gen) | gen <- genNodesFinal])
           alignedScopeRootFor target =
-            case bindingScopeRefCanonical retainedChildPresolutionView target of
-              Right ref -> canonicalizeScopeRef retainedChildPresolutionView redirects ref
+            case View.rtvBindingScopeRefCanonical retainedChildView target of
+              Right ref -> View.rtvScopeRefCanonical retainedChildView ref
               Left _ -> scopeRoot
           boundHasForallFrom scopeRootAligned start0 =
             let go visited nid0 =
@@ -685,7 +676,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
           sameWrapperRetainedChildSelection =
             let sameLocalTypeLane parentRef child =
                   parentRef == scopeRootPost
-                    || case bindingScopeRefCanonical presolutionViewFinal child of
+                    || case View.rtvBindingScopeRefCanonical viewFinalBounded child of
                       Right ref -> ref == scopeRootPost
                       Left _ -> False
                 selectedSameWrapperNestedForallTarget childTarget bndRoot hasForall =
@@ -714,9 +705,9 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                         NoCandidate -> liftSelection instRootRecursiveTargetSelection
                 candidates =
                   [ let childC = canonicalFinal child
-                        childTarget = canonicalFinal (schemeBodyTarget retainedChildPresolutionView child)
+                        childTarget = canonicalFinal (View.rtvSchemeBodyTarget retainedChildView child)
                         bndC = canonicalFinal bnd
-                        bndRoot = canonicalFinal (schemeBodyTarget retainedChildPresolutionView bnd)
+                        bndRoot = canonicalFinal (View.rtvSchemeBodyTarget retainedChildView bnd)
                         chosenTargetProof =
                           case recursiveTargetProofFor childTarget of
                             NoCandidate -> UniqueCandidate (childC, scopeRoot)
@@ -730,7 +721,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                     | (childKey, (parentRef, _flag)) <- IntMap.toList (cBindParents (pvCanonicalConstraint retainedChildPresolutionView)),
                       TypeRef child <- [nodeRefFromKey childKey],
                       sameLocalTypeLane parentRef (canonicalFinal child),
-                      Just bnd <- [pvLookupVarBound retainedChildPresolutionView (canonicalFinal child)]
+                      Just bnd <- [View.rtvLookupVarBound retainedChildView (canonicalFinal child)]
                   ]
                 matchingCandidates =
                   [ RetainedChildProof
@@ -842,13 +833,13 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                           _ ->
                             case lookupNodeIn nodesFinal rootFinal of
                               Just TyVar {} -> rootFinal
-                              _ -> schemeBodyTarget targetPresolutionView rootC
+                              _ -> View.rtvSchemeBodyTarget targetView rootC
                   else
                     if rootBindingIsLocalType
-                      then schemeBodyTarget targetPresolutionView rootC
+                      then View.rtvSchemeBodyTarget targetView rootC
                       else
                         if rootFinalInvolvesMu
-                          then schemeBodyTarget presolutionViewFinal rootC
+                          then View.rtvSchemeBodyTarget viewFinalBounded rootC
                           else rootFinal
       let useSameLaneLocalRetainedChildScopeRoot =
             case selectedBaseTargetAdmission of
@@ -866,31 +857,8 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                   Just alignedScopeRoot -> alignedScopeRoot
                   Nothing -> scopeRoot
               else scopeRoot
-      let bindParentsGaFinal =
-            case boundTarget of
-              Just baseN ->
-                let baseConstraint = gaBaseConstraint bindParentsGa
-                    baseRoot =
-                      IntMap.findWithDefault
-                        rootC
-                        (getNodeId rootC)
-                        (gaSolvedToBase bindParentsGa)
-                    nodes0 = cNodes baseConstraint
-                    adjustNode node =
-                      case node of
-                        TyVar {tnId = nid, tnBound = Nothing} ->
-                          TyVar {tnId = nid, tnBound = Just baseN}
-                        _ -> node
-                    nodes' =
-                      fromListNode
-                        [ (nid, if nid == baseRoot then adjustNode node else node)
-                          | (nid, node) <- toListNode nodes0
-                        ]
-                    baseConstraint' = baseConstraint {cNodes = nodes'}
-                 in bindParentsGa {gaBaseConstraint = baseConstraint'}
-              Nothing -> bindParentsGa
       (sch, _subst) <-
-        generalizeWithPlan planBuilder bindParentsGaFinal presolutionViewFinal generalizeScopeRoot targetC
+        View.rtvGeneralizeTarget viewFinalBounded generalizeScopeRoot targetC
       debugWhenM
         traceCfg
         ( "runPipelineElab: final scheme="

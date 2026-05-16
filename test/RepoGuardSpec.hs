@@ -77,8 +77,10 @@ spec = describe "Repository guardrails" $ do
         src `shouldSatisfy` isInfixOf "mkUncheckedInstanceWitness"
         src `shouldSatisfy` isInfixOf "gaBaseConstraint"
     prepareSrc `shouldSatisfy` isInfixOf "pgaBindParentsGa :: GaBindParents 'Presolved"
+    prepareSrc `shouldSatisfy` isInfixOf "pgaResultTypeInputs :: ResultTypeInputs 'Presolved"
     prepareSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
     pipelineSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
+    pipelineSrc `shouldSatisfy` (not . isInfixOf "mkResultTypeInputs")
     witnessInternalSrc `shouldSatisfy` isInfixOf "mkUncheckedInstanceWitness :: [InstanceOp] -> InstanceWitness"
 
   it "presolution Phase 4 state stays phase-indexed and raw-bridge free" $ do
@@ -305,6 +307,13 @@ spec = describe "Repository guardrails" $ do
         syntaxSrc `shouldSatisfy` (not . isInfixOf marker)
     checkSrc `shouldSatisfy` isInfixOf "import MLF.Frontend.Program.Elaborate"
     checkSrc `shouldSatisfy` isInfixOf "import MLF.Frontend.Program.Finalize"
+    typesSrc `shouldSatisfy` isInfixOf "data ResolvedSemanticModule"
+    typesSrc `shouldSatisfy` isInfixOf "newtype ResolvedSemanticProgramArtifact"
+    typesSrc `shouldSatisfy` isInfixOf "data ResolvedModuleDiagnosticAdapter"
+    checkSrc `shouldSatisfy` isInfixOf "checkModules :: ResolvedSemanticProgramArtifact"
+    checkSrc `shouldSatisfy` isInfixOf "checkModule :: ResolvedSemanticModule"
+    checkSrc `shouldSatisfy` isInfixOf "resolvedProgramSemanticArtifact resolved"
+    checkSrc `shouldSatisfy` (not . isInfixOf "checkModule :: ResolvedModule")
     typesSrc `shouldSatisfy` isInfixOf "loweredBindingSurfaceExpr :: SurfaceExpr"
     typesSrc `shouldSatisfy` (not . isInfixOf "loweredBindingTerm :: ElabTerm")
     finalizeSrc `shouldSatisfy` isInfixOf "runPipelineElabDetailedWithExternalBindings"

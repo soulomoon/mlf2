@@ -11,13 +11,8 @@ import MLF.Elab.Run.ResultType.Fallback.Core (computeResultTypeFallbackCore)
 import MLF.Elab.Run.ResultType.Types
   ( ResultTypeInputs (..),
   )
-import MLF.Elab.Run.ResultType.Util (generalizeWithPlan)
 import MLF.Elab.Run.TypeOps (inlineBoundVarsTypeForBound)
 import qualified MLF.Elab.Run.ResultType.View as View
-import MLF.Elab.Run.Scope
-  ( resolveCanonicalScope,
-    schemeBodyTarget,
-  )
 import MLF.Elab.Types
 import MLF.Frontend.ConstraintGen (AnnExpr (..))
 import MLF.Reify.TypeOps (freeTypeVarsType, freshNameLike)
@@ -83,20 +78,11 @@ computeResultTypeFallbackWithView recurse ctx view annCanon ann = do
             -- Get the parameter type from the coercion's codomain.
             -- We need to generalize at the annotation node to get the full
             -- type with any forall wrappers.
-            let bindParentsGa = rtcBindParentsGa ctx
-                planBuilder = rtcPlanBuilder ctx
-                c1 = rtcBaseConstraint ctx
-                redirects = rtcRedirects ctx
             -- Find the scope root for the annotation node
-            scopeRoot <- bindingToElab (resolveCanonicalScope c1 presolutionViewForGen redirects annNodeId)
-            let targetC = schemeBodyTarget presolutionViewForGen annNodeId
+            scopeRoot <- View.rtvResolveCanonicalScope view annNodeId
+            let targetC = View.rtvSchemeBodyTarget view annNodeId
             (paramSch, _subst) <-
-              generalizeWithPlan
-                planBuilder
-                bindParentsGa
-                presolutionViewForGen
-                scopeRoot
-                targetC
+              View.rtvGeneralizeTarget view scopeRoot targetC
             let paramTy = case paramSch of
                   Forall binds body -> foldr (\(n, b) t -> TForall n b t) body binds
             -- Compute the result type from the body.

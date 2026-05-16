@@ -67,6 +67,22 @@ computeResultTypeFromAnn ctx inner innerPre annNodeId eid = do
   view <- View.buildResultTypeView ctx
   Ann.computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid
 
+{- Note [Annotation dispatch and fallback overlays]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+The top-level result-type facade builds one ResultTypeView and threads it into
+the direct annotation and fallback paths.  Direct AAnn/AUnfold roots are handled
+here by ResultType.Ann; fallback-bound overlays are introduced later, inside
+ResultType.Fallback.Core, after that code has proven it is handling a
+non-annotation root.
+
+That overlay path does not re-enter a direct annotation root: Fallback.Core
+rejects AAnn/AUnfold roots, and the annotated-lambda body helper strips wrapper
+annotations before recursive dispatch.  If a future caller does need annotation
+queries against an already-overlaid view, computeResultTypeFromAnnWithView takes
+the ResultTypeView explicitly and ResultType.Ann performs its query operations
+through the View.rtv* adapter functions.
+-}
+
 -- | Compute result type when there's no direct annotation (fallback path).
 -- This is a facade that handles the AAnn case by delegating to computeResultTypeFromAnn,
 -- and delegates the non-AAnn case to the Fallback submodule.

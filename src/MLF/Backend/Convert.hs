@@ -98,6 +98,8 @@ import MLF.Frontend.Program.Types
     ResolvedScope (..),
     ResolvedSymbol (..),
     SymbolIdentity (..),
+    resolvedModuleName,
+    resolvedModuleScope,
   )
 import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType)
 import MLF.Util.Names (freshNameLike)

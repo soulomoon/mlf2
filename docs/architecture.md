@@ -40,6 +40,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 
 - `MLF.Frontend.*` — surface syntax, desugaring, constraint generation
 - `MLF.Frontend.Syntax.Program` / `MLF.Frontend.Parse.Program` / `MLF.Frontend.Pretty.Program` — canonical `.mlfp` syntax ownership under the main frontend boundary
+- `MLF.Frontend.Program.Resolve` — assigns `.mlfp` symbol identities and produces the resolved semantic program artifact consumed by the checker
 - `MLF.Frontend.Program.Check` — module/import/class/data environment assembly for `.mlfp`, including static validation that may fail before the eMLF pipeline
 - `MLF.Frontend.Program.Elaborate` — lowers executable `.mlfp` bindings to surface eMLF `SurfaceExpr`
 - `MLF.Frontend.Program.Finalize` — normalizes lowered surface eMLF, calls the internal detailed eMLF pipeline entrypoints with program-owned external binding modes, resolves `.mlfp` deferred obligations, and accepts rewritten terms only after the xMLF typecheck guard
@@ -76,19 +77,22 @@ to `build-depends`.
 ### `.mlfp` resolved-symbol boundary
 
 `MLF.Frontend.Program.Resolve` owns semantic identity for `.mlfp` global names.
-Parsed program syntax is `Program 'Parsed`; the resolver produces
-`Program 'Resolved` inside `ResolvedModule.resolvedModuleSyntax`. Resolved
-syntax stores semantic symbols at global reference sites, including value,
-constructor, type, class, method, import/export, and source-type heads. Local
-term binders remain local names and resolved term references distinguish
-`ResolvedLocalValue` from `ResolvedGlobalValue`.
+Parsed program syntax is `Program 'Parsed`; the resolver produces a
+`ResolvedSemanticProgramArtifact` whose modules group `Program 'Resolved` syntax,
+local semantic symbols, full visible scope, and exports as one checker input.
+`ResolvedModule` keeps that semantic artifact plus diagnostic adapters such as
+reference lists. Resolved syntax stores semantic symbols at global reference
+sites, including value, constructor, type, class, method, import/export, and
+source-type heads. Local term binders remain local names and resolved term
+references distinguish `ResolvedLocalValue` from `ResolvedGlobalValue`.
 
 A `SymbolIdentity` records namespace, defining module/name, and constructor or
 method owner identity; `SymbolSpelling` records the source spelling that reached
-that identity. `MLF.Frontend.Program.Check` consumes the resolved program, and
+that identity. `MLF.Frontend.Program.Check` consumes the semantic artifact, and
 `MLF.Frontend.Program.Elaborate` compiles resolved expressions and patterns
 through identity indexes beside its visible string maps. Surface-spelling maps
-are for lookup, diagnostics, source rendering, and runtime-name construction;
+and reference-list adapters are for lookup, diagnostics, source rendering,
+audits, and runtime-name construction;
 semantic decisions compare stored identities or identity-aware source-type
 shapes, not qualified strings. Deferred method finalization carries paired
 display/identity type views so instance and evidence lookup stay semantic even
@@ -168,6 +172,12 @@ runtime invariants as compile-time types:
   while keeping redirect/canonicalization, copy-node recovery, scope overrides,
   and the owner-local base-constraint projection on
   `GaBindParents.gaBaseConstraint` out of `MLF.Elab.Run.Pipeline`.
+- `MLF.Elab.Run.ResultType.View` owns result-type reconstruction's query
+  adapter over the prepared result-type input: bound overlays, no-fallback
+  reification, base-target projection into `GaBindParents.gaBaseConstraint`,
+  scope/target queries, and target generalization. `ResultType.Fallback.*`
+  should select policy paths through this adapter rather than patching
+  `PresolutionView` records or rebuilding base-map inputs locally.
 
 ## Typed backend IR and lowering boundary
 
@@ -402,8 +412,9 @@ semantics that are not represented elsewhere just as explicitly.”
 
 - Elaborative/runtime fallback ladders are now removed: the production path prefers explicit witness/scheme authority and surfaces structured errors when that authority is insufficient.
 - The remaining `MLF.Elab.Run.ResultType.Fallback.*` modules are bounded
-  result-type reconstruction logic over `PresolutionView` and `EdgeTrace`, not a
-  compatibility ladder back to legacy solved/view adapters.
+  result-type reconstruction policy logic over `ResultTypeView` queries and
+  `EdgeTrace`, not a compatibility ladder back to legacy solved/view adapters or
+  fallback-local `PresolutionView` record surgery.
 - Planner scheme ownership for synthesized wrappers is body-root only; there is no wrapper-root recovery path.
 - Instantiation inference keeps only structurally justified argument recovery.
 

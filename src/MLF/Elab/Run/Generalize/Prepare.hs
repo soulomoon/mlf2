@@ -38,6 +38,7 @@ import MLF.Elab.Run.Generalize
     , instantiationCopyNodes
     )
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
+import MLF.Elab.Run.ResultType (ResultTypeInputs, mkResultTypeInputs)
 import MLF.Elab.Run.Scope (letScopeOverrides)
 import MLF.Elab.Run.Util
     ( canonicalizeExpansion
@@ -67,18 +68,22 @@ need, while hiding the mechanics that produce them:
   artifacts;
 * the constraint-for-generalization rewrite plus finalized presolution view;
 * let-scope override comparison between the acyclic base graph and the
-  generalization graph.
+  generalization graph;
+* the result-type-ready adapter, so downstream consumers do not reconstruct
+  redirects, canonical edge artifacts, base maps, or the owner-local phase
+  bridge by deconstructing this artifact.
 
 Result-type reconstruction still expects the thesis base graph in the same
 phantom phase as the prepared view, but that graph already lives on
-`pgaBindParentsGa.gaBaseConstraint`. The artifact therefore keeps the phase
-bridge owner-local to `GaBindParents` instead of duplicating the base graph on
-the outer record.
+`pgaBindParentsGa.gaBaseConstraint`. The result-type adapter is assembled here,
+and the artifact keeps the phase bridge owner-local to `GaBindParents` instead
+of duplicating the base graph on the outer record.
 -}
 data PreparedGeneralizationArtifact = PreparedGeneralizationArtifact
     { pgaPresolutionView :: PresolutionView 'Presolved
     , pgaBindParentsGa :: GaBindParents 'Presolved
     , pgaGeneralizeAt :: GeneralizeAtView 'Presolved
+    , pgaResultTypeInputs :: ResultTypeInputs 'Presolved
     , pgaEdgeArtifacts :: EdgeArtifacts
     , pgaScopeOverrides :: IntMap.IntMap NodeRef
     , pgaAnnotated :: AnnExpr
@@ -144,11 +149,22 @@ prepareGeneralizationArtifact traceCfg acyclicBase pres ann = do
                 planBuilder
                 mbGa
                 presolutionViewForGen
+        resultTypeInputs =
+            mkResultTypeInputs
+                (pvCanonical presolutionViewForGen)
+                edgeArtifacts
+                presolutionViewForGen
+                bindParentsGa
+                planBuilder
+                acyclicBaseForGeneralization
+                (prRedirects pres)
+                traceCfg
     pure
         PreparedGeneralizationArtifact
             { pgaPresolutionView = presolutionViewForGen
             , pgaBindParentsGa = bindParentsGa
             , pgaGeneralizeAt = generalizeAtWithView
+            , pgaResultTypeInputs = resultTypeInputs
             , pgaEdgeArtifacts = edgeArtifacts
             , pgaScopeOverrides = scopeOverrides
             , pgaAnnotated = annCanon

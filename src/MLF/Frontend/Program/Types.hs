@@ -23,8 +23,21 @@ module MLF.Frontend.Program.Types
     ResolvedReferenceKind (..),
     ResolvedReference (..),
     ResolvedScope (..),
+    ResolvedLocalSymbols (..),
+    ResolvedSemanticModule (..),
+    ResolvedModuleDiagnosticAdapter (..),
     ResolvedModule (..),
+    ResolvedSemanticProgramArtifact (..),
     ResolvedProgram (..),
+    resolvedProgramSemanticArtifact,
+    resolvedModuleName,
+    resolvedModuleSyntax,
+    resolvedModuleLocalValues,
+    resolvedModuleLocalTypes,
+    resolvedModuleLocalClasses,
+    resolvedModuleScope,
+    resolvedModuleExports,
+    resolvedModuleReferences,
     mkResolvedSymbol,
     sameResolvedSymbol,
     unqualifiedSymbolName,
@@ -376,15 +389,35 @@ data ResolvedScope = ResolvedScope
   }
   deriving (Eq, Show)
 
+data ResolvedLocalSymbols = ResolvedLocalSymbols
+  { resolvedLocalValues :: Map String [ResolvedSymbol],
+    resolvedLocalTypes :: Map String [ResolvedSymbol],
+    resolvedLocalClasses :: Map String [ResolvedSymbol]
+  }
+  deriving (Eq, Show)
+
+data ResolvedSemanticModule = ResolvedSemanticModule
+  { resolvedSemanticModuleName :: P.ModuleName,
+    resolvedSemanticModuleSyntax :: P.ResolvedModuleSyntax,
+    resolvedSemanticModuleLocalSymbols :: ResolvedLocalSymbols,
+    resolvedSemanticModuleScope :: ResolvedScope,
+    resolvedSemanticModuleExports :: ResolvedScope
+  }
+  deriving (Eq, Show)
+
+data ResolvedModuleDiagnosticAdapter = ResolvedModuleDiagnosticAdapter
+  { resolvedDiagnosticReferences :: [ResolvedReference]
+  }
+  deriving (Eq, Show)
+
 data ResolvedModule = ResolvedModule
-  { resolvedModuleName :: P.ModuleName,
-    resolvedModuleSyntax :: P.ResolvedModuleSyntax,
-    resolvedModuleLocalValues :: Map String [ResolvedSymbol],
-    resolvedModuleLocalTypes :: Map String [ResolvedSymbol],
-    resolvedModuleLocalClasses :: Map String [ResolvedSymbol],
-    resolvedModuleScope :: ResolvedScope,
-    resolvedModuleExports :: ResolvedScope,
-    resolvedModuleReferences :: [ResolvedReference]
+  { resolvedModuleSemantic :: ResolvedSemanticModule,
+    resolvedModuleDiagnosticAdapter :: ResolvedModuleDiagnosticAdapter
+  }
+  deriving (Eq, Show)
+
+newtype ResolvedSemanticProgramArtifact = ResolvedSemanticProgramArtifact
+  { resolvedSemanticProgramModules :: [ResolvedSemanticModule]
   }
   deriving (Eq, Show)
 
@@ -392,6 +425,53 @@ newtype ResolvedProgram = ResolvedProgram
   { resolvedProgramModules :: [ResolvedModule]
   }
   deriving (Eq, Show)
+
+resolvedProgramSemanticArtifact :: ResolvedProgram -> ResolvedSemanticProgramArtifact
+resolvedProgramSemanticArtifact resolvedProgram =
+  ResolvedSemanticProgramArtifact
+    { resolvedSemanticProgramModules =
+        map resolvedModuleSemantic (resolvedProgramModules resolvedProgram)
+    }
+
+resolvedModuleName :: ResolvedModule -> P.ModuleName
+resolvedModuleName = resolvedSemanticModuleName . resolvedModuleSemantic
+
+resolvedModuleSyntax :: ResolvedModule -> P.ResolvedModuleSyntax
+resolvedModuleSyntax = resolvedSemanticModuleSyntax . resolvedModuleSemantic
+
+resolvedModuleLocalValues :: ResolvedModule -> Map String [ResolvedSymbol]
+resolvedModuleLocalValues =
+  resolvedLocalValues . resolvedSemanticModuleLocalSymbols . resolvedModuleSemantic
+
+resolvedModuleLocalTypes :: ResolvedModule -> Map String [ResolvedSymbol]
+resolvedModuleLocalTypes =
+  resolvedLocalTypes . resolvedSemanticModuleLocalSymbols . resolvedModuleSemantic
+
+resolvedModuleLocalClasses :: ResolvedModule -> Map String [ResolvedSymbol]
+resolvedModuleLocalClasses =
+  resolvedLocalClasses . resolvedSemanticModuleLocalSymbols . resolvedModuleSemantic
+
+resolvedModuleScope :: ResolvedModule -> ResolvedScope
+resolvedModuleScope = resolvedSemanticModuleScope . resolvedModuleSemantic
+
+resolvedModuleExports :: ResolvedModule -> ResolvedScope
+resolvedModuleExports = resolvedSemanticModuleExports . resolvedModuleSemantic
+
+resolvedModuleReferences :: ResolvedModule -> [ResolvedReference]
+resolvedModuleReferences =
+  resolvedDiagnosticReferences . resolvedModuleDiagnosticAdapter
+
+{- Note [Resolved semantic program artifact]
+`ResolvedSemanticProgramArtifact` is the Resolve-to-Check seam.  It groups the
+resolved module syntax, local semantic symbols, full visible scope, and export
+scope as one semantic artifact so `Check` does not assemble policy from peer
+records on `ResolvedModule`.
+
+`ResolvedModule` keeps the semantic artifact plus diagnostic adapters.  Raw
+resolved syntax and reference-list accessors stay available for diagnostics,
+audits, backend adapters, and tests, but checker policy should enter through
+`resolvedProgramSemanticArtifact`.
+-}
 
 {- Note [Resolved .mlfp symbol identities]
 `SymbolIdentity` is the semantic key. It uses the defining module plus the

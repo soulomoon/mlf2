@@ -19,12 +19,19 @@ import MLF.Frontend.Program.Finalize
     , sourceForallMatches
     , stripVacuousForallsAndTypeAbs
     )
+import MLF.Frontend.Program.Resolve (resolveProgram)
 import MLF.Frontend.Program.Types
     ( ConstructorInfo (..)
     , ConstructorShape (..)
     , DataInfo (..)
+    , ResolvedLocalSymbols (..)
+    , ResolvedModuleDiagnosticAdapter (..)
+    , ResolvedSemanticModule (..)
     , constructorOwnerRuntimeTypeTrackable
     , mkResolvedSymbol
+    , resolvedModuleName
+    , resolvedModuleReferences
+    , resolvedModuleSyntax
     )
 import MLF.Frontend.Program.Prelude (withPrelude, withPreludeLocated)
 import MLF.Frontend.Syntax (ResolvedSrcTy (..), mkSrcBound)
@@ -1373,6 +1380,50 @@ spec = do
                     symbolDisplayName (resolvedSymbolSpelling qualified) `shouldBe` "C.answer"
                 Left err -> expectationFailure ("expected check success, got " ++ show err)
 
+        it "checks the semantic artifact independently of diagnostic reference adapters" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+                junkSymbol =
+                    mkResolvedSymbol
+                        SymbolIdentity
+                            { symbolNamespace = SymbolValue
+                            , symbolDefiningModule = "Ghost"
+                            , symbolDefiningName = "ghost"
+                            , symbolOwnerIdentity = Nothing
+                            }
+                        "ghost"
+                        "ghost"
+                        (SymbolLocal "Ghost")
+                junkReference = ResolvedReference ResolvedValueReference "ghost" junkSymbol
+                poisonDiagnostics resolved =
+                    resolved
+                        { resolvedProgramModules =
+                            map poisonModule (resolvedProgramModules resolved)
+                        }
+                poisonModule resolvedModule =
+                    resolvedModule
+                        { resolvedModuleDiagnosticAdapter =
+                            ResolvedModuleDiagnosticAdapter
+                                { resolvedDiagnosticReferences =
+                                    junkReference : resolvedModuleReferences resolvedModule
+                                }
+                        }
+                checkedSemanticResult result =
+                    case result of
+                        Left err -> Left err
+                        Right checked -> Right (checkedProgramMain checked, checkedProgramModules checked)
+            program <- requireParsed programText
+            case resolveProgram program of
+                Left err -> expectationFailure ("expected resolve success, got " ++ show err)
+                Right resolved -> do
+                    let poisoned = poisonDiagnostics resolved
+                    checkedSemanticResult (checkResolvedProgram poisoned)
+                        `shouldBe` checkedSemanticResult (checkResolvedProgram resolved)
+
         it "records one resolved identity for mixed spellings across values, types, constructors, classes, and methods" $ do
             let programText =
                     unlines
@@ -1509,33 +1560,42 @@ spec = do
                         }
                 resolvedModule =
                     ResolvedModule
-                        { resolvedModuleName = "Main"
-                        , resolvedModuleSyntax =
-                            Module
-                                { moduleName = "Main"
-                                , moduleExports = Nothing
-                                , moduleImports = []
-                                , moduleDecls =
-                                    [ DeclData
-                                        DataDecl
-                                            { dataDeclName = "Box"
-                                            , dataDeclParams = []
-                                            , dataDeclConstructors =
-                                                [ ConstructorDecl
-                                                    { constructorDeclName = "Bad"
-                                                    , constructorDeclType = RSTBase foreignBox
+                        { resolvedModuleSemantic =
+                            ResolvedSemanticModule
+                                { resolvedSemanticModuleName = "Main"
+                                , resolvedSemanticModuleSyntax =
+                                    Module
+                                        { moduleName = "Main"
+                                        , moduleExports = Nothing
+                                        , moduleImports = []
+                                        , moduleDecls =
+                                            [ DeclData
+                                                DataDecl
+                                                    { dataDeclName = "Box"
+                                                    , dataDeclParams = []
+                                                    , dataDeclConstructors =
+                                                        [ ConstructorDecl
+                                                            { constructorDeclName = "Bad"
+                                                            , constructorDeclType = RSTBase foreignBox
+                                                            }
+                                                        ]
+                                                    , dataDeclDeriving = []
                                                     }
-                                                ]
-                                            , dataDeclDeriving = []
-                                            }
-                                    ]
+                                            ]
+                                        }
+                                , resolvedSemanticModuleLocalSymbols =
+                                    ResolvedLocalSymbols
+                                        { resolvedLocalValues = Map.singleton "Bad" [badCtor]
+                                        , resolvedLocalTypes = Map.singleton "Box" [localBox]
+                                        , resolvedLocalClasses = Map.empty
+                                        }
+                                , resolvedSemanticModuleScope = resolvedScope
+                                , resolvedSemanticModuleExports = resolvedScope
                                 }
-                        , resolvedModuleLocalValues = Map.singleton "Bad" [badCtor]
-                        , resolvedModuleLocalTypes = Map.singleton "Box" [localBox]
-                        , resolvedModuleLocalClasses = Map.empty
-                        , resolvedModuleScope = resolvedScope
-                        , resolvedModuleExports = resolvedScope
-                        , resolvedModuleReferences = []
+                        , resolvedModuleDiagnosticAdapter =
+                            ResolvedModuleDiagnosticAdapter
+                                { resolvedDiagnosticReferences = []
+                                }
                         }
             checkResolvedProgram (ResolvedProgram [resolvedModule])
                 `shouldBe` Left (ProgramInvalidConstructorResult "Bad" (STBase "Box") "Box")
@@ -1586,39 +1646,48 @@ spec = do
                         }
                 resolvedModule =
                     ResolvedModule
-                        { resolvedModuleName = "Main"
-                        , resolvedModuleSyntax =
-                            Module
-                                { moduleName = "Main"
-                                , moduleExports = Nothing
-                                , moduleImports = []
-                                , moduleDecls =
-                                    [ DeclData
-                                        DataDecl
-                                            { dataDeclName = "Box"
-                                            , dataDeclParams = []
-                                            , dataDeclConstructors =
-                                                [ ConstructorDecl
-                                                    { constructorDeclName = "Box"
-                                                    , constructorDeclType = RSTBase boxType
+                        { resolvedModuleSemantic =
+                            ResolvedSemanticModule
+                                { resolvedSemanticModuleName = "Main"
+                                , resolvedSemanticModuleSyntax =
+                                    Module
+                                        { moduleName = "Main"
+                                        , moduleExports = Nothing
+                                        , moduleImports = []
+                                        , moduleDecls =
+                                            [ DeclData
+                                                DataDecl
+                                                    { dataDeclName = "Box"
+                                                    , dataDeclParams = []
+                                                    , dataDeclConstructors =
+                                                        [ ConstructorDecl
+                                                            { constructorDeclName = "Box"
+                                                            , constructorDeclType = RSTBase boxType
+                                                            }
+                                                        ]
+                                                    , dataDeclDeriving = []
                                                     }
-                                                ]
-                                            , dataDeclDeriving = []
-                                            }
-                                    , DeclDef
-                                        DefDecl
-                                            { defDeclName = "main"
-                                            , defDeclType = ConstrainedType [] (RSTBase boxType)
-                                            , defDeclExpr = EVar (ResolvedGlobalValue boxCtor)
-                                            }
-                                    ]
+                                            , DeclDef
+                                                DefDecl
+                                                    { defDeclName = "main"
+                                                    , defDeclType = ConstrainedType [] (RSTBase boxType)
+                                                    , defDeclExpr = EVar (ResolvedGlobalValue boxCtor)
+                                                    }
+                                            ]
+                                        }
+                                , resolvedSemanticModuleLocalSymbols =
+                                    ResolvedLocalSymbols
+                                        { resolvedLocalValues = Map.fromList [("Box", [boxCtor]), ("main", [mainValue])]
+                                        , resolvedLocalTypes = Map.singleton "Box" [boxType]
+                                        , resolvedLocalClasses = Map.empty
+                                        }
+                                , resolvedSemanticModuleScope = resolvedScope
+                                , resolvedSemanticModuleExports = resolvedScope
                                 }
-                        , resolvedModuleLocalValues = Map.fromList [("Box", [boxCtor]), ("main", [mainValue])]
-                        , resolvedModuleLocalTypes = Map.singleton "Box" [boxType]
-                        , resolvedModuleLocalClasses = Map.empty
-                        , resolvedModuleScope = resolvedScope
-                        , resolvedModuleExports = resolvedScope
-                        , resolvedModuleReferences = []
+                        , resolvedModuleDiagnosticAdapter =
+                            ResolvedModuleDiagnosticAdapter
+                                { resolvedDiagnosticReferences = []
+                                }
                         }
             checkResolvedProgram (ResolvedProgram [resolvedModule]) `shouldSatisfy` isRight
 
@@ -1668,45 +1737,54 @@ spec = do
                         }
                 resolvedModule =
                     ResolvedModule
-                        { resolvedModuleName = "Main"
-                        , resolvedModuleSyntax =
-                            Module
-                                { moduleName = "Main"
-                                , moduleExports = Nothing
-                                , moduleImports = []
-                                , moduleDecls =
-                                    [ DeclData
-                                        DataDecl
-                                            { dataDeclName = "Box"
-                                            , dataDeclParams = []
-                                            , dataDeclConstructors =
-                                                [ ConstructorDecl
-                                                    { constructorDeclName = "Box"
-                                                    , constructorDeclType = RSTBase boxType
+                        { resolvedModuleSemantic =
+                            ResolvedSemanticModule
+                                { resolvedSemanticModuleName = "Main"
+                                , resolvedSemanticModuleSyntax =
+                                    Module
+                                        { moduleName = "Main"
+                                        , moduleExports = Nothing
+                                        , moduleImports = []
+                                        , moduleDecls =
+                                            [ DeclData
+                                                DataDecl
+                                                    { dataDeclName = "Box"
+                                                    , dataDeclParams = []
+                                                    , dataDeclConstructors =
+                                                        [ ConstructorDecl
+                                                            { constructorDeclName = "Box"
+                                                            , constructorDeclType = RSTBase boxType
+                                                            }
+                                                        ]
+                                                    , dataDeclDeriving = []
                                                     }
-                                                ]
-                                            , dataDeclDeriving = []
-                                            }
-                                    , DeclDef
-                                        DefDecl
-                                            { defDeclName = "main"
-                                            , defDeclType = ConstrainedType [] (RSTBase boxType)
-                                            , defDeclExpr =
-                                                ECase
-                                                    (EAnn (EVar (ResolvedGlobalValue boxCtor)) (RSTBase boxType))
-                                                    [ Alt
-                                                        (PatAnn (PatCtor boxCtor []) (RSTBase boxType))
-                                                        (EVar (ResolvedGlobalValue boxCtor))
-                                                    ]
-                                            }
-                                    ]
+                                            , DeclDef
+                                                DefDecl
+                                                    { defDeclName = "main"
+                                                    , defDeclType = ConstrainedType [] (RSTBase boxType)
+                                                    , defDeclExpr =
+                                                        ECase
+                                                            (EAnn (EVar (ResolvedGlobalValue boxCtor)) (RSTBase boxType))
+                                                            [ Alt
+                                                                (PatAnn (PatCtor boxCtor []) (RSTBase boxType))
+                                                                (EVar (ResolvedGlobalValue boxCtor))
+                                                            ]
+                                                    }
+                                            ]
+                                        }
+                                , resolvedSemanticModuleLocalSymbols =
+                                    ResolvedLocalSymbols
+                                        { resolvedLocalValues = Map.fromList [("Box", [boxCtor]), ("main", [mainValue])]
+                                        , resolvedLocalTypes = Map.singleton "Box" [boxType]
+                                        , resolvedLocalClasses = Map.empty
+                                        }
+                                , resolvedSemanticModuleScope = resolvedScope
+                                , resolvedSemanticModuleExports = resolvedScope
                                 }
-                        , resolvedModuleLocalValues = Map.fromList [("Box", [boxCtor]), ("main", [mainValue])]
-                        , resolvedModuleLocalTypes = Map.singleton "Box" [boxType]
-                        , resolvedModuleLocalClasses = Map.empty
-                        , resolvedModuleScope = resolvedScope
-                        , resolvedModuleExports = resolvedScope
-                        , resolvedModuleReferences = []
+                        , resolvedModuleDiagnosticAdapter =
+                            ResolvedModuleDiagnosticAdapter
+                                { resolvedDiagnosticReferences = []
+                                }
                         }
             checkResolvedProgram (ResolvedProgram [resolvedModule]) `shouldSatisfy` isRight
 

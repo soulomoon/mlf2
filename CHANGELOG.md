@@ -103,6 +103,14 @@
   `PreparedGeneralizationArtifact` for elaboration, root generalization, and
   result-type reconstruction while leaving `MLF.Elab.Run.Pipeline` as the
   phase orchestrator.
+- Moved result-type input assembly into `PreparedGeneralizationArtifact` so
+  `MLF.Elab.Run.Pipeline` consumes the prepared result-type adapter instead of
+  rebuilding it from redirects, canonical edge artifacts, base maps, and the
+  owner-local phase bridge.
+- Deepened `MLF.Elab.Run.ResultType.View` into the result-type/reify query
+  adapter for bound overlays, no-fallback reification, base-target projection,
+  scope/target lookup, and target generalization, keeping fallback modules on
+  policy selection instead of fallback-local `PresolutionView` patching.
 - Tightened the Phase 4 presolution boundary so the public entry/output remains
   `Constraint 'Acyclic` to `Constraint 'Presolved`, with the internal raw
   in-progress bridge named privately and final presolved construction delayed
@@ -263,6 +271,10 @@
   through identity-indexed scopes. Deferred method finalization now carries
   paired display/identity type views for method constraints and instance method
   types, so evidence lookup no longer depends on recovered display spelling.
+- Deepened the `.mlfp` Resolve-to-Check seam into
+  `ResolvedSemanticProgramArtifact`: Resolve now groups resolved syntax, local
+  semantic symbols, visible scope, and exports into a semantic checker input,
+  while raw syntax/reference-list access stays on diagnostic adapters.
   Validation:
   `cabal test mlf2-test --test-show-details=direct --test-options='--match "MLF.Program" --match "MLF.ResolvedSymbol" --match "Repository guardrails"'`
   (`188 examples, 0 failures`) and `cabal build all && cabal test`

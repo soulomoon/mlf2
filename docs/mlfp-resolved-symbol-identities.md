@@ -16,9 +16,12 @@ not only in a `resolvedModuleReferences` side table.
 - Local term binders remain source names; resolved term references distinguish
   `ResolvedLocalValue` from `ResolvedGlobalValue`.
 
-`ResolvedModule.resolvedModuleSyntax` is the syntax consumed by the checker and
-elaborator. `resolvedModuleReferences` remains useful for audits, diagnostics,
-and tests, but it is no longer the production carrier of resolved references.
+`ResolvedSemanticProgramArtifact` is the seam consumed by the checker. Each
+semantic module groups the resolved syntax, local semantic symbols, full visible
+scope, and export scope. `ResolvedModule` keeps that semantic artifact plus
+diagnostic adapters: `resolvedModuleSyntax` and `resolvedModuleReferences` remain
+useful for audits, diagnostics, backend adapters, and tests, but the reference
+list is no longer the production carrier of resolved references.
 
 ## Identity Vs. Spelling
 

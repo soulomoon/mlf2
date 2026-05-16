@@ -57,8 +57,10 @@ import MLF.Frontend.Program.Types
     ModuleExports (..),
     ProgramDiagnostic (..),
     ProgramError (..),
-    ResolvedModule (..),
+    ResolvedLocalSymbols (..),
     ResolvedProgram (..),
+    ResolvedSemanticModule (..),
+    ResolvedSemanticProgramArtifact (..),
     ResolvedSymbol (..),
     SymbolOrigin (..),
     SymbolIdentity (..),
@@ -80,6 +82,7 @@ import MLF.Frontend.Program.Types
     methodInfoOwnerClassSymbolIdentity,
     methodInfoSymbolIdentity,
     mkResolvedSymbol,
+    resolvedProgramSemanticArtifact,
     displayConstraint,
     specializeMethodType,
     substituteTypeVar,
@@ -228,18 +231,19 @@ displayNameEnvFromScope scope =
           ]
     }
 
-displayNameEnvFromResolvedLocals :: ResolvedModule -> DisplayNameEnv
+displayNameEnvFromResolvedLocals :: ResolvedSemanticModule -> DisplayNameEnv
 displayNameEnvFromResolvedLocals resolvedModule =
   DisplayNameEnv
-    { dneValues = localNames resolvedModuleLocalValues,
-      dneTypes = localNames resolvedModuleLocalTypes,
-      dneClasses = localNames resolvedModuleLocalClasses
+    { dneValues = localNames (resolvedLocalValues localSymbols),
+      dneTypes = localNames (resolvedLocalTypes localSymbols),
+      dneClasses = localNames (resolvedLocalClasses localSymbols)
     }
   where
-    localNames select =
+    localSymbols = resolvedSemanticModuleLocalSymbols resolvedModule
+    localNames symbolsByName =
       Map.fromListWith (++)
         [ (resolvedSymbolIdentity symbol, [name])
-          | (name, symbols) <- Map.toList (select resolvedModule),
+          | (name, symbols) <- Map.toList symbolsByName,
             symbol <- symbols
         ]
 
@@ -352,7 +356,7 @@ checkProgram program =
 
 checkResolvedProgram :: ResolvedProgram -> Either ProgramError CheckedProgram
 checkResolvedProgram resolved = runTcM $ do
-  modulesChecked <- checkModules resolved
+  modulesChecked <- checkModules (resolvedProgramSemanticArtifact resolved)
   let mainNames =
         [ checkedBindingName binding
           | checked <- modulesChecked,
@@ -377,16 +381,24 @@ checkLocatedProgram located =
     Right checked -> Right checked
     Left err -> Left (diagnosticForProgramError (Just located) err)
 
-lookupResolvedLocalTypeIdentity :: ResolvedModule -> P.TypeName -> TcM SymbolIdentity
+lookupResolvedLocalTypeIdentity :: ResolvedSemanticModule -> P.TypeName -> TcM SymbolIdentity
 lookupResolvedLocalTypeIdentity resolvedModule name =
-  resolvedSymbolIdentity <$> uniqueResolvedLocalSymbol ProgramDuplicateType name (resolvedModuleLocalTypes resolvedModule)
+  resolvedSymbolIdentity <$>
+    uniqueResolvedLocalSymbol
+      ProgramDuplicateType
+      name
+      (resolvedLocalTypes (resolvedSemanticModuleLocalSymbols resolvedModule))
 
-lookupResolvedLocalClassIdentity :: ResolvedModule -> P.ClassName -> TcM SymbolIdentity
+lookupResolvedLocalClassIdentity :: ResolvedSemanticModule -> P.ClassName -> TcM SymbolIdentity
 lookupResolvedLocalClassIdentity resolvedModule name =
-  resolvedSymbolIdentity <$> uniqueResolvedLocalSymbol ProgramDuplicateClass name (resolvedModuleLocalClasses resolvedModule)
+  resolvedSymbolIdentity <$>
+    uniqueResolvedLocalSymbol
+      ProgramDuplicateClass
+      name
+      (resolvedLocalClasses (resolvedSemanticModuleLocalSymbols resolvedModule))
 
 lookupResolvedLocalValueIdentity ::
-  ResolvedModule ->
+  ResolvedSemanticModule ->
   SymbolNamespace ->
   Maybe SymbolOwnerIdentity ->
   P.ValueName ->
@@ -403,10 +415,10 @@ lookupResolvedLocalValueIdentity resolvedModule namespace owner name =
                       && symbolOwnerIdentity identity == owner
             )
         )
-        (resolvedModuleLocalValues resolvedModule)
+        (resolvedLocalValues (resolvedSemanticModuleLocalSymbols resolvedModule))
 
 lookupResolvedLocalValueSymbol ::
-  ResolvedModule ->
+  ResolvedSemanticModule ->
   SymbolNamespace ->
   Maybe SymbolOwnerIdentity ->
   P.ValueName ->
@@ -423,7 +435,7 @@ lookupResolvedLocalValueSymbol resolvedModule namespace owner name =
                       && symbolOwnerIdentity identity == owner
             )
         )
-        (resolvedModuleLocalValues resolvedModule)
+        (resolvedLocalValues (resolvedSemanticModuleLocalSymbols resolvedModule))
 
 uniqueResolvedLocalSymbol ::
   (String -> ProgramError) ->
@@ -437,9 +449,9 @@ uniqueResolvedLocalSymbol duplicateErr name symbolsByName =
     Just _ -> throwError (duplicateErr name)
     Nothing -> throwError (duplicateErr name)
 
-checkModules :: ResolvedProgram -> TcM [CheckedModule]
-checkModules (ResolvedProgram resolvedModules) = do
-  ensureDistinctBy ProgramDuplicateModule resolvedModuleName resolvedModules
+checkModules :: ResolvedSemanticProgramArtifact -> TcM [CheckedModule]
+checkModules (ResolvedSemanticProgramArtifact resolvedModules) = do
+  ensureDistinctBy ProgramDuplicateModule resolvedSemanticModuleName resolvedModules
   go [] resolvedModules
   where
     go acc [] = pure (reverse acc)
@@ -447,10 +459,10 @@ checkModules (ResolvedProgram resolvedModules) = do
       checked <- checkModule resolvedModule acc
       go (checked : acc) rest
 
-checkModule :: ResolvedModule -> [CheckedModule] -> TcM CheckedModule
+checkModule :: ResolvedSemanticModule -> [CheckedModule] -> TcM CheckedModule
 checkModule resolvedModule priorModules = do
-  let resolvedSyntax = resolvedModuleSyntax resolvedModule
-      moduleName0 = resolvedModuleName resolvedModule
+  let resolvedSyntax = resolvedSemanticModuleSyntax resolvedModule
+      moduleName0 = resolvedSemanticModuleName resolvedModule
       priorExports = Map.fromList [(checkedModuleName checked, checkedModuleExports checked) | checked <- priorModules]
       priorData = Map.fromList [(checkedModuleName checked, checkedModuleData checked) | checked <- priorModules]
       priorInstances = concatMap checkedModuleInstances priorModules
@@ -1685,7 +1697,7 @@ resolvedTypeHeadKindMaybe env symbol
   | isBuiltinTypeSymbol symbol = Builtins.builtinTypeKind (symbolDefiningName (resolvedSymbolIdentity symbol))
   | otherwise = Map.lookup (resolvedSymbolIdentity symbol) (kindTypeConstructors env)
 
-buildLocalDataInfo :: DisplayNameEnv -> ResolvedModule -> P.ResolvedModuleSyntax -> TcM (Map String DataInfo)
+buildLocalDataInfo :: DisplayNameEnv -> ResolvedSemanticModule -> P.ResolvedModuleSyntax -> TcM (Map String DataInfo)
 buildLocalDataInfo displayEnv resolvedModule mod0 = do
   let dataDecls = moduleDataDecls mod0
   ensureDistinctBy ProgramDuplicateType P.dataDeclName dataDecls
@@ -1780,7 +1792,7 @@ buildLocalDataInfo displayEnv resolvedModule mod0 = do
            in (dom : args, result)
         _ -> ([], resultTy)
 
-buildLocalClassInfo :: DisplayNameEnv -> ResolvedModule -> P.ResolvedModuleSyntax -> TcM (Map String ClassInfo)
+buildLocalClassInfo :: DisplayNameEnv -> ResolvedSemanticModule -> P.ResolvedModuleSyntax -> TcM (Map String ClassInfo)
 buildLocalClassInfo displayEnv resolvedModule mod0 = do
   let classDecls = moduleClassDecls mod0
   ensureDistinctBy ProgramDuplicateClass P.classDeclName classDecls
@@ -1851,7 +1863,7 @@ validateResolvedClassConstraintClasses scope =
     _ <- lookupClassInfoBySymbol scope (P.constraintClassName constraint)
     pure ()
 
-buildLocalDefInfo :: DisplayNameEnv -> ResolvedModule -> P.ResolvedModuleSyntax -> TcM (Map String ValueInfo)
+buildLocalDefInfo :: DisplayNameEnv -> ResolvedSemanticModule -> P.ResolvedModuleSyntax -> TcM (Map String ValueInfo)
 buildLocalDefInfo displayEnv resolvedModule mod0 = do
   let defs = moduleDefDecls mod0
   ensureDistinctBy ProgramDuplicateValue P.defDeclName defs
@@ -1898,7 +1910,7 @@ addConstructorValues moduleName0 dataInfos =
           ctor <- dataConstructors dataInfo
       ]
 
-synthesizeDerivedInstances :: DisplayNameEnv -> Scope -> ResolvedModule -> P.ResolvedModuleSyntax -> TcM [P.ResolvedInstanceDecl]
+synthesizeDerivedInstances :: DisplayNameEnv -> Scope -> ResolvedSemanticModule -> P.ResolvedModuleSyntax -> TcM [P.ResolvedInstanceDecl]
 synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
   candidates <- concat <$> mapM deriveForData (moduleDataDecls mod0)
   let pendingInstances = map (\(_, _, classInfo, instDecl) -> pendingDerivedInstance classInfo instDecl) candidates
@@ -2055,7 +2067,11 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
       mkElaborateScope (scopeValues scope0) (scopeElaborateTypes scope0) (scopeClasses scope0) (scopeInstances scope0)
 
     mkEqInstance classSymbol classInfo eqMethodSymbol resolvedDataDecl displayDataDecl = do
-      dataSymbol <- uniqueResolvedLocalSymbol ProgramDuplicateType (P.dataDeclName resolvedDataDecl) (resolvedModuleLocalTypes resolvedModule)
+      dataSymbol <-
+        uniqueResolvedLocalSymbol
+          ProgramDuplicateType
+          (P.dataDeclName resolvedDataDecl)
+          (resolvedLocalTypes (resolvedSemanticModuleLocalSymbols resolvedModule))
       boolSymbol <- pure (Builtins.builtinTypeSymbol "Bool")
       andSymbol <- valueSymbolForName "__mlfp_and"
       ctorEntries <-

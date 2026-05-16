@@ -28,6 +28,14 @@ _Avoid_: pipeline glue, setup tuple
 The single artifact produced by **Generalization Preparation** and consumed by elaboration, result-type reconstruction, and root-scheme generalization.
 _Avoid_: constraint tuple, prep bag
 
+**Result-Type View**:
+The result-type reconstruction query adapter that owns bound overlays, no-fallback reification, base-target projection, and target generalization over the prepared result-type input.
+_Avoid_: fallback patch set, presolution record surgery
+
+**Resolved Semantic Program Artifact**:
+The `.mlfp` Resolve-to-Check artifact that groups resolved syntax, local semantic symbols, full visible scope, and exports as one checker input, while reference lists stay diagnostic adapters.
+_Avoid_: resolved syntax tuple, scope bag, reference side table as checker input
+
 **Backend Structural Recursive Data Matching**:
 The backend-owned decision that a structural recursive type represents the same exact canonical backend data identity and constructor payload shape as a nominal backend data type.
 _Avoid_: source-local recovery, unqualified data fallback
@@ -51,8 +59,10 @@ _Avoid_: diagnostic text, frontend source error, LLVM lowering error
 - **Legacy Surface Retirement** is enforced by rejection tests for retired syntax, not only by deleting old acceptance tests.
 - **Legacy Surface Retirement** rejection tests assert parse failure, not exact parser diagnostic text.
 - **Generalization Preparation** consumes one **Acyclic Base Constraint** and one **Presolution View**.
-- **Generalization Preparation** produces one **Prepared Generalization Artifact**.
+- **Generalization Preparation** produces one **Prepared Generalization Artifact** and owns the result-type-ready adapter assembled from redirects, canonical edge artifacts, base maps, and the owner-local phase bridge.
 - A **Prepared Generalization Artifact** is shared by elaboration, result-type reconstruction, and root-scheme generalization.
+- **Result-Type View** is built from the prepared result-type adapter and owns overlay-aware query behavior for result-type reconstruction.
+- **Resolved Semantic Program Artifact** is produced by `.mlfp` Resolve and consumed by Check; syntax and references remain available through adapters for diagnostics and audits.
 - **Backend Structural Recursive Data Matching** happens after conversion has produced canonical backend data identities and uses exact identity; source-local recovery remains a conversion adapter concern.
 - **Backend Structural Recursive Data Matching** produces a **Backend Structural Recursive Data Match** rather than a bare boolean.
 - **Backend Structural Recursive Data Matching** has metadata-light and metadata-backed modes that share one core matcher.
@@ -86,6 +96,7 @@ _Avoid_: diagnostic text, frontend source error, LLVM lowering error
 ## Flagged Ambiguities
 
 - "generalization input" can mean either individual maps or the **Prepared Generalization Artifact**; prefer the artifact name when talking about the shared Interface.
+- "result-type context" should mean **Result-Type View** query behavior when overlays, base-target projection, reification, or target generalization are involved.
 - "recursive ADT matching" can mean either source-local recovery during conversion or **Backend Structural Recursive Data Matching** over canonical backend data identities; keep the shared backend matcher on the canonical backend meaning.
 - "constructor name" inside **Backend Structural Recursive Data Matching** means owner-qualified constructor identity, not a bare textual name.
 - "metadata-light match" is not a full ADT proof; constructor-payload evidence requires metadata-backed matching.

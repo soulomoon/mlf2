@@ -38,6 +38,7 @@
 - `EdgeWitness` and `InstanceWitness` should be constructed via `mkEdgeWitness` / `mkInstanceWitness` smart constructors.
 - `mkUncheckedInstanceWitness` is an owner-local pre-normalization seam; finalized production witnesses go through `ValidatedInstanceOps` and `mkInstanceWitness`.
 - `GaBindParents.gaBaseConstraint` owns the base-constraint projection used by generalization and result-type recovery; do not duplicate that graph on outer preparation artifacts.
+- `ResultTypeView` owns result-type bound overlays, no-fallback reify queries, base-target projection, and target generalization; result-type/reify adapter tests should exercise that seam instead of patching `PresolutionView` records directly.
 - `singletons-th` is the only type-level library dependency. Singletons boilerplate lives in dedicated `*.Singletons` modules.
 
 ## Guidance Ownership Map

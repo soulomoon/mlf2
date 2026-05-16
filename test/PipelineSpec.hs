@@ -63,6 +63,7 @@ import MLF.Elab.Run.ResultType
     rtcEdgeTraces,
     rtcEdgeWitnesses,
   )
+import MLF.Elab.Run.ResultType.View qualified as ResultTypeView
 import MLF.Elab.Run.ResultType.Util
   ( CandidateSelection (..),
     candidateSelectionIsAmbiguous,
@@ -659,6 +660,60 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       isInfixOf "fromSolved solvedClean" pipelineSrc `shouldBe` False
       isInfixOf "fromSolved solvedForGen" pipelineSrc `shouldBe` False
 
+    it "ResultTypeView owns bound-overlay reify, base-target projection, and target generalization" $ do
+      let rootN = NodeId 0
+          intN = NodeId 1
+          baseRootN = NodeId 10
+          baseIntN = NodeId 11
+          intBase = BaseTy "Int"
+          solvedConstraint =
+            emptyConstraint
+              { cNodes =
+                  fromListNode
+                    [ (rootN, TyVar {tnId = rootN, tnBound = Nothing}),
+                      (intN, TyBase {tnId = intN, tnBase = intBase})
+                    ]
+              }
+          baseConstraint =
+            emptyConstraint
+              { cNodes =
+                  fromListNode
+                    [ (baseRootN, TyVar {tnId = baseRootN, tnBound = Nothing}),
+                      (baseIntN, TyBase {tnId = baseIntN, tnBase = intBase})
+                    ]
+              }
+          view0 = Finalize.presolutionViewFromSnapshot solvedConstraint IntMap.empty
+          bindParentsGa =
+            GaBindParents
+              { gaBindParentsBase = cBindParents baseConstraint,
+                gaBaseConstraint = baseConstraint,
+                gaBaseToSolved = IntMap.fromList [(getNodeId baseRootN, rootN), (getNodeId baseIntN, intN)],
+                gaSolvedToBase = IntMap.fromList [(getNodeId rootN, baseRootN), (getNodeId intN, baseIntN)]
+              }
+          inputs =
+            mkResultTypeInputs
+              id
+              EdgeArtifacts
+                { eaEdgeExpansions = IntMap.empty,
+                  eaEdgeWitnesses = IntMap.empty,
+                  eaEdgeTraces = IntMap.empty
+                }
+              view0
+              bindParentsGa
+              (defaultPlanBuilder defaultTraceConfig)
+              baseConstraint
+              IntMap.empty
+              defaultTraceConfig
+      view <- requireRight (ResultTypeView.buildResultTypeView inputs)
+      let viewBound = ResultTypeView.rtvWithBoundOverlay rootN intN view
+      ResultTypeView.rtvLookupVarBound viewBound rootN `shouldBe` Just intN
+      ResultTypeView.rtvReifyWithNamesNoFallback viewBound IntMap.empty rootN
+        `shouldBe` Right (TBase intBase)
+      ResultTypeView.rtvReifyBaseWithNamesNoFallback viewBound IntMap.empty baseRootN
+        `shouldBe` Right (TBase intBase)
+      (scheme, _subst) <- requireRight (ResultTypeView.rtvGeneralizeTarget viewBound (typeRef rootN) rootN)
+      scheme `shouldBe` Forall [] (TBase intBase)
+
     it "chi-p global cleanup guard: runtime elaboration helpers no longer import fromSolved" $ do
       scopeSrc <- readFile "src/MLF/Elab/Run/Scope.hs"
       typeOpsSrc <- readFile "src/MLF/Elab/Run/TypeOps.hs"
@@ -863,6 +918,9 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       prepareSrc `shouldSatisfy` isInfixOf "data PreparedGeneralizationArtifact"
       prepareSrc `shouldSatisfy` isInfixOf "prepareTraceCopyArtifacts"
       prepareSrc `shouldSatisfy` isInfixOf "pgaBindParentsGa :: GaBindParents 'Presolved"
+      prepareSrc `shouldSatisfy` isInfixOf "pgaResultTypeInputs :: ResultTypeInputs 'Presolved"
+      prepareSrc `shouldSatisfy` isInfixOf "mkResultTypeInputs"
+      pipelineSrc `shouldSatisfy` (not . isInfixOf "mkResultTypeInputs")
       prepareSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
       pipelineSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
       prepareSrc `shouldSatisfy` (not . isInfixOf "castConstraint")
@@ -1188,7 +1246,8 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
       elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
       rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
-      pipelineSrc `shouldSatisfy` isInfixOf "mkResultTypeInputs"
+      pipelineSrc `shouldSatisfy` isInfixOf "pgaResultTypeInputs"
+      pipelineSrc `shouldSatisfy` (not . isInfixOf "mkResultTypeInputs")
 
     it "chi-first integration: pipeline run path has no internal solved materialization in Elaborate/ResultType" $ do
       elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
@@ -1202,7 +1261,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       rtSrc <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
       elabSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Run.ChiQuery")
       rtViewSrc `shouldSatisfy` (not . isInfixOf "MLF.Elab.Run.ChiQuery")
-      rtViewSrc `shouldSatisfy` (not . isInfixOf "rtvSchemeBodyTarget")
+      rtViewSrc `shouldSatisfy` isInfixOf "rtvSchemeBodyTarget ::"
       elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
       rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
 
@@ -4964,7 +5023,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         fallbackSrc <- readFile "src/MLF/Elab/Run/ResultType/Fallback/Core.hs"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "sameLocalTypeLane parentRef child =\n                  parentRef == scopeRootPost\n                    || case bindingScopeRefCanonical presolutionViewFinal child of"
+            "sameLocalTypeLane parentRef child =\n                  parentRef == scopeRootPost\n                    || case View.rtvBindingScopeRefCanonical viewFinalBounded child of"
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "sameWrapperRetainedChildSelection ="
@@ -5015,7 +5074,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             "keepTargetFinal =\n            rootBindingIsLocalType\n              && ( rootLocalMultiInst\n                     || rootLocalInstArgMultiBase\n                     || rootLocalSchemeAliasBaseLike\n                     || recursiveCandidateAmbiguous\n                     || maybe False (const True) sameLaneLocalRetainedChildTarget\n                 )"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "case sameLaneLocalRetainedChildTarget of\n                          Just v\n                            | v /= rootFinal -> v\n                          _ ->\n                            case lookupNodeIn nodesFinal rootFinal of\n                              Just TyVar {} -> rootFinal\n                              _ -> schemeBodyTarget targetPresolutionView rootC"
+            "case sameLaneLocalRetainedChildTarget of\n                          Just v\n                            | v /= rootFinal -> v\n                          _ ->\n                            case lookupNodeIn nodesFinal rootFinal of\n                              Just TyVar {} -> rootFinal\n                              _ -> View.rtvSchemeBodyTarget targetView rootC"
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "useSameLaneLocalRetainedChildScopeRoot =\n            case selectedBaseTargetAdmission of\n              Just _ -> False\n              Nothing ->\n                keepTargetFinal"
@@ -5024,7 +5083,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             "generalizeScopeRoot =\n            if useSameLaneLocalRetainedChildScopeRoot\n              then\n                case sameLaneLocalRetainedChildScopeRoot of\n                  Just alignedScopeRoot -> alignedScopeRoot\n                  Nothing -> scopeRoot\n              else scopeRoot"
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "generalizeWithPlan planBuilder bindParentsGaFinal presolutionViewFinal generalizeScopeRoot targetC"
+            "View.rtvGeneralizeTarget viewFinalBounded generalizeScopeRoot targetC"
         fallbackSrc
           `shouldSatisfy` (not . isInfixOf "generalizeWithPlan planBuilder bindParentsGaFinal presolutionViewFinal scopeRoot targetC")
         fallbackSrc
@@ -5890,7 +5949,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
           `shouldSatisfy` (not . isInfixOf "rootNonLocalSchemeAliasBaseLike =")
         fallbackSrc
           `shouldSatisfy` isInfixOf
-            "then schemeBodyTarget targetPresolutionView rootC\n                      else\n                        if rootFinalInvolvesMu\n                          then schemeBodyTarget presolutionViewFinal rootC\n                          else rootFinal"
+            "then View.rtvSchemeBodyTarget targetView rootC\n                      else\n                        if rootFinalInvolvesMu\n                          then View.rtvSchemeBodyTarget viewFinalBounded rootC\n                          else rootFinal"
         fallbackSrc
           `shouldSatisfy` isInfixOf
             "keepTargetFinal =\n            rootBindingIsLocalType\n              && ( rootLocalMultiInst\n                     || rootLocalInstArgMultiBase\n                     || rootLocalSchemeAliasBaseLike\n                     || recursiveCandidateAmbiguous"
@@ -6055,16 +6114,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
             schemeBodyTarget
               (pgaPresolutionView artifact)
               (annRootNode (pgaAnnotated artifact))
-          resultTypeInputs =
-            mkResultTypeInputs
-              (pgaCanonical artifact)
-              (pgaEdgeArtifacts artifact)
-              (pgaPresolutionView artifact)
-              (pgaBindParentsGa artifact)
-              (pgaPlanBuilder artifact)
-              baseConstraint
-              (pgaRedirects artifact)
-              defaultTraceConfig
+          resultTypeInputs = pgaResultTypeInputs artifact
       case pgaGeneralizeAt artifact (Just (pgaBindParentsGa artifact)) rootScope rootTarget of
         Right (Forall _ ty, _subst) ->
           pretty ty `shouldSatisfy` ("Bool" `isInfixOf`)

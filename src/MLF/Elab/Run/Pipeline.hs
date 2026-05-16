@@ -42,7 +42,7 @@ import MLF.Elab.Run.Generalize.Prepare
   ( PreparedGeneralizationArtifact (..),
     prepareGeneralizationArtifact,
   )
-import MLF.Elab.Run.ResultType (computeResultTypeFallback, computeResultTypeFromAnn, mkResultTypeInputs)
+import MLF.Elab.Run.ResultType (computeResultTypeFallback, computeResultTypeFromAnn)
 import MLF.Elab.Run.Scope
   ( resolveCanonicalScope,
     schemeBodyTarget,
@@ -254,17 +254,7 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
       generalizeAtWithView (Just bindParentsGa) rootScope rootTarget
   let termSubst = substInTerm rootSubst term
 
-  -- Build context for result type computation
-  let resultTypeInputs =
-        mkResultTypeInputs
-          (pgaCanonical prepared)
-          edgeArtifacts
-          presolutionViewForGen
-          bindParentsGa
-          (pgaPlanBuilder prepared)
-          acyclicBaseForGeneralization
-          (pgaRedirects prepared)
-          traceCfg
+  let resultTypeInputs = pgaResultTypeInputs prepared
       retainedChildAuthoritativeCandidate =
         case preserveRetainedChildAuthoritativeResult termSubst of
           Just _ -> True

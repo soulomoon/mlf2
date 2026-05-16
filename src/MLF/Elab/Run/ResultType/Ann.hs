@@ -25,11 +25,6 @@ import MLF.Constraint.Types.Graph
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Generalize (GaBindParents(..))
 import MLF.Elab.Inst (applyInstantiation, schemeToType)
-import MLF.Reify.Core
-    ( namedNodes
-    , reifyTypeWithNamedSetNoFallback
-    , reifyTypeWithNamesNoFallbackOnConstraint
-    )
 import MLF.Elab.Phi (phiFromEdgeWitnessWithTrace)
 import MLF.Elab.Types
 import MLF.Reify.TypeOps
@@ -43,8 +38,6 @@ import MLF.Elab.Run.Instantiation (inferInstAppArgsFromScheme, instInsideFromArg
 import MLF.Elab.Run.Scope
     ( bindingScopeRef
     , canonicalizeScopeRef
-    , resolveCanonicalScope
-    , schemeBodyTarget
     )
 import MLF.Elab.Run.TypeOps
     ( inlineBoundVarsType
@@ -53,8 +46,7 @@ import MLF.Elab.Run.TypeOps
     )
 import MLF.Elab.Run.Generalize (generalizeAtWithBuilder)
 import MLF.Elab.Run.ResultType.Util
-    ( generalizeWithPlan
-    , containsBoundForall
+    ( containsBoundForall
     , instHasBoundForall
     , instantiateImplicitForalls
     )
@@ -74,7 +66,7 @@ computeResultTypeFromAnnWithView
     -> EdgeId
     -> Either ElabError ElabType
 computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
-    let presolutionViewForGen = rtcPresolutionView ctx
+    let presolutionViewForGen = View.rtvPresolutionViewOverlay view
         canonical = rtcCanonical ctx
         edgeWitnesses = rtcEdgeWitnesses ctx
         edgeTraces = rtcEdgeTraces ctx
@@ -92,13 +84,13 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
         Nothing -> Left (ValidationFailed ["missing edge witness for annotation"])
         Just ew' -> Right ew'
     let mTrace = IntMap.lookup (getEdgeId eid) edgeTraces
-    let targetC = schemeBodyTarget presolutionViewForGen rootC
+    let targetC = View.rtvSchemeBodyTarget view rootC
         scopeRootNodePre0 = annNode innerPre
         scopeRootNodePre =
             let solvedToBase = gaSolvedToBase bindParentsGa
             in IntMap.findWithDefault scopeRootNodePre0 (getNodeId targetC) solvedToBase
         scopeRootNodePost = annNode inner
-    scopeRootPre <- bindingToElab (resolveCanonicalScope c1 presolutionViewForGen redirects scopeRootNodePre)
+    scopeRootPre <- View.rtvResolveCanonicalScope view scopeRootNodePre
     let scopeRootPost =
             case bindingScopeRef c1 scopeRootNodePost of
                 Right ref -> canonicalizeScopeRef presolutionViewForGen redirects ref
@@ -115,25 +107,25 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
             ++ show scopeRootNodePost
         )
     (sch0, subst0) <-
-        generalizeWithPlan planBuilder bindParentsGa presolutionViewForGen scopeRoot targetC
+        View.rtvGeneralizeTarget view scopeRoot targetC
     let sch = sch0
         subst = subst0
         srcTy = schemeToType sch
         schemeInfo = SchemeInfo { siScheme = sch, siSubst = subst }
     phi0 <- phiFromEdgeWitnessWithTrace traceCfg generalizeAtWith presolutionViewForGen (Just bindParentsGa) (Just schemeInfo) mTrace ew
-    namedSetSolved <- namedNodes presolutionViewForGen
+    namedSetSolved <- View.rtvNamedNodes view
     let annBound = View.rtvLookupVarBound view annNodeId
         annTargetNode0 =
             case annBound of
                 Just bnd -> bnd
                 Nothing -> annNodeId
         reifyMaybe nid =
-            case reifyTypeWithNamedSetNoFallback presolutionViewForGen IntMap.empty namedSetSolved nid of
+            case View.rtvReifyWithNamedSetNoFallback view IntMap.empty namedSetSolved nid of
                 Left _ -> Nothing
                 Right ty0 -> Just ty0
         targetTyRawFullM =
             reifyMaybe annTargetNode0
-        annTargetNode = schemeBodyTarget presolutionViewForGen annTargetNode0
+        annTargetNode = View.rtvSchemeBodyTarget view annTargetNode0
         targetTyRawM =
             reifyMaybe annTargetNode
         targetTyMatchM =
@@ -161,7 +153,7 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
                 toBase
                 baseNodesVarOnly
                 (VarStore.lookupVarBound baseConstraint)
-                (reifyTypeWithNamesNoFallbackOnConstraint baseConstraint IntMap.empty)
+                (View.rtvReifyBaseWithNamesNoFallback view IntMap.empty)
         targetTyBaseInlineM =
             fmap inlineAllBoundsType targetTyRawM
         annTargetBase =
@@ -195,10 +187,7 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
                 Just baseN ->
                     let baseRoot =
                             resolveBoundBodyConstraint id baseConstraint IntSet.empty baseN
-                    in case reifyTypeWithNamesNoFallbackOnConstraint
-                            baseConstraint
-                            IntMap.empty
-                            baseRoot of
+                    in case View.rtvReifyBaseWithNamesNoFallback view IntMap.empty baseRoot of
                         Right ty0 ->
                             let ty1 = inlineBaseBoundsType baseConstraint id ty0
                             in Just (inlineAllBoundsType ty1)
@@ -292,10 +281,9 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
                     -- This preserves explicit bounds (including nested foralls) rather than
                     -- re-deriving a type solely from the witness-derived instantiation.
                     annScopeRoot <-
-                        bindingToElab
-                            (resolveCanonicalScope c1 presolutionViewForGen redirects annTargetNode)
+                        View.rtvResolveCanonicalScope view annTargetNode
                     (annSch, _substAnn) <-
-                        generalizeWithPlan planBuilder bindParentsGa presolutionViewForGen annScopeRoot annTargetNode
+                        View.rtvGeneralizeTarget view annScopeRoot annTargetNode
                     pure (simplifyAnnotationType (schemeToType annSch))
                 else if targetHasBoundForall
                     then do
@@ -303,8 +291,7 @@ computeResultTypeFromAnnWithView ctx view inner innerPre annNodeId eid = do
                         pure (simplifyAnnotationType ty0)
                     else do
                         annScopeRoot <-
-                            bindingToElab
-                                (resolveCanonicalScope c1 presolutionViewForGen redirects annTargetNode)
+                            View.rtvResolveCanonicalScope view annTargetNode
                         (annSch, _substAnn) <-
-                            generalizeWithPlan planBuilder bindParentsGa presolutionViewForGen annScopeRoot annTargetNode
+                            View.rtvGeneralizeTarget view annScopeRoot annTargetNode
                         pure (simplifyAnnotationType (schemeToType annSch))
