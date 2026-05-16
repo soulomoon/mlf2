@@ -1,0 +1,36 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-242",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-cli-emission-preparation",
+  "extracted_item_id": "item-4a-backend-emission-preparation-adapter",
+  "decision": "approved",
+  "evidence_summary": "git diff --check, focused BackendEmissionPrepareSpec, CLI file-entrypoint matcher, and cabal build all && cabal test passed; the diff extracts backend-emission semantic preparation into private MLF.Backend.Emission.Prepare with no src-public changes.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-4",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-4"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-242 extracted backend-emission preparation into private MLF.Backend.Emission.Prepare, kept CLI file/command ownership, and passed focused checks plus cabal build all && cabal test."
+      }
+    ],
+    "history_entries": [
+      {
+        "anchor_id": "roadmap-history-completed-rounds",
+        "text": "round-242 completed milestone-4 by moving backend-emission semantic preparation from MLF.Program.CLI into private MLF.Backend.Emission.Prepare with focused and full Cabal validation."
+      }
+    ],
+    "semantic_update_required_reason": null
+  }
+}

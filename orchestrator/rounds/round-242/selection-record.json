@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-242",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-cli-emission-preparation",
+  "extracted_item_id": "item-4a-backend-emission-preparation-adapter",
+  "summary": "Extract backend-emission semantic preparation from MLF.Program.CLI into a private backend-owned adapter while preserving CLI command dispatch and file IO ownership.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

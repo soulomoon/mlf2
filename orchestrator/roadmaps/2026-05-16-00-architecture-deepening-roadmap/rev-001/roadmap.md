@@ -232,7 +232,7 @@ allow it.
 - Extraction notes: a lawful first round may make support/skip policy visible
   and add guard tests before migrating all backend rows.
 
-### [pending] 4. CLI Emission Preparation
+### [done] 4. CLI Emission Preparation
 
 - Milestone id: `milestone-4`
 - Depends on: `milestone-1`, `milestone-2`, `milestone-3`
@@ -250,7 +250,7 @@ allow it.
   where command/file behavior is the actual subject.
 #### Completion Pointers: milestone-4
 
-none yet
+- round-242 extracted backend-emission preparation into private MLF.Backend.Emission.Prepare, kept CLI file/command ownership, and passed focused checks plus cabal build all && cabal test.
 
 #### Candidate Direction: CLI Emission Preparation Adapter
 

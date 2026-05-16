@@ -50,6 +50,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Backend.CallableShape` — private owner for direct-vs-closure callable-head classification shared by `MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower`; it centralizes callable-head policy without creating a second executable backend IR surface
 - `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before LLVM lowering
 - `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion, explicit ADT construct/case recovery, and closure conversion where the checked xMLF shape is unambiguous
+- `MLF.Backend.Emission.Prepare` — private adapter for backend-emission semantic preparation from a caller-provided source string: parsing with a display path, Prelude injection, checking, and backend-owned Prelude retention pruning before LLVM rendering
 - `MLF.Backend.LLVM` — repo-local LLVM backend facade over a small typed LLVM AST, lowerer, and pretty-printer for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
 - Structural recursive ADT matching currently remains adapter-local in `MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower`. The accepted target is one private backend matcher module named `MLF.Backend.StructuralRecursiveData`, but that module is not yet present in the current codebase.
 - `MLF.Constraint.*` — constraint graph types + normalize + acyclicity + presolution + solve
@@ -364,6 +365,17 @@ ProgramSpec-to-LLVM native/object-code row policy consumed by
 interpreter/runtime expectation, backend LLVM assembly, object-code smoke,
 native executable run, and required LLVM/native tools without widening
 production backend APIs.
+
+`MLF.Backend.Emission.Prepare` owns the shared semantic preparation step for
+raw and native backend emission: parsing a provided source string with the
+caller's display path, injecting the source-level Prelude, checking the
+program, and pruning the checked Prelude module to the binding and data
+dependency closure required by backend rendering. The CLI adapter in
+`src/MLF/Program/CLI.hs` remains the file and command owner for `emit-backend`
+and `emit-native`: it reads the requested file, delegates semantic preparation
+to the backend adapter, renders through `MLF.Backend.LLVM`, and presents
+user-facing errors. Runtime execution through `run-program` stays in that CLI
+adapter and `MLF.Frontend.Program.Run`.
 
 The explicit closure ABI is private to the backend IR-to-LLVM path. A closure
 value is a heap pointer to a two-word record containing a code pointer and an

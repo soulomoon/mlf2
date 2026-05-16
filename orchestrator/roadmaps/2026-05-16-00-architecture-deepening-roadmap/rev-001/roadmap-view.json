@@ -49,7 +49,7 @@
     {
       "milestone_id": "milestone-4",
       "title": "CLI Emission Preparation",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-1",
         "milestone-2",
@@ -190,7 +190,7 @@
     },
     "milestone-4": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 4. CLI Emission Preparation"
+      "selector": "### [done] 4. CLI Emission Preparation"
     },
     "milestone-4-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",

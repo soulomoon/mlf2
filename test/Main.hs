@@ -3,6 +3,7 @@ module Main (main) where
 
 import AcyclicitySpec qualified
 import AlignmentInvariantSpec qualified
+import BackendEmissionPrepareSpec qualified
 import BackendIRSpec qualified
 import BackendConvertSpec qualified
 import BackendLLVMSpec qualified
@@ -99,6 +100,7 @@ main = do
     SolveSpec.spec
     ScopeSpec.spec
     PrimitiveInventorySpec.spec
+    BackendEmissionPrepareSpec.spec
     BackendConvertSpec.spec
     BackendIRSpec.spec
     BackendLLVMSpec.spec
