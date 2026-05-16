@@ -40,6 +40,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 
 - `MLF.Frontend.*` — surface syntax, desugaring, constraint generation
 - `MLF.Frontend.Syntax.Program` / `MLF.Frontend.Parse.Program` / `MLF.Frontend.Pretty.Program` — canonical `.mlfp` syntax ownership under the main frontend boundary
+- `MLF.Frontend.Program.Package` — private owner for `.mlfp` package identity, module identity, source-unit shape, trivial-package adapters, and package-to-program projections used while the checker still consumes the existing in-memory program artifact
 - `MLF.Frontend.Program.Resolve` — assigns `.mlfp` symbol identities and produces the resolved semantic program artifact consumed by the checker
 - `MLF.Frontend.Program.Check` — module/import/class/data environment assembly for `.mlfp`, including static validation that may fail before the eMLF pipeline
 - `MLF.Frontend.Program.Elaborate` — lowers executable `.mlfp` bindings to surface eMLF `SurfaceExpr`
@@ -63,16 +64,20 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Types.*` — elaborated/runtime term and type representations
 - `MLF.Util.*` — shared utilities (order keys, union-find, etc.)
 
-The `.mlfp` module boundary is a same-compilation-unit boundary. `Resolve` and
-`Check` receive the full `Program`, topologically sort its module graph, and can
-therefore accept imports of modules declared later in that program. `Finalize`
-consumes the assembled program scope, and `Run` evaluates all checked module
-bindings together. There is no persisted interface artifact, import loader,
-stable `.mlfp` ABI, or linker today. Future separate compilation should be
-introduced only through an explicit compiler-owned interface artifact carrying
-exported principal schemes, visible type/class/instance summaries, and checked
-xMLF/runtime payloads rather than by peeking at source outside the current
-`Program`.
+The `.mlfp` package/module owner is `MLF.Frontend.Program.Package`. Current
+one-file `.mlfp` inputs are represented as trivial package source units, then
+projected into the existing in-memory `Program` artifact at the checker/resolver
+edge. `Resolve` and `Check` still receive the full package projection,
+topologically sort its module graph, and can therefore accept imports of modules
+declared later in that projected package. `Finalize` consumes the assembled
+program scope, and `Run` evaluates all checked module bindings together. There
+is no filesystem discovery, package root/search path policy, persisted
+interface artifact, cache/build graph policy, stable `.mlfp` ABI, linker, or CLI
+package mode today. Future separate compilation should be introduced only
+through the package owner and an explicit compiler-owned interface artifact
+carrying exported principal schemes, visible type/class/instance summaries, and
+checked xMLF/runtime payloads rather than by peeking at source outside the
+package projection.
 
 No active executable or test component depends on historical research modules.
 

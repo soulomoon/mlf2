@@ -8,7 +8,7 @@
     {
       "milestone_id": "milestone-1",
       "title": "Package Module Owner",
-      "status": "pending",
+      "status": "done",
       "depends_on": [],
       "parallel_lane": "lane-package-core",
       "status_anchor": "milestone-1-status",
@@ -164,7 +164,7 @@
   "anchors": {
     "milestone-1-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 1. Package Module Owner"
+      "selector": "### [done] 1. Package Module Owner"
     },
     "milestone-1-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",

@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-245",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-package-module-owner",
+  "extracted_item_id": "round-245-package-module-owner-trivial-package",
+  "plan_path": "orchestrator/rounds/round-245/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

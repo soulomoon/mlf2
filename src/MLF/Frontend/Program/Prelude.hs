@@ -2,12 +2,26 @@ module MLF.Frontend.Program.Prelude
   ( preludeSource,
     preludeProgram,
     preludeLocatedProgram,
+    withPreludePackage,
+    withPreludeLocatedPackage,
     withPrelude,
     withPreludeLocated,
   )
 where
 
 import MLF.Frontend.Parse.Program (parseLocatedProgramWithFile)
+import MLF.Frontend.Program.Package
+    ( LocatedProgramPackage
+    , ProgramPackage
+    , locatedProgramPackageProgram
+    , locatedProgramSourceUnitFromLocated
+    , prependLocatedProgramSourceUnit
+    , prependProgramSourceUnit
+    , programPackageProgram
+    , programSourceUnitFromProgram
+    , trivialLocatedProgramPackage
+    , trivialProgramPackage
+    )
 import qualified MLF.Frontend.Syntax.Program as P
 
 preludeSource :: String
@@ -83,15 +97,18 @@ preludeLocatedProgram =
 preludeProgram :: P.Program
 preludeProgram = P.locatedProgram preludeLocatedProgram
 
+withPreludePackage :: ProgramPackage -> ProgramPackage
+withPreludePackage =
+  prependProgramSourceUnit (programSourceUnitFromProgram preludeProgram)
+
+withPreludeLocatedPackage :: LocatedProgramPackage -> LocatedProgramPackage
+withPreludeLocatedPackage =
+  prependLocatedProgramSourceUnit (locatedProgramSourceUnitFromLocated preludeLocatedProgram)
+
 withPrelude :: P.Program -> P.Program
 withPrelude program =
-  P.Program (P.programModules preludeProgram ++ P.programModules program)
+  programPackageProgram (withPreludePackage (trivialProgramPackage program))
 
 withPreludeLocated :: P.LocatedProgram -> P.LocatedProgram
 withPreludeLocated program =
-  P.LocatedProgram
-    { P.locatedProgram = withPrelude (P.locatedProgram program),
-      P.locatedProgramSpans =
-        P.locatedProgramSpans program
-          `P.appendProgramSpanIndex` P.locatedProgramSpans preludeLocatedProgram
-    }
+  locatedProgramPackageProgram (withPreludeLocatedPackage (trivialLocatedProgramPackage program))

@@ -25,7 +25,11 @@ import MLF.Frontend.Program.Run
     ( programRunOutput
     , runLocatedProgramOutput
     )
-import MLF.Frontend.Program.Prelude (withPreludeLocated)
+import MLF.Frontend.Program.Package
+    ( locatedProgramPackageProgram
+    , trivialLocatedProgramPackage
+    )
+import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
 import MLF.Frontend.Program.Types (renderProgramDiagnostic)
 
 programCliUsage :: String
@@ -47,7 +51,8 @@ runProgramFile path = do
     pure $ do
         source <- first show fileResult
         program <- first renderProgramParseError (parseLocatedProgramWithFile path source)
-        first renderProgramDiagnostic (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated program))
+        let package = withPreludeLocatedPackage (trivialLocatedProgramPackage program)
+        first renderProgramDiagnostic (programRunOutput <$> runLocatedProgramOutput (locatedProgramPackageProgram package))
 
 emitBackendFile :: FilePath -> IO (Either String String)
 emitBackendFile path = do

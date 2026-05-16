@@ -117,7 +117,7 @@ rounds unless controller state and a selected plan explicitly allow it.
 
 ## Milestones
 
-### [pending] 1. Package Module Owner
+### [done] 1. Package Module Owner
 
 - Milestone id: `milestone-1`
 - Depends on: none
@@ -137,7 +137,9 @@ rounds unless controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-1
 
-- none yet
+- Completed by round-245; evidence: private package/module owner routes
+  trivial package checking, CLI, and backend preparation, with focused
+  package-owner tests and `cabal build all && cabal test` passing.
 
 #### Candidate Direction: Package Module Owner
 

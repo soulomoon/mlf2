@@ -19,8 +19,9 @@ import MLF.Frontend.Parse.Program
     , parseLocatedProgramWithFile
     , renderProgramParseError
     )
-import MLF.Frontend.Program.Check (checkLocatedProgram)
-import MLF.Frontend.Program.Prelude (withPreludeLocated)
+import MLF.Frontend.Program.Check (checkLocatedProgramPackage)
+import MLF.Frontend.Program.Package (trivialLocatedProgramPackage)
+import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
 import MLF.Frontend.Program.Types
     ( CheckedBinding (..)
     , CheckedModule (..)
@@ -62,7 +63,7 @@ prepareBackendEmissionFromSource path source = do
             (parseLocatedProgramWithFile path source)
     checked <-
         first BackendEmissionProgramDiagnostic
-            (checkLocatedProgram (withPreludeLocated program))
+            (checkLocatedProgramPackage (withPreludeLocatedPackage (trivialLocatedProgramPackage program)))
     pure (prepareCheckedProgramForBackendEmission checked)
 
 prepareCheckedProgramForBackendEmission :: CheckedProgram -> CheckedProgram

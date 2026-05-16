@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-245",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-package-module-owner",
+  "extracted_item_id": "round-245-package-module-owner-trivial-package",
+  "summary": "Establish a private .mlfp package/module owner and route existing in-memory one-file checking/runtime preparation through trivial-package adapters, with focused tests and architecture ownership docs.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

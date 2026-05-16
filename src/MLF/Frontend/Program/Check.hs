@@ -17,8 +17,10 @@ module MLF.Frontend.Program.Check
     ExportedTypeInfo (..),
     ModuleExports (..),
     checkProgram,
+    checkProgramPackage,
     checkResolvedProgram,
     checkLocatedProgram,
+    checkLocatedProgramPackage,
   )
 where
 
@@ -42,6 +44,15 @@ import MLF.Frontend.Program.Elaborate
     sourceTypeViewInScope,
   )
 import MLF.Frontend.Program.Finalize (finalizeBinding, finalizeBindingAllowOpaque)
+import MLF.Frontend.Program.Package
+  ( LocatedProgramPackage,
+    ProgramPackage,
+    locatedProgramPackagePackage,
+    locatedProgramPackageProgram,
+    programPackageProgram,
+    trivialLocatedProgramPackage,
+    trivialProgramPackage,
+  )
 import MLF.Frontend.Program.Resolve (resolveProgram)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
@@ -352,7 +363,11 @@ isBuiltinTypeSymbol = Builtins.isBuiltinTypeSymbol
 
 checkProgram :: P.Program -> Either ProgramError CheckedProgram
 checkProgram program =
-  resolveProgram program >>= checkResolvedProgram
+  checkProgramPackage (trivialProgramPackage program)
+
+checkProgramPackage :: ProgramPackage -> Either ProgramError CheckedProgram
+checkProgramPackage package =
+  resolveProgram (programPackageProgram package) >>= checkResolvedProgram
 
 checkResolvedProgram :: ResolvedProgram -> Either ProgramError CheckedProgram
 checkResolvedProgram resolved = runTcM $ do
@@ -377,9 +392,13 @@ checkResolvedProgram resolved = runTcM $ do
 
 checkLocatedProgram :: P.LocatedProgram -> Either ProgramDiagnostic CheckedProgram
 checkLocatedProgram located =
-  case checkProgram (P.locatedProgram located) of
+  checkLocatedProgramPackage (trivialLocatedProgramPackage located)
+
+checkLocatedProgramPackage :: LocatedProgramPackage -> Either ProgramDiagnostic CheckedProgram
+checkLocatedProgramPackage package =
+  case checkProgramPackage (locatedProgramPackagePackage package) of
     Right checked -> Right checked
-    Left err -> Left (diagnosticForProgramError (Just located) err)
+    Left err -> Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err)
 
 lookupResolvedLocalTypeIdentity :: ResolvedSemanticModule -> P.TypeName -> TcM SymbolIdentity
 lookupResolvedLocalTypeIdentity resolvedModule name =
