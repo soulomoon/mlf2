@@ -44,12 +44,29 @@ import MLF.Frontend.Program.Elaborate
     sourceTypeViewInScope,
   )
 import MLF.Frontend.Program.Finalize (finalizeBinding, finalizeBindingAllowOpaque)
+import MLF.Frontend.Program.Interface
+  ( ModuleInterface,
+    ProgramInterfaceError,
+    moduleInterfaceData,
+    moduleInterfaceExports,
+    moduleInterfaceId,
+    moduleInterfaceFromCheckedModule,
+    moduleInterfaceInstances,
+    packageInterfaceFromCheckedProgram,
+    renderProgramInterfaceError,
+  )
 import MLF.Frontend.Program.Package
   ( LocatedProgramPackage,
+    PackageModuleGraph (..),
+    PackageModuleGraphNode (..),
+    PackageModuleId (..),
     ProgramPackage,
+    locatedProgramPackageModuleGraph,
     locatedProgramPackageOrderedProgram,
     locatedProgramPackageProgram,
+    programPackageModuleGraph,
     programPackageOrderedProgram,
+    trivialPackageId,
     trivialLocatedProgramPackage,
     trivialProgramPackage,
   )
@@ -367,12 +384,22 @@ checkProgram program =
 
 checkProgramPackage :: ProgramPackage -> Either ProgramError CheckedProgram
 checkProgramPackage package = do
+  graph <- programPackageModuleGraph package
   orderedProgram <- programPackageOrderedProgram package
-  resolveProgram orderedProgram >>= checkResolvedProgram
+  resolved <- resolveProgram orderedProgram
+  checkResolvedProgramWithPackageGraph graph resolved
 
 checkResolvedProgram :: ResolvedProgram -> Either ProgramError CheckedProgram
-checkResolvedProgram resolved = runTcM $ do
-  modulesChecked <- checkModules (resolvedProgramSemanticArtifact resolved)
+checkResolvedProgram =
+  checkResolvedProgramWithContext Nothing
+
+checkResolvedProgramWithPackageGraph :: PackageModuleGraph -> ResolvedProgram -> Either ProgramError CheckedProgram
+checkResolvedProgramWithPackageGraph graph =
+  checkResolvedProgramWithContext (Just graph)
+
+checkResolvedProgramWithContext :: Maybe PackageModuleGraph -> ResolvedProgram -> Either ProgramError CheckedProgram
+checkResolvedProgramWithContext mbGraph resolved = runTcM $ do
+  modulesChecked <- checkModules mbGraph (resolvedProgramSemanticArtifact resolved)
   let mainNames =
         [ checkedBindingName binding
           | checked <- modulesChecked,
@@ -384,12 +411,11 @@ checkResolvedProgram resolved = runTcM $ do
       [] -> throwError ProgramMainNotFound
       [name] -> pure name
       names -> throwError (ProgramMultipleMainDefinitions names)
-  pure
-    CheckedProgram
-      { checkedProgramModules = modulesChecked,
-        checkedProgramMain = mainRuntime,
-        checkedProgramResolved = resolved
-      }
+  let checkedProgram = checkedProgramFromModules resolved modulesChecked mainRuntime
+  case mbGraph of
+    Nothing -> pure ()
+    Just graph -> validateCheckedPackageInterface graph checkedProgram
+  pure checkedProgram
 
 checkLocatedProgram :: P.LocatedProgram -> Either ProgramDiagnostic CheckedProgram
 checkLocatedProgram located =
@@ -397,12 +423,32 @@ checkLocatedProgram located =
 
 checkLocatedProgramPackage :: LocatedProgramPackage -> Either ProgramDiagnostic CheckedProgram
 checkLocatedProgramPackage package =
-  case locatedProgramPackageOrderedProgram package of
-    Left err -> Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err)
-    Right orderedProgram ->
-      case resolveProgram (P.locatedProgram orderedProgram) >>= checkResolvedProgram of
+  case (locatedProgramPackageModuleGraph package, locatedProgramPackageOrderedProgram package) of
+    (Left err, _) -> Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err)
+    (_, Left err) -> Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err)
+    (Right graph, Right orderedProgram) ->
+      case resolveProgram (P.locatedProgram orderedProgram) >>= checkResolvedProgramWithPackageGraph graph of
         Right checked -> Right checked
         Left err -> Left (diagnosticForProgramError (Just orderedProgram) err)
+
+checkedProgramFromModules :: ResolvedProgram -> [CheckedModule] -> String -> CheckedProgram
+checkedProgramFromModules resolved modulesChecked mainRuntime =
+  CheckedProgram
+    { checkedProgramModules = modulesChecked,
+      checkedProgramMain = mainRuntime,
+      checkedProgramResolved = resolved
+    }
+
+validateCheckedPackageInterface :: PackageModuleGraph -> CheckedProgram -> TcM ()
+validateCheckedPackageInterface graph checked =
+  liftEitherWithInterface (packageInterfaceFromCheckedProgram graph checked) >> pure ()
+
+liftEitherWithInterface :: Either ProgramInterfaceError a -> TcM a
+liftEitherWithInterface =
+  either (throwError . ProgramPipelineError . interfaceErrorMessage) pure
+  where
+    interfaceErrorMessage err =
+      "invalid .mlfp interface artifact: " ++ renderProgramInterfaceError err
 
 lookupResolvedLocalTypeIdentity :: ResolvedSemanticModule -> P.TypeName -> TcM SymbolIdentity
 lookupResolvedLocalTypeIdentity resolvedModule name =
@@ -472,23 +518,60 @@ uniqueResolvedLocalSymbol duplicateErr name symbolsByName =
     Just _ -> throwError (duplicateErr name)
     Nothing -> throwError (duplicateErr name)
 
-checkModules :: ResolvedSemanticProgramArtifact -> TcM [CheckedModule]
-checkModules (ResolvedSemanticProgramArtifact resolvedModules) = do
+checkModules :: Maybe PackageModuleGraph -> ResolvedSemanticProgramArtifact -> TcM [CheckedModule]
+checkModules mbGraph (ResolvedSemanticProgramArtifact resolvedModules) = do
   ensureDistinctBy ProgramDuplicateModule resolvedSemanticModuleName resolvedModules
-  go [] resolvedModules
+  go [] [] resolvedModules
   where
-    go acc [] = pure (reverse acc)
-    go acc (resolvedModule : rest) = do
-      checked <- checkModule resolvedModule acc
-      go (checked : acc) rest
+    nodesByModule =
+      Map.fromList
+        [ (packageModuleName (packageModuleGraphNodeId node), node)
+          | graph <- maybe [] pure mbGraph,
+            node <- packageModuleGraphNodes graph
+        ]
 
-checkModule :: ResolvedSemanticModule -> [CheckedModule] -> TcM CheckedModule
-checkModule resolvedModule priorModules = do
+    go _ checkedAcc [] = pure (reverse checkedAcc)
+    go interfaceAcc checkedAcc (resolvedModule : rest) = do
+      checked <- checkModule resolvedModule interfaceAcc
+      node <- moduleInterfaceNodeForResolved nodesByModule mbGraph resolvedModule
+      interface <- liftEitherWithInterface (moduleInterfaceFromCheckedModule node checked)
+      go (interface : interfaceAcc) (checked : checkedAcc) rest
+
+moduleInterfaceNodeForResolved ::
+  Map P.ModuleName PackageModuleGraphNode ->
+  Maybe PackageModuleGraph ->
+  ResolvedSemanticModule ->
+  TcM PackageModuleGraphNode
+moduleInterfaceNodeForResolved nodesByModule mbGraph resolvedModule =
+  case mbGraph of
+    Just _ ->
+      case Map.lookup moduleName0 nodesByModule of
+        Just node -> pure node
+        Nothing ->
+          throwError
+            ( ProgramPipelineError
+                ("missing package module graph node for checked module `" ++ moduleName0 ++ "`")
+            )
+    Nothing ->
+      pure
+        PackageModuleGraphNode
+          { packageModuleGraphNodeId = PackageModuleId trivialPackageId moduleName0,
+            packageModuleGraphNodeSourcePath = Nothing,
+            packageModuleGraphNodeImports =
+              [ PackageModuleId trivialPackageId (resolvedImportDefiningModule imp)
+                | imp <- P.moduleImports (resolvedSemanticModuleSyntax resolvedModule)
+              ]
+          }
+  where
+    moduleName0 = resolvedSemanticModuleName resolvedModule
+
+checkModule :: ResolvedSemanticModule -> [ModuleInterface] -> TcM CheckedModule
+checkModule resolvedModule priorInterfaces = do
   let resolvedSyntax = resolvedSemanticModuleSyntax resolvedModule
       moduleName0 = resolvedSemanticModuleName resolvedModule
-      priorExports = Map.fromList [(checkedModuleName checked, checkedModuleExports checked) | checked <- priorModules]
-      priorData = Map.fromList [(checkedModuleName checked, checkedModuleData checked) | checked <- priorModules]
-      priorInstances = concatMap checkedModuleInstances priorModules
+      priorExports = Map.fromList [(moduleInterfaceName interface, moduleInterfaceExports interface) | interface <- priorInterfaces]
+      priorData = Map.fromList [(moduleInterfaceName interface, moduleInterfaceData interface) | interface <- priorInterfaces]
+      priorInstances = concatMap moduleInterfaceInstances priorInterfaces
       unqualifiedClassIdentities = importedUnqualifiedClassIdentities priorExports (P.moduleImports resolvedSyntax)
       visibleImportedInstances =
         visibleInstancesForImports priorExports priorData priorInstances unqualifiedClassIdentities (P.moduleImports resolvedSyntax)
@@ -558,6 +641,10 @@ checkModule resolvedModule priorModules = do
         checkedModuleInstances = instanceSkeletons,
         checkedModuleExports = exports
       }
+
+moduleInterfaceName :: ModuleInterface -> P.ModuleName
+moduleInterfaceName =
+  packageModuleName . moduleInterfaceId
 
 moduleDefDecls :: P.ModuleF p -> [P.DefDeclF p]
 moduleDefDecls = foldr collect [] . P.moduleDecls

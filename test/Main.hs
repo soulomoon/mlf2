@@ -32,6 +32,7 @@ import Phi.AlignmentSpec qualified
 import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
 import PipelineSpec qualified
+import ProgramInterfaceSpec qualified
 import ProgramPackageSpec qualified
 import ProgramPackageDiscoverySpec qualified
 import ProgramSpec qualified
@@ -106,6 +107,7 @@ main = do
     BackendIRSpec.spec
     BackendStructuralRecursiveDataSpec.spec
     BackendLLVMSpec.spec
+    ProgramInterfaceSpec.spec
     ProgramPackageSpec.spec
     ProgramPackageDiscoverySpec.spec
     ProgramSpec.spec

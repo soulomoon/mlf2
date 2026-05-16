@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-247",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-interface-artifact-contract",
+  "extracted_item_id": "round-247-interface-artifact-contract",
+  "decision": "approved",
+  "evidence_summary": "Focused interface/package/public-surface tests, git diff --check, and cabal build all && cabal test passed; the diff implements the private typed interface artifact boundary described by milestone-3.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-3",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-3-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "Completed by round-247; evidence: private typed .mlfp interface artifacts now cover checked exports, local data/class summaries, visible instances, source/dependency metadata, fail-closed validation, and interface-backed package import visibility."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

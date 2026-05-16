@@ -198,7 +198,7 @@ rounds unless controller state and a selected plan explicitly allow it.
 - Extraction notes: first extraction can target one package root with explicit
   module-to-file mapping before generalizing search paths.
 
-### [pending] 3. Interface Artifact Contract
+### [done] 3. Interface Artifact Contract
 
 - Milestone id: `milestone-3`
 - Depends on: `milestone-1`, `milestone-2`
@@ -217,7 +217,10 @@ rounds unless controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-3
 
-- none yet
+- Completed by round-247; evidence: private typed `.mlfp` interface artifacts
+  now cover checked exports, local data/class summaries, visible instances,
+  source/dependency metadata, fail-closed validation, and interface-backed
+  package import visibility.
 
 #### Candidate Direction: Interface Artifact Contract
 

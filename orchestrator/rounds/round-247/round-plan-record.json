@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-247",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-interface-artifact-contract",
+  "extracted_item_id": "round-247-interface-artifact-contract",
+  "plan_path": "orchestrator/rounds/round-247/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-247",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-interface-artifact-contract",
+  "extracted_item_id": "round-247-interface-artifact-contract",
+  "summary": "Introduce the private typed .mlfp module interface artifact boundary for checked exports, class methods, instances, and dependency metadata, and route package import visibility through that boundary with focused validation tests.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

@@ -34,7 +34,7 @@
     {
       "milestone_id": "milestone-3",
       "title": "Interface Artifact Contract",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-1",
         "milestone-2"
@@ -180,7 +180,7 @@
     },
     "milestone-3-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 3. Interface Artifact Contract"
+      "selector": "### [done] 3. Interface Artifact Contract"
     },
     "milestone-3-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",

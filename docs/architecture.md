@@ -42,6 +42,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Syntax.Program` / `MLF.Frontend.Parse.Program` / `MLF.Frontend.Pretty.Program` — canonical `.mlfp` syntax ownership under the main frontend boundary
 - `MLF.Frontend.Program.Package` — private owner for `.mlfp` package identity, module identity, source-unit shape, trivial-package adapters, one-root filesystem discovery, explicit module graph/order validation, and package-to-program projections used while the checker still consumes the existing in-memory program artifact
 - `MLF.Frontend.Program.Resolve` — assigns `.mlfp` symbol identities and produces the resolved semantic program artifact consumed by the checker
+- `MLF.Frontend.Program.Interface` — private owner for typed checked module interface artifacts, including checked exports, local data/class summaries, visible instances, source-path metadata, and direct package-module dependencies
 - `MLF.Frontend.Program.Check` — module/import/class/data environment assembly for `.mlfp`, including static validation that may fail before the eMLF pipeline
 - `MLF.Frontend.Program.Elaborate` — lowers executable `.mlfp` bindings to surface eMLF `SurfaceExpr`
 - `MLF.Frontend.Program.Finalize` — normalizes lowered surface eMLF, calls the internal detailed eMLF pipeline entrypoints with program-owned external binding modes, resolves `.mlfp` deferred obligations, and accepts rewritten terms only after the xMLF typecheck guard
@@ -70,15 +71,21 @@ projected into the existing in-memory `Program` artifact at the checker/resolver
 edge. The package owner can discover `.mlfp` files under one explicit local
 root, retain source paths, build a module-to-file graph, reject duplicate,
 missing, or cyclic module imports, and project modules in dependency order so
-imports are checked before importers. `Resolve` and `Check` still consume the
-ordered in-memory package projection, `Finalize` consumes the assembled program
-scope, and `Run` evaluates all checked module bindings together. There is no
-package root/search path policy beyond that one explicit root, persisted
+imports are checked before importers. `MLF.Frontend.Program.Interface` owns the
+private checked module interface artifact that `Check` uses for prior-module
+import visibility and package consistency validation. The artifact records
+checked exports, local data/class summaries, visible instances, source paths,
+and direct `PackageModuleId` dependencies; validation fails closed when graph
+order, source paths, dependencies, or exported symbol ownership do not match the
+checked package. The interface artifact is not a second typechecker authority:
+it is extracted only from checked modules plus the package graph, and malformed
+artifacts are rejected rather than repaired. `Finalize` consumes the assembled
+program scope, and `Run` evaluates all checked module bindings together. There
+is no package root/search path policy beyond that one explicit root, persisted
 interface artifact, cache/build graph policy, stable `.mlfp` ABI, linker, or CLI
 package mode today. Future separate compilation should be introduced only
-through the package owner and an explicit compiler-owned interface artifact
-carrying exported principal schemes, visible type/class/instance summaries, and
-checked xMLF/runtime payloads rather than by peeking at source outside the
+through the package/interface owners and explicit compiler-owned artifacts that
+carry checked xMLF/runtime payloads rather than by peeking at source outside the
 package projection.
 
 No active executable or test component depends on historical research modules.

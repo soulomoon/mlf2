@@ -55,6 +55,9 @@ been resolved, semantic decisions compare identities:
   than recovered display names;
 - duplicate case branches and mixed qualified/unqualified references compare
   constructor/method/type/value identities, not display strings.
+- private module interface artifacts validate exported value, type, constructor,
+  class, and method identities against the exporting module before a checked
+  package is accepted.
 
 This keeps qualification as presentation and visibility data rather than a
 semantic identity mechanism.

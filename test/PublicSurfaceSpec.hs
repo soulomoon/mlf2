@@ -3,6 +3,7 @@
 module PublicSurfaceSpec (spec) where
 
 import Data.List.NonEmpty (NonEmpty (..))
+import Data.List (isInfixOf)
 import Data.Set qualified as Set
 import Data.Text qualified as T
 import MLF.API
@@ -14,6 +15,16 @@ import Test.Hspec
 
 spec :: Spec
 spec = describe "Public surface contracts" $ do
+  it "keeps private program interface artifacts out of public modules" $ do
+    publicSources <-
+      mapM
+        readFile
+        [ "src-public/MLF/API.hs",
+          "src-public/MLF/Pipeline.hs",
+          "src-public/MLF/XMLF.hs"
+        ]
+    concat publicSources `shouldNotSatisfy` isInfixOf "MLF.Frontend.Program.Interface"
+
   describe "MLF.API" $ do
     it "roundtrips raw surface expressions through parse(pretty(expr))" $ do
       let expr = ELet "id" (ELam "x" (EVar "x")) (EVar "id")
