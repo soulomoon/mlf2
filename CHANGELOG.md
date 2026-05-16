@@ -44,6 +44,8 @@
   partial applications now run through shared backend parity.
 
 ### Changed
+- Retired stale project-local Codex agent TOMLs under `.codex/agents/`;
+  repo-local orchestrator role prompts now live only under `orchestrator/roles/`.
 - Retired legacy raw eMLF and explicit xMLF parser compatibility syntax:
   parser APIs now reject ASCII token aliases and old xMLF/eMLF grammar shapes
   such as `λx. t`, `λx:τ. t`, `Λa. t`, `∀a. τ`, `1`, `epsilon`, `!a`,

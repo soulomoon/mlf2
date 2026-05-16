@@ -859,11 +859,6 @@ class Migration:
             Path("orchestrator/verification.md"),
             Path("orchestrator/roles"),
             Path("orchestrator/roadmaps"),
-            Path(".codex/agents/orchestrator-guider.toml"),
-            Path(".codex/agents/orchestrator-implementer.toml"),
-            Path(".codex/agents/orchestrator-merger.toml"),
-            Path(".codex/agents/orchestrator-planner.toml"),
-            Path(".codex/agents/orchestrator-reviewer.toml"),
         ]
         for relative_path in sync_targets:
             source = self.repo_root / relative_path
