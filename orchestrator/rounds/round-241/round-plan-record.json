@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-241",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-native-parity-policy-module",
+  "extracted_item_id": "item-3a-program-matrix-native-policy-owner",
+  "plan_path": "orchestrator/rounds/round-241/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

@@ -20,3 +20,4 @@ Contract: `orchestrator-v2`
 - round-238 advanced milestone-1 in-progress by creating the private primitive inventory owner, migrating the selected frontend/backend adapters, and passing focused primitive checks plus the full cabal gate.
 - round-239 completed milestone-1 by finishing the LLVM lowering primitive-inventory adapter and passing the full verification gate.
 - round-240 completed milestone-2 by centralizing backend callable-shape ownership in MLF.Backend.CallableShape with focused and full Cabal validation.
+- round-241 completed milestone-3 by moving ProgramSpec-to-LLVM native/object parity policy beside ProgramMatrix and preserving real native assertions.

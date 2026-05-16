@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-241",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-native-parity-policy-module",
+  "extracted_item_id": "item-3a-program-matrix-native-policy-owner",
+  "summary": "Create a test-support native/object-code parity policy owner beside ProgramMatrix and make BackendLLVMSpec consume it so interpreter-success rows have explicit source, runtime, backend LLVM, object-code, native-run, and toolchain classification without manual string-list drift.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

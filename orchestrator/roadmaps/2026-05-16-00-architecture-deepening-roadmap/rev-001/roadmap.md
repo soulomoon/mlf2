@@ -195,7 +195,7 @@ allow it.
 - Extraction notes: prefer one representative callable family or diagnostic
   path for the first implementation round if the blast radius is high.
 
-### [pending] 3. Native Parity Policy Module
+### [done] 3. Native Parity Policy Module
 
 - Milestone id: `milestone-3`
 - Depends on: `milestone-1`, `milestone-2`
@@ -212,7 +212,7 @@ allow it.
   availability. Do not hide backend limitations behind test convenience.
 #### Completion Pointers: milestone-3
 
-none yet
+- round-241 created Parity.ProgramMatrix.NativePolicy, rewired BackendLLVMSpec native/object parity rows to it, and passed focused parity checks plus cabal build all && cabal test.
 
 #### Candidate Direction: Native Parity Policy Module
 

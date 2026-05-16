@@ -6,7 +6,6 @@ import Control.Exception (evaluate)
 import Control.Monad (forM_, when)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
-import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import System.Exit (ExitCode (..))
 import System.Timeout (timeout)
@@ -35,11 +34,18 @@ import Parity.ProgramMatrix
   ( ProgramMatrixCase (..),
     ProgramMatrixExpectation (..),
     ProgramMatrixSource (..),
-    ProgramRuntimeCase (..),
     ProgramRuntimeExpectation (..),
     emlfSurfaceParityMatrix,
-    programSpecToLLVMParityCases,
     unifiedFixtureExpectations,
+  )
+import Parity.ProgramMatrix.NativePolicy
+  ( BackendLLVMAssemblyPolicy (..),
+    NativeRunPolicy (..),
+    ObjectCodePolicy (..),
+    ProgramLLVMNativeParityPolicy (..),
+    describeProgramLLVMNativeParityPolicy,
+    programLLVMNativeParityPolicies,
+    programLLVMNativeParityPolicyDiagnostics,
   )
 
 spec :: Spec
@@ -818,18 +824,16 @@ spec = describe "MLF.Backend.LLVM" $ do
 
   describe "ProgramSpec-to-LLVM parity matrix" $ do
     it "classifies every interpreter-success case exactly once" $ do
-      let caseNames = map runtimeCaseName programSpecToLLVMParityCases
-          uniqueCaseNames = Set.fromList caseNames
-          coverageCaseNames = Map.keysSet llvmParityCoverage
-          objectCodeNames = Set.fromList llvmObjectCodeParityCases
-          requiredNativeRunNames = Set.fromList llvmRequiredNativeRunParityCases
+      case programLLVMNativeParityPolicyDiagnostics of
+        [] -> pure ()
+        diagnostics ->
+          expectationFailure $
+            unlines $
+              "ProgramSpec-to-LLVM parity policy is inconsistent:"
+                : diagnostics
+                    ++ ("classified rows:" : map describeProgramLLVMNativeParityPolicy programLLVMNativeParityPolicies)
 
-      length caseNames `shouldBe` Set.size uniqueCaseNames
-      coverageCaseNames `shouldBe` uniqueCaseNames
-      objectCodeNames `Set.isSubsetOf` uniqueCaseNames `shouldBe` True
-      requiredNativeRunNames `Set.isSubsetOf` coverageCaseNames `shouldBe` True
-
-    mapM_ runLLVMParityCase programSpecToLLVMParityCases
+    mapM_ runLLVMParityPolicy programLLVMNativeParityPolicies
 
   it "lowers packaged partial applications through the explicit closure ABI" $ do
     output <- requireRight (renderBackendProgramLLVM partialApplicationProgram)
@@ -6337,80 +6341,32 @@ recIntTy :: BackendType
 recIntTy =
   BTMu "self" intTy
 
-data LLVMParityCoverage = LLVMParityCoverage
-  { llvmParityObjectCodeSmoke :: Bool
-  }
-  deriving (Eq, Show)
-
-llvmParityCoverage :: Map.Map String LLVMParityCoverage
-llvmParityCoverage =
-  Map.fromList
-    [ ( runtimeCaseName runtimeCase,
-        LLVMParityCoverage
-          { llvmParityObjectCodeSmoke = runtimeCaseName runtimeCase `Set.member` llvmObjectCodeParityCaseNames
-          }
-      )
-    | runtimeCase <- programSpecToLLVMParityCases
-    ]
-
-llvmRequiredNativeRunParityCases :: [String]
-llvmRequiredNativeRunParityCases =
-  [ "surface: runs lambda/application",
-    "surface: runs top-level partial application",
-    "surface: runs local partial application",
-    "fixture: test/programs/recursive-adt/deriving-eq.mlfp",
-    "fixture: test/programs/recursive-adt/recursive-tree-deriving.mlfp",
-    "fixture: test/programs/recursive-adt/typeclass-integration.mlfp",
-    "unified fixture: test/programs/unified/authoritative-overloaded-method.mlfp",
-    "unified fixture: test/programs/unified/authoritative-nullary-overloaded-method.mlfp",
-    "unified fixture: test/programs/unified/first-class-polymorphism.mlfp",
-    "unified fixture: test/programs/unified/higher-order-function-field.mlfp",
-    "unified fixture: test/programs/unified/higher-order-local-function-flow.mlfp",
-    "unified fixture: test/programs/unified/higher-order-partial-application.mlfp",
-    "unified fixture: test/programs/unified/higher-order-returned-function.mlfp",
-    "standalone: applies captured function-valued constructor fields",
-    "standalone: executes IO Unit main with bind and pure"
-  ]
-
-llvmObjectCodeParityCases :: [String]
-llvmObjectCodeParityCases =
-    [ "surface: runs lambda/application",
-      "surface: runs top-level partial application",
-      "unified fixture: test/programs/unified/authoritative-case-analysis.mlfp",
-      "unified fixture: test/programs/unified/authoritative-recursive-let.mlfp",
-      "boundary: runs value-exported constructor when owner type is not exported",
-      "boundary: runs aliased bulk-imported hidden-owner constructors in one case",
-      "boundary: runs exposed constructor with qualified alias type identity",
-      "unified fixture: test/programs/unified/first-class-polymorphism.mlfp",
-      "unified fixture: test/programs/unified/higher-order-function-field.mlfp",
-      "unified fixture: test/programs/unified/higher-order-local-function-flow.mlfp",
-      "unified fixture: test/programs/unified/higher-order-partial-application.mlfp",
-      "unified fixture: test/programs/unified/higher-order-returned-function.mlfp",
-      "standalone: does not decode typed non-data constructor fields through fallback ADT decoding",
-      "standalone: applies captured function-valued constructor fields"
-    ]
-
-llvmObjectCodeParityCaseNames :: Set.Set String
-llvmObjectCodeParityCaseNames =
-  Set.fromList llvmObjectCodeParityCases
-
-runLLVMParityCase :: ProgramRuntimeCase -> Spec
-runLLVMParityCase runtimeCase =
-  it (runtimeCaseName runtimeCase) $ do
-    result <- emitProgramRuntimeLLVM (runtimeCaseSource runtimeCase)
-    case Map.lookup (runtimeCaseName runtimeCase) llvmParityCoverage of
-      Nothing ->
-        expectationFailure ("missing LLVM parity coverage for " ++ runtimeCaseName runtimeCase)
-      Just coverage -> do
-        output <- requireRight result
+runLLVMParityPolicy :: ProgramLLVMNativeParityPolicy -> Spec
+runLLVMParityPolicy policy =
+  it (describeProgramLLVMNativeParityPolicy policy) $ do
+    backendResult <- emitProgramRuntimeLLVM (parityCaseSource policy)
+    case parityBackendLLVMAssembly policy of
+      BackendLLVMAssemblyRequired -> do
+        output <- requireRight backendResult
         validateLLVMAssembly output
-        when (llvmParityObjectCodeSmoke coverage) $
-          validateLLVMObjectCode output
-        nativeOutput <- requireRight =<< emitProgramRuntimeNativeLLVM (runtimeCaseSource runtimeCase)
+        case parityObjectCode policy of
+          ObjectCodeRequired ->
+            validateLLVMObjectCode output
+          ObjectCodeNotRequired ->
+            pure ()
+      BackendLLVMAssemblyUnsupported diagnostic ->
+        backendResult `shouldSatisfyStringLeft` isInfixOf diagnostic
+
+    case parityNativeRun policy of
+      NativeRunRequired -> do
+        nativeOutput <- requireRight =<< emitProgramRuntimeNativeLLVM (parityCaseSource policy)
         validateLLVMAssembly nativeOutput
         validateLLVMObjectCode nativeOutput
         nativeResult <- runLLVMNativeExecutable nativeOutput
-        assertNativeRuntimeResult (runtimeCaseExpectation runtimeCase) nativeResult
+        assertNativeRuntimeResult (parityExpectedRuntime policy) nativeResult
+      NativeRunUnsupported diagnostic -> do
+        nativeResult <- emitProgramRuntimeNativeLLVM (parityCaseSource policy)
+        nativeResult `shouldSatisfyStringLeft` isInfixOf diagnostic
 
 emitProgramRuntimeLLVM :: ProgramMatrixSource -> IO (Either String String)
 emitProgramRuntimeLLVM source =
@@ -6504,6 +6460,14 @@ shouldSatisfyLeft result predicate =
   case result of
     Left err ->
       renderBackendLLVMError err `shouldSatisfy` predicate
+    Right output ->
+      expectationFailure ("expected backend LLVM failure, got output:\n" ++ output)
+
+shouldSatisfyStringLeft :: Either String String -> (String -> Bool) -> Expectation
+shouldSatisfyStringLeft result predicate =
+  case result of
+    Left err ->
+      err `shouldSatisfy` predicate
     Right output ->
       expectationFailure ("expected backend LLVM failure, got output:\n" ++ output)
 

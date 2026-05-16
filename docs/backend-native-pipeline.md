@@ -103,8 +103,9 @@ or `gcc` on `PATH`. `CC` may include launcher arguments, for example
 `ccache clang` or `xcrun clang`.
 
 When a required LLVM or native linker tool is absent, the relevant Hspec
-assertion is marked pending. The row remains part of the mechanical coverage
-matrix; it is not silently removed from the native pipeline.
+assertion fails with the missing tool diagnostic. The row remains part of the
+mechanical coverage matrix; missing tools are validation blockers, not a reason
+to silently remove native pipeline coverage.
 
 ## Runtime Support
 
@@ -154,10 +155,17 @@ expected diagnostic fragment.
 
 ## Coverage Contract
 
-`BackendLLVMSpec` drives the shared `programSpecToLLVMParityCases` matrix
-through one explicit coverage entry per interpreter-success row. Every row is
-native-run checked with raw LLVM assembly validation, native compile/link/run,
-and result comparison. Selected rows also receive object-code smoke validation.
+`Parity.ProgramMatrix.NativePolicy` owns the test-support policy that maps the
+shared `programSpecToLLVMParityCases` interpreter-success rows into backend
+parity layers. `BackendLLVMSpec` consumes those policy rows rather than keeping
+its own object-code or native-run string lists. Each policy entry names the
+source-checking result, interpreter/runtime expectation, backend LLVM assembly
+expectation, selected raw object-code smoke coverage, native executable run
+expectation, and required LLVM/native tools.
+
+Every current row is native-run checked with raw LLVM assembly validation,
+native compile/link/run, and result comparison. Selected rows also receive raw
+object-code smoke validation through the same policy owner.
 
 The current `ProgramSpec` parity matrix has no native-unsupported exceptions.
 

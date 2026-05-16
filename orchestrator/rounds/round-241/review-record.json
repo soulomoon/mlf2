@@ -1,0 +1,36 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-241",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-native-parity-policy-module",
+  "extracted_item_id": "item-3a-program-matrix-native-policy-owner",
+  "decision": "approved",
+  "evidence_summary": "ProgramSpec-to-LLVM native/object parity policy now lives in Parity.ProgramMatrix.NativePolicy, BackendLLVMSpec consumes it, focused parity selectors passed, and cabal build all && cabal test passed with 2581 examples.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-3",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-3"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-241 created Parity.ProgramMatrix.NativePolicy, rewired BackendLLVMSpec native/object parity rows to it, and passed focused parity checks plus cabal build all && cabal test."
+      }
+    ],
+    "history_entries": [
+      {
+        "anchor_id": "roadmap-history-completed-rounds",
+        "text": "round-241 completed milestone-3 by moving ProgramSpec-to-LLVM native/object parity policy beside ProgramMatrix and preserving real native assertions."
+      }
+    ],
+    "semantic_update_required_reason": null
+  }
+}

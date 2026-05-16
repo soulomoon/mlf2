@@ -414,6 +414,7 @@ test-suite mlf2-test
                       BackendLLVMSpec,
                       LLVMToolSupport,
                       Parity.ProgramMatrix,
+                      Parity.ProgramMatrix.NativePolicy,
                       ProgramSpec,
                       ResolvedSymbolSpec,
                       PipelineSpec,

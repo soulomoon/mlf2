@@ -34,7 +34,7 @@
     {
       "milestone_id": "milestone-3",
       "title": "Native Parity Policy Module",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-1",
         "milestone-2"
@@ -182,7 +182,7 @@
     },
     "milestone-3": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 3. Native Parity Policy Module"
+      "selector": "### [done] 3. Native Parity Policy Module"
     },
     "milestone-3-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",

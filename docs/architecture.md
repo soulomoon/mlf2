@@ -27,7 +27,7 @@ artifacts and are not part of the current task workflow.
 - `src-public/` contains the public entry modules `MLF.API`, `MLF.Pipeline`, and `MLF.XMLF`.
 - `src-research/` contains `MLF.Research.*` modules for the separate internal library `mlf2-research`; `mlf2-internal` must not depend on it.
 - `app/` contains the `mlf2` executable entrypoint.
-- `test/` contains the Hspec suite, the manual test runner, and frozen parity tooling/artifacts.
+- `test/` contains the Hspec suite, the manual test runner, frozen parity tooling/artifacts, and test-support parity owners such as `Parity.ProgramMatrix` plus `Parity.ProgramMatrix.NativePolicy`.
 - `papers/` contains the thesis/reference texts used for paper-faithful implementation work.
 
 ## Internal implementation (package-private)
@@ -358,7 +358,12 @@ program bindings. Unsupported result types fail before native-run assertions,
 so the native process boundary does not invent source or IO semantics.
 `docs/backend-native-pipeline.md` records the linked-executable test pipeline,
 toolchain discovery, generated artifacts, runtime support, and row coverage
-classification.
+classification. `Parity.ProgramMatrix.NativePolicy` owns the test-support
+ProgramSpec-to-LLVM native/object-code row policy consumed by
+`BackendLLVMSpec`; it classifies interpreter-success rows by source checking,
+interpreter/runtime expectation, backend LLVM assembly, object-code smoke,
+native executable run, and required LLVM/native tools without widening
+production backend APIs.
 
 The explicit closure ABI is private to the backend IR-to-LLVM path. A closure
 value is a heap pointer to a two-word record containing a code pointer and an
