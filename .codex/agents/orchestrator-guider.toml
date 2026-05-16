@@ -1,6 +1,6 @@
 name = "orchestrator-guider"
 description = "Use when the repo-local orchestrator loop needs strategic task selection or roadmap updates."
-model = "gpt-5.4"
+model = "gpt-5.5"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """

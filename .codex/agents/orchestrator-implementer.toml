@@ -1,6 +1,6 @@
 name = "orchestrator-implementer"
 description = "Use when a strategic repo-local orchestrator round needs docs, code, tests, or evidence changes for an approved plan."
-model = "gpt-5.4"
+model = "gpt-5.5"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """

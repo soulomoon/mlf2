@@ -107,4 +107,4 @@
 - Delegated the `update-roadmap` stage for `round-033`; the guider marked `U6` done and closed the initial successor cycle with bounded outcome `continue-bounded`.
 - Committed the roadmap update as `799b696 orchestrator: mark U6 decision gate complete`.
 - Returned `orchestrator/state.json` to terminal `stage: "done"` with `last_completed_round: "round-033"`.
-- Updated `TODO.md`, `implementation_notes.md`, `CHANGELOG.md`, and `AGENTS.md` to reflect the completed successor run and the explicit `gpt-5.4` + `xhigh` subagent default.
+- Updated `TODO.md`, `implementation_notes.md`, `CHANGELOG.md`, and `AGENTS.md` to reflect the completed successor run and the explicit `gpt-5.5` + `xhigh` subagent default.

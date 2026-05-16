@@ -1,6 +1,6 @@
 name = "orchestrator-planner"
 description = "Use when the strategic repo-local orchestrator loop needs a concrete round plan."
-model = "gpt-5.4"
+model = "gpt-5.5"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """

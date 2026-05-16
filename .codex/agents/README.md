@@ -20,7 +20,7 @@ The selected set is intentionally small and matches the repo's actual work:
 
 Local normalization:
 
-- All installed agents were normalized to `model = "gpt-5.4"` and
+- All installed agents were normalized to `model = "gpt-5.5"` and
   `model_reasoning_effort = "xhigh"` to match this repository's subagent
   policy in `AGENTS.md`.
 - Upstream source: <https://github.com/VoltAgent/awesome-codex-subagents>

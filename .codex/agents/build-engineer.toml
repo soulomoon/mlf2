@@ -1,6 +1,6 @@
 name = "build-engineer"
 description = "Use when a task needs build-graph debugging, bundling fixes, compiler pipeline work, or CI build stabilization."
-model = "gpt-5.4"
+model = "gpt-5.5"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """

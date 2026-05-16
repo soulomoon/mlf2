@@ -11,8 +11,8 @@
   workflow.
 - 2026-03-22: installed eight project-local agents under `.codex/agents/` and
   added `.codex/agents/README.md` documenting the selection and the local
-  `gpt-5.4` / `xhigh` normalization.
+  `gpt-5.5` / `xhigh` normalization.
 - 2026-03-22: verified the installed agent filenames, confirmed each copied
-  `.toml` now points at `gpt-5.4` with `xhigh` reasoning, and checked `git
+  `.toml` now points at `gpt-5.5` with `xhigh` reasoning, and checked `git
   status` to confirm the new `.codex/agents/` tree and task packet are present
   as untracked additions.

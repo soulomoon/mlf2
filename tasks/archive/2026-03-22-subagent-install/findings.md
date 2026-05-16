@@ -17,6 +17,6 @@
 - The repository already has stronger repo-local orchestration/process skills
   than the generic upstream orchestration agents, so utility agents add more
   value than installing orchestration duplicates.
-- This repo's `AGENTS.md` requires `gpt-5.4` with `xhigh` reasoning for
+- This repo's `AGENTS.md` requires `gpt-5.5` with `xhigh` reasoning for
   subagents by default, so the copied upstream agents were normalized to those
   settings locally.

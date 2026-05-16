@@ -1,6 +1,6 @@
 name = "orchestrator-merger"
 description = "Use when a strategic repo-local orchestrator round is approved and needs squash-merge preparation."
-model = "gpt-5.4"
+model = "gpt-5.5"
 model_reasoning_effort = "xhigh"
 sandbox_mode = "workspace-write"
 developer_instructions = """
