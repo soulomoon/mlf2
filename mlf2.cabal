@@ -91,6 +91,7 @@ library mlf2-internal
                       MLF.Backend.Emission.Prepare,
                       MLF.Backend.Convert,
                       MLF.Backend.IR,
+                      MLF.Backend.StructuralRecursiveData,
                       MLF.Backend.LLVM,
                       MLF.Backend.LLVM.Lower,
                       MLF.Backend.LLVM.Lower.Emit,
@@ -163,6 +164,7 @@ library mlf2-internal
                       MLF.Elab.Phi.TestSupport,
                       MLF.Elab.Types
     other-modules:    MLF.Constraint.Normalize.Internal,
+                      MLF.Backend.IR.Types,
                       MLF.Constraint.Types.Witness.Internal,
                       MLF.Constraint.Finalize.Internal,
                        MLF.Constraint.Normalize.Graft,
@@ -293,34 +295,6 @@ library mlf2-internal
 
     default-extensions: LambdaCase
 
-library mlf2-research
-    import:           warnings
-
-    visibility:       private
-
-    exposed-modules:  MLF.Research.URI.R2.C1.Prototype.Types,
-                      MLF.Research.URI.R2.C1.Prototype.D1,
-                      MLF.Research.URI.R2.C1.Prototype.D2,
-                      MLF.Research.URI.R2.C1.Prototype.D3,
-                      MLF.Research.URI.R2.C1.Prototype.P1,
-                      MLF.Research.URI.R2.C1.Prototype.P2,
-                      MLF.Research.URI.R2.C1.Prototype.P3,
-                      MLF.Research.URI.R2.C1.Prototype.P4,
-                      MLF.Research.URI.R2.C1.Prototype.Artifact,
-                      MLF.Research.URI.R2.C1.Prototype.Entrypoint
-
-    build-depends:    base ^>=4.22.0.0,
-                      containers,
-                      directory,
-                      filepath,
-                      mlf2:mlf2-internal
-
-    hs-source-dirs:   src-research
-
-    default-language: Haskell2010
-
-    default-extensions: LambdaCase
-
 library
     -- Import common warning flags.
     import:           warnings
@@ -360,8 +334,7 @@ executable mlf2
     build-depends:
         base ^>=4.22.0.0,
         mlf2,
-        mlf2:mlf2-internal,
-        mlf2:mlf2-research
+        mlf2:mlf2-internal
 
     -- Directories containing source files.
     hs-source-dirs:   app
@@ -417,6 +390,7 @@ test-suite mlf2-test
                       BackendEmissionPrepareSpec,
                       BackendConvertSpec,
                       BackendIRSpec,
+                      BackendStructuralRecursiveDataSpec,
                       BackendLLVMSpec,
                       LLVMToolSupport,
                       Parity.ProgramMatrix,
@@ -455,7 +429,6 @@ test-suite mlf2-test
                       Research.P2RepresentativeSupportSpec,
                       Research.P5ClearBoundarySpec,
                       Research.SameLaneRetainedChildRepresentativeGapSpec,
-                      Research.UriR2C1PrototypeP1Spec,
                       PresolutionFacadeSpec,
                       Constraint.SolvedSpec,
                       Reify.CoreSpec,
@@ -494,6 +467,5 @@ test-suite mlf2-test
         text,
         mlf2,
         mlf2:mlf2-internal,
-        mlf2:mlf2-research,
         hspec >=2.11 && <2.12,
         QuickCheck >=2.14 && <2.18

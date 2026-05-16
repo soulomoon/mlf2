@@ -65,7 +65,7 @@ import Control.Applicative ((<|>))
 import Control.Monad (foldM, forM, unless, when, zipWithM)
 import Control.Monad.State.Strict (StateT (StateT), evalStateT, get, modify, runStateT)
 import Data.Char (isAlphaNum)
-import Data.List (find, intercalate, nub, stripPrefix)
+import Data.List (find, intercalate, nub)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
@@ -81,6 +81,7 @@ import MLF.Backend.IR hiding
     BackendCallableHead (..),
     backendCallableHead,
   )
+import qualified MLF.Backend.StructuralRecursiveData as Structural
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.TypeCheck (Env (..), typeCheckWithEnv)
@@ -3450,7 +3451,7 @@ convertConstructorApplication _mode context env scope term resultTy =
       case ty of
         BTMu name _
           | Just dataMeta <- structuralRecursiveDataMeta ownerContext name ->
-              case structuralMuAsDataType (backendDataParameters (dmBackend dataMeta)) name of
+              case Structural.structuralMuAsDataType (backendDataParameters (dmBackend dataMeta)) name of
                 Just nominalTy -> nominalTy
                 Nothing -> ty
         _ ->
@@ -3632,7 +3633,7 @@ backendTypeStructuralDataName =
     BTBase (BaseTy name) -> Right name
     BTCon (BaseTy name) _ -> Right name
     BTMu name _ ->
-      case structuralRecursiveDataName name of
+      case Structural.structuralRecursiveDataName name of
         Just resultDataName -> Right resultDataName
         Nothing -> Left (BackendUnsupportedCaseShape ("unsupported structural constructor result type " ++ show name))
     ty -> Left (BackendUnsupportedCaseShape ("unsupported constructor result type " ++ show ty))
@@ -4047,42 +4048,11 @@ backendDataType name args =
 
 structuralRecursiveDataMeta :: ConvertContext -> String -> Maybe DataMeta
 structuralRecursiveDataMeta context name =
-  structuralRecursiveDataName name >>= dataMetaByStructuralName context
-
-structuralRecursiveDataName :: String -> Maybe String
-structuralRecursiveDataName name = do
-  let withoutPrefix = dropWhile (== '$') name
-  stripSuffix "_self" withoutPrefix
-
-structuralMuAsDataType :: [String] -> String -> Maybe BackendType
-structuralMuAsDataType dataParameterOrder muName = do
-  structuralName <- structuralRecursiveDataName muName
-  let parameterArgs = map BTVar dataParameterOrder
-  Just $
-    case parameterArgs of
-      [] -> BTBase (BaseTy structuralName)
-      arg : rest -> BTCon (BaseTy structuralName) (arg :| rest)
-
-structuralMuAsActualDataType :: String -> BackendType -> Maybe BackendType
-structuralMuAsActualDataType muName actual =
-  case actual of
-    BTBase (BaseTy actualName)
-      | structuralMuNameMatches actualName muName -> Just actual
-    _ -> Nothing
-
-structuralMuNameMatches :: String -> String -> Bool
-structuralMuNameMatches actualName muName =
-  case structuralRecursiveDataName muName of
-    Just structuralName -> actualName == structuralName
-    Nothing -> False
-
-stripSuffix :: String -> String -> Maybe String
-stripSuffix suffix value =
-  reverse <$> stripPrefix (reverse suffix) (reverse value)
+  Structural.structuralRecursiveDataName name >>= dataMetaByStructuralName context
 
 structuralBackendDataArguments :: (BackendType -> BackendType) -> DataMeta -> BackendType -> Maybe [BackendType]
 structuralBackendDataArguments recoverFieldTy dataMeta body = do
-  handlerFields <- structuralBackendHandlerFields body
+  handlerFields <- Structural.structuralBackendHandlerFields body
   let dataDecl = dmBackend dataMeta
       dataParameters = backendDataParameters dataDecl
       constructors = backendDataConstructors dataDecl
@@ -4123,38 +4093,6 @@ structuralBackendDataArguments recoverFieldTy dataMeta body = do
             | binder <- backendConstructorForalls constructor
           ]
 
-structuralBackendHandlerFields :: BackendType -> Maybe [[BackendType]]
-structuralBackendHandlerFields =
-  \case
-    BTForall resultName _ handlerTy -> collectHandlers resultName handlerTy
-    _ -> Nothing
-  where
-    collectHandlers resultName =
-      go []
-      where
-        go handlers ty
-          | alphaEqBackendType ty (BTVar resultName) = Just handlers
-          | otherwise =
-              case ty of
-                BTArrow handlerTy rest -> do
-                  fields <- collectHandlerFields resultName handlerTy
-                  go (handlers ++ [fields]) rest
-                _ -> Nothing
-
-    collectHandlerFields resultName =
-      go []
-      where
-        go fields ty
-          | alphaEqBackendType ty (BTVar resultName) = Just fields
-          | otherwise =
-              case ty of
-                BTArrow fieldTy rest -> go (fields ++ [fieldTy]) rest
-                _ -> Nothing
-
-structuralMuPayloadTypes :: BackendType -> Maybe [BackendType]
-structuralMuPayloadTypes body =
-  concat <$> structuralBackendHandlerFields body
-
 constructorApplicationResultType :: ConvertContext -> Env -> ElabTerm -> Either BackendConversionError (Maybe (BackendType, Maybe DataMeta))
 constructorApplicationResultType context env term =
   constructorApplicationTerm context term >>= \case
@@ -4189,14 +4127,14 @@ constructorNominalResultType :: [String] -> Map String BackendType -> BackendTyp
 constructorNominalResultType dataParameters substitution =
   \case
     BTMu name _ ->
-      substituteBackendTypes substitution <$> structuralMuAsDataType dataParameters name
+      substituteBackendTypes substitution <$> Structural.structuralMuAsDataType dataParameters name
     _ -> Nothing
 
 constructorExpectedResultType :: ConvertContext -> ConvertContext -> ConstructorMeta -> BackendType -> BackendType
 constructorExpectedResultType context ownerContext constructorMeta resultTy =
   case canonicalResultTy of
     BTMu name _
-      | structuralRecursiveDataName name == Just ownerName ->
+      | Structural.structuralRecursiveDataName name == Just ownerName ->
           canonicalResultTy
     _ ->
       recoverStructuralBackendType ownerContext (recoverStructuralBackendType context resultTy)
@@ -4579,8 +4517,8 @@ matchBackendTypeParameters typeBounds dataParameterOrder parameterBounds =
       ( structuralMuAsDataTypeForBody muName body
           >>= \expectedTy -> go leftEnv rightEnv substitution expectedTy actualTy
       )
-        <|> ( structuralMuPayloadTypes body
-                *> structuralMuAsActualDataType muName actualTy
+        <|> ( Structural.structuralMuPayloadTypes body
+                *> Structural.structuralMuAsActualDataType muName actualTy
                 >>= \expectedTy -> go leftEnv rightEnv substitution expectedTy actualTy
             )
 
@@ -4588,13 +4526,13 @@ matchBackendTypeParameters typeBounds dataParameterOrder parameterBounds =
       ( structuralMuAsDataTypeForBody muName body
           >>= \actualTy -> go leftEnv rightEnv substitution expectedTy actualTy
       )
-        <|> ( structuralMuPayloadTypes body
-                *> structuralMuAsActualDataType muName expectedTy
+        <|> ( Structural.structuralMuPayloadTypes body
+                *> Structural.structuralMuAsActualDataType muName expectedTy
                 >>= \actualTy -> go leftEnv rightEnv substitution expectedTy actualTy
             )
 
     structuralMuAsDataTypeForBody muName body =
-      structuralMuPayloadTypes body *> structuralMuAsDataType dataParameterOrder muName
+      Structural.structuralMuPayloadTypes body *> Structural.structuralMuAsDataType dataParameterOrder muName
 
     sameTypeVar leftEnv rightEnv expectedName actualName =
       case (Map.lookup expectedName leftEnv, Map.lookup actualName rightEnv) of

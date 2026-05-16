@@ -7,6 +7,7 @@ import BackendEmissionPrepareSpec qualified
 import BackendIRSpec qualified
 import BackendConvertSpec qualified
 import BackendLLVMSpec qualified
+import BackendStructuralRecursiveDataSpec qualified
 import BindingSharedAbstractionSpec qualified
 import BindingSpec qualified
 import CanonicalizerSpec qualified
@@ -58,7 +59,6 @@ import Research.C1AuthoritativeSurfaceSpec qualified
 import Research.P2RepresentativeSupportSpec qualified
 import Research.P5ClearBoundarySpec qualified
 import Research.SameLaneRetainedChildRepresentativeGapSpec qualified
-import Research.UriR2C1PrototypeP1Spec qualified
 import ScopeSpec qualified
 import SolveSpec qualified
 import System.Exit (die)
@@ -103,6 +103,7 @@ main = do
     BackendEmissionPrepareSpec.spec
     BackendConvertSpec.spec
     BackendIRSpec.spec
+    BackendStructuralRecursiveDataSpec.spec
     BackendLLVMSpec.spec
     ProgramSpec.spec
     ResolvedSymbolSpec.spec
@@ -113,7 +114,6 @@ main = do
     Research.P2RepresentativeSupportSpec.spec
     Research.P5ClearBoundarySpec.spec
     Research.SameLaneRetainedChildRepresentativeGapSpec.spec
-    Research.UriR2C1PrototypeP1Spec.spec
     PresolutionFacadeSpec.spec
     ThesisFixDirectionSpec.spec
     TypeCheckSpec.spec

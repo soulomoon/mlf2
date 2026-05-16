@@ -95,6 +95,7 @@ data FunctionForm = FunctionForm
 
 data ConstructorRuntime = ConstructorRuntime
   { crConstructor :: BackendConstructor,
+    crData :: BackendData,
     crDataParameters :: [String],
     crTag :: Integer
   }

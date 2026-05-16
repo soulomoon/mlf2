@@ -676,7 +676,7 @@ isAllowedConstraintBoundaryImport path moduleName =
 
 findFinalizeInternalImportOffenders :: IO [String]
 findFinalizeInternalImportOffenders = do
-  hsFiles <- concat <$> mapM collectHsFiles ["src", "src-public", "app", "test", "src-research"]
+  hsFiles <- concat <$> mapM collectHsFiles ["src", "src-public", "app", "test"]
   fmap sort . fmap concat $
     forM hsFiles $ \path -> do
       src <- readFile path

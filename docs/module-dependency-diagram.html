@@ -78,7 +78,7 @@
         <div class="pulse-dot"></div>
         <h1>mlf4 Module Dependency Diagram</h1>
       </div>
-      <p class="subtitle">This diagram is a domain-level map derived from real Haskell <code>module</code>/<code>import</code> relationships across <code>src/</code>, <code>src-public/</code>, <code>src-research/</code>, <code>app/</code>, and <code>test/</code>. It favors readability over a full 273-node explosion, so the main SVG shows domain families and cross-domain import counts, while the tables below preserve concrete hotspot detail.</p>
+      <p class="subtitle">This diagram is a domain-level map derived from real Haskell <code>module</code>/<code>import</code> relationships across <code>src/</code>, <code>src-public/</code>, <code>app/</code>, and <code>test/</code>. It favors readability over a full 262-node explosion, so the main SVG shows domain families and cross-domain import counts, while the tables below preserve concrete hotspot detail.</p>
     </div>
 
     <div class="diagram-container">
@@ -230,11 +230,11 @@
   <text x="560.0" y="551" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Reify.TypeOps</text>
   <rect x="245" y="420" width="175" height="130" rx="12" fill="#0f172a"/>
   <rect x="245" y="420" width="175" height="130" rx="12" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
-  <text x="332.5" y="444" fill="white" font-size="12" font-weight="600" text-anchor="middle">Research</text>
-  <text x="332.5" y="462" fill="#94a3b8" font-size="8.5" text-anchor="middle">10 modules</text>
-  <text x="332.5" y="478" fill="#94a3b8" font-size="7.8" text-anchor="middle">src-research prototype lanes</text>
-  <text x="332.5" y="522" fill="#fbbf24" font-size="7.8" text-anchor="middle">hub: MLF.Research.URI.R2.C1.Prototype.P2</text>
-  <text x="332.5" y="536" fill="#cbd5e1" font-size="7.6" text-anchor="middle">next: MLF.Research.URI.R2.C1.Prototype.Entrypoint</text>
+  <text x="332.5" y="444" fill="white" font-size="12" font-weight="600" text-anchor="middle">Retired Research</text>
+  <text x="332.5" y="462" fill="#94a3b8" font-size="8.5" text-anchor="middle">0 active modules</text>
+  <text x="332.5" y="478" fill="#94a3b8" font-size="7.8" text-anchor="middle">historical evidence only</text>
+  <text x="332.5" y="522" fill="#fbbf24" font-size="7.8" text-anchor="middle">no active Haskell imports</text>
+  <text x="332.5" y="536" fill="#cbd5e1" font-size="7.6" text-anchor="middle">docs/plans + orchestrator records</text>
   <rect x="1135" y="410" width="220" height="150" rx="12" fill="#0f172a"/>
   <rect x="1135" y="410" width="220" height="150" rx="12" fill="rgba(120, 53, 15, 0.3)" stroke="#fbbf24" stroke-width="1.5"/>
   <text x="1245.0" y="434" fill="white" font-size="12" font-weight="600" text-anchor="middle">Tests</text>
@@ -303,8 +303,8 @@
 <tr><td>Elab Core</td><td>26</td><td>MLF.Elab.Types (41); MLF.Elab.Pipeline (34)</td></tr>
 <tr><td>Elab Runtime</td><td>25</td><td>MLF.Elab.Run.Pipeline (28); MLF.Elab.Run.ResultType (22)</td></tr>
 <tr><td>Support &amp; XMLF</td><td>33</td><td>MLF.Binding.Tree (67); MLF.Reify.TypeOps (36)</td></tr>
-<tr><td>Research</td><td>10</td><td>MLF.Research.URI.R2.C1.Prototype.P2 (27); MLF.Research.URI.R2.C1.Prototype.Entrypoint (14)</td></tr>
-<tr><td>Tests</td><td>66</td><td>SpecUtil (52); Test.Main (50)</td></tr>
+<tr><td>Retired Research</td><td>0</td><td>Historical evidence only; no active Haskell modules</td></tr>
+<tr><td>Tests</td><td>65</td><td>SpecUtil (52); Test.Main (50)</td></tr>
           </tbody>
         </table>
       </div>

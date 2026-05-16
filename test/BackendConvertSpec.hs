@@ -6,6 +6,7 @@ import Data.List (find, intercalate, isInfixOf, isPrefixOf, nub)
 import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Backend.Convert
 import MLF.Backend.IR
+import qualified MLF.Backend.LLVM.Lower as Lower
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import qualified MLF.Elab.Types as Elab
 import MLF.API (parseRawProgram, renderProgramParseError)
@@ -201,6 +202,14 @@ spec = describe "MLF.Backend.Convert" $ do
     backend <- requireRight (convertCheckedProgram checked)
 
     validateBackendProgram backend `shouldBe` Right ()
+
+  it "validates, converts, and lowers the same recursive ADT through public backend paths" $ do
+    checked <- requireChecked =<< readFile "test/programs/recursive-adt/plain-recursive-nat.mlfp"
+    backend <- requireRight (convertCheckedProgram checked)
+
+    validateBackendProgram backend `shouldBe` Right ()
+    _ <- requireRight (Lower.lowerBackendProgram backend)
+    pure ()
 
   it "renames expected forall bodies to actual type abstraction binders" $ do
     checked <- requireChecked =<< readFile "test/programs/unified/first-class-polymorphism.mlfp"

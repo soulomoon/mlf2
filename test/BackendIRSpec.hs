@@ -652,6 +652,25 @@ spec = describe "MLF.Backend.IR" $ do
     validateBackendProgram (programWithMainExpr malformedStructuralBoxConstructExpr)
       `shouldBe` Left (BackendConstructorResultMismatch "Box" boxTy malformedStructuralBoxTy)
 
+  it "allows opaque IO continuations to specialize their argument type" $ do
+    let bindTailTy =
+          BTArrow
+            (BTArrow (BTVar "a") (ioTy BTBottom))
+            (ioTy BTBottom)
+        specializedBindTailTy =
+          BTArrow
+            (BTArrow preludeUnitStructuralTy (ioTy unitTy))
+            (ioTy preludeUnitStructuralTy)
+
+    validateBackendExpr
+      ( BackendApp
+          { backendExprType = specializedBindTailTy,
+            backendFunction = BackendVar (BTArrow (ioTy BTBottom) bindTailTy) "__io_bind",
+            backendArgument = BackendVar (ioTy BTBottom) "action"
+          }
+      )
+      `shouldBe` Right ()
+
   it "checks structural constructor result payloads against metadata" $ do
     alphaEqBackendType boxTy structuralBoxTy
       `shouldBe` False
@@ -1410,6 +1429,18 @@ intTy =
 boolTy :: BackendType
 boolTy =
   BTBase (BaseTy "Bool")
+
+unitTy :: BackendType
+unitTy =
+  BTBase (BaseTy "Unit")
+
+ioTy :: BackendType -> BackendType
+ioTy ty =
+  BTCon (BaseTy "IO") (ty :| [])
+
+preludeUnitStructuralTy :: BackendType
+preludeUnitStructuralTy =
+  BTMu "$Prelude.Unit_self" (BTForall "$Prelude.Unit_result" Nothing (BTArrow (BTVar "$Prelude.Unit_result") (BTVar "$Prelude.Unit_result")))
 
 nullaryStructuralBody :: BackendType
 nullaryStructuralBody =

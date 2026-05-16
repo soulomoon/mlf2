@@ -25,10 +25,10 @@ artifacts and are not part of the current task workflow.
 
 - `src/` builds the private implementation library `mlf2-internal`.
 - `src-public/` contains the public entry modules `MLF.API`, `MLF.Pipeline`, and `MLF.XMLF`.
-- `src-research/` contains `MLF.Research.*` modules for the separate internal library `mlf2-research`; `mlf2-internal` must not depend on it.
 - `app/` contains the `mlf2` executable entrypoint.
 - `test/` contains the Hspec suite, the manual test runner, frozen parity tooling/artifacts, and test-support parity owners such as `Parity.ProgramMatrix` plus `Parity.ProgramMatrix.NativePolicy`.
 - `papers/` contains the thesis/reference texts used for paper-faithful implementation work.
+Historical executable research harnesses have been retired from the active build. Their accepted evidence remains under `docs/plans/` and `orchestrator/rounds/`; do not reintroduce a research sublibrary or CLI entrypoint without a fresh reviewed roadmap.
 
 ## Internal implementation (package-private)
 
@@ -74,8 +74,7 @@ exported principal schemes, visible type/class/instance summaries, and checked
 xMLF/runtime payloads rather than by peeking at source outside the current
 `Program`.
 
-Tests and executables that need `MLF.Research.*` must add `mlf2:mlf2-research`
-to `build-depends`.
+No active executable or test component depends on historical research modules.
 
 ### `.mlfp` resolved-symbol boundary
 
