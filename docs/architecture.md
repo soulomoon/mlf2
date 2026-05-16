@@ -170,10 +170,11 @@ runtime invariants as compile-time types:
 - Presolution state access should go through `MonadPresolution` plus `MLF.Constraint.Presolution.Ops` and `StateAccess`; edge processing is split across planner/interpreter passes with typed `EdgePlan`.
 - Elaboration entrypoints bundle inputs as `ElabConfig`/`ElabEnv`, and tracing is explicit via `TraceConfig`.
 - `MLF.Elab.Run.Generalize.Prepare` owns the elaboration-side Generalization
-  Preparation step. It produces the `PreparedGeneralizationArtifact` consumed
-  by elaboration, root-scheme generalization, and result-type reconstruction,
-  while keeping redirect/canonicalization, copy-node recovery, scope overrides,
-  and the owner-local base-constraint projection on
+  Preparation step. Its normal API exposes the abstract
+  `PreparedGeneralizationArtifact` plus owner operations for prepared
+  annotation, elaboration inputs, root-scheme generalization, and result-type
+  reconstruction, while keeping redirect/canonicalization, copy-node recovery,
+  scope overrides, and the owner-local base-constraint projection on
   `GaBindParents.gaBaseConstraint` out of `MLF.Elab.Run.Pipeline`.
 - `MLF.Elab.Run.ResultType.View` owns result-type reconstruction's query
   adapter over the prepared result-type input: bound overlays, no-fallback

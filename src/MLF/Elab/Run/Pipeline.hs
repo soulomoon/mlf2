@@ -21,11 +21,9 @@ import qualified Data.Set as Set
 import MLF.Constraint.Acyclicity (breakCyclesAndCheckAcyclicity)
 import MLF.Constraint.Normalize (normalize)
 import MLF.Constraint.Presolution (computePresolution)
-import MLF.Constraint.Presolution.Base (EdgeArtifacts (eaEdgeWitnesses))
-import MLF.Constraint.Types.Graph (BaseTy (..), NodeId (..), PolySyms, getEdgeId, getNodeId)
+import MLF.Constraint.Types.Graph (BaseTy (..), PolySyms)
 import MLF.Constraint.Types.Phase (Phase(Raw))
-import MLF.Elab.Elaborate (ElabConfig (..), ElabEnv (..), elaborateWithEnv)
-import MLF.Elab.Generalize (GaBindParents (..))
+import MLF.Elab.Elaborate (elaborateWithEnv)
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.PipelineConfig (PipelineConfig (..), defaultPipelineConfig)
 import MLF.Elab.PipelineError
@@ -37,15 +35,14 @@ import MLF.Elab.PipelineError
     fromSolveError,
     fromTypeCheckError,
   )
-import MLF.Elab.Run.Annotation (annNode)
 import MLF.Elab.Run.Generalize.Prepare
-  ( PreparedGeneralizationArtifact (..),
+  ( computePreparedResultType,
+    generalizePreparedRoot,
     prepareGeneralizationArtifact,
-  )
-import MLF.Elab.Run.ResultType (computeResultTypeFallback, computeResultTypeFromAnn)
-import MLF.Elab.Run.Scope
-  ( resolveCanonicalScope,
-    schemeBodyTarget,
+    preparedAnnotated,
+    preparedElaborationConfig,
+    preparedElaborationEnv,
+    stripPreparedWitnesslessAuthoritativeAnn,
   )
 import MLF.Elab.TermClosure
   ( closeTermWithSchemeSubstIfNeeded,
@@ -197,13 +194,6 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
   prepared <-
     fromSolveError $
       prepareGeneralizationArtifact traceCfg cAcyclic pres ann
-  let presolutionViewForGen = pgaPresolutionView prepared
-      bindParentsGa = pgaBindParentsGa prepared
-      generalizeAtWithView = pgaGeneralizeAt prepared
-      edgeArtifacts = pgaEdgeArtifacts prepared
-      scopeOverrides = pgaScopeOverrides prepared
-      annCanon = pgaAnnotated prepared
-      acyclicBaseForGeneralization = gaBaseConstraint bindParentsGa
   -- Build authoritative SchemeInfo map and TypeCheck.Env from external
   -- source types.  We derive schemes directly from the caller-supplied
   -- NormSrcType values (which preserve lowerType naming) instead of
@@ -214,48 +204,22 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
           { TypeCheck.termEnv = Map.map (schemeToType . siScheme) initialSchemeInfos,
             TypeCheck.typeEnv = Map.empty
           }
-  let elabConfig =
-        ElabConfig
-          { ecTraceConfig = traceCfg,
-            ecGeneralizeAtWith = generalizeAtWithView
-          }
-      elabEnv =
-        ElabEnv
-          { eePresolutionView = presolutionViewForGen,
-            eeGaParents = bindParentsGa,
-            eeEdgeArtifacts = edgeArtifacts,
-            eeScopeOverrides = scopeOverrides,
-            eeAnnSourceTypes =
-              IntMap.fromList
-                [ (getNodeId (pgaAnnNodeCanonical prepared nid), ty)
-                  | (k, ty) <- IntMap.toList annSourceTypes,
-                    let nid = NodeId k
-                ],
-            eeInitialTermEnv = initialSchemeInfos
-          }
+  let annCanon = preparedAnnotated prepared
+      elabConfig = preparedElaborationConfig traceCfg prepared
+      elabEnv = preparedElaborationEnv annSourceTypes initialSchemeInfos prepared
   term <- fromElabError (elaborateWithEnv elabConfig elabEnv annCanon)
   case traceGeneralize traceCfg ("pipeline elaborated term=" ++ show term) () of
     () -> pure ()
   let authoritativeAnnCanon = authoritativeRootAnn term annCanon
       authoritativeAnnPre = authoritativeRootAnn term ann
       (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) =
-        stripWitnesslessAuthoritativeAnn (eaEdgeWitnesses edgeArtifacts) authoritativeAnnCanon authoritativeAnnPre
-  rootScope <-
-    fromElabError $
-      bindingToElab $
-        resolveCanonicalScope
-          acyclicBaseForGeneralization
-          presolutionViewForGen
-          (pgaRedirects prepared)
-          (annNode authoritativeAnnPreFinal)
-  let rootTarget = schemeBodyTarget presolutionViewForGen (annNode authoritativeAnnCanonFinal)
+        stripPreparedWitnesslessAuthoritativeAnn prepared authoritativeAnnCanon authoritativeAnnPre
   (rootScheme, rootSubst) <-
     fromElabError $
-      generalizeAtWithView (Just bindParentsGa) rootScope rootTarget
+      generalizePreparedRoot prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal
   let termSubst = substInTerm rootSubst term
 
-  let resultTypeInputs = pgaResultTypeInputs prepared
-      retainedChildAuthoritativeCandidate =
+  let retainedChildAuthoritativeCandidate =
         case preserveRetainedChildAuthoritativeResult termSubst of
           Just _ -> True
           Nothing -> False
@@ -310,20 +274,9 @@ runPipelineElabWith requireFinalTypeCheck traceCfg extBindings genConstraints ex
   -- type-checker result as authoritative.
   if not requireFinalTypeCheck
     then authoritativeResult
-    else case (authoritativeAnnCanonFinal, authoritativeAnnPreFinal) of
-      (AAnn inner annNodeId eid, AAnn innerPre _ _) -> do
-        _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid)
-        authoritativeResult
-      (AUnfold inner annNodeId eid, _) -> do
-        let innerPre = case authoritativeAnnPreFinal of
-              AUnfold ip _ _ -> ip
-              AAnn ip _ _ -> ip
-              other -> other
-        _ <- fromElabError (computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid)
-        authoritativeResult
-      _ -> do
-        _ <- fromElabError (computeResultTypeFallback resultTypeInputs authoritativeAnnCanonFinal authoritativeAnnPreFinal)
-        authoritativeResult
+    else do
+      _ <- fromElabError (computePreparedResultType prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal)
+      authoritativeResult
 
 freshenTypeAbsAgainstEnv :: TypeCheck.Env -> ElabTerm -> ElabTerm
 freshenTypeAbsAgainstEnv env term0 = pruneVacuousLeadingTyAbsAgainstEnv env (go reserved term0)
@@ -468,31 +421,6 @@ shouldStripAuthoritativeAnn term =
     EVar {} -> True
     EApp (ELam param _ (EVar bodyVar)) _ -> param == bodyVar
     _ -> False
-
-stripWitnesslessAuthoritativeAnn ::
-  IntMap.IntMap edgeWitness ->
-  AnnExpr ->
-  AnnExpr ->
-  (AnnExpr, AnnExpr)
-stripWitnesslessAuthoritativeAnn edgeWitnesses annCanon annPre =
-  case annCanon of
-    AAnn innerCanon _ eid
-      | IntMap.notMember (getEdgeId eid) edgeWitnesses ->
-          let innerPre =
-                case annPre of
-                  AAnn inner _ _ -> inner
-                  AUnfold inner _ _ -> inner
-                  other -> other
-           in stripWitnesslessAuthoritativeAnn edgeWitnesses innerCanon innerPre
-    AUnfold innerCanon _ eid
-      | IntMap.notMember (getEdgeId eid) edgeWitnesses ->
-          let innerPre =
-                case annPre of
-                  AAnn inner _ _ -> inner
-                  AUnfold inner _ _ -> inner
-                  other -> other
-           in stripWitnesslessAuthoritativeAnn edgeWitnesses innerCanon innerPre
-    _ -> (annCanon, annPre)
 
 annProducesVar :: Surface.VarName -> AnnExpr -> Bool
 annProducesVar termName = go

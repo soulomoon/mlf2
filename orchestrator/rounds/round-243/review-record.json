@@ -1,0 +1,36 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-243",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-5",
+  "direction_id": "direction-5a-prepared-generalization-artifact-depth",
+  "extracted_item_id": "item-243-prepared-generalization-capability-adapters",
+  "decision": "approved",
+  "evidence_summary": "Pipeline consumes Prepared Generalization Artifact owner APIs; focused checks, git diff --check, and cabal build all && cabal test passed.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-5",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-5"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-5-completion",
+        "text": "round-243 completed Prepared Generalization Artifact owner APIs for normal Pipeline consumption; evidence: focused checks and cabal build all && cabal test passed."
+      }
+    ],
+    "history_entries": [
+      {
+        "anchor_id": "roadmap-history-completed-rounds",
+        "text": "round-243 completed milestone-5 by moving Pipeline Prepared Generalization Artifact consumption behind Prepare owner APIs."
+      }
+    ],
+    "semantic_update_required_reason": null
+  }
+}

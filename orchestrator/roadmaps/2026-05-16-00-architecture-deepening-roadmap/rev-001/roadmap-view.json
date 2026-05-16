@@ -65,7 +65,7 @@
     {
       "milestone_id": "milestone-5",
       "title": "Prepared Generalization Artifact Depth",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-4"
       ],
@@ -198,7 +198,7 @@
     },
     "milestone-5": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 5. Prepared Generalization Artifact Depth"
+      "selector": "### [done] 5. Prepared Generalization Artifact Depth"
     },
     "milestone-5-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",

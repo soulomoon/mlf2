@@ -66,6 +66,7 @@ spec = describe "Repository guardrails" $ do
     agentsSrc <- readFile "AGENTS.md"
     architectureSrc <- readFile "docs/architecture.md"
     prepareSrc <- readFile "src/MLF/Elab/Run/Generalize/Prepare.hs"
+    prepareInternalSrc <- readFile "src/MLF/Elab/Run/Generalize/Prepare/Internal.hs"
     pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
     witnessInternalSrc <- readFile "src/MLF/Constraint/Types/Witness/Internal.hs"
     forM_
@@ -76,11 +77,19 @@ spec = describe "Repository guardrails" $ do
         src `shouldSatisfy` isInfixOf "NodeRefTag"
         src `shouldSatisfy` isInfixOf "mkUncheckedInstanceWitness"
         src `shouldSatisfy` isInfixOf "gaBaseConstraint"
-    prepareSrc `shouldSatisfy` isInfixOf "pgaBindParentsGa :: GaBindParents 'Presolved"
-    prepareSrc `shouldSatisfy` isInfixOf "pgaResultTypeInputs :: ResultTypeInputs 'Presolved"
+    prepareSrc `shouldSatisfy` isInfixOf "preparedElaborationEnv"
+    prepareSrc `shouldSatisfy` isInfixOf "generalizePreparedRoot"
+    prepareSrc `shouldSatisfy` isInfixOf "computePreparedResultType"
+    prepareSrc `shouldSatisfy` (not . isInfixOf "PreparedGeneralizationArtifact(..)")
+    prepareSrc `shouldSatisfy` (not . isInfixOf "pgaBindParentsGa")
+    prepareSrc `shouldSatisfy` (not . isInfixOf "pgaResultTypeInputs")
+    prepareInternalSrc `shouldSatisfy` isInfixOf "pgaBindParentsGa :: GaBindParents 'Presolved"
+    prepareInternalSrc `shouldSatisfy` isInfixOf "pgaResultTypeInputs :: ResultTypeInputs 'Presolved"
     prepareSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
+    prepareInternalSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
     pipelineSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
     pipelineSrc `shouldSatisfy` (not . isInfixOf "mkResultTypeInputs")
+    pipelineSrc `shouldSatisfy` isInfixOf "computePreparedResultType"
     witnessInternalSrc `shouldSatisfy` isInfixOf "mkUncheckedInstanceWitness :: [InstanceOp] -> InstanceWitness"
 
   it "presolution Phase 4 state stays phase-indexed and raw-bridge free" $ do

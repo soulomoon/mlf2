@@ -52,8 +52,14 @@ import MLF.Elab.Pipeline
   )
 import MLF.Elab.Pipeline qualified as Elab
 import MLF.Elab.Run.Generalize.Prepare
-  ( PreparedGeneralizationArtifact (..),
+  ( computePreparedResultType,
+    generalizePreparedRoot,
     prepareGeneralizationArtifact,
+    preparedAnnotated,
+  )
+import MLF.Elab.Run.Generalize.Prepare.TestSupport
+  ( PreparedGeneralizationArtifactTestView (..),
+    preparedGeneralizationArtifactTestView,
   )
 import MLF.Elab.Run.Provenance (buildTraceCopyMap, collectBaseNamedKeys)
 import MLF.Elab.Run.ResultType
@@ -71,7 +77,6 @@ import MLF.Elab.Run.ResultType.Util
     selectUniqueCandidate,
     selectUniqueCandidateBy,
   )
-import MLF.Elab.Run.Scope (resolveCanonicalScope, schemeBodyTarget)
 import MLF.Elab.Run.Util
   ( canonicalizeExpansion,
     canonicalizeTrace,
@@ -903,6 +908,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
     it "assembly helper guard: generalization preparation owns shared artifact assembly" $ do
       pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
       prepareSrc <- readFile "src/MLF/Elab/Run/Generalize/Prepare.hs"
+      prepareInternalSrc <- readFile "src/MLF/Elab/Run/Generalize/Prepare/Internal.hs"
       driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
       pipelineSrc `shouldSatisfy` isInfixOf "prepareGeneralizationArtifact"
       forM_
@@ -915,15 +921,41 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         ]
         $ \marker ->
           pipelineSrc `shouldSatisfy` (not . isInfixOf marker)
-      prepareSrc `shouldSatisfy` isInfixOf "data PreparedGeneralizationArtifact"
-      prepareSrc `shouldSatisfy` isInfixOf "prepareTraceCopyArtifacts"
-      prepareSrc `shouldSatisfy` isInfixOf "pgaBindParentsGa :: GaBindParents 'Presolved"
-      prepareSrc `shouldSatisfy` isInfixOf "pgaResultTypeInputs :: ResultTypeInputs 'Presolved"
-      prepareSrc `shouldSatisfy` isInfixOf "mkResultTypeInputs"
+      prepareInternalSrc `shouldSatisfy` isInfixOf "data PreparedGeneralizationArtifact"
+      prepareInternalSrc `shouldSatisfy` isInfixOf "prepareTraceCopyArtifacts"
+      prepareSrc `shouldSatisfy` isInfixOf "PreparedGeneralizationArtifact"
+      prepareSrc `shouldSatisfy` (not . isInfixOf "PreparedGeneralizationArtifact(..)")
+      prepareSrc `shouldSatisfy` isInfixOf "preparedAnnotated"
+      prepareSrc `shouldSatisfy` isInfixOf "preparedElaborationConfig"
+      prepareSrc `shouldSatisfy` isInfixOf "preparedElaborationEnv"
+      prepareSrc `shouldSatisfy` isInfixOf "stripPreparedWitnesslessAuthoritativeAnn"
+      prepareSrc `shouldSatisfy` isInfixOf "generalizePreparedRoot"
+      prepareSrc `shouldSatisfy` isInfixOf "computePreparedResultType"
+      prepareSrc `shouldSatisfy` (not . isInfixOf "pgaBindParentsGa")
+      prepareSrc `shouldSatisfy` (not . isInfixOf "pgaResultTypeInputs")
+      prepareInternalSrc `shouldSatisfy` isInfixOf "pgaBindParentsGa :: GaBindParents 'Presolved"
+      prepareInternalSrc `shouldSatisfy` isInfixOf "pgaResultTypeInputs :: ResultTypeInputs 'Presolved"
+      prepareInternalSrc `shouldSatisfy` isInfixOf "mkResultTypeInputs"
       pipelineSrc `shouldSatisfy` (not . isInfixOf "mkResultTypeInputs")
+      pipelineSrc `shouldSatisfy` (not . isInfixOf "PreparedGeneralizationArtifact (..)")
+      forM_
+        [ "pgaPresolutionView",
+          "pgaBindParentsGa",
+          "pgaGeneralizeAt",
+          "pgaResultTypeInputs",
+          "pgaEdgeArtifacts",
+          "pgaScopeOverrides",
+          "pgaAnnotated",
+          "pgaAnnNodeCanonical",
+          "pgaCanonical",
+          "pgaPlanBuilder",
+          "pgaRedirects"
+        ]
+        $ \marker ->
+          pipelineSrc `shouldSatisfy` (not . isInfixOf marker)
       prepareSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
       pipelineSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
-      prepareSrc `shouldSatisfy` (not . isInfixOf "castConstraint")
+      prepareInternalSrc `shouldSatisfy` (not . isInfixOf "castConstraint")
       driverSrc `shouldSatisfy` isInfixOf "mkInitialPresolutionState ::"
       driverSrc `shouldSatisfy` isInfixOf "tyExpNodeIds ::"
 
@@ -1246,7 +1278,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
       elabSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
       rtSrc `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
-      pipelineSrc `shouldSatisfy` isInfixOf "pgaResultTypeInputs"
+      pipelineSrc `shouldSatisfy` isInfixOf "computePreparedResultType"
       pipelineSrc `shouldSatisfy` (not . isInfixOf "mkResultTypeInputs")
 
     it "chi-first integration: pipeline run path has no internal solved materialization in Elaborate/ResultType" $ do
@@ -5110,7 +5142,7 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         pipelineSrc `shouldSatisfy` isInfixOf "pedType = tyChecked"
         pipelineSrc `shouldSatisfy` isInfixOf "authoritativeAnnCanon = authoritativeRootAnn term annCanon"
         pipelineSrc `shouldSatisfy` isInfixOf "authoritativeAnnPre = authoritativeRootAnn term ann"
-        pipelineSrc `shouldSatisfy` isInfixOf "computeResultTypeFromAnn resultTypeInputs inner innerPre annNodeId eid"
+        pipelineSrc `shouldSatisfy` isInfixOf "computePreparedResultType prepared authoritativeAnnCanonFinal authoritativeAnnPreFinal"
 
       it "keeps retained-child fallback open for recursive types even when the same wrapper crosses a nested forall boundary" $ do
         let recursiveAnn = STMu "a" (STArrow (STVar "a") (STBase "Int"))
@@ -6074,12 +6106,11 @@ spec = describe "Pipeline (Phases 1-5)" $ do
         requireRight
           (firstShowE (prepareGeneralizationArtifact defaultTraceConfig cAcyclic pres ann))
       let redirects = prRedirects pres
+          artifactView = preparedGeneralizationArtifactTestView artifact
           redirectedAnn = applyRedirectsToAnn redirects ann
-          canonicalizedAnn = canonicalizeAnn (pgaAnnNodeCanonical artifact) redirectedAnn
-          GaBindParents
-            { gaBaseConstraint = baseConstraint,
-              gaSolvedToBase = solvedToBase
-            } = pgaBindParentsGa artifact
+          canonicalizedAnn = canonicalizeAnn (preparedTestCanonicalizeNode artifactView) redirectedAnn
+          baseConstraint = preparedTestBaseConstraint artifactView
+          solvedToBase = preparedTestSolvedToBase artifactView
           baseNamedKeysAll = collectBaseNamedKeys baseConstraint
           baseCopyPairs =
             [ (baseKey, copyN)
@@ -6088,41 +6119,27 @@ spec = describe "Pipeline (Phases 1-5)" $ do
                 IntSet.member baseKey baseNamedKeysAll
             ]
       redirects `shouldSatisfy` (not . IntMap.null)
-      pgaAnnotated artifact `shouldBe` canonicalizedAnn
-      annNodeOccurrences (pgaAnnotated artifact)
-        `shouldBe` map (pgaAnnNodeCanonical artifact) (annNodeOccurrences redirectedAnn)
+      preparedTestRedirects artifactView `shouldBe` redirects
+      preparedAnnotated artifact `shouldBe` canonicalizedAnn
+      annNodeOccurrences (preparedAnnotated artifact)
+        `shouldBe` map (preparedTestCanonicalizeNode artifactView) (annNodeOccurrences redirectedAnn)
       baseNamedKeysAll `shouldSatisfy` (not . IntSet.null)
       baseCopyPairs `shouldSatisfy` (not . null)
       forM_ baseCopyPairs $ \(_baseKey, copyN) -> do
-        let copyKey = getNodeId (pgaAnnNodeCanonical artifact copyN)
+        let copyKey = getNodeId (preparedTestCanonicalizeNode artifactView copyN)
         case IntMap.lookup copyKey solvedToBase of
           Nothing ->
             expectationFailure ("Prepared artifact missed copy provenance for " ++ show copyN)
           Just actualBase ->
             lookupNodeIn (cNodes baseConstraint) actualBase `shouldSatisfy` isJust
-      rootScope <-
-        requireRight
-          ( firstShowE
-              ( resolveCanonicalScope
-                  baseConstraint
-                  (pgaPresolutionView artifact)
-                  (pgaRedirects artifact)
-                  (annRootNode ann)
-              )
-          )
-      let rootTarget =
-            schemeBodyTarget
-              (pgaPresolutionView artifact)
-              (annRootNode (pgaAnnotated artifact))
-          resultTypeInputs = pgaResultTypeInputs artifact
-      case pgaGeneralizeAt artifact (Just (pgaBindParentsGa artifact)) rootScope rootTarget of
+      case generalizePreparedRoot artifact (preparedAnnotated artifact) ann of
         Right (Forall _ ty, _subst) ->
           pretty ty `shouldSatisfy` ("Bool" `isInfixOf`)
         Left err ->
           expectationFailure ("Prepared artifact generalize-at failed: " ++ show err)
       resultTy <-
         requireRight
-          (firstShowE (computeResultTypeFallback resultTypeInputs (pgaAnnotated artifact) ann))
+          (firstShowE (computePreparedResultType artifact (preparedAnnotated artifact) ann))
       pretty resultTy `shouldSatisfy` ("Bool" `isInfixOf`)
 
     it "tracks instantiation copy maps for named binders" $ do

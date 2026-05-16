@@ -270,7 +270,7 @@ allow it.
 - Extraction notes: a lawful first round may extract a pure preparation helper
   and migrate one emission path or test surface.
 
-### [pending] 5. Prepared Generalization Artifact Depth
+### [done] 5. Prepared Generalization Artifact Depth
 
 - Milestone id: `milestone-5`
 - Depends on: `milestone-4`
@@ -291,7 +291,7 @@ allow it.
   reconstruction, and root-scheme generalization.
 #### Completion Pointers: milestone-5
 
-none yet
+- round-243 completed Prepared Generalization Artifact owner APIs for normal Pipeline consumption; evidence: focused checks and cabal build all && cabal test passed.
 
 #### Candidate Direction: Prepared Generalization Artifact Depth
 
