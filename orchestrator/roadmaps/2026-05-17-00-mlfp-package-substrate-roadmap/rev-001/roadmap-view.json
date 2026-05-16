@@ -49,7 +49,7 @@
     {
       "milestone_id": "milestone-4",
       "title": "Package Roots, Search Paths, Cache, And Build Graph",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-2",
         "milestone-3"
@@ -188,7 +188,7 @@
     },
     "milestone-4-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 4. Package Roots, Search Paths, Cache, And Build Graph"
+      "selector": "### [done] 4. Package Roots, Search Paths, Cache, And Build Graph"
     },
     "milestone-4-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",

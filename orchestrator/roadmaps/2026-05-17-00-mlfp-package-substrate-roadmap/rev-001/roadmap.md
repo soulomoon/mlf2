@@ -239,7 +239,7 @@ rounds unless controller state and a selected plan explicitly allow it.
 - Extraction notes: a lawful round may first cover values/types/constructors,
   then leave class/instance interface details to a follow-up round.
 
-### [pending] 4. Package Roots, Search Paths, Cache, And Build Graph
+### [done] 4. Package Roots, Search Paths, Cache, And Build Graph
 
 - Milestone id: `milestone-4`
 - Depends on: `milestone-2`, `milestone-3`
@@ -256,7 +256,10 @@ rounds unless controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-4
 
-- none yet
+- Completed by round-248; evidence: explicit local package roots/search
+  paths, deterministic source/interface build graph metadata, stale source and
+  dependency-interface cache rejection, duplicate-root diagnostics, and private
+  build graph/cache ownership passed focused checks and the full Cabal gate.
 
 #### Candidate Direction: Package Build Graph Policy
 

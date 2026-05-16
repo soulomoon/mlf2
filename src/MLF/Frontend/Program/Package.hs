@@ -1,6 +1,8 @@
 module MLF.Frontend.Program.Package
     ( PackageId (..)
     , PackageModuleId (..)
+    , PackageRoot (..)
+    , PackageSearchPath (..)
     , ProgramPackageDiscoveryError (..)
     , ProgramSourceUnit (..)
     , LocatedProgramSourceUnit (..)
@@ -10,6 +12,7 @@ module MLF.Frontend.Program.Package
     , PackageModuleGraphNode (..)
     , trivialPackageId
     , discoverLocatedProgramPackage
+    , discoverLocatedProgramPackageFromSearchPath
     , programSourceUnitFromProgram
     , locatedProgramSourceUnitFromLocated
     , trivialProgramPackage
@@ -57,9 +60,20 @@ data PackageModuleId = PackageModuleId
     }
     deriving (Eq, Ord, Show)
 
+newtype PackageRoot = PackageRoot
+    { packageRootPath :: FilePath
+    }
+    deriving (Eq, Ord, Show)
+
+newtype PackageSearchPath = PackageSearchPath
+    { packageSearchPathRoots :: [PackageRoot]
+    }
+    deriving (Eq, Show)
+
 data ProgramPackageDiscoveryError
     = ProgramPackageDiscoveryReadError FilePath IOException
     | ProgramPackageDiscoveryParseError FilePath ProgramParseError
+    | ProgramPackageDiscoveryDuplicateModule P.ModuleName [FilePath]
     deriving (Show)
 
 data ProgramSourceUnit = ProgramSourceUnit
@@ -114,19 +128,39 @@ discoverLocatedProgramPackage ::
     PackageId ->
     FilePath ->
     IO (Either ProgramPackageDiscoveryError LocatedProgramPackage)
-discoverLocatedProgramPackage packageId root = do
-    sourcePathsResult <- try (discoverPackageSourceFiles root) :: IO (Either IOException [FilePath])
-    case sourcePathsResult of
-        Left err -> pure (Left (ProgramPackageDiscoveryReadError root err))
-        Right sourcePaths -> do
-            parsed <- mapM parsePackageSourceFile sourcePaths
+discoverLocatedProgramPackage packageId root =
+    discoverLocatedProgramPackageFromSearchPath
+        packageId
+        (PackageSearchPath [PackageRoot root])
+
+discoverLocatedProgramPackageFromSearchPath ::
+    PackageId ->
+    PackageSearchPath ->
+    IO (Either ProgramPackageDiscoveryError LocatedProgramPackage)
+discoverLocatedProgramPackageFromSearchPath packageId (PackageSearchPath roots) = do
+    sourcePathsResult <- traverse discoverRootSourceFiles roots
+    case sequence sourcePathsResult of
+        Left err -> pure (Left err)
+        Right sourcePathsByRoot -> do
+            parsed <- mapM parsePackageSourceFile (concat sourcePathsByRoot)
             pure $ do
                 sourceUnits <- sequence parsed
-                pure
-                    LocatedProgramPackage
-                        { locatedProgramPackageId = packageId
-                        , locatedProgramPackageSourceUnits = sourceUnits
-                        }
+                case firstDuplicateDiscoveredModule sourceUnits of
+                    Just (moduleName0, sourcePaths) ->
+                        Left (ProgramPackageDiscoveryDuplicateModule moduleName0 sourcePaths)
+                    Nothing ->
+                        pure
+                            LocatedProgramPackage
+                                { locatedProgramPackageId = packageId
+                                , locatedProgramPackageSourceUnits = sourceUnits
+                                }
+  where
+    discoverRootSourceFiles (PackageRoot root) = do
+        sourcePathsResult <- try (discoverPackageSourceFiles root) :: IO (Either IOException [FilePath])
+        pure $
+            case sourcePathsResult of
+                Left err -> Left (ProgramPackageDiscoveryReadError root err)
+                Right sourcePaths -> Right sourcePaths
 
 programSourceUnitFromProgram :: P.Program -> ProgramSourceUnit
 programSourceUnitFromProgram program =
@@ -250,6 +284,27 @@ locatedProgramPackageSpanIndex package =
   where
     prependSpans spans sourceUnit =
         locatedProgramSourceUnitSpans sourceUnit `P.appendProgramSpanIndex` spans
+
+firstDuplicateDiscoveredModule ::
+    [LocatedProgramSourceUnit] ->
+    Maybe (P.ModuleName, [FilePath])
+firstDuplicateDiscoveredModule sourceUnits =
+    go Map.empty discoveredModules
+  where
+    discoveredModules =
+        [ (P.moduleName mod0, sourcePath)
+        | sourceUnit <- sourceUnits
+        , mod0 <- locatedProgramSourceUnitModules sourceUnit
+        , sourcePath <- maybe [] pure (locatedProgramSourceUnitPath sourceUnit)
+        ]
+
+    go _ [] = Nothing
+    go seen ((moduleName0, sourcePath) : rest) =
+        case Map.lookup moduleName0 seen of
+            Just priorPaths ->
+                Just (moduleName0, priorPaths ++ [sourcePath])
+            Nothing ->
+                go (Map.insert moduleName0 [sourcePath] seen) rest
 
 discoverPackageSourceFiles :: FilePath -> IO [FilePath]
 discoverPackageSourceFiles root = go (normalise root)

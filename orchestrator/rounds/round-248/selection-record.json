@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-248",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-package-build-graph-policy",
+  "extracted_item_id": "round-248-package-build-graph-policy",
+  "summary": "Add explicit local package root/search path semantics and deterministic source/interface metadata-based build graph cache policy for multi-file .mlfp packages.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

@@ -24,6 +24,7 @@ spec = describe "Public surface contracts" $ do
           "src-public/MLF/XMLF.hs"
         ]
     concat publicSources `shouldNotSatisfy` isInfixOf "MLF.Frontend.Program.Interface"
+    concat publicSources `shouldNotSatisfy` isInfixOf "MLF.Frontend.Program.BuildGraph"
 
   describe "MLF.API" $ do
     it "roundtrips raw surface expressions through parse(pretty(expr))" $ do
