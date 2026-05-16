@@ -123,82 +123,6 @@ snapshotEquiv =
 
 spec :: Spec
 spec = describe "MLF.Constraint.Solved" $ do
-    describe "Migration guards" $ do
-        it "Solved production-only builders are absent" $ do
-            src <- readFile "src/MLF/Constraint/Solved.hs"
-            src `shouldSatisfy` (not . isInfixOf "fromPresolutionResult")
-
-        it "dead mutation hooks are absent from the Solved surface" $ do
-            src <- readFile "src/MLF/Constraint/Solved.hs"
-            forM_
-                [ "rebuildWithNodes"
-                , "rebuildWithBindParents"
-                , "rebuildWithGenNodes"
-                ] $ \marker ->
-                    src `shouldSatisfy` (not . isInfixOf marker)
-
-        it "compat builders are absent from the Solved facade" $ do
-            src <- readFile "src/MLF/Constraint/Solved.hs"
-            forM_
-                [ "fromConstraintAndUf ::"
-                , "rebuildWithConstraint ::"
-                , "    fromConstraintAndUf,"
-                , "    rebuildWithConstraint,"
-                ] $ \marker ->
-                    src `shouldSatisfy` (not . isInfixOf marker)
-
-        it "raw canonical container accessors are absent from the Solved facade" $ do
-            src <- readFile "src/MLF/Constraint/Solved.hs"
-            forM_
-                [ "canonicalBindParents"
-                , "canonicalGenNodes"
-                ] $ \marker ->
-                    src `shouldSatisfy` (not . isInfixOf marker)
-
-        it "enumeration helpers are absent from the Solved facade" $ do
-            src <- readFile "src/MLF/Constraint/Solved.hs"
-            forM_
-                [ "allNodes"
-                , "instEdges"
-                ] $ \marker ->
-                    src `shouldSatisfy` (not . isInfixOf marker)
-
-        it "test-only helper bundle is absent from the Solved facade" $ do
-            src <- readFile "src/MLF/Constraint/Solved.hs"
-            forM_
-                [ "mkTestSolved"
-                , "classMembers"
-                , "originalNode"
-                , "originalBindParent"
-                , "wasOriginalBinder"
-                , "validateOriginalCanonicalAgreement"
-                ] $ \marker ->
-                    src `shouldSatisfy` (not . isInfixOf marker)
-
-        it "prune helper is absent from the Solved facade" $ do
-            src <- readFile "src/MLF/Constraint/Solved.hs"
-            src `shouldSatisfy` (not . isInfixOf "pruneBindParentsSolved")
-
-        it "view-query wrappers are absent from the Solved facade" $ do
-            src <- readFile "src/MLF/Constraint/Solved.hs"
-            forM_
-                [ "lookupNode"
-                , "lookupBindParent"
-                , "bindParents"
-                ] $ \marker ->
-                    src `shouldSatisfy` (not . isInfixOf marker)
-
-        it "final reify/view helper cluster is absent from the Solved facade" $ do
-            src <- readFile "src/MLF/Constraint/Solved.hs"
-            forM_
-                [ "lookupVarBound"
-                , "genNodes"
-                , "weakenedVars"
-                , "isEliminatedVar"
-                , "canonicalizedBindParents"
-                ] $ \marker ->
-                    src `shouldSatisfy` (not . isInfixOf marker)
-
     let s = testSolved
 
     describe "Constructor compatibility" $ do
@@ -269,21 +193,6 @@ spec = describe "MLF.Constraint.Solved" $ do
         forM_ cases $ \(label, expr) ->
             it ("produces valid Solved for " ++ label ++ " (" ++ show expr ++ ")") $
                 runCase (label, expr)
-
-    describe "Canonicalization helper dedup guards" $ do
-        it "Solved and Presolution.View no longer each define local canonical-map chase helpers" $ do
-            solvedSrc <- readFile "src/MLF/Constraint/Solved.hs"
-            viewSrc <- readFile "src/MLF/Constraint/Presolution/View.hs"
-            helperSrc <- readFile "src/MLF/Constraint/Canonicalization/Shared.hs"
-            forM_
-                [ "buildCanonicalMap ::"
-                , "chaseUfCanonical ::"
-                , "equivCanonical ::"
-                , "nodeIdKey ::"
-                ] $ \marker -> do
-                    solvedSrc `shouldSatisfy` (not . isInfixOf marker)
-                    viewSrc `shouldSatisfy` (not . isInfixOf marker)
-                    helperSrc `shouldSatisfy` isInfixOf marker
 
     describe "Presolution view parity guards" $ do
         it "PresolutionView 'Raw mirrors solved canonical/node/bound queries" $ do

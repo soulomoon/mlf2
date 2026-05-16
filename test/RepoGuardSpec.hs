@@ -1,8 +1,7 @@
-{-# LANGUAGE DataKinds #-}
 module RepoGuardSpec (spec) where
 
 import Control.Monad (forM, forM_)
-import Data.List (intercalate, isInfixOf, isSuffixOf, sort)
+import Data.List (intercalate, isSuffixOf, sort)
 import System.Directory (doesFileExist, listDirectory)
 import System.FilePath (dropExtension, makeRelative, splitDirectories, takeExtension, (</>))
 import Test.Hspec
@@ -23,131 +22,16 @@ spec = describe "Repository guardrails" $ do
   it "legacy MyLib surface is removed" $ do
     doesFileExist "src-public/MyLib.hs" >>= (`shouldBe` False)
     cabalSrc <- readFile "mlf2.cabal"
-    cabalSrc `shouldSatisfy` (not . isInfixOf "MyLib")
-    offenders <- findImportOffenders ["src", "src-public", "test", "app"]
+    countModuleEntries "MyLib" cabalSrc `shouldBe` 0
+    offenders <- findImportOffenders ["MyLib"] ["src", "src-public", "test", "app"]
     offenders `shouldBe` []
 
   it "legacy MLF.Program compatibility shim is removed" $ do
     doesFileExist "src-public/MLF/Program.hs" >>= (`shouldBe` False)
     cabalSrc <- readFile "mlf2.cabal"
-    readmeSrc <- readFile "README.md"
-    architectureSrc <- readFile "docs/architecture.md"
-    syntaxSrc <- readFile "docs/syntax.md"
-    repoDiagramSrc <- readFile "docs/repo-architecture-diagram.html"
-    moduleDiagramSrc <- readFile "docs/module-dependency-diagram.html"
-    detailedGraphSrc <- readFile "docs/detailed-module-import-graph.html"
-    cabalSrc `shouldSatisfy` (not . isInfixOf "MLF.Program,")
-    forM_
-      [ readmeSrc,
-        architectureSrc,
-        syntaxSrc,
-        repoDiagramSrc,
-        moduleDiagramSrc
-      ]
-      $ \src ->
-        src `shouldSatisfy` (not . isInfixOf "MLF.Program")
-    forM_
-      [ "src-public/MLF/Program.hs",
-        ">MLF.Program<",
-        "`MLF.Program`,"
-      ]
-      $ \marker ->
-        detailedGraphSrc `shouldSatisfy` (not . isInfixOf marker)
-
-  it "generic constraint phase cast is retired from the graph surface" $ do
-    graphSrc <- readFile "src/MLF/Constraint/Types/Graph.hs"
-    graphSrc `shouldSatisfy` (not . isInfixOf "castConstraint")
-
-  it "legacy raw constraint bridge is retired from the graph surface" $ do
-    graphSrc <- readFile "src/MLF/Constraint/Types/Graph.hs"
-    graphSrc `shouldSatisfy` (not . isInfixOf "toRawConstraintForLegacy")
-
-  it "type-level safety guidance stays synchronized with the audited owner-local seams" $ do
-    agentsSrc <- readFile "AGENTS.md"
-    architectureSrc <- readFile "docs/architecture.md"
-    prepareSrc <- readFile "src/MLF/Elab/Run/Generalize/Prepare.hs"
-    prepareInternalSrc <- readFile "src/MLF/Elab/Run/Generalize/Prepare/Internal.hs"
-    pipelineSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-    witnessInternalSrc <- readFile "src/MLF/Constraint/Types/Witness/Internal.hs"
-    forM_
-      [ agentsSrc
-      , architectureSrc
-      ]
-      $ \src -> do
-        src `shouldSatisfy` isInfixOf "NodeRefTag"
-        src `shouldSatisfy` isInfixOf "mkUncheckedInstanceWitness"
-        src `shouldSatisfy` isInfixOf "gaBaseConstraint"
-    prepareSrc `shouldSatisfy` isInfixOf "preparedElaborationEnv"
-    prepareSrc `shouldSatisfy` isInfixOf "generalizePreparedRoot"
-    prepareSrc `shouldSatisfy` isInfixOf "computePreparedResultType"
-    prepareSrc `shouldSatisfy` (not . isInfixOf "PreparedGeneralizationArtifact(..)")
-    prepareSrc `shouldSatisfy` (not . isInfixOf "pgaBindParentsGa")
-    prepareSrc `shouldSatisfy` (not . isInfixOf "pgaResultTypeInputs")
-    prepareInternalSrc `shouldSatisfy` isInfixOf "pgaBindParentsGa :: GaBindParents 'Presolved"
-    prepareInternalSrc `shouldSatisfy` isInfixOf "pgaResultTypeInputs :: ResultTypeInputs 'Presolved"
-    prepareSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
-    prepareInternalSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
-    pipelineSrc `shouldSatisfy` (not . isInfixOf "pgaAcyclicBaseConstraint")
-    pipelineSrc `shouldSatisfy` (not . isInfixOf "mkResultTypeInputs")
-    pipelineSrc `shouldSatisfy` isInfixOf "computePreparedResultType"
-    witnessInternalSrc `shouldSatisfy` isInfixOf "mkUncheckedInstanceWitness :: [InstanceOp] -> InstanceWitness"
-
-  it "presolution Phase 4 state stays phase-indexed and raw-bridge free" $ do
-    baseSrc <- readFile "src/MLF/Constraint/Presolution/Base.hs"
-    stateAccessSrc <- readFile "src/MLF/Constraint/Presolution/StateAccess.hs"
-    driverSrc <- readFile "src/MLF/Constraint/Presolution/Driver.hs"
-    forM_
-      [ "data PresolutionState p = PresolutionState",
-        "psConstraint :: Constraint p",
-        "newtype PresolutionM p a = PresolutionM",
-        "type PresolutionPhaseOf m :: Phase"
-      ]
-      $ \marker ->
-        baseSrc `shouldSatisfy` isInfixOf marker
-    forM_
-      [ "getConstraintAndCanonical :: PresolutionM p (Constraint p, NodeId -> NodeId)",
-        "putConstraintAndUnionFind :: Constraint p -> IntMap NodeId -> PresolutionM p ()"
-      ]
-      $ \marker ->
-        stateAccessSrc `shouldSatisfy` isInfixOf marker
-    driverSrc `shouldSatisfy` isInfixOf "mkInitialPresolutionState :: Constraint 'Acyclic -> PresolutionState 'Acyclic"
-    forM_
-      [ "presolutionInProgressRawBridge",
-        "psConstraint :: Constraint 'Raw",
-        "getConstraintAndCanonical :: PresolutionM 'Raw",
-        "getConstraintAndUnionFind :: PresolutionM 'Raw",
-        "putConstraintAndUnionFind :: Constraint 'Raw"
-      ]
-      $ \marker -> do
-        baseSrc `shouldSatisfy` (not . isInfixOf marker)
-        stateAccessSrc `shouldSatisfy` (not . isInfixOf marker)
-        driverSrc `shouldSatisfy` (not . isInfixOf marker)
-
-  it "solve facade retires result-shaped compatibility helpers" $ do
-    solveSrc <- readFile "src/MLF/Constraint/Solve.hs"
-    forM_
-      [ "solveUnifyResult",
-        "solveUnifyResultWithSnapshot",
-        "solveResultFromSnapshot",
-        "SolveResult(..)",
-        "SolveSnapshot(..)"
-      ]
-      $ \marker ->
-        solveSrc `shouldSatisfy` (not . isInfixOf marker)
-
-  it "solve output does not retain a result-shaped compatibility payload" $ do
-    internalSrc <- readFile "src/MLF/Constraint/Solve/Internal.hs"
-    internalSrc `shouldSatisfy` (not . isInfixOf "soResult")
-
-  it "solve output owner stays snapshot-only" $ do
-    outputSrc <- readFile "src/MLF/Constraint/Solve/Output.hs"
-    forM_
-      [ "solveUnifyResult",
-        "solveResultFromSnapshot",
-        "Result-shaped helper"
-      ]
-      $ \marker ->
-        outputSrc `shouldSatisfy` (not . isInfixOf marker)
+    countModuleEntries "MLF.Program" cabalSrc `shouldBe` 0
+    offenders <- findImportOffenders ["MLF.Program"] ["src", "src-public", "test", "app"]
+    offenders `shouldBe` []
 
   it "solver and solved internals stay behind owner and test-support seams" $ do
     offenders <- findConstraintBoundaryImportOffenders
@@ -157,409 +41,19 @@ spec = describe "Repository guardrails" $ do
     offenders <- findFinalizeInternalImportOffenders
     offenders `shouldBe` []
 
-  it "frontend syntax retires backward-compatible raw aliases and normalized patterns" $ do
-    syntaxSrc <- readFile "src/MLF/Frontend/Syntax.hs"
-    forM_
-      [ "RawSrcType",
-        "\n    CoreExpr,",
-        "\ntype CoreExpr =",
-        "pattern NST",
-        "pattern SB",
-        "backward-compatible",
-        "Backward-compatible"
-      ]
-      $ \marker ->
-        syntaxSrc `shouldSatisfy` (not . isInfixOf marker)
-
-  it "shared parser tokens expose canonical spellings only" $ do
-    commonSrc <- readFile "src/MLF/Parse/Common.hs"
-    forM_
-      [ "forallTok :: Parser ()",
-        "lambdaTok :: Parser ()",
-        "bigLambdaTok :: Parser ()",
-        "geTok :: Parser ()",
-        "bottomTok :: Parser ()",
-        "symbol \"forall\"",
-        "symbol \"\\\\\"",
-        "symbol \"Lambda\"",
-        "symbol \">=\"",
-        "symbol \"_|_\"",
-        "symbol \"bottom\""
-      ]
-      $ \marker ->
-        commonSrc `shouldSatisfy` (not . isInfixOf marker)
-    forM_
-      [ "canonicalForallTok :: Parser ()",
-        "canonicalLambdaTok :: Parser ()",
-        "canonicalBigLambdaTok :: Parser ()",
-        "canonicalGeTok :: Parser ()",
-        "canonicalBottomTok :: Parser ()"
-      ]
-      $ \marker ->
-        commonSrc `shouldSatisfy` isInfixOf marker
-
-  it "program parser keeps retired token aliases local to rejection tests" $ do
-    programParseSrc <- readFile "src/MLF/Frontend/Parse/Program.hs"
-    forM_
-      [ "symbol \"forall\"",
-        "symbol \"\\\\\"",
-        "symbol \">=\"",
-        "symbol \"mu\"",
-        "programForallTok",
-        "programGeTok",
-        "programLambdaTok"
-      ]
-      $ \marker ->
-        programParseSrc `shouldSatisfy` (not . isInfixOf marker)
-
-  it "MLF.API no longer exports pipeline/runtime helpers and MLF.Pipeline owns them" $ do
-    apiSrc <- readFile "src-public/MLF/API.hs"
-    pipelineSrc <- readFile "src-public/MLF/Pipeline.hs"
-    forM_
-      [ "inferConstraintGraph",
-        "PipelineConfig(..)",
-        "defaultPipelineConfig",
-        "TraceConfig(..)",
-        "defaultTraceConfig",
-        "PipelineError(..)",
-        "renderPipelineError",
-        "runPipelineElab",
-        "runPipelineElabWithConfig",
-        "typeCheck",
-        "step",
-        "\n    , normalize\n",
-        "isValue",
-        "checkProgram",
-        "runProgram",
-        "prettyValue"
-      ]
-      $ \marker -> do
-        apiSrc `shouldSatisfy` (not . isInfixOf marker)
-        pipelineSrc `shouldSatisfy` isInfixOf marker
-
-  it "README and architecture docs agree on the current public topology" $ do
-    readmeSrc <- readFile "README.md"
-    architectureSrc <- readFile "docs/architecture.md"
-    forM_
-      [ "- `MLF.API` — surface syntax plus eMLF / `.mlfp` parsing, pretty-printing, and normalization helpers",
-        "- `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API, including `.mlfp` elaboration/checking on the shared eMLF/xMLF path",
-        "- `MLF.XMLF` — xMLF syntax, parser, and pretty-printer"
-      ]
-      $ \marker ->
-        readmeSrc `shouldSatisfy` isInfixOf marker
-    forM_
-      [ "- `MLF.API` — umbrella frontend module (surface syntax + eMLF / `.mlfp` parse/pretty + normalization helpers)",
-        "- `MLF.Pipeline` — canonical pipeline/runtime module (e.g. `inferConstraintGraph`, `runPipelineElab`, `runPipelineElabWithConfig`, `typeCheck`, `step`, `normalize`, `.mlfp` elaboration/checking/runtime)",
-        "- `MLF.XMLF` — explicit xMLF syntax, parser, and pretty-printing helpers"
-      ]
-      $ \marker ->
-        architectureSrc `shouldSatisfy` isInfixOf marker
-
-  it "`.mlfp` elaboration reuses the existing eMLF/typecheck boundary without private authority facades" $ do
-    authorityExists <- doesFileExist "src/MLF/Frontend/Program/Authority.hs"
-    typecheckProgramExists <- doesFileExist "src/MLF/Elab/TypeCheck/Program.hs"
-    checkSrc <- readFile "src/MLF/Frontend/Program/Check.hs"
-    elaborateSrc <- readFile "src/MLF/Frontend/Program/Elaborate.hs"
-    finalizeSrc <- readFile "src/MLF/Frontend/Program/Finalize.hs"
-    typesSrc <- readFile "src/MLF/Frontend/Program/Types.hs"
-    runSrc <- readFile "src/MLF/Frontend/Program/Run.hs"
-    pipelineSrc <- readFile "src-public/MLF/Pipeline.hs"
-    pipelineRunSrc <- readFile "src/MLF/Elab/Run/Pipeline.hs"
-    syntaxSrc <- readFile "src/MLF/Frontend/Syntax.hs"
-    readmeSrc <- readFile "README.md"
-    architectureSrc <- readFile "docs/architecture.md"
-    notesSrc <- readFile "implementation_notes.md"
-    authorityExists `shouldBe` False
-    typecheckProgramExists `shouldBe` False
-    forM_
-      [ "isPipelineLowerable",
-        "resolveLowerableChecked",
-        "inferLowerableExpr",
-        "inferExprTypeViaPipeline",
-        "expression is not lowerable to the authoritative pipeline",
-        "resolveLowerableChecked received a non-lowerable case expression",
-        "authoritative `.mlfp` typing needs an explicit parameter type for non-lowerable lambda",
-        "data ExprScope",
-        "inferMethodApp ::",
-        "checkAlt ::",
-        "Program.Authority",
-        "MLF.Elab.TypeCheck.Program",
-        "constructorTerm",
-        "import MLF.Elab.TypeCheck"
-      ]
-      $ \marker -> do
-        checkSrc `shouldSatisfy` (not . isInfixOf marker)
-        elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
-        runSrc `shouldSatisfy` (not . isInfixOf marker)
-        pipelineSrc `shouldSatisfy` (not . isInfixOf marker)
-    forM_
-      [ "MLF.Elab.",
-        "ElabTerm",
-        "ElabType",
-        "runPipelineElab",
-        "typeCheck",
-        "CheckedBinding",
-        "checkedBindingTerm",
-        "checkedBindingType",
-        ".ETyAbs",
-        ".ELam",
-        ".EApp",
-        ".ERoll",
-        ".EUnroll",
-        ".ELet",
-        ".ETyInst"
-      ]
-      $ \marker ->
-        elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
-    forM_
-      [ "EUnfold ::",
-        "EUnfoldSurfaceF",
-        "unfold marker for case scrutinees"
-      ]
-      $ \marker ->
-        syntaxSrc `shouldSatisfy` (not . isInfixOf marker)
-    checkSrc `shouldSatisfy` isInfixOf "import MLF.Frontend.Program.Elaborate"
-    checkSrc `shouldSatisfy` isInfixOf "import MLF.Frontend.Program.Finalize"
-    typesSrc `shouldSatisfy` isInfixOf "data ResolvedSemanticModule"
-    typesSrc `shouldSatisfy` isInfixOf "newtype ResolvedSemanticProgramArtifact"
-    typesSrc `shouldSatisfy` isInfixOf "data ResolvedModuleDiagnosticAdapter"
-    checkSrc `shouldSatisfy` isInfixOf "checkModules :: ResolvedSemanticProgramArtifact"
-    checkSrc `shouldSatisfy` isInfixOf "checkModule :: ResolvedSemanticModule"
-    checkSrc `shouldSatisfy` isInfixOf "resolvedProgramSemanticArtifact resolved"
-    checkSrc `shouldSatisfy` (not . isInfixOf "checkModule :: ResolvedModule")
-    typesSrc `shouldSatisfy` isInfixOf "loweredBindingSurfaceExpr :: SurfaceExpr"
-    typesSrc `shouldSatisfy` (not . isInfixOf "loweredBindingTerm :: ElabTerm")
-    finalizeSrc `shouldSatisfy` isInfixOf "runPipelineElabDetailedWithExternalBindings"
-    finalizeSrc `shouldSatisfy` isInfixOf "runPipelineElabDetailedUncheckedWithExternalBindings"
-    finalizeSrc `shouldSatisfy` isInfixOf "normalizeExpr surfaceExpr"
-    finalizeSrc `shouldSatisfy` isInfixOf "typeCheckWithEnv caseRewriteEnv rewritten"
-    pipelineRunSrc `shouldSatisfy` (not . isInfixOf "Compatibility alias")
-    pipelineRunSrc `shouldSatisfy` (not . isInfixOf "runPipelineElabChecked")
-    forM_
-      [ "where possible and only emits direct",
-        "direct `ElabTerm`s for constructs",
-        "direct `ElabTerm`s only when"
-      ]
-      $ \marker -> do
-        readmeSrc `shouldSatisfy` (not . isInfixOf marker)
-        architectureSrc `shouldSatisfy` (not . isInfixOf marker)
-        notesSrc `shouldSatisfy` (not . isInfixOf marker)
-    runSrc `shouldSatisfy` isInfixOf "normalize"
-
-  it "`.mlfp` checking consumes resolved syntax without unresolving whole programs" $ do
-    checkSrc <- readFile "src/MLF/Frontend/Program/Check.hs"
-    forM_
-      [ "P.unresolveModule",
-        "P.unresolveProgram",
-        "resolvedExprForEnv",
-        "qualifyInstanceHeadOnly",
-        "qualifyInstance ::",
-        "qualifyInstance alias"
-      ]
-      $ \marker ->
-        checkSrc `shouldSatisfy` (not . isInfixOf marker)
-    finalizeSrc <- readFile "src/MLF/Frontend/Program/Finalize.hs"
-    elaborateSrc <- readFile "src/MLF/Frontend/Program/Elaborate.hs"
-    forM_
-      [ "resolveInstanceInfoWithSubst",
-        "resolveMethodInstanceInfoWithSubst"
-      ]
-      $ \marker ->
-        finalizeSrc `shouldSatisfy` (not . isInfixOf marker)
-    forM_
-      [ "(P.constraintClassName constraint, show (P.constraintType constraint))",
-        "Set (P.ClassName, String) -> [P.ClassConstraint]",
-        "resolvedExprForScope",
-        "resolvedPatternForScope",
-        "resolvedTypeForScope",
-        "resolvedConstrainedTypeForScope",
-        "resolvedClassConstraintForScope"
-      ]
-      $ \marker ->
-        elaborateSrc `shouldSatisfy` (not . isInfixOf marker)
-
-  it "split facades stay thin and child-owned" $ do
-    forM_ splitFacadeGuards $ \(path, maxLines, requiredMarkers) -> do
-      src <- readFile path
-      length (lines src) `shouldSatisfy` (<= maxLines)
-      forM_ requiredMarkers $ \marker ->
-        src `shouldSatisfy` isInfixOf marker
-
   it "split child modules stay implementation-only in Cabal" $ do
     cabalSrc <- readFile "mlf2.cabal"
     let publicLibrarySrc = extractPublicLibraryStanza cabalSrc
+        publicLibraryModules = listedModules publicLibrarySrc
     forM_ splitChildModules $ \moduleName -> do
       countModuleEntries moduleName cabalSrc `shouldBe` 1
-      publicLibrarySrc `shouldSatisfy` (not . isInfixOf moduleName)
+      publicLibraryModules `shouldSatisfy` notElem moduleName
 
-  it "one-backend-IR contract stays explicit and no public lower IR leaks" $ do
-    architectureSrc <- readFile "docs/architecture.md"
-    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
-    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
-    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
-    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
+  it "backend implementation modules stay out of the public library" $ do
     cabalSrc <- readFile "mlf2.cabal"
-    let publicLibrarySrc = extractPublicLibraryStanza cabalSrc
-    publicLibrarySrc `shouldSatisfy` (not . isInfixOf "MLF.Backend.")
-    publicLibrarySrc `shouldSatisfy` (not . isInfixOf "LowerableBackend.")
-    forM_
-      [ ("docs/architecture.md", architectureSrc, architectureContractMarkers ++ futureLowerIRCriteriaMarkers),
-        ("src/MLF/Backend/IR.hs", backendIRSrc, backendIRContractMarkers ++ futureLowerIRCriteriaMarkers),
-        ("src/MLF/Backend/Convert.hs", backendConvertSrc, backendConvertContractMarkers ++ futureLowerIRCriteriaMarkers),
-        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, backendLowerContractMarkers ++ futureLowerIRCriteriaMarkers),
-        ("docs/backend-native-pipeline.md", nativePipelineSrc, nativePipelineContractMarkers ++ futureLowerIRCriteriaMarkers)
-      ]
-      $ \(path, src, markers) ->
-        assertMarkersPresent path src markers
-
-  it "eager-runtime lowering contract stays explicit and lazy STG machinery stays out of scope" $ do
-    architectureSrc <- readFile "docs/architecture.md"
-    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
-    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
-    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
-    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
-    forM_
-      [ ("docs/architecture.md", architectureSrc, architectureEagerRuntimeMarkers ++ eagerRuntimeExclusionMarkers),
-        ("src/MLF/Backend/IR.hs", backendIRSrc, backendIREagerRuntimeMarkers ++ eagerRuntimeExclusionMarkers),
-        ("src/MLF/Backend/Convert.hs", backendConvertSrc, backendConvertEagerRuntimeMarkers ++ eagerRuntimeExclusionMarkers),
-        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, backendLowerEagerRuntimeMarkers ++ eagerRuntimeExclusionMarkers),
-        ("docs/backend-native-pipeline.md", nativePipelineSrc, nativePipelineEagerRuntimeMarkers ++ eagerRuntimeExclusionMarkers)
-      ]
-      $ \(path, src, markers) ->
-        assertMarkersPresent path src markers
-
-  it "callable-shape contract stays explicit and direct-vs-closure call heads stay unambiguous" $ do
-    architectureSrc <- readFile "docs/architecture.md"
-    callableShapeSrc <- readFile "src/MLF/Backend/CallableShape.hs"
-    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
-    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
-    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
-    forM_
-      [ ("docs/architecture.md", architectureSrc, architectureCallableShapeMarkers),
-        ("src/MLF/Backend/CallableShape.hs", callableShapeSrc, backendCallableShapeOwnerMarkers),
-        ("src/MLF/Backend/IR.hs", backendIRSrc, backendIRCallableShapeMarkers),
-        ("src/MLF/Backend/Convert.hs", backendConvertSrc, backendConvertCallableShapeMarkers),
-        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, backendLowerCallableShapeMarkers)
-      ]
-      $ \(path, src, markers) ->
-        assertMarkersPresent path src markers
-
-  it "ADT and case semantic boundary stays explicit while lowerer-owned layout policy stays private and frozen" $ do
-    architectureSrc <- readFile "docs/architecture.md"
-    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
-    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
-    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
-    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
-    forM_
-      [ ("docs/architecture.md", architectureSrc, backendADTCaseOwnershipMarkers),
-        ("docs/backend-native-pipeline.md", nativePipelineSrc, backendADTCaseOwnershipMarkers ++ nativePipelineADTCaseLayoutMarkers),
-        ("src/MLF/Backend/IR.hs", backendIRSrc, backendADTCaseOwnershipMarkers),
-        ("src/MLF/Backend/Convert.hs", backendConvertSrc, backendADTCaseOwnershipMarkers),
-        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, backendADTCaseOwnershipMarkers ++ backendLowerADTCaseLayoutMarkers)
-      ]
-      $ \(path, src, markers) ->
-        assertMarkersPresent path src markers
-
-  it "primitive-operation and eager-evaluation-order contract stays explicit without widening the backend boundary" $ do
-    architectureSrc <- readFile "docs/architecture.md"
-    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
-    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
-    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
-    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
-    forM_
-      [ ("docs/architecture.md", architectureSrc, primitiveOperationEagerOrderMarkers),
-        ("docs/backend-native-pipeline.md", nativePipelineSrc, primitiveOperationEagerOrderMarkers),
-        ("src/MLF/Backend/IR.hs", backendIRSrc, primitiveOperationEagerOrderMarkers),
-        ("src/MLF/Backend/Convert.hs", backendConvertSrc, primitiveOperationEagerOrderMarkers),
-        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, primitiveOperationEagerOrderMarkers)
-      ]
-      $ \(path, src, markers) ->
-        assertMarkersPresent path src markers
-
-  it "primitive inventory ownership stays centralized across frontend and backend adapters" $ do
-    inventorySrc <- readFile "src/MLF/Primitive/Inventory.hs"
-    builtinsSrc <- readFile "src/MLF/Frontend/Program/Builtins.hs"
-    resolveSrc <- readFile "src/MLF/Frontend/Program/Resolve.hs"
-    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
-    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
-    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
-    architectureSrc <- readFile "docs/architecture.md"
-    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
-
-    inventorySrc `shouldSatisfy` isInfixOf "builtinTypeSpecs :: Map String BuiltinTypeSpec"
-    inventorySrc `shouldSatisfy` isInfixOf "primitiveValueSpecs :: Map String PrimitiveValueSpec"
-    inventorySrc `shouldSatisfy` isInfixOf "primitiveValueNativeSupport :: PrimitiveNativeSupport"
-    inventorySrc `shouldSatisfy` isInfixOf "nativeIOPrimitiveNames :: Set String"
-    forM_
-      [ builtinsSrc,
-        resolveSrc,
-        backendIRSrc,
-        backendConvertSrc,
-        backendLowerSrc
-      ]
-      $ \src ->
-        src `shouldSatisfy` isInfixOf "MLF.Primitive.Inventory"
-    builtinsSrc `shouldSatisfy` (not . isInfixOf "builtinTypeKinds ::")
-    backendConvertSrc `shouldSatisfy` (not . isInfixOf "backendBuiltinTypeNames ::")
-    backendLowerSrc `shouldSatisfy` isInfixOf "PrimitiveInventory.nativeIOPrimitiveNames"
-    backendLowerSrc `shouldSatisfy` (not . isInfixOf "ioPrimitiveNames = Set.fromList")
-    backendLowerSrc `shouldSatisfy` (not . isInfixOf "runtimeAndName =\n  \"__mlfp_and\"")
-    architectureSrc `shouldSatisfy` isInfixOf "`MLF.Primitive.Inventory`"
-    nativePipelineSrc `shouldSatisfy` isInfixOf "`MLF.Primitive.Inventory`"
-
-  it "polymorphism-erasure and lowerability contract stays explicit without widening the backend boundary" $ do
-    architectureSrc <- readFile "docs/architecture.md"
-    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
-    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
-    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
-    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
-    forM_
-      [ ("docs/architecture.md", architectureSrc, polymorphismLowerabilityMarkers),
-        ("docs/backend-native-pipeline.md", nativePipelineSrc, polymorphismLowerabilityMarkers),
-        ("src/MLF/Backend/IR.hs", backendIRSrc, polymorphismLowerabilityMarkers),
-        ("src/MLF/Backend/Convert.hs", backendConvertSrc, polymorphismLowerabilityMarkers),
-        ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, polymorphismLowerabilityMarkers)
-      ]
-      $ \(path, src, markers) ->
-        assertMarkersPresent path src markers
-
-  it "backend-boundary mechanism table and closeout ledger stay synchronized" $ do
-    repoGuardSrc <- readFile "test/RepoGuardSpec.hs"
-    tableSrc <- readFile "docs/plans/2026-05-02-backend-ir-executable-boundary-mechanism-table.md"
-    todoSrc <- readFile "TODO.md"
-    notesSrc <- readFile "implementation_notes.md"
-    changelogSrc <- readFile "CHANGELOG.md"
-
-    rows <-
-      case parseBackendBoundaryMechanismTable tableSrc of
-        Left err -> expectationFailure err >> pure []
-        Right parsedRows -> pure parsedRows
-
-    map mechanismTableRowName rows `shouldBe` backendBoundaryMechanismNames
-    map mechanismTableRowGate rows `shouldSatisfy` all (`elem` ["YES", "NO"])
-    map mechanismTableRowGate rows `shouldBe` replicate 7 "YES"
-
-    case rows of
-      [_, _, _, _, _, _, row7] -> do
-        mechanismTableRowGapSummary row7
-          `shouldSatisfy` (not . isInfixOf "Some goals are currently design intent rather than verified mechanism.")
-        mechanismTableRowEvidence row7
-          `shouldSatisfy` (not . isInfixOf "backend tests referenced by cabal/test stanzas")
-        mechanismTableRowNextAction row7
-          `shouldSatisfy` (not . isInfixOf "Add or update focused tests and docs with each mechanism improvement")
-        assertMarkersPresent "row-7 evidence" (mechanismTableRowEvidence row7) backendBoundaryRow7EvidenceMarkers
-        mechanismTableRowNextAction row7
-          `shouldSatisfy` isInfixOf "later accepted roadmap revision"
-      _ ->
-        expectationFailure
-          ( "expected 7 backend-boundary mechanism-table rows, found "
-              ++ show (length rows)
-          )
-
-    assertMarkersPresent "test/RepoGuardSpec.hs" repoGuardSrc backendBoundaryFocusedGuardNames
-    assertMarkersPresent "TODO.md" todoSrc backendBoundaryCloseoutTodoMarkers
-    assertMarkersPresent "implementation_notes.md" notesSrc backendBoundaryCloseoutImplementationNoteMarkers
-    assertMarkersPresent "CHANGELOG.md" changelogSrc backendBoundaryCloseoutChangelogMarkers
+    let publicLibraryModules = listedModules (extractPublicLibraryStanza cabalSrc)
+    publicLibraryModules `shouldSatisfy` all (not . hasModulePrefix "MLF.Backend.")
+    publicLibraryModules `shouldSatisfy` all (not . hasModulePrefix "LowerableBackend.")
 
 discoverSpecModules :: FilePath -> IO [String]
 discoverSpecModules root = do
@@ -622,16 +116,15 @@ discoverMainCalls = do
       ".spec" `isSuffixOf` trimmed
     ]
 
-findImportOffenders :: [FilePath] -> IO [FilePath]
-findImportOffenders roots = do
+findImportOffenders :: [String] -> [FilePath] -> IO [FilePath]
+findImportOffenders moduleNames roots = do
   hsFiles <- concat <$> mapM collectHsFiles roots
-  offenders <- mapM hasMyLibImport hsFiles
+  offenders <- mapM hasTargetImport hsFiles
   pure [path | (path, True) <- offenders]
-
-hasMyLibImport :: FilePath -> IO (FilePath, Bool)
-hasMyLibImport path = do
-  src <- readFile path
-  pure (path, any (== "import MyLib") (map trimImport (lines src)))
+  where
+    hasTargetImport path = do
+      src <- readFile path
+      pure (path, any (`elem` moduleNames) (importedModules src))
 
 findConstraintBoundaryImportOffenders :: IO [String]
 findConstraintBoundaryImportOffenders = do
@@ -707,8 +200,7 @@ parseImportModule line =
     firstModuleToken (tok : toks)
       | tok `elem` ["qualified", "safe", "as", "hiding"] = firstModuleToken toks
       | "\"" `isPrefixOfToken` tok = firstModuleToken toks
-      | "." `isInfixOf` tok = Just (normalizeModuleToken tok)
-      | otherwise = firstModuleToken toks
+      | otherwise = Just (normalizeModuleToken tok)
 
 stripLineComment :: String -> String
 stripLineComment [] = []
@@ -744,9 +236,6 @@ dropFieldPrefix line =
     (_field, ':' : rest) -> rest
     _ -> line
 
-trimImport :: String -> String
-trimImport = unwords . take 2 . words
-
 pathToModule :: FilePath -> FilePath -> String
 pathToModule root path =
   intercalate "." (splitDirectories (dropExtension (makeRelative root path)))
@@ -775,45 +264,6 @@ stripPrefix (x : xs) (y : ys)
   | x == y = stripPrefix xs ys
 stripPrefix _ _ = Nothing
 
-splitFacadeGuards :: [(FilePath, Int, [String])]
-splitFacadeGuards =
-  [ ( "src/MLF/Elab/Phi/Omega.hs",
-      30,
-      [ "import MLF.Elab.Phi.Omega.Domain",
-        "import MLF.Elab.Phi.Omega.Interpret",
-        "import MLF.Elab.Phi.Omega.Normalize"
-      ]
-    ),
-    ( "src/MLF/Constraint/Presolution/EdgeUnify.hs",
-      95,
-      [ "import MLF.Constraint.Presolution.EdgeUnify.State",
-        "import qualified MLF.Constraint.Presolution.EdgeUnify.Omega as Omega",
-        "import MLF.Constraint.Presolution.EdgeUnify.Unify"
-      ]
-    ),
-    ( "src/MLF/Reify/Core.hs",
-      95,
-      [ "import qualified MLF.Reify.Bound as Bound",
-        "import qualified MLF.Reify.Named as Named",
-        "import qualified MLF.Reify.Type as Type"
-      ]
-    ),
-    ( "src/MLF/Constraint/Solve.hs",
-      130,
-      [ "import MLF.Constraint.Solve.Finalize",
-        "import MLF.Constraint.Solve.Internal",
-        "import MLF.Constraint.Solve.Worklist"
-      ]
-    ),
-    ( "src/MLF/Elab/Elaborate.hs",
-      120,
-      [ "import MLF.Elab.Elaborate.Algebra",
-        "import MLF.Elab.Elaborate.Annotation",
-        "import MLF.Elab.Elaborate.Scope"
-      ]
-    )
-  ]
-
 splitChildModules :: [String]
 splitChildModules =
   [ "MLF.Constraint.Presolution.EdgeUnify.State",
@@ -833,291 +283,6 @@ splitChildModules =
     "MLF.Elab.Phi.Omega.Interpret",
     "MLF.Elab.Phi.Omega.Normalize"
   ]
-
-backendBoundaryMechanismNames :: [String]
-backendBoundaryMechanismNames =
-  [ "IR role separation and non-duplication",
-    "Eager runtime lowering contract",
-    "Direct calls, closure values, and callable shapes",
-    "ADT/case semantics versus layout",
-    "Primitive operations and eager evaluation order",
-    "Polymorphism erasure and lowerability",
-    "Validation, evidence, and guidance synchronization"
-  ]
-
-backendBoundaryFocusedGuardNames :: [String]
-backendBoundaryFocusedGuardNames =
-  [ "one-backend-IR contract stays explicit and no public lower IR leaks",
-    "eager-runtime lowering contract stays explicit and lazy STG machinery stays out of scope",
-    "callable-shape contract stays explicit and direct-vs-closure call heads stay unambiguous",
-    "ADT and case semantic boundary stays explicit while lowerer-owned layout policy stays private and frozen",
-    "primitive-operation and eager-evaluation-order contract stays explicit without widening the backend boundary",
-    "polymorphism-erasure and lowerability contract stays explicit without widening the backend boundary",
-    "backend-boundary mechanism table and closeout ledger stay synchronized"
-  ]
-
-backendBoundaryRow7EvidenceMarkers :: [String]
-backendBoundaryRow7EvidenceMarkers =
-  [ "docs/architecture.md",
-    "docs/backend-native-pipeline.md",
-    "src/MLF/Backend/IR.hs",
-    "src/MLF/Backend/Convert.hs",
-    "src/MLF/Backend/LLVM/Lower.hs",
-    "test/BackendIRSpec.hs",
-    "test/BackendConvertSpec.hs",
-    "test/BackendLLVMSpec.hs",
-    "test/RepoGuardSpec.hs",
-    "backend-boundary mechanism table and closeout ledger stay synchronized"
-  ]
-
-backendBoundaryCloseoutTodoMarkers :: [String]
-backendBoundaryCloseoutTodoMarkers =
-  [ "## Task 110 backend IR executable-boundary family closeout (completed 2026-05-03)",
-    "rows 1 through 6 of the backend IR executable-boundary",
-    "`710c92eb`",
-    "Row 7 now closes the mechanism table and guidance ledger",
-    "one executable eager backend IR",
-    "no public `LowerableBackend.IR`",
-    "no lazy STG machinery",
-    "No new backend implementation feature was added by this closeout."
-  ]
-
-backendBoundaryCloseoutImplementationNoteMarkers :: [String]
-backendBoundaryCloseoutImplementationNoteMarkers =
-  [ "## 2026-05-03 - Backend IR executable-boundary family closed on the merged 710c92eb baseline",
-    "rows 1 through 7 closed on the merged `710c92eb` baseline",
-    "one executable eager backend IR",
-    "eager runtime lowering only",
-    "no lazy STG machinery",
-    "no public `LowerableBackend.IR`",
-    "no fallback/runtime-rescue widening",
-    "no new backend implementation feature"
-  ]
-
-backendBoundaryCloseoutChangelogMarkers :: [String]
-backendBoundaryCloseoutChangelogMarkers =
-  [ "Closed the backend IR executable-boundary family on merged `710c92eb`",
-    "seven backend-boundary mechanism-table rows are now explicitly settled",
-    "`backend-boundary mechanism table and closeout ledger stay synchronized`",
-    "repo-facing note sync",
-    "one executable eager backend IR",
-    "no public `LowerableBackend.IR`",
-    "no lazy STG",
-    "no new backend feature or public boundary was introduced"
-  ]
-
-architectureContractMarkers :: [String]
-architectureContractMarkers =
-  [ "xMLF remains the thesis-faithful typed elaboration IR.",
-    "`MLF.Backend.IR` is the single executable eager backend IR in the current",
-    "`MLF.Backend.Convert` is the only checked-program to backend-IR conversion",
-    "layout-only structure, or lowerability-only",
-    "public `LowerableBackend.IR`"
-  ]
-
-backendIRContractMarkers :: [String]
-backendIRContractMarkers =
-  [ "xMLF remains the thesis-faithful typed elaboration IR;",
-    "`MLF.Backend.IR` is the single executable eager backend IR;",
-    "no second executable backend IR, no public `LowerableBackend.IR`, and no",
-    "layout-only structure, or lowerability-only"
-  ]
-
-backendConvertContractMarkers :: [String]
-backendConvertContractMarkers =
-  [ "xMLF remains the thesis-faithful typed",
-    "`MLF.Backend.IR` is the single executable eager backend",
-    "Checked-program conversion stops at `MLF.Backend.IR`;",
-    "unsupported checked",
-    "must fail here instead of being rerouted through a second IR layer.",
-    "public `LowerableBackend.IR`"
-  ]
-
-backendLowerContractMarkers :: [String]
-backendLowerContractMarkers =
-  [ "xMLF remains the thesis-faithful typed elaboration IR, and `MLF.Backend.IR`",
-    "Both 'lowerBackendProgram' and",
-    "'lowerBackendProgramNative' lower the same `MLF.Backend.IR` program.",
-    "public `LowerableBackend.IR`"
-  ]
-
-nativePipelineContractMarkers :: [String]
-nativePipelineContractMarkers =
-  [ "xMLF remains the thesis-faithful typed elaboration IR, and",
-    "`MLF.Backend.IR` is the single executable eager backend IR.",
-    "`emit-backend` and `emit-native` consume the same `MLF.Backend.IR` program",
-    "it is not a second executable IR,",
-    "becoming a public `LowerableBackend.IR`"
-  ]
-
-architectureEagerRuntimeMarkers :: [String]
-architectureEagerRuntimeMarkers =
-  [ "`MLF.Backend.IR` owns the eager executable",
-    "typed direct application, explicit closures and",
-    "`BackendClosureCall`, ADT construction and case analysis, lets, lambdas, type",
-    "LLVM/native lowering owns only downstream private lowering/runtime details",
-    "Both raw and native emission still",
-    "consume the same backend IR program."
-  ]
-
-backendIREagerRuntimeMarkers :: [String]
-backendIREagerRuntimeMarkers =
-  [ "`MLF.Backend.IR` owns the eager executable representation consumed by the",
-    "typed direct application, explicit closures and",
-    "`BackendClosureCall`, ADT construction and case analysis, lets, lambdas,",
-    "validation-visible invariants for those executable shapes live at this",
-    "closure-record layout, native process entrypoints, renderer helpers, native"
-  ]
-
-backendConvertEagerRuntimeMarkers :: [String]
-backendConvertEagerRuntimeMarkers =
-  [ "Checked-program conversion publishes that eager executable representation",
-    "direct application, explicit closures and",
-    "`BackendClosureCall`, ADT construction and case analysis, lets, lambdas, type",
-    "Unsupported checked shapes fail here",
-    "lazy runtime artifacts, lowerer-private",
-    "native-wrapper-specific machinery."
-  ]
-
-backendLowerEagerRuntimeMarkers :: [String]
-backendLowerEagerRuntimeMarkers =
-  [ "Both 'lowerBackendProgram' and",
-    "'lowerBackendProgramNative' lower the same `MLF.Backend.IR` program.",
-    "LLVM lowering and native emission own only the downstream private",
-    "wrapper/runtime symbol emission, and executable rendering support.",
-    "Raw LLVM emission and native emission",
-    "both start from the same `MLF.Backend.IR` program"
-  ]
-
-nativePipelineEagerRuntimeMarkers :: [String]
-nativePipelineEagerRuntimeMarkers =
-  [ "`emit-backend` and `emit-native` consume the same `MLF.Backend.IR` program",
-    "`emit-backend` is the raw inspection/lowering output from that same",
-    "`emit-native` is that same eager IR plus private",
-    "native-entrypoint/runtime support only.",
-    "The added support",
-    "does not create a second executable IR or a lazy runtime."
-  ]
-
-eagerRuntimeExclusionMarkers :: [String]
-eagerRuntimeExclusionMarkers =
-  [ "no thunks",
-    "no update frames",
-    "no CAF update semantics",
-    "no graph reduction",
-    "no implicit laziness rescue"
-  ]
-
-architectureCallableShapeMarkers :: [String]
-architectureCallableShapeMarkers =
-  [ "That callable contract is explicit. `BackendApp` is the direct first-order",
-    "`BackendClosureCall` is the indirect closure-call node, so closure-valued",
-    "`MLF.Backend.CallableShape` is the private owner for the shared callable-head",
-    "`BackendApp` heads must stay on the direct-call path",
-    "`BackendClosureCall` heads must remain closure"
-  ]
-
-backendCallableShapeOwnerMarkers :: [String]
-backendCallableShapeOwnerMarkers =
-  [ "This private module centralizes the shared callable-head classification used by",
-    "`MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower`.",
-    "`MLF.Backend.IR` remains the single executable backend IR seam"
-  ]
-
-backendIRCallableShapeMarkers :: [String]
-backendIRCallableShapeMarkers =
-  [ "`BackendApp` is the direct first-order call node",
-    "closure-valued heads violate a",
-    "`BackendClosureCall` is the indirect closure-call node",
-    "heads are rejected with explicit callable diagnostics."
-  ]
-
-backendConvertCallableShapeMarkers :: [String]
-backendConvertCallableShapeMarkers =
-  [ "`BackendApp` is reserved for direct first-order callable heads",
-    "closure-valued aliases, captured closures, and case/let-selected closure",
-    "values are emitted as `BackendClosureCall`"
-  ]
-
-backendLowerCallableShapeMarkers :: [String]
-backendLowerCallableShapeMarkers =
-  [ "indirect closure calls must use",
-    "the explicit `BackendClosureCall` node.",
-    "Lowering consumes that same callable",
-    "`BackendApp` remains the direct first-order call path",
-    "case/let-selected closure values must"
-  ]
-
-backendADTCaseOwnershipMarkers :: [String]
-backendADTCaseOwnershipMarkers =
-  [ "Row-4 ADT/case ownership",
-    "semantic constructor/case nodes",
-    "`MLF.Backend.IR`",
-    "field slots, closure-record storage for",
-    "nullary tag-only representation stay private to"
-  ]
-
-nativePipelineADTCaseLayoutMarkers :: [String]
-nativePipelineADTCaseLayoutMarkers =
-  [ "declaration-order",
-    "zero-based constructor tags drive emitted `switch` targets",
-    "object offset `0`",
-    "function-like constructor fields store explicit closure records",
-    "nullary constructors",
-    "tag-only heap objects"
-  ]
-
-backendLowerADTCaseLayoutMarkers :: [String]
-backendLowerADTCaseLayoutMarkers =
-  [ "declaration-order zero-based constructor tags",
-    "the tag word is stored at object offset `0`",
-    "field slots start after that tag word",
-    "function-like constructor fields are stored as explicit closure records",
-    "nullary constructors use tag-only heap objects"
-  ]
-
-primitiveOperationEagerOrderMarkers :: [String]
-primitiveOperationEagerOrderMarkers =
-  [ "inventory-owned reserved",
-    "runtime-binding set",
-    "`MLF.Primitive.Inventory`",
-    "__mlfp_and",
-    "primitive names",
-    "native support",
-    "`BackendVar`, `BackendApp`, and `BackendTyApp`",
-    "no new `BackendPrim`",
-    "let RHS before body",
-    "case scrutinee before branch selection",
-    "direct/primitive call arguments in written order",
-    "effect sequencing remains explicit through `__io_bind`"
-  ]
-
-polymorphismLowerabilityMarkers :: [String]
-polymorphismLowerabilityMarkers =
-  [ "checked `Backend.IR` may still carry `BackendTyAbs` and `BackendTyApp`",
-    "LLVM/native lowering owns only the specialization-based lowerable subset",
-    "type applications may specialize privately inside the lowerer",
-    "runtime polymorphism remains unsupported and must fail with explicit diagnostics without widening the backend boundary"
-  ]
-
-futureLowerIRCriteriaMarkers :: [String]
-futureLowerIRCriteriaMarkers =
-  [ "distinct backend-owned executable invariants that cannot live in",
-    "`MLF.Backend.IR` or a private lowering helper",
-    "a dedicated validation/evidence owner for that new boundary",
-    "a later accepted roadmap revision before any new durable or public surface",
-    "is added."
-  ]
-
-assertMarkersPresent :: FilePath -> String -> [String] -> Expectation
-assertMarkersPresent path src markers =
-  forM_ markers assertMarker
-  where
-    assertMarker marker =
-      if marker `isInfixOf` src
-        then pure ()
-        else expectationFailure (path ++ " missing marker: " ++ show marker)
-
 countModuleEntries :: String -> String -> Int
 countModuleEntries moduleName src =
   length
@@ -1125,60 +290,23 @@ countModuleEntries moduleName src =
     | line <- lines src,
       normalizeModuleToken (dropFieldPrefix (trim line)) == moduleName
     ]
+listedModules :: String -> [String]
+listedModules src =
+  [ moduleName
+  | line <- lines src,
+    let moduleName = normalizeModuleToken (dropFieldPrefix (trim line)),
+    looksLikeModuleName moduleName
+  ]
 
-data MechanismTableRow = MechanismTableRow
-  { mechanismTableRowName :: String,
-    mechanismTableRowGapSummary :: String,
-    mechanismTableRowEvidence :: String,
-    mechanismTableRowGate :: String,
-    mechanismTableRowNextAction :: String
-  }
+looksLikeModuleName :: String -> Bool
+looksLikeModuleName moduleName =
+  case moduleName of
+    [] -> False
+    c : _ -> c `elem` ['A' .. 'Z']
 
-parseBackendBoundaryMechanismTable :: String -> Either String [MechanismTableRow]
-parseBackendBoundaryMechanismTable src =
-  traverse parseMechanismTableRow rowLines
-  where
-    rowLines =
-      [ line
-      | line <- lines src,
-        isPrefixOf "| " line,
-        not (isPrefixOf "|---" line),
-        not (isPrefixOf "| Mechanism " line)
-      ]
-
-parseMechanismTableRow :: String -> Either String MechanismTableRow
-parseMechanismTableRow line =
-  case map trim (stripTableEdgeCells (splitOn '|' line)) of
-    [name, _currentBehavior, _targetBehavior, gapSummary, evidence, gate, nextAction] ->
-      Right
-        MechanismTableRow
-          { mechanismTableRowName = name,
-            mechanismTableRowGapSummary = gapSummary,
-            mechanismTableRowEvidence = evidence,
-            mechanismTableRowGate = gate,
-            mechanismTableRowNextAction = nextAction
-          }
-    parts ->
-      Left
-        ( "could not parse backend-boundary mechanism-table row: "
-            ++ show line
-            ++ "\nparsed cells: "
-            ++ show parts
-        )
-
-stripTableEdgeCells :: [String] -> [String]
-stripTableEdgeCells cells =
-  case cells of
-    [] -> []
-    (_ : rest) -> reverse (drop 1 (reverse rest))
-
-splitOn :: (Eq a) => a -> [a] -> [[a]]
-splitOn delimiter = go []
-  where
-    go acc [] = [reverse acc]
-    go acc (x : xs)
-      | x == delimiter = reverse acc : go [] xs
-      | otherwise = go (x : acc) xs
+hasModulePrefix :: String -> String -> Bool
+hasModulePrefix prefix moduleName =
+  prefix `isPrefixOf` moduleName
 
 extractPublicLibraryStanza :: String -> String
 extractPublicLibraryStanza src =

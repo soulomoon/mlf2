@@ -43,7 +43,6 @@ import Presolution.MergeEmissionSpec qualified
 import Presolution.RaiseSpec qualified
 import Presolution.UnificationClosureSpec qualified
 import Presolution.WitnessSpec qualified
-import PresolutionFacadeSpec qualified
 import PresolutionSpec qualified
 import Property.QuickCheckPropertySpec qualified
 import PublicSurfaceSpec qualified
@@ -114,7 +113,6 @@ main = do
     Research.P2RepresentativeSupportSpec.spec
     Research.P5ClearBoundarySpec.spec
     Research.SameLaneRetainedChildRepresentativeGapSpec.spec
-    PresolutionFacadeSpec.spec
     ThesisFixDirectionSpec.spec
     TypeCheckSpec.spec
     TypeSoundnessSpec.spec

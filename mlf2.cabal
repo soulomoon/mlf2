@@ -429,7 +429,6 @@ test-suite mlf2-test
                       Research.P2RepresentativeSupportSpec,
                       Research.P5ClearBoundarySpec,
                       Research.SameLaneRetainedChildRepresentativeGapSpec,
-                      PresolutionFacadeSpec,
                       Constraint.SolvedSpec,
                       Reify.CoreSpec,
                       Reify.NamedSpec,

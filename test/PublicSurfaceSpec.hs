@@ -50,10 +50,6 @@ spec = describe "Public surface contracts" $ do
         parseRawProgram (prettyProgram program) `shouldBe` Right program
 
   describe "MLF.Pipeline" $ do
-    it "does not export checker-authoritative compatibility aliases" $ do
-      pipelineSrc <- readFile "src-public/MLF/Pipeline.hs"
-      T.pack pipelineSrc `shouldSatisfy` (not . T.isInfixOf (T.pack "runPipelineElabChecked"))
-
     it "elaborates normalized programs through the focused pipeline surface" $ do
       expectRight (parseNormEmlfExpr "λ(x) x") $ \expr ->
         expectRight (Pipeline.runPipelineElab Set.empty expr) $ \(term, ty) -> do

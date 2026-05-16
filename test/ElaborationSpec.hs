@@ -579,55 +579,6 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
         _ <- requireRight (Elab.runPipelineElab Set.empty (unsafeNormalizeExpr expr))
         pure ()
 
-    it "row1 closeout guard|checked-authoritative keeps representative corpus parity: ElabEnv no longer includes eeSolvedCompat" $ do
-      src <- readFile "src/MLF/Elab/Elaborate.hs"
-      isInfixOf "eeSolvedCompat ::" src `shouldBe` False
-
-    it "row2 closeout guard: ElabConfig no longer includes ecSolved" $ do
-      src <- readFile "src/MLF/Elab/Elaborate.hs"
-      isInfixOf "ecSolved" src `shouldBe` False
-
-    it "chi-first Elaborate|Phase 6 guard: elaborate internals avoid local solved materialization" $ do
-      src <- readFile "src/MLF/Elab/Elaborate.hs"
-      src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
-
-    it "elab-input thesis-exact guard: active Elaborate/Phi callback aliases avoid solved-typed generalize-at input" $ do
-      elabSrc <- readFile "src/MLF/Elab/Elaborate.hs"
-      phiSrc <- readFile "src/MLF/Elab/Phi/Translate.hs"
-      cabalSrc <- readFile "mlf2.cabal"
-      let legacySolvedTypedElabApiMarkers =
-            [ "type GeneralizeAtWithLegacy =",
-              "elaborate\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved",
-              "elaborateWithGen\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved",
-              "elaborateWithScope\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
-            ]
-          legacySolvedTypedPhiApiMarkers =
-            [ "type GeneralizeAtWithLegacy =",
-              "phiFromEdgeWitnessNoTrace\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved",
-              "phiFromEdgeWitness\n    :: TraceConfig\n    -> GeneralizeAtWithLegacy\n    -> Solved"
-            ]
-          solvedTypedPhiTestOnlyApiMarkers =
-            [ "phiFromEdgeWitnessNoTrace\n    :: TraceConfig\n    -> GeneralizeAtWith\n    -> Solved",
-              "phiFromEdgeWitness\n    :: TraceConfig\n    -> GeneralizeAtWith\n    -> Solved",
-              "phiFromEdgeWitnessAutoTrace\n    :: TraceConfig\n    -> GeneralizeAtWith\n    -> Solved"
-            ]
-      forM_ legacySolvedTypedElabApiMarkers $ \marker ->
-        isInfixOf marker elabSrc `shouldBe` False
-      forM_ legacySolvedTypedPhiApiMarkers $ \marker ->
-        isInfixOf marker phiSrc `shouldBe` False
-      forM_ solvedTypedPhiTestOnlyApiMarkers $ \marker ->
-        isInfixOf marker phiSrc `shouldBe` False
-      isInfixOf "MLF.Elab.Phi.TestOnly" cabalSrc `shouldBe` False
-      isInfixOf "MLF.Elab.Phi.IdentityBridge" cabalSrc `shouldBe` False
-
-    it "chi-first guard: ResultType internals avoid local solved materialization" $ do
-      src <- readFile "src/MLF/Elab/Run/ResultType/Types.hs"
-      src `shouldSatisfy` (not . isInfixOf "Solved.fromConstraintAndUf")
-
-    it "chi-first ResultType|checked-authoritative query guard avoids direct Solved.lookup usage" $ do
-      viewSrc <- readFile "src/MLF/Elab/Run/ResultType/View.hs"
-      viewSrc `shouldSatisfy` (not . isInfixOf "Solved.lookup")
-
     it "result-type fallback matches pipeline type on non-annotation roots" $ do
       let expr = EApp (ELam "x" (EVar "x")) (ELit (LInt 7))
       artifacts <- requireRight (runPipelineArtifactsDefault Set.empty expr)

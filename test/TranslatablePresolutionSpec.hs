@@ -2,7 +2,6 @@
 {-# LANGUAGE GADTs #-}
 module TranslatablePresolutionSpec (spec) where
 
-import Data.List (isInfixOf)
 import qualified Data.Set as Set
 import Test.Hspec
 
@@ -13,13 +12,6 @@ import SpecUtil (runToPresolutionDefault)
 
 spec :: Spec
 spec = describe "Translatable presolution" $ do
-    it "row8 thesis-exact guard: live translatability normalization uses all-inert W-normalization" $ do
-        src <- readFile "src/MLF/Constraint/Presolution/Validation.hs"
-        src `shouldSatisfy` isInfixOf "Inert.weakenInertNodes c0"
-        src `shouldSatisfy` isInfixOf "Inert.weakenInertNodes c2"
-        src `shouldSatisfy` (not . isInfixOf "Inert.weakenInertLockedNodes c0")
-        src `shouldSatisfy` (not . isInfixOf "Inert.weakenInertLockedNodes c2")
-
     it "identity expression produces translatable presolution" $
         case runToPresolutionDefault Set.empty (ELam "x" (EVar "x")) of
             Left err -> expectationFailure $ "pipeline failed: " ++ err

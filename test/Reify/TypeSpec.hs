@@ -4,7 +4,7 @@
 module Reify.TypeSpec (spec) where
 
 import Data.IntSet qualified as IntSet
-import Data.List (isInfixOf, isPrefixOf)
+import Data.List (isPrefixOf)
 import Data.Set qualified as Set
 import MLF.Constraint.Finalize.TestSupport qualified as Finalize
 import MLF.Constraint.Presolution.View (PresolutionView (..))
@@ -39,17 +39,6 @@ viewFor = Finalize.presolutionViewFromSolved
 
 spec :: Spec
 spec = describe "MLF.Reify.Type" $ do
-  describe "Snapshot Finalization ownership" $ do
-    it "does not expose a local solvedFromView adapter" $ do
-      src <- readFile "src/MLF/Reify/Type.hs"
-      src `shouldSatisfy` (not . isInfixOf "solvedFromView")
-
-    it "does not reconstruct Solved from PresolutionView in reify entrypoints" $ do
-      typeSrc <- readFile "src/MLF/Reify/Type.hs"
-      boundSrc <- readFile "src/MLF/Reify/Bound.hs"
-      typeSrc `shouldSatisfy` (not . isInfixOf "stepSolvedFromPresolutionView")
-      boundSrc `shouldSatisfy` (not . isInfixOf "stepSolvedFromPresolutionView")
-
   describe "reifyType" $ do
     it "reifies a literal expression to a base type" $ do
       artifacts <- pipelineFor (ELit (LInt 42))

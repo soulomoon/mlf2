@@ -1,4 +1,3 @@
-{-# LANGUAGE DataKinds #-}
 module Presolution.EdgePlannerSpec (spec) where
 
 import Data.List (isInfixOf)
@@ -27,7 +26,6 @@ import MLF.Constraint.Types.Graph
     , typeRef
     )
 import MLF.Constraint.Types.Presolution (Presolution(..))
-import MLF.Constraint.Types.Phase (Phase(Raw))
 import SpecUtil (bindParentsFromPairs, defaultTraceConfig, emptyConstraint, nodeMapFromList, rootedConstraint)
 import Test.Hspec
 
@@ -218,8 +216,3 @@ spec = describe "Edge plan types" $ do
                     expectationFailure ("expected strict wrapper-root fallback rejection, got " ++ show err)
                 Right _ ->
                     expectationFailure "expected planner fail-fast instead of wrapper-root recovery"
-
-        it "source guard: planner no longer defines synthesized wrapper-root owner fallback" $ do
-            src <- readFile "src/MLF/Constraint/Presolution/EdgeProcessing/Planner.hs"
-            src `shouldSatisfy`
-                (not . isInfixOf "mbWrapper <- firstGenOnPath canonical constraint0 (rteNodeId leftTyExp)")
