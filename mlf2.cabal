@@ -397,6 +397,7 @@ test-suite mlf2-test
                       Parity.ProgramMatrix,
                       Parity.ProgramMatrix.NativePolicy,
                       ProgramPackageSpec,
+                      ProgramPackageDiscoverySpec,
                       ProgramSpec,
                       ResolvedSymbolSpec,
                       PipelineSpec,

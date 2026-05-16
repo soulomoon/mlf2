@@ -33,6 +33,7 @@ import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
 import PipelineSpec qualified
 import ProgramPackageSpec qualified
+import ProgramPackageDiscoverySpec qualified
 import ProgramSpec qualified
 import Presolution.EdgeInterpreterSpec qualified
 import Presolution.EdgePlannerSpec qualified
@@ -106,6 +107,7 @@ main = do
     BackendStructuralRecursiveDataSpec.spec
     BackendLLVMSpec.spec
     ProgramPackageSpec.spec
+    ProgramPackageDiscoverySpec.spec
     ProgramSpec.spec
     ResolvedSymbolSpec.spec
     PipelineSpec.spec

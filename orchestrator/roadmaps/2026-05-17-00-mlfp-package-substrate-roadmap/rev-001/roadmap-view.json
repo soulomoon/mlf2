@@ -20,7 +20,7 @@
     {
       "milestone_id": "milestone-2",
       "title": "Filesystem Discovery And Dependency Graph",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-1"
       ],
@@ -172,7 +172,7 @@
     },
     "milestone-2-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 2. Filesystem Discovery And Dependency Graph"
+      "selector": "### [done] 2. Filesystem Discovery And Dependency Graph"
     },
     "milestone-2-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",

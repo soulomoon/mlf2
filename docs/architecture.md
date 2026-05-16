@@ -40,7 +40,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 
 - `MLF.Frontend.*` — surface syntax, desugaring, constraint generation
 - `MLF.Frontend.Syntax.Program` / `MLF.Frontend.Parse.Program` / `MLF.Frontend.Pretty.Program` — canonical `.mlfp` syntax ownership under the main frontend boundary
-- `MLF.Frontend.Program.Package` — private owner for `.mlfp` package identity, module identity, source-unit shape, trivial-package adapters, and package-to-program projections used while the checker still consumes the existing in-memory program artifact
+- `MLF.Frontend.Program.Package` — private owner for `.mlfp` package identity, module identity, source-unit shape, trivial-package adapters, one-root filesystem discovery, explicit module graph/order validation, and package-to-program projections used while the checker still consumes the existing in-memory program artifact
 - `MLF.Frontend.Program.Resolve` — assigns `.mlfp` symbol identities and produces the resolved semantic program artifact consumed by the checker
 - `MLF.Frontend.Program.Check` — module/import/class/data environment assembly for `.mlfp`, including static validation that may fail before the eMLF pipeline
 - `MLF.Frontend.Program.Elaborate` — lowers executable `.mlfp` bindings to surface eMLF `SurfaceExpr`
@@ -67,11 +67,13 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 The `.mlfp` package/module owner is `MLF.Frontend.Program.Package`. Current
 one-file `.mlfp` inputs are represented as trivial package source units, then
 projected into the existing in-memory `Program` artifact at the checker/resolver
-edge. `Resolve` and `Check` still receive the full package projection,
-topologically sort its module graph, and can therefore accept imports of modules
-declared later in that projected package. `Finalize` consumes the assembled
-program scope, and `Run` evaluates all checked module bindings together. There
-is no filesystem discovery, package root/search path policy, persisted
+edge. The package owner can discover `.mlfp` files under one explicit local
+root, retain source paths, build a module-to-file graph, reject duplicate,
+missing, or cyclic module imports, and project modules in dependency order so
+imports are checked before importers. `Resolve` and `Check` still consume the
+ordered in-memory package projection, `Finalize` consumes the assembled program
+scope, and `Run` evaluates all checked module bindings together. There is no
+package root/search path policy beyond that one explicit root, persisted
 interface artifact, cache/build graph policy, stable `.mlfp` ABI, linker, or CLI
 package mode today. Future separate compilation should be introduced only
 through the package owner and an explicit compiler-owned interface artifact

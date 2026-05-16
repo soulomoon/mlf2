@@ -159,7 +159,7 @@ rounds unless controller state and a selected plan explicitly allow it.
 - Extraction notes: a lawful first round may be an owner extraction plus
   adapter tests without implementing filesystem discovery yet.
 
-### [pending] 2. Filesystem Discovery And Dependency Graph
+### [done] 2. Filesystem Discovery And Dependency Graph
 
 - Milestone id: `milestone-2`
 - Depends on: `milestone-1`
@@ -177,7 +177,9 @@ rounds unless controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-2
 
-- none yet
+- Completed by round-246; evidence: one-root filesystem discovery, package
+  module graph ordering, missing/cycle diagnostics, cross-file export
+  visibility tests, and `cabal build all && cabal test` passing.
 
 #### Candidate Direction: Filesystem Discovery And Graph
 

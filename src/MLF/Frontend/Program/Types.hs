@@ -209,6 +209,8 @@ spanForError err index =
     ProgramDuplicateModule name -> Map.lookup name (P.spanModules index)
     ProgramUnknownImportModule name -> firstSpan name (P.spanImports index) <|> Map.lookup name (P.spanModules index)
     ProgramImportNotExported _ name -> firstSpan name (P.spanImportItems index) <|> lookupAnyName name index
+    ProgramImportCycle (name : _) -> Map.lookup name (P.spanModules index) <|> firstSpan name (P.spanImports index)
+    ProgramImportCycle [] -> Nothing
     ProgramInvalidExport name -> firstSpan name (P.spanExportItems index) <|> lookupAnyName name index
     ProgramExportNotLocal name -> firstSpan name (P.spanExportItems index) <|> lookupAnyName name index
     ProgramDuplicateVisibleName name -> lookupAnyName name index

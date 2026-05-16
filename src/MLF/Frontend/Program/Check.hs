@@ -47,9 +47,9 @@ import MLF.Frontend.Program.Finalize (finalizeBinding, finalizeBindingAllowOpaqu
 import MLF.Frontend.Program.Package
   ( LocatedProgramPackage,
     ProgramPackage,
-    locatedProgramPackagePackage,
+    locatedProgramPackageOrderedProgram,
     locatedProgramPackageProgram,
-    programPackageProgram,
+    programPackageOrderedProgram,
     trivialLocatedProgramPackage,
     trivialProgramPackage,
   )
@@ -366,8 +366,9 @@ checkProgram program =
   checkProgramPackage (trivialProgramPackage program)
 
 checkProgramPackage :: ProgramPackage -> Either ProgramError CheckedProgram
-checkProgramPackage package =
-  resolveProgram (programPackageProgram package) >>= checkResolvedProgram
+checkProgramPackage package = do
+  orderedProgram <- programPackageOrderedProgram package
+  resolveProgram orderedProgram >>= checkResolvedProgram
 
 checkResolvedProgram :: ResolvedProgram -> Either ProgramError CheckedProgram
 checkResolvedProgram resolved = runTcM $ do
@@ -396,9 +397,12 @@ checkLocatedProgram located =
 
 checkLocatedProgramPackage :: LocatedProgramPackage -> Either ProgramDiagnostic CheckedProgram
 checkLocatedProgramPackage package =
-  case checkProgramPackage (locatedProgramPackagePackage package) of
-    Right checked -> Right checked
+  case locatedProgramPackageOrderedProgram package of
     Left err -> Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err)
+    Right orderedProgram ->
+      case resolveProgram (P.locatedProgram orderedProgram) >>= checkResolvedProgram of
+        Right checked -> Right checked
+        Left err -> Left (diagnosticForProgramError (Just orderedProgram) err)
 
 lookupResolvedLocalTypeIdentity :: ResolvedSemanticModule -> P.TypeName -> TcM SymbolIdentity
 lookupResolvedLocalTypeIdentity resolvedModule name =
