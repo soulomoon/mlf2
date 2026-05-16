@@ -117,7 +117,7 @@ allow it.
 
 ## Milestones
 
-### [in-progress] 1. Primitive Inventory Module
+### [done] 1. Primitive Inventory Module
 
 - Milestone id: `milestone-1`
 - Depends on: none
@@ -138,6 +138,7 @@ allow it.
 #### Completion Pointers: milestone-1
 
 - round-238 created `MLF.Primitive.Inventory`, migrated the selected frontend/backend adapters to that private owner, kept lowerer wrapper/runtime implementation details local, and passed focused primitive checks plus the full cabal gate.
+- round-239 moved LLVM lowering primitive-name/support coverage to MLF.Primitive.Inventory, kept lowerer wrapper/runtime details local, and passed focused primitive checks plus cabal build all && cabal test.
 
 #### Candidate Direction: Primitive Inventory Module
 

@@ -36,12 +36,12 @@ emit tag-only heap objects. This is evidence for private lowering policy, not
 a second IR or public lowering interface.
 
 Row-5 primitive/eager ownership is part of the same raw/native inspection
-contract. The current primitive surface is the closed reserved runtime-binding set
-`__mlfp_and`, `__io_pure`, `__io_bind`, and `__io_putStrLn`.
-That shared builtin-type and primitive-signature inventory lives in
-`MLF.Primitive.Inventory`; native lowering consumes it through
-`MLF.Backend.IR` and `MLF.Backend.Convert`, while wrapper/runtime
-implementation names remain lowerer-local.
+contract. The current primitive surface is the inventory-owned reserved
+runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and` plus the IO
+primitive names classified there for native support. Native lowering consumes
+that inventory directly for lowerable primitive names, while wrapper bodies,
+C runtime symbol names, closure layout, and eager sequencing implementation
+details remain lowerer-local.
 `emit-backend` and `emit-native` keep those primitives on the same
 `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`,
 no second executable IR, and no broad FFI lane.
@@ -115,10 +115,11 @@ Native emission owns the small process/runtime surface it needs:
 - `malloc`: declared when heap-allocated constructors or closure records need
   allocation.
 - `putchar`: declared for character-by-character String rendering.
-- `__mlfp_and`: emitted as a backend-owned boolean primitive when no program
-  binding owns that name.
-- `__io_pure`, `__io_bind`, `__io_putStrLn`: IO runtime primitives emitted as
-  closure-allocating wrapper functions with entry-point implementations.
+- `__mlfp_and`: inventory-classified as the backend-owned boolean primitive
+  and emitted when no program binding owns that name.
+- Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
+  `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
+  functions with entry-point implementations.
 - `__mlfp_native_render$...`: private renderer functions generated for each
   native-renderable result type reachable from the program `main` result.
 - `__mlfp_native_*` string globals: format strings, booleans, punctuation, and

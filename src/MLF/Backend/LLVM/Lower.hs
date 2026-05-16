@@ -80,7 +80,9 @@ metadata and term nodes.
 -}
 {- Note [Primitive operations and eager sequencing]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Row-5 primitive/eager ownership keeps the primitive surface at the closed reserved runtime-binding set `__mlfp_and`, `__io_pure`, `__io_bind`, and `__io_putStrLn`.
+Row-5 primitive/eager ownership keeps the primitive surface at the
+inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
+`__mlfp_and` plus the IO primitive names classified there for native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
 The lowerer relies on the current eager order exactly as written:
@@ -142,6 +144,7 @@ import MLF.Backend.LLVM.Lower.Types
 import MLF.Backend.LLVM.Syntax
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Syntax (Lit (..))
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Util.Names (freshNameLike)
 
 lowerBackendProgram :: BackendProgram -> Either BackendLLVMError LLVMModule
@@ -784,43 +787,43 @@ nativeAndFunction =
 -- IO runtime primitives
 
 ioPureName :: String
-ioPureName = "__io_pure"
+ioPureName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOPure
 
 ioBindName :: String
-ioBindName = "__io_bind"
+ioBindName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOBind
 
 ioPutStrLnName :: String
-ioPutStrLnName = "__io_putStrLn"
+ioPutStrLnName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOPutStrLn
 
 ioGetLineName :: String
-ioGetLineName = "__io_getLine"
+ioGetLineName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOGetLine
 
 ioPutStrName :: String
-ioPutStrName = "__io_putStr"
+ioPutStrName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOPutStr
 
 ioReadFileName :: String
-ioReadFileName = "__io_readFile"
+ioReadFileName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOReadFile
 
 ioWriteFileName :: String
-ioWriteFileName = "__io_writeFile"
+ioWriteFileName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOWriteFile
 
 ioAppendFileName :: String
-ioAppendFileName = "__io_appendFile"
+ioAppendFileName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOAppendFile
 
 ioExitWithName :: String
-ioExitWithName = "__io_exitWith"
+ioExitWithName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOExitWith
 
 ioNewIORefName :: String
-ioNewIORefName = "__io_newIORef"
+ioNewIORefName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIONewIORef
 
 ioReadIORefName :: String
-ioReadIORefName = "__io_readIORef"
+ioReadIORefName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOReadIORef
 
 ioWriteIORefName :: String
-ioWriteIORefName = "__io_writeIORef"
+ioWriteIORefName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOWriteIORef
 
 ioGetArgsName :: String
-ioGetArgsName = "__io_getArgs"
+ioGetArgsName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOGetArgs
 
 nativeIOEntryName :: String -> String
 nativeIOEntryName prim = prim ++ ".entry"
@@ -830,21 +833,38 @@ nativeIOWrapperName prim = prim ++ ".wrapper"
 
 nativeIOFunctions :: ProgramBase -> [LLVMFunction]
 nativeIOFunctions _base =
-  [ ioPureEntry, ioPureWrapper
-  , ioBindEntry, ioBindWrapper
-  , ioPutStrLnEntry, ioPutStrLnWrapper
-  , ioGetLineEntry, ioGetLineWrapper
-  , ioPutStrEntry, ioPutStrWrapper
-  , ioReadFileEntry, ioReadFileWrapper
-  , ioWriteFileEntry, ioWriteFileWrapper
-  , ioAppendFileEntry, ioAppendFileWrapper
-  , ioExitWithEntry, ioExitWithWrapper
-  , ioNewIORefEntry, ioNewIORefWrapper
-  , ioReadIORefEntry, ioReadIORefWrapper
-  , ioWriteIORefEntry, ioWriteIORefWrapper
-  , ioGetArgsEntry, ioGetArgsWrapper
-  ]
+  concatMap snd (checkedIOPrimitiveImplementations nativeIOPrimitiveImplementations)
   where
+    nativeIOPrimitiveImplementations =
+      [ (ioPureName, [ioPureEntry, ioPureWrapper]),
+        (ioBindName, [ioBindEntry, ioBindWrapper]),
+        (ioPutStrLnName, [ioPutStrLnEntry, ioPutStrLnWrapper]),
+        (ioGetLineName, [ioGetLineEntry, ioGetLineWrapper]),
+        (ioPutStrName, [ioPutStrEntry, ioPutStrWrapper]),
+        (ioReadFileName, [ioReadFileEntry, ioReadFileWrapper]),
+        (ioWriteFileName, [ioWriteFileEntry, ioWriteFileWrapper]),
+        (ioAppendFileName, [ioAppendFileEntry, ioAppendFileWrapper]),
+        (ioExitWithName, [ioExitWithEntry, ioExitWithWrapper]),
+        (ioNewIORefName, [ioNewIORefEntry, ioNewIORefWrapper]),
+        (ioReadIORefName, [ioReadIORefEntry, ioReadIORefWrapper]),
+        (ioWriteIORefName, [ioWriteIORefEntry, ioWriteIORefWrapper]),
+        (ioGetArgsName, [ioGetArgsEntry, ioGetArgsWrapper])
+      ]
+
+    checkedIOPrimitiveImplementations implementations
+      | Set.null missing && Set.null extra = implementations
+      | otherwise =
+          error
+            ( "internal native IO primitive coverage drift: missing "
+                ++ show (Set.toAscList missing)
+                ++ ", extra "
+                ++ show (Set.toAscList extra)
+            )
+      where
+        implementedNames = Set.fromList (map fst implementations)
+        missing = PrimitiveInventory.nativeIOPrimitiveNames `Set.difference` implementedNames
+        extra = implementedNames `Set.difference` PrimitiveInventory.nativeIOPrimitiveNames
+
     emitMallocLocal :: String -> Int -> LowerM LLVMOperand
     emitMallocLocal prefix size =
       emitAssign prefix LLVMPtr (LLVMCall runtimeMallocName [(LLVMInt 64, LLVMIntLiteral 64 (toInteger size))])
@@ -1055,7 +1075,7 @@ nativeIOFunctions _base =
 
 -- | Names of IO runtime primitives that are handled specially.
 ioPrimitiveNames :: Set.Set String
-ioPrimitiveNames = Set.fromList [ioPureName, ioBindName, ioPutStrLnName, ioGetLineName, ioPutStrName, ioReadFileName, ioWriteFileName, ioAppendFileName, ioExitWithName, ioNewIORefName, ioReadIORefName, ioWriteIORefName, ioGetArgsName]
+ioPrimitiveNames = PrimitiveInventory.nativeIOPrimitiveNames
 
 resolveIOPrimitiveAsValue :: BackendType -> String -> LowerM LowerValue
 resolveIOPrimitiveAsValue ty name = do
@@ -1274,7 +1294,7 @@ canEmitFunctionParameter paramName paramTy
 
 runtimeAndName :: String
 runtimeAndName =
-  "__mlfp_and"
+  PrimitiveInventory.nativeAndPrimitiveName
 
 runtimeMallocName :: String
 runtimeMallocName =

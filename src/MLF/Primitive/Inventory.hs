@@ -3,6 +3,8 @@
 
 module MLF.Primitive.Inventory
   ( BuiltinTypeSpec (..),
+    PrimitiveIOOperation (..),
+    PrimitiveNativeSupport (..),
     PrimitiveType (..),
     PrimitiveValueSpec (..),
     builtinModuleName,
@@ -17,6 +19,11 @@ module MLF.Primitive.Inventory
     matchesBuiltinTypeName,
     primitiveValueSpecs,
     primitiveValueNames,
+    primitiveNativeSupport,
+    nativeAndPrimitiveName,
+    nativeIOPrimitiveName,
+    nativeIOPrimitiveNames,
+    nativeLowerablePrimitiveNames,
     primitiveTypeToSourceType,
     primitiveTypeToElabType,
     canonicalizeBuiltinSourceType,
@@ -50,9 +57,32 @@ data PrimitiveType
   | PrimitiveTypeForall String PrimitiveType
   deriving (Eq, Show)
 
+data PrimitiveIOOperation
+  = PrimitiveIOPure
+  | PrimitiveIOBind
+  | PrimitiveIOPutStrLn
+  | PrimitiveIOGetLine
+  | PrimitiveIOPutStr
+  | PrimitiveIOReadFile
+  | PrimitiveIOWriteFile
+  | PrimitiveIOAppendFile
+  | PrimitiveIOExitWith
+  | PrimitiveIONewIORef
+  | PrimitiveIOReadIORef
+  | PrimitiveIOWriteIORef
+  | PrimitiveIOGetArgs
+  deriving (Bounded, Enum, Eq, Ord, Show)
+
+data PrimitiveNativeSupport
+  = PrimitiveNativeUnsupported
+  | PrimitiveNativeBooleanAnd
+  | PrimitiveNativeIO PrimitiveIOOperation
+  deriving (Eq, Ord, Show)
+
 data PrimitiveValueSpec = PrimitiveValueSpec
   { primitiveValueType :: PrimitiveType,
-    primitiveValueClosureValueArguments :: Set Int
+    primitiveValueClosureValueArguments :: Set Int,
+    primitiveValueNativeSupport :: PrimitiveNativeSupport
   }
   deriving (Eq, Show)
 
@@ -103,73 +133,158 @@ matchesBuiltinTypeName builtinName referenceName =
 primitiveValueSpecs :: Map String PrimitiveValueSpec
 primitiveValueSpecs =
   Map.fromList
-    [ ("__mlfp_and", primitiveValueSpec (boolTy `PrimitiveTypeArrow` (boolTy `PrimitiveTypeArrow` boolTy)) Set.empty),
-      ( "__io_pure",
+    [ ( andPrimitiveName,
         primitiveValueSpec
-          (PrimitiveTypeForall "a" (PrimitiveTypeVar "a" `PrimitiveTypeArrow` ioOf (PrimitiveTypeVar "a")))
+          PrimitiveNativeBooleanAnd
+          (boolTy `PrimitiveTypeArrow` (boolTy `PrimitiveTypeArrow` boolTy))
           Set.empty
       ),
-      ( "__io_bind",
-        primitiveValueSpec
-          ( PrimitiveTypeForall
-              "a"
-              ( PrimitiveTypeForall
-                  "b"
-                  (ioOf (PrimitiveTypeVar "a")
-                    `PrimitiveTypeArrow` ((PrimitiveTypeVar "a" `PrimitiveTypeArrow` ioOf (PrimitiveTypeVar "b")) `PrimitiveTypeArrow` ioOf (PrimitiveTypeVar "b")))
-              )
-          )
-          (Set.singleton 1)
-      ),
-      ("__io_putStrLn", primitiveValueSpec (stringTy `PrimitiveTypeArrow` ioOf unitTy) Set.empty),
-      ("__io_getLine", primitiveValueSpec (ioOf stringTy) Set.empty),
-      ("__io_putStr", primitiveValueSpec (stringTy `PrimitiveTypeArrow` ioOf unitTy) Set.empty),
-      ("__io_readFile", primitiveValueSpec (stringTy `PrimitiveTypeArrow` ioOf stringTy) Set.empty),
-      ("__io_writeFile", primitiveValueSpec (stringTy `PrimitiveTypeArrow` (stringTy `PrimitiveTypeArrow` ioOf unitTy)) Set.empty),
-      ("__io_appendFile", primitiveValueSpec (stringTy `PrimitiveTypeArrow` (stringTy `PrimitiveTypeArrow` ioOf unitTy)) Set.empty),
-      ("__io_exitWith", primitiveValueSpec (intTy `PrimitiveTypeArrow` ioOf unitTy) Set.empty),
-      ( "__io_newIORef",
-        primitiveValueSpec
-          ( PrimitiveTypeForall
-              "a"
-              (PrimitiveTypeVar "a" `PrimitiveTypeArrow` ioOf (PrimitiveTypeCon "IORef" (PrimitiveTypeVar "a" :| [])))
-          )
-          Set.empty
-      ),
-      ( "__io_readIORef",
-        primitiveValueSpec
-          ( PrimitiveTypeForall
-              "a"
-              (PrimitiveTypeCon "IORef" (PrimitiveTypeVar "a" :| []) `PrimitiveTypeArrow` ioOf (PrimitiveTypeVar "a"))
-          )
-          Set.empty
-      ),
-      ( "__io_writeIORef",
-        primitiveValueSpec
-          ( PrimitiveTypeForall
-              "a"
-              ( PrimitiveTypeCon "IORef" (PrimitiveTypeVar "a" :| [])
-                  `PrimitiveTypeArrow` (PrimitiveTypeVar "a" `PrimitiveTypeArrow` ioOf unitTy)
-              )
-          )
-          Set.empty
-      ),
-      ("__io_getArgs", primitiveValueSpec (ioOf (PrimitiveTypeCon "List" (stringTy :| []))) Set.empty)
+      nativeIOSpec
+        PrimitiveIOPure
+        ( PrimitiveTypeForall
+            "a"
+            (PrimitiveTypeVar "a" `PrimitiveTypeArrow` ioOf (PrimitiveTypeVar "a"))
+        )
+        Set.empty,
+      nativeIOSpec
+        PrimitiveIOBind
+        ( PrimitiveTypeForall
+            "a"
+            ( PrimitiveTypeForall
+                "b"
+                ( ioOf (PrimitiveTypeVar "a")
+                    `PrimitiveTypeArrow` ( (PrimitiveTypeVar "a" `PrimitiveTypeArrow` ioOf (PrimitiveTypeVar "b"))
+                                             `PrimitiveTypeArrow` ioOf (PrimitiveTypeVar "b")
+                                         )
+                )
+            )
+        )
+        (Set.singleton 1),
+      nativeIOSpec PrimitiveIOPutStrLn (stringTy `PrimitiveTypeArrow` ioOf unitTy) Set.empty,
+      nativeIOSpec PrimitiveIOGetLine (ioOf stringTy) Set.empty,
+      nativeIOSpec PrimitiveIOPutStr (stringTy `PrimitiveTypeArrow` ioOf unitTy) Set.empty,
+      nativeIOSpec PrimitiveIOReadFile (stringTy `PrimitiveTypeArrow` ioOf stringTy) Set.empty,
+      nativeIOSpec
+        PrimitiveIOWriteFile
+        (stringTy `PrimitiveTypeArrow` (stringTy `PrimitiveTypeArrow` ioOf unitTy))
+        Set.empty,
+      nativeIOSpec
+        PrimitiveIOAppendFile
+        (stringTy `PrimitiveTypeArrow` (stringTy `PrimitiveTypeArrow` ioOf unitTy))
+        Set.empty,
+      nativeIOSpec PrimitiveIOExitWith (intTy `PrimitiveTypeArrow` ioOf unitTy) Set.empty,
+      nativeIOSpec
+        PrimitiveIONewIORef
+        ( PrimitiveTypeForall
+            "a"
+            (PrimitiveTypeVar "a" `PrimitiveTypeArrow` ioOf (ioRefOf (PrimitiveTypeVar "a")))
+        )
+        Set.empty,
+      nativeIOSpec
+        PrimitiveIOReadIORef
+        ( PrimitiveTypeForall
+            "a"
+            (ioRefOf (PrimitiveTypeVar "a") `PrimitiveTypeArrow` ioOf (PrimitiveTypeVar "a"))
+        )
+        Set.empty,
+      nativeIOSpec
+        PrimitiveIOWriteIORef
+        ( PrimitiveTypeForall
+            "a"
+            ( ioRefOf (PrimitiveTypeVar "a")
+                `PrimitiveTypeArrow` (PrimitiveTypeVar "a" `PrimitiveTypeArrow` ioOf unitTy)
+            )
+        )
+        Set.empty,
+      nativeIOSpec
+        PrimitiveIOGetArgs
+        (ioOf (listOf stringTy))
+        Set.empty
     ]
   where
-    primitiveValueSpec ty closureValueArguments =
+    nativeIOSpec operation ty closureValueArguments =
+      ( nativeIOPrimitiveName operation,
+        primitiveValueSpec (PrimitiveNativeIO operation) ty closureValueArguments
+      )
+
+    primitiveValueSpec nativeSupport ty closureValueArguments =
       PrimitiveValueSpec
         { primitiveValueType = ty,
-          primitiveValueClosureValueArguments = closureValueArguments
+          primitiveValueClosureValueArguments = closureValueArguments,
+          primitiveValueNativeSupport = nativeSupport
         }
     boolTy = PrimitiveTypeBase "Bool"
     intTy = PrimitiveTypeBase "Int"
     stringTy = PrimitiveTypeBase "String"
     unitTy = PrimitiveTypeBase "Unit"
     ioOf ty = PrimitiveTypeCon "IO" (ty :| [])
+    ioRefOf ty = PrimitiveTypeCon "IORef" (ty :| [])
+    listOf ty = PrimitiveTypeCon "List" (ty :| [])
 
 primitiveValueNames :: Set String
 primitiveValueNames = Map.keysSet primitiveValueSpecs
+
+primitiveNativeSupport :: String -> Maybe PrimitiveNativeSupport
+primitiveNativeSupport name =
+  primitiveValueNativeSupport <$> Map.lookup name primitiveValueSpecs
+
+nativeAndPrimitiveName :: String
+nativeAndPrimitiveName =
+  requireSinglePrimitiveNativeSupport PrimitiveNativeBooleanAnd
+
+nativeIOPrimitiveName :: PrimitiveIOOperation -> String
+nativeIOPrimitiveName =
+  \case
+    PrimitiveIOPure -> "__io_pure"
+    PrimitiveIOBind -> "__io_bind"
+    PrimitiveIOPutStrLn -> "__io_putStrLn"
+    PrimitiveIOGetLine -> "__io_getLine"
+    PrimitiveIOPutStr -> "__io_putStr"
+    PrimitiveIOReadFile -> "__io_readFile"
+    PrimitiveIOWriteFile -> "__io_writeFile"
+    PrimitiveIOAppendFile -> "__io_appendFile"
+    PrimitiveIOExitWith -> "__io_exitWith"
+    PrimitiveIONewIORef -> "__io_newIORef"
+    PrimitiveIOReadIORef -> "__io_readIORef"
+    PrimitiveIOWriteIORef -> "__io_writeIORef"
+    PrimitiveIOGetArgs -> "__io_getArgs"
+
+nativeIOPrimitiveNames :: Set String
+nativeIOPrimitiveNames =
+  Map.keysSet (Map.filter (isPrimitiveNativeIO . primitiveValueNativeSupport) primitiveValueSpecs)
+
+nativeLowerablePrimitiveNames :: Set String
+nativeLowerablePrimitiveNames =
+  Map.keysSet (Map.filter (isPrimitiveNativeLowerable . primitiveValueNativeSupport) primitiveValueSpecs)
+
+andPrimitiveName :: String
+andPrimitiveName =
+  "__mlfp_and"
+
+requireSinglePrimitiveNativeSupport :: PrimitiveNativeSupport -> String
+requireSinglePrimitiveNativeSupport nativeSupport =
+  case Set.toList (Map.keysSet (Map.filter ((== nativeSupport) . primitiveValueNativeSupport) primitiveValueSpecs)) of
+    [name] -> name
+    names ->
+      error
+        ( "primitive inventory expected exactly one "
+            ++ show nativeSupport
+            ++ " primitive, found "
+            ++ show names
+        )
+
+isPrimitiveNativeIO :: PrimitiveNativeSupport -> Bool
+isPrimitiveNativeIO =
+  \case
+    PrimitiveNativeIO {} -> True
+    _ -> False
+
+isPrimitiveNativeLowerable :: PrimitiveNativeSupport -> Bool
+isPrimitiveNativeLowerable =
+  \case
+    PrimitiveNativeUnsupported -> False
+    PrimitiveNativeBooleanAnd -> True
+    PrimitiveNativeIO {} -> True
 
 primitiveTypeToSourceType :: PrimitiveType -> SrcType
 primitiveTypeToSourceType =

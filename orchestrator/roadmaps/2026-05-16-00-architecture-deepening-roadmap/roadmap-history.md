@@ -18,3 +18,4 @@ Contract: `orchestrator-v2`
 ## Completed Rounds
 
 - round-238 advanced milestone-1 in-progress by creating the private primitive inventory owner, migrating the selected frontend/backend adapters, and passing focused primitive checks plus the full cabal gate.
+- round-239 completed milestone-1 by finishing the LLVM lowering primitive-inventory adapter and passing the full verification gate.

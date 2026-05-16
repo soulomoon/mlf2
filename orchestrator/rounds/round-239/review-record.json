@@ -1,0 +1,36 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-239",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-primitive-inventory-module",
+  "extracted_item_id": "item-1a-llvm-lowering-primitive-support-adapter",
+  "decision": "approved",
+  "evidence_summary": "Diff hygiene passed, focused primitive/native checks passed, and `cabal build all && cabal test` passed with 2581 examples and 0 failures. The current head satisfies the milestone-1 completion signal by making frontend builtins, backend IR, checked-program conversion, and LLVM lowering consume `MLF.Primitive.Inventory` as the primitive owner while keeping lowerer implementation details local. Full validation also re-touched tracked `runtime/mlfp_io/target/release/libmlfp_io.d` with worktree-local path data; that generated file is outside the approved scope.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-1",
+        "expected_current_status": "in-progress",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-1"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-1-completion",
+        "text": "round-239 moved LLVM lowering primitive-name/support coverage to MLF.Primitive.Inventory, kept lowerer wrapper/runtime details local, and passed focused primitive checks plus cabal build all && cabal test."
+      }
+    ],
+    "history_entries": [
+      {
+        "anchor_id": "roadmap-history-completed-rounds",
+        "text": "round-239 completed milestone-1 by finishing the LLVM lowering primitive-inventory adapter and passing the full verification gate."
+      }
+    ],
+    "semantic_update_required_reason": null
+  }
+}

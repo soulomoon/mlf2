@@ -2,6 +2,7 @@ module PrimitiveInventorySpec (spec) where
 
 import Control.Monad (forM_)
 import qualified Data.Map.Strict as Map
+import qualified Data.Set as Set
 import qualified MLF.Frontend.Program.Builtins as Builtins
 import MLF.Frontend.Program.Types (ValueInfo (..))
 import qualified MLF.Primitive.Inventory as PrimitiveInventory
@@ -26,3 +27,26 @@ spec = describe "MLF.Primitive.Inventory" $ do
             `shouldBe` PrimitiveInventory.canonicalizeBuiltinSourceType valueType
         other ->
           expectationFailure ("expected ordinary builtin value for " ++ name ++ ", got " ++ show other)
+
+  it "classifies native-lowerable primitive support from the shared primitive inventory owner" $ do
+    PrimitiveInventory.primitiveNativeSupport PrimitiveInventory.nativeAndPrimitiveName
+      `shouldBe` Just PrimitiveInventory.PrimitiveNativeBooleanAnd
+
+    PrimitiveInventory.nativeIOPrimitiveNames
+      `shouldBe` Set.fromList (map PrimitiveInventory.nativeIOPrimitiveName allNativeIOOperations)
+    PrimitiveInventory.nativeLowerablePrimitiveNames
+      `shouldBe` Set.insert PrimitiveInventory.nativeAndPrimitiveName PrimitiveInventory.nativeIOPrimitiveNames
+    PrimitiveInventory.nativeLowerablePrimitiveNames
+      `shouldSatisfy` (`Set.isSubsetOf` PrimitiveInventory.primitiveValueNames)
+
+    forM_ (Map.toList PrimitiveInventory.primitiveValueSpecs) $ \(name, spec0) ->
+      case PrimitiveInventory.primitiveValueNativeSupport spec0 of
+        PrimitiveInventory.PrimitiveNativeUnsupported ->
+          name `shouldNotSatisfy` (`Set.member` PrimitiveInventory.nativeLowerablePrimitiveNames)
+        PrimitiveInventory.PrimitiveNativeBooleanAnd ->
+          name `shouldBe` PrimitiveInventory.nativeAndPrimitiveName
+        PrimitiveInventory.PrimitiveNativeIO operation ->
+          name `shouldBe` PrimitiveInventory.nativeIOPrimitiveName operation
+
+allNativeIOOperations :: [PrimitiveInventory.PrimitiveIOOperation]
+allNativeIOOperations = [minBound .. maxBound]

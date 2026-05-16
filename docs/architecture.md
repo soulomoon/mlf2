@@ -46,7 +46,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Finalize` — normalizes lowered surface eMLF, calls the internal detailed eMLF pipeline entrypoints with program-owned external binding modes, resolves `.mlfp` deferred obligations, and accepts rewritten terms only after the xMLF typecheck guard
 - `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI/file runner as an explicit import target
 - `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates pure checked `.mlfp` bindings through the existing xMLF runtime, executes checked `main : IO Unit` actions through the reserved IO primitive boundary, and renders recovered closed ADT values with source constructor syntax
-- `MLF.Primitive.Inventory` — private owner for builtin type names/kinds, opaque builtin metadata, and shared source/backend primitive signatures. `MLF.Frontend.Program.Builtins`, `MLF.Backend.IR`, and `MLF.Backend.Convert` adapt this inventory; LLVM lowering still owns wrapper/runtime implementation details downstream.
+- `MLF.Primitive.Inventory` — private owner for builtin type names/kinds, opaque builtin metadata, shared source/backend primitive signatures, and native support classification for lowerable reserved primitives. `MLF.Frontend.Program.Builtins`, `MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower` adapt this inventory; LLVM lowering still owns wrapper/runtime implementation details downstream.
 - `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before LLVM lowering
 - `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion, explicit ADT construct/case recovery, and closure conversion where the checked xMLF shape is unambiguous
 - `MLF.Backend.LLVM` — repo-local LLVM backend facade over a small typed LLVM AST, lowerer, and pretty-printer for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
@@ -251,16 +251,18 @@ implementation handoff and keep any cleanup aligned with
 `docs/adr/2026-05-14-backend-structural-recursive-data-matching.md`.
 
 The row-5 primitive/eager contract is explicit as well. The current primitive
-surface is the closed reserved runtime-binding set
-`__mlfp_and`, `__io_pure`, `__io_bind`, and `__io_putStrLn`. Checked-program
-conversion and lowering keep those primitives on the existing
+surface is the inventory-owned reserved runtime-binding set in
+`MLF.Primitive.Inventory`: `__mlfp_and` plus the IO primitive names classified
+there for native support. Checked-program conversion and lowering keep those
+primitives on the existing
 `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`,
 no second executable IR, no public lowering API, and no broad FFI lane.
 The shared builtin-type and primitive-signature inventory for this path lives
 in `MLF.Primitive.Inventory`; `MLF.Frontend.Program.Builtins`,
-`MLF.Backend.IR`, and `MLF.Backend.Convert` adapt that owner, while
-`MLF.Backend.LLVM.Lower` still owns downstream runtime wrapper and native
-support implementation details.
+`MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower` adapt
+that owner, while `MLF.Backend.LLVM.Lower` still owns downstream runtime
+wrapper bodies, C runtime symbol names, closure layout, and eager sequencing
+implementation details.
 
 The eager sequencing contract is reviewable at that same boundary:
 

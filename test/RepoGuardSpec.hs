@@ -467,21 +467,28 @@ spec = describe "Repository guardrails" $ do
     resolveSrc <- readFile "src/MLF/Frontend/Program/Resolve.hs"
     backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
     backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
+    backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
     architectureSrc <- readFile "docs/architecture.md"
     nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
 
     inventorySrc `shouldSatisfy` isInfixOf "builtinTypeSpecs :: Map String BuiltinTypeSpec"
     inventorySrc `shouldSatisfy` isInfixOf "primitiveValueSpecs :: Map String PrimitiveValueSpec"
+    inventorySrc `shouldSatisfy` isInfixOf "primitiveValueNativeSupport :: PrimitiveNativeSupport"
+    inventorySrc `shouldSatisfy` isInfixOf "nativeIOPrimitiveNames :: Set String"
     forM_
       [ builtinsSrc,
         resolveSrc,
         backendIRSrc,
-        backendConvertSrc
+        backendConvertSrc,
+        backendLowerSrc
       ]
       $ \src ->
         src `shouldSatisfy` isInfixOf "MLF.Primitive.Inventory"
     builtinsSrc `shouldSatisfy` (not . isInfixOf "builtinTypeKinds ::")
     backendConvertSrc `shouldSatisfy` (not . isInfixOf "backendBuiltinTypeNames ::")
+    backendLowerSrc `shouldSatisfy` isInfixOf "PrimitiveInventory.nativeIOPrimitiveNames"
+    backendLowerSrc `shouldSatisfy` (not . isInfixOf "ioPrimitiveNames = Set.fromList")
+    backendLowerSrc `shouldSatisfy` (not . isInfixOf "runtimeAndName =\n  \"__mlfp_and\"")
     architectureSrc `shouldSatisfy` isInfixOf "`MLF.Primitive.Inventory`"
     nativePipelineSrc `shouldSatisfy` isInfixOf "`MLF.Primitive.Inventory`"
 
@@ -1025,11 +1032,12 @@ backendLowerADTCaseLayoutMarkers =
 
 primitiveOperationEagerOrderMarkers :: [String]
 primitiveOperationEagerOrderMarkers =
-  [ "closed reserved runtime-binding set",
+  [ "inventory-owned reserved",
+    "runtime-binding set",
+    "`MLF.Primitive.Inventory`",
     "__mlfp_and",
-    "__io_pure",
-    "__io_bind",
-    "__io_putStrLn",
+    "primitive names",
+    "native support",
     "`BackendVar`, `BackendApp`, and `BackendTyApp`",
     "no new `BackendPrim`",
     "let RHS before body",

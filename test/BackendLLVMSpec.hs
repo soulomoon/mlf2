@@ -3,7 +3,7 @@
 module BackendLLVMSpec (spec) where
 
 import Control.Exception (evaluate)
-import Control.Monad (when)
+import Control.Monad (forM_, when)
 import Data.List (isInfixOf)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
@@ -30,6 +30,7 @@ import MLF.Frontend.Program.Types (CheckedProgram)
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Pipeline (checkProgram)
 import MLF.Program.CLI (emitBackendFile, emitNativeFile)
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import Parity.ProgramMatrix
   ( ProgramMatrixCase (..),
     ProgramMatrixExpectation (..),
@@ -68,6 +69,13 @@ spec = describe "MLF.Backend.LLVM" $ do
       output <- requireRight =<< emitNativeSource ioPutStrLnMainProgram
       output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
       output `shouldSatisfy` isInfixOf "call ptr @\"__io_putStrLn.wrapper\""
+      validateLLVMAssembly output
+
+    it "derives native IO wrapper coverage from the primitive inventory" $ do
+      output <- requireRight =<< emitNativeSource ioPutStrLnMainProgram
+      output `shouldSatisfy` isInfixOf ("define i1 @\"" ++ PrimitiveInventory.nativeAndPrimitiveName ++ "\"")
+      forM_ (Set.toList PrimitiveInventory.nativeIOPrimitiveNames) $ \name ->
+        output `shouldSatisfy` isInfixOf ("define private ptr @\"" ++ name ++ ".wrapper\"")
       validateLLVMAssembly output
 
     it "executes __io_bind main through the native IO runtime" $ do

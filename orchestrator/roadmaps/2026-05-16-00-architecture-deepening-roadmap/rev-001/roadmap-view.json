@@ -8,7 +8,7 @@
     {
       "milestone_id": "milestone-1",
       "title": "Primitive Inventory Module",
-            "status": "in-progress",
+      "status": "done",
       "depends_on": [],
       "parallel_lane": "lane-backend-runtime",
       "status_anchor": "milestone-1",
@@ -166,7 +166,7 @@
   "anchors": {
     "milestone-1": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
-            "selector": "### [in-progress] 1. Primitive Inventory Module"
+        "selector": "### [done] 1. Primitive Inventory Module"
     },
     "milestone-1-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",

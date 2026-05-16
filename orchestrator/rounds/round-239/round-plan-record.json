@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-239",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-primitive-inventory-module",
+  "extracted_item_id": "item-1a-llvm-lowering-primitive-support-adapter",
+  "plan_path": "orchestrator/rounds/round-239/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}
