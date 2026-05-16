@@ -83,6 +83,23 @@ spec = describe "MLF.Constraint.Presolution facade" $ do
         finalizeSrc <- readFile "src/MLF/Constraint/Finalize.hs"
         finalizeSrc `shouldSatisfy` (not . isInfixOf "stepSolvedFromPresolutionView")
 
+    it "snapshot-finalization guard: Finalize facade does not expose stepwise or fixture helpers" $ do
+        finalizeSrc <- readFile "src/MLF/Constraint/Finalize.hs"
+        forM_
+            [ "stepSanitizeSnapshotUf"
+            , "stepCanonicalizeConstraint"
+            , "stepPruneSolvedBindParents"
+            , "stepValidateSolvedStrict"
+            , "presolutionViewFromSolved"
+            ] $ \marker ->
+                finalizeSrc `shouldSatisfy` (not . isInfixOf marker)
+
+    it "snapshot-finalization guard: solved-to-view fixtures live behind test support" $ do
+        supportSrc <- readFile "src/MLF/Constraint/Finalize/TestSupport.hs"
+        supportSrc `shouldSatisfy` isInfixOf "module MLF.Constraint.Finalize.TestSupport"
+        supportSrc `shouldSatisfy` isInfixOf "presolutionViewFromSolved"
+        supportSrc `shouldSatisfy` isInfixOf "stepPruneSolvedBindParents"
+
 bannedMarkers :: [String]
 bannedMarkers =
     [ "PresolutionState(..)"

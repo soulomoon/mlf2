@@ -1,0 +1,36 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-244",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-6",
+  "direction_id": "direction-6a-snapshot-finalization-seam",
+  "extracted_item_id": "round-244-finalize-internal-test-support-split",
+  "decision": "approved",
+  "evidence_summary": "Diff matches the round-244 Snapshot Finalization split plan; focused facade, solved, and repository guard checks passed; cabal build all && cabal test passed with 2586 examples and 0 failures.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-6",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-6"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-6-completion",
+        "text": "round-244 completed Snapshot Finalization split: Finalize exposes only production construction entries, fixture mechanics moved to Finalize.TestSupport, and focused/full Cabal validation passed."
+      }
+    ],
+    "history_entries": [
+      {
+        "anchor_id": "roadmap-history-completed-rounds",
+        "text": "round-244 completed milestone-6 by moving Snapshot Finalization stepwise/test mechanics behind internal and test-support seams."
+      }
+    ],
+    "semantic_update_required_reason": null
+  }
+}

@@ -417,9 +417,10 @@ In the current codebase, `PresolutionView` is the primary read-only runtime/inte
 | Current home | Contents | Rule |
 |---|---|---|
 | Public `MLF.Constraint.Solved` facade | `Solved`, `fromSolveOutput`, `canonical`, `canonicalMap`, `originalConstraint`, `canonicalConstraint`, `validateCanonicalGraphStrict` | This is the current production surface. It exists to preserve replay-faithful solved construction, explicit original ↔ canonical correspondence, and strict post-finalization validation. Do not add convenience read queries back to this facade. |
-| `MLF.Constraint.Finalize` | `presolutionViewFromSnapshot`, `presolutionViewFromSolved`, `finalizePresolutionViewFromSnapshot`, `finalizeSolvedFromSnapshot`, `finalizeSolvedForConstraint`, strict snapshot/solved validation steps | This is the construction authority for Snapshot Finalization. It may use solved internals, but callers should ask `Finalize` for finalized views or solved handles instead of assembling them through compatibility adapters. |
-| `MLF.Constraint.Solved.Internal` | Owner-local constructors and helpers such as `fromConstraintAndUf`, `fromPreRewriteState`, `rebuildWithConstraint`, `pruneBindParentsSolved`, and internal read/query utilities | Internal implementation detail for solved construction and finalization. Import is allowed only to the solved facade, solved test support, `Finalize`, or modules under `MLF.Constraint.Solved.*`. |
-| `MLF.Constraint.Solved.TestSupport` and `test/SolvedFacadeTestUtil.hs` | Low-level fixture constructor `mkTestSolved`, snapshot fixture construction, and audit-only original-domain helpers such as `classMembers`, `originalNode`, `originalBindParent`, `wasOriginalBinder`, and `validateOriginalCanonicalAgreement` | Test and audit support only. These helpers must not widen the production `Solved` facade. |
+| `MLF.Constraint.Finalize` | `presolutionViewFromSnapshot`, `finalizePresolutionViewFromSnapshot`, `validateCanonicalSnapshotStrict`, `finalizeSolvedFromSnapshot`, `finalizeSolvedForConstraint` | This is the production construction authority for Snapshot Finalization. It may use owner-local solved/finalize internals, but callers should ask `Finalize` for finalized views or solved handles instead of assembling them through compatibility adapters. Stepwise mechanics and solved-to-view fixtures are not part of this facade. |
+| `MLF.Constraint.Finalize.Internal` | Owner-local snapshot sanitizing, canonicalization, solved bind-parent pruning, strict solved validation, and solved-to-view record construction used by `Finalize` and Finalize test support | Private Snapshot Finalization mechanics. Import is allowed only to `MLF.Constraint.Finalize` and `MLF.Constraint.Finalize.TestSupport`. |
+| `MLF.Constraint.Solved.Internal` | Owner-local constructors and helpers such as `fromConstraintAndUf`, `fromPreRewriteState`, `rebuildWithConstraint`, `pruneBindParentsSolved`, and internal read/query utilities | Internal implementation detail for solved construction and finalization. Import is allowed only to the solved facade, solved test support, Snapshot Finalization internals, or modules under `MLF.Constraint.Solved.*`. |
+| `MLF.Constraint.Finalize.TestSupport`, `MLF.Constraint.Solved.TestSupport`, and `test/SolvedFacadeTestUtil.hs` | Finalize fixture helpers such as solved-to-view construction and bind-parent pruning; low-level solved fixture constructor `mkTestSolved`; snapshot fixture construction; and audit-only original-domain helpers such as `classMembers`, `originalNode`, `originalBindParent`, `wasOriginalBinder`, and `validateOriginalCanonicalAgreement` | Test and audit support only. These helpers must not widen the production `Finalize` or `Solved` facades. |
 | Retired / guarded absent | `fromSolved`, `toRawPresolutionViewForLegacy`, reify-local `solvedFromView`, `Finalize.stepSolvedFromPresolutionView`, public `lookupNode`/`lookupBindParent`/`bindParents`/`lookupVarBound`/`genNodes`, public enumeration helpers, raw canonical container accessors, dead mutation hooks, and broad solved/view adapters | Keep absent. Current guard tests assert these do not reappear on the public facade or production adapter path. |
 
 ### Practical consequence
@@ -432,8 +433,8 @@ work through the current owners”:
 - use `MLF.Constraint.Finalize` for Snapshot Finalization construction;
 - use `MLF.Constraint.Solved` only for solved-handle construction from solve
   output, original/canonical correspondence, and strict solved validation;
-- keep low-level fixture construction behind `MLF.Constraint.Solved.TestSupport`
-  or test-local helpers.
+- keep low-level fixture construction behind `MLF.Constraint.Finalize.TestSupport`,
+  `MLF.Constraint.Solved.TestSupport`, or test-local helpers.
 
 The project goal is **not** “delete `Solved` no matter what”; it is “keep the
 remaining solved boundary only while it carries thesis-relevant finalized-snapshot

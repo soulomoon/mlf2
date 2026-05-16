@@ -3,6 +3,7 @@ module MLF.Constraint.Presolution.View (
     PresolutionView(..),
     SnapshotPreparation(..),
     buildPresolutionView,
+    sanitizedViewCanonicalMap,
     fromPresolutionResult,
     prepareSnapshotPreparation,
     prepareSnapshotPreparationFromParts
@@ -79,6 +80,10 @@ buildPresolutionView prepared canonicalConstraint =
         , pvBindParents = cBindParents constraint
         , pvCanonicalConstraint = canonicalConstraint
         }
+
+sanitizedViewCanonicalMap :: PresolutionView p -> IntMap NodeId
+sanitizedViewCanonicalMap view =
+    sanitizeSnapshotUf (pvCanonicalConstraint view) (pvCanonicalMap view)
 
 sanitizeSnapshotUf :: Constraint p -> IntMap NodeId -> IntMap NodeId
 sanitizeSnapshotUf c =

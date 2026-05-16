@@ -30,12 +30,11 @@ scope-relevant rigidity.
 
 import qualified Data.IntMap.Strict as IntMap
 import qualified Data.IntSet as IntSet
-import MLF.Constraint.Finalize (stepSanitizeSnapshotUf)
 import MLF.Constraint.Presolution.Plan.Context
   ( GaBindParents (..),
     GeneralizeEnv (..),
   )
-import MLF.Constraint.Presolution.View (PresolutionView (..))
+import MLF.Constraint.Presolution.View (PresolutionView (..), sanitizedViewCanonicalMap)
 import MLF.Constraint.Types.Graph hiding (lookupNode)
 import MLF.Util.ElabError (ElabError)
 import MLF.Util.Trace (TraceConfig, tcGeneralize)
@@ -61,7 +60,7 @@ mkGeneralizeEnv ::
   Either ElabError (GeneralizeEnv p)
 mkGeneralizeEnv traceCfg mbBindParentsGa presolutionView =
   let constraint = pvCanonicalConstraint presolutionView
-      canonicalMap = stepSanitizeSnapshotUf constraint (pvCanonicalMap presolutionView)
+      canonicalMap = sanitizedViewCanonicalMap presolutionView
       nodes =
         IntMap.fromList
           [ (getNodeId nid, node)

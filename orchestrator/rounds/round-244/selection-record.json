@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-244",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-6",
+  "direction_id": "direction-6a-snapshot-finalization-seam",
+  "extracted_item_id": "round-244-finalize-internal-test-support-split",
+  "summary": "Internalize Snapshot Finalization step helpers and route solved-to-view fixture mechanics through test-support while keeping MLF.Constraint.Finalize as the production seam.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

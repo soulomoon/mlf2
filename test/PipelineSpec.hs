@@ -18,6 +18,7 @@ import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Acyclicity qualified as Acyc
 import MLF.Constraint.Canonicalizer (canonicalizeNode, canonicalizerFrom)
 import MLF.Constraint.Finalize qualified as Finalize
+import MLF.Constraint.Finalize.TestSupport qualified as FinalizeTestSupport
 import MLF.Constraint.NodeAccess qualified as NodeAccess
 import MLF.Constraint.Normalize qualified as CNormalize
 import MLF.Constraint.Presolution
@@ -130,7 +131,7 @@ expectStrictPipelineFailure label result =
         ("Expected strict failure for " ++ label ++ ", but got type " ++ show ty)
 
 viewFromSolved :: Solved -> PresolutionViewBoundary.PresolutionView 'Raw
-viewFromSolved = Finalize.presolutionViewFromSolved
+viewFromSolved = FinalizeTestSupport.presolutionViewFromSolved
 
 matchesRecursiveArrow :: ElabType -> ElabType -> Bool
 matchesRecursiveArrow actual expected = case (actual, expected) of
@@ -279,7 +280,7 @@ resultTypeInputsForArtifacts
       paSolved = solved0,
       paAnnotated = ann0
     } =
-    let solvedClean = Finalize.stepPruneSolvedBindParents solved0
+    let solvedClean = FinalizeTestSupport.stepPruneSolvedBindParents solved0
         canon = makeCanonicalizer (Solved.canonicalMap solvedClean) (prRedirects pres)
         canonical = canonicalizeNode canon
         annRedirected = applyRedirectsToAnn (prRedirects pres) ann0

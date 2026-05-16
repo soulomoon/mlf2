@@ -14,7 +14,7 @@ import Data.Set qualified as Set
 import MLF.Binding.Canonicalization qualified as BindCanon
 import MLF.Binding.Tree qualified as Binding
 import MLF.Constraint.Canonicalizer (canonicalizeNode)
-import MLF.Constraint.Finalize qualified as Finalize
+import MLF.Constraint.Finalize.TestSupport qualified as Finalize
 import MLF.Constraint.Presolution
   ( EdgeTrace (..),
     PresolutionPlanBuilder (..),

@@ -72,6 +72,7 @@ library mlf2-internal
                       MLF.Constraint.Types.Phase.Singletons,
                       MLF.Constraint.Canonicalizer,
                       MLF.Constraint.Finalize,
+                      MLF.Constraint.Finalize.TestSupport,
                       MLF.Frontend.Syntax,
                       MLF.Frontend.Symbol,
                       MLF.Frontend.Syntax.Program,
@@ -163,6 +164,7 @@ library mlf2-internal
                       MLF.Elab.Types
     other-modules:    MLF.Constraint.Normalize.Internal,
                       MLF.Constraint.Types.Witness.Internal,
+                      MLF.Constraint.Finalize.Internal,
                        MLF.Constraint.Normalize.Graft,
                        MLF.Constraint.Normalize.Merge,
                        MLF.Constraint.Solved.Internal,

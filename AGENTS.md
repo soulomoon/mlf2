@@ -28,7 +28,7 @@
 - When adding a new spec module, wire it into both `mlf2.cabal` and `test/Main.hs`.
 - Keep the production surface narrow: if tests need low-level internal helpers, add a test-support seam rather than widening a production facade.
 - Commit messages should be imperative and descriptive. Update `CHANGELOG.md` only when the change records meaningful project progress rather than pure wording cleanup.
-- When using `spawn_agent`, use the builtin subagent with `model: "gpt-5.4"` and `reasoning_effort: "xhigh"` unless the user explicitly requests something else.
+- When using `spawn_agent`, use the builtin subagent with `model: "gpt-5.5"` and `reasoning_effort: "xhigh"` unless the user explicitly requests something else.
 
 ## Type-level Conventions
 

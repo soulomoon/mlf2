@@ -153,6 +153,10 @@ spec = describe "Repository guardrails" $ do
     offenders <- findConstraintBoundaryImportOffenders
     offenders `shouldBe` []
 
+  it "snapshot finalization internals stay behind Finalize and test-support seams" $ do
+    offenders <- findFinalizeInternalImportOffenders
+    offenders `shouldBe` []
+
   it "frontend syntax retires backward-compatible raw aliases and normalized patterns" $ do
     syntaxSrc <- readFile "src/MLF/Frontend/Syntax.hs"
     forM_
@@ -654,14 +658,37 @@ isAllowedConstraintBoundaryImport path moduleName =
     "MLF.Constraint.Solved.Internal" ->
       path
         `elem` [ "src/MLF/Constraint/Finalize.hs",
+                 "src/MLF/Constraint/Finalize/Internal.hs",
                  "src/MLF/Constraint/Solved.hs",
                  "src/MLF/Constraint/Solved/TestSupport.hs"
                ]
         || "src/MLF/Constraint/Solved/" `isPathPrefixOf` path
     "MLF.Constraint.Solve.TestSupport" -> False
     "MLF.Constraint.Solved.TestSupport" -> False
+    "MLF.Constraint.Finalize.TestSupport" -> False
+    "MLF.Constraint.Finalize.Internal" ->
+      path
+        `elem` [ "src/MLF/Constraint/Finalize.hs",
+                 "src/MLF/Constraint/Finalize/TestSupport.hs"
+               ]
     "MLF.Constraint.Types.Witness.TestSupport" -> False
     _ -> True
+
+findFinalizeInternalImportOffenders :: IO [String]
+findFinalizeInternalImportOffenders = do
+  hsFiles <- concat <$> mapM collectHsFiles ["src", "src-public", "app", "test", "src-research"]
+  fmap sort . fmap concat $
+    forM hsFiles $ \path -> do
+      src <- readFile path
+      pure
+        [ path ++ " imports MLF.Constraint.Finalize.Internal"
+        | moduleName <- importedModules src,
+          moduleName == "MLF.Constraint.Finalize.Internal",
+          path
+            `notElem` [ "src/MLF/Constraint/Finalize.hs",
+                        "src/MLF/Constraint/Finalize/TestSupport.hs"
+                      ]
+        ]
 
 importedModules :: String -> [String]
 importedModules src =

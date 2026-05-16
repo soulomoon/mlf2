@@ -6,7 +6,7 @@ module Reify.TypeSpec (spec) where
 import Data.IntSet qualified as IntSet
 import Data.List (isInfixOf, isPrefixOf)
 import Data.Set qualified as Set
-import MLF.Constraint.Finalize qualified as Finalize
+import MLF.Constraint.Finalize.TestSupport qualified as Finalize
 import MLF.Constraint.Presolution.View (PresolutionView (..))
 import MLF.Constraint.Solved qualified as Solved
 import MLF.Constraint.Types.Phase (Phase(Raw))

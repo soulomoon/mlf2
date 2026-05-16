@@ -79,7 +79,7 @@
     {
       "milestone_id": "milestone-6",
       "title": "Snapshot Finalization Seam",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-5"
       ],
@@ -206,7 +206,7 @@
     },
     "milestone-6": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 6. Snapshot Finalization Seam"
+      "selector": "### [done] 6. Snapshot Finalization Seam"
     },
     "milestone-6-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",

@@ -5,7 +5,7 @@ import qualified Data.IntMap.Strict as IntMap
 import qualified Data.Set as Set
 import Test.Hspec
 
-import qualified MLF.Constraint.Finalize as Finalize
+import qualified MLF.Constraint.Finalize.TestSupport as Finalize
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Canonicalizer (canonicalizeNode)

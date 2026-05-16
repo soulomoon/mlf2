@@ -311,7 +311,7 @@ allow it.
 - Extraction notes: one lawful first round is an ownership audit plus one
   narrow capability Adapter migration.
 
-### [pending] 6. Snapshot Finalization Seam
+### [done] 6. Snapshot Finalization Seam
 
 - Milestone id: `milestone-6`
 - Depends on: `milestone-5`
@@ -331,7 +331,7 @@ allow it.
   selected round proves a thesis-backed temporary seam.
 #### Completion Pointers: milestone-6
 
-none yet
+- round-244 completed Snapshot Finalization split: Finalize exposes only production construction entries, fixture mechanics moved to Finalize.TestSupport, and focused/full Cabal validation passed.
 
 #### Candidate Direction: Snapshot Finalization Seam
 
