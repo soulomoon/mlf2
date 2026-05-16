@@ -417,11 +417,13 @@ spec = describe "Repository guardrails" $ do
 
   it "callable-shape contract stays explicit and direct-vs-closure call heads stay unambiguous" $ do
     architectureSrc <- readFile "docs/architecture.md"
+    callableShapeSrc <- readFile "src/MLF/Backend/CallableShape.hs"
     backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
     backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
     backendLowerSrc <- readFile "src/MLF/Backend/LLVM/Lower.hs"
     forM_
       [ ("docs/architecture.md", architectureSrc, architectureCallableShapeMarkers),
+        ("src/MLF/Backend/CallableShape.hs", callableShapeSrc, backendCallableShapeOwnerMarkers),
         ("src/MLF/Backend/IR.hs", backendIRSrc, backendIRCallableShapeMarkers),
         ("src/MLF/Backend/Convert.hs", backendConvertSrc, backendConvertCallableShapeMarkers),
         ("src/MLF/Backend/LLVM/Lower.hs", backendLowerSrc, backendLowerCallableShapeMarkers)
@@ -974,8 +976,16 @@ architectureCallableShapeMarkers :: [String]
 architectureCallableShapeMarkers =
   [ "That callable contract is explicit. `BackendApp` is the direct first-order",
     "`BackendClosureCall` is the indirect closure-call node, so closure-valued",
+    "`MLF.Backend.CallableShape` is the private owner for the shared callable-head",
     "`BackendApp` heads must stay on the direct-call path",
     "`BackendClosureCall` heads must remain closure"
+  ]
+
+backendCallableShapeOwnerMarkers :: [String]
+backendCallableShapeOwnerMarkers =
+  [ "This private module centralizes the shared callable-head classification used by",
+    "`MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower`.",
+    "`MLF.Backend.IR` remains the single executable backend IR seam"
   ]
 
 backendIRCallableShapeMarkers :: [String]

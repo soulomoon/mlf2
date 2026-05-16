@@ -15,7 +15,9 @@ into `MLF.Backend.IR`: direct application, explicit closures and
 abstraction/application, and roll/unroll. Within that executable contract,
 `BackendApp` is reserved for direct first-order callable heads, while
 closure-valued aliases, captured closures, and case/let-selected closure
-values are emitted as `BackendClosureCall`. Checked-program conversion stops at `MLF.Backend.IR`;
+values are emitted as `BackendClosureCall`. The private owner
+`MLF.Backend.CallableShape` supplies the shared direct-vs-closure classifier
+that conversion consumes with conversion-local scope bookkeeping. Checked-program conversion stops at `MLF.Backend.IR`;
 unsupported checked shapes must fail here instead of being rerouted through a second IR layer.
 Unsupported checked shapes fail here instead of being normalized into lazy runtime artifacts, lowerer-private
 layout forms, or native-wrapper-specific machinery. There are no thunks, no update frames, no CAF update semantics,
@@ -69,7 +71,16 @@ import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
-import MLF.Backend.IR
+import MLF.Backend.CallableShape
+  ( BackendCallableBindingKind (..),
+    BackendCallableHead (..),
+    backendCallableHead,
+  )
+import MLF.Backend.IR hiding
+  ( BackendCallableBindingKind (..),
+    BackendCallableHead (..),
+    backendCallableHead,
+  )
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Elab.Inst (schemeToType)
 import MLF.Elab.TypeCheck (Env (..), typeCheckWithEnv)
@@ -2867,17 +2878,17 @@ isClosureConvertibleFunctionTerm term =
 isClosureAliasTerm :: ConvertContext -> ClosureScope -> ElabTerm -> Bool
 isClosureAliasTerm context scope term =
   case stripClosureHeadTypeInsts term of
-    EVar name -> closureScopeNameIsClosure context scope name
+    EVar name -> bindingNameUsesClosureCallPath context scope name
     _ -> False
 
 backendExprIsClosureValue :: ConvertContext -> ClosureScope -> BackendExpr -> Bool
 backendExprIsClosureValue context scope expr =
-  case backendCallableHead (convertCallableBindingKind context scope) expr of
+  case backendCallableHead (callableBindingKindInClosureScope context scope) expr of
     BackendClosureCallableHead _ -> True
     _ -> False
 
-convertCallableBindingKind :: ConvertContext -> ClosureScope -> String -> BackendCallableBindingKind
-convertCallableBindingKind context scope name
+callableBindingKindInClosureScope :: ConvertContext -> ClosureScope -> String -> BackendCallableBindingKind
+callableBindingKindInClosureScope context scope name
   | Set.member name (closureScopeLocals scope) =
       BackendCallableBindingClosure
   | Set.member name (closureScopeBoundTerms scope) =
@@ -2890,14 +2901,12 @@ convertCallableBindingKind context scope name
 isClosureHeadTerm :: ConvertContext -> ClosureScope -> ElabTerm -> Bool
 isClosureHeadTerm context scope term =
   case stripClosureHeadTypeInsts term of
-    EVar name -> closureScopeNameIsClosure context scope name
+    EVar name -> bindingNameUsesClosureCallPath context scope name
     _ -> False
 
-closureScopeNameIsClosure :: ConvertContext -> ClosureScope -> String -> Bool
-closureScopeNameIsClosure context scope name
-  | Set.member name (closureScopeLocals scope) = True
-  | Set.member name (closureScopeBoundTerms scope) = False
-  | otherwise = Set.member name (ccClosureGlobals context)
+bindingNameUsesClosureCallPath :: ConvertContext -> ClosureScope -> String -> Bool
+bindingNameUsesClosureCallPath context scope name =
+  callableBindingKindInClosureScope context scope name == BackendCallableBindingClosure
 
 stripClosureHeadTypeInsts :: ElabTerm -> ElabTerm
 stripClosureHeadTypeInsts =

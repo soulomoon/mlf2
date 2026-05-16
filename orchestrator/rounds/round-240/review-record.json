@@ -1,0 +1,36 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-240",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-backend-callable-shape-module",
+  "extracted_item_id": "item-2a-private-callable-shape-owner-module",
+  "decision": "approved",
+  "evidence_summary": "Private callable-shape owner is consumed by IR validation, conversion, and LLVM lowering; focused callable selectors, git diff --check, and cabal build all && cabal test passed.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-2",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-2"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-2-completion",
+        "text": "round-240 moved direct-vs-closure callable-head classification into private MLF.Backend.CallableShape consumed by IR, conversion, and LLVM lowering; focused callable checks and cabal build all && cabal test passed."
+      }
+    ],
+    "history_entries": [
+      {
+        "anchor_id": "roadmap-history-completed-rounds",
+        "text": "round-240 completed milestone-2 by centralizing backend callable-shape ownership in MLF.Backend.CallableShape with focused and full Cabal validation."
+      }
+    ],
+    "semantic_update_required_reason": null
+  }
+}

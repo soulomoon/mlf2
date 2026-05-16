@@ -157,7 +157,7 @@ allow it.
 - Extraction notes: a lawful first round may create the owner and migrate one
   adapter family, then leave further adapter migration to later rounds.
 
-### [pending] 2. Backend Callable-Shape Module
+### [done] 2. Backend Callable-Shape Module
 
 - Milestone id: `milestone-2`
 - Depends on: `milestone-1`
@@ -175,7 +175,7 @@ allow it.
   public backend IR.
 #### Completion Pointers: milestone-2
 
-none yet
+- round-240 moved direct-vs-closure callable-head classification into private MLF.Backend.CallableShape consumed by IR, conversion, and LLVM lowering; focused callable checks and cabal build all && cabal test passed.
 
 #### Candidate Direction: Backend Callable-Shape Module
 

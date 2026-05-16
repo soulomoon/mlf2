@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-240",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-backend-callable-shape-module",
+  "extracted_item_id": "item-2a-private-callable-shape-owner-module",
+  "plan_path": "orchestrator/rounds/round-240/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

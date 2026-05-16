@@ -47,6 +47,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI/file runner as an explicit import target
 - `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates pure checked `.mlfp` bindings through the existing xMLF runtime, executes checked `main : IO Unit` actions through the reserved IO primitive boundary, and renders recovered closed ADT values with source constructor syntax
 - `MLF.Primitive.Inventory` — private owner for builtin type names/kinds, opaque builtin metadata, shared source/backend primitive signatures, and native support classification for lowerable reserved primitives. `MLF.Frontend.Program.Builtins`, `MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower` adapt this inventory; LLVM lowering still owns wrapper/runtime implementation details downstream.
+- `MLF.Backend.CallableShape` — private owner for direct-vs-closure callable-head classification shared by `MLF.Backend.IR`, `MLF.Backend.Convert`, and `MLF.Backend.LLVM.Lower`; it centralizes callable-head policy without creating a second executable backend IR surface
 - `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before LLVM lowering
 - `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion, explicit ADT construct/case recovery, and closure conversion where the checked xMLF shape is unambiguous
 - `MLF.Backend.LLVM` — repo-local LLVM backend facade over a small typed LLVM AST, lowerer, and pretty-printer for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
@@ -228,6 +229,10 @@ call node, so local direct aliases that remain first-order stay on this path.
 aliases, captured closures, constructor-field projections, and case/let-
 selected closure values stay on this explicit path instead of relying on
 lowerer recovery.
+`MLF.Backend.CallableShape` is the private owner for the shared callable-head
+classifier that enforces this split; `MLF.Backend.IR` stays the executable IR
+seam, while conversion and lowering consume the same owner instead of keeping
+separate direct-vs-closure heuristics.
 
 The ADT/case ownership split is explicit. Row-4 ADT/case ownership means
 semantic constructor/case nodes stay in `MLF.Backend.IR`:

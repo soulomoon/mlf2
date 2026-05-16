@@ -20,7 +20,7 @@
     {
       "milestone_id": "milestone-2",
       "title": "Backend Callable-Shape Module",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-1"
       ],
@@ -174,7 +174,7 @@
     },
     "milestone-2": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 2. Backend Callable-Shape Module"
+        "selector": "### [done] 2. Backend Callable-Shape Module"
     },
     "milestone-2-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001/roadmap.md",

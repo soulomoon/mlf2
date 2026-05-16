@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-240",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-backend-callable-shape-module",
+  "extracted_item_id": "item-2a-private-callable-shape-owner-module",
+  "summary": "Extract a private backend callable-shape owner for direct-vs-closure head classification and make IR validation, checked-program conversion, and LLVM lowering consume that owner without introducing a second public backend IR.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

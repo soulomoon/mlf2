@@ -86,6 +86,7 @@ library mlf2-internal
                       MLF.Frontend.Program.Check,
                       MLF.Frontend.Program.Run,
                       MLF.Primitive.Inventory,
+                      MLF.Backend.CallableShape,
                       MLF.Backend.Convert,
                       MLF.Backend.IR,
                       MLF.Backend.LLVM,

@@ -50,10 +50,11 @@ contract rather than legalizing malformed `BackendApp` heads after let/case
 peeling. `BackendApp` remains the direct first-order call path, and closure-
 valued aliases, captured closures, and case/let-selected closure values must
 already reach lowering as `BackendClosureCall`. Raw LLVM emission and native emission
-both start from the same `MLF.Backend.IR` program; this private
-closure ABI, plus native wrapper/runtime symbol emission and executable
-rendering support, stays downstream of that IR rather than becoming a second
-executable IR or a lazy runtime.
+both start from the same `MLF.Backend.IR` program; the private
+`MLF.Backend.CallableShape` owner supplies the shared direct-vs-closure head
+classifier. The closure ABI, native wrapper/runtime symbol emission, and
+executable rendering support stay downstream of that IR rather than becoming a
+second executable IR or a lazy runtime.
 -}
 {- Note [ADT constructor runtime layout]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -138,7 +139,16 @@ import Data.Set (Set)
 import qualified Data.Set as Set
 import Numeric (showHex)
 
-import MLF.Backend.IR
+import MLF.Backend.CallableShape
+  ( BackendCallableBindingKind (..),
+    BackendCallableHead (..),
+    backendCallableHead,
+  )
+import MLF.Backend.IR hiding
+  ( BackendCallableBindingKind (..),
+    BackendCallableHead (..),
+    backendCallableHead,
+  )
 import MLF.Backend.LLVM.Lower.Emit
 import MLF.Backend.LLVM.Lower.Types
 import MLF.Backend.LLVM.Syntax

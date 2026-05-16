@@ -50,6 +50,9 @@ A later lower IR may be introduced only when all of the following hold:
 * `BackendApp` is the direct first-order call node, so local direct aliases
   that remain first-order stay on this path and closure-valued heads violate a
   named backend callable invariant;
+* the shared callable-head classifier for that invariant lives in the private
+  owner `MLF.Backend.CallableShape`; `MLF.Backend.IR` supplies the executable
+  IR adapter and validation context that consume it;
 * application/lambda/let/type-application/recursive fold-unfold nodes satisfy
   local type equalities;
 * ADT construction and case analysis are explicit backend nodes, so a backend
@@ -119,9 +122,10 @@ import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
+import MLF.Backend.CallableShape
 import MLF.Constraint.Types.Graph (BaseTy (..))
-import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Frontend.Syntax (Lit (..))
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Util.Names (freshNameLike)
 
 -- | A checked backend program. Module order is preserved from the source
@@ -346,18 +350,6 @@ data BackendConstructorInfo = BackendConstructorInfo
 data TypeVariableInstantiation
   = RejectFreeTypeVariableInstantiation FreshenedTypeVariableAliases
   | AllowStructuralPayloadInstantiation
-  deriving (Eq, Show)
-
-data BackendCallableBindingKind
-  = BackendCallableBindingDirect
-  | BackendCallableBindingClosure
-  | BackendCallableBindingUnknown
-  deriving (Eq, Show)
-
-data BackendCallableHead
-  = BackendDirectCallableHead (Maybe String)
-  | BackendClosureCallableHead String
-  | BackendUnknownCallableHead
   deriving (Eq, Show)
 
 data FreshenedTypeVariableAliases
@@ -883,43 +875,37 @@ validateBackendClosureFunctionType entryName resultTy params bodyTy =
       unless (and (zipWith alphaEqBackendType declaredParamTys (map snd params)) && alphaEqBackendType declaredResultTy bodyTy) $
         Left (BackendClosureTypeMismatch entryName resultTy expected)
 
-backendCallableHead :: (String -> BackendCallableBindingKind) -> BackendExpr -> BackendCallableHead
-backendCallableHead resolve0 =
-  go resolve0
-  where
-    go resolve =
-      \case
-        BackendVar _ name ->
-          case resolve name of
-            BackendCallableBindingDirect ->
-              BackendDirectCallableHead (Just name)
-            BackendCallableBindingClosure ->
-              BackendClosureCallableHead name
-            BackendCallableBindingUnknown ->
-              BackendUnknownCallableHead
-        BackendLam {} ->
-          BackendDirectCallableHead Nothing
-        BackendClosure _ entryName _ _ _ ->
-          BackendClosureCallableHead entryName
-        BackendTyAbs _ _ _ body ->
-          go resolve body
-        BackendTyApp _ fun _ ->
-          go resolve fun
-        BackendLet _ name _ rhs body ->
-          go (extendBindingKind resolve name (go resolve rhs)) body
-        BackendCase _ _ alternatives ->
-          collapseCallableHeads
-            [ go (extendPatternBindingKinds resolve (backendAltPattern alternative) (backendAltBody alternative)) (backendAltBody alternative)
-            | alternative <- NE.toList alternatives
-            ]
-        _ ->
-          BackendUnknownCallableHead
-
-    extendBindingKind resolve name headShape localName
-      | localName == name =
-          callableBindingKindForHead headShape
-      | otherwise =
-          resolve localName
+instance BackendCallableExpr BackendExpr where
+  backendCallableExprView =
+    \case
+      BackendVar _ name ->
+        BackendCallableVar name
+      BackendLam {} ->
+        BackendCallableLam
+      BackendClosure _ entryName _ _ _ ->
+        BackendCallableClosure entryName
+      BackendTyAbs _ _ _ body ->
+        BackendCallableTyAbs body
+      BackendTyApp _ fun _ ->
+        BackendCallableTyApp fun
+      BackendLet _ name _ rhs body ->
+        BackendCallableLet name rhs body
+      BackendCase _ _ alternatives ->
+        BackendCallableCase
+          [ let binders = patternBinders (backendAltPattern alternative)
+                body = backendAltBody alternative
+             in BackendCallableAlternative
+                  { backendCallableAltBinders = binders,
+                    backendCallableAltClosureBinders =
+                      Set.filter
+                        (\name -> backendExprMentionsNameWithCallableType name body)
+                        binders,
+                    backendCallableAltBody = body
+                  }
+          | alternative <- NE.toList alternatives
+          ]
+      _ ->
+        BackendCallableOpaque
 
 backendCallableHeadInContext :: Maybe BackendValidationContext -> BackendExpr -> BackendCallableHead
 backendCallableHeadInContext mbContext =
@@ -941,74 +927,6 @@ backendCallableBindingKindInContext (Just context0) name
       BackendCallableBindingDirect
   | otherwise =
       BackendCallableBindingUnknown
-
-callableBindingKindForHead :: BackendCallableHead -> BackendCallableBindingKind
-callableBindingKindForHead =
-  \case
-    BackendDirectCallableHead _ ->
-      BackendCallableBindingDirect
-    BackendClosureCallableHead _ ->
-      BackendCallableBindingClosure
-    BackendUnknownCallableHead ->
-      BackendCallableBindingUnknown
-
-extendPatternBindingKinds ::
-  (String -> BackendCallableBindingKind) ->
-  BackendPattern ->
-  BackendExpr ->
-  String ->
-  BackendCallableBindingKind
-extendPatternBindingKinds resolve pattern0 body name
-  | Set.member name binders,
-    backendExprMentionsNameWithCallableType name body =
-      BackendCallableBindingClosure
-  | Set.member name binders =
-      BackendCallableBindingDirect
-  | otherwise =
-      resolve name
-  where
-    binders = patternBinders pattern0
-
-collapseCallableHeads :: [BackendCallableHead] -> BackendCallableHead
-collapseCallableHeads heads
-  | all isClosureHead heads =
-      BackendClosureCallableHead (firstClosureHeadName heads)
-  | all isDirectHead heads =
-      BackendDirectCallableHead (firstDirectHeadName heads)
-  | otherwise =
-      BackendUnknownCallableHead
-  where
-    isClosureHead =
-      \case
-        BackendClosureCallableHead _ -> True
-        _ -> False
-
-    isDirectHead =
-      \case
-        BackendDirectCallableHead _ -> True
-        _ -> False
-
-firstClosureHeadName :: [BackendCallableHead] -> String
-firstClosureHeadName =
-  go
-  where
-    go [] =
-      "__mlfp_unknown_closure_head"
-    go (BackendClosureCallableHead name : _) =
-      name
-    go (_ : rest) =
-      go rest
-
-firstDirectHeadName :: [BackendCallableHead] -> Maybe String
-firstDirectHeadName =
-  go
-  where
-    go [] =
-      Nothing
-    go (BackendDirectCallableHead (Just name) : _) =
-      Just name
-    go (_ : rest) =
-      go rest
 
 backendExprMentionsNameWithCallableType :: String -> BackendExpr -> Bool
 backendExprMentionsNameWithCallableType needle =
