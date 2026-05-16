@@ -25,6 +25,7 @@ import GoldenSpec qualified
 import GraphOpsSpec qualified
 import InertSpec qualified
 import NormalizeSpec qualified
+import PrimitiveInventorySpec qualified
 import Phi.AlignmentSpec qualified
 import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
@@ -97,6 +98,7 @@ main = do
         die "PresolutionSpec was not wired into the test harness."
     SolveSpec.spec
     ScopeSpec.spec
+    PrimitiveInventorySpec.spec
     BackendConvertSpec.spec
     BackendIRSpec.spec
     BackendLLVMSpec.spec

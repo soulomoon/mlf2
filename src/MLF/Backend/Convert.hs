@@ -102,6 +102,7 @@ import MLF.Frontend.Program.Types
     resolvedModuleScope,
   )
 import MLF.Frontend.Syntax (SrcBound (..), SrcTy (..), SrcType)
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Util.Names (freshNameLike)
 
 data BackendConversionError
@@ -365,71 +366,7 @@ checkedBindingEnvType context checkedModule binding = do
 
 backendBuiltinTermTypes :: Map String ElabType
 backendBuiltinTermTypes =
-  Map.fromList
-    [ ( "__mlfp_and",
-        TArrow
-          (TBase (BaseTy "Bool"))
-          (TArrow (TBase (BaseTy "Bool")) (TBase (BaseTy "Bool")))
-      ),
-      ( "__io_pure",
-        TForall "a" Nothing
-          (TArrow (TVar "a") (TCon (BaseTy "IO") (TVar "a" :| [])))
-      ),
-      ( "__io_bind",
-        TForall "a" Nothing
-          (TForall "b" Nothing
-            (TArrow
-              (TCon (BaseTy "IO") (TVar "a" :| []))
-              (TArrow
-                (TArrow (TVar "a") (TCon (BaseTy "IO") (TVar "b" :| [])))
-                (TCon (BaseTy "IO") (TVar "b" :| [])))))
-      ),
-      ( "__io_putStrLn",
-        TArrow (TBase (BaseTy "String"))
-          (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| []))
-      ),
-      ( "__io_getLine",
-        TCon (BaseTy "IO") (TBase (BaseTy "String") :| [])
-      ),
-      ( "__io_putStr",
-        TArrow (TBase (BaseTy "String"))
-          (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| []))
-      ),
-      ( "__io_readFile",
-        TArrow (TBase (BaseTy "String"))
-          (TCon (BaseTy "IO") (TBase (BaseTy "String") :| []))
-      ),
-      ( "__io_writeFile",
-        TArrow (TBase (BaseTy "String"))
-          (TArrow (TBase (BaseTy "String"))
-            (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| [])))
-      ),
-      ( "__io_appendFile",
-        TArrow (TBase (BaseTy "String"))
-          (TArrow (TBase (BaseTy "String"))
-            (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| [])))
-      ),
-      ( "__io_exitWith",
-        TArrow (TBase (BaseTy "Int"))
-          (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| []))
-      ),
-      ( "__io_newIORef",
-        TForall "a" Nothing
-          (TArrow (TVar "a") (TCon (BaseTy "IO") (TCon (BaseTy "IORef") (TVar "a" :| []) :| [])))
-      ),
-      ( "__io_readIORef",
-        TForall "a" Nothing
-          (TArrow (TCon (BaseTy "IORef") (TVar "a" :| [])) (TCon (BaseTy "IO") (TVar "a" :| [])))
-      ),
-      ( "__io_writeIORef",
-        TForall "a" Nothing
-          (TArrow (TCon (BaseTy "IORef") (TVar "a" :| []))
-            (TArrow (TVar "a") (TCon (BaseTy "IO") (TBase (BaseTy "Unit") :| []))))
-      ),
-      ( "__io_getArgs",
-        TCon (BaseTy "IO") (TCon (BaseTy "List") (TBase (BaseTy "String") :| []) :| [])
-      )
-    ]
+  Map.map (PrimitiveInventory.primitiveTypeToElabType . PrimitiveInventory.primitiveValueType) PrimitiveInventory.primitiveValueSpecs
 
 convertCheckedModule :: ConvertContext -> Env -> CheckedModule -> Either BackendConversionError BackendModule
 convertCheckedModule context env checkedModule = do
@@ -1239,11 +1176,7 @@ normalizeBuiltinBackendType =
 
 normalizeBuiltinBase :: BaseTy -> BaseTy
 normalizeBuiltinBase (BaseTy name) =
-  BaseTy $
-    case stripPrefix "<builtin>." name of
-      Just builtinName
-        | builtinName `Set.member` backendBuiltinTypeNames -> builtinName
-      _ -> name
+  BaseTy (PrimitiveInventory.normalizeBuiltinTypeReference name)
 
 quantifyFreeElabTypeVars :: [String] -> ElabType -> ElabType
 quantifyFreeElabTypeVars names ty =
@@ -1492,7 +1425,11 @@ checkedProgramClosureValueArguments context checked = do
 
 builtinClosureValueArguments :: Map String (Set.Set Int)
 builtinClosureValueArguments =
-  Map.singleton "__io_bind" (Set.singleton 1)
+  Map.mapMaybe keepClosureValueArguments PrimitiveInventory.primitiveValueSpecs
+  where
+    keepClosureValueArguments spec
+      | Set.null (PrimitiveInventory.primitiveValueClosureValueArguments spec) = Nothing
+      | otherwise = Just (PrimitiveInventory.primitiveValueClosureValueArguments spec)
 
 checkedBindingBackendValueType :: ConvertContext -> CheckedModule -> CheckedBinding -> Either BackendConversionError BackendType
 checkedBindingBackendValueType context checkedModule binding = do
@@ -1981,15 +1918,7 @@ convertElabType =
 
 backendBaseTy :: String -> BaseTy
 backendBaseTy name =
-  BaseTy $
-    case stripPrefix "<builtin>." name of
-      Just builtinName
-        | builtinName `Set.member` backendBuiltinTypeNames -> builtinName
-      _ -> name
-
-backendBuiltinTypeNames :: Set.Set String
-backendBuiltinTypeNames =
-  Set.fromList ["Bool", "Int", "String", "IO", "Unit"]
+  BaseTy (PrimitiveInventory.normalizeBuiltinTypeReference name)
 
 normalizeBuiltinElabType :: Ty v -> Ty v
 normalizeBuiltinElabType =

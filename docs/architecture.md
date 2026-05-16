@@ -46,6 +46,7 @@ The code is organized by domain (not by phase) under `src/MLF/`:
 - `MLF.Frontend.Program.Finalize` — normalizes lowered surface eMLF, calls the internal detailed eMLF pipeline entrypoints with program-owned external binding modes, resolves `.mlfp` deferred obligations, and accepts rewritten terms only after the xMLF typecheck guard
 - `MLF.Frontend.Program.Prelude` — built-in source-level `.mlfp` Prelude used by the CLI/file runner as an explicit import target
 - `MLF.Frontend.Program.Run` — runtime entrypoint that evaluates pure checked `.mlfp` bindings through the existing xMLF runtime, executes checked `main : IO Unit` actions through the reserved IO primitive boundary, and renders recovered closed ADT values with source constructor syntax
+- `MLF.Primitive.Inventory` — private owner for builtin type names/kinds, opaque builtin metadata, and shared source/backend primitive signatures. `MLF.Frontend.Program.Builtins`, `MLF.Backend.IR`, and `MLF.Backend.Convert` adapt this inventory; LLVM lowering still owns wrapper/runtime implementation details downstream.
 - `MLF.Backend.IR` — typed backend IR boundary for checked `.mlfp` programs, before LLVM lowering
 - `MLF.Backend.Convert` — checked `.mlfp` program to typed backend IR conversion, including backend type conversion, explicit ADT construct/case recovery, and closure conversion where the checked xMLF shape is unambiguous
 - `MLF.Backend.LLVM` — repo-local LLVM backend facade over a small typed LLVM AST, lowerer, and pretty-printer for the supported typed backend IR subset, with explicit diagnostics for unsupported backend nodes
@@ -255,6 +256,11 @@ surface is the closed reserved runtime-binding set
 conversion and lowering keep those primitives on the existing
 `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`,
 no second executable IR, no public lowering API, and no broad FFI lane.
+The shared builtin-type and primitive-signature inventory for this path lives
+in `MLF.Primitive.Inventory`; `MLF.Frontend.Program.Builtins`,
+`MLF.Backend.IR`, and `MLF.Backend.Convert` adapt that owner, while
+`MLF.Backend.LLVM.Lower` still owns downstream runtime wrapper and native
+support implementation details.
 
 The eager sequencing contract is reviewable at that same boundary:
 

@@ -461,6 +461,30 @@ spec = describe "Repository guardrails" $ do
       $ \(path, src, markers) ->
         assertMarkersPresent path src markers
 
+  it "primitive inventory ownership stays centralized across frontend and backend adapters" $ do
+    inventorySrc <- readFile "src/MLF/Primitive/Inventory.hs"
+    builtinsSrc <- readFile "src/MLF/Frontend/Program/Builtins.hs"
+    resolveSrc <- readFile "src/MLF/Frontend/Program/Resolve.hs"
+    backendIRSrc <- readFile "src/MLF/Backend/IR.hs"
+    backendConvertSrc <- readFile "src/MLF/Backend/Convert.hs"
+    architectureSrc <- readFile "docs/architecture.md"
+    nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"
+
+    inventorySrc `shouldSatisfy` isInfixOf "builtinTypeSpecs :: Map String BuiltinTypeSpec"
+    inventorySrc `shouldSatisfy` isInfixOf "primitiveValueSpecs :: Map String PrimitiveValueSpec"
+    forM_
+      [ builtinsSrc,
+        resolveSrc,
+        backendIRSrc,
+        backendConvertSrc
+      ]
+      $ \src ->
+        src `shouldSatisfy` isInfixOf "MLF.Primitive.Inventory"
+    builtinsSrc `shouldSatisfy` (not . isInfixOf "builtinTypeKinds ::")
+    backendConvertSrc `shouldSatisfy` (not . isInfixOf "backendBuiltinTypeNames ::")
+    architectureSrc `shouldSatisfy` isInfixOf "`MLF.Primitive.Inventory`"
+    nativePipelineSrc `shouldSatisfy` isInfixOf "`MLF.Primitive.Inventory`"
+
   it "polymorphism-erasure and lowerability contract stays explicit without widening the backend boundary" $ do
     architectureSrc <- readFile "docs/architecture.md"
     nativePipelineSrc <- readFile "docs/backend-native-pipeline.md"

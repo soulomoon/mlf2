@@ -1,0 +1,36 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-238",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-primitive-inventory-module",
+  "extracted_item_id": "item-1a-private-owner-and-source-backend-adapters",
+  "decision": "approved",
+  "evidence_summary": "Round-238 adds a private MLF.Primitive.Inventory owner for builtin type and primitive signature facts, rewires the selected frontend/backend adapters to consume it, documents the remaining lowerer-local wrapper/runtime-name boundary, leaves src-public and milestone-2/CLI surfaces untouched, preserves the inherited no-second-interface/no-fallback/cyclic-search boundaries, and passes git diff --check, focused primitive/backend/guard selectors, and cabal build all && cabal test with 2579 examples and 0 failures. Milestone-1 should advance to in-progress, not done, because the selected item intentionally leaves broader lowering/runtime adapter migration for later milestone-1 work.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-1",
+        "expected_current_status": "pending",
+        "target_status": "in-progress",
+        "roadmap_view_anchor": "milestone-1"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-1-completion",
+        "text": "round-238 created MLF.Primitive.Inventory, migrated the selected frontend/backend adapters to that private owner, kept lowerer wrapper/runtime implementation details local, and passed focused primitive checks plus the full cabal gate."
+      }
+    ],
+    "history_entries": [
+      {
+        "anchor_id": "roadmap-history-completed-rounds",
+        "text": "round-238 advanced milestone-1 in-progress by creating the private primitive inventory owner, migrating the selected frontend/backend adapters, and passing focused primitive checks plus the full cabal gate."
+      }
+    ],
+    "semantic_update_required_reason": null
+  }
+}

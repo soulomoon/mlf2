@@ -17,4 +17,4 @@ Contract: `orchestrator-v2`
 
 ## Completed Rounds
 
-none yet
+- round-238 advanced milestone-1 in-progress by creating the private primitive inventory owner, migrating the selected frontend/backend adapters, and passing focused primitive checks plus the full cabal gate.

@@ -12,10 +12,8 @@ import qualified Data.Map.Strict as Map
 import Data.Map.Strict (Map)
 import qualified Data.Set as Set
 import MLF.Frontend.Program.Builtins
-  ( builtinTypeNames,
-    builtinTypeSymbol,
+  ( builtinTypeSymbol,
     builtinValueSymbol,
-    builtinValues,
   )
 import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax
@@ -27,6 +25,7 @@ import MLF.Frontend.Syntax
     mkResolvedSrcBound,
   )
 import qualified MLF.Frontend.Syntax.Program as P
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 
 type ResolveM a = Either ProgramError a
 
@@ -162,9 +161,9 @@ addBuiltinSymbols scope =
     ( foldr
         (\name acc -> addCandidateType name (builtinTypeSymbol name) acc)
         scope
-        (Set.toList builtinTypeNames)
+        (Set.toList PrimitiveInventory.builtinTypeNames)
     )
-    (Map.keys builtinValues)
+    (Set.toList PrimitiveInventory.primitiveValueNames)
 
 addAllExports ::
   SymbolOrigin ->
@@ -597,7 +596,8 @@ resolveType scope = \case
 
 resolveTypeName :: CandidateScope -> String -> ResolveM ResolvedReference
 resolveTypeName scope name
-  | name `Set.member` builtinTypeNames = pure (ResolvedReference ResolvedTypeReference name (builtinTypeSymbol name))
+  | name `Set.member` PrimitiveInventory.builtinTypeNames =
+      pure (ResolvedReference ResolvedTypeReference name (builtinTypeSymbol name))
   | otherwise = resolveReference ResolvedTypeReference ProgramUnknownType candidateTypes scope name
 
 resolveClassRef :: CandidateScope -> P.ClassName -> ResolveM ResolvedReference

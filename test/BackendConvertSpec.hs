@@ -73,6 +73,19 @@ spec = describe "MLF.Backend.Convert" $ do
     backend <- requireRight (convertCheckedProgram checked)
     validateBackendProgram backend `shouldBe` Right ()
 
+  it "accepts backend conversion when pure bindings reference IORef primitives" $ do
+    program <-
+      requireParsed $
+        unlines
+          [ "module Main export (main) {",
+            "  import Prelude exposing (Unit(..), IO);",
+            "  def main : Unit = (λ(_action : IO (IORef Unit)) Unit) (__io_newIORef Unit);",
+            "}"
+          ]
+    checked <- requireRight (checkProgram (withPrelude program))
+    backend <- requireRight (convertCheckedProgram checked)
+    validateBackendProgram backend `shouldBe` Right ()
+
   it "matches the checked backend IR snapshot for a primitive function program" $ do
     checked <- requireChecked simpleFunctionProgram
     backend <- requireRight (convertCheckedProgram checked)

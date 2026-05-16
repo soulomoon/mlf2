@@ -1,10 +1,14 @@
+{-# LANGUAGE LambdaCase #-}
+
 module BackendIRSpec (spec) where
 
+import Control.Monad (forM_)
 import Data.List.NonEmpty (NonEmpty (..))
 import qualified Data.Map.Strict as Map
 import MLF.Backend.IR
 import MLF.Constraint.Types.Graph (BaseTy (..))
 import MLF.Frontend.Syntax (Lit (..))
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import Test.Hspec
 
 spec :: Spec
@@ -18,6 +22,15 @@ spec = describe "MLF.Backend.IR" $ do
 
     validateBackendProgram (programWithBindings [mainLiteralBinding, mainLiteralBinding])
       `shouldBe` Left (BackendDuplicateBinding "main")
+
+  it "recognizes shared primitive inventory globals during backend validation" $ do
+    forM_ (Map.toList PrimitiveInventory.primitiveValueSpecs) $ \(name, spec0) -> do
+      let ty = primitiveTypeToBackendType (PrimitiveInventory.primitiveValueType spec0)
+          program =
+            BackendProgram
+              [BackendModule "Main" [] [BackendBinding "main" ty (BackendVar ty name) True]]
+              "main"
+      validateBackendProgram program `shouldBe` Right ()
 
   it "rejects a missing main binding" $ do
     validateBackendProgram (BackendProgram [moduleWithBindings "Main" [binding "other" intTy (intLit 1)]] "main")
@@ -1519,3 +1532,16 @@ outOfOrderStructuralBody =
     "r"
     Nothing
     (BTArrow (BTArrow (BTVar "b") (BTArrow (BTVar "a") (BTVar "r"))) (BTVar "r"))
+
+primitiveTypeToBackendType :: PrimitiveInventory.PrimitiveType -> BackendType
+primitiveTypeToBackendType =
+  \case
+    PrimitiveInventory.PrimitiveTypeVar name -> BTVar name
+    PrimitiveInventory.PrimitiveTypeArrow dom cod ->
+      BTArrow (primitiveTypeToBackendType dom) (primitiveTypeToBackendType cod)
+    PrimitiveInventory.PrimitiveTypeBase name ->
+      BTBase (BaseTy name)
+    PrimitiveInventory.PrimitiveTypeCon name args ->
+      BTCon (BaseTy name) (fmap primitiveTypeToBackendType args)
+    PrimitiveInventory.PrimitiveTypeForall name body ->
+      BTForall name Nothing (primitiveTypeToBackendType body)

@@ -118,6 +118,7 @@ import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph (BaseTy (..))
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 import MLF.Frontend.Syntax (Lit (..))
 import MLF.Util.Names (freshNameLike)
 
@@ -736,79 +737,7 @@ backendClosureGlobalNames baseContext bindings =
 
 backendRuntimePrimitiveTypes :: Map.Map String BackendType
 backendRuntimePrimitiveTypes =
-  Map.fromList
-    [ ( "__mlfp_and",
-        BTArrow
-          (BTBase (BaseTy "Bool"))
-          (BTArrow (BTBase (BaseTy "Bool")) (BTBase (BaseTy "Bool")))
-      ),
-      ( "__io_pure",
-        BTForall "a" Nothing
-          (BTArrow (BTVar "a") (BTCon (BaseTy "IO") (BTVar "a" :| [])))
-      ),
-      ( "__io_bind",
-        BTForall "a" Nothing
-          (BTForall "b" Nothing
-            (BTArrow
-              (BTCon (BaseTy "IO") (BTVar "a" :| []))
-              (BTArrow
-                (BTArrow (BTVar "a") (BTCon (BaseTy "IO") (BTVar "b" :| [])))
-                (BTCon (BaseTy "IO") (BTVar "b" :| [])))))
-      ),
-      ( "__io_putStrLn",
-        BTArrow
-          (BTBase (BaseTy "String"))
-          (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| []))
-      ),
-      ( "__io_getLine",
-        BTCon (BaseTy "IO") (BTBase (BaseTy "String") :| [])
-      ),
-      ( "__io_putStr",
-        BTArrow
-          (BTBase (BaseTy "String"))
-          (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| []))
-      ),
-      ( "__io_readFile",
-        BTArrow
-          (BTBase (BaseTy "String"))
-          (BTCon (BaseTy "IO") (BTBase (BaseTy "String") :| []))
-      ),
-      ( "__io_writeFile",
-        BTArrow
-          (BTBase (BaseTy "String"))
-          (BTArrow
-            (BTBase (BaseTy "String"))
-            (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| [])))
-      ),
-      ( "__io_appendFile",
-        BTArrow
-          (BTBase (BaseTy "String"))
-          (BTArrow
-            (BTBase (BaseTy "String"))
-            (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| [])))
-      ),
-      ( "__io_exitWith",
-        BTArrow
-          (BTBase (BaseTy "Int"))
-          (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| []))
-      ),
-      ( "__io_newIORef",
-        BTForall "a" Nothing
-          (BTArrow (BTVar "a") (BTCon (BaseTy "IO") (BTCon (BaseTy "IORef") (BTVar "a" :| []) :| [])))
-      ),
-      ( "__io_readIORef",
-        BTForall "a" Nothing
-          (BTArrow (BTCon (BaseTy "IORef") (BTVar "a" :| [])) (BTCon (BaseTy "IO") (BTVar "a" :| [])))
-      ),
-      ( "__io_writeIORef",
-        BTForall "a" Nothing
-          (BTArrow (BTCon (BaseTy "IORef") (BTVar "a" :| []))
-            (BTArrow (BTVar "a") (BTCon (BaseTy "IO") (BTBase (BaseTy "Unit") :| []))))
-      ),
-      ( "__io_getArgs",
-        BTCon (BaseTy "IO") (BTCon (BaseTy "List") (BTBase (BaseTy "String") :| []) :| [])
-      )
-    ]
+  Map.map (primitiveTypeToBackendType . PrimitiveInventory.primitiveValueType) PrimitiveInventory.primitiveValueSpecs
 
 -- | Validate a binding without a program context. This checks local carried
 -- type equalities only; 'validateBackendProgram' adds global references,
@@ -1697,7 +1626,20 @@ backendTypeIsClosureValue =
 
 isOpaqueIOBackendName :: BaseTy -> Bool
 isOpaqueIOBackendName (BaseTy name) =
-  name == "IO" || name == "<builtin>.IO"
+  PrimitiveInventory.matchesBuiltinTypeName "IO" name
+
+primitiveTypeToBackendType :: PrimitiveInventory.PrimitiveType -> BackendType
+primitiveTypeToBackendType =
+  \case
+    PrimitiveInventory.PrimitiveTypeVar name -> BTVar name
+    PrimitiveInventory.PrimitiveTypeArrow dom cod ->
+      BTArrow (primitiveTypeToBackendType dom) (primitiveTypeToBackendType cod)
+    PrimitiveInventory.PrimitiveTypeBase name ->
+      BTBase (BaseTy name)
+    PrimitiveInventory.PrimitiveTypeCon name args ->
+      BTCon (BaseTy name) (fmap primitiveTypeToBackendType args)
+    PrimitiveInventory.PrimitiveTypeForall name body ->
+      BTForall name Nothing (primitiveTypeToBackendType body)
 
 dropTermLocalsMaybe :: Maybe BackendValidationContext -> Maybe BackendValidationContext
 dropTermLocalsMaybe =

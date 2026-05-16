@@ -38,6 +38,10 @@ a second IR or public lowering interface.
 Row-5 primitive/eager ownership is part of the same raw/native inspection
 contract. The current primitive surface is the closed reserved runtime-binding set
 `__mlfp_and`, `__io_pure`, `__io_bind`, and `__io_putStrLn`.
+That shared builtin-type and primitive-signature inventory lives in
+`MLF.Primitive.Inventory`; native lowering consumes it through
+`MLF.Backend.IR` and `MLF.Backend.Convert`, while wrapper/runtime
+implementation names remain lowerer-local.
 `emit-backend` and `emit-native` keep those primitives on the same
 `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`,
 no second executable IR, and no broad FFI lane.

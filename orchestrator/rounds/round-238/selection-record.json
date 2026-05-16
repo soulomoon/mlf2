@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-238",
+  "roadmap_id": "2026-05-16-00-architecture-deepening-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-16-00-architecture-deepening-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-primitive-inventory-module",
+  "extracted_item_id": "item-1a-private-owner-and-source-backend-adapters",
+  "summary": "Create a private primitive inventory owner for builtin names and source/backend primitive typing, then migrate frontend and backend typing adapters to consume it while leaving lowering runtime implementation follow-up out of scope.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}
