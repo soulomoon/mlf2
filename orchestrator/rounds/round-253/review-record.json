@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-253",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-lexer-token-diagnostic-seed",
+  "extracted_item_id": "item-253-lexer-token-diagnostic-seed",
+  "decision": "approved",
+  "evidence_summary": "Focused seed spec, direct CLI evidence, diff hygiene, cabal build all, cabal test, and thesis gate passed; bounded lexer seed evidence satisfies milestone-2 without coordination changes.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-2",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-2-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-2-completion",
+        "text": "round-253 added bounded lexer seed evidence: token/span/diagnostic/result ADTs, positive token path, negative diagnostic path, full gates green."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

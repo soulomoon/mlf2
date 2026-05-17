@@ -1,0 +1,9 @@
+module SeedDiagnostic export (LexerDiagnosticKind(..), LexerDiagnostic(..)) {
+  import SeedSource exposing (SourceSpan);
+
+  data LexerDiagnosticKind =
+      UnknownInputSymbol : LexerDiagnosticKind;
+
+  data LexerDiagnostic =
+      LexerDiagnostic : SourceSpan -> LexerDiagnosticKind -> LexerDiagnostic;
+}

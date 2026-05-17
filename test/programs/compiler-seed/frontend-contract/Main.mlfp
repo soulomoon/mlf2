@@ -1,6 +1,8 @@
 module Main export (main) {
+  import Prelude exposing (Unit(..), IO, putStrLn);
   import SeedContract exposing (FrontendSeedContract(..), acceptsFrontendSeedContract, frontendSeedContract);
+  import SeedLexer exposing (renderLexerEvidence, lexerEvidence);
 
-  def main : Bool =
-    acceptsFrontendSeedContract frontendSeedContract;
+  def main : IO Unit =
+    putStrLn (renderLexerEvidence lexerEvidence);
 }

@@ -13,6 +13,7 @@ import MLF.Frontend.Program.Package
     , packageModuleGraphNodeSourcePath
     , packageModuleGraphOrder
     )
+import MLF.Frontend.Program.Prelude (withPreludeLocatedPackage)
 import MLF.Frontend.Program.Run
     ( programRunOutput
     , runLocatedProgramPackageOutput
@@ -26,33 +27,48 @@ spec :: Spec
 spec =
     describe "MLF.Program compiler frontend seed package contract" $ do
         it "compiler-seed discovers, checks, and runs the fixture as an ordinary package root" $ do
-            package <- requireRight =<< discoverLocatedProgramPackage compilerSeedPackageId compilerSeedRoot
+            discovered <- requireRight =<< discoverLocatedProgramPackage compilerSeedPackageId compilerSeedRoot
+            let package = withPreludeLocatedPackage discovered
             graph <- requireRight (locatedProgramPackageModuleGraph package)
 
             packageModuleGraphOrder graph
                 `shouldBe`
-                    [ PackageModuleId compilerSeedPackageId "SeedContract"
+                    [ PackageModuleId compilerSeedPackageId "Prelude"
+                    , PackageModuleId compilerSeedPackageId "SeedContract"
+                    , PackageModuleId compilerSeedPackageId "SeedSource"
+                    , PackageModuleId compilerSeedPackageId "SeedToken"
+                    , PackageModuleId compilerSeedPackageId "SeedDiagnostic"
+                    , PackageModuleId compilerSeedPackageId "SeedLexer"
                     , PackageModuleId compilerSeedPackageId "Main"
                     ]
             map packageModuleGraphNodeSourcePath (packageModuleGraphNodes graph)
                 `shouldMatchList`
-                    [ Just (compilerSeedRoot </> "Main.mlfp")
+                    [ Just "<mlfp-prelude>"
+                    , Just (compilerSeedRoot </> "Main.mlfp")
                     , Just (compilerSeedRoot </> "SeedContract.mlfp")
+                    , Just (compilerSeedRoot </> "SeedDiagnostic.mlfp")
+                    , Just (compilerSeedRoot </> "SeedLexer.mlfp")
+                    , Just (compilerSeedRoot </> "SeedSource.mlfp")
+                    , Just (compilerSeedRoot </> "SeedToken.mlfp")
                     ]
             _checked <- requireRight (checkLocatedProgramPackage package)
             result <- requireRight (runLocatedProgramPackageOutput package)
 
-            programRunOutput result `shouldBe` "true\n"
+            programRunOutput result `shouldBe` compilerSeedLexerEvidenceOutput
 
         it "compiler-seed runs the fixture through the public CLI package entrypoint" $ do
             checkProgramArgs [compilerSeedRoot] `shouldReturn` Right "OK\n"
-            runProgramArgs [compilerSeedRoot] `shouldReturn` Right "true\n"
+            runProgramArgs [compilerSeedRoot] `shouldReturn` Right compilerSeedLexerEvidenceOutput
 
 compilerSeedPackageId :: PackageId
 compilerSeedPackageId = PackageId "compiler-frontend-seed"
 
 compilerSeedRoot :: FilePath
 compilerSeedRoot = "test/programs/compiler-seed/frontend-contract"
+
+compilerSeedLexerEvidenceOutput :: String
+compilerSeedLexerEvidenceOutput =
+    "lexer-positive:def-main-equals-true;lexer-negative:unknown@span-unknown-symbol\n"
 
 requireRight :: (Show err) => Either err a -> IO a
 requireRight result =

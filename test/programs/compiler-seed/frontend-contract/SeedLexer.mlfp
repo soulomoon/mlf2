@@ -1,0 +1,226 @@
+module SeedLexer export (LexerResult(..), LexerEvidence(..), lexSeedInput, positiveLexerResult, negativeLexerResult, lexerEvidence, renderLexerEvidence) {
+  import SeedSource exposing (SourcePosition(..), SourceSpan(..), SeedIdentifier(..), SeedBoolLiteral(..), SeedInput(..), SeedInputSymbol(..), spanStart, spanEnd, positiveSeedInput, negativeSeedInput);
+  import SeedToken exposing (SeedToken(..), SeedTokenStream(..));
+  import SeedDiagnostic exposing (LexerDiagnosticKind(..), LexerDiagnostic(..));
+
+  data LexerResult =
+      LexerOk : SeedTokenStream -> LexerResult
+    | LexerError : LexerDiagnostic -> LexerResult;
+
+  data LexerEvidence =
+      LexerEvidence : LexerResult -> LexerResult -> LexerEvidence;
+
+  data PositiveLexerEvidence =
+      PositiveLexerAccepted : PositiveLexerEvidence
+    | PositiveLexerRejected : PositiveLexerEvidence;
+
+  data NegativeLexerEvidence =
+      NegativeLexerAccepted : NegativeLexerEvidence
+    | NegativeLexerRejected : NegativeLexerEvidence;
+
+  def lexSeedInput : SeedInput -> LexerResult =
+    λ(input : SeedInput) case input of {
+      SeedInputNil -> LexerError (LexerDiagnostic SpanDefKeyword UnknownInputSymbol);
+      SeedInputCons symbol rest -> case symbol of {
+        InputDef span -> lexAfterDef span rest;
+        InputIdentifier span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputEquals span -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputBoolLiteral span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputUnknown span -> LexerError (LexerDiagnostic span UnknownInputSymbol)
+      }
+    };
+
+  def lexAfterDef : SourceSpan -> SeedInput -> LexerResult =
+    λ(defSpan : SourceSpan) λ(input : SeedInput) case input of {
+      SeedInputNil -> LexerError (LexerDiagnostic defSpan UnknownInputSymbol);
+      SeedInputCons symbol rest -> case symbol of {
+        InputIdentifier identSpan identifier -> lexAfterIdentifier defSpan identSpan identifier rest;
+        InputDef span -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputEquals span -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputBoolLiteral span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputUnknown span -> LexerError (LexerDiagnostic span UnknownInputSymbol)
+      }
+    };
+
+  def lexAfterIdentifier : SourceSpan -> SourceSpan -> SeedIdentifier -> SeedInput -> LexerResult =
+    λ(defSpan : SourceSpan) λ(identSpan : SourceSpan) λ(identifier : SeedIdentifier) λ(input : SeedInput) case input of {
+      SeedInputNil -> LexerError (LexerDiagnostic identSpan UnknownInputSymbol);
+      SeedInputCons symbol rest -> case symbol of {
+        InputEquals equalsSpan -> lexAfterEquals defSpan identSpan identifier equalsSpan rest;
+        InputDef span -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputIdentifier span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputBoolLiteral span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputUnknown span -> LexerError (LexerDiagnostic span UnknownInputSymbol)
+      }
+    };
+
+  def lexAfterEquals : SourceSpan -> SourceSpan -> SeedIdentifier -> SourceSpan -> SeedInput -> LexerResult =
+    λ(defSpan : SourceSpan) λ(identSpan : SourceSpan) λ(identifier : SeedIdentifier) λ(equalsSpan : SourceSpan) λ(input : SeedInput) case input of {
+      SeedInputNil -> LexerError (LexerDiagnostic equalsSpan UnknownInputSymbol);
+      SeedInputCons symbol rest -> case symbol of {
+        InputBoolLiteral literalSpan literal -> lexAfterLiteral defSpan identSpan identifier equalsSpan literalSpan literal rest;
+        InputDef span -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputIdentifier span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputEquals span -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputUnknown span -> LexerError (LexerDiagnostic span UnknownInputSymbol)
+      }
+    };
+
+  def lexAfterLiteral : SourceSpan -> SourceSpan -> SeedIdentifier -> SourceSpan -> SourceSpan -> SeedBoolLiteral -> SeedInput -> LexerResult =
+    λ(defSpan : SourceSpan) λ(identSpan : SourceSpan) λ(identifier : SeedIdentifier) λ(equalsSpan : SourceSpan) λ(literalSpan : SourceSpan) λ(literal : SeedBoolLiteral) λ(input : SeedInput) case input of {
+      SeedInputNil ->
+        LexerOk
+          (SeedTokenCons (TokenDef defSpan)
+            (SeedTokenCons (TokenIdentifier identSpan identifier)
+              (SeedTokenCons (TokenEquals equalsSpan)
+                (SeedTokenCons (TokenBoolLiteral literalSpan literal)
+                  SeedTokenNil))));
+      SeedInputCons symbol _ -> case symbol of {
+        InputDef span -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputIdentifier span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputEquals span -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputBoolLiteral span _ -> LexerError (LexerDiagnostic span UnknownInputSymbol);
+        InputUnknown span -> LexerError (LexerDiagnostic span UnknownInputSymbol)
+      }
+    };
+
+  def positiveLexerResult : LexerResult =
+    lexSeedInput positiveSeedInput;
+
+  def negativeLexerResult : LexerResult =
+    lexSeedInput negativeSeedInput;
+
+  def lexerEvidence : LexerEvidence =
+    LexerEvidence positiveLexerResult negativeLexerResult;
+
+  def renderLexerEvidence : LexerEvidence -> String =
+    λ(evidence : LexerEvidence) case evidence of {
+      LexerEvidence positive negative -> case classifyPositiveLexerEvidence positive of {
+        PositiveLexerAccepted -> case classifyNegativeLexerEvidence negative of {
+          NegativeLexerAccepted -> "lexer-positive:def-main-equals-true;lexer-negative:unknown@span-unknown-symbol";
+          NegativeLexerRejected -> "lexer-evidence:mismatch"
+        };
+        PositiveLexerRejected -> "lexer-evidence:mismatch"
+      }
+    };
+
+  def classifyPositiveLexerEvidence : LexerResult -> PositiveLexerEvidence =
+    λ(result : LexerResult) case result of {
+      LexerOk tokens -> classifyPositiveTokenDef tokens;
+      LexerError _ -> PositiveLexerRejected
+    };
+
+  def classifyPositiveTokenDef : SeedTokenStream -> PositiveLexerEvidence =
+    λ(tokens : SeedTokenStream) case tokens of {
+      SeedTokenNil -> PositiveLexerRejected;
+      SeedTokenCons token rest -> case token of {
+        TokenDef span -> case span of {
+          SpanDefKeyword -> classifyPositiveTokenIdentifier rest;
+          SpanIdentifierMain -> PositiveLexerRejected;
+          SpanEquals -> PositiveLexerRejected;
+          SpanBoolTrue -> PositiveLexerRejected;
+          SpanUnknownSymbol -> PositiveLexerRejected
+        };
+        TokenIdentifier _ _ -> PositiveLexerRejected;
+        TokenEquals _ -> PositiveLexerRejected;
+        TokenBoolLiteral _ _ -> PositiveLexerRejected
+      }
+    };
+
+  def classifyPositiveTokenIdentifier : SeedTokenStream -> PositiveLexerEvidence =
+    λ(tokens : SeedTokenStream) case tokens of {
+      SeedTokenNil -> PositiveLexerRejected;
+      SeedTokenCons token rest -> case token of {
+        TokenIdentifier span identifier -> case span of {
+          SpanDefKeyword -> PositiveLexerRejected;
+          SpanIdentifierMain -> case identifier of {
+            IdentifierMain -> classifyPositiveTokenEquals rest
+          };
+          SpanEquals -> PositiveLexerRejected;
+          SpanBoolTrue -> PositiveLexerRejected;
+          SpanUnknownSymbol -> PositiveLexerRejected
+        };
+        TokenDef _ -> PositiveLexerRejected;
+        TokenEquals _ -> PositiveLexerRejected;
+        TokenBoolLiteral _ _ -> PositiveLexerRejected
+      }
+    };
+
+  def classifyPositiveTokenEquals : SeedTokenStream -> PositiveLexerEvidence =
+    λ(tokens : SeedTokenStream) case tokens of {
+      SeedTokenNil -> PositiveLexerRejected;
+      SeedTokenCons token rest -> case token of {
+        TokenEquals span -> case span of {
+          SpanDefKeyword -> PositiveLexerRejected;
+          SpanIdentifierMain -> PositiveLexerRejected;
+          SpanEquals -> classifyPositiveTokenLiteral rest;
+          SpanBoolTrue -> PositiveLexerRejected;
+          SpanUnknownSymbol -> PositiveLexerRejected
+        };
+        TokenDef _ -> PositiveLexerRejected;
+        TokenIdentifier _ _ -> PositiveLexerRejected;
+        TokenBoolLiteral _ _ -> PositiveLexerRejected
+      }
+    };
+
+  def classifyPositiveTokenLiteral : SeedTokenStream -> PositiveLexerEvidence =
+    λ(tokens : SeedTokenStream) case tokens of {
+      SeedTokenNil -> PositiveLexerRejected;
+      SeedTokenCons token rest -> case token of {
+        TokenBoolLiteral span literal -> case span of {
+          SpanDefKeyword -> PositiveLexerRejected;
+          SpanIdentifierMain -> PositiveLexerRejected;
+          SpanEquals -> PositiveLexerRejected;
+          SpanBoolTrue -> case literal of {
+            BoolLiteralTrue -> case rest of {
+              SeedTokenNil -> PositiveLexerAccepted;
+              SeedTokenCons _ _ -> PositiveLexerRejected
+            }
+          };
+          SpanUnknownSymbol -> PositiveLexerRejected
+        };
+        TokenDef _ -> PositiveLexerRejected;
+        TokenIdentifier _ _ -> PositiveLexerRejected;
+        TokenEquals _ -> PositiveLexerRejected
+      }
+    };
+
+  def classifyNegativeLexerEvidence : LexerResult -> NegativeLexerEvidence =
+    λ(result : LexerResult) case result of {
+      LexerOk _ -> NegativeLexerRejected;
+      LexerError diagnostic -> case diagnostic of {
+        LexerDiagnostic span kind -> case kind of {
+          UnknownInputSymbol -> case span of {
+            SpanDefKeyword -> NegativeLexerRejected;
+            SpanIdentifierMain -> NegativeLexerRejected;
+            SpanEquals -> NegativeLexerRejected;
+            SpanBoolTrue -> NegativeLexerRejected;
+            SpanUnknownSymbol -> classifyUnknownSpanPositions span
+          }
+        }
+      }
+    };
+
+  def classifyUnknownSpanPositions : SourceSpan -> NegativeLexerEvidence =
+    λ(span : SourceSpan) case spanStart span of {
+      Line1Column1 -> NegativeLexerRejected;
+      Line1Column4 -> NegativeLexerRejected;
+      Line1Column5 -> case spanEnd span of {
+        Line1Column1 -> NegativeLexerRejected;
+        Line1Column4 -> NegativeLexerRejected;
+        Line1Column5 -> NegativeLexerRejected;
+        Line1Column6 -> NegativeLexerAccepted;
+        Line1Column9 -> NegativeLexerRejected;
+        Line1Column10 -> NegativeLexerRejected;
+        Line1Column11 -> NegativeLexerRejected;
+        Line1Column12 -> NegativeLexerRejected;
+        Line1Column16 -> NegativeLexerRejected
+      };
+      Line1Column6 -> NegativeLexerRejected;
+      Line1Column9 -> NegativeLexerRejected;
+      Line1Column10 -> NegativeLexerRejected;
+      Line1Column11 -> NegativeLexerRejected;
+      Line1Column12 -> NegativeLexerRejected;
+      Line1Column16 -> NegativeLexerRejected
+    };
+}

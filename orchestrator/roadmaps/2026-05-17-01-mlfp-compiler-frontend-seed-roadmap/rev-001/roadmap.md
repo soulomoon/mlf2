@@ -157,7 +157,7 @@ controller state and a selected plan explicitly allow it.
 - Extraction notes: a lawful first round may add only the seed package/harness
   and a tiny interpreter-run smoke if that fixes the source boundary.
 
-### [pending] 2. Token, Span, Diagnostic, And Lexer Seed
+### [done] 2. Token, Span, Diagnostic, And Lexer Seed
 
 - Milestone id: `milestone-2`
 - Depends on: `milestone-1`
@@ -175,7 +175,7 @@ controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-2
 
-- None yet.
+- round-253 added bounded lexer seed evidence: token/span/diagnostic/result ADTs, positive token path, negative diagnostic path, full gates green.
 
 #### Candidate Direction: Lexer Token Diagnostic Seed
 

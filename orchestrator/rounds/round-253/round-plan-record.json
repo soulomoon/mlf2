@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-253",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-lexer-token-diagnostic-seed",
+  "extracted_item_id": "item-253-lexer-token-diagnostic-seed",
+  "plan_path": "orchestrator/rounds/round-253/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

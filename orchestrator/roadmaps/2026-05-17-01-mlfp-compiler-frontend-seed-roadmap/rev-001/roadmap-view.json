@@ -20,7 +20,7 @@
     {
       "milestone_id": "milestone-2",
       "title": "Token, Span, Diagnostic, And Lexer Seed",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-1"
       ],
@@ -170,7 +170,7 @@
     },
     "milestone-2-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 2. Token, Span, Diagnostic, And Lexer Seed"
+      "selector": "### [done] 2. Token, Span, Diagnostic, And Lexer Seed"
     },
     "milestone-2-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",

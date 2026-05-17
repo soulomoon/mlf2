@@ -51,8 +51,11 @@ package manager, remote dependency system, persisted interface file, stable
 constructors remain hidden: importing `Nat(..)` from a module that exported
 only `Nat` is a visibility error.
 
-Compiler-source seed fixtures use the same local package mode. They are not a
-separate loader, package manager, ABI, linker, or self-hosting contract.
+Compiler-source seed fixtures use the same local package mode. The current
+lexer seed uses bounded symbolic input and seed-owned monomorphic input/token
+stream ADTs; it does not provide a source-text character stream, byte stream,
+substring API, parser-combinator library, separate loader, package manager,
+ABI, linker, or self-hosting contract.
 
 Imports can be qualified and aliased:
 
@@ -481,8 +484,8 @@ Like `check-program`, `run-program`, and `emit-native`, `emit-backend` loads a
 single file as a trivial package source unit or discovers `.mlfp` files under
 the selected local roots, then prepends the built-in Prelude as an explicit
 module before checking. The emitted text is LLVM IR for the supported backend
-subset, not a stable ABI, compiler-seed native guarantee, or a promise of final
-executable linking. The
+subset, not a stable ABI, compiler-seed lexer native guarantee, or a promise of
+final executable linking. The
 source-facing surface remains primarily first-order: checked first-order
 function bindings, saturated direct calls, literals, variables, SSA-style lets,
 type abstraction/application after specialization, ADT construction, and ADT
