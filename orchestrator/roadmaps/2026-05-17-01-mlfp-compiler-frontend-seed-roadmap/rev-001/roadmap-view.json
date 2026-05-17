@@ -48,7 +48,7 @@
     {
       "milestone_id": "milestone-4",
       "title": "Primitive And Standard Library Gap Budget",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-2",
         "milestone-3"
@@ -186,7 +186,7 @@
     },
     "milestone-4-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 4. Primitive And Standard Library Gap Budget"
+      "selector": "### [done] 4. Primitive And Standard Library Gap Budget"
     },
     "milestone-4-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",

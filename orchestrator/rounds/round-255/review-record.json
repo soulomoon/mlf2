@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-255",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-seed-driven-primitive-budget",
+  "extracted_item_id": "item-255-primitive-stdlib-gap-budget",
+  "decision": "approved",
+  "evidence_summary": "Docs ledger budget covers every required primitive and stdlib gap category with seed-tied evidence; direct seed run, focused seed spec, diff hygiene, cabal build all, cabal test, and thesis gate passed.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-4",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-4-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-255 added the seed-driven primitive/stdlib gap budget: all required categories classified, no broad APIs added, full gates green."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

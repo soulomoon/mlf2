@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-255",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-seed-driven-primitive-budget",
+  "extracted_item_id": "item-255-primitive-stdlib-gap-budget",
+  "summary": "Classify the primitive and standard-library gaps exposed by the runnable lexer/parser seed without implementing broad convenience APIs.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

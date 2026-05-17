@@ -231,7 +231,7 @@ controller state and a selected plan explicitly allow it.
 - Extraction notes: a lawful round may implement only one parseable definition
   or expression shape plus one diagnostic path.
 
-### [pending] 4. Primitive And Standard Library Gap Budget
+### [done] 4. Primitive And Standard Library Gap Budget
 
 - Milestone id: `milestone-4`
 - Depends on: `milestone-2`, `milestone-3`
@@ -249,7 +249,7 @@ controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-4
 
-- None yet.
+- round-255 added the seed-driven primitive/stdlib gap budget: all required categories classified, no broad APIs added, full gates green.
 
 #### Candidate Direction: Seed Driven Primitive Budget
 
