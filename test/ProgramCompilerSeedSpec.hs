@@ -1,8 +1,16 @@
 module ProgramCompilerSeedSpec (spec) where
 
+import Data.List (isInfixOf)
+import System.Exit (ExitCode (..))
 import System.FilePath ((</>))
 import Test.Hspec
 
+import LLVMToolSupport
+    ( NativeRunResult (..)
+    , runLLVMNativeExecutable
+    , validateLLVMAssembly
+    , validateLLVMObjectCode
+    )
 import MLF.Frontend.Program.Check (checkLocatedProgramPackage)
 import MLF.Frontend.Program.Package
     ( PackageId (..)
@@ -20,6 +28,8 @@ import MLF.Frontend.Program.Run
     )
 import MLF.Program.CLI
     ( checkProgramArgs
+    , emitBackendArgs
+    , emitNativeArgs
     , runProgramArgs
     )
 
@@ -63,6 +73,27 @@ spec =
         it "compiler-seed runs the fixture through the public CLI package entrypoint" $ do
             checkProgramArgs [compilerSeedRoot] `shouldReturn` Right "OK\n"
             runProgramArgs [compilerSeedRoot] `shouldReturn` Right compilerSeedFrontendEvidenceOutput
+
+        it "compiler-seed emits backend and native LLVM without changing the seed contract" $ do
+            backendOutput <- requireRight =<< emitBackendArgs [compilerSeedRoot]
+
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"SeedLexer__lexSeedInput\""
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"SeedParser__parseSeedTokens\""
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\""
+            backendOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_bind.wrapper\""
+            backendOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_putStrLn.wrapper\""
+            validateLLVMAssembly backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeArgs [compilerSeedRoot]
+
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            nativeOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\""
+            nativeOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_bind.wrapper\""
+            nativeOutput `shouldSatisfy` isInfixOf "define private ptr @\"__io_putStrLn.wrapper\""
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+                `shouldReturn` NativeRunResult ExitSuccess compilerSeedFrontendEvidenceOutput ""
 
 compilerSeedPackageId :: PackageId
 compilerSeedPackageId = PackageId "compiler-frontend-seed"

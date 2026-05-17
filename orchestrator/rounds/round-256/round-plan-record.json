@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-256",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-5",
+  "direction_id": "direction-5a-interpreter-native-boundary-ledger",
+  "extracted_item_id": "item-256-runtime-backend-layer-classification",
+  "plan_path": "orchestrator/rounds/round-256/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

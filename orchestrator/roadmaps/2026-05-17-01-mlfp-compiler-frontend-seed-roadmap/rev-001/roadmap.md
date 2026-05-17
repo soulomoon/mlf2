@@ -269,7 +269,7 @@ controller state and a selected plan explicitly allow it.
 - Extraction notes: a lawful round may produce only the budget ledger and
   focused no-change decisions if the seed already has enough support.
 
-### [pending] 5. Runtime And Backend Layer Classification
+### [done] 5. Runtime And Backend Layer Classification
 
 - Milestone id: `milestone-5`
 - Depends on: `milestone-3`, `milestone-4`
@@ -287,7 +287,7 @@ controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-5
 
-- None yet.
+- round-256 classified all seed modules and package root by layer; backend/native/object evidence and full gates passed.
 
 #### Candidate Direction: Interpreter Native Boundary Ledger
 

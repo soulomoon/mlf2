@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-256",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-5",
+  "direction_id": "direction-5a-interpreter-native-boundary-ledger",
+  "extracted_item_id": "item-256-runtime-backend-layer-classification",
+  "summary": "Classify the compiler frontend seed across source checking, interpreter/runtime, backend/native, object-code, and package-build layers while preserving fail-closed unsupported behavior.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

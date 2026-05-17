@@ -63,7 +63,7 @@
     {
       "milestone_id": "milestone-5",
       "title": "Runtime And Backend Layer Classification",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-3",
         "milestone-4"
@@ -194,7 +194,7 @@
     },
     "milestone-5-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 5. Runtime And Backend Layer Classification"
+      "selector": "### [done] 5. Runtime And Backend Layer Classification"
     },
     "milestone-5-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
