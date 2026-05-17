@@ -1,0 +1,247 @@
+{
+  "schema_version": "roadmap-view-v1",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002",
+  "roadmap_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+  "milestones": [
+    {
+      "milestone_id": "milestone-1",
+      "title": "Package Module Owner",
+      "status": "done",
+      "depends_on": [],
+      "parallel_lane": "lane-package-core",
+      "status_anchor": "milestone-1-status",
+      "completion_anchor": "milestone-1-completion",
+      "direction_ids": [
+        "direction-1a-package-module-owner"
+      ]
+    },
+    {
+      "milestone_id": "milestone-2",
+      "title": "Filesystem Discovery And Dependency Graph",
+      "status": "done",
+      "depends_on": [
+        "milestone-1"
+      ],
+      "parallel_lane": "lane-package-core",
+      "status_anchor": "milestone-2-status",
+      "completion_anchor": "milestone-2-completion",
+      "direction_ids": [
+        "direction-2a-filesystem-discovery-graph"
+      ]
+    },
+    {
+      "milestone_id": "milestone-3",
+      "title": "Interface Artifact Contract",
+      "status": "done",
+      "depends_on": [
+        "milestone-1",
+        "milestone-2"
+      ],
+      "parallel_lane": "lane-interface-build",
+      "status_anchor": "milestone-3-status",
+      "completion_anchor": "milestone-3-completion",
+      "direction_ids": [
+        "direction-3a-interface-artifact-contract"
+      ]
+    },
+    {
+      "milestone_id": "milestone-4",
+      "title": "Package Roots, Search Paths, Cache, And Build Graph",
+      "status": "done",
+      "depends_on": [
+        "milestone-2",
+        "milestone-3"
+      ],
+      "parallel_lane": "lane-interface-build",
+      "status_anchor": "milestone-4-status",
+      "completion_anchor": "milestone-4-completion",
+      "direction_ids": [
+        "direction-4a-package-build-graph-policy"
+      ]
+    },
+    {
+      "milestone_id": "milestone-5",
+      "title": "CLI And Public Entry Point Migration",
+      "status": "done",
+      "depends_on": [
+        "milestone-1",
+        "milestone-2",
+        "milestone-3",
+        "milestone-4"
+      ],
+      "parallel_lane": "lane-cli-api-fixtures",
+      "status_anchor": "milestone-5-status",
+      "completion_anchor": "milestone-5-completion",
+      "direction_ids": [
+        "direction-5a-cli-api-package-migration"
+      ]
+    },
+    {
+      "milestone_id": "milestone-6",
+      "title": "Fixture Migration And Self-Boot Readiness Evidence",
+      "status": "done",
+      "depends_on": [
+        "milestone-5"
+      ],
+      "parallel_lane": "lane-cli-api-fixtures",
+      "status_anchor": "milestone-6-status",
+      "completion_anchor": "milestone-6-completion",
+      "direction_ids": [
+        "direction-6a-fixture-migration-readiness-ledger"
+      ]
+    },
+    {
+      "milestone_id": "milestone-7",
+      "title": "Full Type-Level MLFP Handoff Merge And Publication",
+      "status": "pending",
+      "depends_on": [
+        "milestone-6"
+      ],
+      "parallel_lane": "lane-type-level-handoff",
+      "status_anchor": "milestone-7-status",
+      "completion_anchor": "milestone-7-completion",
+      "direction_ids": [
+        "direction-7a-full-type-level-handoff-merge"
+      ]
+    }
+  ],
+  "directions": [
+    {
+      "direction_id": "direction-1a-package-module-owner",
+      "milestone_id": "milestone-1",
+      "summary": "Create or designate one internal package/module owner and migrate current `.mlfp` checking/runtime preparation to depend on it.",
+      "preconditions": [
+        "Inspect current parsed/resolved program types, module resolver, checker, Prelude injection, CLI preparation, public pipeline adapters, and current single-file fixtures at HEAD."
+      ],
+      "parallel_hints": [
+        "Serial foundation work; do not fan out until the owner boundary is selected."
+      ]
+    },
+    {
+      "direction_id": "direction-2a-filesystem-discovery-graph",
+      "milestone_id": "milestone-2",
+      "summary": "Teach the package owner to discover source files, build the module graph, topologically order checks, and report missing/cyclic modules.",
+      "preconditions": [
+        "Inspect module import cycle handling, parser source-span handling, CLI file IO, test program fixtures, and current diagnostics."
+      ],
+      "parallel_hints": [
+        "Serial with interface work until discovery semantics are stable."
+      ]
+    },
+    {
+      "direction_id": "direction-3a-interface-artifact-contract",
+      "milestone_id": "milestone-3",
+      "summary": "Introduce the interface representation and validation boundary used by package imports and later separate compilation.",
+      "preconditions": [
+        "Inspect resolved symbol identity docs, import/export resolution, data/class/instance metadata, and existing public surface tests."
+      ],
+      "parallel_hints": [
+        "Serial after milestone 2; schema docs and fixture drafting may split only with disjoint ownership."
+      ]
+    },
+    {
+      "direction_id": "direction-4a-package-build-graph-policy",
+      "milestone_id": "milestone-4",
+      "summary": "Add package root/search path semantics and deterministic build graph invalidation around source and interface artifacts.",
+      "preconditions": [
+        "Inspect CLI commands, test helpers, temporary artifact handling, current module dependency docs, and native/backend preparation."
+      ],
+      "parallel_hints": [
+        "Serial with CLI migration; cache-specific tests can be extracted separately after package roots are fixed."
+      ]
+    },
+    {
+      "direction_id": "direction-5a-cli-api-package-migration",
+      "milestone_id": "milestone-5",
+      "summary": "Route CLI and public package-facing adapters through package mode and preserve current examples as trivial packages.",
+      "preconditions": [
+        "Inspect app/Main.hs, MLF.Program.CLI, MLF.Backend.Emission.Prepare, src-public/MLF/API.hs, src-public/MLF/Pipeline.hs, and CLI/backend tests."
+      ],
+      "parallel_hints": [
+        "CLI adapter and docs/fixture migration may split only after package owner APIs are stable."
+      ]
+    },
+    {
+      "direction_id": "direction-6a-fixture-migration-readiness-ledger",
+      "milestone_id": "milestone-6",
+      "summary": "Finish fixture/docs migration and record exactly what remains before compiler-in-`.mlfp` implementation can begin.",
+      "preconditions": [
+        "Inspect README, docs/mlfp-language-reference.md, docs/syntax.md, fixture directories under test/programs, parity policy, and any package CLI docs added by prior milestones."
+      ],
+      "parallel_hints": [
+        "Docs and fixture updates can split after package CLI/API behavior is green."
+      ]
+    },
+    {
+      "direction_id": "direction-7a-full-type-level-handoff-merge",
+      "milestone_id": "milestone-7",
+      "summary": "Attach, preserve, reconcile, validate, and publish the completed full type-level `.mlfp` implementation described by the handoff.",
+      "preconditions": [
+        "Inspect the handoff file, /Users/ares/.codex/worktrees/b648/mlf4, current master, branch/worktree state, untracked TypeFamilies/TypeLevel/FrontendTypeLevelSpec files, and the broad diff before staging."
+      ],
+      "parallel_hints": [
+        "Keep serial by default until the preserved branch and current-base conflict set are known."
+      ]
+    }
+  ],
+  "anchors": {
+    "milestone-1-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "### [done] 1. Package Module Owner"
+    },
+    "milestone-1-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-1"
+    },
+    "milestone-2-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "### [done] 2. Filesystem Discovery And Dependency Graph"
+    },
+    "milestone-2-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-2"
+    },
+    "milestone-3-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "### [done] 3. Interface Artifact Contract"
+    },
+    "milestone-3-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-3"
+    },
+    "milestone-4-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "### [done] 4. Package Roots, Search Paths, Cache, And Build Graph"
+    },
+    "milestone-4-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-4"
+    },
+    "milestone-5-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "### [done] 5. CLI And Public Entry Point Migration"
+    },
+    "milestone-5-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-5"
+    },
+    "milestone-6-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "### [done] 6. Fixture Migration And Self-Boot Readiness Evidence"
+    },
+    "milestone-6-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-6"
+    },
+    "milestone-7-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "### [pending] 7. Full Type-Level MLFP Handoff Merge And Publication"
+    },
+    "milestone-7-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-7"
+    }
+  }
+}
