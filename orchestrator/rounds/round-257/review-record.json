@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-257",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-6",
+  "direction_id": "direction-6a-frontend-seed-handoff",
+  "extracted_item_id": "item-257-frontend-seed-handoff",
+  "decision": "approved",
+  "evidence_summary": "Final seed handoff docs make the fixture, executable evidence, layer boundaries, next-family recommendation, and remaining blockers discoverable; focused seed checks, full Cabal gates, and thesis gate passed without roadmap semantics changes.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-6",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-6-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-6-completion",
+        "text": "round-257 completed final seed handoff docs: fixture, evidence owner, layer boundaries, next-family recommendation, and full gates green."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

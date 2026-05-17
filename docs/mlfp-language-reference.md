@@ -52,11 +52,14 @@ constructors remain hidden: importing `Nat(..)` from a module that exported
 only `Nat` is a visibility error.
 
 Compiler-source seed fixtures use the same local package mode. The current
-frontend seed uses bounded symbolic input, seed-owned monomorphic input/token
-stream ADTs, and a tiny parser over that seed token stream; it does not provide
-a source-text character stream, byte stream, substring API, parser-combinator
-library, separate loader, package manager, ABI, linker, or self-hosting
-contract.
+frontend seed lives at `test/programs/compiler-seed/frontend-contract/` and is
+loaded as an ordinary package root. Its `.mlfp` modules define bounded symbolic
+input, seed-owned monomorphic input/token stream ADTs, symbolic source spans,
+lexer and parser diagnostics/results, and a tiny parser over the seed token
+stream. The seed evidence is checked by `ProgramCompilerSeedSpec` and printed
+through `run-program`; it does not provide a source-text character stream, byte
+stream, substring API, parser-combinator library, separate loader, package
+manager, ABI, linker, separate compilation, or self-hosting contract.
 
 Imports can be qualified and aliased:
 

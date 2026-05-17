@@ -307,7 +307,7 @@ controller state and a selected plan explicitly allow it.
 - Extraction notes: a lawful round may add only classification tests and docs
   if the seed remains intentionally interpreter-only.
 
-### [pending] 6. Seed Fixtures, Docs, And Next-Stage Handoff
+### [done] 6. Seed Fixtures, Docs, And Next-Stage Handoff
 
 - Milestone id: `milestone-6`
 - Depends on: `milestone-4`, `milestone-5`
@@ -324,7 +324,7 @@ controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-6
 
-- None yet.
+- round-257 completed final seed handoff docs: fixture, evidence owner, layer boundaries, next-family recommendation, and full gates green.
 
 #### Candidate Direction: Frontend Seed Handoff
 

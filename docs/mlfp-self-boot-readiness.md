@@ -117,14 +117,49 @@ broad FFI lane, package manager, ABI/linker contract, or separate compilation.
   lowerable and native-runnable, but that is not a complete compiler workload
   guarantee.
 
+## Seed Fixture Handoff
+
+The compiler frontend seed family closes over the existing package fixture at
+`test/programs/compiler-seed/frontend-contract/`. The fixture is intentionally
+small and stable:
+
+- `SeedContract.mlfp` records the interpreter-runnable package seed marker.
+- `SeedSource.mlfp`, `SeedToken.mlfp`, `SeedDiagnostic.mlfp`, and
+  `SeedLexer.mlfp` own bounded symbolic source input, spans, tokens, lexer
+  diagnostics/results, and rendered positive/negative lexer evidence.
+- `SeedAst.mlfp` and `SeedParser.mlfp` own the tiny definition AST, parser
+  diagnostics/results, one accepted parse, and one rejected missing-equals
+  diagnostic.
+- `Main.mlfp` prints the two evidence lines through `putStrLn`/`bind`.
+
+`ProgramCompilerSeedSpec` is the executable evidence owner for the fixture. It
+asserts package discovery, graph order, source paths, package checking,
+interpreter output, public CLI `check-program`/`run-program`, backend/native
+LLVM emission, LLVM assembly/object validation, and linked native execution for
+the bounded package entrypoint. No additional milestone-6 fixture test is
+needed unless a future round changes the fixture location, module list, or
+entrypoint evidence.
+
 ## Next-Stage Recommendation
 
 The next stage should stay inside the compiler-in-`.mlfp` prerequisites lane,
 not a self-boot claim. With the package-mode lexer/parser seed, seed-driven gap
-budget, and layer classification in place,
-recommended next directions are:
+budget, layer classification, and fixture handoff in place, the next roadmap
+should target a larger frontend component rather than a backend, driver, or
+package-manager slice.
 
-- extend backend lowerability and native-driver policy only for shapes used by
-  the selected compiler slice;
-- decide package build artifact policy for compiler sources before adding any
+- Recommended next family: source-text lexer/parser expansion in `.mlfp`.
+  Start by replacing the symbolic `SeedInputSymbol` model with a narrow
+  text-or-byte input and source-range representation, then expand the current
+  parser one grammar feature at a time with focused accepted/rejected evidence.
+- Blocking prerequisites for that family: practical stream/list operations,
+  narrow parser state/result helpers, diagnostic-list or error-accumulation
+  support, and real source-range diagnostic payloads. These should be added
+  only when the selected frontend slice proves the need.
+- Deferred until demanded by the selected slice: maps/sets for environments,
+  file/process IO driver helpers, stable build artifacts, persisted
+  interfaces, object ABI/linker policy, and separate compilation.
+- Preserve backend lowerability and native-driver policy only for shapes used
+  by the selected compiler slice.
+- Decide package build artifact policy for compiler sources before adding any
   persisted interface or object artifact format.

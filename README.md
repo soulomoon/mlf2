@@ -138,6 +138,35 @@ The current user-facing `.mlfp` language contract is documented in
 Self-boot readiness and remaining compiler-in-`.mlfp` gaps are tracked in
 `docs/mlfp-self-boot-readiness.md`.
 
+### Compiler frontend seed fixture
+
+The current compiler-in-`.mlfp` proof is the ordinary local package root at
+`test/programs/compiler-seed/frontend-contract/`. It contains `.mlfp` source
+modules for a frontend seed contract, symbolic source spans/input, tokens,
+lexer diagnostics/results, a tiny AST, parser diagnostics/results, and a
+`Main` module that prints asserted lexer and parser evidence.
+
+Run the seed through the same package entrypoints as any local package:
+
+```bash
+cabal run mlf2 -- check-program test/programs/compiler-seed/frontend-contract
+cabal run mlf2 -- run-program test/programs/compiler-seed/frontend-contract
+```
+
+The expected interpreter evidence is:
+
+```text
+lexer-positive:def-main-equals-true;lexer-negative:unknown@span-unknown-symbol
+parser-positive:ast-def-main-bool-true;parser-negative:expected-equals@span-bool-true
+```
+
+`ProgramCompilerSeedSpec` also checks package discovery, module graph order,
+source paths, backend/native LLVM emission, object-code generation, and linked
+native execution for this bounded seed. That evidence is not a self-hosting
+claim: it does not provide a source-text lexer/parser, checker-in-`.mlfp`,
+optimizer, backend-in-`.mlfp`, package manager, stable ABI/linker, separate
+compilation mode, or arbitrary compiler workload native support.
+
 The first-class-polymorphism program example lives at
 `test/programs/unified/first-class-polymorphism.mlfp`.
 

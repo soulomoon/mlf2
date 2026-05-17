@@ -110,18 +110,23 @@ The fixture migration evidence for package substrate behavior is kept in
 `test/programs/packages/` and `ProgramFixturePackageSpec`. The compiler
 frontend seed package contract is kept in
 `test/programs/compiler-seed/frontend-contract/` and
-`ProgramCompilerSeedSpec`; it proves ordinary package discovery, check/run
-through the interpreter, and CLI `run-program` output for the seed root without
-introducing a second compiler-source loader. The same fixture now owns the
-bounded symbolic-input lexer seed: `SeedSource`, `SeedToken`,
-`SeedDiagnostic`, and `SeedLexer` define source span labels, input symbols,
-tokens, diagnostics, lexer results, and `.mlfp` evidence rendering for one
-accepted token path and one rejected diagnostic path. `SeedAst` and
-`SeedParser` layer the bounded parser seed on that token stream with one
-definition AST shape, parser result/diagnostic values, and interpreter evidence
-for one accepted parse and one rejected missing-equals parse. It is not a
-source-text lexer/parser, package manager, ABI, linker, native/backend
-contract, or self-hosting claim. `docs/mlfp-self-boot-readiness.md` records
+`ProgramCompilerSeedSpec`; it proves ordinary package discovery, module graph
+order, source-path retention, check/run through the interpreter, and CLI
+`check-program`/`run-program` output for the seed root without introducing a
+second compiler-source loader. The same fixture owns the bounded
+symbolic-input lexer seed: `SeedSource`, `SeedToken`, `SeedDiagnostic`, and
+`SeedLexer` define source span labels, input symbols, tokens, diagnostics,
+lexer results, and `.mlfp` evidence rendering for one accepted token path and
+one rejected diagnostic path. `SeedAst` and `SeedParser` layer the bounded
+parser seed on that token stream with one definition AST shape, parser
+result/diagnostic values, and interpreter evidence for one accepted parse and
+one rejected missing-equals parse. The seed package is currently lowerable by
+the existing backend/native subset and the spec validates backend/native LLVM,
+object-code generation, and linked native execution for this bounded
+entrypoint. That evidence stays under the existing package, CLI, backend IR,
+and LLVM owners; it is not a source-text lexer/parser, package manager, ABI,
+linker, separate-compilation mode, arbitrary native compiler workload
+guarantee, or self-hosting claim. `docs/mlfp-self-boot-readiness.md` records
 the remaining self-boot gaps by layer.
 
 No active executable or test component depends on historical research modules.

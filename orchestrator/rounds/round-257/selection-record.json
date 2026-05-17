@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-257",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-6",
+  "direction_id": "direction-6a-frontend-seed-handoff",
+  "extracted_item_id": "item-257-frontend-seed-handoff",
+  "summary": "Stabilize the compiler frontend seed fixture documentation and next-family handoff without changing seed scope or claiming self-hosting.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

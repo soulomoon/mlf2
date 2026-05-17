@@ -78,7 +78,7 @@
     {
       "milestone_id": "milestone-6",
       "title": "Seed Fixtures, Docs, And Next-Stage Handoff",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-4",
         "milestone-5"
@@ -202,7 +202,7 @@
     },
     "milestone-6-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 6. Seed Fixtures, Docs, And Next-Stage Handoff"
+      "selector": "### [done] 6. Seed Fixtures, Docs, And Next-Stage Handoff"
     },
     "milestone-6-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
