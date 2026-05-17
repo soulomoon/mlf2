@@ -34,7 +34,7 @@
     {
       "milestone_id": "milestone-3",
       "title": "Parser Seed And AST Contract",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-2"
       ],
@@ -178,7 +178,7 @@
     },
     "milestone-3-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 3. Parser Seed And AST Contract"
+      "selector": "### [done] 3. Parser Seed And AST Contract"
     },
     "milestone-3-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",

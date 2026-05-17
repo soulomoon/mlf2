@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-254",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-minimal-parser-seed",
+  "extracted_item_id": "item-254-parser-seed-ast-contract",
+  "decision": "approved",
+  "evidence_summary": "Focused seed spec, direct interpreter evidence, diff hygiene, cabal build all, cabal test, and thesis gate passed; bounded parser/AST seed evidence satisfies milestone-3 without coordination changes.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-3",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-3-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-254 added bounded parser/AST seed evidence: token-stream parser, accepted AST path, rejected diagnostic path, full gates green."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

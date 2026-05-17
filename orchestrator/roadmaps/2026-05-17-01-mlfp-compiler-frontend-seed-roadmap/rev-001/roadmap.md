@@ -195,7 +195,7 @@ controller state and a selected plan explicitly allow it.
 - Extraction notes: a lawful round can target a tiny grammar input such as
   identifiers, delimiters, and one definition form before wider syntax.
 
-### [pending] 3. Parser Seed And AST Contract
+### [done] 3. Parser Seed And AST Contract
 
 - Milestone id: `milestone-3`
 - Depends on: `milestone-2`
@@ -211,7 +211,7 @@ controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-3
 
-- None yet.
+- round-254 added bounded parser/AST seed evidence: token-stream parser, accepted AST path, rejected diagnostic path, full gates green.
 
 #### Candidate Direction: Minimal Parser Seed
 

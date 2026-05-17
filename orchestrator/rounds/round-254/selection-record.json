@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-254",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-minimal-parser-seed",
+  "extracted_item_id": "item-254-parser-seed-ast-contract",
+  "summary": "Add the minimal parser seed over the existing lexer token stream, with AST/result/diagnostic ADTs and asserted interpreter evidence for one accepted and one rejected form.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

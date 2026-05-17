@@ -1,8 +1,10 @@
 module Main export (main) {
-  import Prelude exposing (Unit(..), IO, putStrLn);
+  import Prelude exposing (Unit(..), IO, bind, putStrLn);
   import SeedContract exposing (FrontendSeedContract(..), acceptsFrontendSeedContract, frontendSeedContract);
   import SeedLexer exposing (renderLexerEvidence, lexerEvidence);
+  import SeedParser exposing (renderParserEvidence, parserEvidence);
 
   def main : IO Unit =
-    putStrLn (renderLexerEvidence lexerEvidence);
+    bind (putStrLn (renderLexerEvidence lexerEvidence))
+      (λ(_lexerEvidencePrinted : Unit) putStrLn (renderParserEvidence parserEvidence));
 }

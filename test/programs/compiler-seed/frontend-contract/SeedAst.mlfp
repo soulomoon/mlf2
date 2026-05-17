@@ -1,0 +1,9 @@
+module SeedAst export (SeedExpression(..), SeedDefinition(..)) {
+  import SeedSource exposing (SourceSpan, SeedIdentifier, SeedBoolLiteral);
+
+  data SeedExpression =
+      AstBoolLiteral : SourceSpan -> SeedBoolLiteral -> SeedExpression;
+
+  data SeedDefinition =
+      AstDefinition : SourceSpan -> SeedIdentifier -> SourceSpan -> SeedExpression -> SeedDefinition;
+}

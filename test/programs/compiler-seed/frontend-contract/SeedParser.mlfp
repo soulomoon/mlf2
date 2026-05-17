@@ -1,0 +1,196 @@
+module SeedParser export (ParserDiagnosticKind(..), ParserDiagnostic(..), ParserResult(..), ParserEvidence(..), parseSeedTokens, positiveParserResult, negativeParserResult, parserEvidence, renderParserEvidence) {
+  import SeedSource exposing (SourcePosition(..), SourceSpan(..), SeedIdentifier(..), SeedBoolLiteral(..), spanStart, spanEnd);
+  import SeedToken exposing (SeedToken(..), SeedTokenStream(..));
+  import SeedLexer exposing (LexerResult(..), positiveLexerResult);
+  import SeedAst exposing (SeedExpression(..), SeedDefinition(..));
+
+  data ParserDiagnosticKind =
+      ExpectedDef : ParserDiagnosticKind
+    | ExpectedIdentifier : ParserDiagnosticKind
+    | ExpectedEquals : ParserDiagnosticKind
+    | ExpectedBoolLiteral : ParserDiagnosticKind
+    | ExpectedEndOfInput : ParserDiagnosticKind;
+
+  data ParserDiagnostic =
+      ParserDiagnostic : SourceSpan -> ParserDiagnosticKind -> ParserDiagnostic;
+
+  data ParserResult =
+      ParserOk : SeedDefinition -> ParserResult
+    | ParserError : ParserDiagnostic -> ParserResult;
+
+  data ParserEvidence =
+      ParserEvidence : ParserResult -> ParserResult -> ParserEvidence;
+
+  data PositiveParserEvidence =
+      PositiveParserAccepted : PositiveParserEvidence
+    | PositiveParserRejected : PositiveParserEvidence;
+
+  data NegativeParserEvidence =
+      NegativeParserAccepted : NegativeParserEvidence
+    | NegativeParserRejected : NegativeParserEvidence;
+
+  def parseSeedTokens : SeedTokenStream -> ParserResult =
+    λ(tokens : SeedTokenStream) case tokens of {
+      SeedTokenNil -> ParserError (ParserDiagnostic SpanDefKeyword ExpectedDef);
+      SeedTokenCons token rest -> case token of {
+        TokenDef defSpan -> parseAfterDef defSpan rest;
+        TokenIdentifier span _ -> ParserError (ParserDiagnostic span ExpectedDef);
+        TokenEquals span -> ParserError (ParserDiagnostic span ExpectedDef);
+        TokenBoolLiteral span _ -> ParserError (ParserDiagnostic span ExpectedDef)
+      }
+    };
+
+  def parseAfterDef : SourceSpan -> SeedTokenStream -> ParserResult =
+    λ(defSpan : SourceSpan) λ(tokens : SeedTokenStream) case tokens of {
+      SeedTokenNil -> ParserError (ParserDiagnostic defSpan ExpectedIdentifier);
+      SeedTokenCons token rest -> case token of {
+        TokenIdentifier identSpan identifier -> parseAfterIdentifier defSpan identSpan identifier rest;
+        TokenDef span -> ParserError (ParserDiagnostic span ExpectedIdentifier);
+        TokenEquals span -> ParserError (ParserDiagnostic span ExpectedIdentifier);
+        TokenBoolLiteral span _ -> ParserError (ParserDiagnostic span ExpectedIdentifier)
+      }
+    };
+
+  def parseAfterIdentifier : SourceSpan -> SourceSpan -> SeedIdentifier -> SeedTokenStream -> ParserResult =
+    λ(defSpan : SourceSpan) λ(identSpan : SourceSpan) λ(identifier : SeedIdentifier) λ(tokens : SeedTokenStream) case tokens of {
+      SeedTokenNil -> ParserError (ParserDiagnostic identSpan ExpectedEquals);
+      SeedTokenCons token rest -> case token of {
+        TokenEquals equalsSpan -> parseAfterEquals defSpan identSpan identifier equalsSpan rest;
+        TokenDef span -> ParserError (ParserDiagnostic span ExpectedEquals);
+        TokenIdentifier span _ -> ParserError (ParserDiagnostic span ExpectedEquals);
+        TokenBoolLiteral span _ -> ParserError (ParserDiagnostic span ExpectedEquals)
+      }
+    };
+
+  def parseAfterEquals : SourceSpan -> SourceSpan -> SeedIdentifier -> SourceSpan -> SeedTokenStream -> ParserResult =
+    λ(defSpan : SourceSpan) λ(identSpan : SourceSpan) λ(identifier : SeedIdentifier) λ(equalsSpan : SourceSpan) λ(tokens : SeedTokenStream) case tokens of {
+      SeedTokenNil -> ParserError (ParserDiagnostic equalsSpan ExpectedBoolLiteral);
+      SeedTokenCons token rest -> case token of {
+        TokenBoolLiteral literalSpan literal -> parseAfterBoolLiteral defSpan identSpan identifier equalsSpan literalSpan literal rest;
+        TokenDef span -> ParserError (ParserDiagnostic span ExpectedBoolLiteral);
+        TokenIdentifier span _ -> ParserError (ParserDiagnostic span ExpectedBoolLiteral);
+        TokenEquals span -> ParserError (ParserDiagnostic span ExpectedBoolLiteral)
+      }
+    };
+
+  def parseAfterBoolLiteral : SourceSpan -> SourceSpan -> SeedIdentifier -> SourceSpan -> SourceSpan -> SeedBoolLiteral -> SeedTokenStream -> ParserResult =
+    λ(defSpan : SourceSpan) λ(_identSpan : SourceSpan) λ(identifier : SeedIdentifier) λ(equalsSpan : SourceSpan) λ(literalSpan : SourceSpan) λ(literal : SeedBoolLiteral) λ(tokens : SeedTokenStream) case tokens of {
+      SeedTokenNil -> ParserOk (AstDefinition defSpan identifier equalsSpan (AstBoolLiteral literalSpan literal));
+      SeedTokenCons token _ -> case token of {
+        TokenDef span -> ParserError (ParserDiagnostic span ExpectedEndOfInput);
+        TokenIdentifier span _ -> ParserError (ParserDiagnostic span ExpectedEndOfInput);
+        TokenEquals span -> ParserError (ParserDiagnostic span ExpectedEndOfInput);
+        TokenBoolLiteral span _ -> ParserError (ParserDiagnostic span ExpectedEndOfInput)
+      }
+    };
+
+  def positiveParserResult : ParserResult =
+    case positiveLexerResult of {
+      LexerOk tokens -> parseSeedTokens tokens;
+      LexerError _ -> ParserError (ParserDiagnostic SpanDefKeyword ExpectedDef)
+    };
+
+  def negativeParserTokens : SeedTokenStream =
+    SeedTokenCons (TokenDef SpanDefKeyword)
+      (SeedTokenCons (TokenIdentifier SpanIdentifierMain IdentifierMain)
+        (SeedTokenCons (TokenBoolLiteral SpanBoolTrue BoolLiteralTrue)
+          SeedTokenNil));
+
+  def negativeParserResult : ParserResult =
+    parseSeedTokens negativeParserTokens;
+
+  def parserEvidence : ParserEvidence =
+    ParserEvidence positiveParserResult negativeParserResult;
+
+  def renderParserEvidence : ParserEvidence -> String =
+    λ(evidence : ParserEvidence) case evidence of {
+      ParserEvidence positive negative -> case classifyPositiveParserEvidence positive of {
+        PositiveParserAccepted -> case classifyNegativeParserEvidence negative of {
+          NegativeParserAccepted -> "parser-positive:ast-def-main-bool-true;parser-negative:expected-equals@span-bool-true";
+          NegativeParserRejected -> "parser-evidence:mismatch"
+        };
+        PositiveParserRejected -> "parser-evidence:mismatch"
+      }
+    };
+
+  def classifyPositiveParserEvidence : ParserResult -> PositiveParserEvidence =
+    λ(result : ParserResult) case result of {
+      ParserOk definition -> classifyDefinitionAst definition;
+      ParserError _ -> PositiveParserRejected
+    };
+
+  def classifyDefinitionAst : SeedDefinition -> PositiveParserEvidence =
+    λ(definition : SeedDefinition) case definition of {
+      AstDefinition defSpan identifier equalsSpan expression -> case defSpan of {
+        SpanDefKeyword -> case identifier of {
+          IdentifierMain -> case equalsSpan of {
+            SpanDefKeyword -> PositiveParserRejected;
+            SpanIdentifierMain -> PositiveParserRejected;
+            SpanEquals -> classifyBoolExpressionAst expression;
+            SpanBoolTrue -> PositiveParserRejected;
+            SpanUnknownSymbol -> PositiveParserRejected
+          }
+        };
+        SpanIdentifierMain -> PositiveParserRejected;
+        SpanEquals -> PositiveParserRejected;
+        SpanBoolTrue -> PositiveParserRejected;
+        SpanUnknownSymbol -> PositiveParserRejected
+      }
+    };
+
+  def classifyBoolExpressionAst : SeedExpression -> PositiveParserEvidence =
+    λ(expression : SeedExpression) case expression of {
+      AstBoolLiteral span literal -> case span of {
+        SpanDefKeyword -> PositiveParserRejected;
+        SpanIdentifierMain -> PositiveParserRejected;
+        SpanEquals -> PositiveParserRejected;
+        SpanBoolTrue -> case literal of {
+          BoolLiteralTrue -> PositiveParserAccepted
+        };
+        SpanUnknownSymbol -> PositiveParserRejected
+      }
+    };
+
+  def classifyNegativeParserEvidence : ParserResult -> NegativeParserEvidence =
+    λ(result : ParserResult) case result of {
+      ParserOk _ -> NegativeParserRejected;
+      ParserError diagnostic -> case diagnostic of {
+        ParserDiagnostic span kind -> case kind of {
+          ExpectedDef -> NegativeParserRejected;
+          ExpectedIdentifier -> NegativeParserRejected;
+          ExpectedEquals -> case span of {
+            SpanDefKeyword -> NegativeParserRejected;
+            SpanIdentifierMain -> NegativeParserRejected;
+            SpanEquals -> NegativeParserRejected;
+            SpanBoolTrue -> classifyRejectedTokenSpan span;
+            SpanUnknownSymbol -> NegativeParserRejected
+          };
+          ExpectedBoolLiteral -> NegativeParserRejected;
+          ExpectedEndOfInput -> NegativeParserRejected
+        }
+      }
+    };
+
+  def classifyRejectedTokenSpan : SourceSpan -> NegativeParserEvidence =
+    λ(span : SourceSpan) case spanStart span of {
+      Line1Column1 -> NegativeParserRejected;
+      Line1Column4 -> NegativeParserRejected;
+      Line1Column5 -> NegativeParserRejected;
+      Line1Column6 -> NegativeParserRejected;
+      Line1Column9 -> NegativeParserRejected;
+      Line1Column10 -> NegativeParserRejected;
+      Line1Column11 -> NegativeParserRejected;
+      Line1Column12 -> case spanEnd span of {
+        Line1Column1 -> NegativeParserRejected;
+        Line1Column4 -> NegativeParserRejected;
+        Line1Column5 -> NegativeParserRejected;
+        Line1Column6 -> NegativeParserRejected;
+        Line1Column9 -> NegativeParserRejected;
+        Line1Column10 -> NegativeParserRejected;
+        Line1Column11 -> NegativeParserRejected;
+        Line1Column12 -> NegativeParserRejected;
+        Line1Column16 -> NegativeParserAccepted
+      };
+      Line1Column16 -> NegativeParserRejected
+    };
+}

@@ -39,26 +39,30 @@ spec =
                     , PackageModuleId compilerSeedPackageId "SeedToken"
                     , PackageModuleId compilerSeedPackageId "SeedDiagnostic"
                     , PackageModuleId compilerSeedPackageId "SeedLexer"
+                    , PackageModuleId compilerSeedPackageId "SeedAst"
+                    , PackageModuleId compilerSeedPackageId "SeedParser"
                     , PackageModuleId compilerSeedPackageId "Main"
                     ]
             map packageModuleGraphNodeSourcePath (packageModuleGraphNodes graph)
                 `shouldMatchList`
                     [ Just "<mlfp-prelude>"
                     , Just (compilerSeedRoot </> "Main.mlfp")
+                    , Just (compilerSeedRoot </> "SeedAst.mlfp")
                     , Just (compilerSeedRoot </> "SeedContract.mlfp")
                     , Just (compilerSeedRoot </> "SeedDiagnostic.mlfp")
                     , Just (compilerSeedRoot </> "SeedLexer.mlfp")
+                    , Just (compilerSeedRoot </> "SeedParser.mlfp")
                     , Just (compilerSeedRoot </> "SeedSource.mlfp")
                     , Just (compilerSeedRoot </> "SeedToken.mlfp")
                     ]
             _checked <- requireRight (checkLocatedProgramPackage package)
             result <- requireRight (runLocatedProgramPackageOutput package)
 
-            programRunOutput result `shouldBe` compilerSeedLexerEvidenceOutput
+            programRunOutput result `shouldBe` compilerSeedFrontendEvidenceOutput
 
         it "compiler-seed runs the fixture through the public CLI package entrypoint" $ do
             checkProgramArgs [compilerSeedRoot] `shouldReturn` Right "OK\n"
-            runProgramArgs [compilerSeedRoot] `shouldReturn` Right compilerSeedLexerEvidenceOutput
+            runProgramArgs [compilerSeedRoot] `shouldReturn` Right compilerSeedFrontendEvidenceOutput
 
 compilerSeedPackageId :: PackageId
 compilerSeedPackageId = PackageId "compiler-frontend-seed"
@@ -66,9 +70,12 @@ compilerSeedPackageId = PackageId "compiler-frontend-seed"
 compilerSeedRoot :: FilePath
 compilerSeedRoot = "test/programs/compiler-seed/frontend-contract"
 
-compilerSeedLexerEvidenceOutput :: String
-compilerSeedLexerEvidenceOutput =
-    "lexer-positive:def-main-equals-true;lexer-negative:unknown@span-unknown-symbol\n"
+compilerSeedFrontendEvidenceOutput :: String
+compilerSeedFrontendEvidenceOutput =
+    unlines
+        [ "lexer-positive:def-main-equals-true;lexer-negative:unknown@span-unknown-symbol"
+        , "parser-positive:ast-def-main-bool-true;parser-negative:expected-equals@span-bool-true"
+        ]
 
 requireRight :: (Show err) => Either err a -> IO a
 requireRight result =

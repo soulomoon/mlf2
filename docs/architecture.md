@@ -116,10 +116,13 @@ introducing a second compiler-source loader. The same fixture now owns the
 bounded symbolic-input lexer seed: `SeedSource`, `SeedToken`,
 `SeedDiagnostic`, and `SeedLexer` define source span labels, input symbols,
 tokens, diagnostics, lexer results, and `.mlfp` evidence rendering for one
-accepted token path and one rejected diagnostic path. It is not a source-text
-lexer, parser seed, package manager, ABI, linker, native/backend contract, or
-self-hosting claim. `docs/mlfp-self-boot-readiness.md` records the remaining
-self-boot gaps by layer.
+accepted token path and one rejected diagnostic path. `SeedAst` and
+`SeedParser` layer the bounded parser seed on that token stream with one
+definition AST shape, parser result/diagnostic values, and interpreter evidence
+for one accepted parse and one rejected missing-equals parse. It is not a
+source-text lexer/parser, package manager, ABI, linker, native/backend
+contract, or self-hosting claim. `docs/mlfp-self-boot-readiness.md` records
+the remaining self-boot gaps by layer.
 
 No active executable or test component depends on historical research modules.
 
