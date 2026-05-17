@@ -91,12 +91,14 @@ The unified `.mlfp` surface includes:
 - a built-in Prelude with `Nat`, `Option`, `List`, `Eq`, `Unit`, opaque
   `IO`, minimal `Monad IO`, `pure`, `bind`, `putStrLn`, `and`, and `id`
 
-`.mlfp` modules are same-local-package modules today: imports resolve among
-modules in the input file or the discovered `.mlfp` files under the selected
-local root/search-path roots, with the CLI adding the built-in Prelude as an
-explicit module. Separate module compilation and persisted interface files are
-not supported yet; see `docs/mlfp-language-reference.md` for the user-facing
-module contract.
+`.mlfp` modules are same-local-package modules today. The durable execution
+model is local package mode: imports resolve among modules discovered under the
+selected local root plus ordered `--search-path` roots. Passing one `.mlfp`
+file to the CLI is still supported, but it is represented as one trivial
+package source unit rather than a separate one-file semantic mode. The CLI adds
+the built-in Prelude as an explicit module. Separate module compilation and
+persisted interface files are not supported yet; see
+`docs/mlfp-language-reference.md` for the user-facing module contract.
 
 Internally, `.mlfp` now reuses the old MLF ownership boundary:
 
@@ -114,39 +116,46 @@ syntax/corpus freeze is documented in
 
 The current user-facing `.mlfp` language contract is documented in
 `docs/mlfp-language-reference.md`.
+Self-boot readiness and remaining compiler-in-`.mlfp` gaps are tracked in
+`docs/mlfp-self-boot-readiness.md`.
 
 The first-class-polymorphism program example lives at
 `test/programs/unified/first-class-polymorphism.mlfp`.
 
-Check a program file or local package root from the executable:
+Check a local package root from the executable:
 
 ```bash
-cabal run mlf2 -- check-program test/programs/recursive-adt/plain-recursive-nat.mlfp
+cabal run mlf2 -- check-program test/programs/packages/cross-module-let
 ```
 
-Run a program file or local package root directly from the executable:
+Run a local package root directly from the executable:
+
+```bash
+cabal run mlf2 -- run-program test/programs/packages/cross-module-let
+```
+
+Additional local package roots are searched in order:
+
+```bash
+cabal run mlf2 -- run-program test/programs/packages/search-path-main --search-path test/programs/packages/search-path-lib
+```
+
+A single `.mlfp` file remains a trivial package input:
 
 ```bash
 cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp
 ```
 
-Directory inputs are discovered as local package roots. Additional roots are
-searched in order:
+Emit LLVM IR for a checked local package:
 
 ```bash
-cabal run mlf2 -- run-program app-package --search-path lib-package
-```
-
-Emit LLVM IR for a checked program:
-
-```bash
-cabal run mlf2 -- emit-backend test/programs/unified/authoritative-let-polymorphism.mlfp
+cabal run mlf2 -- emit-backend test/programs/packages/cross-module-let
 ```
 
 Emit LLVM IR with a native process entrypoint:
 
 ```bash
-cabal run mlf2 -- emit-native test/programs/unified/authoritative-let-polymorphism.mlfp
+cabal run mlf2 -- emit-native test/programs/packages/cross-module-let
 ```
 
 The `.mlfp` CLI accepts a file as a trivial local package source unit or a

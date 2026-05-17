@@ -3,10 +3,13 @@
 `.mlfp` is the user-facing program layer on top of the eMLF/xMLF pipeline.
 Raw eMLF stays thesis-facing and minimal; modules, ADTs, cases, typeclasses,
 diagnostics, and runtime value rendering are owned by `.mlfp`.
+Self-boot readiness is tracked separately in
+`docs/mlfp-self-boot-readiness.md`; this reference does not claim the compiler
+is implemented in `.mlfp`.
 
 ## Modules
 
-A file contains one or more modules:
+A `.mlfp` package source unit contains one or more modules:
 
 ```mlf
 module Main export (main) {
@@ -25,17 +28,28 @@ module User export (main) {
 }
 ```
 
-Imports may refer to modules declared later in the same file or in another
-`.mlfp` file discovered under an explicitly selected local package root. A
-parsed `.mlfp` `Program` remains an in-memory package projection: imports
-resolve only against modules in the file/root/search-path package. The CLI
-accepts either a single file, which is treated as a trivial local package source
-unit, or a directory root plus optional ordered `--search-path <root>` entries;
-it prepends the built-in `Prelude` as an explicit module before checking. There
-is no package manager, remote dependency system, persisted interface file,
-stable `.mlfp` ABI, linker, or separate module compilation mode yet. Hidden
-constructors remain hidden: importing `Nat(..)` from a module that exported only
-`Nat` is a visibility error.
+Imports may refer to modules declared later in the same source unit or in
+another `.mlfp` file discovered under an explicitly selected local package root.
+The durable `.mlfp` execution model is local package mode: imports resolve only
+against modules in the selected root plus ordered search-path roots, and the
+CLI prepends the built-in `Prelude` as an explicit module before checking.
+
+```bash
+cabal run mlf2 -- check-program test/programs/packages/cross-module-let
+cabal run mlf2 -- run-program test/programs/packages/search-path-main --search-path test/programs/packages/search-path-lib
+```
+
+Passing a single `.mlfp` file is supported as a trivial package source unit:
+
+```bash
+cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp
+```
+
+A parsed `.mlfp` `Program` remains an in-memory package projection. There is no
+package manager, remote dependency system, persisted interface file, stable
+`.mlfp` ABI, linker, or separate module compilation mode yet. Hidden
+constructors remain hidden: importing `Nat(..)` from a module that exported
+only `Nat` is a visibility error.
 
 Imports can be qualified and aliased:
 
@@ -367,21 +381,20 @@ Prelude contract documented here. Its validator is scoped to backend-local
 invariants such as typed expression nodes, lexical/global references, and
 constructor metadata consistency for construct/case nodes.
 
-The executable exposes this boundary with:
+The executable exposes this boundary with local package roots and ordered
+search paths:
 
 ```bash
-cabal run mlf2 -- emit-backend path/to/file-or-root --search-path path/to/extra-root
+cabal run mlf2 -- emit-backend test/programs/packages/cross-module-let
+cabal run mlf2 -- emit-backend test/programs/packages/search-path-main --search-path test/programs/packages/search-path-lib
 ```
 
 Like `check-program`, `run-program`, and `emit-native`, `emit-backend` loads a
 single file as a trivial package source unit or discovers `.mlfp` files under
 the selected local roots, then prepends the built-in Prelude as an explicit
 module before checking. The emitted text is LLVM IR for the supported backend
-subset, not a stable ABI or a promise of final executable linking. IO values
-remain outside the LLVM contract: checked `main : IO Unit`, direct `__io_*`
-primitive calls, and pure `main` bindings whose reachable dependencies mention
-IO fail before LLVM is emitted. The source-facing surface remains primarily
-first-order: checked first-order
+subset, not a stable ABI or a promise of final executable linking. The
+source-facing surface remains primarily first-order: checked first-order
 function bindings, saturated direct calls, literals, variables, SSA-style lets,
 type abstraction/application after specialization, ADT construction, and ADT
 case analysis.

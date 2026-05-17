@@ -34,6 +34,7 @@ import PhiSoundnessSpec qualified
 import PipelineSpec qualified
 import ProgramPackageBuildGraphSpec qualified
 import ProgramCliPackageSpec qualified
+import ProgramFixturePackageSpec qualified
 import ProgramInterfaceSpec qualified
 import ProgramPackageSpec qualified
 import ProgramPackageDiscoverySpec qualified
@@ -112,6 +113,7 @@ main = do
     ProgramInterfaceSpec.spec
     ProgramPackageBuildGraphSpec.spec
     ProgramCliPackageSpec.spec
+    ProgramFixturePackageSpec.spec
     ProgramPackageSpec.spec
     ProgramPackageDiscoverySpec.spec
     ProgramSpec.spec

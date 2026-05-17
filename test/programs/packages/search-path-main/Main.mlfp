@@ -1,0 +1,5 @@
+module Main export (main) {
+  import SearchLib exposing (two);
+
+  def main : Int = two;
+}

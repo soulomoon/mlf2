@@ -26,7 +26,7 @@ artifacts and are not part of the current task workflow.
 - `src/` builds the private implementation library `mlf2-internal`.
 - `src-public/` contains the public entry modules `MLF.API`, `MLF.Pipeline`, and `MLF.XMLF`.
 - `app/` contains the `mlf2` executable entrypoint.
-- `test/` contains the Hspec suite, the manual test runner, frozen parity tooling/artifacts, and test-support parity owners such as `Parity.ProgramMatrix` plus `Parity.ProgramMatrix.NativePolicy`.
+- `test/` contains the Hspec suite, the manual test runner, frozen parity tooling/artifacts, static `.mlfp` file/root/search-path package fixtures under `test/programs/`, and test-support parity owners such as `Parity.ProgramMatrix` plus `Parity.ProgramMatrix.NativePolicy`.
 - `papers/` contains the thesis/reference texts used for paper-faithful implementation work.
 Historical executable research harnesses have been retired from the active build. Their accepted evidence remains under `docs/plans/` and `orchestrator/rounds/`; do not reintroduce a research sublibrary or CLI entrypoint without a fresh reviewed roadmap.
 
@@ -100,6 +100,10 @@ separate compilation should be introduced only through the package, interface,
 and build-graph owners and explicit compiler-owned artifacts that carry checked
 xMLF/runtime payloads rather than by peeking at source outside the package
 projection.
+The fixture migration evidence for this package-substrate family is kept in
+`test/programs/packages/` and `ProgramFixturePackageSpec`, while
+`docs/mlfp-self-boot-readiness.md` records the remaining self-boot gaps by
+layer without claiming that a compiler implementation in `.mlfp` exists.
 
 No active executable or test component depends on historical research modules.
 

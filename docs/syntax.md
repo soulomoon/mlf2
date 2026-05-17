@@ -141,10 +141,24 @@ PatternAtom  ::= QName | "_" | "(" Pattern ")"
 QName        ::= [UIdent "."] (lIdent | UIdent)
 ```
 
-Current checked/evaluated recursive-ADT corpus examples live under
-`test/programs/recursive-adt/`.
+Current checked/evaluated fixture examples live under
+`test/programs/recursive-adt/`, `test/programs/unified/`, and the static local
+package fixtures under `test/programs/packages/`.
 
-You can run a program file with:
+You can run a local package root with:
+
+```bash
+cabal run mlf2 -- run-program test/programs/packages/cross-module-let
+```
+
+Ordered search-path roots are part of local package mode:
+
+```bash
+cabal run mlf2 -- run-program test/programs/packages/search-path-main --search-path test/programs/packages/search-path-lib
+```
+
+You can also pass one `.mlfp` file; it is loaded as a trivial package source
+unit:
 
 ```bash
 cabal run mlf2 -- run-program test/programs/recursive-adt/plain-recursive-nat.mlfp

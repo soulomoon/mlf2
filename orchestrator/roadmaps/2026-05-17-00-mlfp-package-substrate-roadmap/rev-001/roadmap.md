@@ -315,7 +315,7 @@ rounds unless controller state and a selected plan explicitly allow it.
 - Extraction notes: a lawful round may first migrate `run-program`, then
   backend emission and public adapters in follow-up rounds.
 
-### [pending] 6. Fixture Migration And Self-Boot Readiness Evidence
+### [done] 6. Fixture Migration And Self-Boot Readiness Evidence
 
 - Milestone id: `milestone-6`
 - Depends on: `milestone-5`
@@ -331,7 +331,7 @@ rounds unless controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-6
 
-- none yet
+- Completed by round-250; evidence: existing recursive/unified fixtures run through package-mode file helpers, static package-root and search-path fixtures prove durable local package mode, docs describe one-file inputs only as trivial packages, and the self-boot readiness ledger records remaining compiler-in-.mlfp gaps without overclaiming self-hosting.
 
 #### Candidate Direction: Fixture Migration And Readiness Ledger
 

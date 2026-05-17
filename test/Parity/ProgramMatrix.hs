@@ -6,6 +6,11 @@ module Parity.ProgramMatrix
     , ProgramRuntimeCase (..)
     , fixturePaths
     , unifiedFixtureExpectations
+    , fixtureRuntimeExpectations
+    , staticCrossModulePackageRoot
+    , staticSearchPathMainRoot
+    , staticSearchPathLibRoot
+    , staticSearchPathPackageRoots
     , emlfSurfaceParityMatrix
     , emlfBoundaryMatrix
     , programRuntimeSuccessCases
@@ -41,6 +46,29 @@ unifiedFixtureExpectations =
     , ("test/programs/unified/higher-order-local-function-flow.mlfp", "41")
     , ("test/programs/unified/higher-order-partial-application.mlfp", "1")
     , ("test/programs/unified/higher-order-returned-function.mlfp", "41")
+    ]
+
+fixtureRuntimeExpectations :: [(FilePath, String)]
+fixtureRuntimeExpectations =
+    [(path, "true") | path <- fixturePaths]
+        ++ unifiedFixtureExpectations
+
+staticCrossModulePackageRoot :: FilePath
+staticCrossModulePackageRoot =
+    "test/programs/packages/cross-module-let"
+
+staticSearchPathMainRoot :: FilePath
+staticSearchPathMainRoot =
+    "test/programs/packages/search-path-main"
+
+staticSearchPathLibRoot :: FilePath
+staticSearchPathLibRoot =
+    "test/programs/packages/search-path-lib"
+
+staticSearchPathPackageRoots :: [FilePath]
+staticSearchPathPackageRoots =
+    [ staticSearchPathMainRoot
+    , staticSearchPathLibRoot
     ]
 
 data ProgramMatrixSource

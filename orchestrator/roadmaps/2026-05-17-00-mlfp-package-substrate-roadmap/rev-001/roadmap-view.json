@@ -81,7 +81,7 @@
     {
       "milestone_id": "milestone-6",
       "title": "Fixture Migration And Self-Boot Readiness Evidence",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-5"
       ],
@@ -204,7 +204,7 @@
     },
     "milestone-6-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 6. Fixture Migration And Self-Boot Readiness Evidence"
+      "selector": "### [done] 6. Fixture Migration And Self-Boot Readiness Evidence"
     },
     "milestone-6-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001/roadmap.md",

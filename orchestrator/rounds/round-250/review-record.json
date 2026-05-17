@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-250",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-001",
+  "milestone_id": "milestone-6",
+  "direction_id": "direction-6a-fixture-migration-readiness-ledger",
+  "extracted_item_id": "round-250-fixture-migration-readiness",
+  "decision": "approved",
+  "evidence_summary": "Focused fixture package migration, CLI package migration, runtime/eMLF parity, public-surface, and backend parity checks passed; git diff --check passed; cabal build all && cabal test passed with 2496 examples; the diff proves existing fixtures through package-mode file helpers, adds durable static package-root and search-path fixtures, aligns docs around local package mode, and records a self-boot readiness ledger without claiming self-hosting or widening package-substrate scope.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-6",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-6-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-6-completion",
+        "text": "Completed by round-250; evidence: existing recursive/unified fixtures run through package-mode file helpers, static package-root and search-path fixtures prove durable local package mode, docs describe one-file inputs only as trivial packages, and the self-boot readiness ledger records remaining compiler-in-.mlfp gaps without overclaiming self-hosting."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}
