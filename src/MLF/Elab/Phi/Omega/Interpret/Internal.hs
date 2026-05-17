@@ -96,7 +96,7 @@ import MLF.Elab.Phi.VSpine
 import MLF.Elab.Run.Instantiation (containsForallType, inferInstAppArgsFromScheme)
 import MLF.Elab.Sigma (bubbleReorderTo)
 import MLF.Elab.Types
-import MLF.Reify.TypeOps (alphaEqType, freeTypeVarsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, substTypeCapture)
+import MLF.Reify.TypeOps (alphaEqType, composeTypeHead, freeTypeVarsList, inlineAliasBoundsWithBy, inlineBaseBoundsType, substTypeCapture)
 import MLF.Util.Graph (topoSortBy)
 import MLF.Util.Names (parseNameId)
 import qualified MLF.Util.Order as Order
@@ -419,6 +419,14 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
           TConIF c args ->
             ApplyFun $ \bound ->
               TCon c (fmap (\f -> runApplyFun f bound) args)
+          TVarAppIF v args ->
+            ApplyFun $ \bound ->
+              let args' = fmap (\f -> runApplyFun f bound) args
+               in if Set.member v bound
+                    then TVarApp v args'
+                    else case Map.lookup v inferredArgMap' of
+                      Just instTy -> composeTypeHead v instTy args'
+                      Nothing -> TVarApp v args'
           TBaseIF b -> ApplyFun (const (TBase b))
           TBottomIF -> ApplyFun (const TBottom)
           TForallIF v mb body ->
@@ -509,6 +517,12 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
               Nothing -> TVar v
           TArrowIF a b -> TArrow a b
           TConIF c args -> TCon c args
+          TVarAppIF v args ->
+            let v' =
+                  case parseNameId v >>= (`IntMap.lookup` substForTypes) of
+                    Just name -> name
+                    Nothing -> v
+             in TVarApp v' args
           TBaseIF b -> TBase b
           TForallIF v mb body -> TForall v mb body
           TMuIF v body -> TMu v body
@@ -521,6 +535,7 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
       TBottom -> True
       TArrow a b -> containsBottomTy a || containsBottomTy b
       TCon _ args -> any containsBottomTy args
+      TVarApp _ args -> any containsBottomTy args
       TForall _ mb body -> maybe False containsBottomTy mb || containsBottomTy body
       TMu _ body -> containsBottomTy body
 

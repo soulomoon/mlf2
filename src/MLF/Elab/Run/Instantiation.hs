@@ -13,7 +13,7 @@ import Control.Applicative ((<|>))
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 
-import MLF.Reify.TypeOps (alphaEqType, matchType, stripForallsType)
+import MLF.Reify.TypeOps (alphaEqType, composeTypeHead, matchType, stripForallsType)
 import MLF.Elab.Types
 
 newtype SubstFun (i :: TopVar) =
@@ -131,6 +131,7 @@ varsInType = cataIxConst alg
         TVarIF v -> Set.singleton v
         TArrowIF a b -> Set.union (unK a) (unK b)
         TConIF _ args -> foldr (Set.union . unK) Set.empty args
+        TVarAppIF v args -> Set.insert v (foldr (Set.union . unK) Set.empty args)
         TBaseIF _ -> Set.empty
         TBottomIF -> Set.empty
         TForallIF _ mb body ->
@@ -154,6 +155,14 @@ substTypeSelective binderSet subst ty0 = runSubstFun (cataIx alg ty0) Set.empty
             SubstFun $ \bound -> TArrow (runSubstFun a bound) (runSubstFun b bound)
         TConIF c args ->
             SubstFun $ \bound -> TCon c (fmap (\f -> runSubstFun f bound) args)
+        TVarAppIF v args ->
+            SubstFun $ \bound ->
+                let args' = fmap (\f -> runSubstFun f bound) args
+                in if Set.member v bound || Set.member v binderSet
+                    then TVarApp v args'
+                    else case Map.lookup v subst of
+                        Just ty' -> composeTypeHead v ty' args'
+                        Nothing -> TVarApp v args'
         TBaseIF b -> SubstFun (const (TBase b))
         TBottomIF -> SubstFun (const TBottom)
         TForallIF v mb body ->

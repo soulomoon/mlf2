@@ -8,8 +8,6 @@ import qualified Data.IntMap.Strict as IntMap
 
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 
 collectBoundChildren
     :: (NodeRef -> Maybe NodeId)

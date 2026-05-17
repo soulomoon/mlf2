@@ -55,8 +55,6 @@ import MLF.Constraint.Presolution.Plan.Normalize
     simplifySchemeBindings,
   )
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Elab.Types (mapBoundType)
 import MLF.Reify.TypeOps (freeTypeVarsFrom, freeTypeVarsType, splitForalls, stripForallsType, substTypeSimple)
@@ -256,7 +254,7 @@ finalizeScheme FinalizeInput {..} =
                 case ty of
                   TArrow a b -> TArrow (goReplace a) (goReplace b)
                   TCon c args -> TCon c (fmap goReplace args)
-                  TVarApp v args -> TVarApp v (fmap goReplace args)
+                  TVarApp name args -> TVarApp name (fmap goReplace args)
                   TForall name mb body ->
                     TForall name (fmap (mapBoundType goReplace) mb) (goReplace body)
                   TMu name body -> TMu name (goReplace body)

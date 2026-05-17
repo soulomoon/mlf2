@@ -277,6 +277,7 @@ matchesRecursiveArrow actual expected = case (actual, expected) of
         TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
         TBase base -> TBase base
         TCon con args -> TCon con (fmap stripMuNames args)
+        TVarApp _ args -> TVarApp "_" (fmap stripMuNames args)
         TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
         TMu _ body -> TMu "_" (stripMuNames body)
         TBottom -> TBottom
@@ -285,6 +286,7 @@ matchesRecursiveArrow actual expected = case (actual, expected) of
         TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
         TBase base -> TBase base
         TCon con args -> TCon con (fmap stripMuNames args)
+        TVarApp _ args -> TVarApp "_" (fmap stripMuNames args)
         TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
         TMu _ body -> TMu "_" (stripMuNames body)
         TBottom -> TBottom

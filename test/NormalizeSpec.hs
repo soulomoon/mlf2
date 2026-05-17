@@ -8,7 +8,6 @@ import Data.List.NonEmpty (NonEmpty(..))
 import Test.Hspec
 
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Phase (Phase(Raw))
 import SpecUtil (emptyConstraint, lookupNodeMaybe, nodeMapFromList, nodeMapSingleton, nodeMapSize, normalizeRaw)
 
 spec :: Spec

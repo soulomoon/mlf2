@@ -219,7 +219,7 @@ File.foreach(path) do |line|
 
   next unless in_evidence_section
 
-  if line =~ /^  #{Regexp.escape(target_id)} \[[^\]]+\]$/
+  if line =~ /^  #{Regexp.escape(target_id)}(?: \[[^\]]+\])?$/
     watching_target = true
     next
   end
@@ -245,7 +245,7 @@ while IFS=$'\t' read -r id matcher _file min_success; do
 
   echo
   echo "==> [thesis-obligations] ${id} (--match \"${matcher}\")"
-  if ! cabal test mlf2-test --test-show-details=direct --test-options="--match \"${matcher}\"" >"${log_file}" 2>&1; then
+  if ! cabal test mlf2-test --test-show-details=direct --test-options="--match \"${matcher}\" --format specdoc" >"${log_file}" 2>&1; then
     cat "${log_file}"
     command_failures+=("${id}")
     rm -f "${log_file}"

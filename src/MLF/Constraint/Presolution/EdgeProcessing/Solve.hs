@@ -27,8 +27,6 @@ import MLF.Util.Trace (traceBindingM)
 
 import qualified MLF.Binding.Tree as Binding
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution.Base
 import MLF.Constraint.Presolution.StateAccess (
     getCanonical,
@@ -54,6 +52,7 @@ import MLF.Constraint.Presolution.Witness (binderArgsFromExpansion)
 import MLF.Constraint.Presolution.EdgeProcessing.Unify (
     setBindParentIfUpper
     )
+import MLF.Constraint.Types.Witness
 import MLF.Constraint.Presolution.Unify (unifyAcyclic)
 import qualified MLF.Constraint.Unify.Decompose as UnifyDecompose
 

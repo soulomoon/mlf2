@@ -10,7 +10,6 @@ import Test.QuickCheck
 
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Types.Phase (Phase(Raw))
 import MLF.Binding.Tree
 import MLF.Binding.GraphOps
@@ -337,10 +336,10 @@ spec = describe "MLF.Binding.GraphOps" $ do
             forAll (choose (2, 15)) $ \n -> do
                 c <- generate (genAllFlexTree n)
                 -- Find a non-root node to weaken
-                let nonRoots = filter (not . isBindingRoot c) (map typeRef (allNodeIds c))
+                let nonRoots = filter (not . isBindingRoot c . typeRef) (allNodeIds c)
                 case nonRoots of
                     [] -> return ()  -- No non-roots to test
-                    (TypeRef nId:_) -> do
+                    (nId:_) -> do
                         case applyWeaken (TypeRefTag nId) c of
                             Right (c', _) -> 
                                 checkBindingTree c' `shouldBe` Right ()
@@ -352,10 +351,10 @@ spec = describe "MLF.Binding.GraphOps" $ do
             forAll (choose (3, 15)) $ \n -> do
                 c <- generate (genAllFlexTree n)
                 -- Find a non-root node with a non-root parent
-                let candidates = filter (hasNonRootParent c) (map typeRef (allNodeIds c))
+                let candidates = filter (hasNonRootParent c . typeRef) (allNodeIds c)
                 case candidates of
                     [] -> return ()
-                    (TypeRef nId:_) -> do
+                    (nId:_) -> do
                         case applyRaiseStep (TypeRefTag nId) c of
                             Right (c', _) -> 
                                 checkBindingTree c' `shouldBe` Right ()
@@ -404,7 +403,6 @@ spec = describe "MLF.Binding.GraphOps" $ do
                 c <- generate (genFlexChain n)
                 -- Pick a node in the middle
                 let midIdx = n `div` 2
-                    midNode = typeRef (NodeId midIdx)
                 -- Weaken it
                 case applyWeaken (TypeRefTag (NodeId midIdx)) c of
                     Right (c', _) -> do

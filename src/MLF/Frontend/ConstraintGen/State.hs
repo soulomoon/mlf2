@@ -16,8 +16,6 @@ import qualified Data.IntSet as IntSet
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Frontend.ConstraintGen.Types (ConstraintError)
 import MLF.Frontend.Syntax (NormSrcType)
 

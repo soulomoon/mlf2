@@ -3,6 +3,7 @@
 {-# LANGUAGE StandaloneKindSignatures #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TypeFamilies #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 {- |
 Module      : MLF.Constraint.Types.Phase.Singletons
 Description : Dedicated owner for phase singleton generation

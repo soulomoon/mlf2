@@ -56,10 +56,10 @@ validateLLVMAssembly output = do
             expectationFailure "required LLVM tool not found: llvm-as"
         Just llvmAs ->
             withTempLLVM output $ \path -> do
-                (exitCode, stderr) <- runLLVMTool llvmAs ["-o", "/dev/null", path]
+                (exitCode, errOutput) <- runLLVMTool llvmAs ["-o", "/dev/null", path]
                 case exitCode of
                     ExitSuccess -> pure ()
-                    ExitFailure _ -> expectationFailure ("llvm-as rejected backend output:\n" ++ stderr)
+                    ExitFailure _ -> expectationFailure ("llvm-as rejected backend output:\n" ++ errOutput)
 
 validateLLVMObjectCode :: String -> Expectation
 validateLLVMObjectCode output = do
@@ -69,10 +69,10 @@ validateLLVMObjectCode output = do
             expectationFailure "required LLVM tool not found: llc"
         Just llc ->
             withTempLLVM output $ \path -> do
-                (exitCode, stderr) <- runLLVMTool llc ["-filetype=obj", "-o", "/dev/null", path]
+                (exitCode, errOutput) <- runLLVMTool llc ["-filetype=obj", "-o", "/dev/null", path]
                 case exitCode of
                     ExitSuccess -> pure ()
-                    ExitFailure _ -> expectationFailure ("llc rejected backend output:\n" ++ stderr)
+                    ExitFailure _ -> expectationFailure ("llc rejected backend output:\n" ++ errOutput)
 
 discoverNativeLLVMToolchain :: IO (Either [String] LLVMToolchain)
 discoverNativeLLVMToolchain = do
@@ -354,16 +354,16 @@ failMissingNativeToolchain missing = do
     fail "native LLVM toolchain unavailable"
 
 expectProcessSuccess :: String -> ExitCode -> String -> String -> IO ()
-expectProcessSuccess label exitCode stdout stderr =
+expectProcessSuccess label exitCode stdoutText stderrText =
     case exitCode of
         ExitSuccess -> pure ()
         ExitFailure _ ->
             expectationFailure $
                 label
                     ++ ":\nstdout:\n"
-                    ++ stdout
+                    ++ stdoutText
                     ++ "\nstderr:\n"
-                    ++ stderr
+                    ++ stderrText
 
 knownLLVMToolPaths :: [FilePath]
 knownLLVMToolPaths =

@@ -11,6 +11,7 @@ module MLF.Reify.TypeOps
     freeTypeVarsList,
     substTypeCapture,
     substTypeSimple,
+    composeTypeHead,
     renameTypeVar,
     freshNameLike,
     freshTypeName,
@@ -39,8 +40,6 @@ import qualified Data.Set as Set
 import qualified MLF.Constraint.NodeAccess as NodeAccess
 import qualified MLF.Constraint.Solved as Solved
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import qualified MLF.Constraint.VarStore as VarStore
 import MLF.Types.Elab
 import MLF.Util.ElabError (ElabError (..))

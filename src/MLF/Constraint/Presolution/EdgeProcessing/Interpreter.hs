@@ -41,7 +41,6 @@ import MLF.Constraint.Presolution.Witness
   )
 import MLF.Constraint.Types.Graph
 import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 
 -- | Execute a resolved edge plan.
 executeEdgePlan :: EdgePlan -> PresolutionM p ()

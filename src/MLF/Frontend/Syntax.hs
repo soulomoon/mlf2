@@ -298,6 +298,8 @@ data SrcTypeF a
   | STBaseF String
   | STConF String (NonEmpty a)
   | STVarAppF String (NonEmpty a)
+  | STTyLamF String a
+  | STTyAppF a a
   | STForallF String (Maybe a) a
   | STMuF String a
   | STBottomF
@@ -312,6 +314,8 @@ instance Recursive (SrcTy 'RawN 'TopVarAllowed) where
     STBase b -> STBaseF b
     STCon c args -> STConF c args
     STVarApp v args -> STVarAppF v args
+    STTyLam v body -> STTyLamF v body
+    STTyApp fun arg -> STTyAppF fun arg
     STForall v mb body -> STForallF v (fmap unSrcBound mb) body
     STMu v body -> STMuF v body
     STBottom -> STBottomF
@@ -323,6 +327,8 @@ instance Corecursive (SrcTy 'RawN 'TopVarAllowed) where
     STBaseF b -> STBase b
     STConF c args -> STCon c args
     STVarAppF v args -> STVarApp v args
+    STTyLamF v body -> STTyLam v body
+    STTyAppF fun arg -> STTyApp fun arg
     STForallF v mb body -> STForall v (fmap mkSrcBound mb) body
     STMuF v body -> STMu v body
     STBottomF -> STBottom

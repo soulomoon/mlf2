@@ -252,6 +252,8 @@ combineValueKinds resultTy kinds =
         BTCon _ args -> all isFirstOrderPointerValueType args
         BTVarApp {} -> False
         BTForall {} -> False
+        BTMu _ body -> isFirstOrderPointerValueType body
+        BTBottom -> False
 
     collectArrowsType ty =
       case ty of

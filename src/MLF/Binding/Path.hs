@@ -10,8 +10,6 @@ import qualified Data.IntSet as IntSet
 import Data.Maybe (listToMaybe)
 
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 
 bindingPathToRootWithLookup
     :: (Int -> Maybe (NodeRef, BindFlag))

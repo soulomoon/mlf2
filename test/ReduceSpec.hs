@@ -34,6 +34,7 @@ spec = do
             TVar v -> error ("boundFromType: unexpected variable bound " ++ show v)
             TArrow a b -> TArrow a b
             TCon c args -> TCon c args
+            TVarApp v args -> TVarApp v args
             TBase b -> TBase b
             TBottom -> TBottom
             TForall v mb body -> TForall v mb body

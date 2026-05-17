@@ -1429,6 +1429,7 @@ boundFromType ty =
     Elab.TVar v -> error ("boundFromType: unexpected variable bound " ++ show v)
     Elab.TArrow a b -> Elab.TArrow a b
     Elab.TCon c args -> Elab.TCon c args
+    Elab.TVarApp v args -> Elab.TVarApp v args
     Elab.TBase b -> Elab.TBase b
     Elab.TBottom -> Elab.TBottom
     Elab.TForall v mb body -> Elab.TForall v mb body

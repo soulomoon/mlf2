@@ -11,7 +11,6 @@ import MLF.Constraint.Types.Witness
 import MLF.Constraint.Types.Presolution
 import MLF.Constraint.Presolution
     ( EdgeTrace(..)
-    , PresolutionError
     , PresolutionResult(..)
     )
 import MLF.Constraint.Presolution.TestSupport

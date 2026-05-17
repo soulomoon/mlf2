@@ -15,8 +15,6 @@ import qualified Data.IntSet as IntSet
 import MLF.Constraint.Presolution.Plan.BinderPlan.Order (GaBindParentsInfo)
 import MLF.Constraint.Presolution.View (PresolutionView)
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Util.ElabError (ElabError)
 
 data BinderPlanInput p = BinderPlanInput

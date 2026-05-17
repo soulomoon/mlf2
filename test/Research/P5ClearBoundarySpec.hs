@@ -773,6 +773,7 @@ containsMu ty = case ty of
         TArrow dom cod -> containsMu dom || containsMu cod
         TBase _ -> False
         TCon _ args -> any containsMu args
+        TVarApp _ args -> any containsMu args
         TForall _ mb body -> maybe False containsMuBound mb || containsMu body
         TMu _ _ -> True
         TBottom -> False

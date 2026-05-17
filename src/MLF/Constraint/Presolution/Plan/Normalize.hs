@@ -11,7 +11,7 @@ module MLF.Constraint.Presolution.Plan.Normalize (
 
 import qualified Data.Set as Set
 
-import MLF.Reify.TypeOps (freeTypeVarsFrom, freeTypeVarsType, substTypeSimple)
+import MLF.Reify.TypeOps (composeTypeHead, freeTypeVarsFrom, freeTypeVarsType, substTypeSimple)
 import MLF.Types.Elab
     ( BoundType
     , ElabType
@@ -144,6 +144,11 @@ substBound v replacement bound = case bound of
     TArrow a b ->
         TArrow (substType v replacement a) (substType v replacement b)
     TCon c args -> TCon c (fmap (substType v replacement) args)
+    TVarApp name args ->
+        let args' = fmap (substType v replacement) args
+        in if name == v
+            then composeTypeHead name replacement args'
+            else TVarApp name args'
     TBase b -> TBase b
     TBottom -> TBottom
     TForall name mb body

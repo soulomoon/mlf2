@@ -11,8 +11,6 @@ import MLF.Binding.Path (
     )
 import MLF.Binding.ScopeGraph (buildTypeEdgesFrom, rootsForScope)
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import SpecUtil (emptyConstraint, nodeMapFromList)
 import Test.Hspec
 
