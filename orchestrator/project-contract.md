@@ -53,6 +53,13 @@ stable contracts instead of restating them in every role or roadmap file.
   resolver/checker contract.
 - Compatibility promises: no durable promise to preserve the old one-file
   `.mlfp` program model as a separate mode.
+- Compiler-in-`.mlfp` prerequisite work should begin from ordinary package-mode
+  compiler source modules and interpreter-runnable frontend seed evidence.
+  Native/backend behavior must be classified by layer and must not be forced
+  into the first seed unless a selected roadmap direction authorizes it.
+- Self-boot readiness claims must stay layer-separated: source checking,
+  interpreter/runtime, backend/native, object code, package build mode, and
+  compiler-in-`.mlfp` implementation.
 
 ## Verification Anchors
 
@@ -74,6 +81,10 @@ stable contracts instead of restating them in every role or roadmap file.
 - Baseline commands that protect shared contracts: `git diff --check`,
   focused tests named by the round plan, and `cabal build all && cabal test`
   for behavior-changing work.
+- Thesis-conformance preserving work should keep
+  `./scripts/thesis-conformance-gate.sh` green when the selected round touches
+  thesis obligations, language semantics, compiler seed behavior, or roadmap
+  closeout evidence that depends on the thesis ledger.
 - Architecture deepening rounds must name the ownership boundary they changed,
   prove that callers now depend on that owner instead of duplicating policy,
   and update `docs/architecture.md` when module ownership changes.
@@ -81,6 +92,9 @@ stable contracts instead of restating them in every role or roadmap file.
   focused tests before the full gate, and must classify user-facing support by
   source checking, interpreter/runtime, backend/native, object code, and
   package build mode when those layers differ.
+- Compiler frontend seed rounds must prove executable `.mlfp` seed behavior
+  through focused assertions, keep unsupported native/backend behavior
+  fail-closed, and update readiness docs without claiming full self-hosting.
 
 ## Update Rule
 

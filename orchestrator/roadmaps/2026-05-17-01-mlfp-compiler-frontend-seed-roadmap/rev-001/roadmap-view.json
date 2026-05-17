@@ -1,0 +1,212 @@
+{
+  "schema_version": "roadmap-view-v1",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "roadmap_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+  "milestones": [
+    {
+      "milestone_id": "milestone-1",
+      "title": "Compiler Source Package And Seed Contract",
+      "status": "pending",
+      "depends_on": [],
+      "parallel_lane": "lane-compiler-seed",
+      "status_anchor": "milestone-1-status",
+      "completion_anchor": "milestone-1-completion",
+      "direction_ids": [
+        "direction-1a-compiler-source-package-contract"
+      ]
+    },
+    {
+      "milestone_id": "milestone-2",
+      "title": "Token, Span, Diagnostic, And Lexer Seed",
+      "status": "pending",
+      "depends_on": [
+        "milestone-1"
+      ],
+      "parallel_lane": "lane-compiler-seed",
+      "status_anchor": "milestone-2-status",
+      "completion_anchor": "milestone-2-completion",
+      "direction_ids": [
+        "direction-2a-lexer-token-diagnostic-seed"
+      ]
+    },
+    {
+      "milestone_id": "milestone-3",
+      "title": "Parser Seed And AST Contract",
+      "status": "pending",
+      "depends_on": [
+        "milestone-2"
+      ],
+      "parallel_lane": "lane-compiler-seed",
+      "status_anchor": "milestone-3-status",
+      "completion_anchor": "milestone-3-completion",
+      "direction_ids": [
+        "direction-3a-minimal-parser-seed"
+      ]
+    },
+    {
+      "milestone_id": "milestone-4",
+      "title": "Primitive And Standard Library Gap Budget",
+      "status": "pending",
+      "depends_on": [
+        "milestone-2",
+        "milestone-3"
+      ],
+      "parallel_lane": "lane-gap-budget",
+      "status_anchor": "milestone-4-status",
+      "completion_anchor": "milestone-4-completion",
+      "direction_ids": [
+        "direction-4a-seed-driven-primitive-budget"
+      ]
+    },
+    {
+      "milestone_id": "milestone-5",
+      "title": "Runtime And Backend Layer Classification",
+      "status": "pending",
+      "depends_on": [
+        "milestone-3",
+        "milestone-4"
+      ],
+      "parallel_lane": "lane-layer-classification",
+      "status_anchor": "milestone-5-status",
+      "completion_anchor": "milestone-5-completion",
+      "direction_ids": [
+        "direction-5a-interpreter-native-boundary-ledger"
+      ]
+    },
+    {
+      "milestone_id": "milestone-6",
+      "title": "Seed Fixtures, Docs, And Next-Stage Handoff",
+      "status": "pending",
+      "depends_on": [
+        "milestone-4",
+        "milestone-5"
+      ],
+      "parallel_lane": "lane-docs",
+      "status_anchor": "milestone-6-status",
+      "completion_anchor": "milestone-6-completion",
+      "direction_ids": [
+        "direction-6a-frontend-seed-handoff"
+      ]
+    }
+  ],
+  "directions": [
+    {
+      "direction_id": "direction-1a-compiler-source-package-contract",
+      "milestone_id": "milestone-1",
+      "summary": "Establish the `.mlfp` package, fixture, and test harness used by compiler frontend seed modules.",
+      "preconditions": [
+        "Inspect package-mode CLI/API entrypoints, current package fixtures, docs/mlfp-self-boot-readiness.md, docs/mlfp-language-reference.md, MLF.Program.CLI, and focused program-run tests at HEAD."
+      ],
+      "parallel_hints": [
+        "Serial foundation work; do not fan out before the seed source contract is selected."
+      ]
+    },
+    {
+      "direction_id": "direction-2a-lexer-token-diagnostic-seed",
+      "milestone_id": "milestone-2",
+      "summary": "Define frontend seed ADTs and implement a minimal lexer/tokenization proof over the selected input representation.",
+      "preconditions": [
+        "Inspect Prelude list/string/Nat support, primitive inventory, interpreter IO/value rendering behavior, fixture shape, and current parser diagnostics."
+      ],
+      "parallel_hints": [
+        "Serial with parser work until the token contract settles; gap-budget documentation may split only after concrete missing APIs are observed."
+      ]
+    },
+    {
+      "direction_id": "direction-3a-minimal-parser-seed",
+      "milestone_id": "milestone-3",
+      "summary": "Implement a parser over the seed token stream and prove it returns a small AST or diagnostic result through interpreter execution.",
+      "preconditions": [
+        "Use the token contract from milestone 2, package seed harness from milestone 1, current `.mlfp` ADT/case/typeclass behavior, and focused interpreter-run fixture expectations."
+      ],
+      "parallel_hints": [
+        "Serial until the parser result contract is stable; docs can update after runnable evidence exists."
+      ]
+    },
+    {
+      "direction_id": "direction-4a-seed-driven-primitive-budget",
+      "milestone_id": "milestone-4",
+      "summary": "Classify every primitive and stdlib gap exposed by the lexer/parser seed and decide which gaps must be solved before a larger compiler component.",
+      "preconditions": [
+        "Inspect runnable lexer/parser seed evidence, current Prelude source, primitive inventory, runtime IO support, backend/native primitive support, and self-boot readiness ledger."
+      ],
+      "parallel_hints": [
+        "Can run after milestone 3 and can be planned independently from native/backend classification if ownership stays disjoint."
+      ]
+    },
+    {
+      "direction_id": "direction-5a-interpreter-native-boundary-ledger",
+      "milestone_id": "milestone-5",
+      "summary": "Record and test how the frontend seed behaves across source checking, interpreter/runtime, backend/native, object-code, and package-build layers.",
+      "preconditions": [
+        "Inspect parser seed result contract, primitive/stdlib budget, backend emission tests, native IO/runtime docs, and current fail-closed diagnostics."
+      ],
+      "parallel_hints": [
+        "Can run after milestone 4, alongside docs work, if it does not change the seed contract."
+      ]
+    },
+    {
+      "direction_id": "direction-6a-frontend-seed-handoff",
+      "milestone_id": "milestone-6",
+      "summary": "Update fixture evidence, docs, and the readiness ledger so the next roadmap can choose a larger compiler component without re-litigating this seed.",
+      "preconditions": [
+        "Use completed seed evidence, primitive/stdlib gap budget, layer classification, current README/language-reference/architecture docs, and clean baseline gates."
+      ],
+      "parallel_hints": [
+        "Docs and fixture polish may be extracted separately after milestones 4 and 5 are done."
+      ]
+    }
+  ],
+  "anchors": {
+    "milestone-1-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 1. Compiler Source Package And Seed Contract"
+    },
+    "milestone-1-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-1"
+    },
+    "milestone-2-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 2. Token, Span, Diagnostic, And Lexer Seed"
+    },
+    "milestone-2-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-2"
+    },
+    "milestone-3-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 3. Parser Seed And AST Contract"
+    },
+    "milestone-3-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-3"
+    },
+    "milestone-4-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 4. Primitive And Standard Library Gap Budget"
+    },
+    "milestone-4-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-4"
+    },
+    "milestone-5-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 5. Runtime And Backend Layer Classification"
+    },
+    "milestone-5-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-5"
+    },
+    "milestone-6-status": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "### [pending] 6. Seed Fixtures, Docs, And Next-Stage Handoff"
+    },
+    "milestone-6-completion": {
+      "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
+      "selector": "#### Completion Pointers: milestone-6"
+    }
+  }
+}
