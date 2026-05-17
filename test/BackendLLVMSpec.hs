@@ -119,6 +119,29 @@ spec = describe "MLF.Backend.LLVM" $ do
       runLLVMNativeExecutable output
         `shouldReturn` NativeRunResult ExitSuccess "world\n" ""
 
+    it "executes Prelude Monad IO methods through the native IO runtime" $ do
+      output <- requireRight =<< emitNativeSource ioPreludeMonadMainProgram
+      output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_bind.wrapper\""
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_pure.wrapper\""
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_putStrLn.wrapper\""
+      validateLLVMAssembly output
+      validateLLVMObjectCode output
+      runLLVMNativeExecutable output
+        `shouldReturn` NativeRunResult ExitSuccess "prelude\n" ""
+
+    it "executes Prelude Functor IO map through the native IO wrapper" $ do
+      output <- requireRight =<< emitNativeSource ioPreludeFunctorApplicativeMainProgram
+      output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_bind.wrapper\""
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_pure.wrapper\""
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_map.wrapper\""
+      output `shouldSatisfy` isInfixOf "call ptr @\"__io_putStrLn.wrapper\""
+      validateLLVMAssembly output
+      validateLLVMObjectCode output
+      runLLVMNativeExecutable output
+        `shouldReturn` NativeRunResult ExitSuccess "map\n" ""
+
     it "executes nested __io_bind / __io_putStrLn actions in written order through the native IO runtime" $ do
       output <- requireRight =<< emitNativeSource ioNestedPrimitiveMainProgram
       output `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
@@ -1735,6 +1758,27 @@ ioDirectPrimitiveMainProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (Unit(..), IO);",
       "  def main : IO Unit = __io_bind (__io_pure Unit) (λ(_done : Unit) __io_putStrLn \"world\");",
+      "}"
+    ]
+
+ioPreludeMonadMainProgram :: String
+ioPreludeMonadMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, pure, bind, putStrLn);",
+      "  def action : IO Unit = pure Unit;",
+      "  def main : IO Unit = bind action (λ(_done : Unit) putStrLn \"prelude\");",
+      "}"
+    ]
+
+ioPreludeFunctorApplicativeMainProgram :: String
+ioPreludeFunctorApplicativeMainProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), IO, Functor, Applicative, map, pure);",
+      "  def action : IO Int = pure 1;",
+      "  def mapped : IO Int = map (λ(_n : Int) 2) action;",
+      "  def main : IO Unit = __io_bind mapped (λ(_m : Int) __io_putStrLn \"map\");",
       "}"
     ]
 

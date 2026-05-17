@@ -794,6 +794,12 @@ freeElabTypeVarsIn initialBound =
           go bound dom `Set.union` go bound cod
         TCon _ args ->
           Set.unions (map (go bound) (NE.toList args))
+        TVarApp name args ->
+          let headFree =
+                if Set.member name (initialBound `Set.union` bound)
+                  then Set.empty
+                  else Set.singleton name
+           in headFree `Set.union` Set.unions (map (go bound) (NE.toList args))
         TBase {} ->
           Set.empty
         TForall name mb body ->
@@ -916,6 +922,8 @@ elabTypeVariableNames =
       elabTypeVariableNames dom `Set.union` elabTypeVariableNames cod
     TCon _ args ->
       Set.unions (map elabTypeVariableNames (NE.toList args))
+    TVarApp name args ->
+      Set.insert name (Set.unions (map elabTypeVariableNames (NE.toList args)))
     TBase {} ->
       Set.empty
     TForall name mbBound body ->
@@ -1087,6 +1095,10 @@ renameElabTypeVariable old new =
       TArrow (renameElabTypeVariable old new dom) (renameElabTypeVariable old new cod)
     TCon con args ->
       TCon con (fmap (renameElabTypeVariable old new) args)
+    TVarApp name args ->
+      TVarApp
+        (if name == old then new else name)
+        (fmap (renameElabTypeVariable old new) args)
     TBase base ->
       TBase base
     TForall name mbBound body
@@ -1225,7 +1237,9 @@ sourceTypeToElabType =
     STArrow dom cod -> TArrow <$> sourceTypeToElabType dom <*> sourceTypeToElabType cod
     STBase name -> Right (TBase (BaseTy name))
     STCon name args -> TCon (BaseTy name) <$> traverse sourceTypeToElabType args
-    STVarApp name _ -> Left (BackendUnsupportedCaseShape ("unsupported variable-headed source type application `" ++ name ++ "`"))
+    STVarApp name args -> TVarApp name <$> traverse sourceTypeToElabType args
+    STTyLam {} -> Left (BackendUnsupportedCaseShape "residual type lambda reached backend conversion")
+    STTyApp {} -> Left (BackendUnsupportedCaseShape "residual type application reached backend conversion")
     STForall name mb body ->
       TForall name
         <$> maybe (Right Nothing) sourceBoundToElabBound mb
@@ -1241,6 +1255,7 @@ sourceBoundToElabBound (SrcBound boundTy) =
     Right (TArrow dom cod) -> Right (Just (TArrow dom cod))
     Right (TBase base) -> Right (Just (TBase base))
     Right (TCon con args) -> Right (Just (TCon con args))
+    Right (TVarApp name args) -> Right (Just (TVarApp name args))
     Right (TForall name mb body) -> Right (Just (TForall name mb body))
     Right (TMu name body) -> Right (Just (TMu name body))
     Left err -> Left err
@@ -1909,6 +1924,8 @@ convertSourceType =
     STBase name -> Right (BTBase (backendBaseTy name))
     STCon name args -> BTCon (backendBaseTy name) <$> traverse convertSourceType args
     STVarApp name args -> BTVarApp name <$> traverse convertSourceType args
+    STTyLam {} -> Left (BackendUnsupportedCaseShape "residual type lambda reached backend type conversion")
+    STTyApp {} -> Left (BackendUnsupportedCaseShape "residual type application reached backend type conversion")
     STForall name mb body ->
       BTForall name
         <$> traverse (convertSourceType . unSrcBound) mb
@@ -1922,6 +1939,7 @@ convertElabType =
     TVar name -> Right (BTVar name)
     TArrow dom cod -> BTArrow <$> convertElabType dom <*> convertElabType cod
     TCon (BaseTy name) args -> BTCon (backendBaseTy name) <$> traverse convertElabType args
+    TVarApp name args -> BTVarApp name <$> traverse convertElabType args
     TBase (BaseTy name) -> Right (BTBase (backendBaseTy name))
     TForall name mb body ->
       BTForall name
@@ -1940,6 +1958,7 @@ normalizeBuiltinElabType =
     TVar name -> TVar name
     TArrow dom cod -> TArrow (normalizeBuiltinElabType dom) (normalizeBuiltinElabType cod)
     TCon (BaseTy name) args -> TCon (backendBaseTy name) (fmap normalizeBuiltinElabType args)
+    TVarApp name args -> TVarApp name (fmap normalizeBuiltinElabType args)
     TBase (BaseTy name) -> TBase (backendBaseTy name)
     TForall name mb body ->
       TForall name (fmap normalizeBuiltinElabType mb) (normalizeBuiltinElabType body)
@@ -1999,7 +2018,7 @@ backendTypeToElabType =
     BTArrow dom cod -> TArrow <$> backendTypeToElabType dom <*> backendTypeToElabType cod
     BTBase name -> Just (TBase name)
     BTCon name args -> TCon name <$> traverse backendTypeToElabType args
-    BTVarApp {} -> Nothing
+    BTVarApp name args -> TVarApp name <$> traverse backendTypeToElabType args
     BTForall name mb body ->
       TForall name
         <$> traverse backendTypeToBoundType mb

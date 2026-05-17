@@ -44,6 +44,7 @@ import Text.Megaparsec
     )
 import MLF.Parse.Common
     ( Parser
+    , canonicalBigLambdaTok
     , canonicalBottomTok
     , canonicalForallTok
     , canonicalGeTok
@@ -141,6 +142,7 @@ frontendTypeConfig :: TypeParserConfig SrcType (Maybe SrcType)
 frontendTypeConfig =
     TypeParserConfig
         { tpcForallTok = canonicalForallTok
+        , tpcTypeLambdaTok = canonicalBigLambdaTok
         , tpcGeTok = canonicalGeTok
         , tpcSymbol = symbol
         , tpcParens = parens
@@ -152,6 +154,8 @@ frontendTypeConfig =
         , tpcMkBase = STBase
         , tpcMkCon = STCon
         , tpcMkVarApp = \v args -> Just (STVarApp v args)
+        , tpcMkTypeLam = \v body -> Just (STTyLam v body)
+        , tpcMkTypeApp = \fun arg -> Just (STTyApp fun arg)
         , tpcMkForall = \v mb body -> STForall v (fmap mkSrcBound mb) body
         , tpcMkBottom = STBottom
         , tpcBoundedBinder = \pTy ->

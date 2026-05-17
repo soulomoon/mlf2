@@ -40,9 +40,11 @@ module MLF.Frontend.Syntax.Program
     , ImportF (..)
     , Import
     , ResolvedImport
+    , FunctionalDependency (..)
     , ClassConstraintF (..)
     , ClassConstraint
     , ResolvedClassConstraint
+    , constraintType
     , ConstrainedTypeF (..)
     , ConstrainedType
     , ResolvedConstrainedType
@@ -54,12 +56,14 @@ module MLF.Frontend.Syntax.Program
     , ClassDeclF (..)
     , ClassDecl
     , ResolvedClassDecl
+    , classDeclParam
     , MethodSigF (..)
     , MethodSig
     , ResolvedMethodSig
     , InstanceDeclF (..)
     , InstanceDecl
     , ResolvedInstanceDecl
+    , instanceDeclType
     , MethodDefF (..)
     , MethodDef
     , ResolvedMethodDef
@@ -116,6 +120,8 @@ module MLF.Frontend.Syntax.Program
 
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
+import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
 import MLF.Frontend.Symbol
     ( ResolvedSymbol (..)
     , resolvedSymbolSpelling
@@ -133,6 +139,7 @@ import MLF.Frontend.Syntax
     , typeParamIsFirstOrder
     , typeParamNames
     )
+import MLF.Frontend.TypeLevel (TypeFamilyDecl)
 
 data ProgramPhase = Parsed | Resolved
     deriving (Eq, Show)
@@ -370,9 +377,15 @@ type Import = ImportF 'Parsed
 
 type ResolvedImport = ImportF 'Resolved
 
+data FunctionalDependency = FunctionalDependency
+    { fundepDeterminers :: NonEmpty String
+    , fundepDetermined :: NonEmpty String
+    }
+    deriving (Eq, Show)
+
 data ClassConstraintF (p :: ProgramPhase) = ClassConstraint
     { constraintClassName :: ClassRef p
-    , constraintType :: ProgramSrcType p
+    , constraintTypes :: NonEmpty (ProgramSrcType p)
     }
 
 deriving instance
@@ -386,6 +399,9 @@ deriving instance
 type ClassConstraint = ClassConstraintF 'Parsed
 
 type ResolvedClassConstraint = ClassConstraintF 'Resolved
+
+constraintType :: ClassConstraintF p -> ProgramSrcType p
+constraintType = NE.head . constraintTypes
 
 data ConstrainedTypeF (p :: ProgramPhase) = ConstrainedType
     { constrainedConstraints :: [ClassConstraintF p]
@@ -414,6 +430,7 @@ data DeclF (p :: ProgramPhase)
     = DeclClass (ClassDeclF p)
     | DeclInstance (InstanceDeclF p)
     | DeclData (DataDeclF p)
+    | DeclTypeFamily TypeFamilyDecl
     | DeclDef (DefDeclF p)
 
 deriving instance
@@ -430,17 +447,22 @@ type ResolvedDecl = DeclF 'Resolved
 
 data ClassDeclF (p :: ProgramPhase) = ClassDecl
     { classDeclName :: ClassName
-    , classDeclParam :: TypeParam
+    , classDeclSuperclasses :: [ClassConstraintF p]
+    , classDeclParams :: NonEmpty TypeParam
+    , classDeclFundeps :: [FunctionalDependency]
     , classDeclMethods :: [MethodSigF p]
     }
 
-deriving instance Eq (MethodSigF p) => Eq (ClassDeclF p)
+deriving instance (Eq (ClassConstraintF p), Eq (MethodSigF p)) => Eq (ClassDeclF p)
 
-deriving instance Show (MethodSigF p) => Show (ClassDeclF p)
+deriving instance (Show (ClassConstraintF p), Show (MethodSigF p)) => Show (ClassDeclF p)
 
 type ClassDecl = ClassDeclF 'Parsed
 
 type ResolvedClassDecl = ClassDeclF 'Resolved
+
+classDeclParam :: ClassDeclF p -> TypeParam
+classDeclParam = NE.head . classDeclParams
 
 data MethodSigF (p :: ProgramPhase) = MethodSig
     { methodSigName :: MethodName
@@ -458,7 +480,7 @@ type ResolvedMethodSig = MethodSigF 'Resolved
 data InstanceDeclF (p :: ProgramPhase) = InstanceDecl
     { instanceDeclConstraints :: [ClassConstraintF p]
     , instanceDeclClass :: ClassRef p
-    , instanceDeclType :: ProgramSrcType p
+    , instanceDeclTypes :: NonEmpty (ProgramSrcType p)
     , instanceDeclMethods :: [MethodDefF p]
     }
 
@@ -473,6 +495,9 @@ deriving instance
 type InstanceDecl = InstanceDeclF 'Parsed
 
 type ResolvedInstanceDecl = InstanceDeclF 'Resolved
+
+instanceDeclType :: InstanceDeclF p -> ProgramSrcType p
+instanceDeclType = NE.head . instanceDeclTypes
 
 data MethodDefF (p :: ProgramPhase) = MethodDef
     { methodDefName :: MethodName
@@ -640,13 +665,16 @@ unresolveDecl decl =
         DeclClass classDecl -> DeclClass (unresolveClassDecl classDecl)
         DeclInstance instDecl -> DeclInstance (unresolveInstanceDecl instDecl)
         DeclData dataDecl -> DeclData (unresolveDataDecl dataDecl)
+        DeclTypeFamily familyDecl -> DeclTypeFamily familyDecl
         DeclDef defDecl -> DeclDef (unresolveDefDecl defDecl)
 
 unresolveClassDecl :: ResolvedClassDecl -> ClassDecl
 unresolveClassDecl decl =
     ClassDecl
         { classDeclName = classDeclName decl
-        , classDeclParam = classDeclParam decl
+        , classDeclSuperclasses = map unresolveClassConstraint (classDeclSuperclasses decl)
+        , classDeclParams = classDeclParams decl
+        , classDeclFundeps = classDeclFundeps decl
         , classDeclMethods = map unresolveMethodSig (classDeclMethods decl)
         }
 
@@ -662,7 +690,7 @@ unresolveInstanceDecl decl =
     InstanceDecl
         { instanceDeclConstraints = map unresolveClassConstraint (instanceDeclConstraints decl)
         , instanceDeclClass = refDisplayName (instanceDeclClass decl)
-        , instanceDeclType = resolvedSrcTypeToSrcType (instanceDeclType decl)
+        , instanceDeclTypes = fmap resolvedSrcTypeToSrcType (instanceDeclTypes decl)
         , instanceDeclMethods = map unresolveMethodDef (instanceDeclMethods decl)
         }
 
@@ -708,7 +736,7 @@ unresolveClassConstraint :: ResolvedClassConstraint -> ClassConstraint
 unresolveClassConstraint constraint =
     ClassConstraint
         { constraintClassName = refDisplayName (constraintClassName constraint)
-        , constraintType = resolvedSrcTypeToSrcType (constraintType constraint)
+        , constraintTypes = fmap resolvedSrcTypeToSrcType (constraintTypes constraint)
         }
 
 unresolveExpr :: ResolvedExpr -> Expr

@@ -68,6 +68,16 @@ CI reuses the same repo commands; there is no CI-only verification logic.
 - `MLF.Pipeline` — canonical public constraint-generation / elaboration / runtime API, including local `.mlfp` package discovery/checking/runtime on the shared eMLF/xMLF path
 - `MLF.XMLF` — xMLF syntax, parser, and pretty-printer
 
+Raw frontend source types also accept Unicode type lambdas (`Λa. τ`) and
+explicit type-lambda applications when normalization can beta-reduce them away
+before core erasure. Residual type lambdas and non-normalized general type
+applications remain fail-closed at the core/backend boundary.
+
+The `.mlfp` parser, pretty-printer, and checker also accept closed `type
+family` declarations with ordered equations and kind-variable family kinds.
+Reducible family applications normalize and erase before the resolver/core
+boundary; stuck and cyclic reductions fail with explicit diagnostics.
+
 Active multi-step work is tracked under `tasks/todo/`; root-level `task_plan.md`,
 `findings.md`, and `progress.md` are historical leftovers rather than the active
 workflow.
@@ -86,10 +96,19 @@ The unified `.mlfp` surface includes:
 - `case` / constructor pattern matching
 - recursive GADT-style constructor result types
 - existential constructors via `∀`
-- single-parameter typeclasses, class constraints, and schema instances
+- single-parameter typeclasses, class constraints, schema instances,
+  zero-method multi-parameter class evidence, and method-bearing
+  multi-parameter dispatch when each class argument is fixed by supplied
+  arguments, expected result type, local evidence, or functional-dependency
+  closure; superclass constraints are flattened into method evidence and
+  instance prerequisites, and ambiguous/fundep-conflicting instance shapes fail
+  closed with structured diagnostics
+- closed `type family` declarations that normalize and erase before the core
+  boundary
 - `deriving Eq` for nullary, recursive, and parameterized ADTs whose fields have Eq evidence
-- a built-in Prelude with `Nat`, `Option`, `List`, `Eq`, `Unit`, opaque
-  `IO`, minimal `Monad IO`, `pure`, `bind`, `putStrLn`, `and`, and `id`
+- a built-in Prelude with `Nat`, `Option`, `List`, `Eq`, `Show`, `Unit`,
+  opaque `IO`, coherent `Functor IO` / `Applicative IO` / `Monad IO`,
+  `map`, `pure`, `ap`, `bind`, `putStrLn`, `and`, and `id`
 
 `.mlfp` modules are same-local-package modules today. The durable execution
 model is local package mode: imports resolve among modules discovered under the

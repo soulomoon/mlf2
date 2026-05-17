@@ -95,6 +95,7 @@ xmlfTypeConfig :: TypeParserConfig XmlfType XmlfType
 xmlfTypeConfig =
     TypeParserConfig
         { tpcForallTok = canonicalForallTok
+        , tpcTypeLambdaTok = canonicalBigLambdaTok
         , tpcGeTok = canonicalGeTok
         , tpcSymbol = symbol
         , tpcParens = parens
@@ -105,7 +106,9 @@ xmlfTypeConfig =
         , tpcMkArrow = XTArrow
         , tpcMkBase = XTBase
         , tpcMkCon = XTCon
-        , tpcMkVarApp = \_ _ -> Nothing
+        , tpcMkVarApp = \v args -> Just (XTVarApp v args)
+        , tpcMkTypeLam = \_ _ -> Nothing
+        , tpcMkTypeApp = \_ _ -> Nothing
         , tpcMkForall = XTForall
         , tpcMkBottom = XTBottom
         , tpcBoundedBinder = \pTy ->

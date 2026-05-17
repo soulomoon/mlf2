@@ -22,6 +22,7 @@ SrcType     ::= α
               | SrcType "->" SrcType
               | C SrcType+
               | α SrcType+
+              | "Λ" α+ "." SrcType
               | "∀" Binder+ "." SrcType
               | "⊥"
 Binder      ::= α | "(" α "⩾" SrcType ")"
@@ -80,6 +81,10 @@ xMLF, and `.mlfp` parser APIs where the token or grammar family applies:
 
 - eMLF supports literals (`Int`, `Bool`, `String`) as expression atoms.
 - eMLF parser accepts `let x : τ = e in b` and desugars to `let x = (e : τ) in b`.
+- eMLF source types accept Unicode type lambdas (`Λa. τ`) and explicit general
+  type application in annotations. The source normalizer beta-reduces supported
+  applications and rejects residual type lambdas or non-normalized general
+  applications before the MLF core boundary.
 - xMLF term/type syntax includes base types as uppercase 0-ary constructors (e.g. `Int`, `Bool`).
 - xMLF parser accepts recursive term forms `roll[τ] t` and `unroll t`.
 - `ElabTerm` carries let schemes (`ELet String ElabScheme ...`); pretty output keeps `let x : scheme = ... in ...` as a repository-specific extension for debugging fidelity.
@@ -99,27 +104,36 @@ Module       ::= "module" UIdent ["export" "(" ExportItem ("," ExportItem)* ")"]
 Import       ::= "import" UIdent ["as" UIdent] ["exposing" "(" ExportItem ("," ExportItem)* ")"] ";"
 ExportItem   ::= lIdent | UIdent | UIdent "(..)"
 
-Decl         ::= DataDecl | ClassDecl | InstanceDecl | DefDecl
+Decl         ::= DataDecl | TypeFamilyDecl | ClassDecl | InstanceDecl | DefDecl
 DataDecl     ::= "data" UIdent TypeParam* "=" CtorDecl ("|" CtorDecl)* ["deriving" QName ("," QName)*] ";"
 CtorDecl     ::= UIdent ":" SrcType
-ClassDecl    ::= "class" UIdent TypeParam "{" MethodSig* "}"
+TypeFamilyDecl ::= "type" "family" UIdent TypeFamilyParam* "::" TypeLevelKind "where" "{" TypeFamilyEquation+ "}"
+TypeFamilyParam ::= lIdent | "(" lIdent "::" TypeLevelKind ")"
+TypeFamilyEquation ::= UIdent TypeLevelPatternAtom* "=" TypeLevelType ";"
+ClassDecl    ::= "class" [ConstraintPrefix "=>"] UIdent TypeParam+ [FundepList] "{" MethodSig* "}"
 MethodSig    ::= lIdent ":" ConstrainedType ";"
-InstanceDecl ::= "instance" [ConstraintPrefix "=>"] QName SrcType "{" MethodDef* "}"
+InstanceDecl ::= "instance" [ConstraintPrefix "=>"] QName ClassArg+ "{" MethodDef* "}"
 MethodDef    ::= lIdent "=" Expr ";"
 DefDecl      ::= "def" lIdent ":" ConstrainedType "=" Expr ";"
 
 TypeParam    ::= lIdent | "(" lIdent "::" Kind ")"
 Kind         ::= KindAtom ["->" Kind]
 KindAtom     ::= "*" | "(" Kind ")"
+FundepList   ::= "|" Fundep ("," Fundep)*
+Fundep       ::= lIdent+ "→" lIdent+
+TypeLevelKind ::= "*" | KindVar | "(" TypeLevelKind ")" | TypeLevelKind "->" TypeLevelKind
+KindVar      ::= lower-case identifier, including Unicode lower-case letters
 
 ConstrainedType ::= [ConstraintPrefix "=>"] SrcType
 ConstraintPrefix ::= ClassConstraint | "(" ClassConstraint ("," ClassConstraint)* ")"
-ClassConstraint ::= QName SrcType
+ClassConstraint ::= QName ClassArg+
+ClassArg     ::= lIdent | UIdent | "⊥" | "(" SrcType ")"
 
 SrcType      ::= lIdent
                | UIdent SrcTypeAtom*
                | lIdent SrcTypeAtom+
                | SrcType "->" SrcType
+               | "Λ" lIdent+ "." SrcType
                | "∀" Binder+ "." SrcType
                | "μ" lIdent "." SrcType
                | "⊥"
@@ -139,7 +153,29 @@ Pattern      ::= PatternAtom+
                | "(" Pattern ":" SrcType ")"
 PatternAtom  ::= QName | "_" | "(" Pattern ")"
 QName        ::= [UIdent "."] (lIdent | UIdent)
+
+TypeLevelType ::= lIdent | UIdent | TypeLevelType TypeLevelType | TypeLevelType "->" TypeLevelType | "Λ" TypeFamilyParam+ "." TypeLevelType | "(" TypeLevelType ")"
+TypeLevelPattern ::= lIdent | UIdent TypeLevelPatternAtom*
+TypeLevelPatternAtom ::= lIdent | UIdent | "(" TypeLevelPattern ")"
 ```
+
+`→` is the only fundep arrow. ASCII `->` remains the type/kind arrow and is not
+accepted as a functional-dependency alias.
+
+The checked class subset includes single-parameter method classes, zero-method
+multi-parameter classes, and method-bearing multi-parameter dispatch when every
+class argument is fixed by the call or functional-dependency closure over
+visible instances/evidence. Superclass clauses lower into flattened method
+evidence and specialized instance prerequisites. Invalid fundeps, ambiguous
+fundep instances, fundep-conflicting instances, and still-ambiguous
+multi-parameter method uses fail closed before evidence elaboration.
+
+Closed `type family` declarations roundtrip through the `.mlfp` parser/pretty
+syntax and map into the internal pre-core type-level AST. During program
+checking, reducible family applications normalize by ordered first-match
+equations and family declarations are erased before the existing resolver/core
+boundary. Stuck, cyclic, and fuel-exhausted family reductions fail before core
+erasure.
 
 Current checked/evaluated fixture examples live under
 `test/programs/recursive-adt/`, `test/programs/unified/`, and the static local

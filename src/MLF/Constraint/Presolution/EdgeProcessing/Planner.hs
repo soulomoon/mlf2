@@ -119,6 +119,7 @@ nodeTag = \case
     TyArrow{} -> "TyArrow"
     TyBase{} -> "TyBase"
     TyCon{} -> "TyCon"
+    TyVarApp{} -> "TyVarApp"
     TyForall{} -> "TyForall"
     TyExp{} -> "TyExp"
     TyMu{} -> "TyMu"

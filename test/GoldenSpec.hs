@@ -130,6 +130,7 @@ constraintSummary c root =
       TyArrow {} -> "TyArrow"
       TyBase _ (BaseTy b) -> "TyBase(" ++ b ++ ")"
       TyCon {} -> "TyCon"
+      TyVarApp {} -> "TyVarApp"
       TyForall {} -> "TyForall"
       TyExp {} -> "TyExp"
       TyMu {} -> "TyMu"

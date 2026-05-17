@@ -13,6 +13,7 @@ import Control.Monad (foldM)
 import Control.Applicative ((<|>))
 import Data.List (isPrefixOf, sort)
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -76,12 +77,15 @@ import MLF.Frontend.Program.Types
     constructorOwnerShapes,
     constructorShapeFromInfo,
     freeTypeVarsTypeView,
+    freeTypeVarsTypeViews,
     methodInfoOwnerClassSymbolIdentity,
     SymbolIdentity,
     splitArrows,
     splitForalls,
     specializeMethodType,
     substituteTypeVar,
+    typeViewsDisplay,
+    typeViewsIdentity,
   )
 import MLF.Frontend.Syntax (Expr (..), Lit (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarsType)
@@ -445,6 +449,8 @@ runSurfacePipeline scope forceUnchecked deferredObligations externalTypes surfac
                       then Set.empty
                       else Set.singleton name
                in headVars `Set.union` foldMap (go boundVars) args
+            STTyLam name body -> go (Set.insert name boundVars) body
+            STTyApp fun arg -> go boundVars fun `Set.union` go boundVars arg
             STForall name mb body ->
               maybe Set.empty (go boundVars . unSrcBound) mb
                 `Set.union` go (Set.insert name boundVars) body
@@ -512,6 +518,7 @@ inlineTypeEnvBounds env = go Set.empty
               _ -> ty
       X.TArrow dom cod -> X.TArrow (go seen dom) (go seen cod)
       X.TCon con args -> X.TCon con (fmap (go seen) args)
+      X.TVarApp name args -> X.TVarApp name (fmap (go seen) args)
       X.TBase {} -> ty
       X.TBottom -> ty
       X.TForall name mb body ->
@@ -524,6 +531,7 @@ inlineTypeEnvBounds env = go Set.empty
     goBound seen bound = case bound of
       X.TArrow dom cod -> X.TArrow (go seen dom) (go seen cod)
       X.TCon con args -> X.TCon con (fmap (go seen) args)
+      X.TVarApp name args -> X.TVarApp name (fmap (go seen) args)
       X.TBase {} -> bound
       X.TBottom -> bound
       X.TForall name mb body ->
@@ -556,6 +564,8 @@ freeSourceTypeVars = go Set.empty
                   then Set.empty
                   else Set.singleton name
            in headVars `Set.union` foldMap (go boundVars) args
+        STTyLam name body -> go (Set.insert name boundVars) body
+        STTyApp fun arg -> go boundVars fun `Set.union` go boundVars arg
         STForall name mb body ->
           maybe Set.empty (go boundVars . unSrcBound) mb
             `Set.union` go (Set.insert name boundVars) body
@@ -637,6 +647,17 @@ sourceForallMatchSubst expected actual =
             _ -> Nothing
         STVarApp name args ->
           matchVarApp bound subst name args actualTy
+        STTyLam name body ->
+          case actualTy of
+            STTyLam name' body'
+              | name == name' -> match (Set.insert name bound) subst body body'
+            _ -> Nothing
+        STTyApp fun arg ->
+          case actualTy of
+            STTyApp fun' arg' -> do
+              subst' <- match bound subst fun fun'
+              match bound subst' arg arg'
+            _ -> Nothing
         STMu _ body -> match bound subst body actualTy
         STBottom ->
           case actualTy of
@@ -718,6 +739,15 @@ alphaEqSrcType = go Map.empty Map.empty
           sameTypeVar leftNames rightNames leftName rightName
             && length (toListNE leftArgs) == length (toListNE rightArgs)
             && and (zipWith (go leftNames rightNames) (toListNE leftArgs) (toListNE rightArgs))
+        (STTyLam leftName leftBody, STTyLam rightName rightBody) ->
+          go
+            (Map.insert leftName rightName leftNames)
+            (Map.insert rightName leftName rightNames)
+            leftBody
+            rightBody
+        (STTyApp leftFun leftArg, STTyApp rightFun rightArg) ->
+          go leftNames rightNames leftFun rightFun
+            && go leftNames rightNames leftArg rightArg
         (STForall leftName leftMb leftBody, STForall rightName rightMb rightBody) ->
           let leftNames' = Map.insert leftName rightName leftNames
               rightNames' = Map.insert rightName leftName rightNames
@@ -1245,6 +1275,7 @@ resolveDeferredMethods scope deferredMethods = go
           Just
             DeferredMethodEvidence
               { deferredMethodEvidenceClassArg = classArgView,
+                deferredMethodEvidenceClassArgs = classArgView :| [],
                 deferredMethodEvidenceRuntimeName = runtimeName,
                 deferredMethodEvidenceType = evidenceTy
               }
@@ -1266,13 +1297,17 @@ resolveDeferredMethods scope deferredMethods = go
        in map (applyConstraintInfoSubst methodSubst) methodLocal
 
     specializeConstraintInfoType paramName headView constraint =
-      constraint
-        { constraintTypeView =
-            TypeView
-              { typeViewDisplay = substituteTypeVar paramName (typeViewDisplay headView) (typeViewDisplay (constraintTypeView constraint)),
-                typeViewIdentity = substituteTypeVar paramName (typeViewIdentity headView) (typeViewIdentity (constraintTypeView constraint))
-              }
-        }
+      let views = fmap substituteView (constraintTypeViews constraint)
+       in constraint
+            { constraintTypeView = NE.head views,
+              constraintTypeViews = views
+            }
+      where
+        substituteView view =
+          TypeView
+            { typeViewDisplay = substituteTypeVar paramName (typeViewDisplay headView) (typeViewDisplay view),
+              typeViewIdentity = substituteTypeVar paramName (typeViewIdentity headView) (typeViewIdentity view)
+            }
 
     inferNullaryMethodClassArgument methodInfo expectedView
       | deferredMethodFullArityFromInfo methodInfo /= 0 = Nothing
@@ -1335,9 +1370,9 @@ resolveConstraintEvidenceTerms scope localEvidence seen constraints =
 
 resolveConstraintEvidenceTerm :: ElaborateScope -> [EvidenceInfo] -> Set (SymbolIdentity, String) -> ConstraintInfo -> Either ProgramError [ElabTerm]
 resolveConstraintEvidenceTerm scope localEvidence seen constraint = do
-  let key = (constraintClassSymbol constraint, show (typeViewIdentity (constraintTypeView constraint)))
+  let key = constraintEvidenceKey constraint
   if key `Set.member` seen
-    then Left (ProgramNoMatchingInstance (constraintDisplayClass constraint) (typeViewDisplay (constraintTypeView constraint)))
+    then Left (noMatchingInstanceError constraint)
     else do
       mbLocalEvidence <- resolveLocalConstraintEvidenceTerms scope localEvidence constraint
       case mbLocalEvidence of
@@ -1355,7 +1390,7 @@ resolveConstraintEvidenceTerm scope localEvidence seen constraint = do
                   seen'
                   (map (applyConstraintInfoSubst subst) (instanceConstraintInfos instanceInfo))
               Right []
-            else mapM (materializeMethodEvidence (freeTypeVarsTypeView (constraintTypeView constraint)) seen' subst) methodValues
+            else mapM (materializeMethodEvidence (freeTypeVarsTypeViews (constraintTypeViews constraint)) seen' subst) methodValues
   where
     ordinaryInstanceMethods instanceInfo =
       [valueInfo | valueInfo@OrdinaryValue {} <- Map.elems (instanceMethods instanceInfo)]
@@ -1404,6 +1439,7 @@ resolveLocalConstraintEvidenceTerms scope localEvidence constraint =
                       pure
                         DeferredMethodEvidence
                           { deferredMethodEvidenceClassArg = constraintTypeView constraint,
+                            deferredMethodEvidenceClassArgs = constraintTypeViews constraint,
                             deferredMethodEvidenceRuntimeName = runtimeName,
                             deferredMethodEvidenceType = evidenceTy
                           }
@@ -1436,9 +1472,19 @@ zeroMethodConstraintCoveredByEvidence evidenceInfos constraint =
   any
     ( \evidence ->
         evidenceClassSymbol evidence == constraintClassSymbol constraint
-          && evidenceTypeIdentity evidence == typeViewIdentity (constraintTypeView constraint)
+          && evidenceTypeIdentities evidence == typeViewsIdentity (constraintTypeViews constraint)
     )
     evidenceInfos
+
+constraintEvidenceKey :: ConstraintInfo -> (SymbolIdentity, String)
+constraintEvidenceKey constraint =
+  (constraintClassSymbol constraint, show (NE.toList (typeViewsIdentity (constraintTypeViews constraint))))
+
+noMatchingInstanceError :: ConstraintInfo -> ProgramError
+noMatchingInstanceError constraint =
+  case typeViewsDisplay (constraintTypeViews constraint) of
+    ty :| [] -> ProgramNoMatchingInstance (constraintDisplayClass constraint) ty
+    tys -> ProgramNoMatchingInstanceHead (constraintDisplayClass constraint) (NE.toList tys)
 
 instantiateLocalMethodEvidence :: ElaborateScope -> Map String TypeView -> DeferredMethodEvidence -> Either ProgramError ElabTerm
 instantiateLocalMethodEvidence scope subst DeferredMethodEvidence {deferredMethodEvidenceRuntimeName = runtimeName, deferredMethodEvidenceType = evidenceTy} =
@@ -1447,11 +1493,11 @@ instantiateLocalMethodEvidence scope subst DeferredMethodEvidence {deferredMetho
 
 constraintDeterminedByTypeVars :: Set String -> ConstraintInfo -> Bool
 constraintDeterminedByTypeVars typeVars constraint =
-  freeTypeVarsTypeView (constraintTypeView constraint) `Set.isSubsetOf` typeVars
+  freeTypeVarsTypeViews (constraintTypeViews constraint) `Set.isSubsetOf` typeVars
 
 constraintGround :: ConstraintInfo -> Bool
 constraintGround constraint =
-  Set.null (freeTypeVarsTypeView (constraintTypeView constraint))
+  Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint))
 
 methodValueConstraints :: ValueInfo -> [ConstraintInfo]
 methodValueConstraints OrdinaryValue {valueConstraintInfos = constraints} = constraints
@@ -1565,6 +1611,8 @@ recoverSourceType scope = recover
       STMu name body -> STMu name (recover body)
       STCon name args -> STCon name (fmap recover args)
       STVarApp name args -> STVarApp name (fmap recover args)
+      STTyLam name body -> STTyLam name (recover body)
+      STTyApp fun arg -> STTyApp (recover fun) (recover arg)
 
 matchDataInfoEncoding :: ElaborateScope -> DataInfo -> SrcType -> Maybe (SrcType, Map String SrcType)
 matchDataInfoEncoding = matchDataInfoEncodingWith id
@@ -1647,6 +1695,17 @@ matchRecoverType params subst renames template actual =
         _ -> Nothing
     STVarApp name args ->
       matchRecoverVarApp params subst renames name args actual
+    STTyLam name body ->
+      case actual of
+        STTyLam name' body' ->
+          matchRecoverType params subst (Map.insert name name' renames) body body'
+        _ -> Nothing
+    STTyApp fun arg ->
+      case actual of
+        STTyApp fun' arg' -> do
+          subst' <- matchRecoverType params subst renames fun fun'
+          matchRecoverType params subst' renames arg arg'
+        _ -> Nothing
     STForall name _mb body ->
       case actual of
         STForall name' _mb' body' ->
@@ -1816,6 +1875,7 @@ elabTypeToSrcType ty = case ty of
     case toListNE (fmap elabTypeToSrcType args) of
       x : xs -> STCon name (x :| xs)
       [] -> STBase name
+  X.TVarApp name args -> STVarApp name (fmap elabTypeToSrcType args)
   X.TForall name mb body ->
     STForall name (fmap (SrcBound . elabTypeToSrcType) mb) (elabTypeToSrcType body)
   X.TMu name body -> STMu name (elabTypeToSrcType body)
@@ -1827,8 +1887,11 @@ srcTypeToElabType ty = case ty of
   STArrow dom cod -> X.TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod
   STBase name -> Right (X.TBase (Graph.BaseTy name))
   STCon name args -> X.TCon (Graph.BaseTy name) <$> traverse srcTypeToElabType args
-  STVarApp name _ ->
-    Left (unsupportedVariableHeadType name)
+  STVarApp name args -> X.TVarApp name <$> traverse srcTypeToElabType args
+  STTyLam {} ->
+    Left (ProgramPipelineError "residual type lambda reached finalization")
+  STTyApp {} ->
+    Left (ProgramPipelineError "residual type application reached finalization")
   STForall name mb body ->
     X.TForall name
       <$> maybe (Right Nothing) srcBoundToElabBound mb
@@ -1836,18 +1899,15 @@ srcTypeToElabType ty = case ty of
   STMu name body -> X.TMu name <$> srcTypeToElabType body
   STBottom -> Right X.TBottom
 
-unsupportedVariableHeadType :: String -> ProgramError
-unsupportedVariableHeadType name =
-  ProgramPipelineError
-    ("variable-headed source type application `" ++ name ++ "` is not supported before higher-kinded elaboration")
-
 srcTypeToElabTypeMaybe :: SrcTy n v -> Maybe ElabType
 srcTypeToElabTypeMaybe ty = case ty of
   STVar name -> Just (X.TVar name)
   STArrow dom cod -> X.TArrow <$> srcTypeToElabTypeMaybe dom <*> srcTypeToElabTypeMaybe cod
   STBase name -> Just (X.TBase (Graph.BaseTy name))
   STCon name args -> X.TCon (Graph.BaseTy name) <$> traverse srcTypeToElabTypeMaybe args
-  STVarApp {} -> Nothing
+  STVarApp name args -> X.TVarApp name <$> traverse srcTypeToElabTypeMaybe args
+  STTyLam {} -> Nothing
+  STTyApp {} -> Nothing
   STForall name mb body ->
     X.TForall name
       <$> maybe (Just Nothing) srcBoundToElabBoundMaybe mb
@@ -1864,6 +1924,7 @@ srcBoundToElabBound (SrcBound boundTy) =
     Right (X.TArrow dom cod) -> Right (Just (X.TArrow dom cod))
     Right (X.TBase base) -> Right (Just (X.TBase base))
     Right (X.TCon con args) -> Right (Just (X.TCon con args))
+    Right (X.TVarApp name args) -> Right (Just (X.TVarApp name args))
     Right (X.TForall name mb body) -> Right (Just (X.TForall name mb body))
     Right (X.TMu name body) -> Right (Just (X.TMu name body))
 
@@ -1875,6 +1936,7 @@ srcBoundToElabBoundMaybe (SrcBound boundTy) =
     Just (X.TArrow dom cod) -> Just (Just (X.TArrow dom cod))
     Just (X.TBase base) -> Just (Just (X.TBase base))
     Just (X.TCon con args) -> Just (Just (X.TCon con args))
+    Just (X.TVarApp name args) -> Just (Just (X.TVarApp name args))
     Just (X.TForall name mb body) -> Just (Just (X.TForall name mb body))
     Just (X.TMu name body) -> Just (Just (X.TMu name body))
     Nothing -> Nothing

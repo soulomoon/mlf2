@@ -110,6 +110,10 @@ validateDirectRecursiveAnnotations = goExpr
             Surface.STCon _ args -> all (bodyType True shadowed) args
             Surface.STVarApp v args ->
               (shadowed || v /= needle || guarded) && all (bodyType True shadowed) args
+            Surface.STTyLam v body ->
+              bodyType guarded (shadowed || v == needle) body
+            Surface.STTyApp fun arg ->
+              bodyType guarded shadowed fun && bodyType guarded shadowed arg
             Surface.STForall v mb body ->
               let shadowed' = shadowed || v == needle
                   boundOk = maybe True (bodyBound guarded shadowed' . Surface.unNormBound) mb
@@ -126,6 +130,10 @@ validateDirectRecursiveAnnotations = goExpr
             Surface.STCon _ args -> all (bodyType True shadowed) args
             Surface.STVarApp v args ->
               (shadowed || v /= needle || guarded) && all (bodyType True shadowed) args
+            Surface.STTyLam v body ->
+              bodyType guarded (shadowed || v == needle) body
+            Surface.STTyApp fun arg ->
+              bodyType guarded shadowed fun && bodyType guarded shadowed arg
             Surface.STForall v mb body ->
               let shadowed' = shadowed || v == needle
                   boundOk = maybe True (bodyBound guarded shadowed' . Surface.unNormBound) mb
@@ -352,12 +360,14 @@ containsRecursiveType ty = case ty of
   TMu _ _ -> True
   TArrow dom cod -> containsRecursiveType dom || containsRecursiveType cod
   TCon _ args -> any containsRecursiveType args
+  TVarApp _ args -> any containsRecursiveType args
   TForall _ mb body -> maybe False containsRecursiveBound mb || containsRecursiveType body
   _ -> False
   where
     containsRecursiveBound bound = case bound of
       TArrow dom cod -> containsRecursiveType dom || containsRecursiveType cod
       TCon _ args -> any containsRecursiveType args
+      TVarApp _ args -> any containsRecursiveType args
       TForall _ mb body -> maybe False containsRecursiveBound mb || containsRecursiveType body
       TMu _ _ -> True
       _ -> False
@@ -457,8 +467,11 @@ srcTypeToElabType ty = case ty of
   Surface.STArrow dom cod -> TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod
   Surface.STBase name -> Right (TBase (BaseTy name))
   Surface.STCon name args -> TCon (BaseTy name) <$> traverse srcTypeToElabType args
-  Surface.STVarApp name _ ->
-    unsupportedVariableHead name
+  Surface.STVarApp name args -> TVarApp name <$> traverse srcTypeToElabType args
+  Surface.STTyLam {} ->
+    Left (InternalConstraintError "residual type lambda reached elaboration")
+  Surface.STTyApp {} ->
+    Left (InternalConstraintError "residual type application reached elaboration")
   Surface.STForall name mb body ->
     TForall name
       <$> maybe (Right Nothing) srcBoundToElabBound mb
@@ -474,8 +487,11 @@ srcTypeToElabType ty = case ty of
       Surface.STArrow dom cod -> Just <$> (TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod)
       Surface.STBase name -> Right (Just (TBase (BaseTy name)))
       Surface.STCon name args -> Just . TCon (BaseTy name) <$> traverse srcTypeToElabType args
-      Surface.STVarApp name _ ->
-        unsupportedVariableHead name
+      Surface.STVarApp name args -> Just . TVarApp name <$> traverse srcTypeToElabType args
+      Surface.STTyLam {} ->
+        Left (InternalConstraintError "residual type lambda reached elaboration")
+      Surface.STTyApp {} ->
+        Left (InternalConstraintError "residual type application reached elaboration")
       Surface.STForall name mb body ->
         Just
           <$> ( TForall name
@@ -484,6 +500,3 @@ srcTypeToElabType ty = case ty of
               )
       Surface.STMu name body -> Just . TMu name <$> srcTypeToElabType body
       Surface.STBottom -> Right Nothing
-
-    unsupportedVariableHead name =
-      Left (InternalConstraintError ("variable-headed source type application `" ++ name ++ "` is not supported before higher-kinded elaboration"))

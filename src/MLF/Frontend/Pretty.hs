@@ -28,6 +28,12 @@ prettyEmlfType = goType 0
       STBottom -> "⊥"
       STCon c args -> c ++ " " ++ unwords (map (goArg 2) (toListNE args))
       STVarApp v args -> v ++ " " ++ unwords (map (goArg 2) (toListNE args))
+      STTyLam v body ->
+        let (tailBinds, tailBody) = collectTypeLams body
+            bindStr = unwords (v : tailBinds)
+         in paren (p > 0) ("Λ" ++ bindStr ++ ". " ++ goType 0 tailBody)
+      STTyApp fun arg ->
+        paren (p > 2) (goType 2 fun ++ " " ++ goArg 3 arg)
       STArrow a b ->
         paren (p > 1) (goType 2 a ++ " -> " ++ goType 1 b)
       STForall v mb body ->
@@ -44,6 +50,7 @@ prettyEmlfType = goType 0
       STBase {} -> goType p ty
       STBottom {} -> goType p ty
       STVarApp {} -> "(" ++ goType 0 ty ++ ")"
+      STTyApp {} -> "(" ++ goType 0 ty ++ ")"
       _ -> "(" ++ goType 0 ty ++ ")"
 
     prettyBind :: (String, Maybe (SrcTy n (BoundTopVar n))) -> String
@@ -57,6 +64,15 @@ prettyEmlfType = goType 0
       STForall v mb body ->
         let (rest, body') = collectForalls body
          in ((v, fmap unSrcBound mb) : rest, body')
+      _ -> ([], ty)
+
+    collectTypeLams ::
+      SrcTy n 'TopVarAllowed ->
+      ([String], SrcTy n 'TopVarAllowed)
+    collectTypeLams ty = case ty of
+      STTyLam v body ->
+        let (rest, body') = collectTypeLams body
+         in (v : rest, body')
       _ -> ([], ty)
 
 prettyEmlfExpr :: Expr 'Surface (SrcTy n v) -> String

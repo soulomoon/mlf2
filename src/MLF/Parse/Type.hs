@@ -5,6 +5,8 @@ module MLF.Parse.Type (
     parseArrowTypeWith,
 ) where
 
+import Control.Applicative (some)
+import Control.Monad (void)
 import Data.List.NonEmpty (NonEmpty(..))
 import MLF.Parse.Common (Parser)
 import Text.Megaparsec (choice, many, optional, try, (<|>))
@@ -16,6 +18,7 @@ data TypeAtom ty
 
 data TypeParserConfig ty bound = TypeParserConfig
     { tpcForallTok :: Parser ()
+    , tpcTypeLambdaTok :: Parser ()
     , tpcGeTok :: Parser ()
     , tpcSymbol :: String -> Parser String
     , tpcParens :: Parser ty -> Parser ty
@@ -27,6 +30,8 @@ data TypeParserConfig ty bound = TypeParserConfig
     , tpcMkBase :: String -> ty
     , tpcMkCon :: String -> NonEmpty ty -> ty
     , tpcMkVarApp :: String -> NonEmpty ty -> Maybe ty
+    , tpcMkTypeLam :: String -> ty -> Maybe ty
+    , tpcMkTypeApp :: ty -> ty -> Maybe ty
     , tpcMkForall :: String -> bound -> ty -> ty
     , tpcMkBottom :: ty
     , tpcBoundedBinder :: Parser ty -> Parser (String, bound)
@@ -69,7 +74,9 @@ parseArrowTypeWith cfg pType = do
                         case tpcMkVarApp cfg varName (arg :| rest) of
                             Just ty -> pure ty
                             Nothing -> fail ("variable-headed type application `" ++ varName ++ "` is not supported")
-            AtomOther ty -> pure ty
+            AtomOther ty -> do
+                args <- many pTypeArg
+                foldMTypeApp ty args
 
     pTypeArg = pTypeAtom >>= \case
         AtomCon conName -> pure (tpcMkBase cfg conName)
@@ -79,7 +86,28 @@ parseArrowTypeWith cfg pType = do
     pTypeAtom =
         choice
             [ AtomOther (tpcMkBottom cfg) <$ tpcBottomTok cfg
+            , AtomOther <$> try pTypeLambda
             , AtomCon <$> tpcUpperIdent cfg
             , AtomVar <$> tpcLowerIdent cfg
             , AtomOther <$> tpcParens cfg pType
             ]
+
+    pTypeLambda = do
+        tpcTypeLambdaTok cfg
+        binders <- some (tpcLowerIdent cfg)
+        void (tpcSymbol cfg ".")
+        body <- pType
+        foldMTypeLam binders body
+
+    foldMTypeLam [] body = pure body
+    foldMTypeLam (binder : rest) body = do
+        inner <- foldMTypeLam rest body
+        case tpcMkTypeLam cfg binder inner of
+            Just ty -> pure ty
+            Nothing -> fail "type lambdas are not supported in this type grammar"
+
+    foldMTypeApp fun [] = pure fun
+    foldMTypeApp fun (arg : rest) =
+        case tpcMkTypeApp cfg fun arg of
+            Just ty -> foldMTypeApp ty rest
+            Nothing -> fail "general type application is not supported in this type grammar"

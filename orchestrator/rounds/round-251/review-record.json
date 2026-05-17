@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-251",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002",
+  "milestone_id": "milestone-7",
+  "direction_id": "direction-7a-full-type-level-handoff-merge",
+  "extracted_item_id": "round-251-full-type-level-handoff",
+  "decision": "approved",
+  "evidence_summary": "Retry docs checks, diff hygiene, conflict-marker scan, and generated depfile checks passed. Prior focused tests, cabal build all, cabal test, and thesis gate remain applicable because the retry changed only docs and implementation notes.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-7",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-7-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-7-completion",
+        "text": "Completed by round-251; evidence: full type-level handoff reconciled, docs retry fixed backend/native IO support wording, focused tests, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

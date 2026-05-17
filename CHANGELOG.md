@@ -3,6 +3,34 @@
 ## Unreleased
 
 ### Added
+- Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
+  richer pre-core type layer, including kind variables in its AST,
+  capture-avoiding type-lambda beta reduction, closed type-family ordered
+  first-match reduction, stuck-family rejection, cycle detection, and fuel
+  exhaustion diagnostics.
+- Added `.mlfp` parser, pretty-printer, and pre-resolution checker support for
+  closed `type family` declarations with kind-variable result/parameter kinds
+  and ordered equations. Reducible family applications now normalize and erase
+  before the existing resolver/core boundary, while stuck, cyclic, and
+  fuel-exhausted family reductions report structured diagnostics.
+- Added raw/frontend source type-lambda parsing and pretty-printing with
+  Unicode `Λ`, plus beta normalization for type-lambda applications before the
+  core boundary. Residual type lambdas and non-normalized general type
+  applications now fail closed before core erasure.
+- Added `.mlfp` parser/pretty AST support for the generalized typeclass
+  surface: superclass constraints, multi-parameter class/constraint/instance
+  heads, and Unicode functional dependencies (`→`). The checker now supports
+  zero-method multi-parameter class evidence with vector-matched constraints
+  and instances plus method-bearing multi-parameter dispatch when every class
+  argument is fixed at the call site or by functional-dependency closure over
+  visible instances/evidence. Superclass constraints now flatten into method
+  evidence and specialized instance prerequisites, while invalid fundeps,
+  ambiguous fundep instances, fundep-conflicting instances, and still-ambiguous
+  multi-parameter method uses fail closed with structured diagnostics before
+  they can enter the existing method evidence path.
+- Promoted the built-in IO Prelude from a direct `Monad IO` surface to a real
+  `Functor -> Applicative -> Monad` hierarchy with coherent `IO` instances for
+  `map`, `pure`, `ap`, and `bind`.
 - Broadened native LLVM run-result coverage accounting so every shared
   `ProgramSpec`-to-LLVM runtime-success row is explicitly classified as
   native-run checked or native-unsupported with a diagnostic, with advanced

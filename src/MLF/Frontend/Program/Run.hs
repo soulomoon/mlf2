@@ -19,6 +19,7 @@ where
 import Control.Monad (foldM)
 import Data.Foldable (toList)
 import Data.List (find, intercalate)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import MLF.Elab.Pipeline (ElabTerm (..), Pretty (..), Ty (..), freeTypeVarsType, normalize, schemeFromType, typeCheck)
@@ -68,11 +69,14 @@ import MLF.Frontend.Program.Types
     applyConstraintInfoSubst,
     diagnosticForProgramError,
     freeTypeVarsTypeView,
+    freeTypeVarsTypeViews,
     methodInfoOwnerClassSymbolIdentity,
     specializeMethodType,
     splitArrows,
     splitForalls,
     substituteTypeVar,
+    typeViewsDisplay,
+    typeViewsIdentity,
   )
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
 import qualified MLF.Frontend.Syntax as Surface
@@ -298,6 +302,8 @@ data RuntimeValue
 data RuntimePrimitive
   = RuntimeIOPure
   | RuntimeIOBind
+  | RuntimeIOMap
+  | RuntimeIOAp
   | RuntimeIOPutStrLn
   | RuntimeIOGetLine
   | RuntimeIOPutStr
@@ -315,6 +321,8 @@ data RuntimePrimitive
 data RuntimeIOAction
   = RuntimePure RuntimeValue
   | RuntimeBind RuntimeIOAction RuntimeValue
+  | RuntimeMap RuntimeValue RuntimeIOAction
+  | RuntimeAp RuntimeIOAction RuntimeIOAction
   | RuntimePutStrLn String
   | RuntimeGetLine
   | RuntimePutStr String
@@ -452,6 +460,8 @@ runtimePrimitive name =
   case name of
     "__io_pure" -> Just RuntimeIOPure
     "__io_bind" -> Just RuntimeIOBind
+    "__io_map" -> Just RuntimeIOMap
+    "__io_ap" -> Just RuntimeIOAp
     "__io_putStrLn" -> Just RuntimeIOPutStrLn
     "__io_getLine" -> Just RuntimeIOGetLine
     "__io_putStr" -> Just RuntimeIOPutStr
@@ -535,6 +545,8 @@ freeTypeVarsRuntimeSrcType = go Set.empty
                   then Set.empty
                   else Set.singleton name
            in headVars `Set.union` foldMap (go bound) args
+        STTyLam name body -> go (Set.insert name bound) body
+        STTyApp fun arg -> go bound fun `Set.union` go bound arg
         STForall name mb body ->
           maybe Set.empty (go bound . unSrcBound) mb
             `Set.union` go (Set.insert name bound) body
@@ -788,6 +800,7 @@ lookupRuntimeNullaryEvidence context deferred classArgView =
       Just
         DeferredMethodEvidence
           { deferredMethodEvidenceClassArg = classArgView,
+            deferredMethodEvidenceClassArgs = classArgView NE.:| [],
             deferredMethodEvidenceRuntimeName = runtimeName,
             deferredMethodEvidenceType = evidenceTy
           }
@@ -810,21 +823,25 @@ runtimeNullaryMethodLocalConstraints methodInfo classArgView methodSubst =
 
 specializeRuntimeConstraintInfoType :: String -> TypeView -> ConstraintInfo -> ConstraintInfo
 specializeRuntimeConstraintInfoType paramName headView constraint =
-  constraint
-    { constraintTypeView =
-        TypeView
-          { typeViewDisplay =
-              substituteTypeVar
-                paramName
-                (typeViewDisplay headView)
-                (typeViewDisplay (constraintTypeView constraint)),
-            typeViewIdentity =
-              substituteTypeVar
-                paramName
-                (typeViewIdentity headView)
-                (typeViewIdentity (constraintTypeView constraint))
-          }
-    }
+  let views = fmap substituteView (constraintTypeViews constraint)
+   in constraint
+        { constraintTypeView = NE.head views,
+          constraintTypeViews = views
+        }
+  where
+    substituteView view =
+      TypeView
+        { typeViewDisplay =
+            substituteTypeVar
+              paramName
+              (typeViewDisplay headView)
+              (typeViewDisplay view),
+          typeViewIdentity =
+            substituteTypeVar
+              paramName
+              (typeViewIdentity headView)
+              (typeViewIdentity view)
+        }
 
 runtimeMethodValueName :: String -> ValueInfo -> Either ProgramError String
 runtimeMethodValueName _ OrdinaryValue {valueRuntimeName = name} = Right name
@@ -836,7 +853,7 @@ methodValueConstraints _ = []
 
 constraintGround :: ConstraintInfo -> Bool
 constraintGround constraint =
-  Set.null (freeTypeVarsTypeView (constraintTypeView constraint))
+  Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint))
 
 resolveRuntimeConstraintEvidenceValues ::
   RuntimeContext ->
@@ -860,9 +877,9 @@ resolveRuntimeConstraintEvidenceValue ::
   ConstraintInfo ->
   Either ProgramError [RuntimeValue]
 resolveRuntimeConstraintEvidenceValue context stack deferredValues env localEvidence seen constraint = do
-  let key = (constraintClassSymbol constraint, show (typeViewIdentity (constraintTypeView constraint)))
+  let key = constraintEvidenceKey constraint
   if key `Set.member` seen
-    then Left (ProgramNoMatchingInstance (constraintDisplayClass constraint) (typeViewDisplay (constraintTypeView constraint)))
+    then Left (noMatchingInstanceError constraint)
     else do
       mbLocalEvidence <- resolveRuntimeLocalConstraintEvidenceValues context stack deferredValues env localEvidence constraint
       case mbLocalEvidence of
@@ -897,7 +914,7 @@ materializeRuntimeMethodEvidence ::
   ValueInfo ->
   Either ProgramError RuntimeValue
 materializeRuntimeMethodEvidence context stack deferredValues env localEvidence seen subst constraint valueInfo = do
-  let headVars = freeTypeVarsTypeView (constraintTypeView constraint)
+  let headVars = freeTypeVarsTypeViews (constraintTypeViews constraint)
       eagerConstraints =
         filter
           (constraintDeterminedByTypeVars headVars)
@@ -976,22 +993,37 @@ runtimeEvidenceTypeMatches scope left right =
   matchTypesInScope scope Map.empty left right /= Nothing
     || matchTypesInScope scope Map.empty right left /= Nothing
 
+runtimeEvidenceTypesMatch :: ElaborateScope -> NE.NonEmpty SrcType -> NE.NonEmpty SrcType -> Bool
+runtimeEvidenceTypesMatch scope left right =
+  length left == length right
+    && and (zipWith (runtimeEvidenceTypeMatches scope) (NE.toList left) (NE.toList right))
+
 orElseRuntimeEvidenceMethod :: Maybe (String, SrcType) -> Maybe (String, SrcType) -> Maybe (String, SrcType)
 orElseRuntimeEvidenceMethod (Just evidence) _ = Just evidence
 orElseRuntimeEvidenceMethod Nothing fallback = fallback
+
+constraintEvidenceKey :: ConstraintInfo -> (SymbolIdentity, String)
+constraintEvidenceKey constraint =
+  (constraintClassSymbol constraint, show (NE.toList (typeViewsIdentity (constraintTypeViews constraint))))
+
+noMatchingInstanceError :: ConstraintInfo -> ProgramError
+noMatchingInstanceError constraint =
+  case NE.toList (typeViewsDisplay (constraintTypeViews constraint)) of
+    [ty] -> ProgramNoMatchingInstance (constraintDisplayClass constraint) ty
+    tys -> ProgramNoMatchingInstanceHead (constraintDisplayClass constraint) tys
 
 zeroMethodConstraintCoveredByRuntimeEvidence :: ElaborateScope -> [EvidenceInfo] -> ConstraintInfo -> Bool
 zeroMethodConstraintCoveredByRuntimeEvidence scope evidenceInfos constraint =
   any
     ( \evidence ->
         evidenceClassSymbol evidence == constraintClassSymbol constraint
-          && runtimeEvidenceTypeMatches scope (evidenceTypeIdentity evidence) (typeViewIdentity (constraintTypeView constraint))
+          && runtimeEvidenceTypesMatch scope (evidenceTypeIdentities evidence) (typeViewsIdentity (constraintTypeViews constraint))
     )
     evidenceInfos
 
 constraintDeterminedByTypeVars :: Set.Set String -> ConstraintInfo -> Bool
 constraintDeterminedByTypeVars typeVars constraint =
-  freeTypeVarsTypeView (constraintTypeView constraint) `Set.isSubsetOf` typeVars
+  freeTypeVarsTypeViews (constraintTypeViews constraint) `Set.isSubsetOf` typeVars
 
 runtimeValueTypeView :: RuntimeContext -> RuntimeValue -> Either ProgramError TypeView
 runtimeValueTypeView context value =
@@ -1086,6 +1118,14 @@ applyRuntimePrimitive prim args
           Right (RuntimeIO (RuntimeBind action continuation))
         (RuntimeIOBind, _) ->
           Left (ProgramPipelineError "run-program __io_bind expected an IO action and continuation")
+        (RuntimeIOMap, [mapper, RuntimeIO action]) ->
+          Right (RuntimeIO (RuntimeMap mapper action))
+        (RuntimeIOMap, _) ->
+          Left (ProgramPipelineError "run-program __io_map expected a mapper and an IO action")
+        (RuntimeIOAp, [RuntimeIO wrappedFunction, RuntimeIO wrappedValue]) ->
+          Right (RuntimeIO (RuntimeAp wrappedFunction wrappedValue))
+        (RuntimeIOAp, _) ->
+          Left (ProgramPipelineError "run-program __io_ap expected two IO actions")
         (RuntimeIOPutStrLn, [RuntimeLit (LString msg)]) ->
           Right (RuntimeIO (RuntimePutStrLn msg))
         (RuntimeIOPutStrLn, [_]) ->
@@ -1134,6 +1174,8 @@ runtimePrimitiveArity prim =
   case prim of
     RuntimeIOPure -> 1
     RuntimeIOBind -> 2
+    RuntimeIOMap -> 2
+    RuntimeIOAp -> 2
     RuntimeIOPutStrLn -> 1
     RuntimeIOGetLine -> 0
     RuntimeIOPutStr -> 1
@@ -1183,6 +1225,15 @@ executeIOAction context action =
           _ -> Left (ProgramPipelineError "run-program __io_bind continuation did not return an IO action")
       (nextStdout, resultValue) <- executeIOAction context nextAction
       Right (firstStdout ++ nextStdout, resultValue)
+    RuntimeMap mapper action0 -> do
+      (stdout0, value) <- executeIOAction context action0
+      mapped <- applyRuntimeValue context mapper value
+      Right (stdout0, mapped)
+    RuntimeAp wrappedFunction wrappedValue -> do
+      (functionStdout, functionValue) <- executeIOAction context wrappedFunction
+      (valueStdout, value) <- executeIOAction context wrappedValue
+      applied <- applyRuntimeValue context functionValue value
+      Right (functionStdout ++ valueStdout, applied)
 
 isRuntimeUnit :: RuntimeValue -> Bool
 isRuntimeUnit value =
@@ -1513,6 +1564,9 @@ substDataParams subst ty =
             Just (STCon replacementName replacementArgs) -> STCon replacementName (replacementArgs <> args')
             Just (STVarApp replacementName replacementArgs) -> STVarApp replacementName (replacementArgs <> args')
             _ -> STVarApp name args'
+    STTyLam name body ->
+      STTyLam name (substDataParams (Map.delete name subst) body)
+    STTyApp fun arg -> STTyApp (substDataParams subst fun) (substDataParams subst arg)
     STForall name mb body ->
       let subst' = Map.delete name subst
        in STForall name (fmap (SrcBound . substDataParams subst' . unSrcBound) mb) (substDataParams subst' body)
@@ -1536,6 +1590,8 @@ canonicalFieldType checked ownerInfo = canonical
                 Just info -> STCon (qualifiedDataName info) args'
                 Nothing -> STCon name args'
         STVarApp name args -> STVarApp name (fmap canonical args)
+        STTyLam name body -> STTyLam name (canonical body)
+        STTyApp fun arg -> STTyApp (canonical fun) (canonical arg)
         STArrow dom cod -> STArrow (canonical dom) (canonical cod)
         STForall name mb body ->
           STForall name (fmap (SrcBound . canonical . unSrcBound) mb) (canonical body)

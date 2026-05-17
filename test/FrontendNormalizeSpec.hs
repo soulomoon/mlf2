@@ -54,6 +54,14 @@ freeVarsSpec = describe "freeVarsSrcType" $ do
         freeVarsSrcType (STVarApp "f" (STVar "a" :| [STVar "b"]))
             `shouldBe` Set.fromList ["f", "a", "b"]
 
+    it "type lambdas bind their variable in the body" $
+        freeVarsSrcType (STTyLam "a" (STArrow (STVar "a") (STVar "b")))
+            `shouldBe` Set.fromList ["b"]
+
+    it "general type application collects head and argument variables" $
+        freeVarsSrcType (STTyApp (STVar "f") (STVar "a"))
+            `shouldBe` Set.fromList ["f", "a"]
+
 -- -----------------------------------------------------------------------
 -- Capture-avoiding substitution
 -- -----------------------------------------------------------------------
@@ -109,6 +117,18 @@ substSpec = describe "substSrcType" $ do
     it "composes variable-headed type application heads when substituted by a partially applied variable head" $
         substSrcType "f" (STVarApp "g" (STBase "Int" :| [])) (STVarApp "f" (STVar "a" :| []))
             `shouldBe` STVarApp "g" (STBase "Int" :| [STVar "a"])
+
+    it "substitutes into general type applications" $
+        substSrcType "a" (STBase "Int") (STTyApp (STVar "f") (STVar "a"))
+            `shouldBe` STTyApp (STVar "f") (STBase "Int")
+
+    it "alpha-renames type lambdas to avoid capture" $
+        case substSrcType "a" (STVar "b") (STTyLam "b" (STArrow (STVar "a") (STVar "b"))) of
+            STTyLam v' (STArrow (STVar replacement) (STVar inner)) -> do
+                v' `shouldNotBe` "b"
+                replacement `shouldBe` "b"
+                inner `shouldBe` v'
+            other -> expectationFailure ("unexpected shape: " ++ show other)
 
 -- -----------------------------------------------------------------------
 -- Type normalization
@@ -187,6 +207,24 @@ normalizeTypeSpec = describe "normalizeType" $ do
     it "normalizes variable-headed type applications without lowering the head" $
         normalizeType (STVarApp "f" (STVar "a" :| [STVar "b"]))
             `shouldBe` Right (STVarApp "f" (STVar "a" :| [STVar "b"]))
+
+    it "beta-reduces type-lambda applications" $
+        normalizeType (STTyApp (STTyLam "a" (STArrow (STVar "a") (STVar "a"))) (STBase "Int"))
+            `shouldBe` Right (STArrow (STBase "Int") (STBase "Int"))
+
+    it "normalizes parenthesized applications back to core-supported heads" $ do
+        normalizeType (STTyApp (STCon "Either" (STBase "Int" :| [])) (STBase "String"))
+            `shouldBe` Right (STCon "Either" (STBase "Int" :| [STBase "String"]))
+        normalizeType (STTyApp (STVarApp "f" (STVar "a" :| [])) (STVar "b"))
+            `shouldBe` Right (STVarApp "f" (STVar "a" :| [STVar "b"]))
+
+    it "rejects residual type lambdas" $
+        normalizeType (STTyLam "a" (STVar "a"))
+            `shouldBe` Left (ResidualTypeLambda (STTyLam "a" (STVar "a")))
+
+    it "rejects unsupported residual type applications" $
+        normalizeType (STTyApp (STArrow (STBase "Int") (STBase "Int")) (STBase "Bool"))
+            `shouldBe` Left (UnsupportedTypeApplication (STTyApp (STArrow (STBase "Int") (STBase "Int")) (STBase "Bool")))
 
     it "preserves recursive wrappers while normalizing nested alias bounds" $
         let input =

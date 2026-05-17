@@ -151,6 +151,7 @@ matchesRecursiveMu actual expected = case (actual, expected) of
       TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
       TBase base -> TBase base
       TCon con args -> TCon con (fmap stripMuNames args)
+      TVarApp name args -> TVarApp name (fmap stripMuNames args)
       TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
       TMu _ body -> TMu "_" (stripMuNames body)
       TBottom -> TBottom
@@ -159,6 +160,7 @@ matchesRecursiveMu actual expected = case (actual, expected) of
       TArrow dom cod -> TArrow (stripMuNames dom) (stripMuNames cod)
       TBase base -> TBase base
       TCon con args -> TCon con (fmap stripMuNames args)
+      TVarApp name args -> TVarApp name (fmap stripMuNames args)
       TForall _ mb body -> TForall "_" (fmap stripBoundNames mb) (stripMuNames body)
       TMu _ body -> TMu "_" (stripMuNames body)
       TBottom -> TBottom
@@ -198,6 +200,7 @@ containsMu ty = case ty of
       TArrow dom cod -> containsMu dom || containsMu cod
       TBase _ -> False
       TCon _ args -> any containsMu args
+      TVarApp _ args -> any containsMu args
       TForall _ mb body -> maybe False containsMuBound mb || containsMu body
       TMu _ _ -> True
       TBottom -> False
@@ -322,34 +325,36 @@ resultTypeInputsForArtifacts
             defaultTraceConfig
      in (inputs, annCanon, ann0)
 
-expectUnsupportedVarApp :: Either Elab.PipelineError a -> Expectation
-expectUnsupportedVarApp result =
-  case result of
-    Left (Elab.PipelineConstraintError (InternalConstraintError msg)) ->
-      msg `shouldSatisfy` isInfixOf "variable-headed source type application `f` is not supported"
-    Left (Elab.PipelineElabError (Elab.InstantiationError msg)) ->
-      msg `shouldSatisfy` isInfixOf "variable-headed source type application `f` is not supported"
-    Left err ->
-      expectationFailure ("expected typed variable-headed source type error, got " ++ renderPipelineError err)
-    Right _ ->
-      expectationFailure "expected unsupported variable-headed source type application error"
-
 spec :: Spec
 spec = describe "Pipeline (Phases 1-5)" $ do
   describe "External binding validation" $ do
-    it "fails closed for variable-headed external env types" $ do
+    it "accepts variable-headed external env types" $ do
       let extEnv = Map.singleton "x" (STVarApp "f" (STVar "a" :| []))
           result = Elab.runPipelineElabWithEnv Set.empty extEnv (EVar "x")
-      expectUnsupportedVarApp result
+      result `shouldSatisfy` isRight
 
   describe "Source annotation validation" $ do
-    it "fails closed for variable-headed term annotations" $ do
-      let expr = EAnn (ELit (LInt 1)) (STVarApp "f" (STBase "Int" :| []))
-      expectUnsupportedVarApp (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+    it "accepts variable-headed term annotations" $ do
+      let ty = STVarApp "f" (STVar "a" :| [])
+          extEnv = Map.singleton "x" ty
+          expr = EAnn (EVar "x") ty
+      Elab.runPipelineElabWithEnv Set.empty extEnv (unsafeNormalizeExpr expr)
+        `shouldSatisfy` isRight
 
-    it "fails closed for variable-headed annotated lambda parameters" $ do
+    it "accepts variable-headed annotated lambda parameters" $ do
       let expr = ELamAnn "x" (STVarApp "f" (STBase "Int" :| [])) (EVar "x")
-      expectUnsupportedVarApp (runPipelineElab Set.empty (unsafeNormalizeExpr expr))
+      runPipelineElab Set.empty (unsafeNormalizeExpr expr) `shouldSatisfy` isRight
+
+    it "accepts higher-kinded forall annotations with variable-headed bodies" $ do
+      let body = STArrow (STVarApp "f" (STVar "a" :| [])) (STVarApp "f" (STVar "a" :| []))
+          ty = mkForalls [("f", Nothing), ("a", Nothing)] body
+          expr = EAnn (ELam "x" (EVar "x")) ty
+      runPipelineElab Set.empty (unsafeNormalizeExpr expr) `shouldSatisfy` isRight
+
+    it "accepts reducible type-lambda applications in term annotations" $ do
+      let ty = STTyApp (STTyLam "a" (STArrow (STVar "a") (STVar "a"))) (STBase "Int")
+          expr = EAnn (ELam "x" (EVar "x")) ty
+      runPipelineElab Set.empty (unsafeNormalizeExpr expr) `shouldSatisfy` isRight
 
   describe "Shared candidate selection" $ do
     it "deduplicates repeated equal candidates instead of treating repeats as ambiguity" $ do
@@ -5558,11 +5563,19 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       expectStrictPipelineFailure "let-c1-apply-bool strict-target" (runChecked letC1ApplyBoolExpr)
 
   describe "Phase 3 atomic wrapping equivalence gates" $ do
-    let bugExpr :: SurfaceExpr
+    let makeFactory :: SurfaceExpr
+        makeFactory =
+          ELam "x" (ELam "y" (EVar "x"))
+
+        makeOnlyExpr :: SurfaceExpr
+        makeOnlyExpr =
+          ELet "make" makeFactory (EVar "make")
+
+        bugExpr :: SurfaceExpr
         bugExpr =
           ELet
             "make"
-            (ELam "x" (ELam "y" (EVar "x")))
+            makeFactory
             ( ELet
                 "c1"
                 (EApp (EVar "make") (ELit (LInt (-4))))
@@ -5612,6 +5625,14 @@ spec = describe "Pipeline (Phases 1-5)" $ do
       expectStrictPipelineFailure
         "atomic gate thesis canonical"
         (runPipelineElab Set.empty (unsafeNormalizeExpr bugExpr))
+
+    it "gate: make-only prefix remains a polymorphic factory" $
+      case runPipelineElab Set.empty (unsafeNormalizeExpr makeOnlyExpr) of
+        Left err -> expectationFailure ("pipeline failed: " ++ renderPipelineError err)
+        Right (_term, ty) -> do
+          ty `shouldSatisfy` containsForallTy
+          ty `shouldSatisfy` containsArrowTy
+          show ty `shouldNotSatisfy` ("TBottom" `isInfixOf`)
 
     it "gate: \\y. let id = (\\x. x) in id y has type forall a. a -> a" $
       case runPipelineElab Set.empty (unsafeNormalizeExpr lambdaLetIdExpr) of

@@ -461,6 +461,12 @@ bindingFor env plan (name, nidInt) = do
               Nothing -> TVar v
         TArrow a b -> TArrow (substAliasTy boundSet a) (substAliasTy boundSet b)
         TCon c args -> TCon c (fmap (substAliasTy boundSet) args)
+        TVarApp v args ->
+          let v' =
+                if Set.member v boundSet
+                  then v
+                  else maybe v id (aliasNameFor v)
+           in TVarApp v' (fmap (substAliasTy boundSet) args)
         TBase _ -> ty
         TBottom -> ty
         TForall v mb body ->
@@ -472,6 +478,12 @@ bindingFor env plan (name, nidInt) = do
       substAliasBound boundSet bound = case bound of
         TArrow a b -> TArrow (substAliasTy boundSet a) (substAliasTy boundSet b)
         TCon c args -> TCon c (fmap (substAliasTy boundSet) args)
+        TVarApp v args ->
+          let v' =
+                if Set.member v boundSet
+                  then v
+                  else maybe v id (aliasNameFor v)
+           in TVarApp v' (fmap (substAliasTy boundSet) args)
         TBase _ -> bound
         TBottom -> bound
         TForall v mb body ->
@@ -490,6 +502,7 @@ bindingFor env plan (name, nidInt) = do
               | otherwise -> TVar v
             TArrow a b -> TArrow (goTy shadow a) (goTy shadow b)
             TCon c args -> TCon c (fmap (goTy shadow) args)
+            TVarApp v args -> TVarApp v (fmap (goTy shadow) args)
             TBase _ -> ty
             TBottom -> ty
             TForall v mb body ->
@@ -503,6 +516,7 @@ bindingFor env plan (name, nidInt) = do
           goBound shadow bound = case bound of
             TArrow a b -> TArrow (goTy shadow a) (goTy shadow b)
             TCon c args -> TCon c (fmap (goTy shadow) args)
+            TVarApp v args -> TVarApp v (fmap (goTy shadow) args)
             TBase _ -> bound
             TBottom -> bound
             TForall v mb body ->

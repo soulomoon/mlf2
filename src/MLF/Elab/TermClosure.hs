@@ -159,6 +159,7 @@ hasRecursiveComponent ty = case ty of
       TArrow dom cod -> hasRecursiveComponent dom || hasRecursiveComponent cod
       TBase _ -> False
       TCon _ args -> any hasRecursiveComponent args
+      TVarApp _ args -> any hasRecursiveComponent args
       TForall _ mb body -> maybe False hasRecursiveBound mb || hasRecursiveComponent body
       TMu _ _ -> True
       TBottom -> False
@@ -491,6 +492,7 @@ substInTy subst = cataIx alg
     alg :: TyIF i Ty -> Ty i
     alg node = case node of
       TVarIF v -> TVar (applySubst v)
+      TVarAppIF v args -> TVarApp (applySubst v) args
       TArrowIF d c -> TArrow d c
       TConIF c args -> TCon c args
       TBaseIF b -> TBase b

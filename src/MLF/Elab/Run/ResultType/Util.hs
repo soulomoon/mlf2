@@ -164,10 +164,12 @@ containsBoundForall ty =
           maybe False containsAnyForallBound mb || go body
         TArrow a b -> go a || go b
         TCon _ args -> any go args
+        TVarApp _ args -> any go args
         _ -> False
       containsAnyForallBound bound = case bound of
         TArrow a b -> go a || go b
         TCon _ args -> any go args
+        TVarApp _ args -> any go args
         TForall _ _ _ -> True
         _ -> False
    in go ty
@@ -199,6 +201,7 @@ instantiateImplicitForalls ty0 =
           TForall v (fmap goBound mb) (go body)
         TArrow a b -> TArrow (go a) (go b)
         TCon c args -> TCon c (fmap go args)
+        TVarApp v args -> TVarApp v (fmap go args)
         TBase _ -> ty
         TBottom -> ty
         TVar _ -> ty
@@ -206,6 +209,7 @@ instantiateImplicitForalls ty0 =
       goBound bound = case bound of
         TArrow a b -> TArrow (go a) (go b)
         TCon c args -> TCon c (fmap go args)
+        TVarApp v args -> TVarApp v (fmap go args)
         TBase b -> TBase b
         TBottom -> TBottom
         TForall v mb body ->

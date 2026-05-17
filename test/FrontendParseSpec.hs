@@ -103,6 +103,15 @@ spec = describe "Frontend eMLF parser" $ do
             parseRawEmlfType "f (g a)"
                 `shouldBe` Right (STVarApp "f" (STVarApp "g" (STVar "a" :| []) :| []))
 
+        it "parses Unicode type lambdas and explicit type-lambda applications" $ do
+            parseRawEmlfType "Λa. a"
+                `shouldBe` Right (STTyLam "a" (STVar "a"))
+            parseRawEmlfType "(Λa. a) Int"
+                `shouldBe` Right (STTyApp (STTyLam "a" (STVar "a")) (STBase "Int"))
+
+        it "rejects ASCII type-lambda aliases" $
+            parseRawEmlfType "\\a. a" `shouldSatisfy` isLeft
+
         it "parses arrow and forall arguments to variable-headed applications when parenthesized" $ do
             parseRawEmlfType "f (a -> b)"
                 `shouldBe` Right (STVarApp "f" (STArrow (STVar "a") (STVar "b") :| []))
@@ -167,6 +176,19 @@ spec = describe "Frontend eMLF parser" $ do
         it "normalizes constructor application" $
             parseNormEmlfType "List Int"
                 `shouldBe` Right (STCon "List" (STBase "Int" :| []))
+
+        it "beta-reduces type-lambda applications before core erasure" $
+            parseNormEmlfType "(Λa. a -> a) Int"
+                `shouldBe` Right (STArrow (STBase "Int") (STBase "Int"))
+
+        it "normalizes parenthesized constructor and variable-headed applications" $ do
+            parseNormEmlfType "(Either Int) String"
+                `shouldBe` Right (STCon "Either" (STBase "Int" :| [STBase "String"]))
+            parseNormEmlfType "(f a) b"
+                `shouldBe` Right (STVarApp "f" (STVar "a" :| [STVar "b"]))
+
+        it "rejects residual type lambdas before entering the core" $
+            parseNormEmlfType "Λa. a" `shouldSatisfy` isNormErr
 
     describe "normalized expressions" $ do
         it "normalizes unannotated expression unchanged" $

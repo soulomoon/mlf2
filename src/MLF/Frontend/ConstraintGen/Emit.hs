@@ -5,6 +5,7 @@ module MLF.Frontend.ConstraintGen.Emit (
     allocBase,
     allocArrow,
     allocCon,
+    allocVarApp,
     allocGenNode,
     setGenNodeSchemes,
     allocExpNode,
@@ -102,6 +103,20 @@ allocCon con argNodes = do
     -- but only if they don't already have binding parents.
     -- This ensures all non-root nodes have binding parents while preserving
     -- existing binding structure.
+    mapM_ (\argNode -> setBindParentIfMissing (typeRef argNode) (typeRef nid) BindFlex)
+          (NE.toList argNodes)
+    pure nid
+
+-- | Allocate a TyVarApp node (type variable application f σ₁ … σₙ).
+allocVarApp :: NodeId -> NonEmpty NodeId -> ConstraintM NodeId
+allocVarApp headNode argNodes = do
+    nid <- freshNodeId
+    insertNode TyVarApp
+        { tnId = nid
+        , tnVarHead = headNode
+        , tnArgs = argNodes
+        }
+    setBindParentIfMissing (typeRef headNode) (typeRef nid) BindFlex
     mapM_ (\argNode -> setBindParentIfMissing (typeRef argNode) (typeRef nid) BindFlex)
           (NE.toList argNodes)
     pure nid

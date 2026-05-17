@@ -278,6 +278,10 @@ sourceTypeHeads =
                 Set.insert name (foldMap go args)
             STVarApp _ args ->
                 foldMap go args
+            STTyLam _ body ->
+                go body
+            STTyApp fun arg ->
+                Set.union (go fun) (go arg)
             STForall _ mbBound body ->
                 maybe Set.empty (go . unSrcBound) mbBound `Set.union` go body
             STMu _ body ->

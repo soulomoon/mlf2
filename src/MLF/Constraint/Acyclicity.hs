@@ -329,6 +329,15 @@ cloneWithSubstitution originalNodes recursiveNodes binderId nid
                         tnCon = con,
                         tnArgs = args'
                       }
+                TyVarApp {tnVarHead = headNode, tnArgs = args} -> do
+                  head' <- cloneWithSubstitution originalNodes recursiveNodes binderId headNode
+                  args' <- traverse (cloneWithSubstitution originalNodes recursiveNodes binderId) args
+                  pure
+                    TyVarApp
+                      { tnId = cloneId,
+                        tnVarHead = head',
+                        tnArgs = args'
+                      }
                 TyForall {tnBody = body} -> do
                   body' <- cloneWithSubstitution originalNodes recursiveNodes binderId body
                   pure

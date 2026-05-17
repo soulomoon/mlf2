@@ -118,6 +118,7 @@ boundToType bound = case bound of
   Elab.TCon c args -> Elab.TCon c args
   Elab.TBase b -> Elab.TBase b
   Elab.TBottom -> Elab.TBottom
+  Elab.TVarApp v args -> Elab.TVarApp v args
   Elab.TForall v mb body -> Elab.TForall v mb body
   Elab.TMu v body -> Elab.TMu v body
 
@@ -129,6 +130,7 @@ boundFromType ty = case ty of
   Elab.TCon c args -> Elab.TCon c args
   Elab.TBase b -> Elab.TBase b
   Elab.TBottom -> Elab.TBottom
+  Elab.TVarApp v args -> Elab.TVarApp v args
   Elab.TForall v mb body -> Elab.TForall v mb body
   Elab.TMu v body -> Elab.TMu v body
 
@@ -423,6 +425,9 @@ canonType = go [] (0 :: Int)
           Just v' -> Elab.TVar v'
           Nothing -> Elab.TVar v
       Elab.TCon c args -> Elab.TCon c (fmap (go env n) args)
+      Elab.TVarApp v args ->
+        let v' = maybe v id (lookup v env)
+         in Elab.TVarApp v' (fmap (go env n) args)
       Elab.TBase b -> Elab.TBase b
       Elab.TBottom -> Elab.TBottom
       Elab.TArrow a b -> Elab.TArrow (go env n a) (go env n b)
@@ -464,6 +469,10 @@ shouldEqUpToTypeVarRenaming actual expected =
       Elab.TCon c args ->
         let (env', n', args') = goList env n (NE.toList args)
          in (env', n', Elab.TCon c (NE.fromList args'))
+      Elab.TVarApp v args ->
+        let (env1, n1, v') = allocName env n v
+            (env2, n2, args') = goList env1 n1 (NE.toList args)
+         in (env2, n2, Elab.TVarApp v' (NE.fromList args'))
       Elab.TBase b -> (env, n, Elab.TBase b)
       Elab.TBottom -> (env, n, Elab.TBottom)
       Elab.TArrow a b ->
@@ -512,6 +521,7 @@ stripUnusedTopForalls ty =
         go shadowed t = case t of
           Elab.TVar v -> not shadowed && v == needle
           Elab.TCon _ args -> any (go shadowed) args
+          Elab.TVarApp v args -> (not shadowed && v == needle) || any (go shadowed) args
           Elab.TBase _ -> False
           Elab.TBottom -> False
           Elab.TArrow a b -> go shadowed a || go shadowed b
@@ -525,6 +535,7 @@ stripUnusedTopForalls ty =
         occursInBound shadowed b = case b of
           Elab.TArrow a c -> go shadowed a || go shadowed c
           Elab.TCon _ args -> any (go shadowed) args
+          Elab.TVarApp v args -> (not shadowed && v == needle) || any (go shadowed) args
           Elab.TBase _ -> False
           Elab.TBottom -> False
           Elab.TForall v mb body ->
@@ -1128,6 +1139,11 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
                           let visited' = IntSet.insert key visited
                           fvs <- mapM (go bound visited' . canonical) (NE.toList args)
                           pure (IntSet.unions fvs)
+                        Just TyVarApp {tnVarHead = headNode, tnArgs = args} -> do
+                          let visited' = IntSet.insert key visited
+                          headFvs <- go bound visited' (canonical headNode)
+                          argFvs <- mapM (go bound visited' . canonical) (NE.toList args)
+                          pure (IntSet.unions (headFvs : argFvs))
                         Just TyForall {tnId = fId, tnBody = b} -> do
                           let visited' = IntSet.insert key visited
                           binders <- Binding.boundFlexChildrenUnder canonical constraint (typeRef (canonical fId))
@@ -2712,12 +2728,14 @@ spec = describe "Phase 6 — Elaborate (xMLF)" $ do
             Elab.TMu _ _ -> True
             Elab.TArrow dom cod -> containsMuTy dom || containsMuTy cod
             Elab.TCon _ args -> any containsMuTy args
+            Elab.TVarApp _ args -> any containsMuTy args
             Elab.TForall _ mb body -> maybe False containsMuBound mb || containsMuTy body
             _ -> False
           containsMuBound bound = case bound of
             Elab.TArrow dom cod -> containsMuTy dom || containsMuTy cod
             Elab.TBase _ -> False
             Elab.TCon _ args -> any containsMuTy args
+            Elab.TVarApp _ args -> any containsMuTy args
             Elab.TForall _ mb body -> maybe False containsMuBound mb || containsMuTy body
             Elab.TMu _ _ -> True
             Elab.TBottom -> False

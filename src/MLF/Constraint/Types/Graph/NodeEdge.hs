@@ -328,6 +328,16 @@ data TyNode
         , tnCon :: BaseTy
         , tnArgs :: NonEmpty NodeId
         }
+    -- | Type variable application (f σ₁ … σₙ).
+    --
+    -- This is the erased graph-level counterpart of normalized higher-kinded
+    -- source annotations. The head is itself a node so existing binding edges
+    -- still own the higher-kinded variable.
+    | TyVarApp
+        { tnId :: NodeId
+        , tnVarHead :: NodeId
+        , tnArgs :: NonEmpty NodeId
+        }
     -- | Explicit quantifier node (∀).
     --
     -- Quantifier binders are represented by binding edges (`Constraint.cBindParents`):
@@ -373,6 +383,7 @@ structuralChildren TyVar{} = []
 structuralChildren TyBottom{} = []
 structuralChildren TyBase{} = []
 structuralChildren TyCon{ tnArgs = args } = NE.toList args
+structuralChildren TyVarApp{ tnVarHead = headNode, tnArgs = args } = headNode : NE.toList args
 structuralChildren TyArrow{ tnDom = d, tnCod = c } = [d, c]
 structuralChildren TyForall{ tnBody = b } = [b]
 structuralChildren TyExp{ tnBody = b } = [b]

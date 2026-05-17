@@ -650,15 +650,7 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
     -- To avoid locked descendants, rebind children auto-bound under structural
     -- nodes back to the current gen when rigid.
     STVar name ->
-      case Map.lookup name tyEnv of
-        Just nid -> pure (nid, shared)
-        Nothing ->
-          case Map.lookup name shared of
-            Just nid -> pure (nid, shared)
-            Nothing -> do
-              nid <- allocVar
-              setBindParentOverride (typeRef nid) (genRef coerceGen) BindFlex
-              pure (nid, Map.insert name nid shared)
+      internalizeTypeVariable name shared
     STArrow dom cod -> do
       (domNode, shared1) <-
         internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared dom
@@ -679,8 +671,17 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
       conNode <- allocCon (BaseTy name) argNodes
       rebindChildrenIfRigid bindFlag conNode (genRef currentGen) (NE.toList argNodes)
       withWrappedNode bindFlag wrap currentGen conNode sharedFinal
-    STVarApp name _ ->
-      throwError (InternalConstraintError ("variable-headed source type application `" ++ name ++ "` is not supported before higher-kinded elaboration"))
+    STVarApp name args -> do
+      (headNode, shared1) <- internalizeTypeVariable name shared
+      (argNodes, sharedFinal) <-
+        internalizeConArgs bindFlag wrap coerceGen currentGen tyEnv shared1 args
+      varAppNode <- allocVarApp headNode argNodes
+      rebindChildrenIfRigid bindFlag varAppNode (genRef currentGen) (headNode : NE.toList argNodes)
+      withWrappedNode bindFlag wrap currentGen varAppNode sharedFinal
+    STTyLam {} ->
+      throwError (InternalConstraintError "residual type lambda reached constraint generation")
+    STTyApp {} ->
+      throwError (InternalConstraintError "residual type application reached constraint generation")
     STForall var mBound body -> do
       -- Note: Alias bounds (∀(b ⩾ a). body where the bound is a bare
       -- variable) are unreachable here — normalization inlines them via
@@ -742,6 +743,17 @@ internalizeCoercionCopy bindFlag wrap coerceGen currentGen tyEnv shared srcType 
     STBottom -> do
       varNode <- allocVar
       pure (varNode, shared)
+  where
+    internalizeTypeVariable name shared0 =
+      case Map.lookup name tyEnv of
+        Just nid -> pure (nid, shared0)
+        Nothing ->
+          case Map.lookup name shared0 of
+            Just nid -> pure (nid, shared0)
+            Nothing -> do
+              nid <- allocVar
+              setBindParentOverride (typeRef nid) (genRef coerceGen) BindFlex
+              pure (nid, Map.insert name nid shared0)
 
 rebindIfParent :: NodeId -> NodeRef -> NodeRef -> BindFlag -> ConstraintM ()
 rebindIfParent child expectedParent newParent flag = do
@@ -777,6 +789,8 @@ structBoundToNormSrcType sb = case sb of
   STBase name -> STBase name
   STCon name args -> STCon name args
   STVarApp name args -> STVarApp name args
+  STTyLam name body -> STTyLam name body
+  STTyApp fun arg -> STTyApp fun arg
   STForall v mb body -> STForall v mb body
   STMu v body -> STMu v body
   STBottom -> STBottom
@@ -795,6 +809,10 @@ structBoundFreeVars = go Set.empty
                 then Set.empty
                 else Set.singleton name
          in headVars <> foldMap (normFreeVars bound) args
+      STTyLam v body ->
+        normFreeVars (Set.insert v bound) body
+      STTyApp fun arg ->
+        normFreeVars bound fun <> normFreeVars bound arg
       STForall v mb body ->
         let bound' = Set.insert v bound
          in maybe Set.empty (go bound . unNormBound) mb <> normFreeVars bound' body
@@ -813,6 +831,10 @@ structBoundFreeVars = go Set.empty
                 then Set.empty
                 else Set.singleton name
          in headVars <> foldMap (normFreeVars bound) args
+      STTyLam v body ->
+        normFreeVars (Set.insert v bound) body
+      STTyApp fun arg ->
+        normFreeVars bound fun <> normFreeVars bound arg
       STForall v mb body ->
         let bound' = Set.insert v bound
          in maybe Set.empty (go bound . unNormBound) mb <> normFreeVars bound' body

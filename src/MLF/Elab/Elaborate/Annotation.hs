@@ -862,8 +862,11 @@ srcTypeToElabType ty = case ty of
   STVar name -> Right (TVar name)
   STArrow dom cod -> TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod
   STCon name args -> TCon (BaseTy name) <$> traverse srcTypeToElabType args
-  STVarApp name _ ->
-    Left (unsupportedVariableHeadType name)
+  STVarApp name args -> TVarApp name <$> traverse srcTypeToElabType args
+  STTyLam {} ->
+    Left (InstantiationError "residual type lambda reached elaboration")
+  STTyApp {} ->
+    Left (InstantiationError "residual type application reached elaboration")
   STForall name mb body ->
     TForall name
       <$> maybe (Right Nothing) srcBoundToElabBound mb
@@ -871,11 +874,6 @@ srcTypeToElabType ty = case ty of
   STMu name body -> TMu name <$> srcTypeToElabType body
   STBase name -> Right (TBase (BaseTy name))
   STBottom -> Right TBottom
-
-unsupportedVariableHeadType :: String -> ElabError
-unsupportedVariableHeadType name =
-  InstantiationError
-    ("variable-headed source type application `" ++ name ++ "` is not supported before higher-kinded elaboration")
 
 srcBoundToElabBound :: SrcBound 'NormN -> Either ElabError (Maybe BoundType)
 srcBoundToElabBound bound = case bound of
@@ -886,8 +884,11 @@ structBoundToElabBound bTy = case bTy of
   STArrow dom cod -> Just <$> (TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod)
   STBase name -> Right (Just (TBase (BaseTy name)))
   STCon name args -> Just . TCon (BaseTy name) <$> traverse srcTypeToElabType args
-  STVarApp name _ ->
-    Left (unsupportedVariableHeadType name)
+  STVarApp name args -> Just . TVarApp name <$> traverse srcTypeToElabType args
+  STTyLam {} ->
+    Left (InstantiationError "residual type lambda reached elaboration")
+  STTyApp {} ->
+    Left (InstantiationError "residual type application reached elaboration")
   STForall name mb body ->
     Just
       <$> ( TForall name

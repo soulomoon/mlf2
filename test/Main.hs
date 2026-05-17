@@ -21,6 +21,7 @@ import FrontendDesugarSpec qualified
 import FrontendNormalizeSpec qualified
 import FrontendParseSpec qualified
 import FrontendPrettySpec qualified
+import FrontendTypeLevelSpec qualified
 import FrozenParitySpec qualified
 import GeneralizeSpec qualified
 import GoldenSpec qualified
@@ -139,6 +140,7 @@ main = do
     FrontendParseSpec.spec
     FrontendPrettySpec.spec
     FrontendNormalizeSpec.spec
+    FrontendTypeLevelSpec.spec
     FrontendDesugarSpec.spec
     XMLFParseSpec.spec
     XMLFPrettySpec.spec

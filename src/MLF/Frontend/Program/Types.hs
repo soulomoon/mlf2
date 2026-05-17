@@ -13,6 +13,9 @@ module MLF.Frontend.Program.Types
     applyTypeViewSubst,
     applyConstraintInfoSubst,
     freeTypeVarsTypeView,
+    freeTypeVarsTypeViews,
+    typeViewsDisplay,
+    typeViewsIdentity,
     EvidenceInfo (..),
     SymbolNamespace (..),
     SymbolOwnerIdentity (..),
@@ -84,6 +87,7 @@ module MLF.Frontend.Program.Types
     dataConstructorsRuntimeTypeTrackable,
     srcTypeHasVariableHeadApplication,
     specializeMethodType,
+    specializeMethodTypes,
     constrainedVisibleType,
   )
 where
@@ -91,6 +95,7 @@ where
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -119,6 +124,7 @@ import MLF.Frontend.Syntax
     resolvedSrcTypeToSrcType,
   )
 import qualified MLF.Frontend.Syntax.Program as P
+import MLF.Frontend.TypeLevel (TypeLevelKind (..), TypeLevelNormalizeError (..), TypeLevelTy (..))
 
 data ProgramError
   = ProgramDuplicateModule P.ModuleName
@@ -136,7 +142,9 @@ data ProgramError
   | ProgramDuplicateMethod String
   | ProgramDuplicateImportAlias P.ModuleName
   | ProgramDuplicateInstance P.ClassName SrcType
+  | ProgramDuplicateInstanceHead P.ClassName [SrcType]
   | ProgramOverlappingInstance P.ClassName SrcType SrcType
+  | ProgramOverlappingInstanceHead P.ClassName [SrcType] [SrcType]
   | ProgramUnknownValue String
   | ProgramUnknownConstructor String
   | ProgramUnknownType String
@@ -145,13 +153,32 @@ data ProgramError
   | ProgramAmbiguousUnqualifiedReference String
   | ProgramKindMismatch SrcType P.SrcKind P.SrcKind
   | ProgramTypeArityMismatch String Int Int
+  | ProgramClassArityMismatch P.ClassName Int Int
   | ProgramInvalidConstructorResult P.ConstructorName SrcType P.TypeName
   | ProgramUnsupportedDeriving P.ClassName
+  | ProgramUnsupportedTypeFamily P.TypeName
+  | ProgramUnsupportedTypeFamilyType SrcType
+  | ProgramResidualTypeLambda SrcType
+  | ProgramUnsupportedTypeApplication SrcType
+  | ProgramTypeLevelReductionFailed SrcType TypeLevelNormalizeError
+  | ProgramTypeFamilyReductionFailed P.TypeName TypeLevelNormalizeError
+  | ProgramUnboundTypeFamilyVariable String
+  | ProgramTypeFamilyEquationArityMismatch P.TypeName Int Int
+  | ProgramTypeFamilyKindMismatch P.TypeName TypeLevelTy TypeLevelKind TypeLevelKind
+  | ProgramUnsupportedMultiParameterClass P.ClassName Int
+  | ProgramUnsupportedSuperclassConstraint P.ClassName
+  | ProgramUnsupportedFunctionalDependency P.ClassName
+  | ProgramInvalidFunctionalDependency P.ClassName String
+  | ProgramAmbiguousFunctionalDependencyInstance P.ClassName [SrcType]
+  | ProgramConflictingFunctionalDependency P.ClassName [SrcType] [SrcType] [SrcType]
+  | ProgramUnsupportedMultiParameterConstraint P.ClassName [SrcType]
+  | ProgramUnsupportedMultiParameterInstance P.ClassName [SrcType]
   | ProgramDerivingRequiresNullaryType P.TypeName
   | ProgramDerivingMissingFieldInstance P.ClassName SrcType
   | ProgramMissingInstanceMethod P.ClassName P.MethodName
   | ProgramUnexpectedInstanceMethod P.ClassName P.MethodName
   | ProgramNoMatchingInstance P.ClassName SrcType
+  | ProgramNoMatchingInstanceHead P.ClassName [SrcType]
   | ProgramAmbiguousMethodUse P.MethodName
   | ProgramAmbiguousConstrainedValueUse String
   | ProgramAmbiguousConstructorUse P.ConstructorName
@@ -222,7 +249,9 @@ spanForError err index =
     ProgramDuplicateMethod name -> firstSpan name (P.spanValues index)
     ProgramDuplicateImportAlias name -> firstSpan name (P.spanImportAliases index) <|> Map.lookup name (P.spanModules index)
     ProgramDuplicateInstance className0 _ -> firstSpan className0 (P.spanClasses index)
+    ProgramDuplicateInstanceHead className0 _ -> firstSpan className0 (P.spanClasses index)
     ProgramOverlappingInstance className0 _ _ -> firstSpan className0 (P.spanClasses index)
+    ProgramOverlappingInstanceHead className0 _ _ -> firstSpan className0 (P.spanClasses index)
     ProgramUnknownValue name -> lookupAnyName name index
     ProgramUnknownConstructor name -> firstSpan name (P.spanConstructors index)
     ProgramUnknownType name -> firstSpan name (P.spanTypes index)
@@ -231,13 +260,32 @@ spanForError err index =
     ProgramAmbiguousUnqualifiedReference name -> lookupAnyName name index
     ProgramKindMismatch ty _ _ -> sourceTypeHeadSpan ty index
     ProgramTypeArityMismatch name _ _ -> lookupAnyName name index
+    ProgramClassArityMismatch className0 _ _ -> firstSpan className0 (P.spanClasses index)
     ProgramInvalidConstructorResult ctor _ _ -> firstSpan ctor (P.spanConstructors index)
     ProgramUnsupportedDeriving className0 -> firstSpan className0 (P.spanClasses index)
+    ProgramUnsupportedTypeFamily typeName -> firstSpan typeName (P.spanTypes index)
+    ProgramUnsupportedTypeFamilyType ty -> sourceTypeHeadSpan ty index
+    ProgramResidualTypeLambda ty -> sourceTypeHeadSpan ty index
+    ProgramUnsupportedTypeApplication ty -> sourceTypeHeadSpan ty index
+    ProgramTypeLevelReductionFailed ty _ -> sourceTypeHeadSpan ty index
+    ProgramTypeFamilyReductionFailed typeName _ -> lookupAnyName typeName index
+    ProgramUnboundTypeFamilyVariable name -> firstSpan name (P.spanTypes index)
+    ProgramTypeFamilyEquationArityMismatch typeName _ _ -> firstSpan typeName (P.spanTypes index)
+    ProgramTypeFamilyKindMismatch typeName _ _ _ -> firstSpan typeName (P.spanTypes index)
+    ProgramUnsupportedMultiParameterClass className0 _ -> firstSpan className0 (P.spanClasses index)
+    ProgramUnsupportedSuperclassConstraint className0 -> firstSpan className0 (P.spanClasses index)
+    ProgramUnsupportedFunctionalDependency className0 -> firstSpan className0 (P.spanClasses index)
+    ProgramInvalidFunctionalDependency className0 _ -> firstSpan className0 (P.spanClasses index)
+    ProgramAmbiguousFunctionalDependencyInstance className0 _ -> firstSpan className0 (P.spanClasses index)
+    ProgramConflictingFunctionalDependency className0 _ _ _ -> firstSpan className0 (P.spanClasses index)
+    ProgramUnsupportedMultiParameterConstraint className0 _ -> firstSpan className0 (P.spanClasses index)
+    ProgramUnsupportedMultiParameterInstance className0 _ -> firstSpan className0 (P.spanClasses index)
     ProgramDerivingRequiresNullaryType typeName -> firstSpan typeName (P.spanTypes index)
     ProgramDerivingMissingFieldInstance className0 _ -> firstSpan className0 (P.spanClasses index)
     ProgramMissingInstanceMethod _ methodName0 -> firstSpan methodName0 (P.spanValues index)
     ProgramUnexpectedInstanceMethod _ methodName0 -> firstSpan methodName0 (P.spanValues index)
     ProgramNoMatchingInstance {} -> Nothing
+    ProgramNoMatchingInstanceHead {} -> Nothing
     ProgramAmbiguousMethodUse methodName0 -> firstSpan methodName0 (P.spanValues index)
     ProgramAmbiguousConstrainedValueUse valueName -> firstSpan valueName (P.spanValues index)
     ProgramAmbiguousConstructorUse ctor -> firstSpan ctor (P.spanConstructors index)
@@ -279,7 +327,9 @@ programErrorMessage err =
     ProgramDuplicateMethod name -> "duplicate method `" ++ name ++ "`"
     ProgramDuplicateImportAlias name -> "duplicate import alias `" ++ name ++ "`"
     ProgramDuplicateInstance className0 ty -> "duplicate instance `" ++ className0 ++ " " ++ show ty ++ "`"
+    ProgramDuplicateInstanceHead className0 tys -> "duplicate instance `" ++ renderClassHead className0 tys ++ "`"
     ProgramOverlappingInstance className0 left right -> "overlapping instances for `" ++ className0 ++ "`: `" ++ show left ++ "` overlaps `" ++ show right ++ "`"
+    ProgramOverlappingInstanceHead className0 left right -> "overlapping instances for `" ++ className0 ++ "`: `" ++ renderClassHead className0 left ++ "` overlaps `" ++ renderClassHead className0 right ++ "`"
     ProgramUnknownValue name -> "unknown value `" ++ name ++ "`"
     ProgramUnknownConstructor name -> "unknown constructor `" ++ name ++ "`"
     ProgramUnknownType name -> "unknown type `" ++ name ++ "`"
@@ -303,13 +353,75 @@ programErrorMessage err =
         ++ plural expected
         ++ ", but got "
         ++ show actual
+    ProgramClassArityMismatch className0 expected actual ->
+      "class `"
+        ++ className0
+        ++ "` expects "
+        ++ show expected
+        ++ " type argument"
+        ++ plural expected
+        ++ ", but got "
+        ++ show actual
     ProgramInvalidConstructorResult ctor resultTy owner -> "constructor `" ++ ctor ++ "` returns `" ++ show resultTy ++ "` instead of owning type `" ++ owner ++ "`"
     ProgramUnsupportedDeriving className0 -> "unsupported deriving class `" ++ className0 ++ "`"
+    ProgramUnsupportedTypeFamily typeName -> "resolved program still contains unerased type family `" ++ typeName ++ "`"
+    ProgramUnsupportedTypeFamilyType ty -> "unsupported type-family argument or result type `" ++ show ty ++ "`"
+    ProgramResidualTypeLambda ty -> "residual type lambda reached `.mlfp` core boundary: `" ++ show ty ++ "`"
+    ProgramUnsupportedTypeApplication ty -> "unsupported type application reached `.mlfp` core boundary: `" ++ show ty ++ "`"
+    ProgramTypeLevelReductionFailed ty reductionErr -> "type-level expression `" ++ show ty ++ "` failed to reduce: " ++ renderTypeLevelNormalizeError reductionErr
+    ProgramTypeFamilyReductionFailed typeName reductionErr -> "type family `" ++ typeName ++ "` failed to reduce: " ++ renderTypeLevelNormalizeError reductionErr
+    ProgramUnboundTypeFamilyVariable name -> "unbound type-family equation variable `" ++ name ++ "`"
+    ProgramTypeFamilyEquationArityMismatch typeName expected actual ->
+      "type family `"
+        ++ typeName
+        ++ "` equation expects "
+        ++ show expected
+        ++ " pattern"
+        ++ plural expected
+        ++ ", but got "
+        ++ show actual
+    ProgramTypeFamilyKindMismatch typeName ty expected actual ->
+      "type family `"
+        ++ typeName
+        ++ "` has kind mismatch in `"
+        ++ show ty
+        ++ "`: expected `"
+        ++ show expected
+        ++ "`, got `"
+        ++ show actual
+        ++ "`"
+    ProgramUnsupportedMultiParameterClass className0 count ->
+      "class `"
+        ++ className0
+        ++ "` has "
+        ++ show count
+        ++ " parameters; generalized typeclass evidence is not wired through the checker yet"
+    ProgramUnsupportedSuperclassConstraint className0 -> "class `" ++ className0 ++ "` declares unsupported superclass constraints"
+    ProgramUnsupportedFunctionalDependency className0 -> "class `" ++ className0 ++ "` declares functional dependencies in a checker context that does not support class declarations"
+    ProgramInvalidFunctionalDependency className0 name ->
+      "class `" ++ className0 ++ "` declares a functional dependency over unknown or repeated parameter `" ++ name ++ "`"
+    ProgramAmbiguousFunctionalDependencyInstance className0 tys ->
+      "instance `" ++ renderClassHead className0 tys ++ "` leaves a functional-dependency result unconstrained"
+    ProgramConflictingFunctionalDependency className0 determiners left right ->
+      "functional dependency conflict for `"
+        ++ className0
+        ++ "`: determinant `"
+        ++ unwords (map show determiners)
+        ++ "` maps to both `"
+        ++ unwords (map show left)
+        ++ "` and `"
+        ++ unwords (map show right)
+        ++ "`"
+    ProgramUnsupportedMultiParameterConstraint className0 tys ->
+      "constraint `" ++ renderClassHead className0 tys ++ "` uses multiple class arguments; generalized constraint evidence is not wired through the checker yet"
+    ProgramUnsupportedMultiParameterInstance className0 tys ->
+      "instance `" ++ renderClassHead className0 tys ++ "` uses multiple class arguments; generalized instance evidence is not wired through the checker yet"
     ProgramDerivingRequiresNullaryType typeName -> "deriving currently requires a nullary type, but `" ++ typeName ++ "` has parameters"
     ProgramDerivingMissingFieldInstance className0 ty -> "cannot derive `" ++ className0 ++ "` because field type `" ++ show ty ++ "` has no matching instance or constraint"
     ProgramMissingInstanceMethod className0 methodName0 -> "instance for `" ++ className0 ++ "` is missing method `" ++ methodName0 ++ "`"
     ProgramUnexpectedInstanceMethod className0 methodName0 -> "instance for `" ++ className0 ++ "` defines unexpected method `" ++ methodName0 ++ "`"
     ProgramNoMatchingInstance className0 ty -> "no matching instance for `" ++ className0 ++ " " ++ show ty ++ "`"
+    ProgramNoMatchingInstanceHead className0 tys -> "no matching instance for `" ++ renderClassHead className0 tys ++ "`"
     ProgramAmbiguousMethodUse methodName0 -> "ambiguous overloaded method use `" ++ methodName0 ++ "`"
     ProgramAmbiguousConstrainedValueUse valueName -> "ambiguous constrained value use `" ++ valueName ++ "`"
     ProgramAmbiguousConstructorUse ctor -> "ambiguous constructor use `" ++ ctor ++ "`"
@@ -334,6 +446,8 @@ programErrorHints err =
       ["use `" ++ valueName ++ "` at a concrete instance type; generic constrained value aliases are not supported yet"]
     ProgramNoMatchingInstance className0 ty ->
       ["define or import an instance for `" ++ className0 ++ " " ++ show ty ++ "`"]
+    ProgramNoMatchingInstanceHead className0 tys ->
+      ["define or import an instance for `" ++ renderClassHead className0 tys ++ "`"]
     ProgramDerivingMissingFieldInstance className0 ty ->
       ["add a `" ++ className0 ++ " " ++ show ty ++ "` instance or add a type parameter constraint through deriving"]
     ProgramTypeMismatch {} ->
@@ -348,7 +462,64 @@ programErrorHints err =
       ["check higher-kinded parameter annotations and type constructor application arguments"]
     ProgramTypeArityMismatch {} ->
       ["apply the type constructor to exactly the number of arguments required by its kind"]
+    ProgramClassArityMismatch {} ->
+      ["apply the class to exactly the number of arguments declared by its class head"]
+    ProgramUnsupportedTypeFamily {} ->
+      ["run parsed `.mlfp` programs through the type-family normalization entrypoint before resolving"]
+    ProgramUnsupportedTypeFamilyType {} ->
+      ["keep closed type-family arguments and results in the first-order type-level fragment for now"]
+    ProgramResidualTypeLambda {} ->
+      ["apply type lambdas before the core boundary; only normalized family-free source types can be erased"]
+    ProgramUnsupportedTypeApplication {} ->
+      ["use constructor-headed or variable-headed type applications after type-level normalization"]
+    ProgramTypeLevelReductionFailed {} ->
+      ["type-level applications reduce before `.mlfp` erasure; simplify the type expression or remove the cycle"]
+    ProgramTypeFamilyReductionFailed {} ->
+      ["closed type families reduce by ordered first match; add a matching equation or remove the cyclic family use"]
+    ProgramUnboundTypeFamilyVariable {} ->
+      ["bind the variable in the equation's left-hand pattern or in a local type lambda"]
+    ProgramTypeFamilyEquationArityMismatch {} ->
+      ["make every closed type-family equation use exactly the declared family parameter count"]
+    ProgramTypeFamilyKindMismatch {} ->
+      ["check family parameter/result kind annotations, type-lambda binder kinds, and constructor application arity"]
+    ProgramUnsupportedMultiParameterClass {} ->
+      ["multi-parameter method dispatch requires each class argument to be fixed by supplied arguments, result type, or local evidence"]
+    ProgramUnsupportedSuperclassConstraint {} ->
+      ["keep superclass constraints within the checked method-evidence subset"]
+    ProgramUnsupportedFunctionalDependency {} ->
+      ["use the `.mlfp` program checker for functional-dependency class declarations"]
+    ProgramInvalidFunctionalDependency {} ->
+      ["use only class-head parameter names in each functional dependency"]
+    ProgramAmbiguousFunctionalDependencyInstance {} ->
+      ["make every determined instance-head variable appear in the determinant side of the functional dependency"]
+    ProgramConflictingFunctionalDependency {} ->
+      ["remove or specialize one of the instances so the determinant side fixes a single result"]
+    ProgramUnsupportedMultiParameterConstraint {} ->
+      ["parenthesize complex single class arguments; true multi-argument constraints require the generalized evidence path"]
+    ProgramUnsupportedMultiParameterInstance {} ->
+      ["parenthesize complex single instance arguments; true multi-argument instances require the generalized evidence path"]
     _ -> []
+
+renderClassHead :: P.ClassName -> [SrcType] -> String
+renderClassHead className0 tys =
+  unwords (className0 : map show tys)
+
+renderTypeLevelNormalizeError :: TypeLevelNormalizeError -> String
+renderTypeLevelNormalizeError err =
+  case err of
+    UnknownTypeFamily name -> "unknown family `" ++ name ++ "`"
+    TypeFamilyArityMismatch name expected actual ->
+      "family `"
+        ++ name
+        ++ "` expects "
+        ++ show expected
+        ++ " argument"
+        ++ plural expected
+        ++ ", but got "
+        ++ show actual
+    TypeFamilyStuck name args -> "stuck application `" ++ name ++ " " ++ unwords (map show args) ++ "`"
+    TypeFamilyCycle names -> "cycle " ++ show names
+    TypeLevelFuelExhausted ty -> "fuel exhausted while reducing `" ++ show ty ++ "`"
 
 renderSrcKind :: P.SrcKind -> String
 renderSrcKind = go 0
@@ -378,6 +549,8 @@ sourceTypeHeadName ty =
     STBase name -> Just name
     STCon name _ -> Just name
     STVarApp name _ -> Just name
+    STTyLam _ body -> sourceTypeHeadName body
+    STTyApp fun _ -> sourceTypeHeadName fun
     STArrow dom _ -> sourceTypeHeadName dom
     STForall _ _ body -> sourceTypeHeadName body
     STMu _ body -> sourceTypeHeadName body
@@ -498,7 +671,8 @@ data TypeView = TypeView
 data ConstraintInfo = ConstraintInfo
   { constraintDisplayClass :: P.ClassName,
     constraintClassSymbol :: SymbolIdentity,
-    constraintTypeView :: TypeView
+    constraintTypeView :: TypeView,
+    constraintTypeViews :: NonEmpty TypeView
   }
   deriving (Eq, Show)
 
@@ -512,8 +686,9 @@ typeViewFromResolved ty =
 displayConstraint :: ConstraintInfo -> P.ClassConstraint
 displayConstraint constraint =
   P.ClassConstraint
-    (constraintDisplayClass constraint)
-    (typeViewDisplay (constraintTypeView constraint))
+    { P.constraintClassName = constraintDisplayClass constraint,
+      P.constraintTypes = typeViewsDisplay (constraintTypeViews constraint)
+    }
 
 applyTypeViewSubst :: Map String TypeView -> TypeView -> TypeView
 applyTypeViewSubst subst view =
@@ -527,16 +702,31 @@ applyTypeViewSubst subst view =
 
 applyConstraintInfoSubst :: Map String TypeView -> ConstraintInfo -> ConstraintInfo
 applyConstraintInfoSubst subst constraint =
-  constraint {constraintTypeView = applyTypeViewSubst subst (constraintTypeView constraint)}
+  let views = fmap (applyTypeViewSubst subst) (constraintTypeViews constraint)
+   in constraint
+        { constraintTypeView = NE.head views,
+          constraintTypeViews = views
+        }
 
 freeTypeVarsTypeView :: TypeView -> Set String
 freeTypeVarsTypeView = freeTypeVarsSrcType . typeViewIdentity
+
+freeTypeVarsTypeViews :: NonEmpty TypeView -> Set String
+freeTypeVarsTypeViews = foldMap freeTypeVarsTypeView
+
+typeViewsDisplay :: NonEmpty TypeView -> NonEmpty SrcType
+typeViewsDisplay = fmap typeViewDisplay
+
+typeViewsIdentity :: NonEmpty TypeView -> NonEmpty SrcType
+typeViewsIdentity = fmap typeViewIdentity
 
 data EvidenceInfo = EvidenceInfo
   { evidenceClassName :: P.ClassName,
     evidenceClassSymbol :: SymbolIdentity,
     evidenceType :: SrcType,
     evidenceTypeIdentity :: SrcType,
+    evidenceTypes :: NonEmpty SrcType,
+    evidenceTypeIdentities :: NonEmpty SrcType,
     evidenceMethods :: Map P.MethodName (String, SrcType)
   }
   deriving (Eq, Show)
@@ -589,7 +779,9 @@ data MethodInfo = MethodInfo
     methodConstraints :: [P.ClassConstraint],
     methodConstraintInfos :: [ConstraintInfo],
     methodTypeParam :: P.TypeParam,
-    methodParamName :: String
+    methodParamName :: String,
+    methodTypeParams :: NonEmpty P.TypeParam,
+    methodParamNames :: NonEmpty String
   }
   deriving (Eq, Show)
 
@@ -599,6 +791,11 @@ data ClassInfo = ClassInfo
     classModule :: P.ModuleName,
     classTypeParam :: P.TypeParam,
     classParamName :: String,
+    classTypeParams :: NonEmpty P.TypeParam,
+    classParamNames :: NonEmpty String,
+    classSuperclasses :: [P.ClassConstraint],
+    classSuperclassInfos :: [ConstraintInfo],
+    classFunctionalDependencies :: [P.FunctionalDependency],
     classMethods :: Map P.MethodName MethodInfo
   }
   deriving (Eq, Show)
@@ -639,6 +836,8 @@ data InstanceInfo = InstanceInfo
     instanceConstraintInfos :: [ConstraintInfo],
     instanceHeadType :: SrcType,
     instanceHeadIdentityType :: SrcType,
+    instanceHeadTypes :: NonEmpty SrcType,
+    instanceHeadIdentityTypes :: NonEmpty SrcType,
     instanceMethods :: Map P.MethodName ValueInfo
   }
   deriving (Eq, Show)
@@ -650,6 +849,7 @@ data DeferredBindingMode
 
 data DeferredMethodEvidence = DeferredMethodEvidence
   { deferredMethodEvidenceClassArg :: TypeView,
+    deferredMethodEvidenceClassArgs :: NonEmpty TypeView,
     deferredMethodEvidenceRuntimeName :: String,
     deferredMethodEvidenceType :: SrcType
   }
@@ -827,6 +1027,8 @@ hasVariableHeadApplication ty =
     STBase {} -> False
     STCon _ args -> any hasVariableHeadApplication args
     STVarApp {} -> True
+    STTyLam _ body -> hasVariableHeadApplication body
+    STTyApp fun arg -> hasVariableHeadApplication fun || hasVariableHeadApplication arg
     STForall _ mb body ->
       maybe False (hasVariableHeadApplication . unSrcBound) mb
         || hasVariableHeadApplication body
@@ -960,6 +1162,10 @@ substituteTypeVar needle replacement = go
          in case replacementHead name (toList args') of
               Just ty' -> ty'
               Nothing -> STVarApp name args'
+      STTyLam name body
+        | name == needle -> STTyLam name body
+        | otherwise -> STTyLam name (go body)
+      STTyApp fun arg -> STTyApp (go fun) (go arg)
       STForall name mb body
         | name == needle -> STForall name mb body
         | otherwise -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
@@ -988,6 +1194,8 @@ freeTypeVarsSrcType = go Set.empty
                 then Set.empty
                 else Set.singleton name
          in headVars `Set.union` foldMap (go bound) args
+      STTyLam name body -> go (Set.insert name bound) body
+      STTyApp fun arg -> go bound fun `Set.union` go bound arg
       STForall name mb body ->
         maybe Set.empty (go bound . unSrcBound) mb `Set.union` go (Set.insert name bound) body
       STMu name body -> go (Set.insert name bound) body
@@ -995,8 +1203,13 @@ freeTypeVarsSrcType = go Set.empty
 
 specializeMethodType :: SrcType -> String -> SrcType -> SrcType
 specializeMethodType methodTy paramName headTy =
+  specializeMethodTypes methodTy (paramName :| []) (headTy :| [])
+
+specializeMethodTypes :: SrcType -> NonEmpty String -> NonEmpty SrcType -> SrcType
+specializeMethodTypes methodTy paramNames headTys =
   let (foralls, body) = splitForalls methodTy
-      rebuilt = foldr (\(name, mb) acc -> STForall name (fmap SrcBound mb) acc) (substituteTypeVar paramName headTy body) foralls
+      subst = Map.fromList (zip (NE.toList paramNames) (NE.toList headTys))
+      rebuilt = foldr (\(name, mb) acc -> STForall name (fmap SrcBound mb) acc) (Map.foldrWithKey substituteTypeVar body subst) foralls
    in rebuilt
 
 constrainedVisibleType :: P.ConstrainedType -> SrcType
@@ -1012,7 +1225,7 @@ constrainedVisibleType constrained
 
     forallNoBound name acc = STForall name Nothing acc
 
-    constraintFreeVars constraint = freeVars (P.constraintType constraint)
+    constraintFreeVars constraint = foldMap freeVars (P.constraintTypes constraint)
 
     freeVars ty = case ty of
       STVar name -> [name]
@@ -1020,6 +1233,8 @@ constrainedVisibleType constrained
       STBase {} -> []
       STCon _ args -> concatMap freeVars (toList args)
       STVarApp name args -> name : concatMap freeVars (toList args)
+      STTyLam name body -> filter (/= name) (freeVars body)
+      STTyApp fun arg -> freeVars fun ++ freeVars arg
       STForall name mb body ->
         filter (/= name) (maybe [] (freeVars . unSrcBound) mb ++ freeVars body)
       STMu name body -> filter (/= name) (freeVars body)

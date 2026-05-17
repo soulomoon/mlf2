@@ -803,6 +803,9 @@ ioPureName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.Primiti
 ioBindName :: String
 ioBindName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOBind
 
+ioMapName :: String
+ioMapName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOMap
+
 ioPutStrLnName :: String
 ioPutStrLnName = PrimitiveInventory.nativeIOPrimitiveName PrimitiveInventory.PrimitiveIOPutStrLn
 
@@ -849,6 +852,7 @@ nativeIOFunctions _base =
     nativeIOPrimitiveImplementations =
       [ (ioPureName, [ioPureEntry, ioPureWrapper]),
         (ioBindName, [ioBindEntry, ioBindWrapper]),
+        (ioMapName, [ioMapEntry, ioMapWrapper]),
         (ioPutStrLnName, [ioPutStrLnEntry, ioPutStrLnWrapper]),
         (ioGetLineName, [ioGetLineEntry, ioGetLineWrapper]),
         (ioPutStrName, [ioPutStrEntry, ioPutStrWrapper]),
@@ -940,6 +944,22 @@ nativeIOFunctions _base =
         Right fn -> fn { llvmFunctionPrivate = True }
         Left err -> error ("internal native " ++ prim ++ " wrapper lowering failed: " ++ renderBackendLLVMError err)
 
+    runIOAction :: String -> LLVMOperand -> LowerM LLVMOperand
+    runIOAction prefix action = do
+      codePtrField <- emitGep (prefix ++ ".code") action 0
+      code <- emitAssign (prefix ++ ".code") LLVMPtr (LLVMLoad LLVMPtr codePtrField)
+      envField <- emitGep (prefix ++ ".env") action 8
+      env <- emitAssign (prefix ++ ".env") LLVMPtr (LLVMLoad LLVMPtr envField)
+      emitAssign (prefix ++ ".result") LLVMPtr (LLVMCallOperand code [(LLVMPtr, env)])
+
+    callClosure1 :: String -> LLVMOperand -> LLVMOperand -> LowerM LLVMOperand
+    callClosure1 prefix closure arg = do
+      codePtrField <- emitGep (prefix ++ ".code") closure 0
+      code <- emitAssign (prefix ++ ".code") LLVMPtr (LLVMLoad LLVMPtr codePtrField)
+      envField <- emitGep (prefix ++ ".env") closure 8
+      env <- emitAssign (prefix ++ ".env") LLVMPtr (LLVMLoad LLVMPtr envField)
+      emitAssign (prefix ++ ".result") LLVMPtr (LLVMCallOperand code [(LLVMPtr, env), (LLVMPtr, arg)])
+
     ioPureEntry = finalizeEntry ioPureName $ \envPtr -> do
       valPtr <- emitGep "pure.val" envPtr 0
       val <- emitAssign "pure.val" LLVMPtr (LLVMLoad LLVMPtr valPtr)
@@ -951,23 +971,21 @@ nativeIOFunctions _base =
       action <- emitAssign "bind.action" LLVMPtr (LLVMLoad LLVMPtr actionPtr)
       contPtr <- emitGep "bind.cont" envPtr 8
       cont <- emitAssign "bind.cont" LLVMPtr (LLVMLoad LLVMPtr contPtr)
-      actionCodePtrField <- emitGep "bind.action.code" action 0
-      actionCode <- emitAssign "bind.action.code" LLVMPtr (LLVMLoad LLVMPtr actionCodePtrField)
-      actionEnvField <- emitGep "bind.action.env" action 8
-      actionEnv <- emitAssign "bind.action.env" LLVMPtr (LLVMLoad LLVMPtr actionEnvField)
-      actionResult <- emitAssign "bind.action.result" LLVMPtr (LLVMCallOperand actionCode [(LLVMPtr, actionEnv)])
-      contCodePtrField <- emitGep "bind.cont.code" cont 0
-      contCode <- emitAssign "bind.cont.code" LLVMPtr (LLVMLoad LLVMPtr contCodePtrField)
-      contEnvField <- emitGep "bind.cont.env" cont 8
-      contEnv <- emitAssign "bind.cont.env" LLVMPtr (LLVMLoad LLVMPtr contEnvField)
-      nextAction <- emitAssign "bind.next" LLVMPtr (LLVMCallOperand contCode [(LLVMPtr, contEnv), (LLVMPtr, actionResult)])
-      nextCodePtrField <- emitGep "bind.next.code" nextAction 0
-      nextCode <- emitAssign "bind.next.code" LLVMPtr (LLVMLoad LLVMPtr nextCodePtrField)
-      nextEnvField <- emitGep "bind.next.env" nextAction 8
-      nextEnv <- emitAssign "bind.next.env" LLVMPtr (LLVMLoad LLVMPtr nextEnvField)
-      result <- emitAssign "bind.result" LLVMPtr (LLVMCallOperand nextCode [(LLVMPtr, nextEnv)])
+      actionResult <- runIOAction "bind.action" action
+      nextAction <- callClosure1 "bind.cont" cont actionResult
+      result <- runIOAction "bind.next" nextAction
       finishCurrentBlock (LLVMRet LLVMPtr result)
     ioBindWrapper = finalizeWrapper ioBindName [(LLVMPtr, "action"), (LLVMPtr, "cont")]
+
+    ioMapEntry = finalizeEntry ioMapName $ \envPtr -> do
+      mapperPtr <- emitGep "map.mapper" envPtr 0
+      mapper <- emitAssign "map.mapper" LLVMPtr (LLVMLoad LLVMPtr mapperPtr)
+      actionPtr <- emitGep "map.action" envPtr 8
+      action <- emitAssign "map.action" LLVMPtr (LLVMLoad LLVMPtr actionPtr)
+      actionResult <- runIOAction "map.action" action
+      mapped <- callClosure1 "map.mapper" mapper actionResult
+      finishCurrentBlock (LLVMRet LLVMPtr mapped)
+    ioMapWrapper = finalizeWrapper ioMapName [(LLVMPtr, "mapper"), (LLVMPtr, "action")]
 
     ioPutStrLnEntry = finalizeEntry ioPutStrLnName $ \envPtr -> do
       strPtr <- emitGep "putStrLn.str" envPtr 0

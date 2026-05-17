@@ -131,12 +131,14 @@ containsMuType ty =
     TMu {} -> True
     TArrow dom cod -> containsMuType dom || containsMuType cod
     TCon _ args -> any containsMuType args
+    TVarApp _ args -> any containsMuType args
     TForall _ mb body -> maybe False containsMuBound mb || containsMuType body
     _ -> False
   where
     containsMuBound bound = case bound of
       TArrow dom cod -> containsMuType dom || containsMuType cod
       TCon _ args -> any containsMuType args
+      TVarApp _ args -> any containsMuType args
       TForall _ mb body -> maybe False containsMuBound mb || containsMuType body
       TMu {} -> True
       _ -> False
@@ -158,6 +160,7 @@ containsInternalTypeVar ty =
     TVar name -> isJust (parseNameId name)
     TArrow dom cod -> containsInternalTypeVar dom || containsInternalTypeVar cod
     TCon _ args -> any containsInternalTypeVar args
+    TVarApp name args -> isJust (parseNameId name) || any containsInternalTypeVar args
     TForall _ mb body -> maybe False containsInternalBoundVar mb || containsInternalTypeVar body
     TMu _ body -> containsInternalTypeVar body
     _ -> False
@@ -166,6 +169,7 @@ containsInternalTypeVar ty =
       case bound of
         TArrow dom cod -> containsInternalTypeVar dom || containsInternalTypeVar cod
         TCon _ args -> any containsInternalTypeVar args
+        TVarApp name args -> isJust (parseNameId name) || any containsInternalTypeVar args
         TForall _ mb body -> maybe False containsInternalBoundVar mb || containsInternalTypeVar body
         TMu _ body -> containsInternalTypeVar body
         _ -> False
@@ -292,6 +296,9 @@ freeTypeVarsInOccurrenceOrder ty0 = reverse (snd (goType Set.empty Set.empty [] 
            in goType bound seen' acc' cod
         TCon _ args ->
           foldl' (\(seen', acc') arg -> goType bound seen' acc' arg) (seen, acc) args
+        TVarApp name args ->
+          let (seen', acc') = addName bound seen acc name
+           in foldl' (\(seen'', acc'') arg -> goType bound seen'' acc'' arg) (seen', acc') args
         TForall name mb body ->
           let (seen', acc') =
                 maybe (seen, acc) (\boundTy -> goType bound seen acc (tyToElab boundTy)) mb
@@ -2351,6 +2358,7 @@ elabAlg algebraContext layer =
         TForall name (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
       TArrow dom cod -> TArrow (stripVacuousForallsDeep dom) (stripVacuousForallsDeep cod)
       TCon con args -> TCon con (fmap stripVacuousForallsDeep args)
+      TVarApp name args -> TVarApp name (fmap stripVacuousForallsDeep args)
       TMu name body -> TMu name (stripVacuousForallsDeep body)
       _ -> ty
 
@@ -2359,6 +2367,7 @@ elabAlg algebraContext layer =
       TArrow dom cod -> TArrow (stripVacuousForallsDeep dom) (stripVacuousForallsDeep cod)
       TBase _ -> bound
       TCon con args -> TCon con (fmap stripVacuousForallsDeep args)
+      TVarApp name args -> TVarApp name (fmap stripVacuousForallsDeep args)
       TForall name mb body -> TForall name (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
       TMu name body -> TMu name (stripVacuousForallsDeep body)
       TBottom -> TBottom
@@ -2574,8 +2583,11 @@ srcTypeToElabType ty = case ty of
   STArrow dom cod -> TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod
   STBase name -> Right (TBase (BaseTy name))
   STCon name args -> TCon (BaseTy name) <$> traverse srcTypeToElabType args
-  STVarApp name _ ->
-    Left (unsupportedVariableHeadType name)
+  STVarApp name args -> TVarApp name <$> traverse srcTypeToElabType args
+  STTyLam {} ->
+    Left (InstantiationError "residual type lambda reached elaboration")
+  STTyApp {} ->
+    Left (InstantiationError "residual type application reached elaboration")
   STForall name mb body ->
     TForall name
       <$> maybe (Right Nothing) srcBoundToElabBound mb
@@ -2591,8 +2603,11 @@ srcTypeToElabType ty = case ty of
       STArrow dom cod -> Just <$> (TArrow <$> srcTypeToElabType dom <*> srcTypeToElabType cod)
       STBase name -> Right (Just (TBase (BaseTy name)))
       STCon name args -> Just . TCon (BaseTy name) <$> traverse srcTypeToElabType args
-      STVarApp name _ ->
-        Left (unsupportedVariableHeadType name)
+      STVarApp name args -> Just . TVarApp name <$> traverse srcTypeToElabType args
+      STTyLam {} ->
+        Left (InstantiationError "residual type lambda reached elaboration")
+      STTyApp {} ->
+        Left (InstantiationError "residual type application reached elaboration")
       STForall name mb body ->
         Just
           <$> ( TForall name
@@ -2601,11 +2616,6 @@ srcTypeToElabType ty = case ty of
               )
       STMu name body -> Just . TMu name <$> srcTypeToElabType body
       STBottom -> Right Nothing
-
-unsupportedVariableHeadType :: String -> ElabError
-unsupportedVariableHeadType name =
-  InstantiationError
-    ("variable-headed source type application `" ++ name ++ "` is not supported before higher-kinded elaboration")
 
 annNode :: AnnExpr -> NodeId
 annNode ann =

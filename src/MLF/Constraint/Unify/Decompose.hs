@@ -27,6 +27,7 @@ data DecomposeMismatch
     | MismatchExpVar ExpVarId ExpVarId
     | MismatchTyCon BaseTy BaseTy
     | MismatchTyConArity BaseTy Int Int
+    | MismatchTyVarAppArity Int Int
     deriving (Eq, Show)
 
 -- | Decompose a "same-head" equality into a list of child equalities.
@@ -59,6 +60,10 @@ decomposeUnifyChildren n1 n2 = case (n1, n2) of
         | c1 /= c2 -> Left (MismatchTyCon c1 c2)
         | NE.length args1 /= NE.length args2 -> Left (MismatchTyConArity c1 (NE.length args1) (NE.length args2))
         | otherwise -> Right (zipWith UnifyEdge (NE.toList args1) (NE.toList args2))
+
+    (TyVarApp { tnVarHead = head1, tnArgs = args1 }, TyVarApp { tnVarHead = head2, tnArgs = args2 })
+        | NE.length args1 /= NE.length args2 -> Left (MismatchTyVarAppArity (NE.length args1) (NE.length args2))
+        | otherwise -> Right (UnifyEdge head1 head2 : zipWith UnifyEdge (NE.toList args1) (NE.toList args2))
 
     _ ->
         Left MismatchConstructor

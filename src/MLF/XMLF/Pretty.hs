@@ -17,6 +17,7 @@ prettyXmlfType = goType 0
         XTBottom -> "⊥"
         XTBase b -> b
         XTCon c args -> c ++ " " ++ unwords (map (goArg 2) (toListNE args))
+        XTVarApp v args -> v ++ " " ++ unwords (map (goArg 2) (toListNE args))
         XTArrow a b ->
             paren (p > 1) (goType 2 a ++ " -> " ++ goType 1 b)
         XTForall v bound body ->
@@ -54,6 +55,7 @@ prettyXmlfComp = goComp 0
         XTBottom{} -> prettyXmlfType ty
         XTBase{} -> prettyXmlfType ty
         XTCon{} -> "(" ++ prettyXmlfType ty ++ ")"
+        XTVarApp{} -> "(" ++ prettyXmlfType ty ++ ")"
         XTArrow{} -> "(" ++ prettyXmlfType ty ++ ")"
         XTForall{} -> "(" ++ prettyXmlfType ty ++ ")"
         XTMu{} -> "(" ++ prettyXmlfType ty ++ ")"

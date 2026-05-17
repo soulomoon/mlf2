@@ -122,6 +122,9 @@ rewriteNode canonical = \case
     TyCon { tnId = nid, tnCon = con, tnArgs = args } ->
         let nid' = canonical nid
         in Just (getNodeId nid', TyCon nid' con (fmap canonical args))
+    TyVarApp { tnId = nid, tnVarHead = headNode, tnArgs = args } ->
+        let nid' = canonical nid
+        in Just (getNodeId nid', TyVarApp nid' (canonical headNode) (fmap canonical args))
     TyForall { tnId = nid, tnBody = b } ->
         let nid' = canonical nid
         in Just (getNodeId nid', TyForall nid' (canonical b))

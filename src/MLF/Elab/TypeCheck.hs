@@ -243,6 +243,7 @@ inlineTypeEnvBounds env = go Set.empty
               _ -> TVar v
       TArrow dom cod -> TArrow (go seen dom) (go seen cod)
       TCon con args -> TCon con (fmap (go seen) args)
+      TVarApp v args -> TVarApp v (fmap (go seen) args)
       TBase _ -> ty
       TBottom -> ty
       TForall v mb body ->
@@ -255,6 +256,7 @@ inlineTypeEnvBounds env = go Set.empty
     goBound seen bound = case bound of
       TArrow dom cod -> TArrow (go seen dom) (go seen cod)
       TCon con args -> TCon con (fmap (go seen) args)
+      TVarApp v args -> TVarApp v (fmap (go seen) args)
       TBase _ -> bound
       TBottom -> bound
       TForall v mb body ->
@@ -296,6 +298,7 @@ stripVacuousForallsDeep ty = case ty of
         TForall name (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
   TArrow dom cod -> TArrow (stripVacuousForallsDeep dom) (stripVacuousForallsDeep cod)
   TCon con args -> TCon con (fmap stripVacuousForallsDeep args)
+  TVarApp v args -> TVarApp v (fmap stripVacuousForallsDeep args)
   TMu name body -> TMu name (stripVacuousForallsDeep body)
   _ -> ty
 
@@ -303,6 +306,7 @@ stripVacuousForallsDeepBound :: BoundType -> BoundType
 stripVacuousForallsDeepBound bound = case bound of
   TArrow dom cod -> TArrow (stripVacuousForallsDeep dom) (stripVacuousForallsDeep cod)
   TCon con args -> TCon con (fmap stripVacuousForallsDeep args)
+  TVarApp v args -> TVarApp v (fmap stripVacuousForallsDeep args)
   TForall name mb body ->
     TForall name (fmap stripVacuousForallsDeepBound mb) (stripVacuousForallsDeep body)
   TMu name body -> TMu name (stripVacuousForallsDeep body)
@@ -340,6 +344,7 @@ collapseRecursiveAlias muName recursiveTy = go
           case ty of
             TArrow dom cod -> TArrow (go dom) (go cod)
             TCon con args -> TCon con (fmap go args)
+            TVarApp v args -> TVarApp v (fmap go args)
             TForall v mb body -> TForall v (fmap goBound mb) (go body)
             TMu v body -> TMu v (go body)
             _ -> ty
@@ -347,6 +352,7 @@ collapseRecursiveAlias muName recursiveTy = go
     goBound bound = case bound of
       TArrow dom cod -> TArrow (go dom) (go cod)
       TCon con args -> TCon con (fmap go args)
+      TVarApp v args -> TVarApp v (fmap go args)
       TForall v mb body -> TForall v (fmap goBound mb) (go body)
       TMu v body -> TMu v (go body)
       _ -> bound

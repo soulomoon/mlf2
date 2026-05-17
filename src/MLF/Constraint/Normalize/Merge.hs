@@ -273,6 +273,8 @@ applyToStructure uf node = case node of
     TyBase {} -> node
     TyCon { tnId = nid, tnCon = con, tnArgs = args } ->
         TyCon { tnId = nid, tnCon = con, tnArgs = fmap (findRoot uf) args }
+    TyVarApp { tnId = nid, tnVarHead = headNode, tnArgs = args } ->
+        TyVarApp { tnId = nid, tnVarHead = findRoot uf headNode, tnArgs = fmap (findRoot uf) args }
     TyForall { tnId = nid, tnBody = body } ->
         TyForall { tnId = nid, tnBody = findRoot uf body }
     TyMu { tnId = nid, tnBody = body } ->

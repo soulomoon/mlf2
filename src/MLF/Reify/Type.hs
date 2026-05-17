@@ -123,6 +123,8 @@ freeVars solved nid visited
                 `IntSet.union` freeVarsChild visited' c
             Just TyCon {tnArgs = args} ->
               IntSet.unions (map (freeVarsChild visited') (NE.toList args))
+            Just TyVarApp {tnVarHead = headNode, tnArgs = args} ->
+              IntSet.unions (map (freeVarsChild visited') (headNode : NE.toList args))
             Just TyForall {tnBody = b} ->
               freeVarsChild visited' b
             Just TyMu {tnBody = b} ->

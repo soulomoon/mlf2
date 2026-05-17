@@ -72,6 +72,7 @@ simplifyAnnotationType = go
     go ty = case ty of
         TVar _ -> ty
         TCon c args -> TCon c (fmap go args)
+        TVarApp v args -> TVarApp v (fmap go args)
         TBase _ -> ty
         TBottom -> ty
         TArrow a b -> TArrow (go a) (go b)

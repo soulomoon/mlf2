@@ -179,6 +179,8 @@ applyUFConstraint uf c =
             TyExp { tnExpVar = expVar, tnBody = body } -> TyExp nid' expVar (frWith uf body)
             TyMu { tnBody = body } -> TyMu nid' (frWith uf body)
             TyCon { tnCon = con, tnArgs = args } -> TyCon nid' con (NE.map (frWith uf) args)
+            TyVarApp { tnVarHead = headNode, tnArgs = args } ->
+                TyVarApp nid' (frWith uf headNode) (NE.map (frWith uf) args)
             )
 
     rewriteEliminated :: (NodeId -> NodeId) -> IntMap TyNode -> EliminatedVars -> EliminatedVars
@@ -337,6 +339,8 @@ rewriteEliminatedBinders c0
                     TyMu nid (substNode body)
                 TyCon { tnId = nid, tnCon = con, tnArgs = args } ->
                     TyCon nid con (NE.map substNode args)
+                TyVarApp { tnId = nid, tnVarHead = headNode, tnArgs = args } ->
+                    TyVarApp nid (substNode headNode) (NE.map substNode args)
 
             nodes1 =
                 IntMap.fromList

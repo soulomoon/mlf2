@@ -54,6 +54,12 @@ spec = describe "Frontend eMLF pretty printer" $ do
         prettyEmlfType unary `shouldBe` "f a"
         prettyEmlfType binary `shouldBe` "p a b"
 
+    it "pretty-prints type lambdas and explicit type application" $ do
+        prettyEmlfType (STTyLam "a" (STArrow (STVar "a") (STVar "a")))
+            `shouldBe` "Λa. a -> a"
+        prettyEmlfType (STTyApp (STTyLam "a" (STVar "a")) (STBase "Int"))
+            `shouldBe` "(Λa. a) Int"
+
     it "roundtrips expression parse(pretty(expr))" $ do
         let expr =
                 ELet "f"
@@ -76,6 +82,10 @@ spec = describe "Frontend eMLF pretty printer" $ do
                     ( STVarApp "g" (STVar "a" :| [])
                         :| [STArrow (STVar "a") (STVar "b")]
                     )
+        parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty
+
+    it "roundtrips type-lambda application parse(pretty(type))" $ do
+        let ty = STTyApp (STTyLam "a" (STArrow (STVar "a") (STVar "a"))) (STBase "Int")
         parseRawEmlfType (prettyEmlfType ty) `shouldBe` Right ty
 
     it "roundtrips recursive expression parse(pretty(expr))" $ do

@@ -117,6 +117,7 @@ toXmlfType ty = case ty of
     TVar v -> XMLF.XTVar v
     TArrow a b -> XMLF.XTArrow (toXmlfType a) (toXmlfType b)
     TCon (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
+    TVarApp v args -> XMLF.XTVarApp v (fmap toXmlfType args)
     TBase (BaseTy b) -> XMLF.XTBase b
     TForall v mb body ->
         let bound = maybe XMLF.XTBottom toXmlfBound mb
@@ -128,6 +129,7 @@ toXmlfBound :: BoundType -> XMLF.XmlfType
 toXmlfBound bound = case bound of
     TArrow a b -> XMLF.XTArrow (toXmlfType a) (toXmlfType b)
     TCon (BaseTy c) args -> XMLF.XTCon c (fmap toXmlfType args)
+    TVarApp v args -> XMLF.XTVarApp v (fmap toXmlfType args)
     TBase (BaseTy b) -> XMLF.XTBase b
     TForall v mb body ->
         let boundTy = maybe XMLF.XTBottom toXmlfBound mb
@@ -179,6 +181,7 @@ inlineBoundsForDisplay = go
     go ty = case ty of
         TArrow d c -> TArrow (go d) (go c)
         TCon c args -> TCon c (fmap go args)
+        TVarApp v args -> TVarApp v (fmap go args)
         TForall v mb body ->
             let mb' = fmap goBound mb
                 body' = go body
@@ -216,12 +219,14 @@ inlineBoundsForDisplay = go
         TVar{} -> True
         TArrow{} -> True
         TCon{} -> True
+        TVarApp{} -> True
         _ -> False
 
     goBound :: BoundType -> BoundType
     goBound bound = case bound of
         TArrow a b -> TArrow (go a) (go b)
         TCon c args -> TCon c (fmap go args)
+        TVarApp v args -> TVarApp v (fmap go args)
         TBase b -> TBase b
         TBottom -> TBottom
         TForall v mb body ->
@@ -260,6 +265,14 @@ inlineBoundsForDisplay = go
                     freeVars = Set.unions (map oiFreeVars occArgs)
                     occMaps = map oiOccMap occArgs
                 in K (OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps))
+            TVarAppIF v args ->
+                let occArg :: IxPair Ty (K OccInfo) 'AllowVar -> OccInfo
+                    occArg ix = unK (snd (unIxPair ix))
+                    occArgs = case args of
+                        arg :| rest -> map occArg (arg : rest)
+                    freeVars = Set.insert v (Set.unions (map oiFreeVars occArgs))
+                    occMaps = Map.singleton v (1, 0) : map oiOccMap occArgs
+                in K (OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps))
             TBaseIF _ -> K emptyOccInfo
             TBottomIF -> K emptyOccInfo
             TForallIF v mb body ->
@@ -293,6 +306,12 @@ inlineBoundsForDisplay = go
                     arg :| rest -> map occInfo (arg : rest)
                 freeVars = Set.unions (map oiFreeVars occArgs)
                 occMaps = map oiOccMap occArgs
+            in OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps)
+        TVarApp v args ->
+            let occArgs = case args of
+                    arg :| rest -> map occInfo (arg : rest)
+                freeVars = Set.insert v (Set.unions (map oiFreeVars occArgs))
+                occMaps = Map.singleton v (1, 0) : map oiOccMap occArgs
             in OccInfo freeVars (foldr mergeOccMaps Map.empty occMaps)
         TBase _ -> emptyOccInfo
         TBottom -> emptyOccInfo
@@ -330,6 +349,7 @@ mapBoundType :: (ElabType -> ElabType) -> BoundType -> BoundType
 mapBoundType f bound = case bound of
     TArrow a b -> TArrow (f a) (f b)
     TCon c args -> TCon c (fmap f args)
+    TVarApp v args -> TVarApp v (fmap f args)
     TBase b -> TBase b
     TBottom -> TBottom
     TForall v mb body ->

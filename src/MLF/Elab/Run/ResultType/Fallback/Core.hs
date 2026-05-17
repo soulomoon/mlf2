@@ -594,6 +594,7 @@ computeResultTypeFallbackCore ctx viewBase annCanon ann = do
                                     Just TyExp {} -> "exp"
                                     Just TyBase {} -> "base"
                                     Just TyCon {} -> "con"
+                                    Just TyVarApp {} -> "varapp"
                                     Just TyBottom {} -> "bottom"
                                     Nothing -> "missing"
                              in debugGaScope

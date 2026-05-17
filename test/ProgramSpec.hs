@@ -36,6 +36,18 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Program.Prelude (withPrelude, withPreludeLocated)
 import MLF.Frontend.Syntax (ResolvedSrcTy (..), mkSrcBound)
 import MLF.Frontend.Syntax.Program
+import MLF.Frontend.TypeLevel
+    ( TypeLevelKind (..)
+    , TypeLevelNormalizeError (..)
+    , TypeLevelPattern (..)
+    , TypeLevelTy (..)
+    , familyDeclEquations
+    , familyDeclName
+    , familyDeclParams
+    , familyDeclResultKind
+    , familyEquationPatterns
+    , familyEquationRhs
+    )
 import MLF.Pipeline
 import qualified MLF.Types.Elab as Elab
 import MLF.Program.CLI (runProgramFile)
@@ -307,6 +319,480 @@ spec = do
                 other -> expectationFailure ("unexpected program shape: " ++ show other)
             parseRawProgram (prettyProgram program) `shouldBe` Right program
 
+        it "roundtrips superclass constraints, multi-parameter classes, and Unicode fundeps" $ do
+            let hk = KArrow KType KType
+                programText =
+                    unlines
+                        [ "module Main export (Monad) {"
+                        , "  class Functor f => Monad (m :: * -> *) (f :: * -> *) | m → f {"
+                        , "    bind : ∀ a b. m a -> (a -> m b) -> m b;"
+                        , "  }"
+                        , ""
+                        , "  instance Monad IO IO {"
+                        , "  }"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case program of
+                Program [Module {moduleDecls = [DeclClass classDecl, DeclInstance instanceDecl]}] -> do
+                    classDeclParams classDecl `shouldBe` (TypeParam "m" hk :| [TypeParam "f" hk])
+                    classDeclSuperclasses classDecl
+                        `shouldBe` [ ClassConstraint
+                                        { constraintClassName = "Functor"
+                                        , constraintTypes = STVar "f" :| []
+                                        }
+                                   ]
+                    classDeclFundeps classDecl
+                        `shouldBe` [ FunctionalDependency
+                                        { fundepDeterminers = "m" :| []
+                                        , fundepDetermined = "f" :| []
+                                        }
+                                   ]
+                    instanceDeclTypes instanceDecl `shouldBe` (STBase "IO" :| [STBase "IO"])
+                other -> expectationFailure ("unexpected program shape: " ++ show other)
+            parseRawProgram (prettyProgram program) `shouldBe` Right program
+
+        it "roundtrips closed type-family declarations with kind variables" $ do
+            let programText =
+                    unlines
+                        [ "module Main {"
+                        , "  type family Normalize (a :: κ) :: κ where {"
+                        , "    Normalize Int = Int;"
+                        , "    Normalize (Box a) = a;"
+                        , "    Normalize a = (Λx. x) a;"
+                        , "  }"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            case program of
+                Program [Module {moduleDecls = [DeclTypeFamily familyDecl]}] -> do
+                    familyDeclName familyDecl `shouldBe` "Normalize"
+                    familyDeclParams familyDecl `shouldBe` [("a", TLKVar "κ")]
+                    familyDeclResultKind familyDecl `shouldBe` TLKVar "κ"
+                    case familyDeclEquations familyDecl of
+                        [intEq, boxEq, idEq] -> do
+                            familyEquationPatterns intEq `shouldBe` [TLPCon "Int" []]
+                            familyEquationRhs intEq `shouldBe` TLTCon "Int"
+                            familyEquationPatterns boxEq `shouldBe` [TLPCon "Box" [TLPVar "a"]]
+                            familyEquationRhs boxEq `shouldBe` TLTVar "a"
+                            familyEquationPatterns idEq `shouldBe` [TLPVar "a"]
+                            familyEquationRhs idEq `shouldBe` TLTApp (TLTLam "x" TLKType (TLTVar "x")) (TLTVar "a")
+                        other -> expectationFailure ("unexpected family equations: " ++ show other)
+                other -> expectationFailure ("unexpected program shape: " ++ show other)
+            parseRawProgram (prettyProgram program) `shouldBe` Right program
+
+        it "normalizes checked type-family declarations before resolution" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  type family Id a :: * where {"
+                        , "    Id a = a;"
+                        , "  }"
+                        , "  def main : Id Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "reduces nested checked type-family declarations before resolution" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  type family Id a :: * where {"
+                        , "    Id a = a;"
+                        , "  }"
+                        , "  type family ToMain a :: * where {"
+                        , "    ToMain Int = Id Bool;"
+                        , "  }"
+                        , "  def main : ToMain Int = true;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "rejects stuck checked type-family applications before resolution" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  type family OnlyBool a :: * where {"
+                        , "    OnlyBool Bool = Int;"
+                        , "  }"
+                        , "  def main : OnlyBool Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program
+                `shouldBe` Left (ProgramTypeFamilyReductionFailed "OnlyBool" (TypeFamilyStuck "OnlyBool" [TLTCon "Int"]))
+
+        it "rejects cyclic checked type-family applications before resolution" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  type family LoopA a :: * where {"
+                        , "    LoopA a = LoopB a;"
+                        , "  }"
+                        , "  type family LoopB a :: * where {"
+                        , "    LoopB a = LoopA a;"
+                        , "  }"
+                        , "  def main : LoopA Int = 1;"
+                        , "}"
+                        ]
+            case checkProgram program of
+                Left (ProgramTypeFamilyReductionFailed "LoopA" (TypeFamilyCycle familyCycle)) ->
+                    familyCycle `shouldSatisfy` (not . null)
+                other -> expectationFailure ("expected type-family cycle, got: " ++ show other)
+
+        it "beta-reduces checked source type-lambda applications before resolution" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : (Λa. a) Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "beta-reduces nested source type-lambda applications in constructor arguments" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , "  def main : Box ((Λa. a) Int) = Box 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "beta-reduces source type-lambda family arguments before erasure" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  type family Apply (f :: * -> *) a :: * where {"
+                        , "    Apply f a = f a;"
+                        , "  }"
+                        , "  def main : Apply (Λx. x) Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "beta-reduces source type-lambda bodies before reducing closed families" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  type family OnlyInt a :: * where {"
+                        , "    OnlyInt Int = Bool;"
+                        , "  }"
+                        , "  def main : (Λa. OnlyInt a) Int = true;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "kind-checks kind-polymorphic type-family declarations before erasure" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  type family IdK (a :: κ) :: κ where {"
+                        , "    IdK a = a;"
+                        , "  }"
+                        , "  def main : IdK Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "rejects type-family equations with the wrong pattern arity" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  type family Id a :: * where {"
+                        , "    Id a b = a;"
+                        , "  }"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldBe` Left (ProgramTypeFamilyEquationArityMismatch "Id" 1 2)
+
+        it "rejects type-family RHS kinds that do not match the result kind" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  type family Bad (f :: * -> *) :: * where {"
+                        , "    Bad f = f;"
+                        , "  }"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program
+                `shouldBe` Left (ProgramTypeFamilyKindMismatch "Bad" (TLTVar "f") TLKType (TLKArrow TLKType TLKType))
+
+        it "rejects type-family RHS variables not bound by the equation pattern" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  type family Bad a :: * where {"
+                        , "    Bad Int = a;"
+                        , "  }"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldBe` Left (ProgramUnboundTypeFamilyVariable "a")
+
+        it "does not reduce closed families that are not imported" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Hidden export (HiddenId) {"
+                        , "  type family HiddenId a :: * where {"
+                        , "    HiddenId a = a;"
+                        , "  }"
+                        , "}"
+                        , "module Main export (main) {"
+                        , "  def main : HiddenId Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldBe` Left (ProgramUnknownType "HiddenId")
+
+        it "normalizes imported closed families and erases their import/export surface" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Families export (Id) {"
+                        , "  type family Id a :: * where {"
+                        , "    Id a = a;"
+                        , "  }"
+                        , "}"
+                        , "module Main export (main) {"
+                        , "  import Families exposing (Id);"
+                        , "  def main : Id Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "rejects residual source type lambdas before resolution" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  def main : Λa. a = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldBe` Left (ProgramResidualTypeLambda (STTyLam "a" (STVar "a")))
+
+        it "checks zero-method multi-parameter class constraints and instances" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Rel a b {"
+                        , "  }"
+                        , "  instance Rel Int Bool {"
+                        , "  }"
+                        , "  def needsRel : Rel Int Bool => Int = 1;"
+                        , "  def main : Int = needsRel;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "checks method-bearing multi-parameter class instances when method use fixes every class argument" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Convert a b {"
+                        , "    convert : a -> b;"
+                        , "  }"
+                        , "  instance Convert Int Bool {"
+                        , "    convert = λ(_x : Int) true;"
+                        , "  }"
+                        , "  def main : Bool = convert 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "rejects ambiguous method-bearing multi-parameter method use" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Convert a b {"
+                        , "    convert : a -> b;"
+                        , "  }"
+                        , "  instance Convert Int Bool {"
+                        , "    convert = λ(_x : Int) true;"
+                        , "  }"
+                        , "  def main : Int -> Bool = convert;"
+                        , "}"
+                        ]
+            checkProgram program `shouldBe` Left (ProgramAmbiguousMethodUse "convert")
+
+        it "uses superclass constraints as flattened evidence prerequisites" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  class Eq a => Ord a {"
+                        , "  }"
+                        , "  instance Eq Int {"
+                        , "    eq = λ(_x : Int) λ(_y : Int) true;"
+                        , "  }"
+                        , "  instance Ord Int {"
+                        , "  }"
+                        , "  def needsOrd : Ord Int => Bool = eq 1 1;"
+                        , "  def main : Bool = needsOrd;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "rejects missing superclass instance prerequisites" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Eq a {"
+                        , "    eq : a -> a -> Bool;"
+                        , "  }"
+                        , "  class Eq a => Ord a {"
+                        , "  }"
+                        , "  instance Ord Int {"
+                        , "  }"
+                        , "  def needsOrd : Ord Int => Bool = true;"
+                        , "  def main : Bool = needsOrd;"
+                        , "}"
+                        ]
+            checkProgram program `shouldBe` Left (ProgramNoMatchingInstance "Eq" (STBase "Int"))
+
+        it "uses functional dependencies to close multi-parameter method dispatch" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  data Box ="
+                        , "      Box : Int -> Box;"
+                        , "  class Collect a b | a → b {"
+                        , "    collect : a -> b;"
+                        , "  }"
+                        , "  instance Collect Box Int {"
+                        , "    collect = λ(box : Box) case box of { Box value -> value };"
+                        , "  }"
+                        , "  def main : Int = let value = collect (Box 1) in value;"
+                        , "}"
+                        ]
+            checkProgram program `shouldSatisfy` isRight
+
+        it "rejects functional dependencies over non-class parameters" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Bad a | a → b {"
+                        , "  }"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldBe` Left (ProgramInvalidFunctionalDependency "Bad" "b")
+
+        it "rejects ambiguous functional-dependency instances" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Collect a b | a → b {"
+                        , "  }"
+                        , "  instance Collect a b {"
+                        , "  }"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program `shouldBe` Left (ProgramAmbiguousFunctionalDependencyInstance "Collect" [STVar "a", STVar "b"])
+
+        it "rejects conflicting functional-dependency instances before generic overlap" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Collect a b | a → b {"
+                        , "  }"
+                        , "  instance Collect Int Bool {"
+                        , "  }"
+                        , "  instance Collect Int String {"
+                        , "  }"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program
+                `shouldBe` Left (ProgramConflictingFunctionalDependency "Collect" [STBase "Int"] [STBase "Bool"] [STBase "String"])
+
+        it "rejects class arity mismatches with structured diagnostics" $ do
+            constraintProgram <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Rel a b {"
+                        , "  }"
+                        , "  def main : Rel Int => Int = 1;"
+                        , "}"
+                        ]
+            checkProgram constraintProgram
+                `shouldBe` Left (ProgramClassArityMismatch "Rel" 2 1)
+
+            instanceProgram <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Rel a b {"
+                        , "  }"
+                        , "  instance Rel Int {"
+                        , "  }"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram instanceProgram
+                `shouldBe` Left (ProgramClassArityMismatch "Rel" 2 1)
+
+        it "rejects duplicate multi-parameter instances with structured diagnostics" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Rel a b {"
+                        , "  }"
+                        , "  instance Rel Int Bool {"
+                        , "  }"
+                        , "  instance Rel Int Bool {"
+                        , "  }"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program
+                `shouldBe` Left (ProgramDuplicateInstanceHead "Rel" [STBase "Int", STBase "Bool"])
+
+        it "rejects overlapping multi-parameter instances with structured diagnostics" $ do
+            program <-
+                requireParsed $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  class Rel a b {"
+                        , "  }"
+                        , "  instance Rel a Bool {"
+                        , "  }"
+                        , "  instance Rel Int b {"
+                        , "  }"
+                        , "  def main : Int = 1;"
+                        , "}"
+                        ]
+            checkProgram program
+                `shouldBe` Left (ProgramOverlappingInstanceHead "Rel" [STVar "a", STBase "Bool"] [STBase "Int", STVar "b"])
+
         it "parses and pretty-prints variable-headed higher-kinded field types" $ do
             let programText =
                     unlines
@@ -384,6 +870,19 @@ spec = do
                         , "  def main : _|_ = 1;"
                         , "}"
                         ]
+                    , unlines
+                        [ "module Main {"
+                        , "  type family Id a :: * where {"
+                        , "    Id a = \\x. x;"
+                        , "  }"
+                        , "}"
+                        ]
+                    , unlines
+                        [ "module Main {"
+                        , "  class C a b | a -> b {"
+                        , "  }"
+                        , "}"
+                        ]
                     ]
             mapM_ (`shouldSatisfy` isLeft) (map parseRawProgram rejectedPrograms)
 
@@ -420,18 +919,33 @@ spec = do
                         ]
             (prettyValue <$> runLocatedProgram (withPreludeLocated located)) `shouldBe` Right "Some Zero"
 
-        it "typechecks the initial Prelude IO and Monad surface" $ do
+        it "typechecks the Prelude IO class hierarchy" $ do
             located <-
                 requireLocated $
                     unlines
                         [ "module Main export (pureUnit, main) {"
-                        , "  import Prelude exposing (Unit(..), IO, Monad, pure, bind, putStrLn);"
+                        , "  import Prelude exposing (Unit(..), IO, Functor, Applicative, Monad, pure, bind, putStrLn);"
                         , "  def pureUnit : IO Unit = pure Unit;"
                         , "  def after : Unit -> IO Unit = λ_done putStrLn \"world\";"
                         , "  def main : IO Unit = bind (putStrLn \"hello\") after;"
                         , "}"
                         ]
             checkLocatedProgram (withPreludeLocated located) `shouldSatisfy` isRight
+
+        it "runs Prelude Functor and Applicative IO instances through class methods" $ do
+            located <-
+                requireLocated $
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  import Prelude exposing (Unit(..), IO, Functor, Applicative, Monad, map, pure, ap, bind, putStrLn);"
+                        , "  def action : IO Int = pure 1;"
+                        , "  def mapped : IO Unit = map (λ(_n : Int) Unit) action;"
+                        , "  def wrappedFunction : IO (Int -> Unit) = pure (λ(_n : Int) Unit);"
+                        , "  def applied : IO Unit = ap wrappedFunction action;"
+                        , "  def main : IO Unit = bind mapped (λ(_done : Unit) bind applied (λ(_done2 : Unit) putStrLn \"hierarchy\"));"
+                        , "}"
+                        ]
+            (programRunOutput <$> runLocatedProgramOutput (withPreludeLocated located)) `shouldBe` Right "hierarchy\n"
 
         it "typechecks direct IO bind primitive uses with consistent arguments" $ do
             located <-
@@ -878,7 +1392,7 @@ spec = do
                 (const False)
 
     describe "MLF.Program diagnostics" $ do
-        it "reports variable-headed direct AST types as program errors" $ do
+        it "reports variable-headed direct AST type mismatches as program errors" $ do
             let program =
                     Program
                         [ Module
@@ -895,14 +1409,7 @@ spec = do
                                 ]
                             }
                         ]
-            checkProgram program `shouldSatisfy` either
-                ( \err ->
-                    case err of
-                        ProgramPipelineError msg ->
-                            "variable-headed source type application `f`" `isInfixOf` msg
-                        _ -> False
-                )
-                (const False)
+            checkProgram program `shouldBe` Left (ProgramTypeMismatch (STBase "Int") (STVarApp "f" (STBase "Int" :| [])))
 
         it "rejects duplicate data type parameter names" $ do
             let programText =

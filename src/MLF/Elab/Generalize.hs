@@ -243,6 +243,7 @@ inlineRigidTypes rigidBounds = go Set.empty
             | otherwise -> go (Set.insert v seen) bound
           Nothing -> TVar v
       TCon c args -> TCon c (fmap (go seen) args)
+      TVarApp v args -> TVarApp v (fmap (go seen) args)
       TBase b -> TBase b
       TBottom -> TBottom
       TArrow a b -> TArrow (go seen a) (go seen b)
@@ -252,6 +253,7 @@ inlineRigidTypes rigidBounds = go Set.empty
     goBound seen = \case
       TArrow a b -> TArrow (go seen a) (go seen b)
       TCon c args -> TCon c (fmap (go seen) args)
+      TVarApp v args -> TVarApp v (fmap (go seen) args)
       TBase b -> TBase b
       TBottom -> TBottom
       TForall v mb body -> TForall v (fmap (goBound seen) mb) (go seen body)

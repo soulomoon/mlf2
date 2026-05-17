@@ -39,7 +39,13 @@ All implementation modules live under `src/` and are built as a private sublibra
 The code is organized by domain (not by phase) under `src/MLF/`:
 
 - `MLF.Frontend.*` — surface syntax, desugaring, constraint generation
-- `MLF.Frontend.Syntax.Program` / `MLF.Frontend.Parse.Program` / `MLF.Frontend.Pretty.Program` — canonical `.mlfp` syntax ownership under the main frontend boundary
+- `MLF.Frontend.TypeLevel` — internal owner for the richer pre-core type-level
+  AST and normalization rules: kind-variable-bearing type forms,
+  capture-avoiding `Λ` beta reduction, closed type-family ordered reduction,
+  stuck-family rejection, cycle detection, and fuel diagnostics before erasure
+  into the thesis-facing MLF core
+- `MLF.Frontend.Syntax.Program` / `MLF.Frontend.Parse.Program` / `MLF.Frontend.Pretty.Program` — canonical `.mlfp` syntax ownership under the main frontend boundary, including closed type-family declaration parse/pretty syntax
+- `MLF.Frontend.Program.TypeFamilies` — pre-resolution `.mlfp` type-family normalization and erasure, converting closed family declarations and uses into normalized family-free source types before the existing resolver/checker path
 - `MLF.Frontend.Program.Package` — private owner for `.mlfp` package identity, module identity, source-unit shape, trivial-package adapters, explicit local roots/search paths, filesystem discovery, explicit module graph/order validation, and package-to-program projections used while the checker still consumes the existing in-memory program artifact
 - `MLF.Frontend.Program.Resolve` — assigns `.mlfp` symbol identities and produces the resolved semantic program artifact consumed by the checker
 - `MLF.Frontend.Program.Interface` — private owner for typed checked module interface artifacts, including checked exports, local data/class summaries, visible instances, source-path metadata, and direct package-module dependencies

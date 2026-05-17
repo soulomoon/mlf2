@@ -91,6 +91,7 @@ validateOriginalCanonicalAgreement solved =
     tnTag TyArrow{}  = "arrow"
     tnTag TyBase{}   = "base"
     tnTag TyCon{}    = "con"
+    tnTag TyVarApp{} = "var-app"
     tnTag TyForall{} = "forall"
     tnTag TyExp{}    = "exp"
     tnTag TyMu{}     = "mu"

@@ -18,6 +18,7 @@ module MLF.Frontend.Normalize
 where
 
 import qualified Data.Set as Set
+import Data.List.NonEmpty (NonEmpty (..))
 import MLF.Frontend.Syntax
 import MLF.Util.Names (freshNameLike)
 
@@ -46,6 +47,10 @@ data NormalizationError
   | -- | A bound expected to normalize into 'StructBound' still contains a
     -- bare variable subtree (for example after nested alias inlining).
     NonStructuralBoundInStructContext SrcType
+  | -- | A type lambda was still present after normalization.
+    ResidualTypeLambda SrcType
+  | -- | A type application could not be reduced to a core-supported head.
+    UnsupportedTypeApplication SrcType
   deriving (Eq, Show)
 
 -- ---------------------------------------------------------------------------
@@ -69,6 +74,10 @@ freeVarsSrcType = go Set.empty
                 then Set.empty
                 else Set.singleton name
          in headVars `Set.union` foldMap (go bound) args
+      STTyLam v body ->
+        go (Set.insert v bound) body
+      STTyApp fun arg ->
+        Set.union (go bound fun) (go bound arg)
       STForall v mb body ->
         let bound' = Set.insert v bound
             freeBound = maybe Set.empty (go bound . unSrcBound) mb
@@ -101,6 +110,23 @@ substSrcType x s = goSub
          in case replacementHead name args' of
               Just ty -> ty
               Nothing -> STVarApp name args'
+      STTyLam v body
+        | v == x ->
+            STTyLam v body
+        | Set.member v freeS ->
+            let used =
+                  Set.unions
+                    [ freeS,
+                      freeVarsSrcType body,
+                      Set.singleton v
+                    ]
+                v' = freshNameLike v used
+                body' = substSrcType v (STVar v') body
+             in STTyLam v' (goSub body')
+        | otherwise ->
+            STTyLam v (goSub body)
+      STTyApp fun arg ->
+        STTyApp (goSub fun) (goSub arg)
       STBottom -> STBottom
       STForall v mb body
         | v == x ->
@@ -144,7 +170,9 @@ substSrcType x s = goSub
             STBase replacementName -> Just (STCon replacementName args)
             STCon replacementName replacementArgs -> Just (STCon replacementName (replacementArgs <> args))
             STVarApp replacementName replacementArgs -> Just (STVarApp replacementName (replacementArgs <> args))
-            _ -> Nothing
+            _ -> Just (foldl STTyApp s (neToList args))
+
+    neToList (headArg :| restArgs) = headArg : restArgs
 
 -- ---------------------------------------------------------------------------
 -- Fresh name generation
@@ -170,6 +198,10 @@ normalizeType = go
       STBase b -> Right (STBase b)
       STCon c args -> STCon c <$> traverse go args
       STVarApp v args -> STVarApp v <$> traverse go args
+      STTyLam v body ->
+        Left (ResidualTypeLambda (STTyLam v body))
+      ty@STTyApp {} ->
+        normalizeTypeApplication ty
       STBottom -> Right STBottom
       STForall v Nothing body ->
         STForall v Nothing <$> go body
@@ -189,29 +221,67 @@ normalizeType = go
         STMu v <$> go body
 
     normalizeBound :: SrcType -> Either NormalizationError StructBound
-    normalizeBound = \case
-      STVar v ->
-        Left (NonStructuralBoundInStructContext (STVar v))
-      STArrow a b -> STArrow <$> go a <*> go b
+    normalizeBound ty = go ty >>= normToStructBound
+
+    normToStructBound :: NormSrcType -> Either NormalizationError StructBound
+    normToStructBound = \case
+      STVar v -> Left (NonStructuralBoundInStructContext (STVar v))
+      STArrow a b -> Right (STArrow a b)
       STBase b -> Right (STBase b)
-      STCon c args -> STCon c <$> traverse go args
-      STVarApp v args -> STVarApp v <$> traverse go args
+      STCon c args -> Right (STCon c args)
+      STVarApp v args -> Right (STVarApp v args)
+      STForall v mb body -> Right (STForall v mb body)
+      STMu v body -> Right (STMu v body)
       STBottom -> Right STBottom
-      STForall v Nothing body ->
-        STForall v Nothing <$> go body
-      STForall v (Just bound) body -> case bound of
-        SrcBound (STVar alias)
-          | alias == v ->
-              Left (SelfBoundVariable v body)
-          | otherwise ->
-              -- Alias in nested bound: inline and re-normalize
-              let body' = substSrcType v (STVar alias) body
-               in normalizeBound body'
-        SrcBound boundTy -> do
-          sb <- normalizeBound boundTy
-          STForall v (Just (mkNormBound sb)) <$> go body
-      STMu v body ->
-        STMu v <$> go body
+      STTyLam v body -> Left (ResidualTypeLambda (forgetStageAsTop (STTyLam v body)))
+      STTyApp fun arg -> Left (UnsupportedTypeApplication (forgetStageAsTop (STTyApp fun arg)))
+
+    normalizeTypeApplication :: SrcType -> Either NormalizationError NormSrcType
+    normalizeTypeApplication original =
+      reduceHead rawHead rawArgs
+      where
+        (rawHead, rawArgs) = collectApps original
+
+        reduceHead headTy [] = go headTy
+        reduceHead (STTyLam v body) (arg : rest) =
+          reduceHead (substSrcType v arg body) rest
+        reduceHead headTy args = do
+          headNorm <- go headTy
+          foldlM (applyNormalized original) headNorm args
+
+    applyNormalized :: SrcType -> NormSrcType -> SrcType -> Either NormalizationError NormSrcType
+    applyNormalized original fun rawArg = do
+      arg <- go rawArg
+      case fun of
+        STVar name -> Right (STVarApp name (arg :| []))
+        STBase name -> Right (STCon name (arg :| []))
+        STCon name args -> Right (STCon name (args <> (arg :| [])))
+        STVarApp name args -> Right (STVarApp name (args <> (arg :| [])))
+        _ -> Left (UnsupportedTypeApplication original)
+
+    collectApps :: SrcType -> (SrcType, [SrcType])
+    collectApps = goApps []
+      where
+        goApps args (STTyApp fun arg) = goApps (arg : args) fun
+        goApps args headTy = (headTy, args)
+
+    foldlM :: (a -> b -> Either e a) -> a -> [b] -> Either e a
+    foldlM _ acc [] = Right acc
+    foldlM f acc (x : xs) = f acc x >>= \acc' -> foldlM f acc' xs
+
+forgetStageAsTop :: SrcTy n v -> SrcType
+forgetStageAsTop = \case
+  STVar name -> STVar name
+  STArrow dom cod -> STArrow (forgetStageAsTop dom) (forgetStageAsTop cod)
+  STBase name -> STBase name
+  STCon name args -> STCon name (fmap forgetStageAsTop args)
+  STVarApp name args -> STVarApp name (fmap forgetStageAsTop args)
+  STTyLam name body -> STTyLam name (forgetStageAsTop body)
+  STTyApp fun arg -> STTyApp (forgetStageAsTop fun) (forgetStageAsTop arg)
+  STForall name mb body ->
+    STForall name (fmap (mkSrcBound . forgetStageAsTop . unSrcBound) mb) (forgetStageAsTop body)
+  STMu name body -> STMu name (forgetStageAsTop body)
+  STBottom -> STBottom
 
 -- ---------------------------------------------------------------------------
 -- Expression normalization: Expr s SrcType → Expr s NormSrcType

@@ -60,6 +60,7 @@ data PrimitiveType
 data PrimitiveIOOperation
   = PrimitiveIOPure
   | PrimitiveIOBind
+  | PrimitiveIOMap
   | PrimitiveIOPutStrLn
   | PrimitiveIOGetLine
   | PrimitiveIOPutStr
@@ -160,6 +161,32 @@ primitiveValueSpecs =
             )
         )
         (Set.singleton 1),
+      nativeIOSpec
+        PrimitiveIOMap
+        ( PrimitiveTypeForall
+            "a"
+            ( PrimitiveTypeForall
+                "b"
+                ( (PrimitiveTypeVar "a" `PrimitiveTypeArrow` PrimitiveTypeVar "b")
+                    `PrimitiveTypeArrow` (ioOf (PrimitiveTypeVar "a") `PrimitiveTypeArrow` ioOf (PrimitiveTypeVar "b"))
+                )
+            )
+        )
+        (Set.singleton 0),
+      ( "__io_ap",
+        primitiveValueSpec
+          PrimitiveNativeUnsupported
+          ( PrimitiveTypeForall
+              "a"
+              ( PrimitiveTypeForall
+                  "b"
+                  ( ioOf (PrimitiveTypeVar "a" `PrimitiveTypeArrow` PrimitiveTypeVar "b")
+                      `PrimitiveTypeArrow` (ioOf (PrimitiveTypeVar "a") `PrimitiveTypeArrow` ioOf (PrimitiveTypeVar "b"))
+                  )
+              )
+          )
+          Set.empty
+      ),
       nativeIOSpec PrimitiveIOPutStrLn (stringTy `PrimitiveTypeArrow` ioOf unitTy) Set.empty,
       nativeIOSpec PrimitiveIOGetLine (ioOf stringTy) Set.empty,
       nativeIOSpec PrimitiveIOPutStr (stringTy `PrimitiveTypeArrow` ioOf unitTy) Set.empty,
@@ -237,6 +264,7 @@ nativeIOPrimitiveName =
   \case
     PrimitiveIOPure -> "__io_pure"
     PrimitiveIOBind -> "__io_bind"
+    PrimitiveIOMap -> "__io_map"
     PrimitiveIOPutStrLn -> "__io_putStrLn"
     PrimitiveIOGetLine -> "__io_getLine"
     PrimitiveIOPutStr -> "__io_putStr"
@@ -324,6 +352,10 @@ canonicalizeBuiltinSourceType =
           STCon name (fmap canonicalizeBuiltinSourceType args)
     STVarApp name args ->
       STVarApp name (fmap canonicalizeBuiltinSourceType args)
+    STTyLam name body ->
+      STTyLam name (canonicalizeBuiltinSourceType body)
+    STTyApp fun arg ->
+      STTyApp (canonicalizeBuiltinSourceType fun) (canonicalizeBuiltinSourceType arg)
     STArrow dom cod ->
       STArrow (canonicalizeBuiltinSourceType dom) (canonicalizeBuiltinSourceType cod)
     STForall name mb body ->
@@ -345,6 +377,10 @@ sourceTypeMentionsOpaqueBuiltin =
       isOpaqueBuiltinTypeReference name || any sourceTypeMentionsOpaqueBuiltin args
     STVarApp _ args ->
       any sourceTypeMentionsOpaqueBuiltin args
+    STTyLam _ body ->
+      sourceTypeMentionsOpaqueBuiltin body
+    STTyApp fun arg ->
+      sourceTypeMentionsOpaqueBuiltin fun || sourceTypeMentionsOpaqueBuiltin arg
     STArrow dom cod ->
       sourceTypeMentionsOpaqueBuiltin dom || sourceTypeMentionsOpaqueBuiltin cod
     STForall _ mb body ->

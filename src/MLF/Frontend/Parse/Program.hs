@@ -7,18 +7,29 @@ module MLF.Frontend.Parse.Program
     ) where
 
 import Control.Monad (void)
+import Data.Char (isAlphaNum, isLower)
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
 import qualified Data.Set as Set
 import Data.Void (Void)
-import MLF.Frontend.Syntax.Program
 import MLF.Frontend.Syntax (SrcTy (..), SrcType, mkSrcBound)
+import MLF.Frontend.Syntax.Program
+import MLF.Frontend.TypeLevel
+    ( TypeFamilyDecl (..)
+    , TypeFamilyEquation (..)
+    , TypeLevelKind (..)
+    , TypeLevelPattern (..)
+    , TypeLevelTy (..)
+    )
 import MLF.Parse.Common
     ( Parser
+    , canonicalBigLambdaTok
     , canonicalBottomTok
     , canonicalForallTok
     , canonicalGeTok
     , canonicalLambdaTok
+    , lexeme
     , lowerIdent
     , pLit
     , parens
@@ -39,6 +50,7 @@ import Text.Megaparsec
     , parse
     , sepBy
     , sepBy1
+    , satisfy
     , some
     , try
     , (<|>)
@@ -86,6 +98,9 @@ reservedWords =
         , "bottom"
         , "true"
         , "false"
+        , "family"
+        , "type"
+        , "where"
         ]
 
 braces :: Parser a -> Parser a
@@ -99,6 +114,9 @@ semi = symbol ";"
 
 commaSep :: Parser a -> Parser [a]
 commaSep item = item `sepBy` symbol ","
+
+commaSep1 :: Parser a -> Parser [a]
+commaSep1 item = item `sepBy1` symbol ","
 
 qualifiedUpperIdent :: Parser String
 qualifiedUpperIdent =
@@ -126,6 +144,7 @@ programTypeConfig :: TypeParserConfig SrcType (Maybe SrcType)
 programTypeConfig =
     TypeParserConfig
         { tpcForallTok = canonicalForallTok
+        , tpcTypeLambdaTok = canonicalBigLambdaTok
         , tpcGeTok = canonicalGeTok
         , tpcSymbol = symbol
         , tpcParens = parens
@@ -137,6 +156,8 @@ programTypeConfig =
         , tpcMkBase = STBase
         , tpcMkCon = STCon
         , tpcMkVarApp = \v args -> Just (STVarApp v args)
+        , tpcMkTypeLam = \v body -> Just (STTyLam v body)
+        , tpcMkTypeApp = \fun arg -> Just (STTyApp fun arg)
         , tpcMkForall = \v mb body -> STForall v (fmap mkSrcBound mb) body
         , tpcMkBottom = STBottom
         , tpcBoundedBinder = \pTy ->
@@ -196,11 +217,11 @@ pLocatedConstrainedType =
 pLocatedClassConstraint :: Parser (ClassConstraint, ProgramSpanIndex)
 pLocatedClassConstraint = do
     (className, classSpan) <- withSpan qualifiedUpperIdent
-    ty <- pType
+    tys <- some pClassArgument
     pure
         ( ClassConstraint
             { constraintClassName = className
-            , constraintType = ty
+            , constraintTypes = NE.fromList tys
             }
         , singletonClassSpan className classSpan
         )
@@ -367,6 +388,7 @@ pLocatedDecl =
     choice
         [ fmap (\(decl, spans) -> (DeclClass decl, spans)) (try pLocatedClassDecl)
         , fmap (\(decl, spans) -> (DeclInstance decl, spans)) (try pLocatedInstanceDecl)
+        , fmap (\(decl, spans) -> (DeclTypeFamily decl, spans)) (try pLocatedTypeFamilyDecl)
         , fmap (\(decl, spans) -> (DeclData decl, spans)) (try pLocatedDataDecl)
         , fmap (\(decl, spans) -> (DeclDef decl, spans)) pLocatedDefDecl
         ]
@@ -375,21 +397,45 @@ pLocatedClassDecl :: Parser (ClassDecl, ProgramSpanIndex)
 pLocatedClassDecl = do
     start <- getSourcePos
     void (symbol "class")
+    superclasses <- optional $ try $ do
+        constraints <- pLocatedConstraintList
+        void (symbol "=>")
+        pure constraints
     className <- qualifiedUpperIdent
-    classParam <- pTypeParam
+    classParams <- some pTypeParam
+    fundeps <- maybe [] id <$> optional pFunctionalDependencies
     methods <- braces (many pLocatedMethodSig)
     end <- getSourcePos
     let classSpan = sourceSpanFromPositions start end
         decl =
             ClassDecl
                 { classDeclName = className
-                , classDeclParam = classParam
+                , classDeclSuperclasses = maybe [] fst superclasses
+                , classDeclParams = NE.fromList classParams
+                , classDeclFundeps = fundeps
                 , classDeclMethods = map fst methods
                 }
         spans =
             singletonClassSpan className classSpan
+                `appendProgramSpanIndex` maybe emptyProgramSpanIndex snd superclasses
                 `appendProgramSpanIndex` mergeSpanIndexes (map snd methods)
     pure (decl, spans)
+
+pFunctionalDependencies :: Parser [FunctionalDependency]
+pFunctionalDependencies = do
+    void (symbol "|")
+    commaSep1 pFunctionalDependency
+
+pFunctionalDependency :: Parser FunctionalDependency
+pFunctionalDependency = do
+    determiners <- some (lowerIdent reservedWords)
+    void (symbol "→")
+    determined <- some (lowerIdent reservedWords)
+    pure
+        FunctionalDependency
+            { fundepDeterminers = NE.fromList determiners
+            , fundepDetermined = NE.fromList determined
+            }
 
 pLocatedMethodSig :: Parser (MethodSig, ProgramSpanIndex)
 pLocatedMethodSig = do
@@ -419,13 +465,13 @@ pLocatedInstanceDecl = do
         void (symbol "=>")
         pure constraints0
     (className, classSpan) <- withSpan qualifiedUpperIdent
-    instTy <- pType
+    instTys <- some pClassArgument
     methods <- braces (many pLocatedMethodDef)
     let decl =
             InstanceDecl
                 { instanceDeclConstraints = maybe [] fst constraints
                 , instanceDeclClass = className
-                , instanceDeclType = instTy
+                , instanceDeclTypes = NE.fromList instTys
                 , instanceDeclMethods = map fst methods
                 }
         spans =
@@ -449,6 +495,15 @@ pLocatedMethodDef :: Parser (MethodDef, ProgramSpanIndex)
 pLocatedMethodDef = do
     (methodDef, span0) <- withSpan pMethodDef
     pure (methodDef, singletonValueSpan (methodDefName methodDef) span0)
+
+pClassArgument :: Parser SrcType
+pClassArgument =
+    choice
+        [ parens pType
+        , STBottom <$ canonicalBottomTok
+        , STBase <$> qualifiedUpperIdent
+        , STVar <$> lowerIdent reservedWords
+        ]
 
 pLocatedDataDecl :: Parser (DataDecl, ProgramSpanIndex)
 pLocatedDataDecl = do
@@ -474,6 +529,135 @@ pLocatedDataDecl = do
                 `appendProgramSpanIndex` mergeSpanIndexes (map snd ctors)
                 `appendProgramSpanIndex` maybe emptyProgramSpanIndex snd derivingClause
     pure (decl, spans)
+
+pLocatedTypeFamilyDecl :: Parser (TypeFamilyDecl, ProgramSpanIndex)
+pLocatedTypeFamilyDecl = do
+    start <- getSourcePos
+    void (symbol "type")
+    void (symbol "family")
+    familyName <- upperIdent reservedWords
+    params <- many pTypeFamilyParam
+    void (symbol "::")
+    resultKind <- pTypeLevelKind
+    void (symbol "where")
+    equations <- braces (some (pTypeFamilyEquation familyName))
+    end <- getSourcePos
+    let familySpan = sourceSpanFromPositions start end
+        decl =
+            TypeFamilyDecl
+                { familyDeclName = familyName
+                , familyDeclParams = params
+                , familyDeclResultKind = resultKind
+                , familyDeclEquations = equations
+                }
+    pure (decl, singletonTypeSpan familyName familySpan)
+
+pTypeFamilyParam :: Parser (String, TypeLevelKind)
+pTypeFamilyParam =
+    try
+        ( parens $ do
+            name <- lowerIdent reservedWords
+            void (symbol "::")
+            kind <- pTypeLevelKind
+            pure (name, kind)
+        )
+        <|> do
+            name <- lowerIdent reservedWords
+            pure (name, TLKType)
+
+pTypeFamilyEquation :: TypeName -> Parser TypeFamilyEquation
+pTypeFamilyEquation familyName = do
+    equationName <- upperIdent reservedWords
+    if equationName == familyName
+        then pure ()
+        else fail ("expected type family equation for " ++ show familyName ++ ", got " ++ show equationName)
+    patterns <- many pTypeLevelPatternAtom
+    void (symbol "=")
+    rhs <- pTypeLevelType
+    void semi
+    pure TypeFamilyEquation { familyEquationPatterns = patterns, familyEquationRhs = rhs }
+
+pTypeLevelKind :: Parser TypeLevelKind
+pTypeLevelKind = do
+    lhs <- pTypeLevelKindAtom
+    rhs <- optional (symbol "->" *> pTypeLevelKind)
+    pure $ maybe lhs (TLKArrow lhs) rhs
+
+pTypeLevelKindAtom :: Parser TypeLevelKind
+pTypeLevelKindAtom =
+    (TLKType <$ symbol "*")
+        <|> parens pTypeLevelKind
+        <|> (TLKVar <$> kindVarIdent)
+
+kindVarIdent :: Parser String
+kindVarIdent = lexeme $ try $ do
+    first <- satisfy (\c -> isLower c || c == '_')
+    rest <- many (satisfy (\c -> isAlphaNum c || c == '_' || c == '\''))
+    let name = first : rest
+    if Set.member name reservedWords
+        then fail ("reserved word " ++ show name)
+        else pure name
+
+pTypeLevelType :: Parser TypeLevelTy
+pTypeLevelType = try pTypeLevelLam <|> pTypeLevelArrow
+
+pTypeLevelLam :: Parser TypeLevelTy
+pTypeLevelLam = do
+    canonicalBigLambdaTok
+    binders <- some pTypeLevelLamBinder
+    void (symbol ".")
+    body <- pTypeLevelType
+    pure (foldr (\(name, kind) acc -> TLTLam name kind acc) body binders)
+
+pTypeLevelLamBinder :: Parser (String, TypeLevelKind)
+pTypeLevelLamBinder =
+    try
+        ( parens $ do
+            name <- lowerIdent reservedWords
+            void (symbol "::")
+            kind <- pTypeLevelKind
+            pure (name, kind)
+        )
+        <|> do
+            name <- lowerIdent reservedWords
+            pure (name, TLKType)
+
+pTypeLevelArrow :: Parser TypeLevelTy
+pTypeLevelArrow = do
+    lhs <- pTypeLevelApp
+    rhs <- optional (symbol "->" *> pTypeLevelType)
+    pure $ maybe lhs (TLTArrow lhs) rhs
+
+pTypeLevelApp :: Parser TypeLevelTy
+pTypeLevelApp = do
+    headTy <- pTypeLevelAtom
+    args <- many pTypeLevelAtom
+    pure (foldl TLTApp headTy args)
+
+pTypeLevelAtom :: Parser TypeLevelTy
+pTypeLevelAtom =
+    choice
+        [ parens pTypeLevelType
+        , TLTVar <$> lowerIdent reservedWords
+        , TLTCon <$> qualifiedUpperIdent
+        ]
+
+pTypeLevelPattern :: Parser TypeLevelPattern
+pTypeLevelPattern = try pTypeLevelPatternApp <|> pTypeLevelPatternAtom
+
+pTypeLevelPatternApp :: Parser TypeLevelPattern
+pTypeLevelPatternApp = do
+    name <- qualifiedUpperIdent
+    args <- many pTypeLevelPatternAtom
+    pure (TLPCon name args)
+
+pTypeLevelPatternAtom :: Parser TypeLevelPattern
+pTypeLevelPatternAtom =
+    choice
+        [ parens pTypeLevelPattern
+        , TLPVar <$> lowerIdent reservedWords
+        , TLPCon <$> qualifiedUpperIdent <*> pure []
+        ]
 
 pTypeParam :: Parser TypeParam
 pTypeParam =

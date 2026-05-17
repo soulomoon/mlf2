@@ -136,9 +136,37 @@ data WrappedP (p :: * -> * -> *) a b =
     WrappedP : p a b -> WrappedP p a b;
 ```
 
-These are still single-parameter classes: `Profunctor` takes one class
-parameter `p`, but that parameter itself has kind `* -> * -> *`. The checker
-does not enforce class laws.
+The method evidence lane accepts single-parameter method classes and the
+method-bearing multi-parameter subset whose method use fixes every class
+argument from supplied arguments, result type, local evidence, or
+functional-dependency closure over visible instances/evidence. The checker also
+accepts zero-method multi-parameter classes, constraints, and instances as
+schema evidence. Superclass constraints are flattened into the same method
+evidence lane: a local subclass constraint provides its superclass method
+evidence, and subclass instances carry specialized superclass prerequisites.
+It does not enforce class laws.
+
+The parser and pretty-printer also understand the generalized class surface:
+superclass constraints, multiple class parameters, and Unicode functional
+dependencies:
+
+```mlf
+class Functor f => Monad (m :: * -> *) (f :: * -> *) | m → f {
+  bind : forall a b. m a -> (a -> m b) -> m b;
+}
+```
+
+This syntax is accepted into the frontend AST and checked before core erasure.
+The current checker admits zero-method multi-parameter evidence,
+vector-specialized method-bearing multi-parameter instance dispatch, superclass
+evidence flattened through subclass constraints and instance prerequisites, and
+functional-dependency closure for method calls whose remaining class arguments
+are fixed by visible instances or local evidence. Invalid fundeps, ambiguous
+fundep instances, fundep-conflicting instances, and still-ambiguous
+multi-parameter method uses fail closed with structured diagnostics. The
+implementation must not silently erase these forms into the older
+single-parameter method evidence path. `→` is the only fundep arrow; ASCII
+`->` remains the type/kind arrow and is not accepted as a fundep alias.
 
 Variable-headed type applications such as `f a` and `p a b` are accepted in
 source types and pretty-print back to the same structure:
@@ -176,10 +204,35 @@ as `Box` in `MaybeF Box Bool`. Direct raw eMLF pipeline inputs that bypass the
 program checker and still contain an unresolved variable-headed type
 application remain fail-closed.
 
+Raw frontend source types can use Unicode type lambdas in annotations when
+they normalize away before the core boundary, for example `(Λa. a -> a) Int`.
+The normalizer beta-reduces these applications, and any residual type lambda or
+non-normalized general type application is rejected before erasure into MLF
+core types.
+
+Closed type-family declarations have parse/pretty syntax on `.mlfp`:
+
+```mlf
+type family Normalize (a :: κ) :: κ where {
+  Normalize Int = Int;
+  Normalize (Box a) = a;
+  Normalize a = (Λx. x) a;
+}
+```
+
+This declaration syntax is represented in the frontend AST, and the internal
+pre-core type-level normalizer owns ordered closed-family reduction, stuck
+family diagnostics, cycle detection, and fuel exhaustion. During program
+checking, reducible family applications normalize and family declarations erase
+before the existing resolver/core boundary sees the program. Stuck, cyclic, and
+fuel-exhausted reductions fail before core erasure. Open families and
+associated types are not part of the contract.
+
 Unsupported forms include using a first-order parameter as a type function,
 unsaturated or over-applied type constructors, mismatched higher-kinded
-arguments such as passing `Bool` where `* -> *` is required, kind polymorphism,
-type lambdas, and type-level computation.
+arguments such as passing `Bool` where `* -> *` is required, ordinary
+data/class kind polymorphism, open type-family declarations, associated types,
+unreduced type lambdas, and checker-visible stuck type-level computation.
 
 ## Case Expressions And Patterns
 
@@ -233,8 +286,15 @@ program fails with an ambiguous-constructor diagnostic.
 
 ## Typeclasses
 
-The current typeclass lane supports single-parameter classes, class
-constraints, schema instances, deriving, and overloaded method dispatch:
+The current checked typeclass lane supports single-parameter method classes,
+class constraints, schema instances, deriving, overloaded method dispatch,
+zero-method multi-parameter class evidence, and method-bearing
+multi-parameter dispatch when every class argument is determined at the call
+site or by functional-dependency closure over visible instances/evidence.
+Superclass constraints are checked as flattened evidence and specialized
+instance prerequisites. Invalid fundeps, ambiguous fundep instances,
+fundep-conflicting instances, and ambiguous multi-parameter method uses fail
+closed before evidence elaboration:
 
 ```mlf
 class Eq a {
@@ -301,36 +361,48 @@ The initial standard-library surface is deliberately small:
 ```mlf
 data Unit =
     Unit : Unit;
-
-class Monad (m :: * -> *) {
-  pure : forall a. a -> m a;
-  bind : forall a b. m a -> (a -> m b) -> m b;
-}
 ```
 
 `Unit` is the unit result type for completed effects. It has one inhabitant,
 `Unit`, and is the only supported result type for effectful program entrypoints
-in the initial IO surface. `Functor` and `Applicative` are explicitly deferred:
-the first IO slice exposes `Monad` directly and does not require the broader
-Haskell class hierarchy.
+in the initial IO surface. The standard-library hierarchy is now explicit:
+
+```mlf
+class Functor (f :: * -> *) {
+  map : forall a b. (a -> b) -> f a -> f b;
+}
+
+class Functor f => Applicative (f :: * -> *) {
+  pure : forall a. a -> f a;
+  ap : forall a b. f (a -> b) -> f a -> f b;
+}
+
+class Applicative m => Monad (m :: * -> *) {
+  bind : forall a b. m a -> (a -> m b) -> m b;
+}
+```
 
 `IO` is an opaque source type constructor with kind `* -> *`. It is owned by the
 program/runtime boundary rather than declared as an ordinary source ADT. User
 programs may mention `IO a` in types and use the standard-library operations
 below, but they cannot construct, deconstruct, derive, or pattern match on an
-`IO` representation. The standard library provides a coherent `Monad IO`
-instance backed by implementation-reserved primitives such as `__io_pure` and
-`__io_bind`; those primitive names are not the user-facing API.
+`IO` representation. The standard library provides coherent `Functor IO`,
+`Applicative IO`, and `Monad IO` instances backed by implementation-reserved
+primitives such as `__io_pure` and `__io_bind`; those primitive names are not
+the user-facing API.
 
-The initial text operation is:
+The current source-level IO prelude exposes text, file, process, reference, and
+argument operations through the opaque `IO` boundary. The initial text operation
+is:
 
 ```mlf
 putStrLn : String -> IO Unit
 ```
 
-`putStrLn` uses the existing source `String` base type and string literals.
-There is no narrower byte/character primitive in the first contract, and input
-operations such as `readLine : IO String` are deferred.
+`putStrLn` and `putStr` use the existing source `String` base type and string
+literals. Native-backed IO also includes `getLine`, `readFile`, `writeFile`,
+`appendFile`, `exitWith`, `newIORef`, `readIORef`, `writeIORef`, and `getArgs`.
+There is no narrower byte/character primitive in the first contract.
 
 Pure program entrypoints remain accepted:
 
@@ -344,7 +416,7 @@ The checked effectful entrypoint mode is `main : IO Unit`:
 
 ```mlf
 module Main export (main) {
-  import Prelude exposing (Unit(..), IO, Monad, bind, pure, putStrLn);
+  import Prelude exposing (Unit(..), IO, Applicative, Monad, bind, pure, putStrLn);
 
   def main : IO Unit =
     bind (putStrLn "hello") (\(_done : Unit) putStrLn "world");
@@ -353,19 +425,32 @@ module Main export (main) {
 
 An `IO` action is still an opaque value while the program is checked and
 normalized. `run-program` executes a checked `main : IO Unit` by interpreting
-the reserved `__io_pure`, `__io_bind`, and `__io_putStrLn` primitive boundary.
-Effects occur only when the final `main` action is run. Sequencing is
-determined by `bind`, `putStrLn` appends its text argument plus a newline to
-stdout, and successful `IO Unit` programs do not render a `Unit` result value.
-The initial runtime contract rejects `main : IO a` for non-`Unit` `a`.
+the reserved IO primitive boundary. Effects occur only when the final `main`
+action is run. Sequencing is determined by `bind`, `putStrLn` appends its text
+argument plus a newline to stdout, and successful `IO Unit` programs do not
+render a `Unit` result value. The `run-program` output path also accepts
+`main : IO a` when the action result can be converted back to a runtime value;
+operations that require native process support, such as `getLine`, file IO,
+`IORef`, `exitWith`, and `getArgs`, fail closed with a diagnostic that points to
+native execution.
 
-The backend contract is fail-closed for the first IO slice. `emit-backend`
-rejects checked IO entrypoints with a structured unsupported diagnostic until a
-later backend/runtime issue adds a concrete lowering plan for the selected
-primitives. It also rejects pure entrypoints that depend on IO-typed helpers or
-direct opaque primitives. The backend does not lower `__io_pure`, `__io_bind`,
-or `__io_putStrLn` yet. That rejection does not change source typing, pure
-runtime rendering, or the existing first-order LLVM subset.
+The backend/native contract is layer-specific rather than a blanket IO
+rejection. `emit-backend` lowers checked programs that reference
+inventory-classified native IO primitives by emitting private
+closure-allocating wrappers and the runtime declarations they need; it does not
+add a process entrypoint. `emit-native` starts from the same backend IR, adds
+the C ABI `main` wrapper, and executes `main : IO ...` actions without rendering
+their result values. The covered native wrapper paths include `__io_pure`,
+`__io_bind`, `__io_map`, `__io_putStrLn`, `__io_putStr`, `__io_getLine`,
+`__io_readFile`, `__io_writeFile`, `__io_appendFile`, `__io_exitWith`,
+`__io_newIORef`, `__io_readIORef`, `__io_writeIORef`, and `__io_getArgs`.
+`Functor IO.map` is supported through that wrapper path when the mapped action
+and result stay inside the lowerable/native-renderable subset. `Applicative
+IO.ap` remains a source and `run-program` operation, but its reserved
+`__io_ap` primitive is not native-lowerable yet; backend/native emission must
+fail closed if an `ap` use survives to emission, especially for function-valued
+`IO` results. These boundaries do not change source typing, pure runtime
+rendering, or the existing first-order LLVM subset.
 
 ## Backend Boundary
 
@@ -429,13 +514,15 @@ module Main export (main) {
 Current prelude contents:
 
 - `Unit(..)` with the `Unit` value constructor
-- opaque `IO`
+- opaque `IO` and `IORef`
 - `Nat(..)` with derived `Eq Nat`
 - `Option(..)` with derived `Eq a => Eq (Option a)`
 - `List(..)` with `Nil`, `Cons`, and derived `Eq a => Eq (List a)`
 - `Eq` and `eq`
-- `Monad`, with the built-in `Monad IO` instance
-- `pure`, `bind`, and `putStrLn`
+- `Functor`, `Applicative`, and `Monad`, with built-in coherent `IO` instances
+- `map`, `pure`, `ap`, and `bind`
+- `putStrLn`, `putStr`, `getLine`, `readFile`, `writeFile`, `appendFile`,
+  `exitWith`, `newIORef`, `readIORef`, `writeIORef`, and `getArgs`
 - `and`
 - `id`
 

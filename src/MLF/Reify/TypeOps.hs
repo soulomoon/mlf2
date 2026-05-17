@@ -33,6 +33,7 @@ where
 import Control.Applicative ((<|>))
 import Data.Foldable (toList)
 import qualified Data.IntSet as IntSet
+import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
 import qualified MLF.Constraint.NodeAccess as NodeAccess
@@ -89,6 +90,18 @@ freeTypeVarsFromWith bindInBound bound0 ty =
             (\arg acc -> Set.union (runBoundFun arg boundSet) acc)
             Set.empty
             args
+      TVarAppIF v args ->
+        BoundFun $ \boundSet ->
+          let headFree =
+                if Set.member v boundSet
+                  then Set.empty
+                  else Set.singleton v
+              argsFree =
+                foldr
+                  (\arg acc -> Set.union (runBoundFun arg boundSet) acc)
+                  Set.empty
+                  args
+           in Set.union headFree argsFree
       TBaseIF _ -> BoundFun (const Set.empty)
       TBottomIF -> BoundFun (const Set.empty)
       TForallIF v mb body ->
@@ -112,6 +125,11 @@ substTypeCapture x s = goSub
       TArrow a b ->
         TArrow (substTypeCapture name replacement a) (substTypeCapture name replacement b)
       TCon c args -> TCon c (fmap (substTypeCapture name replacement) args)
+      TVarApp v args ->
+        let args' = fmap (substTypeCapture name replacement) args
+         in if v == name
+              then composeTypeHead v replacement args'
+              else TVarApp v args'
       TBase b -> TBase b
       TBottom -> TBottom
       TForall v mb body
@@ -157,6 +175,11 @@ substTypeCapture x s = goSub
             | otherwise -> TVar v
           TArrowIF d c -> TArrow (snd (unIxPair d)) (snd (unIxPair c))
           TConIF c args -> TCon c (fmap (snd . unIxPair) args)
+          TVarAppIF v args ->
+            let args' = fmap (snd . unIxPair) args
+             in if v == x
+                  then composeTypeHead v s args'
+                  else TVarApp v args'
           TBaseIF b -> TBase b
           TBottomIF -> TBottom
           TForallIF v mb body
@@ -201,6 +224,11 @@ substTypeSimple name replacement = paraIx alg
       TArrow a b ->
         TArrow (substTypeSimple name0 replacement0 a) (substTypeSimple name0 replacement0 b)
       TCon c args -> TCon c (fmap (substTypeSimple name0 replacement0) args)
+      TVarApp v args ->
+        let args' = fmap (substTypeSimple name0 replacement0) args
+         in if v == name0
+              then composeTypeHead v replacement0 args'
+              else TVarApp v args'
       TBase b -> TBase b
       TBottom -> TBottom
       TForall v mb body
@@ -221,6 +249,11 @@ substTypeSimple name replacement = paraIx alg
         | otherwise -> TVar v
       TArrowIF d c -> TArrow (snd (unIxPair d)) (snd (unIxPair c))
       TConIF c args -> TCon c (fmap (snd . unIxPair) args)
+      TVarAppIF v args ->
+        let args' = fmap (snd . unIxPair) args
+         in if v == name
+              then composeTypeHead v replacement args'
+              else TVarApp v args'
       TBaseIF b -> TBase b
       TBottomIF -> TBottom
       TForallIF v mb body
@@ -251,6 +284,15 @@ freshTypeNameFromCounter n used =
 renameTypeVar :: String -> String -> ElabType -> ElabType
 renameTypeVar old new = substTypeSimple old (TVar new)
 
+composeTypeHead :: String -> ElabType -> NE.NonEmpty ElabType -> Ty v
+composeTypeHead original replacement args =
+  case replacement of
+    TVar name -> TVarApp name args
+    TVarApp name existingArgs -> TVarApp name (existingArgs <> args)
+    TBase con -> TCon con args
+    TCon con existingArgs -> TCon con (existingArgs <> args)
+    _ -> TVarApp original args
+
 -- | Return the first explicit recursive type that violates the M4 v1
 -- contractiveness policy.
 --
@@ -265,6 +307,7 @@ firstNonContractiveRecursiveType = goType
       TVar _ -> Nothing
       TArrow a b -> goType a <|> goType b
       TCon _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
+      TVarApp _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
       TBase _ -> Nothing
       TBottom -> Nothing
       TForall _ mb body -> maybe Nothing goBound mb <|> goType body
@@ -276,6 +319,7 @@ firstNonContractiveRecursiveType = goType
     goBound bound = case bound of
       TArrow a b -> goType a <|> goType b
       TCon _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
+      TVarApp _ args -> foldr (\arg acc -> goType arg <|> acc) Nothing args
       TBase _ -> Nothing
       TBottom -> Nothing
       TForall _ mb body -> maybe Nothing goBound mb <|> goType body
@@ -291,6 +335,9 @@ firstNonContractiveRecursiveType = goType
           TVar v -> shadowed || v /= needle || guarded
           TArrow a b -> bodyType True shadowed a && bodyType True shadowed b
           TCon _ args -> all (bodyType True shadowed) args
+          TVarApp v args ->
+            (shadowed || v /= needle || guarded)
+              && all (bodyType guarded shadowed) args
           TBase _ -> True
           TBottom -> True
           TForall v mb body ->
@@ -305,6 +352,9 @@ firstNonContractiveRecursiveType = goType
         bodyBound guarded shadowed bound = case bound of
           TArrow a b -> bodyType True shadowed a && bodyType True shadowed b
           TCon _ args -> all (bodyType True shadowed) args
+          TVarApp v args ->
+            (shadowed || v /= needle || guarded)
+              && all (bodyType guarded shadowed) args
           TBase _ -> True
           TBottom -> True
           TForall v mb body ->
@@ -330,6 +380,8 @@ alphaEqType = go Map.empty Map.empty
         go envL envR a1 a2 && go envL envR b1 b2
       (TCon c1 args1, TCon c2 args2) ->
         c1 == c2 && alphaEqArgs envL envR (toList args1) (toList args2)
+      (TVarApp a args1, TVarApp b args2) ->
+        alphaEqVar envL envR a b && alphaEqArgs envL envR (toList args1) (toList args2)
       (TBase b1, TBase b2) -> b1 == b2
       (TBottom, TBottom) -> True
       (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
@@ -347,6 +399,14 @@ alphaEqType = go Map.empty Map.empty
       (a : as', b : bs') -> go envL envR a b && alphaEqArgs envL envR as' bs'
       _ -> False
 
+    alphaEqVar envL envR a b =
+      case Map.lookup a envL of
+        Just b' -> b == b'
+        Nothing ->
+          case Map.lookup b envR of
+            Just a' -> a == a'
+            Nothing -> a == b
+
     alphaEqMaybeBound envL envR mb1 mb2 = case (mb1, mb2) of
       (Nothing, Nothing) -> True
       (Just b1, Just b2) -> alphaEqBound envL envR b1 b2
@@ -357,6 +417,8 @@ alphaEqType = go Map.empty Map.empty
         go envL envR a1 a2 && go envL envR b1' b2'
       (TCon c1 args1, TCon c2 args2) ->
         c1 == c2 && alphaEqArgs envL envR (toList args1) (toList args2)
+      (TVarApp a args1, TVarApp b args2) ->
+        alphaEqVar envL envR a b && alphaEqArgs envL envR (toList args1) (toList args2)
       (TBase b1', TBase b2') -> b1' == b2'
       (TBottom, TBottom) -> True
       (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
@@ -510,6 +572,8 @@ churchAwareEqType = go Map.empty Map.empty
         go envL envR a1 a2 && go envL envR b1 b2
       (TCon c1 args1, TCon c2 args2) ->
         c1 == c2 && eqArgs envL envR (toList args1) (toList args2)
+      (TVarApp a args1, TVarApp b args2) ->
+        eqVar envL envR a b && eqArgs envL envR (toList args1) (toList args2)
       (TBase b1, TBase b2) -> b1 == b2
       (TBottom, TBottom) -> True
       (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
@@ -534,6 +598,14 @@ churchAwareEqType = go Map.empty Map.empty
       (a : as', b : bs') -> go envL envR a b && eqArgs envL envR as' bs'
       _ -> False
 
+    eqVar envL envR a b =
+      case Map.lookup a envL of
+        Just b' -> b == b'
+        Nothing ->
+          case Map.lookup b envR of
+            Just a' -> a == a'
+            Nothing -> a == b
+
     eqMaybeBound envL envR mb1 mb2 = case (mb1, mb2) of
       (Nothing, Nothing) -> True
       (Just b1, Just b2) -> eqBound envL envR b1 b2
@@ -545,6 +617,8 @@ churchAwareEqType = go Map.empty Map.empty
         go envL envR a1 a2 && go envL envR b1' b2'
       (TCon c1 args1, TCon c2 args2) ->
         c1 == c2 && eqArgs envL envR (toList args1) (toList args2)
+      (TVarApp a args1, TVarApp b args2) ->
+        eqVar envL envR a b && eqArgs envL envR (toList args1) (toList args2)
       (TBase b1', TBase b2') -> b1' == b2'
       (TBottom, TBottom) -> True
       (TForall v1 mb1 body1, TForall v2 mb2 body2) ->
@@ -594,6 +668,12 @@ matchType binderSet = goMatch Map.empty Map.empty
       (TCon c0 args0, TCon c1 args1)
         | c0 == c1 ->
             matchArgs env subst (toList args0) (toList args1)
+      (TVarApp v argsP, _)
+        | Set.member v binderSet ->
+            matchVarHead env subst v (toList argsP) tyT
+      (TVarApp v args0, TVarApp v' args1)
+        | boundVarMatches env v v' ->
+            matchArgs env subst (toList args0) (toList args1)
       (TBase b0, TBase b1)
         | b0 == b1 -> Right subst
       (TBottom, TBottom) -> Right subst
@@ -614,12 +694,57 @@ matchType binderSet = goMatch Map.empty Map.empty
         matchArgs env subst1 as bs
       _ -> Left (InstantiationError "matchType: structure mismatch")
 
+    matchVarHead env subst0 v argsP tyT = do
+      (targetHead, targetArgs) <-
+        maybe
+          (Left (InstantiationError "matchType: higher-kinded target mismatch"))
+          Right
+          (unapplyTypeHead tyT)
+      let prefixLen = length targetArgs - length argsP
+      if prefixLen < 0
+        then Left (InstantiationError "matchType: higher-kinded arity mismatch")
+        else do
+          let (prefixArgs, suffixArgs) = splitAt prefixLen targetArgs
+              replacement = applyHeadArgs targetHead prefixArgs
+          subst1 <- bindHeadSubst v replacement subst0
+          matchArgs env subst1 argsP suffixArgs
+
+    bindHeadSubst v replacement subst0 =
+      case Map.lookup v subst0 of
+        Nothing -> Right (Map.insert v replacement subst0)
+        Just existing
+          | alphaEqType existing replacement -> Right subst0
+          | otherwise -> Left (InstantiationError "matchType: higher-kinded binder mismatch")
+
+    boundVarMatches env v v' =
+      case Map.lookup v env of
+        Just expected -> expected == v'
+        Nothing -> v == v'
+
+    unapplyTypeHead ty = case ty of
+      TVar v -> Just (TVar v, [])
+      TVarApp v args -> Just (TVar v, toList args)
+      TBase base -> Just (TBase base, [])
+      TCon con args -> Just (TBase con, toList args)
+      _ -> Nothing
+
+    applyHeadArgs headTy args =
+      case NE.nonEmpty args of
+        Nothing -> headTy
+        Just argsNE -> composeTypeHead "_" headTy argsNE
+
     matchBound env subst boundP boundT = case (boundP, boundT) of
       (TArrow a b, TArrow a' b') -> do
         subst1 <- goMatch env subst a a'
         goMatch env subst1 b b'
       (TCon c0 args0, TCon c1 args1)
         | c0 == c1 ->
+            matchArgs env subst (toList args0) (toList args1)
+      (TVarApp v argsP, _)
+        | Set.member v binderSet ->
+            matchVarHead env subst v (toList argsP) (tyToElab boundT)
+      (TVarApp v args0, TVarApp v' args1)
+        | boundVarMatches env v v' ->
             matchArgs env subst (toList args0) (toList args1)
       (TBase b0, TBase b1)
         | b0 == b1 -> Right subst
@@ -700,6 +825,17 @@ inlineBaseBoundsType constraint canonical = cataIx alg
       TForallIF v mb body -> TForall v mb body
       TMuIF v body -> TMu v body
       TConIF c args -> TCon c args
+      TVarAppIF v args ->
+        case parseNameId v of
+          Just nidInt ->
+            let nid = NodeId nidInt
+             in case resolveBaseBoundForInstConstraint constraint canonical nid of
+                  Just baseN ->
+                    case NodeAccess.lookupNode constraint baseN of
+                      Just TyBase {tnBase = b} -> TCon b args
+                      _ -> TVarApp v args
+                  Nothing -> TVarApp v args
+          Nothing -> TVarApp v args
       TBaseIF b -> TBase b
       TBottomIF -> TBottom
 
@@ -760,6 +896,10 @@ inlineAliasBoundsWithBySeen fallbackToBottom canonical nodes lookupBound reifyBo
               Nothing -> ty
       TArrow a b -> TArrow (goAlias seen boundNames a) (goAlias seen boundNames b)
       TCon c args -> TCon c (fmap (goAlias seen boundNames) args)
+      TVarApp v args ->
+        let args' = fmap (goAlias seen boundNames) args
+            headTy = goAlias seen boundNames (TVar v)
+         in composeTypeHead v headTy args'
       TForall v mb body ->
         let boundNames' = Set.insert v boundNames
             mb' = fmap (goBound seen boundNames') mb
@@ -774,6 +914,10 @@ inlineAliasBoundsWithBySeen fallbackToBottom canonical nodes lookupBound reifyBo
     goBound seen boundNames bound = case bound of
       TArrow a b -> TArrow (goAlias seen boundNames a) (goAlias seen boundNames b)
       TCon c args -> TCon c (fmap (goAlias seen boundNames) args)
+      TVarApp v args ->
+        let args' = fmap (goAlias seen boundNames) args
+            headTy = goAlias seen boundNames (TVar v)
+         in composeTypeHead v headTy args'
       TBase b -> TBase b
       TBottom -> TBottom
       TForall v mb body ->

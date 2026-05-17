@@ -164,6 +164,22 @@ finalizeScheme FinalizeInput {..} =
                       args
                   args' = reverse argsRev
                in (TCon c (arg' :| args'), free2, n2)
+            TVarApp v (arg :| args) ->
+              let (headTy, free1, n1) = go boundEnv freeEnv n (TVar v)
+                  v' = case headTy of
+                    TVar name -> name
+                    _ -> v
+                  (arg', freeArg, nArg) = go boundEnv free1 n1 arg
+                  (argsRev, free2, n2) =
+                    foldl
+                      ( \(acc, freeAcc, nAcc) a ->
+                          let (a', free', n') = go boundEnv freeAcc nAcc a
+                           in (a' : acc, free', n')
+                      )
+                      ([], freeArg, nArg)
+                      args
+                  args' = reverse argsRev
+               in (TVarApp v' (arg' :| args'), free2, n2)
             TForall v mb body ->
               let v' = "v" ++ show n
                   n1 = n + 1
@@ -198,6 +214,22 @@ finalizeScheme FinalizeInput {..} =
                       args
                   args' = reverse argsRev
                in (TCon c (arg' :| args'), free2, n2)
+            TVarApp v (arg :| args) ->
+              let (headTy, free1, n1) = go boundEnv freeEnv n (TVar v)
+                  v' = case headTy of
+                    TVar name -> name
+                    _ -> v
+                  (arg', freeArg, nArg) = go boundEnv free1 n1 arg
+                  (argsRev, free2, n2) =
+                    foldl
+                      ( \(acc, freeAcc, nAcc) a ->
+                          let (a', free', n') = go boundEnv freeAcc nAcc a
+                           in (a' : acc, free', n')
+                      )
+                      ([], freeArg, nArg)
+                      args
+                  args' = reverse argsRev
+               in (TVarApp v' (arg' :| args'), free2, n2)
             TBase b -> (TBase b, freeEnv, n)
             TBottom -> (TBottom, freeEnv, n)
             TForall v mb body ->
@@ -224,6 +256,7 @@ finalizeScheme FinalizeInput {..} =
                 case ty of
                   TArrow a b -> TArrow (goReplace a) (goReplace b)
                   TCon c args -> TCon c (fmap goReplace args)
+                  TVarApp v args -> TVarApp v (fmap goReplace args)
                   TForall name mb body ->
                     TForall name (fmap (mapBoundType goReplace) mb) (goReplace body)
                   TMu name body -> TMu name (goReplace body)
@@ -239,11 +272,13 @@ finalizeScheme FinalizeInput {..} =
           TForall v Nothing (stripAliasForall body)
         TArrow a b -> TArrow (stripAliasForall a) (stripAliasForall b)
         TCon c args -> TCon c (fmap stripAliasForall args)
+        TVarApp v args -> TVarApp v (fmap stripAliasForall args)
         TMu v body -> TMu v (stripAliasForall body)
         _ -> ty
       stripAliasForallBound bound = case bound of
         TArrow a b -> TArrow (stripAliasForall a) (stripAliasForall b)
         TCon c args -> TCon c (fmap stripAliasForall args)
+        TVarApp v args -> TVarApp v (fmap stripAliasForall args)
         TBase _ -> bound
         TBottom -> bound
         TForall v mb body ->
@@ -327,6 +362,7 @@ finalizeScheme FinalizeInput {..} =
             TVarIF v -> TVar (renameFromSubst v)
             TArrowIF a b -> TArrow a b
             TConIF c args -> TCon c args
+            TVarAppIF v args -> TVarApp (renameFromSubst v) args
             TBaseIF b -> TBase b
             TBottomIF -> TBottom
             TForallIF v mb body ->
@@ -382,6 +418,7 @@ finalizeScheme FinalizeInput {..} =
             TVarIF v -> TVar (renameFromMap v)
             TArrowIF a b -> TArrow a b
             TConIF c args -> TCon c args
+            TVarAppIF v args -> TVarApp (renameFromMap v) args
             TBaseIF b -> TBase b
             TBottomIF -> TBottom
             TForallIF v mb body ->

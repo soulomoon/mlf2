@@ -457,6 +457,7 @@ validateOriginalCanonicalAgreement s =
     tnTag TyArrow {} = "arrow"
     tnTag TyBase {} = "base"
     tnTag TyCon {} = "con"
+    tnTag TyVarApp {} = "varapp"
     tnTag TyForall {} = "forall"
     tnTag TyExp {} = "exp"
     tnTag TyMu {} = "mu"

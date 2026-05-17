@@ -2922,6 +2922,27 @@ programSpecStandaloneRuntimeSuccessCases =
         )
         (ExpectRuntimeValue "true")
     , ProgramRuntimeCase
+        "standalone: runs superclass method evidence through subclass constraint"
+        ( InlineProgram $
+            unlines
+                [ "module Main export (main) {"
+                , "  class Eq a {"
+                , "    eq : a -> a -> Bool;"
+                , "  }"
+                , "  class Eq a => Ord a {"
+                , "  }"
+                , "  instance Eq Int {"
+                , "    eq = λ(_x : Int) λ(_y : Int) true;"
+                , "  }"
+                , "  instance Ord Int {"
+                , "  }"
+                , "  def needsOrd : Ord Int => Bool = eq 1 1;"
+                , "  def main : Bool = needsOrd;"
+                , "}"
+                ]
+        )
+        (ExpectRuntimeValue "true")
+    , ProgramRuntimeCase
         "standalone: renders closed ADT values with source constructor syntax"
         ( InlineProgram $
             unlines

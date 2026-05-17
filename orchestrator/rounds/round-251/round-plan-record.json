@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-251",
+  "roadmap_id": "2026-05-17-00-mlfp-package-substrate-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002",
+  "milestone_id": "milestone-7",
+  "direction_id": "direction-7a-full-type-level-handoff-merge",
+  "extracted_item_id": "round-251-full-type-level-handoff",
+  "plan_path": "orchestrator/rounds/round-251/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

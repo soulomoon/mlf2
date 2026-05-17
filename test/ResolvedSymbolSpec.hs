@@ -88,6 +88,8 @@ containsSrcType needle ty
         STArrow dom cod -> containsSrcType needle dom || containsSrcType needle cod
         STCon _ args -> any (containsSrcType needle) (toListNE args)
         STVarApp _ args -> any (containsSrcType needle) (toListNE args)
+        STTyLam _ body -> containsSrcType needle body
+        STTyApp fun arg -> containsSrcType needle fun || containsSrcType needle arg
         STForall _ mb body -> maybe False (containsSrcType needle . unSrcBound) mb || containsSrcType needle body
         STMu _ body -> containsSrcType needle body
         STVar {} -> False
@@ -100,6 +102,8 @@ containsVarAppHead needle ty =
     STArrow dom cod -> containsVarAppHead needle dom || containsVarAppHead needle cod
     STCon _ args -> any (containsVarAppHead needle) (toListNE args)
     STVarApp name args -> name == needle || any (containsVarAppHead needle) (toListNE args)
+    STTyLam _ body -> containsVarAppHead needle body
+    STTyApp fun arg -> containsVarAppHead needle fun || containsVarAppHead needle arg
     STForall _ mb body -> maybe False (containsVarAppHead needle . unSrcBound) mb || containsVarAppHead needle body
     STMu _ body -> containsVarAppHead needle body
     STVar {} -> False
@@ -220,7 +224,9 @@ eqMethodInfo =
       methodConstraints = [],
       methodConstraintInfos = [],
       methodTypeParam = firstOrderTypeParam "a",
-      methodParamName = "a"
+      methodParamName = "a",
+      methodTypeParams = firstOrderTypeParam "a" :| [],
+      methodParamNames = "a" :| []
     }
 
 qualifiedEqMethodInfo :: MethodInfo
@@ -235,6 +241,11 @@ eqClassInfo =
       classModule = "Lib",
       classTypeParam = firstOrderTypeParam "a",
       classParamName = "a",
+      classTypeParams = firstOrderTypeParam "a" :| [],
+      classParamNames = "a" :| [],
+      classSuperclasses = [],
+      classSuperclassInfos = [],
+      classFunctionalDependencies = [],
       classMethods = Map.singleton "eq" eqMethodInfo
     }
 
@@ -246,6 +257,11 @@ qualifiedEqClassInfo =
       classModule = "Lib",
       classTypeParam = firstOrderTypeParam "a",
       classParamName = "a",
+      classTypeParams = firstOrderTypeParam "a" :| [],
+      classParamNames = "a" :| [],
+      classSuperclasses = [],
+      classSuperclassInfos = [],
+      classFunctionalDependencies = [],
       classMethods = Map.singleton "eq" qualifiedEqMethodInfo
     }
 

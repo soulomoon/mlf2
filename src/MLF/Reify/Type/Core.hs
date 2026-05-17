@@ -133,6 +133,8 @@ reifyWith _contextLabel presolutionView nameForVar isNamed rootMode nid =
                             TyBottom {} -> True
                             TyCon {tnArgs = args} ->
                               all (go visited') (NE.toList args)
+                            TyVarApp {tnVarHead = headNode, tnArgs = args} ->
+                              all (go visited') (headNode : NE.toList args)
                             TyVar {} ->
                               case lookupVarBoundS nidC of
                                 Nothing -> True
@@ -410,6 +412,23 @@ reifyWith _contextLabel presolutionView nameForVar isNamed rootMode nid =
                                   (cache0, [])
                                   (NE.toList args)
                               pure (cache', TCon con (NE.fromList (reverse args')))
+                            TyVarApp {tnVarHead = headNode, tnArgs = args} -> do
+                              (cache1, headTy) <- vChild cache0 namedExtra' mode (canonical headNode)
+                              (cache', args') <-
+                                foldM
+                                  ( \(cacheAcc, acc) arg -> do
+                                      (cacheNext, arg') <- vChild cacheAcc namedExtra' mode (canonical arg)
+                                      pure (cacheNext, arg' : acc)
+                                  )
+                                  (cache1, [])
+                                  (NE.toList args)
+                              let argsNE = NE.fromList (reverse args')
+                              case headTy of
+                                TVar name -> pure (cache', TVarApp name argsNE)
+                                TBase con -> pure (cache', TCon con argsNE)
+                                TCon con existingArgs -> pure (cache', TCon con (existingArgs <> argsNE))
+                                TVarApp name existingArgs -> pure (cache', TVarApp name (existingArgs <> argsNE))
+                                _ -> pure (cache', TVarApp (varName (canonical headNode)) argsNE)
                             TyForall {tnBody = b} ->
                               let bodyC = canonical b
                                in vChild cache0 namedExtra' mode bodyC
@@ -707,6 +726,8 @@ freeVarsInView presolutionView nid visited
                 `IntSet.union` freeVarsChild visited' c
             Just TyCon {tnArgs = args} ->
               IntSet.unions (map (freeVarsChild visited') (NE.toList args))
+            Just TyVarApp {tnVarHead = headNode, tnArgs = args} ->
+              IntSet.unions (map (freeVarsChild visited') (headNode : NE.toList args))
             Just TyForall {tnBody = b} ->
               freeVarsChild visited' b
             Just TyMu {tnBody = b} ->

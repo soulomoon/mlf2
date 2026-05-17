@@ -155,6 +155,8 @@ processUnifyEdgesWith strategy findRoot lookupNode unionNodes = foldM processOne
                         mismatch (MismatchTyCon c1 c2) acc edge
                     Left (UnifyDecompose.MismatchTyConArity c k1 k2) ->
                         mismatch (MismatchTyConArity c k1 k2) acc edge
+                    Left (UnifyDecompose.MismatchTyVarAppArity _ _) ->
+                        mismatch (MismatchConstructor leftNode rightNode) acc edge
                     Left UnifyDecompose.MismatchConstructor ->
                         mismatch (MismatchConstructor leftNode rightNode) acc edge
 
@@ -187,6 +189,7 @@ processUnifyEdgesWith strategy findRoot lookupNode unionNodes = foldM processOne
     insertEdges node newEdges acc = case node of
         TyArrow{} -> acc ++ newEdges
         TyCon{} -> acc ++ newEdges
+        TyVarApp{} -> acc ++ newEdges
         TyExp{} -> newEdges ++ acc
         TyForall{} -> newEdges ++ acc
         TyMu{} -> newEdges ++ acc

@@ -32,8 +32,6 @@ import qualified Data.List.NonEmpty as NE
 
 import qualified MLF.Util.Order as Order
 import MLF.Constraint.Types.Graph
-import MLF.Constraint.Types.Witness
-import MLF.Constraint.Types.Presolution
 import MLF.Elab.Types
 import qualified MLF.Constraint.Traversal as Traversal
 import qualified MLF.Binding.Tree as Binding
@@ -88,6 +86,7 @@ contextToNodeBoundWithOrderKeys canonicalNode keys c root target = do
                         Just TyVar{} -> True
                         Just TyArrow{} -> True
                         Just TyCon{} -> True
+                        Just TyVarApp{} -> True
                         Just TyMu{} -> True
                         Just TyBase{} -> True
                         Just TyBottom{} -> True
@@ -180,6 +179,9 @@ contextToNodeBoundWithOrderKeys canonicalNode keys c root target = do
                                             finish res memo'
                                         TyCon{ tnArgs = args } -> do
                                             (memo', res) <- goChildren visiting' memo (NE.toList args)
+                                            finish res memo'
+                                        TyVarApp{ tnVarHead = headNode, tnArgs = args } -> do
+                                            (memo', res) <- goChildren visiting' memo (headNode : NE.toList args)
                                             finish res memo'
                                         TyMu{ tnBody = body } -> do
                                             (memo', res) <- go visiting' memo body

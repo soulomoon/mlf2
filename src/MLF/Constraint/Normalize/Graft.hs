@@ -146,9 +146,11 @@ partitionGraftable edges nodes = do
                 not (Set.member base polySyms)
               (Just TyVar {}, Just TyCon {tnCon = con}) ->
                 not (Set.member con polySyms)
+              (Just TyVar {}, Just TyVarApp {}) -> True
               (Just TyArrow {}, Just TyArrow {}) -> True
               (Just TyBase {}, Just TyBase {}) -> True
               (Just TyCon {}, Just TyCon {}) -> True
+              (Just TyVarApp {}, Just TyVarApp {}) -> True
               (Just TyBottom {}, Just TyBottom {}) -> True
               (Just TyArrow {}, Just TyBase {}) -> True
               (Just TyBase {}, Just TyArrow {}) -> True
@@ -162,6 +164,14 @@ partitionGraftable edges nodes = do
               (Just TyCon {}, Just TyBase {}) -> True
               (Just TyCon {}, Just TyBottom {}) -> True
               (Just TyBottom {}, Just TyCon {}) -> True
+              (Just TyVarApp {}, Just TyArrow {}) -> True
+              (Just TyArrow {}, Just TyVarApp {}) -> True
+              (Just TyVarApp {}, Just TyBase {}) -> True
+              (Just TyBase {}, Just TyVarApp {}) -> True
+              (Just TyVarApp {}, Just TyCon {}) -> True
+              (Just TyCon {}, Just TyVarApp {}) -> True
+              (Just TyVarApp {}, Just TyBottom {}) -> True
+              (Just TyBottom {}, Just TyVarApp {}) -> True
               _ -> False
   pure (filter isGraftable edges, filter (not . isGraftable) edges)
 
@@ -319,6 +329,33 @@ graftEdge edge = do
               argUnifyEdges =
                 zipWith (\v r -> UnifyEdge v (findRoot uf r)) argVars (NE.toList rArgs)
           pure $ Just (boundEdges ++ argUnifyEdges)
+    (Just TyVar {tnBound = mbBound}, Just (TyVarApp {tnVarHead = rHead, tnArgs = rArgs}))
+      | occursIn nodes uf leftId rightId -> pure Nothing
+      | otherwise -> do
+          headVar <- freshVar
+          argVars <- mapM (const freshVar) (NE.toList rArgs)
+          let argVarsNE = NE.fromList argVars
+          insertNode TyVarApp {tnId = leftId, tnVarHead = headVar, tnArgs = argVarsNE}
+          mapM_ (\v -> setBindParentNorm v leftId BindFlex) (headVar : argVars)
+          case mbBound of
+            Nothing -> pure ()
+            Just bnd -> do
+              let bp = cBindParents c
+              case IntMap.lookup (nodeRefKey (typeRef leftId)) bp of
+                Nothing -> pure ()
+                Just (parentRef, flag) ->
+                  setBindParentRefNorm (typeRef bnd) parentRef flag
+          let boundEdges =
+                case mbBound of
+                  Just bnd
+                    | bnd /= leftId,
+                      not (IntSet.member (getNodeId leftId) schemeRoots) ->
+                        [UnifyEdge bnd leftId]
+                  _ -> []
+              headEdge = UnifyEdge headVar (findRoot uf rHead)
+              argUnifyEdges =
+                zipWith (\v r -> UnifyEdge v (findRoot uf r)) argVars (NE.toList rArgs)
+          pure $ Just (boundEdges ++ headEdge : argUnifyEdges)
     (Just (TyArrow {tnDom = lDom, tnCod = lCod}), Just (TyArrow {tnDom = rDom, tnCod = rCod})) ->
       pure $
         Just
@@ -338,6 +375,15 @@ graftEdge edge = do
                   (NE.toList rArgs)
            in pure $ Just argEdges
       | otherwise -> pure Nothing
+    (Just (TyVarApp {tnVarHead = lHead, tnArgs = lArgs}), Just (TyVarApp {tnVarHead = rHead, tnArgs = rArgs}))
+      | NE.length lArgs == NE.length rArgs ->
+          let argEdges =
+                zipWith
+                  (\l r -> UnifyEdge (findRoot uf l) (findRoot uf r))
+                  (NE.toList lArgs)
+                  (NE.toList rArgs)
+           in pure $ Just (UnifyEdge (findRoot uf lHead) (findRoot uf rHead) : argEdges)
+      | otherwise -> pure Nothing
     (Just TyBottom {}, Just TyBottom {}) ->
       pure $ Just []
     (Just TyArrow {}, Just TyBase {}) -> pure Nothing
@@ -352,6 +398,14 @@ graftEdge edge = do
     (Just TyCon {}, Just TyBase {}) -> pure Nothing
     (Just TyCon {}, Just TyBottom {}) -> pure Nothing
     (Just TyBottom {}, Just TyCon {}) -> pure Nothing
+    (Just TyVarApp {}, Just TyArrow {}) -> pure Nothing
+    (Just TyArrow {}, Just TyVarApp {}) -> pure Nothing
+    (Just TyVarApp {}, Just TyBase {}) -> pure Nothing
+    (Just TyBase {}, Just TyVarApp {}) -> pure Nothing
+    (Just TyVarApp {}, Just TyCon {}) -> pure Nothing
+    (Just TyCon {}, Just TyVarApp {}) -> pure Nothing
+    (Just TyVarApp {}, Just TyBottom {}) -> pure Nothing
+    (Just TyBottom {}, Just TyVarApp {}) -> pure Nothing
     _ -> pure $ Just []
 
 -- | Check whether target (under UF reps) contains the variable.

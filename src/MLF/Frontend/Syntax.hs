@@ -195,6 +195,8 @@ data SrcTy (n :: SrcNorm) (v :: SrcTopVar) where
   STBase :: String -> SrcTy n v
   STCon :: String -> NonEmpty (SrcTy n 'TopVarAllowed) -> SrcTy n v
   STVarApp :: String -> NonEmpty (SrcTy n 'TopVarAllowed) -> SrcTy n v
+  STTyLam :: String -> SrcTy n 'TopVarAllowed -> SrcTy n v
+  STTyApp :: SrcTy n 'TopVarAllowed -> SrcTy n 'TopVarAllowed -> SrcTy n v
   STForall :: String -> Maybe (SrcBound n) -> SrcTy n 'TopVarAllowed -> SrcTy n v
   STMu :: String -> SrcTy n 'TopVarAllowed -> SrcTy n v
   STBottom :: SrcTy n v
@@ -221,6 +223,8 @@ data ResolvedSrcTy (n :: SrcNorm) (v :: SrcTopVar) where
   RSTBase :: ResolvedSymbol -> ResolvedSrcTy n v
   RSTCon :: ResolvedSymbol -> NonEmpty (ResolvedSrcTy n 'TopVarAllowed) -> ResolvedSrcTy n v
   RSTVarApp :: String -> NonEmpty (ResolvedSrcTy n 'TopVarAllowed) -> ResolvedSrcTy n v
+  RSTTyLam :: String -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
+  RSTTyApp :: ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
   RSTForall :: String -> Maybe (ResolvedSrcBound n) -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
   RSTMu :: String -> ResolvedSrcTy n 'TopVarAllowed -> ResolvedSrcTy n v
   RSTBottom :: ResolvedSrcTy n v
@@ -243,6 +247,8 @@ resolvedSrcTypeToSrcType ty =
     RSTBase symbol -> STBase (resolvedTypeHeadDisplay symbol)
     RSTCon symbol args -> STCon (resolvedTypeHeadDisplay symbol) (fmap resolvedSrcTypeToSrcType args)
     RSTVarApp name args -> STVarApp name (fmap resolvedSrcTypeToSrcType args)
+    RSTTyLam name body -> STTyLam name (resolvedSrcTypeToSrcType body)
+    RSTTyApp fun arg -> STTyApp (resolvedSrcTypeToSrcType fun) (resolvedSrcTypeToSrcType arg)
     RSTForall name mb body ->
       STForall
         name
@@ -259,6 +265,8 @@ resolvedSrcTypeIdentityType ty =
     RSTBase symbol -> STBase (resolvedTypeHeadIdentityName symbol)
     RSTCon symbol args -> STCon (resolvedTypeHeadIdentityName symbol) (fmap resolvedSrcTypeIdentityType args)
     RSTVarApp name args -> STVarApp name (fmap resolvedSrcTypeIdentityType args)
+    RSTTyLam name body -> STTyLam name (resolvedSrcTypeIdentityType body)
+    RSTTyApp fun arg -> STTyApp (resolvedSrcTypeIdentityType fun) (resolvedSrcTypeIdentityType arg)
     RSTForall name mb body ->
       STForall
         name

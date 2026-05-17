@@ -432,6 +432,8 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                                                                 TyBase freshId b
                                                             TyCon { tnCon = con, tnArgs = args } ->
                                                                 TyCon freshId con args
+                                                            TyVarApp { tnVarHead = headNode, tnArgs = args } ->
+                                                                TyVarApp freshId headNode args
                                                 lift $ registerNode freshId placeholder
 
                                                 -- Recursively copy children
@@ -456,6 +458,10 @@ instantiateSchemeWithMode replaceFrontier bodyId substList = do
                                                     TyCon { tnCon = con, tnArgs = args } -> do
                                                         args' <- traverse (copyNode copyInterior frontierSet degenerateRoot canonical subst) args
                                                         return $ TyCon freshId con args'
+                                                    TyVarApp { tnVarHead = headNode, tnArgs = args } -> do
+                                                        head' <- copyNode copyInterior frontierSet degenerateRoot canonical subst headNode
+                                                        args' <- traverse (copyNode copyInterior frontierSet degenerateRoot canonical subst) args
+                                                        return $ TyVarApp freshId head' args'
 
                                                 -- Register new node in constraint (overwrite placeholder)
                                                 lift $ registerNode freshId newNode

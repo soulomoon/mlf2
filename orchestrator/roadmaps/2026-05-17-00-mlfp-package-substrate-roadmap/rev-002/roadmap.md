@@ -366,7 +366,7 @@ rounds unless controller state and a selected plan explicitly allow it.
 - Extraction notes: a lawful final round may be docs/fixture closeout plus a
   self-boot readiness matrix and next-family recommendation.
 
-### [pending] 7. Full Type-Level MLFP Handoff Merge And Publication
+### [done] 7. Full Type-Level MLFP Handoff Merge And Publication
 
 - Milestone id: `milestone-7`
 - Depends on: `milestone-6`
@@ -393,7 +393,7 @@ rounds unless controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-7
 
-- none yet
+- Completed by round-251; evidence: full type-level handoff reconciled, docs retry fixed backend/native IO support wording, focused tests, cabal build all, cabal test, and thesis gate passed.
 
 #### Candidate Direction: Full Type-Level Handoff Merge
 

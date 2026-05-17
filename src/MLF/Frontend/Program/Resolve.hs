@@ -370,6 +370,7 @@ resolveModuleSyntax priorExports locals scope mod0 = do
       P.DeclData decl -> firstWithRefs P.DeclData <$> resolveDataDecl scope decl
       P.DeclClass decl -> firstWithRefs P.DeclClass <$> resolveClassDecl scope decl
       P.DeclInstance decl -> firstWithRefs P.DeclInstance <$> resolveInstanceDecl scope decl
+      P.DeclTypeFamily decl -> pure (P.DeclTypeFamily decl, [])
       P.DeclDef decl -> firstWithRefs P.DeclDef <$> resolveDefDecl scope decl
 
 resolveImport :: Map P.ModuleName ResolvedScope -> P.Import -> ResolveM P.ResolvedImport
@@ -490,14 +491,17 @@ resolveConstructorDecl scope decl = do
 
 resolveClassDecl :: CandidateScope -> P.ClassDecl -> ResolveM (P.ResolvedClassDecl, [ResolvedReference])
 resolveClassDecl scope decl = do
+  (superclasses, superclassRefs) <- mapAndRefs (resolveConstraint scope) (P.classDeclSuperclasses decl)
   (methods, refs) <- mapAndRefs (resolveMethodSig scope) (P.classDeclMethods decl)
   pure
     ( P.ClassDecl
         { P.classDeclName = P.classDeclName decl,
-          P.classDeclParam = P.classDeclParam decl,
+          P.classDeclSuperclasses = superclasses,
+          P.classDeclParams = P.classDeclParams decl,
+          P.classDeclFundeps = P.classDeclFundeps decl,
           P.classDeclMethods = methods
         },
-      refs
+      superclassRefs ++ refs
     )
 
 resolveMethodSig :: CandidateScope -> P.MethodSig -> ResolveM (P.ResolvedMethodSig, [ResolvedReference])
@@ -509,13 +513,13 @@ resolveInstanceDecl :: CandidateScope -> P.InstanceDecl -> ResolveM (P.ResolvedI
 resolveInstanceDecl scope decl = do
   classRef <- resolveClassRef scope (P.instanceDeclClass decl)
   (constraints, constraintRefs) <- mapAndRefs (resolveConstraint scope) (P.instanceDeclConstraints decl)
-  (headTy, typeRefs) <- resolveType scope (P.instanceDeclType decl)
+  (headTys, typeRefs) <- mapAndRefsNE (resolveType scope) (P.instanceDeclTypes decl)
   (methods, methodRefs) <- mapAndRefs (resolveMethodDef scope) (P.instanceDeclMethods decl)
   pure
     ( P.InstanceDecl
         { P.instanceDeclConstraints = constraints,
           P.instanceDeclClass = resolvedReferenceSymbol classRef,
-          P.instanceDeclType = headTy,
+          P.instanceDeclTypes = headTys,
           P.instanceDeclMethods = methods
         },
       classRef : constraintRefs ++ typeRefs ++ methodRefs
@@ -554,11 +558,11 @@ resolveConstrainedType scope ty = do
 resolveConstraint :: CandidateScope -> P.ClassConstraint -> ResolveM (P.ResolvedClassConstraint, [ResolvedReference])
 resolveConstraint scope constraint = do
   classRef <- resolveClassRef scope (P.constraintClassName constraint)
-  (ty, typeRefs) <- resolveType scope (P.constraintType constraint)
+  (tys, typeRefs) <- mapAndRefsNE (resolveType scope) (P.constraintTypes constraint)
   pure
     ( P.ClassConstraint
         { P.constraintClassName = resolvedReferenceSymbol classRef,
-          P.constraintType = ty
+          P.constraintTypes = tys
         },
       classRef : typeRefs
     )
@@ -576,6 +580,13 @@ resolveType scope = \case
   STVarApp name args -> do
     (args', argRefs) <- mapAndRefs (resolveType scope) (toListNE args)
     pure (RSTVarApp name (toNonEmpty args'), argRefs)
+  STTyLam name body -> do
+    (body', bodyRefs) <- resolveType scope body
+    pure (RSTTyLam name body', bodyRefs)
+  STTyApp fun arg -> do
+    (fun', funRefs) <- resolveType scope fun
+    (arg', argRefs) <- resolveType scope arg
+    pure (RSTTyApp fun' arg', funRefs ++ argRefs)
   STArrow dom cod -> do
     (dom', domRefs) <- resolveType scope dom
     (cod', codRefs) <- resolveType scope cod
@@ -916,3 +927,8 @@ mapAndRefs :: (a -> ResolveM (b, [ResolvedReference])) -> [a] -> ResolveM ([b], 
 mapAndRefs f values = do
   resolved <- mapM f values
   pure ([value | (value, _) <- resolved], concat [refs | (_, refs) <- resolved])
+
+mapAndRefsNE :: (a -> ResolveM (b, [ResolvedReference])) -> NonEmpty a -> ResolveM (NonEmpty b, [ResolvedReference])
+mapAndRefsNE f values = do
+  (resolved, refs) <- mapAndRefs f (toListNE values)
+  pure (toNonEmpty resolved, refs)

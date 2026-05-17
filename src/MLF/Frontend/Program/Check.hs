@@ -71,6 +71,7 @@ import MLF.Frontend.Program.Package
     trivialProgramPackage,
   )
 import MLF.Frontend.Program.Resolve (resolveProgram)
+import MLF.Frontend.Program.TypeFamilies (normalizeTypeFamiliesInProgram)
 import MLF.Frontend.Program.Types
   ( CheckedBinding (..),
     CheckedModule (..),
@@ -112,7 +113,7 @@ import MLF.Frontend.Program.Types
     mkResolvedSymbol,
     resolvedProgramSemanticArtifact,
     displayConstraint,
-    specializeMethodType,
+    specializeMethodTypes,
     substituteTypeVar,
     splitArrows,
     splitForalls,
@@ -130,6 +131,7 @@ import MLF.Frontend.Syntax
     resolvedSrcTypeToSrcType,
   )
 import qualified MLF.Frontend.Syntax.Program as P
+import MLF.Frontend.TypeLevel (TypeFamilyDecl, familyDeclName)
 
 type TcM a = Either ProgramError a
 
@@ -386,7 +388,9 @@ checkProgramPackage :: ProgramPackage -> Either ProgramError CheckedProgram
 checkProgramPackage package = do
   graph <- programPackageModuleGraph package
   orderedProgram <- programPackageOrderedProgram package
-  resolved <- resolveProgram orderedProgram
+  normalized <- normalizeTypeFamiliesInProgram orderedProgram
+  rejectUnsupportedGeneralizedClassFeatures normalized
+  resolved <- resolveProgram normalized
   checkResolvedProgramWithPackageGraph graph resolved
 
 checkResolvedProgram :: ResolvedProgram -> Either ProgramError CheckedProgram
@@ -427,7 +431,11 @@ checkLocatedProgramPackage package =
     (Left err, _) -> Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err)
     (_, Left err) -> Left (diagnosticForProgramError (Just (locatedProgramPackageProgram package)) err)
     (Right graph, Right orderedProgram) ->
-      case resolveProgram (P.locatedProgram orderedProgram) >>= checkResolvedProgramWithPackageGraph graph of
+      case do
+        normalized <- normalizeTypeFamiliesInProgram (P.locatedProgram orderedProgram)
+        rejectUnsupportedGeneralizedClassFeatures normalized
+        resolved <- resolveProgram normalized
+        checkResolvedProgramWithPackageGraph graph resolved of
         Right checked -> Right checked
         Left err -> Left (diagnosticForProgramError (Just orderedProgram) err)
 
@@ -576,6 +584,8 @@ checkModule resolvedModule priorInterfaces = do
       visibleImportedInstances =
         visibleInstancesForImports priorExports priorData priorInstances unqualifiedClassIdentities (P.moduleImports resolvedSyntax)
   ensureDistinctImportAliases (P.moduleImports resolvedSyntax)
+  rejectUnsupportedTypeFamilies resolvedSyntax
+  rejectUnsupportedGeneralizedClassFeaturesModule P.refDisplayName resolvedSrcTypeToSrcType resolvedSyntax
   importScope <- buildImportScopeResolved priorExports (P.moduleImports resolvedSyntax)
   let importedEnv = displayNameEnvFromScope importScope
       localSymbolEnv = displayNameEnvFromResolvedLocals resolvedModule
@@ -673,6 +683,52 @@ moduleClassDecls = foldr collect [] . P.moduleDecls
     collect decl acc = case decl of
       P.DeclClass classDecl -> classDecl : acc
       _ -> acc
+
+moduleTypeFamilyDecls :: P.ModuleF p -> [TypeFamilyDecl]
+moduleTypeFamilyDecls = foldr collect [] . P.moduleDecls
+  where
+    collect decl acc = case decl of
+      P.DeclTypeFamily familyDecl -> familyDecl : acc
+      _ -> acc
+
+rejectUnsupportedTypeFamilies :: P.ModuleF p -> TcM ()
+rejectUnsupportedTypeFamilies mod0 =
+  case moduleTypeFamilyDecls mod0 of
+    [] -> pure ()
+    familyDecl : _ -> throwError (ProgramUnsupportedTypeFamily (familyDeclName familyDecl))
+
+rejectUnsupportedGeneralizedClassFeatures :: P.Program -> TcM ()
+rejectUnsupportedGeneralizedClassFeatures (P.Program modules0) =
+  mapM_ (rejectUnsupportedGeneralizedClassFeaturesModule id id) modules0
+
+rejectUnsupportedGeneralizedClassFeaturesModule :: (P.ClassRef p -> P.ClassName) -> (P.ProgramSrcType p -> SrcType) -> P.ModuleF p -> TcM ()
+rejectUnsupportedGeneralizedClassFeaturesModule _renderClass _renderTy mod0 =
+  mapM_ rejectDecl (P.moduleDecls mod0)
+  where
+    rejectDecl :: P.DeclF p -> TcM ()
+    rejectDecl decl =
+      case decl of
+        P.DeclClass classDecl -> rejectClassDecl classDecl
+        P.DeclInstance instDecl -> rejectInstanceDecl instDecl
+        P.DeclDef defDecl -> rejectConstrainedType (P.defDeclType defDecl)
+        P.DeclData {} -> pure ()
+        P.DeclTypeFamily {} -> pure ()
+
+    rejectClassDecl :: P.ClassDeclF p -> TcM ()
+    rejectClassDecl classDecl = do
+      mapM_ (rejectConstrainedType . P.methodSigType) (P.classDeclMethods classDecl)
+
+    rejectInstanceDecl :: P.InstanceDeclF p -> TcM ()
+    rejectInstanceDecl instDecl = do
+      mapM_ rejectConstraint (P.instanceDeclConstraints instDecl)
+
+    rejectConstrainedType :: P.ConstrainedTypeF p -> TcM ()
+    rejectConstrainedType constrained =
+      mapM_ rejectConstraint (P.constrainedConstraints constrained)
+
+    rejectConstraint :: P.ClassConstraintF p -> TcM ()
+    rejectConstraint _constraint =
+      pure ()
 
 buildImportScopeResolved :: Map P.ModuleName ModuleExports -> [P.ResolvedImport] -> TcM Scope
 buildImportScopeResolved priorExports imports0 = foldM go emptyScope imports0
@@ -816,14 +872,27 @@ qualifyModuleExports alias exports =
 
     qualifyClassInfo classInfo =
       let qualifiedClassName = qualifiedName (className classInfo)
+          qualifyConstraintInfo constraintInfo =
+            constraintInfo
+              { constraintDisplayClass = qualifiedClassNameFor (constraintDisplayClass constraintInfo),
+                constraintTypeView = qualifyTypeView (constraintTypeView constraintInfo),
+                constraintTypeViews = fmap qualifyTypeView (constraintTypeViews constraintInfo)
+              }
+          qualifyTypeView view =
+            view
+              { typeViewDisplay = qualifySrcType (typeViewDisplay view)
+              }
           qualifyMethod methodInfo =
             methodInfo
               { methodClassName = qualifiedClassName,
                 methodType = qualifySrcType (methodType methodInfo),
-                methodConstraints = map qualifyConstraint (methodConstraints methodInfo)
+                methodConstraints = map qualifyConstraint (methodConstraints methodInfo),
+                methodConstraintInfos = map qualifyConstraintInfo (methodConstraintInfos methodInfo)
               }
        in classInfo
             { className = qualifiedClassName,
+              classSuperclasses = map qualifyConstraint (classSuperclasses classInfo),
+              classSuperclassInfos = map qualifyConstraintInfo (classSuperclassInfos classInfo),
               classMethods = Map.map qualifyMethod (classMethods classInfo)
             }
 
@@ -857,7 +926,20 @@ qualifyModuleExports alias exports =
       methodInfo
         { methodClassName = qualifiedClassNameFor (methodClassName methodInfo),
           methodType = qualifySrcType (methodType methodInfo),
-          methodConstraints = map qualifyConstraint (methodConstraints methodInfo)
+          methodConstraints = map qualifyConstraint (methodConstraints methodInfo),
+          methodConstraintInfos = map qualifyConstraintInfoFromExport (methodConstraintInfos methodInfo)
+        }
+
+    qualifyConstraintInfoFromExport constraintInfo =
+      constraintInfo
+        { constraintDisplayClass = qualifiedClassNameFor (constraintDisplayClass constraintInfo),
+          constraintTypeView = qualifyTypeViewFromExport (constraintTypeView constraintInfo),
+          constraintTypeViews = fmap qualifyTypeViewFromExport (constraintTypeViews constraintInfo)
+        }
+
+    qualifyTypeViewFromExport view =
+      view
+        { typeViewDisplay = qualifySrcType (typeViewDisplay view)
         }
 
     qualifiedClassNameFor className0
@@ -870,7 +952,7 @@ qualifyModuleExports alias exports =
             if P.constraintClassName constraint `Set.member` exportedClassNames
               then qualifiedName (P.constraintClassName constraint)
               else P.constraintClassName constraint,
-          P.constraintType = qualifySrcType (P.constraintType constraint)
+          P.constraintTypes = fmap qualifySrcType (P.constraintTypes constraint)
         }
 
     qualifySrcType ty =
@@ -883,6 +965,8 @@ qualifyModuleExports alias exports =
           | name `Set.member` exportedTypeNames -> STCon (qualifiedName name) (fmap qualifySrcType args)
           | otherwise -> STCon name (fmap qualifySrcType args)
         STVarApp name args -> STVarApp name (fmap qualifySrcType args)
+        STTyLam name body -> STTyLam name (qualifySrcType body)
+        STTyApp fun arg -> STTyApp (qualifySrcType fun) (qualifySrcType arg)
         STArrow dom cod -> STArrow (qualifySrcType dom) (qualifySrcType cod)
         STForall name mb body -> STForall name (fmap (SrcBound . qualifySrcType . unSrcBound) mb) (qualifySrcType body)
         STMu name body -> STMu name (qualifySrcType body)
@@ -904,13 +988,6 @@ methodClassIdentity valueInfo =
     OverloadedMethod {valueMethodInfo = methodInfo} ->
       Just (methodInfoOwnerClassSymbolIdentity methodInfo)
     _ -> Nothing
-
-resolvedClassIdentityFromSymbol :: ResolvedSymbol -> Maybe ClassIdentity
-resolvedClassIdentityFromSymbol symbol =
-  let identity = resolvedSymbolIdentity symbol
-   in case symbolNamespace identity of
-        SymbolClass -> Just identity
-        _ -> Nothing
 
 resolvedMethodOwnerClassIdentity :: ResolvedSymbol -> Maybe ClassIdentity
 resolvedMethodOwnerClassIdentity symbol =
@@ -1005,17 +1082,40 @@ importUnqualifiedClassIdentitiesFor exports imp =
     importItemClassIdentities item =
       case item of
         P.ExportType ref ->
-          Set.fromList
-            [ identity
-              | symbol <- P.resolvedExportTypeSymbols ref,
-                Just identity <- [resolvedClassIdentityFromSymbol symbol]
-            ]
+          case exportedClassByRef ref exports of
+            Just (_, classInfo) -> classDependencyIdentityClosure exports (classInfoSymbolIdentity classInfo)
+            Nothing -> Set.empty
         P.ExportValue symbol ->
-          Set.fromList (maybe [] (: []) (resolvedMethodOwnerClassIdentity symbol))
+          case exportedValueByIdentity (resolvedSymbolIdentity symbol) exports of
+            Just (_, valueInfo) -> importedValueClassDependencyIdentities exports valueInfo
+            Nothing -> Set.fromList (maybe [] (: []) (resolvedMethodOwnerClassIdentity symbol))
         _ -> Set.empty
 
     overloadedMethodClassIdentities =
       Set.fromList . mapMaybe methodClassIdentity
+
+importedValueClassDependencyIdentities :: ModuleExports -> ValueInfo -> Set.Set ClassIdentity
+importedValueClassDependencyIdentities exports valueInfo =
+  case valueInfo of
+    OverloadedMethod {valueMethodInfo = methodInfo} ->
+      classDependencyIdentityClosure exports (methodInfoOwnerClassSymbolIdentity methodInfo)
+    _ -> Set.empty
+
+classDependencyIdentityClosure :: ModuleExports -> ClassIdentity -> Set.Set ClassIdentity
+classDependencyIdentityClosure exports = go Set.empty
+  where
+    go seen identity
+      | identity `Set.member` seen = seen
+      | otherwise =
+          case exportedClassByIdentity identity exports of
+            Nothing -> Set.insert identity seen
+            Just (_, classInfo) ->
+              foldl'
+                go
+                (Set.insert identity seen)
+                [ constraintClassSymbol constraint
+                  | constraint <- classSuperclassInfos classInfo
+                ]
 
 importUnqualifiedTypeNames :: ModuleExports -> P.ResolvedImport -> Set.Set String
 importUnqualifiedTypeNames exports imp =
@@ -1072,7 +1172,7 @@ instanceVisibleForQualifiedImport :: Map P.ModuleName (Map String DataInfo) -> M
 instanceVisibleForQualifiedImport priorData exports instanceInfo =
   originDataVisible
     && ( instanceClassIdentity instanceInfo `Set.member` exportedClassIdentities
-           || srcTypeMentionsAny exportedTypeNames (instanceHeadIdentityType instanceInfo)
+           || any (srcTypeMentionsAny exportedTypeNames) (instanceHeadIdentityTypes instanceInfo)
        )
   where
     exportedTypeNames = exportedTypeIdentityNames exports
@@ -1086,6 +1186,8 @@ srcTypeMentionsAny names ty =
     STBase name -> name `Set.member` names
     STCon name args -> name `Set.member` names || any (srcTypeMentionsAny names) args
     STVarApp _ args -> any (srcTypeMentionsAny names) args
+    STTyLam _ body -> srcTypeMentionsAny names body
+    STTyApp fun arg -> srcTypeMentionsAny names fun || srcTypeMentionsAny names arg
     STArrow dom cod -> srcTypeMentionsAny names dom || srcTypeMentionsAny names cod
     STForall _ mb body ->
       maybe False (srcTypeMentionsAny names . unSrcBound) mb
@@ -1103,21 +1205,26 @@ distinctInstanceHeads = reverse . foldl' add []
 sameInstanceHead :: InstanceInfo -> InstanceInfo -> Bool
 sameInstanceHead left right =
   instanceClassIdentity left == instanceClassIdentity right
-    && instanceHeadIdentityType left == instanceHeadIdentityType right
+    && instanceHeadIdentityTypes left == instanceHeadIdentityTypes right
 
 instanceExportedTypeMentions :: Set.Set String -> InstanceInfo -> Set.Set String
 instanceExportedTypeMentions exportedTypeNames instanceInfo =
   Set.unions (headMentions : constraintMentions ++ methodMentions)
   where
-    headMentions = srcTypeMentionedNames exportedTypeNames (instanceHeadIdentityType instanceInfo)
-    constraintMentions = map (srcTypeMentionedNames exportedTypeNames . typeViewIdentity . constraintTypeView) (instanceConstraintInfos instanceInfo)
+    headMentions = foldMap (srcTypeMentionedNames exportedTypeNames) (instanceHeadIdentityTypes instanceInfo)
+    constraintMentions =
+      concatMap
+        (map (srcTypeMentionedNames exportedTypeNames . typeViewIdentity) . NE.toList . constraintTypeViews)
+        (instanceConstraintInfos instanceInfo)
     methodMentions = concatMap valueExportedTypeMentions (Map.elems (instanceMethods instanceInfo))
 
     valueExportedTypeMentions valueInfo =
       case valueInfo of
         OrdinaryValue {} ->
           srcTypeMentionedNames exportedTypeNames (valueIdentityType valueInfo)
-            : map (srcTypeMentionedNames exportedTypeNames . typeViewIdentity . constraintTypeView) (valueConstraintInfos valueInfo)
+            : concatMap
+              (map (srcTypeMentionedNames exportedTypeNames . typeViewIdentity) . NE.toList . constraintTypeViews)
+              (valueConstraintInfos valueInfo)
         _ -> []
 
 instanceOriginDataMentions :: Map P.ModuleName (Map String DataInfo) -> InstanceInfo -> Set.Set String
@@ -1142,6 +1249,9 @@ srcTypeMentionedNames names ty =
             | otherwise = Set.empty
        in Set.unions (headNames : map (srcTypeMentionedNames names) (NE.toList args))
     STVarApp _ args -> Set.unions (map (srcTypeMentionedNames names) (NE.toList args))
+    STTyLam _ body -> srcTypeMentionedNames names body
+    STTyApp fun arg ->
+      srcTypeMentionedNames names fun `Set.union` srcTypeMentionedNames names arg
     STArrow dom cod ->
       srcTypeMentionedNames names dom `Set.union` srcTypeMentionedNames names cod
     STForall _ mb body ->
@@ -1161,8 +1271,9 @@ applyResolvedImportItem moduleName0 exports scope item =
       case exportedValueByIdentity (resolvedSymbolIdentity symbol) exports of
         Just (name, info) -> do
           let (scopeWithOwner, importedInfo) = prepareImportedValue exports scope info
+          classes <- liftEither (addClasses (scopeClasses scopeWithOwner) (importedValueClassDependencies exports importedInfo))
           values <- liftEither (addValues (scopeValues scopeWithOwner) (Map.singleton name importedInfo))
-          pure (withScopeValues values scopeWithOwner)
+          pure (withScopeValues values (withScopeClasses classes scopeWithOwner))
         Nothing -> throwError (ProgramImportNotExported moduleName0 (resolvedSymbolDisplayName symbol))
     P.ExportType ref ->
       case exportedTypeByRef ref exports of
@@ -1171,14 +1282,14 @@ applyResolvedImportItem moduleName0 exports scope item =
           types <- liftEither (addTypes (scopeTypes scope) (Map.singleton typeName dataInfo))
           let scope' = withScopeTypes types scope
           case exportedClassByRef ref exports of
-            Just (className0, classInfo) -> do
-              classes <- liftEither (addClasses (scopeClasses scope') (Map.singleton className0 classInfo))
+            Just (_, classInfo) -> do
+              classes <- liftEither (addClasses (scopeClasses scope') (classDependencyClosure exports (classInfoSymbolIdentity classInfo)))
               pure (withScopeClasses classes scope')
             Nothing -> pure scope'
         Nothing ->
           case exportedClassByRef ref exports of
-            Just (className0, classInfo) -> do
-              classes <- liftEither (addClasses (scopeClasses scope) (Map.singleton className0 classInfo))
+            Just (_, classInfo) -> do
+              classes <- liftEither (addClasses (scopeClasses scope) (classDependencyClosure exports (classInfoSymbolIdentity classInfo)))
               pure (withScopeClasses classes scope)
             Nothing -> throwError (ProgramImportNotExported moduleName0 (P.resolvedExportTypeName ref))
     P.ExportTypeWithConstructors ref ->
@@ -1223,6 +1334,28 @@ prepareImportedValue exports scope valueInfo =
            in (withScopeHiddenTypes hiddenTypes scope, importedInfo)
         Nothing -> (scope, valueInfo)
     _ -> (scope, valueInfo)
+
+importedValueClassDependencies :: ModuleExports -> ValueInfo -> Map String ClassInfo
+importedValueClassDependencies exports valueInfo =
+  case valueInfo of
+    OverloadedMethod {valueMethodInfo = methodInfo} ->
+      classDependencyClosure exports (methodInfoOwnerClassSymbolIdentity methodInfo)
+    _ -> Map.empty
+
+classDependencyClosure :: ModuleExports -> ClassIdentity -> Map String ClassInfo
+classDependencyClosure exports identity =
+  go Set.empty identity Map.empty
+  where
+    go seen classIdentity0 acc
+      | classIdentity0 `Set.member` seen = acc
+      | otherwise =
+          case exportedClassByIdentity classIdentity0 exports of
+            Nothing -> acc
+            Just (className0, classInfo) ->
+              foldl'
+                (\acc0 superclass -> go (Set.insert classIdentity0 seen) (constraintClassSymbol superclass) acc0)
+                (Map.insert className0 classInfo acc)
+                (classSuperclassInfos classInfo)
 
 hiddenOwnerDataInfo :: DataInfo -> DataInfo
 hiddenOwnerDataInfo dataInfo =
@@ -1278,6 +1411,8 @@ rewriteOwnerTypeHeads ownerNames hiddenName = go
         STBase name -> STBase (rewriteHead name)
         STCon name args -> STCon (rewriteHead name) (fmap go args)
         STVarApp name args -> STVarApp name (fmap go args)
+        STTyLam name body -> STTyLam name (go body)
+        STTyApp fun arg -> STTyApp (go fun) (go arg)
         STForall name mb body -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
         STMu name body -> STMu name (go body)
         STBottom -> STBottom
@@ -1400,6 +1535,8 @@ srcTypeVariableHeadArities ty =
     STVarApp name args ->
       Map.singleton name (NE.length args)
         <> foldMap srcTypeVariableHeadArities (NE.toList args)
+    STTyLam _ body -> srcTypeVariableHeadArities body
+    STTyApp fun arg -> srcTypeVariableHeadArities fun <> srcTypeVariableHeadArities arg
     STForall _ mb body ->
       maybe Map.empty (srcTypeVariableHeadArities . unSrcBound) mb
         <> srcTypeVariableHeadArities body
@@ -1426,6 +1563,10 @@ exportedClassByRef ref exports =
     symbol : _ -> find ((== resolvedSymbolIdentity symbol) . classInfoSymbolIdentity . snd) (Map.toList (exportedClasses exports))
     [] -> Nothing
 
+exportedClassByIdentity :: ClassIdentity -> ModuleExports -> Maybe (String, ClassInfo)
+exportedClassByIdentity identity exports =
+  find ((== identity) . classInfoSymbolIdentity . snd) (Map.toList (exportedClasses exports))
+
 displaySrcTypeForResolved :: DisplayNameEnv -> ResolvedSrcType -> TcM SrcType
 displaySrcTypeForResolved env = \case
   RSTVar name -> pure (STVar name)
@@ -1433,6 +1574,8 @@ displaySrcTypeForResolved env = \case
   RSTBase symbol -> STBase <$> displayTypeHeadName env symbol
   RSTCon symbol args -> STCon <$> displayTypeHeadName env symbol <*> traverse (displaySrcTypeForResolved env) args
   RSTVarApp name args -> STVarApp name <$> traverse (displaySrcTypeForResolved env) args
+  RSTTyLam name body -> STTyLam name <$> displaySrcTypeForResolved env body
+  RSTTyApp fun arg -> STTyApp <$> displaySrcTypeForResolved env fun <*> displaySrcTypeForResolved env arg
   RSTForall name mb body ->
     STForall name
       <$> traverse (fmap SrcBound . displaySrcTypeForResolved env . unResolvedSrcBound) mb
@@ -1449,10 +1592,14 @@ displayTypeHeadName env symbol =
     Nothing -> throwError (ProgramUnknownType (resolvedSymbolDisplayName symbol))
 
 displayClassConstraintForResolved :: DisplayNameEnv -> P.ResolvedClassConstraint -> TcM P.ClassConstraint
-displayClassConstraintForResolved env constraint =
-  P.ClassConstraint
-    <$> displayClassName env (P.constraintClassName constraint)
-    <*> displaySrcTypeForResolved env (P.constraintType constraint)
+displayClassConstraintForResolved env constraint = do
+  className0 <- displayClassName env (P.constraintClassName constraint)
+  tys <- traverse (displaySrcTypeForResolved env) (P.constraintTypes constraint)
+  pure
+    P.ClassConstraint
+      { P.constraintClassName = className0,
+        P.constraintTypes = tys
+      }
 
 typeViewForDisplayEnv :: DisplayNameEnv -> ResolvedSrcType -> TcM TypeView
 typeViewForDisplayEnv env ty =
@@ -1461,11 +1608,13 @@ typeViewForDisplayEnv env ty =
     <*> pure (resolvedSrcTypeIdentityType ty)
 
 constraintInfoForDisplayEnv :: DisplayNameEnv -> P.ResolvedClassConstraint -> TcM ConstraintInfo
-constraintInfoForDisplayEnv env constraint =
+constraintInfoForDisplayEnv env constraint = do
+  views <- mapM (typeViewForDisplayEnv env) (P.constraintTypes constraint)
   ConstraintInfo
     <$> displayClassName env (P.constraintClassName constraint)
     <*> pure (resolvedSymbolIdentity (P.constraintClassName constraint))
-    <*> typeViewForDisplayEnv env (P.constraintType constraint)
+    <*> pure (NE.head views)
+    <*> pure views
 
 displayConstrainedTypeForResolved :: DisplayNameEnv -> P.ResolvedConstrainedType -> TcM P.ConstrainedType
 displayConstrainedTypeForResolved env ty =
@@ -1526,8 +1675,9 @@ validateConstructorDeclKind env ctorDecl = do
 
 validateClassDeclKinds :: Scope -> KindEnv -> P.ResolvedClassDecl -> TcM ()
 validateClassDeclKinds scope baseEnv classDecl = do
-  env <- extendKindParams [P.classDeclParam classDecl] baseEnv
-  mapM_ (validateMethodSigKind scope env) (P.classDeclMethods classDecl)
+  env <- extendKindParams (NE.toList (P.classDeclParams classDecl)) baseEnv
+  env1 <- foldM (validateClassConstraintKind scope) env (P.classDeclSuperclasses classDecl)
+  mapM_ (validateMethodSigKind scope env1) (P.classDeclMethods classDecl)
 
 validateMethodSigKind :: Scope -> KindEnv -> P.ResolvedMethodSig -> TcM ()
 validateMethodSigKind scope env methodSig = do
@@ -1543,7 +1693,12 @@ validateInstanceDeclKinds :: Scope -> KindEnv -> P.ResolvedInstanceDecl -> TcM (
 validateInstanceDeclKinds scope env0 instDecl = do
   classInfo <- lookupClassInfoBySymbol scope (P.instanceDeclClass instDecl)
   env1 <- foldM (validateClassConstraintKind scope) env0 (P.instanceDeclConstraints instDecl)
-  _ <- checkResolvedKind env1 (P.instanceDeclType instDecl) (P.typeParamKind (classTypeParam classInfo))
+  validateClassApplicationArity classInfo (length (P.instanceDeclTypes instDecl))
+  _ <-
+    foldM
+      (\acc (ty, param) -> checkResolvedKind acc ty (P.typeParamKind param))
+      env1
+      (zip (NE.toList (P.instanceDeclTypes instDecl)) (NE.toList (classTypeParams classInfo)))
   pure ()
 
 validateConstrainedTypeKinds :: Scope -> KindEnv -> P.ResolvedConstrainedType -> TcM KindEnv
@@ -1554,7 +1709,17 @@ validateConstrainedTypeKinds scope env0 ty = do
 validateClassConstraintKind :: Scope -> KindEnv -> P.ResolvedClassConstraint -> TcM KindEnv
 validateClassConstraintKind scope env constraint = do
   classInfo <- lookupClassInfoBySymbol scope (P.constraintClassName constraint)
-  checkResolvedKind env (P.constraintType constraint) (P.typeParamKind (classTypeParam classInfo))
+  validateClassApplicationArity classInfo (length (P.constraintTypes constraint))
+  foldM
+    (\acc (ty, param) -> checkResolvedKind acc ty (P.typeParamKind param))
+    env
+    (zip (NE.toList (P.constraintTypes constraint)) (NE.toList (classTypeParams classInfo)))
+
+validateClassApplicationArity :: ClassInfo -> Int -> TcM ()
+validateClassApplicationArity classInfo actual =
+  let expected = length (classTypeParams classInfo)
+   in when (expected /= actual) $
+        throwError (ProgramClassArityMismatch (className classInfo) expected actual)
 
 extendKindParams :: [P.TypeParam] -> KindEnv -> TcM KindEnv
 extendKindParams params env =
@@ -1588,6 +1753,7 @@ checkResolvedKindTerm env ty expected =
       withScopedKindVariable name KTType env1 $ \env2 ->
         checkResolvedKindTerm env2 body KTType
     RSTVarApp name args -> checkVarAppKind env name args expected
+    RSTTyApp fun arg -> checkTyAppKind env ty fun arg expected
     _ -> do
       (actual, env1) <- inferResolvedKindTerm env ty
       requireKindTerm env1 ty expected actual
@@ -1603,6 +1769,9 @@ inferResolvedKindTerm env ty =
       headKind <- kindFromSrc <$> resolvedTypeHeadKind env symbol
       applyKindArgs env (resolvedSymbolDisplayName symbol) headKind args
     RSTVarApp name args -> inferVarAppKind env name args
+    RSTTyLam {} ->
+      throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType ty) P.KType (P.KArrow P.KType P.KType))
+    RSTTyApp fun arg -> inferTyAppKind env ty fun arg
     RSTArrow dom cod -> do
       env1 <- checkResolvedKindTerm env dom KTType
       env2 <- checkResolvedKindTerm env1 cod KTType
@@ -1627,6 +1796,26 @@ checkVarAppKind :: KindEnv -> String -> NonEmpty ResolvedSrcType -> KindTerm -> 
 checkVarAppKind env name args expected = do
   (actual, env1) <- inferVarAppKind env name args
   requireKindTerm env1 (RSTVarApp name args) expected actual
+
+checkTyAppKind :: KindEnv -> ResolvedSrcType -> ResolvedSrcType -> ResolvedSrcType -> KindTerm -> TcM KindEnv
+checkTyAppKind env whole fun arg expected = do
+  (actual, env1) <- inferTyAppKind env whole fun arg
+  requireKindTerm env1 whole expected actual
+
+inferTyAppKind :: KindEnv -> ResolvedSrcType -> ResolvedSrcType -> ResolvedSrcType -> TcM (KindTerm, KindEnv)
+inferTyAppKind env whole fun arg = do
+  (funKind, env1) <- inferResolvedKindTerm env fun
+  case zonkKindTerm env1 funKind of
+    KTArrow argKind resultKind -> do
+      env2 <- checkResolvedKindTerm env1 arg argKind
+      pure (resultKind, env2)
+    KTMeta meta -> do
+      (argKind, env2) <- inferResolvedKindTerm env1 arg
+      let (resultKind, env3) = freshKindMeta env2
+      env4 <- requireKindTerm env3 fun (KTMeta meta) (KTArrow argKind resultKind)
+      pure (resultKind, env4)
+    KTType ->
+      throwError (ProgramKindMismatch (resolvedSrcTypeToSrcType whole) P.KType P.KType)
 
 inferVarAppKind :: KindEnv -> String -> NonEmpty ResolvedSrcType -> TcM (KindTerm, KindEnv)
 inferVarAppKind env name args = do
@@ -1913,6 +2102,12 @@ buildLocalClassInfo displayEnv resolvedModule mod0 = do
       resolvedClassIdentity <- lookupResolvedLocalClassIdentity resolvedModule (P.classDeclName classDecl)
       let classParam = P.classDeclParam classDecl
           classParamName0 = P.typeParamName classParam
+          classParams = P.classDeclParams classDecl
+          classParamNames0 = fmap P.typeParamName classParams
+      ensureDistinctPlain ProgramDuplicateTypeParameter (NE.toList classParamNames0)
+      validateFunctionalDependencies (P.classDeclName classDecl) classParamNames0 (P.classDeclFundeps classDecl)
+      superclasses0 <- mapM (displayClassConstraintForResolved displayEnv) (P.classDeclSuperclasses classDecl)
+      superclassInfos0 <- mapM (constraintInfoForDisplayEnv displayEnv) (P.classDeclSuperclasses classDecl)
       methods <-
         Map.fromList
           <$> forM
@@ -1939,7 +2134,9 @@ buildLocalClassInfo displayEnv resolvedModule mod0 = do
                         methodConstraints = P.constrainedConstraints methodSigType0,
                         methodConstraintInfos = methodConstraintInfos0,
                         methodTypeParam = classParam,
-                        methodParamName = classParamName0
+                        methodParamName = classParamName0,
+                        methodTypeParams = classParams,
+                        methodParamNames = classParamNames0
                       }
                   )
             )
@@ -1951,15 +2148,42 @@ buildLocalClassInfo displayEnv resolvedModule mod0 = do
               classModule = P.moduleName mod0,
               classTypeParam = classParam,
               classParamName = classParamName0,
+              classTypeParams = classParams,
+              classParamNames = classParamNames0,
+              classSuperclasses = superclasses0,
+              classSuperclassInfos = superclassInfos0,
+              classFunctionalDependencies = P.classDeclFundeps classDecl,
               classMethods = methods
             }
         )
+
+validateFunctionalDependencies :: P.ClassName -> NonEmpty String -> [P.FunctionalDependency] -> TcM ()
+validateFunctionalDependencies className0 paramNames fundeps =
+  mapM_ validate fundeps
+  where
+    params = Set.fromList (NE.toList paramNames)
+
+    validate fundep = do
+      let determiners = NE.toList (P.fundepDeterminers fundep)
+          determined = NE.toList (P.fundepDetermined fundep)
+      case invalidName (determiners ++ determined) of
+        Just name -> throwError (ProgramInvalidFunctionalDependency className0 name)
+        Nothing -> pure ()
+
+    invalidName names =
+      case [name | name <- names, name `Set.notMember` params] of
+        name : _ -> Just name
+        [] ->
+          case duplicates names of
+            dup : _ -> Just dup
+            [] -> Nothing
 
 validateLocalClassMethodConstraints :: Scope -> P.ResolvedModuleSyntax -> TcM ()
 validateLocalClassMethodConstraints scope mod0 =
   mapM_ validateClassDecl (moduleClassDecls mod0)
   where
-    validateClassDecl classDecl =
+    validateClassDecl classDecl = do
+      validateResolvedClassConstraintClasses scope (P.classDeclSuperclasses classDecl)
       mapM_ validateMethodConstraints (P.classDeclMethods classDecl)
 
     validateMethodConstraints =
@@ -2069,7 +2293,16 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
                     TypeView
                       { typeViewDisplay = resolvedSrcTypeToSrcType (P.constraintType constraint),
                         typeViewIdentity = resolvedSrcTypeIdentityType (P.constraintType constraint)
-                      }
+                      },
+                  constraintTypeViews =
+                    fmap
+                      ( \constraintTy ->
+                          TypeView
+                            { typeViewDisplay = resolvedSrcTypeToSrcType constraintTy,
+                              typeViewIdentity = resolvedSrcTypeIdentityType constraintTy
+                            }
+                      )
+                      (P.constraintTypes constraint)
                 }
               | constraint <- P.instanceDeclConstraints instDecl
             ]
@@ -2082,6 +2315,8 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
           instanceConstraintInfos = constraintInfos,
           instanceHeadType = headTy,
           instanceHeadIdentityType = headIdentityTy,
+          instanceHeadTypes = headTy :| [],
+          instanceHeadIdentityTypes = headIdentityTy :| [],
           instanceMethods = Map.empty
         }
 
@@ -2167,6 +2402,8 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
         STBase {} -> Set.empty
         STCon _ args -> foldMap freeTypeVars args
         STVarApp name args -> Set.insert name (foldMap freeTypeVars args)
+        STTyLam name body -> Set.delete name (freeTypeVars body)
+        STTyApp fun arg -> freeTypeVars fun `Set.union` freeTypeVars arg
         STForall name mb body ->
           maybe Set.empty (freeTypeVars . unSrcBound) mb
             `Set.union` Set.delete name (freeTypeVars body)
@@ -2215,10 +2452,13 @@ synthesizeDerivedInstances displayEnv scope resolvedModule mod0 = do
         P.InstanceDecl
             { P.instanceDeclClass = classSymbol,
               P.instanceDeclConstraints =
-                [ P.ClassConstraint classSymbol (RSTVar paramName)
+                [ P.ClassConstraint
+                    { P.constraintClassName = classSymbol,
+                      P.constraintTypes = RSTVar paramName :| []
+                    }
                   | paramName <- derivedConstraintParams displayDataDecl
                 ],
-              P.instanceDeclType = headTy,
+              P.instanceDeclTypes = headTy :| [],
               P.instanceDeclMethods = [P.MethodDef "eq" methodBody]
             }
 
@@ -2287,18 +2527,25 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
   let instances0 = derived ++ explicitInstances mod0
   infos <- mapM toInstanceInfo instances0
   case duplicateLocalInstances infos of
-    info : _ -> throwError (ProgramDuplicateInstance (instanceClassName info) (instanceHeadType info))
+    info : _ -> throwError (duplicateInstanceError info)
     [] -> pure ()
   case duplicateExistingInstances infos of
-    info : _ -> throwError (ProgramDuplicateInstance (instanceClassName info) (instanceHeadType info))
+    info : _ -> throwError (duplicateInstanceError info)
+    [] -> pure ()
+  case ambiguousFunctionalDependencyInstances infos of
+    info : _ -> throwError (ambiguousFunctionalDependencyInstanceError info)
+    [] -> pure ()
+  case conflictingFunctionalDependencyInstances infos of
+    (className0, determiners, left, right) : _ ->
+      throwError (ProgramConflictingFunctionalDependency className0 (NE.toList determiners) (NE.toList left) (NE.toList right))
     [] -> pure ()
   case overlappingInstances infos of
     (left, right) : _ ->
-      throwError (ProgramOverlappingInstance (instanceClassName left) (instanceHeadType left) (instanceHeadType right))
+      throwError (overlappingInstanceError left right)
     [] -> pure ()
   case overlappingWithExistingInstances infos of
     (left, right) : _ ->
-      throwError (ProgramOverlappingInstance (instanceClassName left) (instanceHeadType left) (instanceHeadType right))
+      throwError (overlappingInstanceError left right)
     [] -> pure ()
   pure infos
   where
@@ -2306,15 +2553,25 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
       classInfo <- lookupClassInfoBySymbol scope (P.instanceDeclClass instDecl)
       instanceClassName0 <- displayClassName displayEnv (P.instanceDeclClass instDecl)
       validateResolvedClassConstraintClasses scope (P.instanceDeclConstraints instDecl)
-      instanceHeadType0 <- displaySrcTypeForResolved displayEnv (P.instanceDeclType instDecl)
-      let instanceHeadIdentityType0 = resolvedSrcTypeIdentityType (P.instanceDeclType instDecl)
-          instanceHeadView0 =
-            TypeView
-              { typeViewDisplay = instanceHeadType0,
-                typeViewIdentity = instanceHeadIdentityType0
-              }
-      instanceConstraints0 <- mapM (displayClassConstraintForResolved displayEnv) (P.instanceDeclConstraints instDecl)
-      instanceConstraintInfos0 <- mapM (constraintInfoForDisplayEnv displayEnv) (P.instanceDeclConstraints instDecl)
+      let instanceHeadTysResolved = P.instanceDeclTypes instDecl
+      validateClassApplicationArity classInfo (length instanceHeadTysResolved)
+      instanceHeadTypes0 <- mapM (displaySrcTypeForResolved displayEnv) instanceHeadTysResolved
+      let instanceHeadType0 = NE.head instanceHeadTypes0
+          instanceHeadIdentityTypes0 = fmap resolvedSrcTypeIdentityType instanceHeadTysResolved
+          instanceHeadIdentityType0 = NE.head instanceHeadIdentityTypes0
+          instanceHeadViews0 = NE.zipWith TypeView instanceHeadTypes0 instanceHeadIdentityTypes0
+      declaredInstanceConstraints0 <- mapM (displayClassConstraintForResolved displayEnv) (P.instanceDeclConstraints instDecl)
+      declaredInstanceConstraintInfos0 <- mapM (constraintInfoForDisplayEnv displayEnv) (P.instanceDeclConstraints instDecl)
+      let superclassConstraints0 =
+            map
+              (substituteConstraintTypes (classParamNames classInfo) instanceHeadTypes0)
+              (classSuperclasses classInfo)
+          superclassConstraintInfos0 =
+            map
+              (substituteConstraintInfoTypes (classParamNames classInfo) instanceHeadViews0)
+              (classSuperclassInfos classInfo)
+          instanceConstraints0 = declaredInstanceConstraints0 ++ superclassConstraints0
+          instanceConstraintInfos0 = declaredInstanceConstraintInfos0 ++ superclassConstraintInfos0
       let methodMap = classMethods classInfo
           expected = Map.keysSet methodMap
           provided = Set.fromList (map P.methodDefName (P.instanceDeclMethods instDecl))
@@ -2327,17 +2584,17 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
       let instanceMethodInfos =
             Map.fromList
               [ let methodInfo = methodMap Map.! P.methodDefName methodDef
-                    rawMethodType = specializeMethodType (methodType methodInfo) (classParamName classInfo) instanceHeadType0
-                    rawMethodIdentityType = specializeMethodType (methodTypeIdentity methodInfo) (classParamName classInfo) instanceHeadIdentityType0
+                    rawMethodType = specializeMethodTypes (methodType methodInfo) (classParamNames classInfo) instanceHeadTypes0
+                    rawMethodIdentityType = specializeMethodTypes (methodTypeIdentity methodInfo) (classParamNames classInfo) instanceHeadIdentityTypes0
                     methodValueConstraints =
-                      instanceConstraints0
+                      declaredInstanceConstraints0
                         ++ map
-                          (substituteConstraint (classParamName classInfo) instanceHeadType0)
+                          (substituteConstraintTypes (classParamNames classInfo) instanceHeadTypes0)
                           (methodConstraints methodInfo)
                     methodValueConstraintInfos =
-                      instanceConstraintInfos0
+                      declaredInstanceConstraintInfos0
                         ++ map
-                          (substituteConstraintInfo (classParamName classInfo) instanceHeadView0)
+                          (substituteConstraintInfoTypes (classParamNames classInfo) instanceHeadViews0)
                           (methodConstraintInfos methodInfo)
                     methodValueIdentityType =
                       constrainedVisibleType $
@@ -2351,10 +2608,10 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
                             SymbolIdentity
                               { symbolNamespace = SymbolValue,
                                 symbolDefiningModule = P.moduleName mod0,
-                                symbolDefiningName = renderInstanceName instanceClassName0 instanceHeadType0 (P.methodDefName methodDef),
+                                symbolDefiningName = renderInstanceNameHead instanceClassName0 instanceHeadTypes0 (P.methodDefName methodDef),
                                 symbolOwnerIdentity = Nothing
                           },
-                          valueRuntimeName = qualify (P.moduleName mod0) (renderInstanceName instanceClassName0 instanceHeadType0 (P.methodDefName methodDef)),
+                          valueRuntimeName = qualify (P.moduleName mod0) (renderInstanceNameHead instanceClassName0 instanceHeadTypes0 (P.methodDefName methodDef)),
                           valueType = constrainedVisibleType (P.ConstrainedType methodValueConstraints rawMethodType),
                           valueIdentityType = methodValueIdentityType,
                           valueConstraints = methodValueConstraints,
@@ -2374,16 +2631,120 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
             instanceConstraintInfos = instanceConstraintInfos0,
             instanceHeadType = instanceHeadType0,
             instanceHeadIdentityType = instanceHeadIdentityType0,
+            instanceHeadTypes = instanceHeadTypes0,
+            instanceHeadIdentityTypes = instanceHeadIdentityTypes0,
             instanceMethods = instanceMethodInfos
           }
+
+    duplicateInstanceError info =
+      case instanceHeadTypes info of
+        ty :| [] -> ProgramDuplicateInstance (instanceClassName info) ty
+        tys -> ProgramDuplicateInstanceHead (instanceClassName info) (NE.toList tys)
+
+    overlappingInstanceError left right =
+      case (instanceHeadTypes left, instanceHeadTypes right) of
+        (leftTy :| [], rightTy :| []) -> ProgramOverlappingInstance (instanceClassName left) leftTy rightTy
+        (leftTys, rightTys) -> ProgramOverlappingInstanceHead (instanceClassName left) (NE.toList leftTys) (NE.toList rightTys)
+
+    ambiguousFunctionalDependencyInstanceError info =
+      ProgramAmbiguousFunctionalDependencyInstance (instanceClassName info) (NE.toList (instanceHeadTypes info))
+
+    ambiguousFunctionalDependencyInstances infos =
+      [ info
+        | info <- infos,
+          Just classInfo <- [classInfoForInstance info],
+          fundep <- classFunctionalDependencies classInfo,
+          Just (determinerIndices, determinedIndices) <- [functionalDependencyIndices classInfo fundep],
+          let determinerVars = freeProjectedTypeVars determinerIndices (instanceHeadIdentityTypes info)
+              determinedVars = freeProjectedTypeVars determinedIndices (instanceHeadIdentityTypes info),
+          not (determinedVars `Set.isSubsetOf` determinerVars)
+      ]
+
+    conflictingFunctionalDependencyInstances infos =
+      [ conflict
+        | (ix, left) <- zip [(0 :: Int) ..] infos,
+          right <- drop (ix + 1) infos,
+          sameInstanceClass left right,
+          Just conflict <- [functionalDependencyConflict left right]
+      ]
+        ++ [ conflict
+             | local <- infos,
+               existing <- scopeInstances scope,
+               sameInstanceClass local existing,
+               Just conflict <- [functionalDependencyConflict local existing]
+           ]
+
+    functionalDependencyConflict left right = do
+      classInfo <- classInfoForInstance left
+      firstJust
+        [ conflictForFundep classInfo fundep left right
+          | fundep <- classFunctionalDependencies classInfo
+        ]
+
+    conflictForFundep classInfo fundep left right = do
+      (determinerIndices, determinedIndices) <- functionalDependencyIndices classInfo fundep
+      let leftDeterminers = projectInstanceTypes determinerIndices (instanceHeadTypes left)
+          leftDetermined = projectInstanceTypes determinedIndices (instanceHeadTypes left)
+          rightDetermined = projectInstanceTypes determinedIndices (instanceHeadTypes right)
+          leftDeterminerIdentities = projectInstanceTypes determinerIndices (instanceHeadIdentityTypes left)
+          rightDeterminerIdentities = projectInstanceTypes determinerIndices (instanceHeadIdentityTypes right)
+          leftDeterminedIdentities = projectInstanceTypes determinedIndices (instanceHeadIdentityTypes left)
+          rightDeterminedIdentities = projectInstanceTypes determinedIndices (instanceHeadIdentityTypes right)
+      if functionalDependencyHeadsConflict leftDeterminerIdentities rightDeterminerIdentities leftDeterminedIdentities rightDeterminedIdentities
+        then Just (className classInfo, leftDeterminers, leftDetermined, rightDetermined)
+        else Nothing
+
+    functionalDependencyHeadsConflict leftDeterminers rightDeterminers leftDetermined rightDetermined =
+      case unifyTaggedProjections leftDeterminers rightDeterminers leftDetermined rightDetermined of
+        Just True -> False
+        Just False -> True
+        Nothing -> False
+
+    unifyTaggedProjections leftDeterminers rightDeterminers leftDetermined rightDetermined = do
+      let (leftEnv, taggedLeftDeterminers) = tagTypeList "__fundep_left__" Map.empty (NE.toList leftDeterminers)
+          (rightEnv, taggedRightDeterminers) = tagTypeList "__fundep_right__" Map.empty (NE.toList rightDeterminers)
+          (_, taggedLeftDetermined) = tagTypeList "__fundep_left__" leftEnv (NE.toList leftDetermined)
+          (_, taggedRightDetermined) = tagTypeList "__fundep_right__" rightEnv (NE.toList rightDetermined)
+      determinerSubst <- unifyProjectionTypes Map.empty taggedLeftDeterminers taggedRightDeterminers
+      case unifyProjectionTypes determinerSubst taggedLeftDetermined taggedRightDetermined of
+        Just _ -> Just True
+        Nothing -> Just False
+
+    unifyProjectionTypes subst left right
+      | length left /= length right = Nothing
+      | otherwise = foldM (\acc (leftTy, rightTy) -> unifyOverlap acc leftTy rightTy) subst (zip left right)
+
+    freeProjectedTypeVars indices tys =
+      foldMap freeTypeVarsInType (projectInstanceTypes indices tys)
+
+    functionalDependencyIndices classInfo fundep =
+      (,) <$> traverse lookupParamIndex (P.fundepDeterminers fundep) <*> traverse lookupParamIndex (P.fundepDetermined fundep)
+      where
+        paramIndices = Map.fromList (zip (NE.toList (classParamNames classInfo)) [(0 :: Int) ..])
+        lookupParamIndex name = Map.lookup name paramIndices
+
+    projectInstanceTypes indices tys =
+      let values = NE.toList tys
+       in fmap (values !!) indices
+
+    classInfoForInstance info =
+      case Map.lookup (instanceInfoClassSymbolIdentity info) (scopeClassesByIdentity scope) of
+        Just ((_, classInfo) : _) -> Just classInfo
+        _ -> Nothing
+
+    firstJust [] = Nothing
+    firstJust (mbValue : rest) =
+      case mbValue of
+        Just value -> Just value
+        Nothing -> firstJust rest
 
     overlappingInstances infos =
       [ (left, right)
         | (ix, left) <- zip [(0 :: Int) ..] infos,
           right <- drop (ix + 1) infos,
           sameInstanceClass left right,
-          instanceHeadIdentityType left /= instanceHeadIdentityType right,
-          instanceHeadsOverlap (instanceHeadIdentityType left) (instanceHeadIdentityType right)
+          instanceHeadIdentityTypes left /= instanceHeadIdentityTypes right,
+          instanceHeadsOverlap (instanceHeadIdentityTypes left) (instanceHeadIdentityTypes right)
       ]
 
     duplicateLocalInstances infos =
@@ -2405,8 +2766,8 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
         | local <- infos,
           existing <- scopeInstances scope,
           sameInstanceClass local existing,
-          instanceHeadIdentityType local /= instanceHeadIdentityType existing,
-          instanceHeadsOverlap (instanceHeadIdentityType local) (instanceHeadIdentityType existing)
+          instanceHeadIdentityTypes local /= instanceHeadIdentityTypes existing,
+          instanceHeadsOverlap (instanceHeadIdentityTypes local) (instanceHeadIdentityTypes existing)
       ]
 
     sameInstanceClass left right =
@@ -2414,17 +2775,25 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
 
     sameCanonicalInstanceHead left right =
       sameInstanceClass left right
-        && instanceHeadIdentityType left == instanceHeadIdentityType right
+        && instanceHeadIdentityTypes left == instanceHeadIdentityTypes right
 
     instanceHeadsOverlap left right =
-      case
-        unifyOverlap
-          Map.empty
-          (tagTypeVars "__overlap_left__" left)
-          (tagTypeVars "__overlap_right__" right)
+      length left == length right
+        && case
+          foldM
+            ( \(subst, ix) (leftTy, rightTy) -> do
+                subst' <-
+                  unifyOverlap
+                    subst
+                    (tagTypeVars ("__overlap_left" ++ show ix ++ "__") leftTy)
+                    (tagTypeVars ("__overlap_right" ++ show ix ++ "__") rightTy)
+                pure (subst', ix + 1)
+            )
+            (Map.empty, 0 :: Int)
+            (zip (NE.toList left) (NE.toList right))
         of
-        Just _ -> True
-        Nothing -> False
+          Just _ -> True
+          Nothing -> False
 
     unifyOverlap subst left right =
       case (applyOverlapSubst subst left, applyOverlapSubst subst right) of
@@ -2438,6 +2807,11 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
                 (\acc (leftTy, rightTy) -> unifyOverlap acc leftTy rightTy)
                 subst
                 (zip (NE.toList leftArgs) (NE.toList rightArgs))
+        (STTyLam leftName leftBody, STTyLam rightName rightBody)
+          | leftName == rightName -> unifyOverlap subst leftBody rightBody
+        (STTyApp leftFun leftArg, STTyApp rightFun rightArg) -> do
+          subst' <- unifyOverlap subst leftFun rightFun
+          unifyOverlap subst' leftArg rightArg
         (STVarApp leftName leftArgs, rightTy) ->
           unifyOverlapTypeHead subst leftName (NE.toList leftArgs) rightTy
         (leftTy, STVarApp rightName rightArgs) ->
@@ -2489,8 +2863,12 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
            in case Map.lookup name subst >>= \replacement -> applyTypeHead replacement (NE.toList args') of
                 Just replacementTy -> replacementTy
                 Nothing -> STVarApp name args'
+        STTyLam name body ->
+          STTyLam name (applyOverlapSubst (Map.delete name subst) body)
+        STTyApp fun arg -> STTyApp (applyOverlapSubst subst fun) (applyOverlapSubst subst arg)
         STForall name mb body ->
-          STForall name (fmap (SrcBound . applyOverlapSubst subst . unSrcBound) mb) (applyOverlapSubst subst body)
+          let subst' = Map.delete name subst
+           in STForall name (fmap (SrcBound . applyOverlapSubst subst' . unSrcBound) mb) (applyOverlapSubst subst' body)
         STMu name body -> STMu name (applyOverlapSubst subst body)
         STBase {} -> ty
         STBottom -> STBottom
@@ -2503,6 +2881,10 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
             STArrow dom cod -> STArrow (go env dom) (go env cod)
             STCon name args -> STCon name (fmap (go env) args)
             STVarApp name args -> STVarApp (Map.findWithDefault (prefix ++ name) name env) (fmap (go env) args)
+            STTyLam name body ->
+              let tagged = prefix ++ name
+               in STTyLam tagged (go (Map.insert name tagged env) body)
+            STTyApp fun arg -> STTyApp (go env fun) (go env arg)
             STForall name mb body ->
               let tagged = prefix ++ name
                   env' = Map.insert name tagged env
@@ -2513,12 +2895,77 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
             STBase {} -> ty
             STBottom -> STBottom
 
+    tagTypeList prefix env0 tys =
+      foldl step (env0, []) tys
+      where
+        step (env, acc) ty =
+          let (env', ty') = tagTypeWithEnv prefix env ty
+           in (env', acc ++ [ty'])
+
+    tagTypeWithEnv prefix env ty =
+      case ty of
+        STVar name ->
+          let (env', tagged) = lookupOrTag prefix env name
+           in (env', STVar tagged)
+        STArrow dom cod ->
+          let (env1, dom') = tagTypeWithEnv prefix env dom
+              (env2, cod') = tagTypeWithEnv prefix env1 cod
+           in (env2, STArrow dom' cod')
+        STCon name args ->
+          let (env', args') = tagTypeList prefix env (NE.toList args)
+           in (env', STCon name (NE.fromList args'))
+        STVarApp name args ->
+          let (env1, tagged) = lookupOrTag prefix env name
+              (env2, args') = tagTypeList prefix env1 (NE.toList args)
+           in (env2, STVarApp tagged (NE.fromList args'))
+        STTyLam name body ->
+          let tagged = prefix ++ name
+              previous = Map.lookup name env
+              (env', body') = tagTypeWithEnv prefix (Map.insert name tagged env) body
+           in (restoreTagBinding name previous env', STTyLam tagged body')
+        STTyApp fun arg ->
+          let (env1, fun') = tagTypeWithEnv prefix env fun
+              (env2, arg') = tagTypeWithEnv prefix env1 arg
+           in (env2, STTyApp fun' arg')
+        STForall name mb body ->
+          let tagged = prefix ++ name
+              previous = Map.lookup name env
+              (env1, mb') = tagMaybeBound env mb
+              (env2, body') = tagTypeWithEnv prefix (Map.insert name tagged env1) body
+           in (restoreTagBinding name previous env2, STForall tagged mb' body')
+          where
+            tagMaybeBound envBound Nothing = (envBound, Nothing)
+            tagMaybeBound envBound (Just bound) =
+              let (env', bound') = tagTypeWithEnv prefix envBound (unSrcBound bound)
+               in (env', Just (SrcBound bound'))
+        STMu name body ->
+          let tagged = prefix ++ name
+              previous = Map.lookup name env
+              (env', body') = tagTypeWithEnv prefix (Map.insert name tagged env) body
+           in (restoreTagBinding name previous env', STMu tagged body')
+        STBase {} -> (env, ty)
+        STBottom -> (env, STBottom)
+
+    lookupOrTag prefix env name =
+      case Map.lookup name env of
+        Just tagged -> (env, tagged)
+        Nothing ->
+          let tagged = prefix ++ name
+           in (Map.insert name tagged env, tagged)
+
+    restoreTagBinding name previous env =
+      case previous of
+        Just tagged -> Map.insert name tagged env
+        Nothing -> Map.delete name env
+
     freeTypeVarsInType ty =
       case ty of
         STVar name -> Set.singleton name
         STArrow dom cod -> freeTypeVarsInType dom `Set.union` freeTypeVarsInType cod
         STCon _ args -> foldMap freeTypeVarsInType args
         STVarApp name args -> Set.insert name (foldMap freeTypeVarsInType args)
+        STTyLam name body -> Set.delete name (freeTypeVarsInType body)
+        STTyApp fun arg -> freeTypeVarsInType fun `Set.union` freeTypeVarsInType arg
         STForall name mb body ->
           maybe Set.empty (freeTypeVarsInType . unSrcBound) mb
             `Set.union` Set.delete name (freeTypeVarsInType body)
@@ -2526,22 +2973,34 @@ buildInstanceSkeletons displayEnv scope mod0 derived = do
         STBase {} -> Set.empty
         STBottom -> Set.empty
 
-    substituteConstraint paramName headTy constraint =
+    substituteConstraintTypes paramNames headTys constraint =
       constraint
-        { P.constraintType = substituteTypeVar paramName headTy (P.constraintType constraint)
+        { P.constraintTypes = fmap (substituteTypeVars paramNames headTys) (P.constraintTypes constraint)
         }
 
-    substituteConstraintInfo paramName headView constraint =
-      constraint
-        { constraintTypeView =
-            TypeView
-              { typeViewDisplay = substituteTypeVar paramName (typeViewDisplay headView) (typeViewDisplay (constraintTypeView constraint)),
-                typeViewIdentity = substituteTypeVar paramName (typeViewIdentity headView) (typeViewIdentity (constraintTypeView constraint))
-              }
-        }
+    substituteConstraintInfoTypes paramNames headViews constraint =
+      let views = fmap substituteView (constraintTypeViews constraint)
+       in constraint
+            { constraintTypeView = NE.head views,
+              constraintTypeViews = views
+            }
+      where
+        substituteView view =
+          TypeView
+            { typeViewDisplay = substituteTypeVars paramNames (fmap typeViewDisplay headViews) (typeViewDisplay view),
+              typeViewIdentity = substituteTypeVars paramNames (fmap typeViewIdentity headViews) (typeViewIdentity view)
+            }
+
+    substituteTypeVars paramNames headTys ty =
+      Map.foldrWithKey substituteTypeVar ty (Map.fromList (zip (NE.toList paramNames) (NE.toList headTys)))
 
 renderInstanceName :: P.ClassName -> SrcType -> P.MethodName -> String
-renderInstanceName className0 headTy methodName0 = className0 ++ "__" ++ sanitizeType headTy ++ "__" ++ methodName0
+renderInstanceName className0 headTy =
+  renderInstanceNameHead className0 (headTy :| [])
+
+renderInstanceNameHead :: P.ClassName -> NonEmpty SrcType -> P.MethodName -> String
+renderInstanceNameHead className0 headTys methodName0 =
+  intercalate "__" (className0 : map sanitizeType (NE.toList headTys) ++ [methodName0])
 
 sanitizeType :: SrcType -> String
 sanitizeType = \case
@@ -2550,6 +3009,8 @@ sanitizeType = \case
   STBase base -> sanitizeName base
   STCon con args -> intercalate "_" (sanitizeName con : map sanitizeType (NE.toList args))
   STVarApp name args -> intercalate "_" (sanitizeName name : map sanitizeType (NE.toList args))
+  STTyLam v body -> "tylam_" ++ sanitizeName v ++ "_" ++ sanitizeType body
+  STTyApp fun arg -> "tyapp_" ++ sanitizeType fun ++ "_" ++ sanitizeType arg
   STForall v _ body -> "forall_" ++ sanitizeName v ++ "_" ++ sanitizeType body
   STMu v body -> "mu_" ++ sanitizeName v ++ "_" ++ sanitizeType body
   STBottom -> "bottom"
@@ -2565,11 +3026,15 @@ sanitizeType = \case
 checkInstance :: ElaborateScope -> Scope -> P.ResolvedInstanceDecl -> TcM [CheckedBinding]
 checkInstance elaborateScope scope instDecl = do
   classInfo <- lookupClassInfoBySymbol scope (P.instanceDeclClass instDecl)
-  let headTy = resolvedSrcTypeToSrcType (P.instanceDeclType instDecl)
+  let headTys = fmap resolvedSrcTypeToSrcType (P.instanceDeclTypes instDecl)
   instanceInfo <-
-    case findInstance classInfo (resolvedSrcTypeIdentityType (P.instanceDeclType instDecl)) of
+    case findInstance classInfo (fmap resolvedSrcTypeIdentityType (P.instanceDeclTypes instDecl)) of
       Just info -> pure info
-      Nothing -> throwError (ProgramNoMatchingInstance (className classInfo) headTy)
+      Nothing ->
+        throwError $
+          case headTys of
+            headTy :| [] -> ProgramNoMatchingInstance (className classInfo) headTy
+            tys -> ProgramNoMatchingInstanceHead (className classInfo) (NE.toList tys)
   forM (P.instanceDeclMethods instDecl) $ \methodDef -> do
     case instanceMethods instanceInfo Map.! P.methodDefName methodDef of
       valueInfo@OrdinaryValue {} -> do
@@ -2585,11 +3050,11 @@ checkInstance elaborateScope scope instDecl = do
           )
       _ -> throwError (ProgramUnexpectedInstanceMethod (className classInfo) (P.methodDefName methodDef))
   where
-    findInstance classInfo headIdentityTy =
+    findInstance classInfo headIdentityTys =
       find
         ( \info ->
             instanceClassIdentity info == classIdentity classInfo
-              && instanceHeadIdentityType info == headIdentityTy
+              && instanceHeadIdentityTypes info == headIdentityTys
         )
         (scopeInstances scope)
 

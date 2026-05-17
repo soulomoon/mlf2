@@ -95,7 +95,7 @@
     {
       "milestone_id": "milestone-7",
       "title": "Full Type-Level MLFP Handoff Merge And Publication",
-      "status": "pending",
+      "status": "done",
       "depends_on": [
         "milestone-6"
       ],
@@ -237,7 +237,7 @@
     },
     "milestone-7-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",
-      "selector": "### [pending] 7. Full Type-Level MLFP Handoff Merge And Publication"
+      "selector": "### [done] 7. Full Type-Level MLFP Handoff Merge And Publication"
     },
     "milestone-7-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-00-mlfp-package-substrate-roadmap/rev-002/roadmap.md",

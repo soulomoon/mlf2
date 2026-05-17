@@ -13,6 +13,7 @@ data XmlfType
     | XTArrow XmlfType XmlfType
     | XTBase String
     | XTCon String (NonEmpty XmlfType)
+    | XTVarApp String (NonEmpty XmlfType)
     | XTForall String XmlfType XmlfType
     | XTMu String XmlfType
     | XTBottom

@@ -28,8 +28,10 @@ module MLF.Frontend.Program.Elaborate
     resolveInstanceInfoByConstraint,
     resolveMethodInstanceInfoWithSubst,
     resolveMethodInstanceInfoByTypeView,
+    resolveMethodInstanceInfoByTypeViews,
     zeroMethodConstraintCoveredByEvidenceInfo,
     lookupEvidenceMethodByClass,
+    lookupEvidenceMethodByClassTypes,
   )
 where
 
@@ -39,6 +41,7 @@ import Control.Monad.Except (ExceptT, MonadError (throwError), runExceptT)
 import Control.Monad.State.Strict (State, get, modify, runState)
 import Data.List (find, partition, sort)
 import Data.List.NonEmpty (NonEmpty (..))
+import qualified Data.List.NonEmpty as NE
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as Map
 import Data.Set (Set)
@@ -206,6 +209,10 @@ visibleTypeForIdentity dataTypes = go
         (STVarApp displayName displayArgs, STVarApp identityName identityArgs)
           | displayName == identityName ->
               STVarApp displayName (zipWithNE go displayArgs identityArgs)
+        (STTyLam displayName displayBody, STTyLam _ identityBody) ->
+          STTyLam displayName (go displayBody identityBody)
+        (STTyApp displayFun displayArg, STTyApp identityFun identityArg) ->
+          STTyApp (go displayFun identityFun) (go displayArg identityArg)
         (STArrow displayDom displayCod, STArrow identityDom identityCod) ->
           STArrow (go displayDom identityDom) (go displayCod identityCod)
         (STForall name displayBound displayBody, STForall _ identityBound identityBody) ->
@@ -263,6 +270,8 @@ sourceTypeIdentityInScope scope = canonical
                   | Builtins.isBuiltinTypeName name -> STCon (Builtins.builtinModuleName ++ "." ++ name) args'
                   | otherwise -> STCon name args'
         STVarApp name args -> STVarApp name (fmap canonical args)
+        STTyLam name body -> STTyLam name (canonical body)
+        STTyApp fun arg -> STTyApp (canonical fun) (canonical arg)
         STArrow dom cod -> STArrow (canonical dom) (canonical cod)
         STForall name mb body ->
           STForall name (fmap (SrcBound . canonical . unSrcBound) mb) (canonical body)
@@ -285,59 +294,90 @@ constrainedRuntimeTypeRaw dataTypes classes0 constraints visibleTy =
    in foldr (\(name, mb) acc -> STForall name (fmap SrcBound mb) acc) runtimeBody foralls
   where
     constraintEvidenceTypes constraint =
+      [ lowerTypeRaw dataTypes (methodEvidenceSourceTypeRaw dataTypes classes0 classInfo (P.constraintTypes evidenceConstraint) methodInfo)
+        | (classInfo, evidenceConstraint) <- constraintEvidenceClosureRaw classes0 constraint,
+          methodInfo <- Map.elems (classMethods classInfo)
+      ]
+
+constraintEvidenceClosureRaw :: Map String ClassInfo -> P.ClassConstraint -> [(ClassInfo, P.ClassConstraint)]
+constraintEvidenceClosureRaw classes0 =
+  go Set.empty
+  where
+    go seen constraint =
       case Map.lookup (P.constraintClassName constraint) classes0 of
         Nothing -> []
         Just classInfo ->
-          [ lowerTypeRaw dataTypes (methodEvidenceSourceTypeRaw dataTypes classes0 classInfo (P.constraintType constraint) methodInfo)
-            | methodInfo <- Map.elems (classMethods classInfo)
-          ]
+          let key = classConstraintEvidenceKeyRaw classInfo constraint
+           in if key `Set.member` seen
+                then []
+                else
+                  let seen' = Set.insert key seen
+                      superclasses =
+                        map
+                          (specializeConstraintTypes (classParamNames classInfo) (P.constraintTypes constraint))
+                          (classSuperclasses classInfo)
+                   in (classInfo, constraint) : concatMap (go seen') superclasses
 
-methodEvidenceSourceType :: ElaborateScope -> ClassInfo -> SrcType -> MethodInfo -> SrcType
+classConstraintEvidenceKeyRaw :: ClassInfo -> P.ClassConstraint -> (SymbolIdentity, String)
+classConstraintEvidenceKeyRaw classInfo constraint =
+  (classInfoSymbolIdentity classInfo, show (NE.toList (P.constraintTypes constraint)))
+
+methodEvidenceSourceType :: ElaborateScope -> ClassInfo -> NonEmpty SrcType -> MethodInfo -> SrcType
 methodEvidenceSourceType scope =
   methodEvidenceSourceTypeRaw (esTypes scope) (esClasses scope)
 
-methodEvidenceSourceTypeRaw :: Map String DataInfo -> Map String ClassInfo -> ClassInfo -> SrcType -> MethodInfo -> SrcType
-methodEvidenceSourceTypeRaw dataTypes classes0 classInfo classArgTy methodInfo =
+methodEvidenceSourceTypeRaw :: Map String DataInfo -> Map String ClassInfo -> ClassInfo -> NonEmpty SrcType -> MethodInfo -> SrcType
+methodEvidenceSourceTypeRaw dataTypes classes0 classInfo classArgTys methodInfo =
   let specializedMethodTy =
-        specializeMethodType (methodType methodInfo) (classParamName classInfo) classArgTy
+        specializeMethodTypes (methodType methodInfo) (classParamNames classInfo) classArgTys
       specializedConstraints =
         map
-          (specializeConstraintType (classParamName classInfo) classArgTy)
+          (specializeConstraintTypes (classParamNames classInfo) classArgTys)
           (methodConstraints methodInfo)
-      headVars = freeTypeVarsSrcType classArgTy
+      headVars = foldMap freeTypeVarsSrcType classArgTys
       deferredConstraints =
         filter (not . constraintDeterminedByTypeVars headVars) specializedConstraints
       evidenceVisibleTy =
         quantifyMethodLocalVars headVars specializedConstraints specializedMethodTy
    in constrainedRuntimeTypeRaw dataTypes classes0 deferredConstraints evidenceVisibleTy
 
-specializeConstraintType :: String -> SrcType -> P.ClassConstraint -> P.ClassConstraint
-specializeConstraintType paramName headTy constraint =
-  constraint {P.constraintType = substituteTypeVar paramName headTy (P.constraintType constraint)}
-
-specializeConstraintInfoType :: String -> TypeView -> ConstraintInfo -> ConstraintInfo
-specializeConstraintInfoType paramName headView constraint =
+specializeConstraintTypes :: NonEmpty String -> NonEmpty SrcType -> P.ClassConstraint -> P.ClassConstraint
+specializeConstraintTypes paramNames headTys constraint =
   constraint
-    { constraintTypeView =
-        TypeView
-          { typeViewDisplay = substituteTypeVar paramName (typeViewDisplay headView) (typeViewDisplay (constraintTypeView constraint)),
-            typeViewIdentity = substituteTypeVar paramName (typeViewIdentity headView) (typeViewIdentity (constraintTypeView constraint))
-          }
+    { P.constraintTypes = fmap (substituteTypeVars paramNames headTys) (P.constraintTypes constraint)
     }
+
+specializeConstraintInfoTypes :: NonEmpty String -> NonEmpty TypeView -> ConstraintInfo -> ConstraintInfo
+specializeConstraintInfoTypes paramNames headViews constraint =
+  let views = fmap substituteView (constraintTypeViews constraint)
+   in constraint
+        { constraintTypeView = NE.head views,
+          constraintTypeViews = views
+        }
+  where
+    substituteView view =
+      TypeView
+        { typeViewDisplay = substituteTypeVars paramNames (fmap typeViewDisplay headViews) (typeViewDisplay view),
+          typeViewIdentity = substituteTypeVars paramNames (fmap typeViewIdentity headViews) (typeViewIdentity view)
+        }
+
+substituteTypeVars :: NonEmpty String -> NonEmpty SrcType -> SrcType -> SrcType
+substituteTypeVars paramNames headTys ty =
+  Map.foldrWithKey substituteTypeVar ty (Map.fromList (zip (NE.toList paramNames) (NE.toList headTys)))
 
 constraintDeterminedByTypeVars :: Set String -> P.ClassConstraint -> Bool
 constraintDeterminedByTypeVars typeVars constraint =
-  freeTypeVarsSrcType (P.constraintType constraint) `Set.isSubsetOf` typeVars
+  foldMap freeTypeVarsSrcType (P.constraintTypes constraint) `Set.isSubsetOf` typeVars
 
 constraintInfoDeterminedByTypeVars :: Set String -> ConstraintInfo -> Bool
 constraintInfoDeterminedByTypeVars typeVars constraint =
-  freeTypeVarsTypeView (constraintTypeView constraint) `Set.isSubsetOf` typeVars
+  freeTypeVarsTypeViews (constraintTypeViews constraint) `Set.isSubsetOf` typeVars
 
 quantifyMethodLocalVars :: Set String -> [P.ClassConstraint] -> SrcType -> SrcType
 quantifyMethodLocalVars headVars constraints ty =
   let (foralls, _) = splitForalls ty
       alreadyQuantified = Set.fromList (map fst foralls)
-      constraintVars = foldMap (freeTypeVarsSrcType . P.constraintType) constraints
+      constraintVars = foldMap (foldMap freeTypeVarsSrcType . P.constraintTypes) constraints
       localVars =
         (freeTypeVarsSrcType ty `Set.union` constraintVars)
           Set.\\ headVars
@@ -373,6 +413,9 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
       STVarApp name args ->
         let args' = fmap (lowerWith seen subst currentData) args
          in lowerAppliedTypeHead (\seen' -> lowerWith seen' subst currentData) subst seen name args'
+      STTyLam name body ->
+        STTyLam name (lowerWith (Set.delete name seen) (Map.delete name subst) currentData body)
+      STTyApp fun arg -> STTyApp (lowerWith seen subst currentData fun) (lowerWith seen subst currentData arg)
       STForall name mb body ->
         let subst' = Map.delete name subst
             seen' = Set.delete name seen
@@ -429,6 +472,10 @@ lowerTypeRaw dataTypes = lower Map.empty Nothing
       STVarApp name args ->
         let args' = fmap (lowerCtorArgWith seen subst currentData selfTy) args
          in lowerAppliedTypeHead (\seen' -> lowerCtorArgWith seen' subst currentData selfTy) subst seen name args'
+      STTyLam name body ->
+        STTyLam name (lowerCtorArgWith (Set.delete name seen) (Map.delete name subst) currentData selfTy body)
+      STTyApp fun arg ->
+        STTyApp (lowerCtorArgWith seen subst currentData selfTy fun) (lowerCtorArgWith seen subst currentData selfTy arg)
       STForall name mb body ->
         let subst' = Map.delete name subst
             seen' = Set.delete name seen
@@ -560,7 +607,10 @@ lowerResolvedConstrainedExprBinding scope runtimeName ty exportedAsMain expr = d
             typeViewIdentity =
               constrainedVisibleType
                 ( P.ConstrainedType
-                    [ P.ClassConstraint (constraintDisplayClass constraint) (typeViewIdentity (constraintTypeView constraint))
+                    [ P.ClassConstraint
+                        { P.constraintClassName = constraintDisplayClass constraint,
+                          P.constraintTypes = typeViewsIdentity (constraintTypeViews constraint)
+                        }
                       | constraint <- constraints
                     ]
                     (typeViewIdentity bodyView)
@@ -582,19 +632,48 @@ constrainedRuntimeTypeInfo scope constraints visibleView =
    in foldr (\(name, mb) acc -> STForall name (fmap SrcBound mb) acc) runtimeBody foralls
   where
     constraintEvidenceTypes constraint =
+      [ lowerTypeRaw (esTypes scope) (methodEvidenceSourceType scope classInfo (typeViewsDisplay (constraintTypeViews evidenceConstraint)) methodInfo)
+        | (classInfo, evidenceConstraint) <- constraintEvidenceClosureInfo scope constraint,
+          methodInfo <- Map.elems (classMethods classInfo)
+      ]
+
+constraintEvidenceClosureInfo :: ElaborateScope -> ConstraintInfo -> [(ClassInfo, ConstraintInfo)]
+constraintEvidenceClosureInfo scope =
+  go Set.empty
+  where
+    go seen constraint =
       case classInfoForConstraint scope constraint of
         Nothing -> []
         Just classInfo ->
-          [ lowerTypeRaw (esTypes scope) (methodEvidenceSourceType scope classInfo (typeViewDisplay (constraintTypeView constraint)) methodInfo)
-            | methodInfo <- Map.elems (classMethods classInfo)
-          ]
+          let key = classConstraintEvidenceKeyInfo classInfo constraint
+           in if key `Set.member` seen
+                then []
+                else
+                  let seen' = Set.insert key seen
+                      superclasses =
+                        map
+                          (applyConstraintInfoSubst (superclassSubst classInfo constraint))
+                          (classSuperclassInfos classInfo)
+                   in (classInfo, constraint) : concatMap (go seen') superclasses
+
+    superclassSubst classInfo constraint =
+      Map.fromList $
+        zip
+          (NE.toList (classParamNames classInfo))
+          (NE.toList (constraintTypeViews constraint))
+
+classConstraintEvidenceKeyInfo :: ClassInfo -> ConstraintInfo -> (SymbolIdentity, String)
+classConstraintEvidenceKeyInfo classInfo constraint =
+  (classInfoSymbolIdentity classInfo, show (NE.toList (typeViewsIdentity (constraintTypeViews constraint))))
 
 resolvedConstraintInfoForScope :: ElaborateScope -> P.ResolvedClassConstraint -> Either ProgramError ConstraintInfo
-resolvedConstraintInfoForScope scope constraint =
+resolvedConstraintInfoForScope scope constraint = do
+  views <- mapM (resolvedTypeViewForScope scope) (P.constraintTypes constraint)
   ConstraintInfo
     <$> displayClassNameForResolved scope (P.constraintClassName constraint)
     <*> pure (resolvedSymbolIdentity (P.constraintClassName constraint))
-    <*> resolvedTypeViewForScope scope (P.constraintType constraint)
+    <*> pure (NE.head views)
+    <*> pure views
 
 resolvedTypeViewForScope :: ElaborateScope -> ResolvedSrcType -> Either ProgramError TypeView
 resolvedTypeViewForScope scope ty =
@@ -615,6 +694,8 @@ displaySrcTypeForResolved scope = \case
   RSTBase symbol -> STBase <$> displayTypeHeadNameForResolved scope symbol
   RSTCon symbol args -> STCon <$> displayTypeHeadNameForResolved scope symbol <*> traverse (displaySrcTypeForResolved scope) args
   RSTVarApp name args -> STVarApp name <$> traverse (displaySrcTypeForResolved scope) args
+  RSTTyLam name body -> STTyLam name <$> displaySrcTypeForResolved scope body
+  RSTTyApp fun arg -> STTyApp <$> displaySrcTypeForResolved scope fun <*> displaySrcTypeForResolved scope arg
   RSTForall name mb body ->
     STForall name
       <$> traverse (fmap SrcBound . displaySrcTypeForResolved scope . unResolvedSrcBound) mb
@@ -1155,6 +1236,17 @@ matchTypesByShape subst template actual = case template of
       _ -> Nothing
   STVarApp name args ->
     matchTypeHeadApplicationWith matchTypesByShape (==) subst name args actual
+  STTyLam name body ->
+    case actual of
+      STTyLam name' body'
+        | name == name' -> matchTypesByShape subst body body'
+      _ -> Nothing
+  STTyApp fun arg ->
+    case actual of
+      STTyApp fun' arg' -> do
+        subst' <- matchTypesByShape subst fun fun'
+        matchTypesByShape subst' arg arg'
+      _ -> Nothing
   STForall name mb body ->
     case actual of
       STForall name' mb' body'
@@ -1269,7 +1361,7 @@ valueEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, valueType
           Just subst0 -> pure (fmap (sourceTypeViewInScope scope) (refineValueEvidenceSubst scope visibleTy mbExpected args subst0))
           Nothing ->
             case displayConstraints of
-              constraint : _ -> throwError (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
+              constraint : _ -> throwError (noMatchingDisplayConstraintError constraint)
               [] -> pure Map.empty
       let specializedConstraints = map (applyConstraintInfoSubst subst) constraints
       if any usesLocalPolymorphicEvidence specializedConstraints
@@ -1277,7 +1369,7 @@ valueEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, valueType
         else concat <$> mapM (constraintEvidenceArgExprsInfo scope) specializedConstraints
   where
     usesLocalPolymorphicEvidence constraint =
-      not (Set.null (freeTypeVarsTypeView (constraintTypeView constraint)))
+      not (Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint)))
         && constraintCoveredByEvidenceInfo scope constraint
 valueEvidenceArgs _ _ _ _ = pure []
 
@@ -1290,7 +1382,7 @@ valueResolvedEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, v
           Just subst0 -> pure (fmap (sourceTypeViewInScope scope) (refineValueEvidenceSubst scope visibleTy mbExpected args subst0))
           Nothing ->
             case displayConstraints of
-              constraint : _ -> throwError (ProgramNoMatchingInstance (P.constraintClassName constraint) (P.constraintType constraint))
+              constraint : _ -> throwError (noMatchingDisplayConstraintError constraint)
               [] -> pure Map.empty
       let specializedConstraints = map (applyConstraintInfoSubst subst) constraints
       if any usesLocalPolymorphicEvidence specializedConstraints
@@ -1298,7 +1390,7 @@ valueResolvedEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, v
         else concat <$> mapM (constraintEvidenceArgExprsInfo scope) specializedConstraints
   where
     usesLocalPolymorphicEvidence constraint =
-      not (Set.null (freeTypeVarsTypeView (constraintTypeView constraint)))
+      not (Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint)))
         && constraintCoveredByEvidenceInfo scope constraint
 valueResolvedEvidenceArgs _ _ _ _ = pure []
 
@@ -1320,20 +1412,23 @@ constraintEvidenceArgExprsInfo scope constraint
 
 shouldDeferConstraintEvidenceInfo :: ElaborateScope -> ConstraintInfo -> Bool
 shouldDeferConstraintEvidenceInfo scope constraint =
-  not (Set.null (freeTypeVarsTypeView (constraintTypeView constraint)))
+  not (Set.null (freeTypeVarsTypeViews (constraintTypeViews constraint)))
     && not (constraintCoveredByEvidenceInfo scope constraint)
 
 constraintCoveredByEvidenceInfo :: ElaborateScope -> ConstraintInfo -> Bool
 constraintCoveredByEvidenceInfo scope constraint =
   case classInfoForConstraint scope constraint of
     Nothing -> False
-    Just classInfo
-      | Map.null (classMethods classInfo) ->
-          zeroMethodConstraintCoveredByEvidenceInfo scope constraint
-      | otherwise ->
+    Just _ ->
+      all ownConstraintCovered (constraintEvidenceClosureInfo scope constraint)
+  where
+    ownConstraintCovered (classInfo, evidenceConstraint)
+      | Map.null (classMethods classInfo) =
+          zeroMethodConstraintCoveredByEvidenceInfo scope evidenceConstraint
+      | otherwise =
           all
             ( \methodInfo ->
-                case lookupEvidenceMethodInfo scope constraint (methodName methodInfo) of
+                case lookupEvidenceMethodInfo scope evidenceConstraint (methodName methodInfo) of
                   Just _ -> True
                   Nothing -> False
             )
@@ -1343,21 +1438,24 @@ deferConstraintEvidenceExprsInfo :: ElaborateScope -> ConstraintInfo -> Elaborat
 deferConstraintEvidenceExprsInfo scope constraint =
   case classInfoForConstraint scope constraint of
     Nothing -> throwError (ProgramUnknownClass (constraintDisplayClass constraint))
-    Just classInfo
-      | Map.null (classMethods classInfo) ->
-          resolveZeroMethodEvidenceExpr scope Set.empty constraint
-      | otherwise ->
-          mapM (deferMethodEvidenceExpr scope (constraintTypeView constraint)) (Map.elems (classMethods classInfo))
+    Just _ ->
+      concat <$> mapM deferOne (constraintEvidenceClosureInfo scope constraint)
+  where
+    deferOne (classInfo, evidenceConstraint)
+      | Map.null (classMethods classInfo) =
+          resolveZeroMethodEvidenceExpr scope Set.empty evidenceConstraint
+      | otherwise =
+          mapM (deferMethodEvidenceExpr scope (constraintTypeViews evidenceConstraint)) (Map.elems (classMethods classInfo))
 
-deferMethodEvidenceExpr :: ElaborateScope -> TypeView -> MethodInfo -> ElaborateM SurfaceExpr
-deferMethodEvidenceExpr scope classArgView methodInfo = do
+deferMethodEvidenceExpr :: ElaborateScope -> NonEmpty TypeView -> MethodInfo -> ElaborateM SurfaceExpr
+deferMethodEvidenceExpr scope classArgViews methodInfo = do
   let methodTy =
         stripVacuousSrcForalls $
-          specializeMethodType (methodType methodInfo) (methodParamName methodInfo) (typeViewDisplay classArgView)
+          specializeMethodTypes (methodType methodInfo) (methodParamNames methodInfo) (typeViewsDisplay classArgViews)
       fullArity = methodFullArity methodInfo
   placeholder <- deferMethodCall scope methodInfo fullArity methodTy Nothing
   expanded <- etaExpandMissingArgs scope methodInfo methodTy Nothing 0 fullArity (surfaceVar placeholder)
-  pure (surfaceAnn expanded (lowerTypeView scope (TypeView methodTy (specializeMethodType (methodTypeIdentity methodInfo) (methodParamName methodInfo) (typeViewIdentity classArgView)))))
+  pure (surfaceAnn expanded (lowerTypeView scope (TypeView methodTy (specializeMethodTypes (methodTypeIdentity methodInfo) (methodParamNames methodInfo) (typeViewsIdentity classArgViews)))))
 
 inferCallSubst :: ElaborateScope -> SrcType -> [P.Expr] -> Maybe (Map String SrcType)
 inferCallSubst scope visibleTy args = do
@@ -1458,6 +1556,8 @@ sourceTypeHasVariableHeadApplication ty =
     STBase {} -> False
     STCon _ args -> any sourceTypeHasVariableHeadApplication args
     STVarApp {} -> True
+    STTyLam _ body -> sourceTypeHasVariableHeadApplication body
+    STTyApp fun arg -> sourceTypeHasVariableHeadApplication fun || sourceTypeHasVariableHeadApplication arg
     STArrow dom cod -> sourceTypeHasVariableHeadApplication dom || sourceTypeHasVariableHeadApplication cod
     STForall _ mb body -> maybe False (sourceTypeHasVariableHeadApplication . unSrcBound) mb || sourceTypeHasVariableHeadApplication body
     STMu _ body -> sourceTypeHasVariableHeadApplication body
@@ -1493,24 +1593,26 @@ compileMethodApp scope mbExpected methodInfo args
             if suppliedArity >= fullArity
               then mbExpected
               else Nothing
-          knownClassArg = knownMethodClassArg scope methodInfo args mbExpectedResult
+          knownClassArgs = knownMethodClassArgs scope methodInfo args mbExpectedResult
           placeholderTy = placeholderMethodType scope methodInfo args mbExpectedResult
           knownArgTys =
-            case knownClassArg of
+            case knownClassArgs of
               Just _ -> Just (take suppliedArity (methodArgumentTypes placeholderTy))
               Nothing -> Nothing
       argSurfaces <-
         case knownArgTys of
           Just argTys -> zipWithM (compileExpectedMethodArg scope) argTys args
           Nothing -> mapM (compileExpr scope Nothing) args
-      case knownClassArg of
-        Just classArgTy
-          | shouldResolveMethodBeforeInference scope methodInfo classArgTy -> do
-              methodHead <- resolveMethodHeadForCall scope Set.empty methodInfo classArgTy args
+      case knownClassArgs of
+        Just classArgTys
+          | shouldResolveMethodBeforeInference scope methodInfo classArgTys -> do
+              methodHead <- resolveMethodHeadForCall scope Set.empty methodInfo classArgTys args
               let applied = foldl surfaceApp methodHead argSurfaces
               expanded <- etaExpandMissingArgs scope methodInfo placeholderTy mbExpected suppliedArity fullArity applied
               pure (annotatePartialMethod expanded placeholderTy suppliedArity fullArity)
         _ -> do
+          when (NE.length (methodParamNames methodInfo) > 1) $
+            throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
           when (sourceTypeHasVariableHeadApplication placeholderTy) $
             throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
           placeholder <- deferMethodCall scope methodInfo fullArity placeholderTy (sourceTypeViewInScope scope <$> mbExpectedResult)
@@ -1538,24 +1640,26 @@ compileResolvedMethodApp scope mbExpected methodInfo args
             if suppliedArity >= fullArity
               then mbExpected
               else Nothing
-          knownClassArg = knownResolvedMethodClassArg scope methodInfo args mbExpectedResult
+          knownClassArgs = knownResolvedMethodClassArgs scope methodInfo args mbExpectedResult
           placeholderTy = placeholderResolvedMethodType scope methodInfo args mbExpectedResult
           knownArgTys =
-            case knownClassArg of
+            case knownClassArgs of
               Just _ -> Just (take suppliedArity (methodArgumentTypes placeholderTy))
               Nothing -> Nothing
       argSurfaces <-
         case knownArgTys of
           Just argTys -> zipWithM (compileExpectedResolvedMethodArg scope) argTys args
           Nothing -> mapM (compileResolvedExpr scope Nothing) args
-      case knownClassArg of
-        Just classArgTy
-          | shouldResolveMethodBeforeInference scope methodInfo classArgTy -> do
-              methodHead <- resolveResolvedMethodHeadForCall scope Set.empty methodInfo classArgTy args
+      case knownClassArgs of
+        Just classArgTys
+          | shouldResolveMethodBeforeInference scope methodInfo classArgTys -> do
+              methodHead <- resolveResolvedMethodHeadForCall scope Set.empty methodInfo classArgTys args
               let applied = foldl surfaceApp methodHead argSurfaces
               expanded <- etaExpandMissingArgs scope methodInfo placeholderTy mbExpected suppliedArity fullArity applied
               pure (annotatePartialMethod expanded placeholderTy suppliedArity fullArity)
         _ -> do
+          when (NE.length (methodParamNames methodInfo) > 1) $
+            throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
           when (sourceTypeHasVariableHeadApplication placeholderTy) $
             throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
           placeholder <- deferMethodCall scope methodInfo fullArity placeholderTy (sourceTypeViewInScope scope <$> mbExpectedResult)
@@ -1575,11 +1679,13 @@ compileResolvedMethodApp scope mbExpected methodInfo args
 
 compileNullaryMethodUse :: ElaborateScope -> Maybe SrcType -> MethodInfo -> ElaborateM SurfaceExpr
 compileNullaryMethodUse scope mbExpected methodInfo =
-  case nullaryMethodExpectedResultView scope mbExpected methodInfo of
-    Just expectedView -> do
-      placeholder <- deferNullaryMethodCall scope methodInfo expectedView
-      pure (surfaceVar placeholder)
-    Nothing -> throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
+  if NE.length (methodParamNames methodInfo) > 1
+    then throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
+    else case nullaryMethodExpectedResultView scope mbExpected methodInfo of
+      Just expectedView -> do
+        placeholder <- deferNullaryMethodCall scope methodInfo expectedView
+        pure (surfaceVar placeholder)
+      Nothing -> throwError (ProgramAmbiguousMethodUse (methodName methodInfo))
 
 nullaryMethodExpectedResultView :: ElaborateScope -> Maybe SrcType -> MethodInfo -> Maybe TypeView
 nullaryMethodExpectedResultView scope mbExpected methodInfo = do
@@ -1686,6 +1792,10 @@ sourceTypeMentionsVisibleData scope ty =
       Map.member name (esTypes scope)
         || any (sourceTypeMentionsVisibleData scope) args
     STVarApp _ args -> any (sourceTypeMentionsVisibleData scope) args
+    STTyLam _ body -> sourceTypeMentionsVisibleData scope body
+    STTyApp fun arg ->
+      sourceTypeMentionsVisibleData scope fun
+        || sourceTypeMentionsVisibleData scope arg
     STArrow dom cod ->
       sourceTypeMentionsVisibleData scope dom
         || sourceTypeMentionsVisibleData scope cod
@@ -1695,15 +1805,15 @@ sourceTypeMentionsVisibleData scope ty =
     STMu _ body -> sourceTypeMentionsVisibleData scope body
     STBottom -> False
 
-resolveMethodHeadExprInfo :: ElaborateScope -> Set (SymbolIdentity, String) -> MethodInfo -> TypeView -> ElaborateM SurfaceExpr
-resolveMethodHeadExprInfo scope seen methodInfo classArgView =
-  case lookupEvidenceMethodByClass scope (methodInfoClassIdentity methodInfo) (typeViewIdentity classArgView) (methodName methodInfo) of
+resolveMethodHeadExprInfo :: ElaborateScope -> Set (SymbolIdentity, String) -> MethodInfo -> NonEmpty TypeView -> ElaborateM SurfaceExpr
+resolveMethodHeadExprInfo scope seen methodInfo classArgViews =
+  case lookupEvidenceMethodByClassTypes scope (methodInfoClassIdentity methodInfo) (typeViewsIdentity classArgViews) (methodName methodInfo) of
     Just (runtimeName, _) -> pure (surfaceVar runtimeName)
     Nothing -> do
-      (instanceInfo, subst) <- liftEitherElab (resolveMethodInstanceInfoByTypeView scope methodInfo classArgView)
+      (instanceInfo, subst) <- liftEitherElab (resolveMethodInstanceInfoByTypeViews scope methodInfo classArgViews)
       case Map.lookup (methodName methodInfo) (instanceMethods instanceInfo) of
         Just OrdinaryValue {valueRuntimeName = runtimeName, valueConstraintInfos = constraints} -> do
-          let headVars = freeTypeVarsTypeView classArgView
+          let headVars = freeTypeVarsTypeViews classArgViews
               eagerConstraints =
                 filter
                   (constraintInfoDeterminedByTypeVars headVars)
@@ -1716,53 +1826,55 @@ resolveMethodHeadExprInfo scope seen methodInfo classArgView =
           pure (foldl surfaceApp (surfaceVar runtimeName) evidenceArgs)
         _ -> throwError (ProgramUnknownMethod (methodName methodInfo))
 
-resolveMethodHeadForCall :: ElaborateScope -> Set (SymbolIdentity, String) -> MethodInfo -> SrcType -> [P.Expr] -> ElaborateM SurfaceExpr
-resolveMethodHeadForCall scope seen methodInfo classArgTy args =
-  let classArgView = sourceTypeViewInScope scope classArgTy
-   in case lookupEvidenceMethodByClass scope (methodInfoClassIdentity methodInfo) (typeViewIdentity classArgView) (methodName methodInfo) of
+resolveMethodHeadForCall :: ElaborateScope -> Set (SymbolIdentity, String) -> MethodInfo -> NonEmpty SrcType -> [P.Expr] -> ElaborateM SurfaceExpr
+resolveMethodHeadForCall scope seen methodInfo classArgTys args =
+  let classArgViews = fmap (sourceTypeViewInScope scope) classArgTys
+   in case lookupEvidenceMethodByClassTypes scope (methodInfoClassIdentity methodInfo) (typeViewsIdentity classArgViews) (methodName methodInfo) of
     Just (runtimeName, _) -> do
-      evidenceArgs <- methodLocalEvidenceArgsForCall scope methodInfo classArgTy args
+      evidenceArgs <- methodLocalEvidenceArgsForCall scope methodInfo classArgTys args
       pure (foldl surfaceApp (surfaceVar runtimeName) evidenceArgs)
-    Nothing -> resolveMethodHeadExprInfo scope seen methodInfo classArgView
+    Nothing -> resolveMethodHeadExprInfo scope seen methodInfo classArgViews
 
-resolveResolvedMethodHeadForCall :: ElaborateScope -> Set (SymbolIdentity, String) -> MethodInfo -> SrcType -> [P.ResolvedExpr] -> ElaborateM SurfaceExpr
-resolveResolvedMethodHeadForCall scope seen methodInfo classArgTy args =
-  let classArgView = sourceTypeViewInScope scope classArgTy
-   in case lookupEvidenceMethodByClass scope (methodInfoClassIdentity methodInfo) (typeViewIdentity classArgView) (methodName methodInfo) of
+resolveResolvedMethodHeadForCall :: ElaborateScope -> Set (SymbolIdentity, String) -> MethodInfo -> NonEmpty SrcType -> [P.ResolvedExpr] -> ElaborateM SurfaceExpr
+resolveResolvedMethodHeadForCall scope seen methodInfo classArgTys args =
+  let classArgViews = fmap (sourceTypeViewInScope scope) classArgTys
+   in case lookupEvidenceMethodByClassTypes scope (methodInfoClassIdentity methodInfo) (typeViewsIdentity classArgViews) (methodName methodInfo) of
     Just (runtimeName, _) -> do
-      evidenceArgs <- methodLocalEvidenceArgsForResolvedCall scope methodInfo classArgTy args
+      evidenceArgs <- methodLocalEvidenceArgsForResolvedCall scope methodInfo classArgTys args
       pure (foldl surfaceApp (surfaceVar runtimeName) evidenceArgs)
-    Nothing -> resolveMethodHeadExprInfo scope seen methodInfo classArgView
+    Nothing -> resolveMethodHeadExprInfo scope seen methodInfo classArgViews
 
-methodLocalEvidenceArgsForCall :: ElaborateScope -> MethodInfo -> SrcType -> [P.Expr] -> ElaborateM [SurfaceExpr]
-methodLocalEvidenceArgsForCall scope methodInfo classArgTy args = do
+methodLocalEvidenceArgsForCall :: ElaborateScope -> MethodInfo -> NonEmpty SrcType -> [P.Expr] -> ElaborateM [SurfaceExpr]
+methodLocalEvidenceArgsForCall scope methodInfo classArgTys args = do
   subst <-
-    case inferMethodCallSubst scope methodInfo classArgTy args of
+    case inferMethodCallSubst scope methodInfo classArgTys args of
       Just subst0 -> pure subst0
       Nothing -> pure Map.empty
+  let classArgViews = fmap (sourceTypeViewInScope scope) classArgTys
   let methodLocalConstraintInfos =
         filter
-          (not . constraintInfoDeterminedByTypeVars (freeTypeVarsTypeView (sourceTypeViewInScope scope classArgTy)))
-          (map (specializeConstraintInfoType (methodParamName methodInfo) (sourceTypeViewInScope scope classArgTy)) (methodConstraintInfos methodInfo))
+          (not . constraintInfoDeterminedByTypeVars (freeTypeVarsTypeViews classArgViews))
+          (map (specializeConstraintInfoTypes (methodParamNames methodInfo) classArgViews) (methodConstraintInfos methodInfo))
       specializedConstraints = map (applyConstraintInfoSubst (fmap (sourceTypeViewInScope scope) subst)) methodLocalConstraintInfos
   concat <$> mapM (constraintEvidenceArgExprsInfo scope) specializedConstraints
 
-methodLocalEvidenceArgsForResolvedCall :: ElaborateScope -> MethodInfo -> SrcType -> [P.ResolvedExpr] -> ElaborateM [SurfaceExpr]
-methodLocalEvidenceArgsForResolvedCall scope methodInfo classArgTy args = do
+methodLocalEvidenceArgsForResolvedCall :: ElaborateScope -> MethodInfo -> NonEmpty SrcType -> [P.ResolvedExpr] -> ElaborateM [SurfaceExpr]
+methodLocalEvidenceArgsForResolvedCall scope methodInfo classArgTys args = do
   subst <-
-    case inferResolvedMethodCallSubst scope methodInfo classArgTy args of
+    case inferResolvedMethodCallSubst scope methodInfo classArgTys args of
       Just subst0 -> pure subst0
       Nothing -> pure Map.empty
+  let classArgViews = fmap (sourceTypeViewInScope scope) classArgTys
   let methodLocalConstraintInfos =
         filter
-          (not . constraintInfoDeterminedByTypeVars (freeTypeVarsTypeView (sourceTypeViewInScope scope classArgTy)))
-          (map (specializeConstraintInfoType (methodParamName methodInfo) (sourceTypeViewInScope scope classArgTy)) (methodConstraintInfos methodInfo))
+          (not . constraintInfoDeterminedByTypeVars (freeTypeVarsTypeViews classArgViews))
+          (map (specializeConstraintInfoTypes (methodParamNames methodInfo) classArgViews) (methodConstraintInfos methodInfo))
       specializedConstraints = map (applyConstraintInfoSubst (fmap (sourceTypeViewInScope scope) subst)) methodLocalConstraintInfos
   concat <$> mapM (constraintEvidenceArgExprsInfo scope) specializedConstraints
 
-inferMethodCallSubst :: ElaborateScope -> MethodInfo -> SrcType -> [P.Expr] -> Maybe (Map String SrcType)
-inferMethodCallSubst scope methodInfo classArgTy args = do
-  let specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) classArgTy
+inferMethodCallSubst :: ElaborateScope -> MethodInfo -> NonEmpty SrcType -> [P.Expr] -> Maybe (Map String SrcType)
+inferMethodCallSubst scope methodInfo classArgTys args = do
+  let specializedMethodTy = specializeMethodTypes (methodType methodInfo) (methodParamNames methodInfo) classArgTys
       (_, bodyTy) = splitForalls specializedMethodTy
       (paramTys, _) = splitArrows bodyTy
       knownPairs =
@@ -1772,9 +1884,9 @@ inferMethodCallSubst scope methodInfo classArgTy args = do
         ]
   foldM (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy) Map.empty knownPairs
 
-inferResolvedMethodCallSubst :: ElaborateScope -> MethodInfo -> SrcType -> [P.ResolvedExpr] -> Maybe (Map String SrcType)
-inferResolvedMethodCallSubst scope methodInfo classArgTy args = do
-  let specializedMethodTy = specializeMethodType (methodType methodInfo) (methodParamName methodInfo) classArgTy
+inferResolvedMethodCallSubst :: ElaborateScope -> MethodInfo -> NonEmpty SrcType -> [P.ResolvedExpr] -> Maybe (Map String SrcType)
+inferResolvedMethodCallSubst scope methodInfo classArgTys args = do
+  let specializedMethodTy = specializeMethodTypes (methodType methodInfo) (methodParamNames methodInfo) classArgTys
       (_, bodyTy) = splitForalls specializedMethodTy
       (paramTys, _) = splitArrows bodyTy
       knownPairs =
@@ -1784,13 +1896,19 @@ inferResolvedMethodCallSubst scope methodInfo classArgTy args = do
         ]
   foldM (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy) Map.empty knownPairs
 
-shouldResolveMethodBeforeInference :: ElaborateScope -> MethodInfo -> SrcType -> Bool
-shouldResolveMethodBeforeInference scope methodInfo classArgTy =
-  case lookupEvidenceMethodByClass scope (methodInfoClassIdentity methodInfo) (typeViewIdentity (sourceTypeViewInScope scope classArgTy)) (methodName methodInfo) of
+shouldResolveMethodBeforeInference :: ElaborateScope -> MethodInfo -> NonEmpty SrcType -> Bool
+shouldResolveMethodBeforeInference scope methodInfo classArgTys =
+  let classArgViews = fmap (sourceTypeViewInScope scope) classArgTys
+   in case lookupEvidenceMethodByClassTypes scope (methodInfoClassIdentity methodInfo) (typeViewsIdentity classArgViews) (methodName methodInfo) of
     Just _ -> True
     Nothing
-      | Builtins.srcTypeMentionsOpaqueBuiltin classArgTy ->
-          case resolveMethodInstanceInfoByTypeView scope methodInfo (sourceTypeViewInScope scope classArgTy) of
+      | NE.length classArgTys > 1 ->
+          case resolveMethodInstanceInfoByTypeViews scope methodInfo classArgViews of
+            Right _ -> True
+            Left _ -> False
+    Nothing
+      | any Builtins.srcTypeMentionsOpaqueBuiltin classArgTys ->
+          case resolveMethodInstanceInfoByTypeViews scope methodInfo classArgViews of
             Right _ -> True
             Left _ -> False
     Nothing -> False
@@ -1799,11 +1917,14 @@ resolveConstraintEvidenceExpr :: ElaborateScope -> Set (SymbolIdentity, String) 
 resolveConstraintEvidenceExpr scope seen constraint =
   case classInfoForConstraint scope constraint of
     Nothing -> throwError (ProgramUnknownClass (constraintDisplayClass constraint))
-    Just classInfo -> do
-      let key = constraintEvidenceKey constraint
+    Just _ ->
+      concat <$> mapM resolveOne (constraintEvidenceClosureInfo scope constraint)
+  where
+    resolveOne (classInfo, evidenceConstraint) = do
+      let key = constraintEvidenceKey evidenceConstraint
       whenSeen key
       if Map.null (classMethods classInfo)
-        then resolveZeroMethodEvidenceExpr scope seen constraint
+        then resolveZeroMethodEvidenceExpr scope seen evidenceConstraint
         else
           mapM
             ( \methodInfo ->
@@ -1811,13 +1932,13 @@ resolveConstraintEvidenceExpr scope seen constraint =
                   scope
                   (Set.insert key seen)
                   methodInfo
-                  (constraintTypeView constraint)
+                  (constraintTypeViews evidenceConstraint)
             )
             (Map.elems (classMethods classInfo))
-  where
+
     whenSeen key =
       when (key `Set.member` seen) $
-        throwError (ProgramNoMatchingInstance (constraintDisplayClass constraint) (typeViewDisplay (constraintTypeView constraint)))
+        throwError (noMatchingInstanceError constraint)
 
 resolveZeroMethodEvidenceExpr :: ElaborateScope -> Set (SymbolIdentity, String) -> ConstraintInfo -> ElaborateM [SurfaceExpr]
 resolveZeroMethodEvidenceExpr scope seen constraint
@@ -1837,21 +1958,25 @@ zeroMethodConstraintCoveredByEvidenceInfo scope constraint =
   any
     ( \evidence ->
         evidenceClassSymbol evidence == constraintClassSymbol constraint
-          && evidenceTypeIdentity evidence == typeViewIdentity (constraintTypeView constraint)
+          && evidenceTypeIdentities evidence == typeViewsIdentity (constraintTypeViews constraint)
     )
     (esEvidence scope)
 
 lookupEvidenceMethodInfo :: ElaborateScope -> ConstraintInfo -> P.MethodName -> Maybe (String, SrcType)
 lookupEvidenceMethodInfo scope constraint =
-  lookupEvidenceMethodByClass scope (constraintClassSymbol constraint) (typeViewIdentity (constraintTypeView constraint))
+  lookupEvidenceMethodByClassTypes scope (constraintClassSymbol constraint) (typeViewsIdentity (constraintTypeViews constraint))
 
 lookupEvidenceMethodByClass :: ElaborateScope -> SymbolIdentity -> SrcType -> P.MethodName -> Maybe (String, SrcType)
 lookupEvidenceMethodByClass scope classIdentity0 headIdentityTy methodName0 =
+  lookupEvidenceMethodByClassTypes scope classIdentity0 (headIdentityTy :| []) methodName0
+
+lookupEvidenceMethodByClassTypes :: ElaborateScope -> SymbolIdentity -> NonEmpty SrcType -> P.MethodName -> Maybe (String, SrcType)
+lookupEvidenceMethodByClassTypes scope classIdentity0 headIdentityTys methodName0 =
   case
     [ methodEvidence
       | evidence <- esEvidence scope,
         evidenceClassSymbol evidence == classIdentity0,
-        evidenceTypeIdentity evidence == headIdentityTy,
+        evidenceTypeIdentities evidence == headIdentityTys,
         Just methodEvidence <- [Map.lookup methodName0 (evidenceMethods evidence)]
     ]
   of
@@ -1870,7 +1995,19 @@ classInfoForConstraint scope constraint =
 
 constraintEvidenceKey :: ConstraintInfo -> (SymbolIdentity, String)
 constraintEvidenceKey constraint =
-  (constraintClassSymbol constraint, show (typeViewIdentity (constraintTypeView constraint)))
+  (constraintClassSymbol constraint, show (NE.toList (typeViewsIdentity (constraintTypeViews constraint))))
+
+noMatchingInstanceError :: ConstraintInfo -> ProgramError
+noMatchingInstanceError constraint =
+  case typeViewsDisplay (constraintTypeViews constraint) of
+    ty :| [] -> ProgramNoMatchingInstance (constraintDisplayClass constraint) ty
+    tys -> ProgramNoMatchingInstanceHead (constraintDisplayClass constraint) (NE.toList tys)
+
+noMatchingDisplayConstraintError :: P.ClassConstraint -> ProgramError
+noMatchingDisplayConstraintError constraint =
+  case P.constraintTypes constraint of
+    ty :| [] -> ProgramNoMatchingInstance (P.constraintClassName constraint) ty
+    tys -> ProgramNoMatchingInstanceHead (P.constraintClassName constraint) (NE.toList tys)
 
 liftEitherElab :: Either ProgramError a -> ElaborateM a
 liftEitherElab = either throwError pure
@@ -1964,6 +2101,7 @@ nullaryMethodEvidence scope methodInfo expectedView = do
   pure
     DeferredMethodEvidence
       { deferredMethodEvidenceClassArg = classArgView,
+        deferredMethodEvidenceClassArgs = classArgView :| [],
         deferredMethodEvidenceRuntimeName = runtimeName,
         deferredMethodEvidenceType = evidenceTy
       }
@@ -2063,6 +2201,9 @@ specializeSrcType subst ty = case ty of
      in case Map.lookup name subst >>= \replacement -> applyTypeHead replacement (toListNE args') of
           Just replacementTy -> replacementTy
           Nothing -> STVarApp name args'
+  STTyLam name body ->
+    STTyLam name (specializeSrcType (Map.delete name subst) body)
+  STTyApp fun arg -> STTyApp (specializeSrcType subst fun) (specializeSrcType subst arg)
   STForall name mb body
     | Map.member name subst -> STForall name mb body
     | otherwise ->
@@ -2102,15 +2243,14 @@ registerDeferredObligation placeholder placeholderTy obligation =
 
 placeholderMethodType :: ElaborateScope -> MethodInfo -> [P.Expr] -> Maybe SrcType -> SrcType
 placeholderMethodType scope methodInfo args mbExpectedResult =
-  let paramName = methodParamName methodInfo
-      methodTy = methodType methodInfo
+  let methodTy = methodType methodInfo
       quantifiedMethodTy = quantifiedMethodType methodInfo
-      knownClassArg = knownMethodClassArg scope methodInfo args mbExpectedResult
-   in case knownClassArg of
-        Just classArgTy ->
-          let specializedTy = stripVacuousSrcForalls (specializeMethodType methodTy paramName classArgTy)
+      knownClassArgs = knownMethodClassArgs scope methodInfo args mbExpectedResult
+   in case knownClassArgs of
+        Just classArgTys ->
+          let specializedTy = stripVacuousSrcForalls (specializeMethodTypes methodTy (methodParamNames methodInfo) classArgTys)
               callSubst =
-                case inferMethodCallSubst scope methodInfo classArgTy args of
+                case inferMethodCallSubst scope methodInfo classArgTys args of
                   Just subst -> subst
                   Nothing -> Map.empty
            in stripVacuousSrcForalls (specializeQuantifiedType callSubst specializedTy)
@@ -2118,32 +2258,31 @@ placeholderMethodType scope methodInfo args mbExpectedResult =
 
 placeholderResolvedMethodType :: ElaborateScope -> MethodInfo -> [P.ResolvedExpr] -> Maybe SrcType -> SrcType
 placeholderResolvedMethodType scope methodInfo args mbExpectedResult =
-  let paramName = methodParamName methodInfo
-      methodTy = methodType methodInfo
+  let methodTy = methodType methodInfo
       quantifiedMethodTy = quantifiedMethodType methodInfo
-      knownClassArg = knownResolvedMethodClassArg scope methodInfo args mbExpectedResult
-   in case knownClassArg of
-        Just classArgTy ->
-          let specializedTy = stripVacuousSrcForalls (specializeMethodType methodTy paramName classArgTy)
+      knownClassArgs = knownResolvedMethodClassArgs scope methodInfo args mbExpectedResult
+   in case knownClassArgs of
+        Just classArgTys ->
+          let specializedTy = stripVacuousSrcForalls (specializeMethodTypes methodTy (methodParamNames methodInfo) classArgTys)
               callSubst =
-                case inferResolvedMethodCallSubst scope methodInfo classArgTy args of
+                case inferResolvedMethodCallSubst scope methodInfo classArgTys args of
                   Just subst -> subst
                   Nothing -> Map.empty
            in stripVacuousSrcForalls (specializeQuantifiedType callSubst specializedTy)
         Nothing -> quantifiedMethodTy
 
-knownMethodClassArg :: ElaborateScope -> MethodInfo -> [P.Expr] -> Maybe SrcType -> Maybe SrcType
-knownMethodClassArg scope methodInfo args mbExpectedResult =
-  knownMethodClassArgFromArgs scope methodInfo (map (inferKnownExprType scope) args)
-    <|> knownMethodClassArgFromExpected scope methodInfo (map (inferKnownExprType scope) args) mbExpectedResult
+knownMethodClassArgs :: ElaborateScope -> MethodInfo -> [P.Expr] -> Maybe SrcType -> Maybe (NonEmpty SrcType)
+knownMethodClassArgs scope methodInfo args mbExpectedResult =
+  knownMethodClassArgsFromArgs scope methodInfo (map (inferKnownExprType scope) args)
+    <|> knownMethodClassArgsFromExpected scope methodInfo (map (inferKnownExprType scope) args) mbExpectedResult
 
-knownResolvedMethodClassArg :: ElaborateScope -> MethodInfo -> [P.ResolvedExpr] -> Maybe SrcType -> Maybe SrcType
-knownResolvedMethodClassArg scope methodInfo args mbExpectedResult =
-  knownMethodClassArgFromArgs scope methodInfo (map (inferKnownResolvedExprType scope) args)
-    <|> knownMethodClassArgFromExpected scope methodInfo (map (inferKnownResolvedExprType scope) args) mbExpectedResult
+knownResolvedMethodClassArgs :: ElaborateScope -> MethodInfo -> [P.ResolvedExpr] -> Maybe SrcType -> Maybe (NonEmpty SrcType)
+knownResolvedMethodClassArgs scope methodInfo args mbExpectedResult =
+  knownMethodClassArgsFromArgs scope methodInfo (map (inferKnownResolvedExprType scope) args)
+    <|> knownMethodClassArgsFromExpected scope methodInfo (map (inferKnownResolvedExprType scope) args) mbExpectedResult
 
-knownMethodClassArgFromArgs :: ElaborateScope -> MethodInfo -> [Maybe SrcType] -> Maybe SrcType
-knownMethodClassArgFromArgs scope methodInfo argTypes = do
+knownMethodClassArgsFromArgs :: ElaborateScope -> MethodInfo -> [Maybe SrcType] -> Maybe (NonEmpty SrcType)
+knownMethodClassArgsFromArgs scope methodInfo argTypes = do
   let (_, bodyTy) = splitForalls (methodType methodInfo)
       (paramTys, _) = splitArrows bodyTy
       knownPairs =
@@ -2152,11 +2291,11 @@ knownMethodClassArgFromArgs scope methodInfo argTypes = do
             Just actualTy <- [mbActualTy]
         ]
   subst <- foldM (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy) Map.empty knownPairs
-  Map.lookup (methodParamName methodInfo) subst
+  lookupMethodClassArgs scope methodInfo subst
 
-knownMethodClassArgFromExpected :: ElaborateScope -> MethodInfo -> [Maybe SrcType] -> Maybe SrcType -> Maybe SrcType
-knownMethodClassArgFromExpected _ _ _ Nothing = Nothing
-knownMethodClassArgFromExpected scope methodInfo argTypes (Just expectedTy) = do
+knownMethodClassArgsFromExpected :: ElaborateScope -> MethodInfo -> [Maybe SrcType] -> Maybe SrcType -> Maybe (NonEmpty SrcType)
+knownMethodClassArgsFromExpected _ _ _ Nothing = Nothing
+knownMethodClassArgsFromExpected scope methodInfo argTypes (Just expectedTy) = do
   let (_, bodyTy) = splitForalls (methodType methodInfo)
       (paramTys, _) = splitArrows bodyTy
       knownPairs =
@@ -2166,16 +2305,117 @@ knownMethodClassArgFromExpected scope methodInfo argTypes (Just expectedTy) = do
         ]
   substFromArgs <- foldM (\acc (templateTy, actualTy) -> matchTypesInScope scope acc templateTy actualTy) Map.empty knownPairs
   subst <- matchTypesInScope scope substFromArgs (specializeSrcType substFromArgs (snd (splitArrows bodyTy))) expectedTy
-  Map.lookup (methodParamName methodInfo) subst
+  lookupMethodClassArgs scope methodInfo subst
+
+lookupMethodClassArgs :: ElaborateScope -> MethodInfo -> Map String SrcType -> Maybe (NonEmpty SrcType)
+lookupMethodClassArgs scope methodInfo subst = do
+  closedSubst <-
+    case classInfoForMethod scope methodInfo of
+      Just classInfo -> closeFunctionalDependencies scope classInfo subst
+      Nothing -> Just subst
+  traverse (`Map.lookup` closedSubst) (methodParamNames methodInfo)
+
+classInfoForMethod :: ElaborateScope -> MethodInfo -> Maybe ClassInfo
+classInfoForMethod scope methodInfo =
+  case Map.lookup (methodInfoOwnerClassSymbolIdentity methodInfo) (esClassesByIdentity scope) of
+    Just ((_, classInfo) : _) -> Just classInfo
+    _ -> Map.lookup (methodClassName methodInfo) (esClasses scope)
+
+closeFunctionalDependencies :: ElaborateScope -> ClassInfo -> Map String SrcType -> Maybe (Map String SrcType)
+closeFunctionalDependencies scope classInfo subst0 =
+  go maxFuel subst0
+  where
+    maxFuel = max 1 (length (classFunctionalDependencies classInfo) * max 1 (length (esInstances scope) + length (esEvidence scope)) + 1)
+
+    go fuel subst
+      | fuel <= 0 = Nothing
+      | otherwise = do
+          (subst', changed) <- foldM closeOne (subst, False) (classFunctionalDependencies classInfo)
+          if changed
+            then go (fuel - 1) subst'
+            else Just subst'
+
+    closeOne (subst, changed) fundep =
+      case functionalDependencyNamesReady fundep subst of
+        Nothing -> Just (subst, changed)
+        Just (determiners, determined) ->
+          case determinedCandidates determiners determined subst of
+            [] -> Just (subst, changed)
+            candidate : rest
+              | all (sameDeterminedCandidate candidate) rest -> do
+                  (subst', changed') <- mergeDeterminedSubst subst determined candidate
+                  Just (subst', changed || changed')
+              | otherwise -> Nothing
+
+    functionalDependencyNamesReady fundep subst = do
+      let determiners = P.fundepDeterminers fundep
+          determined = P.fundepDetermined fundep
+      _ <- traverse (`Map.lookup` subst) determiners
+      pure (determiners, determined)
+
+    determinedCandidates determiners determined subst =
+      deduplicateDeterminedCandidates
+        [ candidate
+          | headViews <- candidateClassHeadViews,
+            Just matchSubst <- [matchDeterminers determiners subst headViews],
+            let candidate = fmap (applyTypeViewSubst matchSubst) (projectClassHeadViews determined headViews),
+            Set.null (freeTypeVarsTypeViews candidate)
+        ]
+
+    candidateClassHeadViews =
+      [ NE.zipWith TypeView (instanceHeadTypes info) (instanceHeadIdentityTypes info)
+        | info <- esInstances scope,
+          instanceInfoClassSymbolIdentity info == classInfoSymbolIdentity classInfo
+      ]
+        ++ [ NE.zipWith TypeView (evidenceTypes evidence) (evidenceTypeIdentities evidence)
+             | evidence <- esEvidence scope,
+               evidenceClassSymbol evidence == classInfoSymbolIdentity classInfo
+           ]
+
+    matchDeterminers determiners subst headViews =
+      matchTypeViewsAgainstIdentity
+        scope
+        Map.empty
+        (projectClassHeadViews determiners headViews)
+        (fmap (sourceTypeViewInScope scope . (subst Map.!)) determiners)
+
+    mergeDeterminedSubst subst names views =
+      foldM mergeOne (subst, False) (zip (NE.toList names) (NE.toList views))
+
+    mergeOne (subst, changed) (name, view) =
+      case Map.lookup name subst of
+        Just existing
+          | semanticTypeEqual scope existing (typeViewIdentity view) -> Just (subst, changed)
+          | otherwise -> Nothing
+        Nothing -> Just (Map.insert name (typeViewDisplay view) subst, True)
+
+    sameDeterminedCandidate left right =
+      length left == length right
+        && and
+          [ semanticTypeEqual scope (typeViewIdentity leftView) (typeViewIdentity rightView)
+            | (leftView, rightView) <- zip (NE.toList left) (NE.toList right)
+          ]
+
+    deduplicateDeterminedCandidates [] = []
+    deduplicateDeterminedCandidates (candidate : rest) =
+      candidate : deduplicateDeterminedCandidates (filter (not . sameDeterminedCandidate candidate) rest)
+
+    projectClassHeadViews names headViews =
+      let values = NE.toList headViews
+          indices = Map.fromList (zip (NE.toList (classParamNames classInfo)) [(0 :: Int) ..])
+       in fmap (\name -> values !! (indices Map.! name)) names
 
 quantifiedMethodType :: MethodInfo -> SrcType
 quantifiedMethodType methodInfo =
-  let paramName = methodParamName methodInfo
-      methodTy = methodType methodInfo
+  let methodTy = methodType methodInfo
       (foralls, _) = splitForalls methodTy
-   in if any ((== paramName) . fst) foralls || paramName `Set.notMember` freeTypeVarsSrcType methodTy
-        then methodTy
-        else STForall paramName Nothing methodTy
+      quantifiedNames = Set.fromList (map fst foralls)
+      freeVars = freeTypeVarsSrcType methodTy
+      addParam paramName acc
+        | paramName `Set.member` quantifiedNames = acc
+        | paramName `Set.notMember` freeVars = acc
+        | otherwise = STForall paramName Nothing acc
+   in foldr addParam methodTy (methodParamNames methodInfo)
 
 inferKnownExprType :: ElaborateScope -> P.Expr -> Maybe SrcType
 inferKnownExprType scope expr =
@@ -3093,11 +3333,11 @@ resolveMethodInstanceInfoWithSubst scope methodInfo =
 
 resolveInstanceInfoByConstraint :: ElaborateScope -> ConstraintInfo -> Either ProgramError (InstanceInfo, Map String TypeView)
 resolveInstanceInfoByConstraint scope constraint =
-  resolveInstanceInfoWithTypeView
+  resolveInstanceInfoWithTypeViews
     scope
     (constraintDisplayClass constraint)
     (Just (constraintClassSymbol constraint))
-    (constraintTypeView constraint)
+    (constraintTypeViews constraint)
 
 resolveInstanceInfoWithIdentityType :: ElaborateScope -> ClassIdentity -> P.ClassName -> TypeView -> Either ProgramError (InstanceInfo, Map String TypeView)
 resolveInstanceInfoWithIdentityType scope classIdentity0 className0 =
@@ -3106,6 +3346,10 @@ resolveInstanceInfoWithIdentityType scope classIdentity0 className0 =
 resolveMethodInstanceInfoByTypeView :: ElaborateScope -> MethodInfo -> TypeView -> Either ProgramError (InstanceInfo, Map String TypeView)
 resolveMethodInstanceInfoByTypeView scope methodInfo =
   resolveInstanceInfoWithTypeView scope (methodClassName methodInfo) (Just (methodInfoClassIdentity methodInfo))
+
+resolveMethodInstanceInfoByTypeViews :: ElaborateScope -> MethodInfo -> NonEmpty TypeView -> Either ProgramError (InstanceInfo, Map String TypeView)
+resolveMethodInstanceInfoByTypeViews scope methodInfo =
+  resolveInstanceInfoWithTypeViews scope (methodClassName methodInfo) (Just (methodInfoClassIdentity methodInfo))
 
 classInfoIdentity :: ClassInfo -> ClassIdentity
 classInfoIdentity = classInfoSymbolIdentity
@@ -3120,12 +3364,25 @@ resolveInstanceInfoWithTypeView ::
   TypeView ->
   Either ProgramError (InstanceInfo, Map String TypeView)
 resolveInstanceInfoWithTypeView scope className0 expectedClassIdentity headView =
+  resolveInstanceInfoWithTypeViews scope className0 expectedClassIdentity (headView :| [])
+
+resolveInstanceInfoWithTypeViews ::
+  ElaborateScope ->
+  P.ClassName ->
+  Maybe ClassIdentity ->
+  NonEmpty TypeView ->
+  Either ProgramError (InstanceInfo, Map String TypeView)
+resolveInstanceInfoWithTypeViews scope className0 expectedClassIdentity headViews =
   case deduplicatedMatches of
     [(match, subst, _direct)] -> Right (match, subst)
-    [] -> Left (ProgramNoMatchingInstance className0 (typeViewDisplay headView))
-    _ -> Left (ProgramNoMatchingInstance className0 (typeViewDisplay headView))
+    [] -> Left noMatching
+    _ -> Left noMatching
   where
     deduplicatedMatches = deduplicateEquivalentMatches matches
+    noMatching =
+      case typeViewsDisplay headViews of
+        ty :| [] -> ProgramNoMatchingInstance className0 ty
+        tys -> ProgramNoMatchingInstanceHead className0 (NE.toList tys)
 
     matches =
       [ (info, subst, direct)
@@ -3143,9 +3400,12 @@ resolveInstanceInfoWithTypeView scope className0 expectedClassIdentity headView 
       instanceInfoClassSymbolIdentity info
 
     matchInstanceHead info =
-      case matchTypeViewAgainstIdentity scope Map.empty (TypeView (instanceHeadType info) (instanceHeadIdentityType info)) headView of
+      case matchTypeViewsAgainstIdentity scope Map.empty (instanceHeadViews info) headViews of
         Just subst -> Just (subst, True)
         Nothing -> Nothing
+
+    instanceHeadViews info =
+      NE.zipWith TypeView (instanceHeadTypes info) (instanceHeadIdentityTypes info)
 
     deduplicateEquivalentMatches [] = []
     deduplicateEquivalentMatches (match : rest) =
@@ -3155,14 +3415,12 @@ resolveInstanceInfoWithTypeView scope className0 expectedClassIdentity headView 
     equivalentInstanceMatch (left, _, _) (right, _, _) =
       instanceOriginModule left == instanceOriginModule right
         && instanceInfoClassIdentity left == instanceInfoClassIdentity right
-        && instanceHeadIdentityType left == instanceHeadIdentityType right
+        && instanceHeadIdentityTypes left == instanceHeadIdentityTypes right
         && map canonicalConstraint (instanceConstraints left) == map canonicalConstraint (instanceConstraints right)
         && fmap methodRuntimeIdentity (instanceMethods left) == fmap methodRuntimeIdentity (instanceMethods right)
 
     canonicalConstraint constraint =
-      ( canonicalConstraintClassKey (P.constraintClassName constraint),
-        canonicalSourceType scope (P.constraintType constraint)
-      )
+      (canonicalConstraintClassKey (P.constraintClassName constraint), fmap (canonicalSourceType scope) (P.constraintTypes constraint))
 
     canonicalConstraintClassKey classKeyName =
       case constraintClassIdentity scope classKeyName of
@@ -3179,6 +3437,15 @@ resolveInstanceInfoWithTypeView scope className0 expectedClassIdentity headView 
       | rightDirect && not leftDirect = right
       | rightDirect == leftDirect && Map.size rightSubst > Map.size leftSubst = right
       | otherwise = left
+
+matchTypeViewsAgainstIdentity :: ElaborateScope -> Map String TypeView -> NonEmpty TypeView -> NonEmpty TypeView -> Maybe (Map String TypeView)
+matchTypeViewsAgainstIdentity scope subst templates actuals
+  | length templates /= length actuals = Nothing
+  | otherwise =
+      foldM
+        (\acc (template, actual) -> matchTypeViewAgainstIdentity scope acc template actual)
+        subst
+        (zip (NE.toList templates) (NE.toList actuals))
 
 matchTypeViewAgainstIdentity :: ElaborateScope -> Map String TypeView -> TypeView -> TypeView -> Maybe (Map String TypeView)
 matchTypeViewAgainstIdentity scope subst template actual =
@@ -3212,6 +3479,17 @@ matchTypeViewAgainstIdentity scope subst template actual =
         _ -> Nothing
     STVarApp expectedName args ->
       matchTypeViewHeadApplication scope subst expectedName args actual
+    STTyLam name body ->
+      case typeViewIdentity actual of
+        STTyLam name' body'
+          | name == name' -> matchTypeViewAgainstIdentity scope subst (sameView body) (sameView body')
+        _ -> Nothing
+    STTyApp fun arg ->
+      case typeViewIdentity actual of
+        STTyApp fun' arg' -> do
+          subst' <- matchTypeViewAgainstIdentity scope subst (sameView fun) (sameView fun')
+          matchTypeViewAgainstIdentity scope subst' (sameView arg) (sameView arg')
+        _ -> Nothing
     STForall name mb body ->
       case typeViewIdentity actual of
         STForall name' mb' body'
@@ -3329,6 +3607,8 @@ preferVisibleSourceType scope = go
         STBase name -> STBase (preferVisibleTypeHeadName scope name)
         STCon name args -> STCon (preferVisibleTypeHeadName scope name) (fmap go args)
         STVarApp name args -> STVarApp name (fmap go args)
+        STTyLam name body -> STTyLam name (go body)
+        STTyApp fun arg -> STTyApp (go fun) (go arg)
         STArrow dom cod -> STArrow (go dom) (go cod)
         STForall name mb body -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
         STMu name body -> STMu name (go body)
@@ -3358,6 +3638,8 @@ rewriteSrcTypeOccurrences needle replacement = go
             STBase {} -> ty
             STCon name args -> STCon name (fmap go args)
             STVarApp name args -> STVarApp name (fmap go args)
+            STTyLam name body -> STTyLam name (go body)
+            STTyApp fun arg -> STTyApp (go fun) (go arg)
             STArrow dom cod -> STArrow (go dom) (go cod)
             STForall name mb body -> STForall name (fmap (SrcBound . go . unSrcBound) mb) (go body)
             STMu name body -> STMu name (go body)
@@ -3418,6 +3700,17 @@ matchTypesWith sameType sameTypeHead subst template actual = case template of
       name
       args
       actual
+  STTyLam name body ->
+    case actual of
+      STTyLam name' body'
+        | name == name' -> matchTypesWith sameType sameTypeHead subst body body'
+      _ -> Nothing
+  STTyApp fun arg ->
+    case actual of
+      STTyApp fun' arg' -> do
+        subst' <- matchTypesWith sameType sameTypeHead subst fun fun'
+        matchTypesWith sameType sameTypeHead subst' arg arg'
+      _ -> Nothing
   STForall name mb body ->
     case actual of
       STForall name' mb' body'
@@ -3481,6 +3774,8 @@ freeTypeVarsSrcType = go Set.empty
               then Set.empty
               else Set.singleton name
        in headVars `Set.union` foldMap (go bound) args
+    go bound (STTyLam name body) = go (Set.insert name bound) body
+    go bound (STTyApp fun arg) = go bound fun `Set.union` go bound arg
     go bound (STForall name mb body) =
       let bound' = Set.insert name bound
           mbFvs = maybe Set.empty (go bound . unSrcBound) mb
@@ -3501,12 +3796,14 @@ extendConstraintEvidence scope constraints = do
         ConstraintInfo
           { constraintDisplayClass = P.constraintClassName constraint,
             constraintClassSymbol = classInfoSymbolIdentity classInfo,
-            constraintTypeView = sourceTypeViewInScope scope (P.constraintType constraint)
+            constraintTypeView = sourceTypeViewInScope scope (P.constraintType constraint),
+            constraintTypeViews = fmap (sourceTypeViewInScope scope) (P.constraintTypes constraint)
           }
 
 extendConstraintEvidenceInfo :: ElaborateScope -> [ConstraintInfo] -> ElaborateM (ElaborateScope, [(String, SrcType)])
 extendConstraintEvidenceInfo scope constraints = do
-  built <- mapM buildEvidence constraints
+  mapM_ requireKnownClass constraints
+  built <- mapM buildEvidence (concatMap (constraintEvidenceClosureInfo scope) constraints)
   let evidenceInfos = concatMap fst built
       params = concatMap snd built
   let runtimeTypes = Map.fromList params
@@ -3518,11 +3815,12 @@ extendConstraintEvidenceInfo scope constraints = do
       params
     )
   where
-    buildEvidence constraint = do
-      classInfo <-
-        case classInfoForConstraint scope constraint of
-          Just info -> pure info
-          Nothing -> throwError (ProgramUnknownClass (constraintDisplayClass constraint))
+    requireKnownClass constraint =
+      case classInfoForConstraint scope constraint of
+        Just _ -> pure ()
+        Nothing -> throwError (ProgramUnknownClass (constraintDisplayClass constraint))
+
+    buildEvidence (classInfo, constraint) = do
       methodEntries <-
         mapM
           ( \methodInfo -> do
@@ -3531,8 +3829,8 @@ extendConstraintEvidenceInfo scope constraints = do
                     lowerTypeView
                       scope
                       ( TypeView
-                          (methodEvidenceSourceType scope classInfo (typeViewDisplay (constraintTypeView constraint)) methodInfo)
-                          (methodEvidenceSourceType scope classInfo (typeViewIdentity (constraintTypeView constraint)) methodInfo)
+                          (methodEvidenceSourceType scope classInfo (typeViewsDisplay (constraintTypeViews constraint)) methodInfo)
+                          (methodEvidenceSourceType scope classInfo (typeViewsIdentity (constraintTypeViews constraint)) methodInfo)
                       )
               pure (methodName methodInfo, (runtimeName, evidenceTy))
           )
@@ -3543,6 +3841,8 @@ extendConstraintEvidenceInfo scope constraints = do
                 evidenceClassSymbol = constraintClassSymbol constraint,
                 evidenceType = typeViewDisplay (constraintTypeView constraint),
                 evidenceTypeIdentity = typeViewIdentity (constraintTypeView constraint),
+                evidenceTypes = typeViewsDisplay (constraintTypeViews constraint),
+                evidenceTypeIdentities = typeViewsIdentity (constraintTypeViews constraint),
                 evidenceMethods = Map.fromList methodEntries
               }
           params = map snd methodEntries
