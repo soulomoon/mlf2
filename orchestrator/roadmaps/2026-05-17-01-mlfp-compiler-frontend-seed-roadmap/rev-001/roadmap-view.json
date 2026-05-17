@@ -8,7 +8,7 @@
     {
       "milestone_id": "milestone-1",
       "title": "Compiler Source Package And Seed Contract",
-      "status": "pending",
+      "status": "done",
       "depends_on": [],
       "parallel_lane": "lane-compiler-seed",
       "status_anchor": "milestone-1-status",
@@ -162,7 +162,7 @@
   "anchors": {
     "milestone-1-status": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",
-      "selector": "### [pending] 1. Compiler Source Package And Seed Contract"
+      "selector": "### [done] 1. Compiler Source Package And Seed Contract"
     },
     "milestone-1-completion": {
       "target_file": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001/roadmap.md",

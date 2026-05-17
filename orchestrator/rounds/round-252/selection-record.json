@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-252",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-compiler-source-package-contract",
+  "extracted_item_id": "item-252-compiler-source-package-contract",
+  "summary": "Establish the ordinary package-mode fixture and focused interpreter-run harness for the compiler frontend seed contract.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

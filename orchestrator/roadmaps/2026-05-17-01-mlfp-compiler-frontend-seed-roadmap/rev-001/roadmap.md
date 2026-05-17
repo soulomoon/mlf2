@@ -120,7 +120,7 @@ controller state and a selected plan explicitly allow it.
 
 ## Milestones
 
-### [pending] 1. Compiler Source Package And Seed Contract
+### [done] 1. Compiler Source Package And Seed Contract
 
 - Milestone id: `milestone-1`
 - Depends on: none
@@ -137,7 +137,7 @@ controller state and a selected plan explicitly allow it.
 
 #### Completion Pointers: milestone-1
 
-- None yet.
+- round-252 added the compiler-seed package fixture and ProgramCompilerSeedSpec evidence: discovery, check, interpreter output, CLI run-program, full gates green.
 
 #### Candidate Direction: Compiler Source Package Contract
 

@@ -1,0 +1,12 @@
+module SeedContract export (FrontendSeedContract(..), acceptsFrontendSeedContract, frontendSeedContract) {
+  data FrontendSeedContract =
+      InterpreterRunnablePackageSeed : FrontendSeedContract;
+
+  def frontendSeedContract : FrontendSeedContract =
+    InterpreterRunnablePackageSeed;
+
+  def acceptsFrontendSeedContract : FrontendSeedContract -> Bool =
+    λ(contract : FrontendSeedContract) case contract of {
+      InterpreterRunnablePackageSeed -> true
+    };
+}

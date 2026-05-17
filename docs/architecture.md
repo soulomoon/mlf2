@@ -106,10 +106,16 @@ separate compilation should be introduced only through the package, interface,
 and build-graph owners and explicit compiler-owned artifacts that carry checked
 xMLF/runtime payloads rather than by peeking at source outside the package
 projection.
-The fixture migration evidence for this package-substrate family is kept in
-`test/programs/packages/` and `ProgramFixturePackageSpec`, while
-`docs/mlfp-self-boot-readiness.md` records the remaining self-boot gaps by
-layer without claiming that a compiler implementation in `.mlfp` exists.
+The fixture migration evidence for package substrate behavior is kept in
+`test/programs/packages/` and `ProgramFixturePackageSpec`. The compiler
+frontend seed package contract is kept in
+`test/programs/compiler-seed/frontend-contract/` and
+`ProgramCompilerSeedSpec`; it proves ordinary package discovery, check/run
+through the interpreter, and CLI `run-program` output for the seed root without
+introducing a second compiler-source loader. `docs/mlfp-self-boot-readiness.md`
+records the remaining self-boot gaps by layer without claiming that a lexer,
+parser, checker, backend, package manager, linker, or driver implementation in
+`.mlfp` exists.
 
 No active executable or test component depends on historical research modules.
 

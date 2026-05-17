@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-252",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-compiler-source-package-contract",
+  "extracted_item_id": "item-252-compiler-source-package-contract",
+  "plan_path": "orchestrator/rounds/round-252/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

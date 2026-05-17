@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-252",
+  "roadmap_id": "2026-05-17-01-mlfp-compiler-frontend-seed-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-17-01-mlfp-compiler-frontend-seed-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-compiler-source-package-contract",
+  "extracted_item_id": "item-252-compiler-source-package-contract",
+  "decision": "approved",
+  "evidence_summary": "Focused seed spec, diff hygiene, cabal build all, cabal test, and thesis gate passed; fixture and docs satisfy milestone-1 without coordination changes.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-1",
+        "expected_current_status": "pending",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-1-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-1-completion",
+        "text": "round-252 added the compiler-seed package fixture and ProgramCompilerSeedSpec evidence: discovery, check, interpreter output, CLI run-program, full gates green."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

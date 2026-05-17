@@ -403,6 +403,7 @@ test-suite mlf2-test
                       ProgramInterfaceSpec,
                       ProgramPackageBuildGraphSpec,
                       ProgramCliPackageSpec,
+                      ProgramCompilerSeedSpec,
                       ProgramFixturePackageSpec,
                       ProgramPackageSpec,
                       ProgramPackageDiscoverySpec,

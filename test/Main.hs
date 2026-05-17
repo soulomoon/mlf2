@@ -33,6 +33,7 @@ import Phi.AlignmentSpec qualified
 import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
 import PipelineSpec qualified
+import ProgramCompilerSeedSpec qualified
 import ProgramPackageBuildGraphSpec qualified
 import ProgramCliPackageSpec qualified
 import ProgramFixturePackageSpec qualified
@@ -114,6 +115,7 @@ main = do
     ProgramInterfaceSpec.spec
     ProgramPackageBuildGraphSpec.spec
     ProgramCliPackageSpec.spec
+    ProgramCompilerSeedSpec.spec
     ProgramFixturePackageSpec.spec
     ProgramPackageSpec.spec
     ProgramPackageDiscoverySpec.spec

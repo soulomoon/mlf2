@@ -1,0 +1,6 @@
+module Main export (main) {
+  import SeedContract exposing (FrontendSeedContract(..), acceptsFrontendSeedContract, frontendSeedContract);
+
+  def main : Bool =
+    acceptsFrontendSeedContract frontendSeedContract;
+}
