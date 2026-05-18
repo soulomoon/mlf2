@@ -430,6 +430,7 @@ stringEndsWith : String -> String -> Bool
 stringDrop : String -> Int -> String
 stringTake : String -> Int -> String
 stringSlice : String -> Int -> Int -> String
+stringCharAt : String -> Int -> Char
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -457,12 +458,15 @@ Unicode scalar values, so `stringTake "λab" 1` returns `"λ"` and
 operation; the current native-capable tracer drops a non-negative scalar start
 offset and then keeps a non-negative scalar count, so
 `stringSlice "aλbc" 1 2` returns `"λb"` and
-`stringSlice "λabc" 1 2` returns `"ab"`. These operations are covered through
+`stringSlice "λabc" 1 2` returns `"ab"`. `stringCharAt` is the first
+in-range cursor/index `String` operation; the current native-capable tracer
+indexes Unicode scalar positions, so `stringCharAt "aλb" 1` returns `'λ'` and
+`stringCharAt "λab" 2` returns `'b'`. These operations are covered through
 source checking, `run-program`, backend LLVM emission, object generation, and
 linked native execution for the current native-capable tracers. `String`/`List
 Char` conversion, formatting, full slicing coverage, broader classification
-predicates, cursor APIs, locale, regex, and full parser parity remain out of
-scope.
+predicates, complete cursor APIs, locale, regex, and full parser parity remain
+out of scope.
 
 Pure program entrypoints remain accepted:
 
@@ -593,6 +597,7 @@ Current prelude contents:
 - `stringDrop`
 - `stringTake`
 - `stringSlice`
+- `stringCharAt`
 - `and`
 - `id`
 
@@ -630,10 +635,11 @@ non-empty Unicode scalar suffix. The first drop slicing operation is
 examples. The first take slicing operation is `stringTake`, with native
 coverage for non-negative Unicode scalar prefix-take examples. The first range
 slicing operation is `stringSlice`, with native coverage for non-negative
-Unicode scalar start/count examples. Broad
-`String`/`List Char` conversion, formatting, full slicing coverage, broader
-classification predicates, cursor APIs, and parser-parity helpers remain
-outside this contract.
+Unicode scalar start/count examples. The first in-range cursor/index operation
+is `stringCharAt`, with native coverage for Unicode scalar index examples.
+Broad `String`/`List Char` conversion, formatting, full slicing coverage,
+broader classification predicates, complete cursor APIs, and parser-parity
+helpers remain outside this contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 

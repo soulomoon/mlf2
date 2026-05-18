@@ -58,6 +58,11 @@
   existing escaped Haskell-style string display, through `.mlfp` source
   checking, `run-program`, raw LLVM emission, object-code validation, and
   linked native execution.
+- Added the first native-capable in-range string cursor/index tracer:
+  `stringCharAt : String -> Int -> Char` now returns `'\\955'` for
+  `stringCharAt "aλb" 1` and `'b'` for `stringCharAt "λab" 2` through
+  `.mlfp` source checking, `run-program`, raw LLVM emission, object-code
+  validation, and linked native execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

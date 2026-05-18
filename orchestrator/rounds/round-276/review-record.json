@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-276",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-broad-string-char-substrate",
+  "extracted_item_id": "item-276-string-char-at-native-tracer",
+  "decision": "approved",
+  "evidence_summary": "Focused stringCharAt native cursor/index tracer, primitive inventory matcher, neighbor text/native matcher set, required rg evidence checks, git diff --check, cabal build all, cabal test, and thesis conformance gate passed. The diff matches the selected item, preserves prior text tracers, and docs/changelog record only the first in-range cursor/index tracer without widening future-work claims. The native printable ASCII Char rendering alignment is required for the selected public Char output and is scoped to native result rendering parity with run-program.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-276 completed item-276-string-char-at-native-tracer: stringCharAt : String -> Int -> Char returns '\\955' for stringCharAt \"aλb\" 1 and 'b' for stringCharAt \"λab\" 2 through source checking, run-program, backend LLVM/object validation, emit-native/native object validation, and linked native execution; evidence: focused stringCharAt matcher, primitive inventory matcher, neighbor text/native matcher set, rg evidence checks, git diff --check, cabal build all, cabal test, and thesis gate passed. Native printable ASCII Char rendering was aligned only to match public run-program result rendering for this tracer."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

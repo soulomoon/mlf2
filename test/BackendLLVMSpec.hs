@@ -473,6 +473,28 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "stringCharAt indexes Unicode scalar cursor positions through native execution" $
+      forM_
+        [ (nativeCharAtMixedUnicodeStringSourceProgram, "'\\955'\n", NativeRunResult ExitSuccess "'\\955'\n" ""),
+          (nativeCharAtAfterLeadingUnicodeStringSourceProgram, "'b'\n", NativeRunResult ExitSuccess "'b'\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define i32 @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "Char literal source checks, runs, emits backend, and executes natively" $
       withTempProgram nativeCharLiteralSourceProgram $ \path -> do
         checkProgramFile path `shouldReturn` Right "OK\n"
@@ -2367,6 +2389,24 @@ nativeSliceAfterLeadingUnicodeStringSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (stringSlice);",
       "  def main : String = stringSlice \"λabc\" 1 2;",
+      "}"
+    ]
+
+nativeCharAtMixedUnicodeStringSourceProgram :: String
+nativeCharAtMixedUnicodeStringSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringCharAt);",
+      "  def main : Char = stringCharAt \"aλb\" 1;",
+      "}"
+    ]
+
+nativeCharAtAfterLeadingUnicodeStringSourceProgram :: String
+nativeCharAtAfterLeadingUnicodeStringSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringCharAt);",
+      "  def main : Char = stringCharAt \"λab\" 2;",
       "}"
     ]
 

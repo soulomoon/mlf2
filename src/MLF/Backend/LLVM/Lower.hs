@@ -85,7 +85,8 @@ Row-5 primitive/eager ownership keeps the primitive surface at the
 inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__mlfp_and`, `__string_length`, `__string_is_empty`,
 `__string_contains_char`, `__string_contains`, `__string_starts_with`,
-`__string_ends_with`, `__string_drop`, `__string_take`, `__string_slice`, plus the IO primitive
+`__string_ends_with`, `__string_drop`, `__string_take`, `__string_slice`,
+`__string_char_at`, plus the IO primitive
 names classified there for native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
@@ -175,6 +176,7 @@ lowerBackendProgram program = do
       needsStringDrop = any (functionReferencesGlobalNames (Set.singleton runtimeStringDropName)) (lpFunctions lowered)
       needsStringTake = any (functionReferencesGlobalNames (Set.singleton runtimeStringTakeName)) (lpFunctions lowered)
       needsStringSlice = any (functionReferencesGlobalNames (Set.singleton runtimeStringSliceName)) (lpFunctions lowered)
+      needsStringCharAt = any (functionReferencesGlobalNames (Set.singleton runtimeStringCharAtName)) (lpFunctions lowered)
       existingDecls =
         runtimeDeclarations
           base
@@ -187,6 +189,7 @@ lowerBackendProgram program = do
           needsStringDrop
           needsStringTake
           needsStringSlice
+          needsStringCharAt
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -324,6 +327,7 @@ nativeRuntimeFunctions base =
     ++ [nativeStringDropFunction | Map.notMember runtimeStringDropName (pbBindings base)]
     ++ [nativeStringTakeFunction | Map.notMember runtimeStringTakeName (pbBindings base)]
     ++ [nativeStringSliceFunction | Map.notMember runtimeStringSliceName (pbBindings base)]
+    ++ [nativeStringCharAtFunction | Map.notMember runtimeStringCharAtName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -606,6 +610,26 @@ lowerNativeScalarRenderer spec =
         [(LLVMInt 32, "value"), (LLVMInt 1, "parenthesize")]
         $ \params -> do
           let value = requireNativeParam "value" params
+          printableAscii <- freshBlock "char.printable.ascii"
+          numericEscape <- freshBlock "char.numeric.escape"
+          rejectQuote <- freshBlock "char.reject.quote"
+          rejectBackslash <- freshBlock "char.reject.backslash"
+          aboveControl <- emitAssign "char.above.control" (LLVMInt 1) (LLVMICmpUgt value (LLVMIntLiteral 32 31))
+          belowDelete <- emitAssign "char.below.delete" (LLVMInt 1) (LLVMICmpUgt (LLVMIntLiteral 32 127) value)
+          isPrintable <- emitAssign "char.printable" (LLVMInt 1) (LLVMAnd aboveControl belowDelete)
+          finishCurrentBlock (LLVMSwitch (LLVMInt 1) isPrintable numericEscape [(1, rejectQuote)])
+          startBlock rejectQuote
+          isQuote <- emitAssign "char.is.quote" (LLVMInt 1) (LLVMICmpEq value (LLVMIntLiteral 32 (toInteger (ord '\''))))
+          finishCurrentBlock (LLVMSwitch (LLVMInt 1) isQuote rejectBackslash [(1, numericEscape)])
+          startBlock rejectBackslash
+          isBackslash <- emitAssign "char.is.backslash" (LLVMInt 1) (LLVMICmpEq value (LLVMIntLiteral 32 (toInteger (ord '\\'))))
+          finishCurrentBlock (LLVMSwitch (LLVMInt 1) isBackslash printableAscii [(1, numericEscape)])
+          startBlock printableAscii
+          _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\'')))
+          _ <- emitPutchar value
+          _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\'')))
+          finishNativeSuccess
+          startBlock numericEscape
           valueI64 <- emitAssign "char.code.i64" (LLVMInt 64) (LLVMZext value (LLVMInt 64))
           _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\'')))
           _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\\')))
@@ -1472,6 +1496,95 @@ nativeStringSliceFunction =
     Right function -> function
     Left err -> error ("internal native __string_slice lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringCharAtFunction :: LLVMFunction
+nativeStringCharAtFunction =
+  case
+    lowerNativeFunction runtimeStringCharAtName (LLVMInt 32) [(LLVMPtr, "value"), (LLVMInt 64, "index")] $ \params -> do
+      let value = requireNativeParam "value" params
+          index = requireNativeParam "index" params
+          i8Ty = LLVMInt 8
+          i32Ty = LLVMInt 32
+          i64Ty = LLVMInt 64
+          loadByte prefix curPtr offset = do
+            bytePtr <- emitAssign (prefix ++ ".ptr") LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 offset)])
+            emitAssign prefix i8Ty (LLVMLoad i8Ty bytePtr)
+          extendByte prefix byte =
+            emitAssign prefix i32Ty (LLVMZext byte i32Ty)
+      cursor <-
+        emitAssign
+          "strcharat.cursor"
+          LLVMPtr
+          ( LLVMCall
+              runtimeStringDropName
+              [(LLVMPtr, value), (LLVMInt 64, index)]
+          )
+      byte0 <- loadByte "strcharat.b0" cursor 0
+      asciiScalar <- freshBlock "strcharat.ascii"
+      detectTwo <- freshBlock "strcharat.detect.two"
+      twoByteScalar <- freshBlock "strcharat.two"
+      detectThree <- freshBlock "strcharat.detect.three"
+      threeByteScalar <- freshBlock "strcharat.three"
+      fourByteScalar <- freshBlock "strcharat.four"
+      asciiClass <- emitAssign "strcharat.ascii.class" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0x80))
+      isAscii <- emitAssign "strcharat.is.ascii" (LLVMInt 1) (LLVMICmpEq asciiClass (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isAscii detectTwo [(1, asciiScalar)])
+      startBlock asciiScalar
+      asciiValue <- extendByte "strcharat.ascii.value" byte0
+      finishCurrentBlock (LLVMRet i32Ty asciiValue)
+      startBlock detectTwo
+      twoClass <- emitAssign "strcharat.two.class" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0xE0))
+      isTwo <- emitAssign "strcharat.is.two" (LLVMInt 1) (LLVMICmpEq twoClass (LLVMIntLiteral 8 0xC0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isTwo detectThree [(1, twoByteScalar)])
+      startBlock twoByteScalar
+      twoByte0Masked <- emitAssign "strcharat.two.b0.masked" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0x1F))
+      twoByte0Value <- extendByte "strcharat.two.b0.value" twoByte0Masked
+      twoByte0Shifted <- emitAssign "strcharat.two.b0.shifted" i32Ty (LLVMShl twoByte0Value (LLVMIntLiteral 32 6))
+      twoByte1 <- loadByte "strcharat.two.b1" cursor 1
+      twoByte1Masked <- emitAssign "strcharat.two.b1.masked" i8Ty (LLVMAnd twoByte1 (LLVMIntLiteral 8 0x3F))
+      twoByte1Value <- extendByte "strcharat.two.b1.value" twoByte1Masked
+      twoScalar <- emitAssign "strcharat.two.scalar" i32Ty (LLVMOr twoByte0Shifted twoByte1Value)
+      finishCurrentBlock (LLVMRet i32Ty twoScalar)
+      startBlock detectThree
+      threeClass <- emitAssign "strcharat.three.class" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0xF0))
+      isThree <- emitAssign "strcharat.is.three" (LLVMInt 1) (LLVMICmpEq threeClass (LLVMIntLiteral 8 0xE0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isThree fourByteScalar [(1, threeByteScalar)])
+      startBlock threeByteScalar
+      threeByte0Masked <- emitAssign "strcharat.three.b0.masked" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0x0F))
+      threeByte0Value <- extendByte "strcharat.three.b0.value" threeByte0Masked
+      threeByte0Shifted <- emitAssign "strcharat.three.b0.shifted" i32Ty (LLVMShl threeByte0Value (LLVMIntLiteral 32 12))
+      threeByte1 <- loadByte "strcharat.three.b1" cursor 1
+      threeByte1Masked <- emitAssign "strcharat.three.b1.masked" i8Ty (LLVMAnd threeByte1 (LLVMIntLiteral 8 0x3F))
+      threeByte1Value <- extendByte "strcharat.three.b1.value" threeByte1Masked
+      threeByte1Shifted <- emitAssign "strcharat.three.b1.shifted" i32Ty (LLVMShl threeByte1Value (LLVMIntLiteral 32 6))
+      threePrefix <- emitAssign "strcharat.three.prefix" i32Ty (LLVMOr threeByte0Shifted threeByte1Shifted)
+      threeByte2 <- loadByte "strcharat.three.b2" cursor 2
+      threeByte2Masked <- emitAssign "strcharat.three.b2.masked" i8Ty (LLVMAnd threeByte2 (LLVMIntLiteral 8 0x3F))
+      threeByte2Value <- extendByte "strcharat.three.b2.value" threeByte2Masked
+      threeScalar <- emitAssign "strcharat.three.scalar" i32Ty (LLVMOr threePrefix threeByte2Value)
+      finishCurrentBlock (LLVMRet i32Ty threeScalar)
+      startBlock fourByteScalar
+      fourByte0Masked <- emitAssign "strcharat.four.b0.masked" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0x07))
+      fourByte0Value <- extendByte "strcharat.four.b0.value" fourByte0Masked
+      fourByte0Shifted <- emitAssign "strcharat.four.b0.shifted" i32Ty (LLVMShl fourByte0Value (LLVMIntLiteral 32 18))
+      fourByte1 <- loadByte "strcharat.four.b1" cursor 1
+      fourByte1Masked <- emitAssign "strcharat.four.b1.masked" i8Ty (LLVMAnd fourByte1 (LLVMIntLiteral 8 0x3F))
+      fourByte1Value <- extendByte "strcharat.four.b1.value" fourByte1Masked
+      fourByte1Shifted <- emitAssign "strcharat.four.b1.shifted" i32Ty (LLVMShl fourByte1Value (LLVMIntLiteral 32 12))
+      fourPrefix <- emitAssign "strcharat.four.prefix" i32Ty (LLVMOr fourByte0Shifted fourByte1Shifted)
+      fourByte2 <- loadByte "strcharat.four.b2" cursor 2
+      fourByte2Masked <- emitAssign "strcharat.four.b2.masked" i8Ty (LLVMAnd fourByte2 (LLVMIntLiteral 8 0x3F))
+      fourByte2Value <- extendByte "strcharat.four.b2.value" fourByte2Masked
+      fourByte2Shifted <- emitAssign "strcharat.four.b2.shifted" i32Ty (LLVMShl fourByte2Value (LLVMIntLiteral 32 6))
+      fourPrefix' <- emitAssign "strcharat.four.prefix2" i32Ty (LLVMOr fourPrefix fourByte2Shifted)
+      fourByte3 <- loadByte "strcharat.four.b3" cursor 3
+      fourByte3Masked <- emitAssign "strcharat.four.b3.masked" i8Ty (LLVMAnd fourByte3 (LLVMIntLiteral 8 0x3F))
+      fourByte3Value <- extendByte "strcharat.four.b3.value" fourByte3Masked
+      fourScalar <- emitAssign "strcharat.four.scalar" i32Ty (LLVMOr fourPrefix' fourByte3Value)
+      finishCurrentBlock (LLVMRet i32Ty fourScalar)
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_char_at lowering failed: " ++ renderBackendLLVMError err)
+
 -- IO runtime primitives
 
 ioPureName :: String
@@ -2045,12 +2158,16 @@ runtimeStringSliceName :: String
 runtimeStringSliceName =
   PrimitiveInventory.stringSlicePrimitiveName
 
+runtimeStringCharAtName :: String
+runtimeStringCharAtName =
+  PrimitiveInventory.stringCharAtPrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice needsStringCharAt =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -2092,6 +2209,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeStringSliceName LLVMPtr [LLVMPtr, LLVMInt 64, LLVMInt 64] False
          | needsStringSlice,
            Map.notMember runtimeStringSliceName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringCharAtName (LLVMInt 32) [LLVMPtr, LLVMInt 64] False
+         | needsStringCharAt,
+           Map.notMember runtimeStringCharAtName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -5483,6 +5604,26 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
               pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 3 (length args))
+    Nothing
+      | name == runtimeStringCharAtName -> do
+          unless (length args == 2) $
+            liftEither (BackendLLVMArityMismatch name 2 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [value, index] -> do
+              requireLLVMType context name LLVMPtr value
+              requireLLVMType context name (LLVMInt 64) index
+              result <-
+                emitAssign
+                  "call"
+                  (LLVMInt 32)
+                  ( LLVMCall
+                      runtimeStringCharAtName
+                      [(LLVMPtr, lvOperand value), (LLVMInt 64, lvOperand index)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "Char")) (LLVMInt 32) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
       | Set.member name ioPrimitiveNames -> do
           callArgs <- traverse (lowerExpr env exprEnv context) args

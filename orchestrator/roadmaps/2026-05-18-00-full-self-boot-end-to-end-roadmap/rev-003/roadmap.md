@@ -363,6 +363,16 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   native execution; evidence: focused stringSlice matcher, primitive inventory
   matcher, neighbor text/native matcher set, rg evidence checks,
   `git diff --check`, cabal build all, cabal test, and thesis gate passed.
+- round-276 completed item-276-string-char-at-native-tracer:
+  `stringCharAt : String -> Int -> Char` returns `'\\955'` for
+  `stringCharAt "aλb" 1` and `'b'` for `stringCharAt "λab" 2` through source
+  checking, run-program, backend LLVM/object validation, emit-native/native
+  object validation, and linked native execution; evidence: focused
+  stringCharAt matcher, primitive inventory matcher, neighbor text/native
+  matcher set, rg evidence checks, `git diff --check`, cabal build all,
+  cabal test, and thesis gate passed. Native printable ASCII Char rendering
+  was aligned only to match public run-program result rendering for this
+  tracer.
 
 #### Candidate Direction: Broad String And Char Substrate
 

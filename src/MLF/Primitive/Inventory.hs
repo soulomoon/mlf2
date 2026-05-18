@@ -30,6 +30,7 @@ module MLF.Primitive.Inventory
     stringDropPrimitiveName,
     stringTakePrimitiveName,
     stringSlicePrimitiveName,
+    stringCharAtPrimitiveName,
     nativeIOPrimitiveName,
     nativeIOPrimitiveNames,
     nativeLowerablePrimitiveNames,
@@ -95,6 +96,7 @@ data PrimitiveNativeSupport
   | PrimitiveNativeStringDrop
   | PrimitiveNativeStringTake
   | PrimitiveNativeStringSlice
+  | PrimitiveNativeStringCharAt
   | PrimitiveNativeIO PrimitiveIOOperation
   deriving (Eq, Ord, Show)
 
@@ -211,6 +213,12 @@ primitiveValueSpecs =
         primitiveValueSpec
           PrimitiveNativeStringSlice
           (stringTy `PrimitiveTypeArrow` (intTy `PrimitiveTypeArrow` (intTy `PrimitiveTypeArrow` stringTy)))
+          Set.empty
+      ),
+      ( stringCharAtPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringCharAt
+          (stringTy `PrimitiveTypeArrow` (intTy `PrimitiveTypeArrow` charTy))
           Set.empty
       ),
       nativeIOSpec
@@ -399,6 +407,10 @@ stringSlicePrimitiveName :: String
 stringSlicePrimitiveName =
   "__string_slice"
 
+stringCharAtPrimitiveName :: String
+stringCharAtPrimitiveName =
+  "__string_char_at"
+
 requireSinglePrimitiveNativeSupport :: PrimitiveNativeSupport -> String
 requireSinglePrimitiveNativeSupport nativeSupport =
   case Set.toList (Map.keysSet (Map.filter ((== nativeSupport) . primitiveValueNativeSupport) primitiveValueSpecs)) of
@@ -431,6 +443,7 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeStringDrop -> True
     PrimitiveNativeStringTake -> True
     PrimitiveNativeStringSlice -> True
+    PrimitiveNativeStringCharAt -> True
     PrimitiveNativeIO {} -> True
 
 primitiveTypeToSourceType :: PrimitiveType -> SrcType
