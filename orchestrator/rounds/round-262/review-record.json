@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-262",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-conformance-corpus-migration",
+  "extracted_item_id": "item-262-conformance-check-program-search-path-tracer",
+  "decision": "approved",
+  "evidence_summary": "Focused check-program search-path and full shared conformance corpus tests, artifact/source-copy checks, no-dynamic-golden audit, git diff --check, cabal build all, cabal test, and thesis conformance gate passed. The new check-program search-path tracer derives package root and ordered --search-path args from metadata, dispatches through checkProgramArgs, compares committed OK stdout, and leaves existing run-program dispatch through runProgramArgs.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-2-completion",
+        "text": "round-262 completed item-262-conformance-check-program-search-path-tracer by adding a shared conformance corpus check-program search-path tracer with metadata-derived package root/search-path argv and committed OK stdout; evidence: focused conformance tests, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

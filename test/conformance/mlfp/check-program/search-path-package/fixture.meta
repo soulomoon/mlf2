@@ -1,0 +1,9 @@
+fixture-id: search-path-check-program
+package-root: roots/main
+search-paths: roots/lib
+command: check-program
+expect: pass
+normalization: none
+stage-applicability: all
+tags: package,public,search-path,cross-root-import,check
+expected-stdout: expected/check-program.stdout

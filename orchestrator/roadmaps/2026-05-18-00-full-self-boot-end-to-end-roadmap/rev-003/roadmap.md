@@ -243,6 +243,11 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   metadata-driven checkProgramArgs dispatch and committed OK stdout; evidence:
   focused conformance tests, cabal build all, cabal test, and thesis gate
   passed.
+- round-262: completed item-262-conformance-check-program-search-path-tracer
+  by adding a shared conformance corpus check-program search-path tracer with
+  metadata-derived package root/search-path argv and committed OK stdout;
+  evidence: focused conformance tests, cabal build all, cabal test, and thesis
+  gate passed.
 
 #### Candidate Direction: Conformance Corpus Migration
 

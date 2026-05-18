@@ -32,6 +32,13 @@ spec =
 
             actual `shouldBe` Right expected
 
+        it "shared conformance corpus validates check-program search-path fixture" $ do
+            fixture <- loadFixture checkProgramSearchPathFixture
+            actual <- runFixture fixture
+            expected <- readFile (fixtureExpectedStdout fixture)
+
+            actual `shouldBe` Right expected
+
 data ConformanceFixture = ConformanceFixture
     { fixtureCommand :: String
     , fixtureArgs :: [FilePath]
@@ -77,6 +84,17 @@ checkProgramCrossModuleLetFixture =
         , expectationCommand = "check-program"
         , expectationSearchPaths = "none"
         , expectationTags = "package,public,cross-module,let-polymorphism,check"
+        }
+
+checkProgramSearchPathFixture :: FixtureExpectation
+checkProgramSearchPathFixture =
+    FixtureExpectation
+        { expectationMetaPath =
+            "test/conformance/mlfp/check-program/search-path-package/fixture.meta"
+        , expectationFixtureId = "search-path-check-program"
+        , expectationCommand = "check-program"
+        , expectationSearchPaths = "roots/lib"
+        , expectationTags = "package,public,search-path,cross-root-import,check"
         }
 
 loadFixture :: FixtureExpectation -> IO ConformanceFixture
