@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-259",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-002",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-conformance-corpus-migration",
+  "extracted_item_id": "item-259-conformance-run-program-package-tracer",
+  "plan_path": "orchestrator/rounds/round-259/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

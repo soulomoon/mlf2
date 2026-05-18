@@ -211,7 +211,7 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
 - Extraction notes: a lawful round may be a no-code alignment audit if docs are
   already accurate.
 
-### [pending] 2. Shared File-Based Conformance Corpus
+### [in-progress] 2. Shared File-Based Conformance Corpus
 
 - Milestone id: `milestone-2`
 - Depends on: `milestone-1`
@@ -227,7 +227,10 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
 
 #### Completion Pointers: milestone-2
 
-None yet.
+- round-259: added the first shared conformance corpus run-program tracer for
+  cross-module-let with fixture metadata and committed expected stdout;
+  reviewer evidence: focused matcher, cabal build all, cabal test, and thesis
+  gate passed.
 
 #### Candidate Direction: Conformance Corpus Migration
 

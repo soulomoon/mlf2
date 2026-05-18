@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-259",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-002",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-conformance-corpus-migration",
+  "extracted_item_id": "item-259-conformance-run-program-package-tracer",
+  "decision": "approved",
+  "evidence_summary": "Focused runProgramArgs conformance tracer, metadata/expected-output artifact checks, wiring checks, existing-fixture preservation check, git diff hygiene, cabal build all, cabal test, and thesis conformance gate all passed.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-2",
+        "expected_current_status": "pending",
+        "target_status": "in-progress",
+        "roadmap_view_anchor": "milestone-2-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-2-completion",
+        "text": "round-259: added the first shared conformance corpus run-program tracer for cross-module-let with fixture metadata and committed expected stdout; reviewer evidence: focused matcher, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

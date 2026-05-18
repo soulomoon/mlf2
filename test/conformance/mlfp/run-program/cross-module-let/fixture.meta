@@ -1,0 +1,8 @@
+fixture-id: cross-module-let-run-program
+package-root: src
+command: run-program
+expect: pass
+normalization: none
+stage-applicability: all
+tags: package,public,cross-module,let-polymorphism
+expected-stdout: expected/run-program.stdout

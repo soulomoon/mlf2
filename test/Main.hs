@@ -33,6 +33,7 @@ import Phi.AlignmentSpec qualified
 import Phi.WitnessDomainSpec qualified
 import PhiSoundnessSpec qualified
 import PipelineSpec qualified
+import ProgramConformanceCorpusSpec qualified
 import ProgramCompilerSeedSpec qualified
 import ProgramPackageBuildGraphSpec qualified
 import ProgramCliPackageSpec qualified
@@ -114,6 +115,7 @@ main = do
     BackendLLVMSpec.spec
     ProgramInterfaceSpec.spec
     ProgramPackageBuildGraphSpec.spec
+    ProgramConformanceCorpusSpec.spec
     ProgramCliPackageSpec.spec
     ProgramCompilerSeedSpec.spec
     ProgramFixturePackageSpec.spec

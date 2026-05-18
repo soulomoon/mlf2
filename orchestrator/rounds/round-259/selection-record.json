@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-259",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-002",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-002",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-conformance-corpus-migration",
+  "extracted_item_id": "item-259-conformance-run-program-package-tracer",
+  "summary": "Create the first shared conformance corpus tracer bullet by migrating the existing cross-module package run-program behavior into metadata and committed expected output.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}
