@@ -30,6 +30,12 @@
   `stringContains "aλb" "λ"` as `true` and `stringContains "ab" "λ"` as
   `false` through `.mlfp` source checking, `run-program`, raw LLVM emission,
   object-code validation, and linked native execution.
+- Added the first native-capable prefix string search tracer:
+  `stringStartsWith : String -> String -> Bool` now classifies
+  `stringStartsWith "λab" "λ"` as `true` and
+  `stringStartsWith "aλb" "λ"` as `false` through `.mlfp` source checking,
+  `run-program`, raw LLVM emission, object-code validation, and linked native
+  execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

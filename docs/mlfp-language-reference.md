@@ -425,6 +425,7 @@ stringLength : String -> Int
 stringIsEmpty : String -> Bool
 stringContainsChar : String -> Char -> Bool
 stringContains : String -> String -> Bool
+stringStartsWith : String -> String -> Bool
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -436,7 +437,10 @@ values, so `stringContainsChar "aλb" 'λ'` is `true` while
 `stringContainsChar "ab" 'λ'` is `false`. `stringContains` is the first
 substring `String` search operation; the current native-capable tracer covers a
 non-empty Unicode scalar substring, so `stringContains "aλb" "λ"` is `true`
-while `stringContains "ab" "λ"` is `false`. These operations are covered
+while `stringContains "ab" "λ"` is `false`. `stringStartsWith` is the first
+prefix `String` search operation; the current native-capable tracer covers a
+non-empty Unicode scalar prefix, so `stringStartsWith "λab" "λ"` is `true`
+while `stringStartsWith "aλb" "λ"` is `false`. These operations are covered
 through source checking, `run-program`, backend LLVM emission, object
 generation, and linked native execution for the current native-capable tracers.
 `String`/`List Char` conversion, formatting, slicing, broader classification
@@ -567,6 +571,7 @@ Current prelude contents:
 - `stringIsEmpty`
 - `stringContainsChar`
 - `stringContains`
+- `stringStartsWith`
 - `and`
 - `id`
 
@@ -596,9 +601,11 @@ non-empty Unicode string such as `"λ"`. The first single-character
 `String`/`Char` search operation is `stringContainsChar`, which compares
 Unicode scalar values. The first substring `String` search operation is
 `stringContains`, with native coverage for a non-empty Unicode scalar
-substring. Broad `String`/`List Char` conversion, formatting, slicing, broader
-classification predicates, cursor APIs, and parser-parity helpers remain
-outside this contract.
+substring. The first prefix `String` search operation is `stringStartsWith`,
+with native coverage for a non-empty Unicode scalar prefix. Broad
+`String`/`List Char` conversion, formatting, slicing, broader classification
+predicates, cursor APIs, and parser-parity helpers remain outside this
+contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 

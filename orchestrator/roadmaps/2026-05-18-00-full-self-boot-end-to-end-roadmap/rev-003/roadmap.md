@@ -323,6 +323,14 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   emit-native, native object validation, and linked native execution;
   evidence: focused and neighbor matchers, rg checks, `git diff --check`,
   cabal build all, cabal test, and thesis gate passed.
+- round-271 completed item-271-string-starts-with-native-tracer:
+  `stringStartsWith : String -> String -> Bool` now classifies
+  `stringStartsWith "λab" "λ"` as true and `stringStartsWith "aλb" "λ"` as
+  false through source checking, run-program, backend LLVM/object validation,
+  emit-native, native object validation, and linked native execution;
+  evidence: focused and neighbor matchers, primitive inventory matcher, rg
+  checks, `git diff --check`, cabal build all, cabal test, and thesis gate
+  passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

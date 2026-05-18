@@ -84,8 +84,8 @@ metadata and term nodes.
 Row-5 primitive/eager ownership keeps the primitive surface at the
 inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__mlfp_and`, `__string_length`, `__string_is_empty`,
-`__string_contains_char`, `__string_contains`, plus the IO primitive
-names classified there for native support.
+`__string_contains_char`, `__string_contains`, `__string_starts_with`, plus
+the IO primitive names classified there for native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
 The lowerer relies on the current eager order exactly as written:
@@ -169,7 +169,15 @@ lowerBackendProgram program = do
       needsStringIsEmpty = any (functionReferencesGlobalNames (Set.singleton runtimeStringIsEmptyName)) (lpFunctions lowered)
       needsStringContainsChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringContainsCharName)) (lpFunctions lowered)
       needsStringContains = any (functionReferencesGlobalNames (Set.singleton runtimeStringContainsName)) (lpFunctions lowered)
-      existingDecls = runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains
+      needsStringStartsWith = any (functionReferencesGlobalNames (Set.singleton runtimeStringStartsWithName)) (lpFunctions lowered)
+      existingDecls =
+        runtimeDeclarations
+          base
+          needsStringLength
+          needsStringIsEmpty
+          needsStringContainsChar
+          needsStringContains
+          needsStringStartsWith
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -302,6 +310,7 @@ nativeRuntimeFunctions base =
     ++ [nativeStringIsEmptyFunction | Map.notMember runtimeStringIsEmptyName (pbBindings base)]
     ++ [nativeStringContainsCharFunction | Map.notMember runtimeStringContainsCharName (pbBindings base)]
     ++ [nativeStringContainsFunction | Map.notMember runtimeStringContainsName (pbBindings base)]
+    ++ [nativeStringStartsWithFunction | Map.notMember runtimeStringStartsWithName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -1093,6 +1102,57 @@ nativeStringContainsFunction =
     Right function -> function
     Left err -> error ("internal native __string_contains lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringStartsWithFunction :: LLVMFunction
+nativeStringStartsWithFunction =
+  case
+    lowerNativeFunction runtimeStringStartsWithName (LLVMInt 1) [(LLVMPtr, "haystack"), (LLVMPtr, "prefix")] $ \params -> do
+      let haystack = requireNativeParam "haystack" params
+          prefix = requireNativeParam "prefix" params
+          i8Ty = LLVMInt 8
+          i64Ty = LLVMInt 64
+          loadByte label curPtr = do
+            bytePtr <- emitAssign (label ++ ".ptr") LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 0)])
+            emitAssign label i8Ty (LLVMLoad i8Ty bytePtr)
+          advancePtr label curPtr =
+            emitAssign label LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 1)])
+      haystackSlot <- emitAssign "strstartswith.haystack.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      prefixSlot <- emitAssign "strstartswith.prefix.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitStore LLVMPtr haystack haystackSlot
+      emitStore LLVMPtr prefix prefixSlot
+      matchHeader <- freshBlock "strstartswith.match.header"
+      matchHaystackEnd <- freshBlock "strstartswith.match.haystack-end"
+      matchCompare <- freshBlock "strstartswith.match.compare"
+      matchAdvance <- freshBlock "strstartswith.match.advance"
+      matched <- freshBlock "strstartswith.matched"
+      notMatched <- freshBlock "strstartswith.not-matched"
+      finishCurrentBlock (LLVMBr matchHeader)
+      startBlock matchHeader
+      prefixCursor <- emitAssign "strstartswith.prefix" LLVMPtr (LLVMLoad LLVMPtr prefixSlot)
+      prefixByte <- loadByte "strstartswith.prefix.byte" prefixCursor
+      prefixDone <- emitAssign "strstartswith.prefix.done" (LLVMInt 1) (LLVMICmpEq prefixByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) prefixDone matchHaystackEnd [(1, matched)])
+      startBlock matchHaystackEnd
+      haystackCursor <- emitAssign "strstartswith.haystack" LLVMPtr (LLVMLoad LLVMPtr haystackSlot)
+      haystackByte <- loadByte "strstartswith.haystack.byte" haystackCursor
+      haystackDone <- emitAssign "strstartswith.haystack.done" (LLVMInt 1) (LLVMICmpEq haystackByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) haystackDone matchCompare [(1, notMatched)])
+      startBlock matchCompare
+      bytesMatch <- emitAssign "strstartswith.match.bytes" (LLVMInt 1) (LLVMICmpEq haystackByte prefixByte)
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) bytesMatch notMatched [(1, matchAdvance)])
+      startBlock matchAdvance
+      nextHaystack <- advancePtr "strstartswith.haystack.next" haystackCursor
+      nextPrefix <- advancePtr "strstartswith.prefix.next" prefixCursor
+      emitStore LLVMPtr nextHaystack haystackSlot
+      emitStore LLVMPtr nextPrefix prefixSlot
+      finishCurrentBlock (LLVMBr matchHeader)
+      startBlock matched
+      finishCurrentBlock (LLVMRet (LLVMInt 1) (LLVMIntLiteral 1 1))
+      startBlock notMatched
+      finishCurrentBlock (LLVMRet (LLVMInt 1) (LLVMIntLiteral 1 0))
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_starts_with lowering failed: " ++ renderBackendLLVMError err)
+
 -- IO runtime primitives
 
 ioPureName :: String
@@ -1646,12 +1706,16 @@ runtimeStringContainsName :: String
 runtimeStringContainsName =
   PrimitiveInventory.stringContainsPrimitiveName
 
+runtimeStringStartsWithName :: String
+runtimeStringStartsWithName =
+  PrimitiveInventory.stringStartsWithPrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -1673,6 +1737,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeStringContainsName (LLVMInt 1) [LLVMPtr, LLVMPtr] False
          | needsStringContains,
            Map.notMember runtimeStringContainsName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringStartsWithName (LLVMInt 1) [LLVMPtr, LLVMPtr] False
+         | needsStringStartsWith,
+           Map.notMember runtimeStringStartsWithName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -4959,6 +5027,26 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
                   ( LLVMCall
                       runtimeStringContainsName
                       [(LLVMPtr, lvOperand haystack), (LLVMPtr, lvOperand needle)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 2 (length args))
+    Nothing
+      | name == runtimeStringStartsWithName -> do
+          unless (length args == 2) $
+            liftEither (BackendLLVMArityMismatch name 2 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [haystack, prefix] -> do
+              requireLLVMType context name LLVMPtr haystack
+              requireLLVMType context name LLVMPtr prefix
+              result <-
+                emitAssign
+                  "call"
+                  (LLVMInt 1)
+                  ( LLVMCall
+                      runtimeStringStartsWithName
+                      [(LLVMPtr, lvOperand haystack), (LLVMPtr, lvOperand prefix)]
                   )
               pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
