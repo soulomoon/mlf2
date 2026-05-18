@@ -40,8 +40,8 @@ contract. The current primitive surface is the inventory-owned reserved
 runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_length`, `__string_is_empty`, `__string_contains_char`,
 `__string_contains`, `__string_starts_with`, `__string_ends_with`,
-`__string_drop`, `__string_take`, `__string_slice`, `__string_char_at`, plus
-the IO primitive names classified there
+`__string_drop`, `__string_take`, `__string_slice`, `__string_char_at`,
+`__char_is_digit`, plus the IO primitive names classified there
 for native support. Native lowering consumes that inventory directly for lowerable
 primitive names, while wrapper bodies, C runtime symbol names, closure layout,
 and eager sequencing implementation details remain lowerer-local.
@@ -152,6 +152,9 @@ Native emission owns the small process/runtime surface it needs:
 - `__string_char_at`: inventory-classified as the first native-capable
   in-range cursor/index `String` operation; the native helper advances by
   UTF-8 scalar starts and returns the Unicode scalar value as a `Char`.
+- `__char_is_digit`: inventory-classified as the first native-capable `Char`
+  classification operation; the native helper compares the Unicode scalar
+  value against the ASCII decimal digit range.
 - Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
   `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
   functions with entry-point implementations.
@@ -202,6 +205,9 @@ Supported result shapes are:
 - `stringCharAt : String -> Int -> Char` is the first native-capable in-range
   cursor/index String tracer and returns Unicode scalar values through native
   execution.
+- `charIsDigit : Char -> Bool` is the first native-capable Char
+  classification tracer and classifies ASCII decimal digit code points through
+  native execution while keeping broader classification families out of scope.
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 

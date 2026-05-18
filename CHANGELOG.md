@@ -63,6 +63,11 @@
   `stringCharAt "aλb" 1` and `'b'` for `stringCharAt "λab" 2` through
   `.mlfp` source checking, `run-program`, raw LLVM emission, object-code
   validation, and linked native execution.
+- Added the first native-capable `Char` classification tracer:
+  `charIsDigit : Char -> Bool` now classifies `charIsDigit '7'` as `true`
+  and `charIsDigit 'λ'` as `false` through `.mlfp` source checking,
+  `run-program`, raw LLVM emission, object-code validation, and linked native
+  execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

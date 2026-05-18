@@ -418,7 +418,7 @@ literals. Native-backed IO also includes `getLine`, `readFile`, `writeFile`,
 `appendFile`, `exitWith`, `newIORef`, `readIORef`, `writeIORef`, and `getArgs`.
 There is no narrower byte/character IO primitive in the first contract.
 
-The current pure broad string operations are:
+The current pure broad string/`Char` text operations are:
 
 ```mlf
 stringLength : String -> Int
@@ -431,6 +431,7 @@ stringDrop : String -> Int -> String
 stringTake : String -> Int -> String
 stringSlice : String -> Int -> Int -> String
 stringCharAt : String -> Int -> Char
+charIsDigit : Char -> Bool
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -461,12 +462,14 @@ offset and then keeps a non-negative scalar count, so
 `stringSlice "λabc" 1 2` returns `"ab"`. `stringCharAt` is the first
 in-range cursor/index `String` operation; the current native-capable tracer
 indexes Unicode scalar positions, so `stringCharAt "aλb" 1` returns `'λ'` and
-`stringCharAt "λab" 2` returns `'b'`. These operations are covered through
-source checking, `run-program`, backend LLVM emission, object generation, and
-linked native execution for the current native-capable tracers. `String`/`List
-Char` conversion, formatting, full slicing coverage, broader classification
-predicates, complete cursor APIs, locale, regex, and full parser parity remain
-out of scope.
+`stringCharAt "λab" 2` returns `'b'`. `charIsDigit` is the first
+native-capable `Char` classification tracer; it classifies ASCII decimal digit
+code points, so `charIsDigit '7'` is `true` while `charIsDigit 'λ'` is
+`false`. These operations are covered through source checking, `run-program`,
+backend LLVM emission, object generation, and linked native execution for the
+current native-capable tracers. `String`/`List Char` conversion, formatting,
+full slicing coverage, broader classification predicates, complete cursor
+APIs, locale, regex, and full parser parity remain out of scope.
 
 Pure program entrypoints remain accepted:
 
@@ -598,6 +601,7 @@ Current prelude contents:
 - `stringTake`
 - `stringSlice`
 - `stringCharAt`
+- `charIsDigit`
 - `and`
 - `id`
 
@@ -637,9 +641,11 @@ coverage for non-negative Unicode scalar prefix-take examples. The first range
 slicing operation is `stringSlice`, with native coverage for non-negative
 Unicode scalar start/count examples. The first in-range cursor/index operation
 is `stringCharAt`, with native coverage for Unicode scalar index examples.
-Broad `String`/`List Char` conversion, formatting, full slicing coverage,
-broader classification predicates, complete cursor APIs, and parser-parity
-helpers remain outside this contract.
+The first native-capable `Char` classification operation is `charIsDigit`,
+with coverage for ASCII decimal digit classification and a non-digit Unicode
+scalar. Broad `String`/`List Char` conversion, formatting, full slicing
+coverage, broader classification predicates, complete cursor APIs, and
+parser-parity helpers remain outside this contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 

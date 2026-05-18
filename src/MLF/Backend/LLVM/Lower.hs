@@ -86,7 +86,7 @@ inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__mlfp_and`, `__string_length`, `__string_is_empty`,
 `__string_contains_char`, `__string_contains`, `__string_starts_with`,
 `__string_ends_with`, `__string_drop`, `__string_take`, `__string_slice`,
-`__string_char_at`, plus the IO primitive
+`__string_char_at`, `__char_is_digit`, plus the IO primitive
 names classified there for native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
@@ -177,6 +177,7 @@ lowerBackendProgram program = do
       needsStringTake = any (functionReferencesGlobalNames (Set.singleton runtimeStringTakeName)) (lpFunctions lowered)
       needsStringSlice = any (functionReferencesGlobalNames (Set.singleton runtimeStringSliceName)) (lpFunctions lowered)
       needsStringCharAt = any (functionReferencesGlobalNames (Set.singleton runtimeStringCharAtName)) (lpFunctions lowered)
+      needsCharIsDigit = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsDigitName)) (lpFunctions lowered)
       existingDecls =
         runtimeDeclarations
           base
@@ -190,6 +191,7 @@ lowerBackendProgram program = do
           needsStringTake
           needsStringSlice
           needsStringCharAt
+          needsCharIsDigit
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -328,6 +330,7 @@ nativeRuntimeFunctions base =
     ++ [nativeStringTakeFunction | Map.notMember runtimeStringTakeName (pbBindings base)]
     ++ [nativeStringSliceFunction | Map.notMember runtimeStringSliceName (pbBindings base)]
     ++ [nativeStringCharAtFunction | Map.notMember runtimeStringCharAtName (pbBindings base)]
+    ++ [nativeCharIsDigitFunction | Map.notMember runtimeCharIsDigitName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -893,6 +896,20 @@ nativeAndFunction =
   of
     Right function -> function
     Left err -> error ("internal native __mlfp_and lowering failed: " ++ renderBackendLLVMError err)
+
+nativeCharIsDigitFunction :: LLVMFunction
+nativeCharIsDigitFunction =
+  case
+    lowerNativeFunction runtimeCharIsDigitName (LLVMInt 1) [(LLVMInt 32, "value")] $ \params -> do
+      let value = requireNativeParam "value" params
+          i1Ty = LLVMInt 1
+      aboveBeforeZero <- emitAssign "charisdigit.above.before.zero" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 47))
+      belowAfterNine <- emitAssign "charisdigit.below.after.nine" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 58) value)
+      result <- emitAssign "charisdigit.result" i1Ty (LLVMAnd aboveBeforeZero belowAfterNine)
+      finishCurrentBlock (LLVMRet i1Ty result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __char_is_digit lowering failed: " ++ renderBackendLLVMError err)
 
 nativeStringLengthFunction :: LLVMFunction
 nativeStringLengthFunction =
@@ -2162,12 +2179,16 @@ runtimeStringCharAtName :: String
 runtimeStringCharAtName =
   PrimitiveInventory.stringCharAtPrimitiveName
 
+runtimeCharIsDigitName :: String
+runtimeCharIsDigitName =
+  PrimitiveInventory.charIsDigitPrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice needsStringCharAt =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -2213,6 +2234,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeStringCharAtName (LLVMInt 32) [LLVMPtr, LLVMInt 64] False
          | needsStringCharAt,
            Map.notMember runtimeStringCharAtName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeCharIsDigitName (LLVMInt 1) [LLVMInt 32] False
+         | needsCharIsDigit,
+           Map.notMember runtimeCharIsDigitName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -5624,6 +5649,25 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
               pure (LowerValue (BTBase (BaseTy "Char")) (LLVMInt 32) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
+    Nothing
+      | name == runtimeCharIsDigitName -> do
+          unless (length args == 1) $
+            liftEither (BackendLLVMArityMismatch name 1 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [value] -> do
+              requireLLVMType context name (LLVMInt 32) value
+              result <-
+                emitAssign
+                  "call"
+                  (LLVMInt 1)
+                  ( LLVMCall
+                      runtimeCharIsDigitName
+                      [(LLVMInt 32, lvOperand value)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
       | Set.member name ioPrimitiveNames -> do
           callArgs <- traverse (lowerExpr env exprEnv context) args

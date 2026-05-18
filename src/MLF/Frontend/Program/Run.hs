@@ -330,6 +330,7 @@ data RuntimePrimitive
   | RuntimeStringTake
   | RuntimeStringSlice
   | RuntimeStringCharAt
+  | RuntimeCharIsDigit
   deriving (Eq, Show)
 
 data RuntimeIOAction
@@ -509,6 +510,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringTakePrimitiveName -> Just RuntimeStringTake
       | name' == PrimitiveInventory.stringSlicePrimitiveName -> Just RuntimeStringSlice
       | name' == PrimitiveInventory.stringCharAtPrimitiveName -> Just RuntimeStringCharAt
+      | name' == PrimitiveInventory.charIsDigitPrimitiveName -> Just RuntimeCharIsDigit
     _ -> Nothing
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -1244,8 +1246,16 @@ applyRuntimePrimitive prim args
             Nothing -> Left (ProgramPipelineError "run-program __string_char_at index out of range")
         (RuntimeStringCharAt, _) ->
           Left (ProgramPipelineError "run-program __string_char_at expected String and Int arguments")
+        (RuntimeCharIsDigit, [RuntimeLit (LChar value)]) ->
+          Right (RuntimeLit (LBool (isAsciiDecimalDigit value)))
+        (RuntimeCharIsDigit, _) ->
+          Left (ProgramPipelineError "run-program __char_is_digit expected a Char argument")
         _ ->
           Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
+
+isAsciiDecimalDigit :: Char -> Bool
+isAsciiDecimalDigit value =
+  value >= '0' && value <= '9'
 
 dropUnicodeScalars :: Integer -> String -> String
 dropUnicodeScalars count value
@@ -1310,6 +1320,7 @@ runtimePrimitiveArity prim =
     RuntimeStringTake -> 2
     RuntimeStringSlice -> 3
     RuntimeStringCharAt -> 2
+    RuntimeCharIsDigit -> 1
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
 executeIOAction context action =
@@ -1486,7 +1497,8 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringDropPrimitiveName,
     PrimitiveInventory.stringTakePrimitiveName,
     PrimitiveInventory.stringSlicePrimitiveName,
-    PrimitiveInventory.stringCharAtPrimitiveName
+    PrimitiveInventory.stringCharAtPrimitiveName,
+    PrimitiveInventory.charIsDigitPrimitiveName
   ]
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm
