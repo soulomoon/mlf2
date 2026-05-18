@@ -1,5 +1,6 @@
 fixture-id: cross-module-let-run-program
 package-root: src
+search-paths: none
 command: run-program
 expect: pass
 normalization: none

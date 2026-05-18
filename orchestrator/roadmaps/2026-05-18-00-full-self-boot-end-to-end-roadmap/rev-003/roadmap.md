@@ -233,6 +233,11 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   cross-module-let with fixture metadata and committed expected stdout;
   reviewer evidence: focused matcher, cabal build all, cabal test, and thesis
   gate passed.
+- round-260: completed item-260-conformance-run-program-search-path-tracer by
+  adding a shared conformance corpus run-program search-path tracer with
+  metadata-derived package root/search path argv and committed expected stdout;
+  evidence: focused conformance tests, cabal build all, cabal test, and thesis
+  gate passed.
 
 #### Candidate Direction: Conformance Corpus Migration
 

@@ -10,25 +10,56 @@ import MLF.Program.CLI (runProgramArgs)
 
 spec :: Spec
 spec =
-    describe "MLF.Program shared conformance corpus" $
+    describe "MLF.Program shared conformance corpus" $ do
         it "shared conformance corpus validates run-program package fixture" $ do
-            fixture <- loadFixture conformanceFixtureMeta
-            actual <- runProgramArgs [fixturePackageRoot fixture]
+            fixture <- loadFixture crossModuleLetFixture
+            actual <- runProgramArgs (fixtureRunProgramArgs fixture)
+            expected <- readFile (fixtureExpectedStdout fixture)
+
+            actual `shouldBe` Right expected
+
+        it "shared conformance corpus validates run-program search-path fixture" $ do
+            fixture <- loadFixture searchPathFixture
+            actual <- runProgramArgs (fixtureRunProgramArgs fixture)
             expected <- readFile (fixtureExpectedStdout fixture)
 
             actual `shouldBe` Right expected
 
 data ConformanceFixture = ConformanceFixture
-    { fixturePackageRoot :: FilePath
+    { fixtureRunProgramArgs :: [FilePath]
     , fixtureExpectedStdout :: FilePath
     }
 
-conformanceFixtureMeta :: FilePath
-conformanceFixtureMeta =
-    "test/conformance/mlfp/run-program/cross-module-let/fixture.meta"
+data FixtureExpectation = FixtureExpectation
+    { expectationMetaPath :: FilePath
+    , expectationFixtureId :: String
+    , expectationSearchPaths :: String
+    , expectationTags :: String
+    }
 
-loadFixture :: FilePath -> IO ConformanceFixture
-loadFixture metaPath = do
+crossModuleLetFixture :: FixtureExpectation
+crossModuleLetFixture =
+    FixtureExpectation
+        { expectationMetaPath =
+            "test/conformance/mlfp/run-program/cross-module-let/fixture.meta"
+        , expectationFixtureId = "cross-module-let-run-program"
+        , expectationSearchPaths = "none"
+        , expectationTags = "package,public,cross-module,let-polymorphism"
+        }
+
+searchPathFixture :: FixtureExpectation
+searchPathFixture =
+    FixtureExpectation
+        { expectationMetaPath =
+            "test/conformance/mlfp/run-program/search-path-package/fixture.meta"
+        , expectationFixtureId = "search-path-run-program"
+        , expectationSearchPaths = "roots/lib"
+        , expectationTags = "package,public,search-path,cross-root-import"
+        }
+
+loadFixture :: FixtureExpectation -> IO ConformanceFixture
+loadFixture expectation = do
+    let metaPath = expectationMetaPath expectation
     exists <- doesFileExist metaPath
     exists `shouldBe` True
     contents <- readFile metaPath
@@ -41,20 +72,45 @@ loadFixture metaPath = do
     stageApplicability <- requireField "stage-applicability" fields
     tags <- requireField "tags" fields
     packageRoot <- requireField "package-root" fields
+    searchPaths <- requireField "search-paths" fields
     expectedStdout <- requireField "expected-stdout" fields
 
-    fixtureId `shouldBe` "cross-module-let-run-program"
+    fixtureId `shouldBe` expectationFixtureId expectation
     command `shouldBe` "run-program"
     expect `shouldBe` "pass"
     normalization `shouldBe` "none"
     stageApplicability `shouldBe` "all"
-    tags `shouldBe` "package,public,cross-module,let-polymorphism"
+    searchPaths `shouldBe` expectationSearchPaths expectation
+    tags `shouldBe` expectationTags expectation
+
+    let packageArg = fixtureRoot </> packageRoot
+        searchPathArgs = concatMap searchPathArg (parseSearchPaths fixtureRoot searchPaths)
 
     pure
         ConformanceFixture
-            { fixturePackageRoot = fixtureRoot </> packageRoot
+            { fixtureRunProgramArgs = packageArg : searchPathArgs
             , fixtureExpectedStdout = fixtureRoot </> expectedStdout
             }
+
+searchPathArg :: FilePath -> [FilePath]
+searchPathArg path =
+    ["--search-path", path]
+
+parseSearchPaths :: FilePath -> String -> [FilePath]
+parseSearchPaths fixtureRoot rawSearchPaths =
+    case trim rawSearchPaths of
+        "none" ->
+            []
+        paths ->
+            map ((fixtureRoot </>) . trim) (splitOnComma paths)
+
+splitOnComma :: String -> [String]
+splitOnComma input =
+    case break (== ',') input of
+        (chunk, []) ->
+            [chunk]
+        (chunk, _comma : rest) ->
+            chunk : splitOnComma rest
 
 parseFields :: String -> [(String, String)]
 parseFields =

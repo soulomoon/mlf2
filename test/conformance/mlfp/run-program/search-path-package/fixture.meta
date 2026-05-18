@@ -1,0 +1,9 @@
+fixture-id: search-path-run-program
+package-root: roots/main
+search-paths: roots/lib
+command: run-program
+expect: pass
+normalization: none
+stage-applicability: all
+tags: package,public,search-path,cross-root-import
+expected-stdout: expected/run-program.stdout

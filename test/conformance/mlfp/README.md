@@ -12,6 +12,7 @@ The initial tracer fixture uses a plain line-oriented metadata file:
 ```text
 fixture-id: cross-module-let-run-program
 package-root: src
+search-paths: none
 command: run-program
 expect: pass
 normalization: none
@@ -20,10 +21,13 @@ tags: package,public,cross-module,let-polymorphism
 expected-stdout: expected/run-program.stdout
 ```
 
-Fields are `key: value` lines. For this tracer, `package-root` and
-`expected-stdout` are resolved relative to the directory containing
-`fixture.meta`. The only recognized command is `run-program`, the only expected
-status is `pass`, and the only normalization profile is `none`.
+Fields are `key: value` lines. For these tracers, `package-root`,
+`search-paths`, and `expected-stdout` are resolved relative to the directory
+containing `fixture.meta`. Use `search-paths: none` for fixtures with no extra
+roots. Otherwise, `search-paths` is a comma-separated ordered list of roots;
+the initial search-path tracer uses exactly one root. The only recognized
+command is `run-program`, the only expected status is `pass`, and the only
+normalization profile is `none`.
 
 Any expected-output update is a reviewed source change. A test run may write
 actual outputs only to an explicitly selected actual-output root in a later
