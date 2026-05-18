@@ -347,6 +347,14 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   stringDrop matcher, primitive inventory matcher, neighbor text/native
   matcher set, rg evidence checks, `git diff --check`, cabal build all,
   cabal test, and thesis gate passed.
+- round-274 completed item-274-string-take-native-tracer:
+  `stringTake : String -> Int -> String` returns `"\\955"` for
+  `stringTake "λab" 1` and `"a\\955"` for `stringTake "aλb" 2` with the
+  current escaped string display through source checking, run-program, backend
+  LLVM/object validation, emit-native/native object validation, and linked
+  native execution; evidence: focused stringTake matcher, primitive inventory
+  matcher, neighbor text/native matcher set, rg evidence checks,
+  `git diff --check`, cabal build all, cabal test, and thesis gate passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

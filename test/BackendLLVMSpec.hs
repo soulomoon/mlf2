@@ -429,6 +429,28 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "stringTake slices Unicode scalar prefixes through native execution" $
+      forM_
+        [ (nativeTakeLeadingUnicodeStringSourceProgram, "\"\\955\"\n", NativeRunResult ExitSuccess "\"\\955\"\n" ""),
+          (nativeTakeMixedUnicodeStringSourceProgram, "\"a\\955\"\n", NativeRunResult ExitSuccess "\"a\\955\"\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "Char literal source checks, runs, emits backend, and executes natively" $
       withTempProgram nativeCharLiteralSourceProgram $ \path -> do
         checkProgramFile path `shouldReturn` Right "OK\n"
@@ -2287,6 +2309,24 @@ nativeDropMixedUnicodeStringSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (stringDrop);",
       "  def main : String = stringDrop \"aλb\" 2;",
+      "}"
+    ]
+
+nativeTakeLeadingUnicodeStringSourceProgram :: String
+nativeTakeLeadingUnicodeStringSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringTake);",
+      "  def main : String = stringTake \"λab\" 1;",
+      "}"
+    ]
+
+nativeTakeMixedUnicodeStringSourceProgram :: String
+nativeTakeMixedUnicodeStringSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringTake);",
+      "  def main : String = stringTake \"aλb\" 2;",
       "}"
     ]
 

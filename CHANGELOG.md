@@ -46,6 +46,12 @@
   `stringDrop "λab" 1` and `"b"` for `stringDrop "aλb" 2` through `.mlfp`
   source checking, `run-program`, raw LLVM emission, object-code validation,
   and linked native execution.
+- Added the first native-capable take slicing string tracer:
+  `stringTake : String -> Int -> String` now returns `"\\955"` for
+  `stringTake "λab" 1` and `"a\\955"` for `stringTake "aλb" 2` with the
+  existing escaped Haskell-style string display, through `.mlfp` source
+  checking, `run-program`, raw LLVM emission, object-code validation, and
+  linked native execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

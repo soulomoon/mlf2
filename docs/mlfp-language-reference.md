@@ -428,6 +428,7 @@ stringContains : String -> String -> Bool
 stringStartsWith : String -> String -> Bool
 stringEndsWith : String -> String -> Bool
 stringDrop : String -> Int -> String
+stringTake : String -> Int -> String
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -448,10 +449,13 @@ non-empty Unicode scalar suffix, so `stringEndsWith "abλ" "λ"` is `true` while
 `stringEndsWith "λab" "λ"` is `false`. `stringDrop` is the first drop slicing
 operation; the current native-capable tracer drops a non-negative count of
 Unicode scalar values, so `stringDrop "λab" 1` returns `"ab"` and
-`stringDrop "aλb" 2` returns `"b"`. These operations are covered through source
-checking, `run-program`, backend LLVM emission, object generation, and linked
-native execution for the current native-capable tracers. `String`/`List Char`
-conversion, formatting, full slicing coverage, broader classification
+`stringDrop "aλb" 2` returns `"b"`. `stringTake` is the first take slicing
+operation; the current native-capable tracer keeps a non-negative count of
+Unicode scalar values, so `stringTake "λab" 1` returns `"λ"` and
+`stringTake "aλb" 2` returns `"aλ"`. These operations are covered through
+source checking, `run-program`, backend LLVM emission, object generation, and
+linked native execution for the current native-capable tracers. `String`/`List
+Char` conversion, formatting, full slicing coverage, broader classification
 predicates, cursor APIs, locale, regex, and full parser parity remain out of
 scope.
 
@@ -582,6 +586,7 @@ Current prelude contents:
 - `stringStartsWith`
 - `stringEndsWith`
 - `stringDrop`
+- `stringTake`
 - `and`
 - `id`
 
@@ -616,9 +621,11 @@ with native coverage for a non-empty Unicode scalar prefix. The first suffix
 `String` search operation is `stringEndsWith`, with native coverage for a
 non-empty Unicode scalar suffix. The first drop slicing operation is
 `stringDrop`, with native coverage for non-negative Unicode scalar prefix-drop
-examples. Broad `String`/`List Char` conversion, formatting, full slicing
-coverage, broader classification predicates, cursor APIs, and parser-parity
-helpers remain outside this contract.
+examples. The first take slicing operation is `stringTake`, with native
+coverage for non-negative Unicode scalar prefix-take examples. Broad
+`String`/`List Char` conversion, formatting, full slicing coverage, broader
+classification predicates, cursor APIs, and parser-parity helpers remain
+outside this contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 

@@ -28,6 +28,7 @@ module MLF.Primitive.Inventory
     stringStartsWithPrimitiveName,
     stringEndsWithPrimitiveName,
     stringDropPrimitiveName,
+    stringTakePrimitiveName,
     nativeIOPrimitiveName,
     nativeIOPrimitiveNames,
     nativeLowerablePrimitiveNames,
@@ -91,6 +92,7 @@ data PrimitiveNativeSupport
   | PrimitiveNativeStringStartsWith
   | PrimitiveNativeStringEndsWith
   | PrimitiveNativeStringDrop
+  | PrimitiveNativeStringTake
   | PrimitiveNativeIO PrimitiveIOOperation
   deriving (Eq, Ord, Show)
 
@@ -194,6 +196,12 @@ primitiveValueSpecs =
       ( stringDropPrimitiveName,
         primitiveValueSpec
           PrimitiveNativeStringDrop
+          (stringTy `PrimitiveTypeArrow` (intTy `PrimitiveTypeArrow` stringTy))
+          Set.empty
+      ),
+      ( stringTakePrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringTake
           (stringTy `PrimitiveTypeArrow` (intTy `PrimitiveTypeArrow` stringTy))
           Set.empty
       ),
@@ -375,6 +383,10 @@ stringDropPrimitiveName :: String
 stringDropPrimitiveName =
   "__string_drop"
 
+stringTakePrimitiveName :: String
+stringTakePrimitiveName =
+  "__string_take"
+
 requireSinglePrimitiveNativeSupport :: PrimitiveNativeSupport -> String
 requireSinglePrimitiveNativeSupport nativeSupport =
   case Set.toList (Map.keysSet (Map.filter ((== nativeSupport) . primitiveValueNativeSupport) primitiveValueSpecs)) of
@@ -405,6 +417,7 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeStringStartsWith -> True
     PrimitiveNativeStringEndsWith -> True
     PrimitiveNativeStringDrop -> True
+    PrimitiveNativeStringTake -> True
     PrimitiveNativeIO {} -> True
 
 primitiveTypeToSourceType :: PrimitiveType -> SrcType

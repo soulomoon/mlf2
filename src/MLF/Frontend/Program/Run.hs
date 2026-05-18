@@ -327,6 +327,7 @@ data RuntimePrimitive
   | RuntimeStringStartsWith
   | RuntimeStringEndsWith
   | RuntimeStringDrop
+  | RuntimeStringTake
   deriving (Eq, Show)
 
 data RuntimeIOAction
@@ -503,6 +504,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringStartsWithPrimitiveName -> Just RuntimeStringStartsWith
       | name' == PrimitiveInventory.stringEndsWithPrimitiveName -> Just RuntimeStringEndsWith
       | name' == PrimitiveInventory.stringDropPrimitiveName -> Just RuntimeStringDrop
+      | name' == PrimitiveInventory.stringTakePrimitiveName -> Just RuntimeStringTake
     _ -> Nothing
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -1224,6 +1226,10 @@ applyRuntimePrimitive prim args
           Right (RuntimeLit (LString (dropUnicodeScalars count value)))
         (RuntimeStringDrop, _) ->
           Left (ProgramPipelineError "run-program __string_drop expected String and Int arguments")
+        (RuntimeStringTake, [RuntimeLit (LString value), RuntimeLit (LInt count)]) ->
+          Right (RuntimeLit (LString (takeUnicodeScalars count value)))
+        (RuntimeStringTake, _) ->
+          Left (ProgramPipelineError "run-program __string_take expected String and Int arguments")
         _ ->
           Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
 
@@ -1236,6 +1242,16 @@ dropUnicodeScalars count value
       | remaining <= 0 = rest
     go _ [] = []
     go remaining (_ : rest) = go (remaining - 1) rest
+
+takeUnicodeScalars :: Integer -> String -> String
+takeUnicodeScalars count value
+  | count <= 0 = []
+  | otherwise = go count value
+  where
+    go remaining _
+      | remaining <= 0 = []
+    go _ [] = []
+    go remaining (char : rest) = char : go (remaining - 1) rest
 
 runtimePrimitiveArity :: RuntimePrimitive -> Int
 runtimePrimitiveArity prim =
@@ -1263,6 +1279,7 @@ runtimePrimitiveArity prim =
     RuntimeStringStartsWith -> 2
     RuntimeStringEndsWith -> 2
     RuntimeStringDrop -> 2
+    RuntimeStringTake -> 2
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
 executeIOAction context action =
@@ -1436,7 +1453,8 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringContainsPrimitiveName,
     PrimitiveInventory.stringStartsWithPrimitiveName,
     PrimitiveInventory.stringEndsWithPrimitiveName,
-    PrimitiveInventory.stringDropPrimitiveName
+    PrimitiveInventory.stringDropPrimitiveName,
+    PrimitiveInventory.stringTakePrimitiveName
   ]
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm
