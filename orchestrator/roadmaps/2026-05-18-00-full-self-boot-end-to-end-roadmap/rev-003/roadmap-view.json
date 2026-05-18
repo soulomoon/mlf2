@@ -18,7 +18,7 @@
     {
       "milestone_id": "milestone-2",
       "title": "Shared File-Based Conformance Corpus",
-      "status": "in-progress",
+      "status": "done",
       "depends_on": ["milestone-1"],
       "parallel_lane": "lane-evidence-conformance",
       "status_anchor": "milestone-2-status",
@@ -147,7 +147,7 @@
   "anchors": {
     "milestone-1-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "### [done] 1. Readiness Ledger Baseline"},
     "milestone-1-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "#### Completion Pointers: milestone-1"},
-    "milestone-2-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "### [in-progress] 2. Shared File-Based Conformance Corpus"},
+    "milestone-2-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "### [done] 2. Shared File-Based Conformance Corpus"},
     "milestone-2-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "#### Completion Pointers: milestone-2"},
     "milestone-3-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "### [pending] 3. Native-Capable Broad Text Substrate"},
     "milestone-3-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "#### Completion Pointers: milestone-3"},

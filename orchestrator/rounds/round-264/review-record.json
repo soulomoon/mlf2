@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-264",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-conformance-corpus-migration",
+  "extracted_item_id": "item-264-conformance-corpus-milestone-2-status-closeout",
+  "decision": "approved",
+  "evidence_summary": "Status-only closeout audit confirmed the milestone-2 conformance corpus completion signal: five shared corpus examples cover run-program/check-program pass fixtures and the check-program missing-import fail fixture, metadata drives package roots/search paths/commands/pass-fail expected streams, no dynamic golden accept/bless/regenerate or skip/pending path was found, prior rounds 259 through 263 are approved under milestone-2/direction-2a, and focused corpus, git diff --check, cabal build all, cabal test, and thesis conformance gate passed. No code, fixture, README, roadmap, production compiler, or controller-state implementation edits were made.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-2",
+        "expected_current_status": "in-progress",
+        "target_status": "done",
+        "roadmap_view_anchor": "milestone-2-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-2-completion",
+        "text": "round-264 completed the status-only conformance corpus closeout audit for milestone-2; evidence: approved rounds 259-263, five shared corpus examples, focused corpus check, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

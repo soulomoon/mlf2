@@ -213,7 +213,7 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
 - Extraction notes: a lawful round may be a no-code alignment audit if docs are
   already accurate.
 
-### [in-progress] 2. Shared File-Based Conformance Corpus
+### [done] 2. Shared File-Based Conformance Corpus
 
 - Milestone id: `milestone-2`
 - Depends on: `milestone-1`
@@ -252,6 +252,9 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   by adding the shared conformance corpus expect-fail check-program
   missing-import tracer with committed expected stderr; evidence: focused
   conformance tests, cabal build all, cabal test, and thesis gate passed.
+- round-264: completed the status-only conformance corpus closeout audit for
+  milestone-2; evidence: approved rounds 259-263, five shared corpus examples,
+  focused corpus check, cabal build all, cabal test, and thesis gate passed.
 
 #### Candidate Direction: Conformance Corpus Migration
 
