@@ -312,7 +312,12 @@ None yet.
   ambient-input policy are implemented and validated where required.
 - Parallel lane: `lane-platform-substrate`
 - Coordination notes: trusted substrate provides capabilities only. Compiler
-  language semantics remain in the `.mlfp` compiler package.
+  language semantics remain in the `.mlfp` compiler package. Before selecting
+  implementation rounds for this milestone, reassess the then-current
+  `CONTEXT.md`, accepted ADRs, readiness ledger, architecture docs, tests, and
+  codebase boundaries, then split the milestone into smaller roadmap
+  milestones when those sources expose distinct ABI, runtime/GC/FFI,
+  substrate, package-lock, toolchain, or proof-record work fronts.
 
 #### Completion Pointers: milestone-5
 
@@ -334,7 +339,10 @@ None yet.
 - Boundary notes: no remote solver, package publishing, or host-owned canonical
   data formats.
 - Extraction notes: begin with canonical declarations and drift validation
-  before expanding generated bindings and runtime coverage.
+  before expanding generated bindings and runtime coverage. If the current docs
+  and code show that ABI, GC/FFI, package locks, toolchain identity, or
+  proof-record contracts need different verification surfaces, publish a
+  semantic roadmap revision that splits this milestone before implementation.
 
 ### [pending] 6. Compiler Source Package In `.mlfp`
 
@@ -350,7 +358,12 @@ None yet.
 - Parallel lane: `lane-compiler-package`
 - Coordination notes: trusted substrate may provide filesystem, subprocess,
   hashing, linker, runtime, GC, and FFI primitives; it must not implement
-  compiler semantics.
+  compiler semantics. Before implementation rounds begin, use the then-current
+  docs, ADRs, `CONTEXT.md`, conformance corpus, parser/platform evidence, and
+  codebase ownership boundaries to split this milestone into smaller compiler
+  phase milestones when parser integration, resolution, checking, interfaces,
+  backend artifact decisions, diagnostics, package validation, or driver-facing
+  semantics no longer fit one bounded execution front.
 
 #### Completion Pointers: milestone-6
 
@@ -371,7 +384,10 @@ None yet.
 - Boundary notes: no optimizer controls, formatter, docs generator, remote
   package manager, or broad REPL scope.
 - Extraction notes: choose vertical compiler components that produce
-  conformance-visible behavior and semantic artifacts.
+  conformance-visible behavior and semantic artifacts. If phase boundaries or
+  semantic artifact contracts are not clear enough for one round, require a
+  semantic roadmap revision that splits the compiler package work before
+  implementation continues.
 
 ### [pending] 7. Small Real Self-Boot Driver
 
@@ -387,7 +403,10 @@ None yet.
 - Parallel lane: `lane-proof-driver`
 - Coordination notes: `prove-self-boot` is not required in the first compiler
   driver. A host proof runner may orchestrate, but it cannot perform compiler
-  semantics.
+  semantics. If current manifest, lock, command-record, native-emission, or
+  conformance-runner contracts show separate driver work fronts, split this
+  milestone by command mode or proof-record boundary before executing broad
+  driver work.
 
 #### Completion Pointers: milestone-7
 
@@ -407,7 +426,9 @@ None yet.
 - Boundary notes: no package publishing, remote dependency commands, REPL,
   formatting, documentation generation, or optimizer controls.
 - Extraction notes: start with `check` and conformance execution, then native
-  emission once record and link contracts are in place.
+  emission once record and link contracts are in place. Derive any finer split
+  from the then-current manifest/lock/proof-record contracts and codebase
+  driver boundaries.
 
 ### [pending] 8. First Self-Boot Proof
 
@@ -425,7 +446,11 @@ None yet.
   records, stage-owned outputs, hashes, and classified failures if any.
 - Parallel lane: `lane-proof-driver`
 - Coordination notes: native object and executable bytes are regenerated and
-  recorded, but not the equality oracle.
+  recorded, but not the equality oracle. Before the final proof attempt, use
+  the current proof runner, platform contracts, conformance suite, normalized
+  semantic artifact format, and failure taxonomy to split proof-runner
+  hardening, conformance-first execution, manifest validation, and final
+  stage-equivalence closeout when they need separate evidence.
 
 #### Completion Pointers: milestone-8
 
@@ -445,4 +470,7 @@ None yet.
 - Boundary notes: do not compare native object or executable bytes as the
   first-proof oracle.
 - Extraction notes: first runs may be proof-runner hardening rounds before the
-  final stage-equivalence closeout.
+  final stage-equivalence closeout. If proof records expose distinct failure
+  classes or missing contracts, publish a semantic roadmap revision that splits
+  those proof fronts instead of treating the final proof as one oversized
+  round.

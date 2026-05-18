@@ -113,6 +113,11 @@ Every round must satisfy the checks matching its touched scope.
   - Verify no checker/backend/driver scope is claimed by parser parity.
 
 - **milestone-5 (Self-Boot Platform Contract Implementation)**
+  - Before selecting broad platform work, verify the planner reassessed the
+    current ADRs, `CONTEXT.md`, readiness ledger, architecture docs, tests, and
+    codebase boundaries. If those sources show separable ABI, runtime/GC/FFI,
+    substrate, package-lock, toolchain, or proof-record fronts, require a
+    semantic roadmap revision that splits this milestone first.
   - Verify ABI version, target triple, substrate fingerprint, GC/root model,
     FFI value/ownership/error/export/callback rules, manifests, locks,
     generated binding drift checks, toolchain identity, native link records,
@@ -123,6 +128,12 @@ Every round must satisfy the checks matching its touched scope.
     shortcuts.
 
 - **milestone-6 (Compiler Source Package In `.mlfp`)**
+  - Before selecting broad compiler-package work, verify the planner reassessed
+    current parser/platform evidence, conformance fixtures, ADRs, `CONTEXT.md`,
+    architecture docs, and code ownership. If parser integration, resolution,
+    checking, interfaces, backend decisions, diagnostics, package validation,
+    or driver-facing semantics need distinct proof surfaces, require a
+    semantic roadmap revision that splits this milestone first.
   - Verify compiler source modules own parser, resolver, checker, semantic
     interface, backend artifact-decision, diagnostic, package validation, and
     driver-facing semantics.
@@ -130,12 +141,22 @@ Every round must satisfy the checks matching its touched scope.
   - Verify conformance and semantic artifacts expose behavior changes.
 
 - **milestone-7 (Small Real Self-Boot Driver)**
+  - Before selecting broad driver work, verify current manifest, lock,
+    command-record, native-emission, and conformance-runner contracts are clear
+    enough for one bounded round. If not, require a semantic roadmap revision
+    that splits this milestone by command mode or proof-record boundary.
   - Verify `check`, `emit-backend`, `emit-native`, and `run-conformance` over
     explicit manifests and checked locks.
   - Verify the driver validates and recomputes checked locks deterministically.
   - Verify proof orchestration remains outside compiler semantics.
 
 - **milestone-8 (First Self-Boot Proof)**
+  - Before selecting final proof work, verify current proof-runner,
+    conformance-suite, proof-manifest, normalized semantic artifact, platform,
+    and failure-taxonomy contracts are clear enough for one bounded round. If
+    not, require a semantic roadmap revision that splits proof-runner
+    hardening, conformance-first execution, manifest validation, and final
+    stage-equivalence closeout.
   - Verify stage 0 and stage 1 consume the same locked inputs and substrate
     fingerprint.
   - Verify both stages pass the shared conformance suite before semantic
