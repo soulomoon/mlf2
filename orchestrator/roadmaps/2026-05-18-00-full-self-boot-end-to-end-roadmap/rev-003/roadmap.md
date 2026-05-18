@@ -248,6 +248,10 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   metadata-derived package root/search-path argv and committed OK stdout;
   evidence: focused conformance tests, cabal build all, cabal test, and thesis
   gate passed.
+- round-263: completed item-263-conformance-check-program-fail-missing-import-tracer
+  by adding the shared conformance corpus expect-fail check-program
+  missing-import tracer with committed expected stderr; evidence: focused
+  conformance tests, cabal build all, cabal test, and thesis gate passed.
 
 #### Candidate Direction: Conformance Corpus Migration
 

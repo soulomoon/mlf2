@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-263",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-conformance-corpus-migration",
+  "extracted_item_id": "item-263-conformance-check-program-fail-missing-import-tracer",
+  "decision": "approved",
+  "evidence_summary": "Focused missing-import fail fixture and full shared conformance corpus tests passed, artifact and expected-stderr checks passed, no dynamic golden accept path was found, git diff --check passed, cabal build all passed, cabal test passed with 2568 examples and 0 failures, and the thesis conformance gate passed. The new expect-fail fixture compares public checkProgramArgs Left diagnostics with committed expected-stderr while pass fixtures continue to compare committed expected-stdout.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-2-completion",
+        "text": "round-263 completed item-263-conformance-check-program-fail-missing-import-tracer by adding the shared conformance corpus expect-fail check-program missing-import tracer with committed expected stderr; evidence: focused conformance tests, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

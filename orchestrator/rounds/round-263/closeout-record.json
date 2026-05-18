@@ -1,0 +1,17 @@
+{
+  "schema_version": "closeout-record-v3",
+  "round_id": "round-263",
+  "review_record_path": "orchestrator/rounds/round-263/review-record.json",
+  "review_record_sha256": "a66a9db3b88e945f65f9bf6e8c4c2f40ce7b0783c61db2710e6bb3bcfe0df711",
+  "base_revision": "67ea4aa2e873a28f2e531110bf6b488a0305858d",
+  "status": "applied",
+  "applied_edit_summary": [
+    "milestone-2 completion pointer recorded for round-263"
+  ],
+  "verification": {
+    "roadmap_view_revalidated": true,
+    "active_bundle_revalidated": true,
+    "diff_matches_review_record": true,
+    "revalidated_after_base_refresh": false
+  }
+}

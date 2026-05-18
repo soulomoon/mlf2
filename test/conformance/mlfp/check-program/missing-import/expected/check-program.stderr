@@ -1,0 +1,2 @@
+test/conformance/mlfp/check-program/missing-import/src/Main.mlfp:2:10
+error: unknown imported module `Missing`

@@ -1,0 +1,9 @@
+fixture-id: missing-import-check-program
+package-root: src
+search-paths: none
+command: check-program
+expect: fail
+normalization: none
+stage-applicability: all
+tags: package,public,diagnostic,missing-import,check
+expected-stderr: expected/check-program.stderr

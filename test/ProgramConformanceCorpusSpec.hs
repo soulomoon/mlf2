@@ -14,41 +14,48 @@ spec =
         it "shared conformance corpus validates run-program package fixture" $ do
             fixture <- loadFixture crossModuleLetFixture
             actual <- runFixture fixture
-            expected <- readFile (fixtureExpectedStdout fixture)
 
-            actual `shouldBe` Right expected
+            actual `shouldMatchFixture` fixture
 
         it "shared conformance corpus validates run-program search-path fixture" $ do
             fixture <- loadFixture searchPathFixture
             actual <- runFixture fixture
-            expected <- readFile (fixtureExpectedStdout fixture)
 
-            actual `shouldBe` Right expected
+            actual `shouldMatchFixture` fixture
 
         it "shared conformance corpus validates check-program package fixture" $ do
             fixture <- loadFixture checkProgramCrossModuleLetFixture
             actual <- runFixture fixture
-            expected <- readFile (fixtureExpectedStdout fixture)
 
-            actual `shouldBe` Right expected
+            actual `shouldMatchFixture` fixture
 
         it "shared conformance corpus validates check-program search-path fixture" $ do
             fixture <- loadFixture checkProgramSearchPathFixture
             actual <- runFixture fixture
-            expected <- readFile (fixtureExpectedStdout fixture)
 
-            actual `shouldBe` Right expected
+            actual `shouldMatchFixture` fixture
+
+        it "shared conformance corpus validates check-program missing-import failure fixture" $ do
+            fixture <- loadFixture checkProgramMissingImportFixture
+            actual <- runFixture fixture
+
+            actual `shouldMatchFixture` fixture
 
 data ConformanceFixture = ConformanceFixture
     { fixtureCommand :: String
     , fixtureArgs :: [FilePath]
-    , fixtureExpectedStdout :: FilePath
+    , fixtureExpectedOutput :: FixtureExpectedOutput
     }
+
+data FixtureExpectedOutput
+    = ExpectStdout FilePath
+    | ExpectStderr FilePath
 
 data FixtureExpectation = FixtureExpectation
     { expectationMetaPath :: FilePath
     , expectationFixtureId :: String
     , expectationCommand :: String
+    , expectationStatus :: String
     , expectationSearchPaths :: String
     , expectationTags :: String
     }
@@ -60,6 +67,7 @@ crossModuleLetFixture =
             "test/conformance/mlfp/run-program/cross-module-let/fixture.meta"
         , expectationFixtureId = "cross-module-let-run-program"
         , expectationCommand = "run-program"
+        , expectationStatus = "pass"
         , expectationSearchPaths = "none"
         , expectationTags = "package,public,cross-module,let-polymorphism"
         }
@@ -71,6 +79,7 @@ searchPathFixture =
             "test/conformance/mlfp/run-program/search-path-package/fixture.meta"
         , expectationFixtureId = "search-path-run-program"
         , expectationCommand = "run-program"
+        , expectationStatus = "pass"
         , expectationSearchPaths = "roots/lib"
         , expectationTags = "package,public,search-path,cross-root-import"
         }
@@ -82,6 +91,7 @@ checkProgramCrossModuleLetFixture =
             "test/conformance/mlfp/check-program/cross-module-let/fixture.meta"
         , expectationFixtureId = "cross-module-let-check-program"
         , expectationCommand = "check-program"
+        , expectationStatus = "pass"
         , expectationSearchPaths = "none"
         , expectationTags = "package,public,cross-module,let-polymorphism,check"
         }
@@ -93,8 +103,21 @@ checkProgramSearchPathFixture =
             "test/conformance/mlfp/check-program/search-path-package/fixture.meta"
         , expectationFixtureId = "search-path-check-program"
         , expectationCommand = "check-program"
+        , expectationStatus = "pass"
         , expectationSearchPaths = "roots/lib"
         , expectationTags = "package,public,search-path,cross-root-import,check"
+        }
+
+checkProgramMissingImportFixture :: FixtureExpectation
+checkProgramMissingImportFixture =
+    FixtureExpectation
+        { expectationMetaPath =
+            "test/conformance/mlfp/check-program/missing-import/fixture.meta"
+        , expectationFixtureId = "missing-import-check-program"
+        , expectationCommand = "check-program"
+        , expectationStatus = "fail"
+        , expectationSearchPaths = "none"
+        , expectationTags = "package,public,diagnostic,missing-import,check"
         }
 
 loadFixture :: FixtureExpectation -> IO ConformanceFixture
@@ -113,11 +136,11 @@ loadFixture expectation = do
     tags <- requireField "tags" fields
     packageRoot <- requireField "package-root" fields
     searchPaths <- requireField "search-paths" fields
-    expectedStdout <- requireField "expected-stdout" fields
+    expectedOutput <- requireExpectedOutputField fixtureRoot expect fields
 
     fixtureId `shouldBe` expectationFixtureId expectation
     command `shouldBe` expectationCommand expectation
-    expect `shouldBe` "pass"
+    expect `shouldBe` expectationStatus expectation
     normalization `shouldBe` "none"
     stageApplicability `shouldBe` "all"
     searchPaths `shouldBe` expectationSearchPaths expectation
@@ -130,8 +153,18 @@ loadFixture expectation = do
         ConformanceFixture
             { fixtureCommand = command
             , fixtureArgs = packageArg : searchPathArgs
-            , fixtureExpectedStdout = fixtureRoot </> expectedStdout
+            , fixtureExpectedOutput = expectedOutput
             }
+
+shouldMatchFixture :: Either String String -> ConformanceFixture -> IO ()
+shouldMatchFixture actual fixture =
+    case fixtureExpectedOutput fixture of
+        ExpectStdout expectedPath -> do
+            expected <- readFile expectedPath
+            actual `shouldBe` Right expected
+        ExpectStderr expectedPath -> do
+            expected <- readFile expectedPath
+            actual `shouldBe` Left expected
 
 runFixture :: ConformanceFixture -> IO (Either String String)
 runFixture fixture =
@@ -147,6 +180,21 @@ runFixture fixture =
 searchPathArg :: FilePath -> [FilePath]
 searchPathArg path =
     ["--search-path", path]
+
+requireExpectedOutputField ::
+    FilePath ->
+    String ->
+    [(String, String)] ->
+    IO FixtureExpectedOutput
+requireExpectedOutputField fixtureRoot expect fields =
+    case expect of
+        "pass" ->
+            ExpectStdout . (fixtureRoot </>) <$> requireField "expected-stdout" fields
+        "fail" ->
+            ExpectStderr . (fixtureRoot </>) <$> requireField "expected-stderr" fields
+        other ->
+            expectationFailure ("unsupported conformance expectation: " ++ other)
+                >> fail ("unsupported conformance expectation: " ++ other)
 
 parseSearchPaths :: FilePath -> String -> [FilePath]
 parseSearchPaths fixtureRoot rawSearchPaths =

@@ -22,13 +22,15 @@ expected-stdout: expected/run-program.stdout
 ```
 
 Fields are `key: value` lines. For these tracers, `package-root`,
-`search-paths`, and `expected-stdout` are resolved relative to the directory
-containing `fixture.meta`. Use `search-paths: none` for fixtures with no extra
-roots. Otherwise, `search-paths` is a comma-separated ordered list of roots;
-the initial search-path tracer uses exactly one root. The only recognized
-commands are `run-program` and `check-program`, the only expected status is
-`pass`, and the only normalization profile is `none`. Each fixture names its
-committed expected stdout with `expected-stdout`.
+`search-paths`, `expected-stdout`, and `expected-stderr` are resolved relative
+to the directory containing `fixture.meta`. Use `search-paths: none` for
+fixtures with no extra roots. Otherwise, `search-paths` is a comma-separated
+ordered list of roots; the initial search-path tracer uses exactly one root.
+The only recognized commands are `run-program` and `check-program`, the
+recognized expected statuses are `pass` and `fail`, and the only normalization
+profile is `none`. Passing fixtures name committed stdout with
+`expected-stdout`; failing fixtures name committed stderr with
+`expected-stderr`.
 
 Any expected-output update is a reviewed source change. A test run may write
 actual outputs only to an explicitly selected actual-output root in a later
