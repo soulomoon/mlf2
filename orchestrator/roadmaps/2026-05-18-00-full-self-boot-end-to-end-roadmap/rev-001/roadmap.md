@@ -130,6 +130,12 @@ is not a compiler-only rewrite.
   compared.
 - If a round cannot preserve this order, it must request a semantic roadmap
   update instead of widening locally.
+- If a dependency-ready milestone becomes too broad for a clean bounded round,
+  or exposes newly independent sub-fronts with distinct dependencies,
+  verification surfaces, or ownership, split it through a semantic roadmap
+  update before executing the wider work. Do not force platform, compiler
+  package, or proof work into oversized rounds just because the current
+  milestone is coarse.
 
 ## Parallel Lanes
 

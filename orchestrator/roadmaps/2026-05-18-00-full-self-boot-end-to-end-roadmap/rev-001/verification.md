@@ -38,6 +38,10 @@ Every round must satisfy the checks matching its touched scope.
      by `selection-record.json`.
    - Confirm implementation does not skip ADR-ordered prerequisites without a
      semantic roadmap update.
+   - Confirm the selected extraction is small enough to verify as one round.
+     If the planner or reviewer needs new milestone boundaries, direction
+     meaning, dependencies, ownership lanes, or verification rules to keep work
+     bounded, require semantic-update mode before execution continues.
    - Confirm self-boot claims are separated by layer: source checking,
      interpreter/runtime, backend/native, object code, package build mode,
      conformance corpus, compiler-in-`.mlfp`, driver, and proof.
@@ -164,3 +168,7 @@ Every round must satisfy the checks matching its touched scope.
   compare native bytes as first-proof evidence, or broaden beyond the selected
   stage, classify it as `semantic-update-required` instead of continuing as
   status-only closeout.
+- If a retry or next selection reveals that a coarse milestone needs smaller
+  milestones before a bounded round can be planned or reviewed, classify it as
+  `semantic-update-required` and publish a refined revision before continuing
+  implementation.
