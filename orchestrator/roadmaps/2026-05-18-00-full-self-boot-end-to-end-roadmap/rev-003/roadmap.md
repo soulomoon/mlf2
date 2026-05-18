@@ -309,6 +309,13 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   emit-native, native object validation, and linked native execution;
   evidence: focused and neighbor matchers, `git diff --check`, cabal build
   all, cabal test, and thesis gate passed.
+- round-269 completed item-269-string-contains-char-native-tracer:
+  `stringContainsChar : String -> Char -> Bool` now classifies
+  `stringContainsChar "aλb" 'λ'` as true and `stringContainsChar "ab" 'λ'` as
+  false through check, run-program, backend LLVM/object validation,
+  emit-native, native object validation, and linked native execution;
+  evidence: focused and neighbor matchers, `git diff --check`, cabal build
+  all, cabal test, and thesis gate passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

@@ -124,6 +124,9 @@ Native emission owns the small process/runtime surface it needs:
 - `__string_is_empty`: inventory-classified as the first native-capable broad
   String classification operation; the native helper checks the valid-text
   empty boundary and returns a `Bool`.
+- `__string_contains_char`: inventory-classified as the first native-capable
+  single-character `String`/`Char` search operation; the native helper compares
+  Unicode scalar values and returns a `Bool`.
 - Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
   `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
   functions with entry-point implementations.
@@ -151,6 +154,8 @@ Supported result shapes are:
   operation tracer and counts Unicode scalar values rather than bytes.
 - `stringIsEmpty : String -> Bool` is the first native-capable broad String
   classification tracer and distinguishes `""` from a non-empty Unicode string.
+- `stringContainsChar : String -> Char -> Bool` is the first native-capable
+  single-character String search tracer and compares Unicode scalar values.
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 

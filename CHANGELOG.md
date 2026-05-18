@@ -19,6 +19,12 @@
   `stringIsEmpty : String -> Bool` now classifies `""` as `true` and `"λ"` as
   `false` through `.mlfp` source checking, `run-program`, raw LLVM emission,
   object-code validation, and linked native execution.
+- Added the first native-capable single-character string search tracer:
+  `stringContainsChar : String -> Char -> Bool` now classifies
+  `stringContainsChar "aλb" 'λ'` as `true` and
+  `stringContainsChar "ab" 'λ'` as `false` through `.mlfp` source checking,
+  `run-program`, raw LLVM emission, object-code validation, and linked native
+  execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

@@ -23,6 +23,7 @@ module MLF.Primitive.Inventory
     nativeAndPrimitiveName,
     stringLengthPrimitiveName,
     stringIsEmptyPrimitiveName,
+    stringContainsCharPrimitiveName,
     nativeIOPrimitiveName,
     nativeIOPrimitiveNames,
     nativeLowerablePrimitiveNames,
@@ -81,6 +82,7 @@ data PrimitiveNativeSupport
   | PrimitiveNativeBooleanAnd
   | PrimitiveNativeStringLength
   | PrimitiveNativeStringIsEmpty
+  | PrimitiveNativeStringContainsChar
   | PrimitiveNativeIO PrimitiveIOOperation
   deriving (Eq, Ord, Show)
 
@@ -155,6 +157,12 @@ primitiveValueSpecs =
         primitiveValueSpec
           PrimitiveNativeStringIsEmpty
           (stringTy `PrimitiveTypeArrow` boolTy)
+          Set.empty
+      ),
+      ( stringContainsCharPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringContainsChar
+          (stringTy `PrimitiveTypeArrow` (charTy `PrimitiveTypeArrow` boolTy))
           Set.empty
       ),
       nativeIOSpec
@@ -258,6 +266,7 @@ primitiveValueSpecs =
           primitiveValueNativeSupport = nativeSupport
         }
     boolTy = PrimitiveTypeBase "Bool"
+    charTy = PrimitiveTypeBase "Char"
     intTy = PrimitiveTypeBase "Int"
     stringTy = PrimitiveTypeBase "String"
     unitTy = PrimitiveTypeBase "Unit"
@@ -314,6 +323,10 @@ stringIsEmptyPrimitiveName :: String
 stringIsEmptyPrimitiveName =
   "__string_is_empty"
 
+stringContainsCharPrimitiveName :: String
+stringContainsCharPrimitiveName =
+  "__string_contains_char"
+
 requireSinglePrimitiveNativeSupport :: PrimitiveNativeSupport -> String
 requireSinglePrimitiveNativeSupport nativeSupport =
   case Set.toList (Map.keysSet (Map.filter ((== nativeSupport) . primitiveValueNativeSupport) primitiveValueSpecs)) of
@@ -339,6 +352,7 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeBooleanAnd -> True
     PrimitiveNativeStringLength -> True
     PrimitiveNativeStringIsEmpty -> True
+    PrimitiveNativeStringContainsChar -> True
     PrimitiveNativeIO {} -> True
 
 primitiveTypeToSourceType :: PrimitiveType -> SrcType

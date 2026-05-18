@@ -83,7 +83,8 @@ metadata and term nodes.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Row-5 primitive/eager ownership keeps the primitive surface at the
 inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
-`__mlfp_and`, `__string_length`, `__string_is_empty`, plus the IO primitive
+`__mlfp_and`, `__string_length`, `__string_is_empty`,
+`__string_contains_char`, plus the IO primitive
 names classified there for native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
@@ -166,7 +167,8 @@ lowerBackendProgram program = do
       needsIO = any functionReferencesIOWrapper (lpFunctions lowered)
       needsStringLength = any (functionReferencesGlobalNames (Set.singleton runtimeStringLengthName)) (lpFunctions lowered)
       needsStringIsEmpty = any (functionReferencesGlobalNames (Set.singleton runtimeStringIsEmptyName)) (lpFunctions lowered)
-      existingDecls = runtimeDeclarations base needsStringLength needsStringIsEmpty
+      needsStringContainsChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringContainsCharName)) (lpFunctions lowered)
+      existingDecls = runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -297,6 +299,7 @@ nativeRuntimeFunctions base =
   [nativeAndFunction | Map.notMember runtimeAndName (pbBindings base)]
     ++ [nativeStringLengthFunction | Map.notMember runtimeStringLengthName (pbBindings base)]
     ++ [nativeStringIsEmptyFunction | Map.notMember runtimeStringIsEmptyName (pbBindings base)]
+    ++ [nativeStringContainsCharFunction | Map.notMember runtimeStringContainsCharName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -900,6 +903,123 @@ nativeStringIsEmptyFunction =
     Right function -> function
     Left err -> error ("internal native __string_is_empty lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringContainsCharFunction :: LLVMFunction
+nativeStringContainsCharFunction =
+  case
+    lowerNativeFunction runtimeStringContainsCharName (LLVMInt 1) [(LLVMPtr, "value"), (LLVMInt 32, "needle")] $ \params -> do
+      let value = requireNativeParam "value" params
+          needle = requireNativeParam "needle" params
+          i8Ty = LLVMInt 8
+          i32Ty = LLVMInt 32
+          i64Ty = LLVMInt 64
+          loadByte prefix curPtr offset = do
+            bytePtr <- emitAssign (prefix ++ ".ptr") LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 offset)])
+            emitAssign prefix i8Ty (LLVMLoad i8Ty bytePtr)
+          extendByte prefix byte =
+            emitAssign prefix i32Ty (LLVMZext byte i32Ty)
+      curSlot <- emitAssign "strcontains.cur.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitStore LLVMPtr value curSlot
+      scalarSlot <- emitAssign "strcontains.scalar.slot" LLVMPtr (LLVMAlloca i32Ty (LLVMIntLiteral 64 1))
+      loopHeader <- freshBlock "strcontains.header"
+      detectStart <- freshBlock "strcontains.detect.start"
+      detectAscii <- freshBlock "strcontains.detect.ascii"
+      asciiScalar <- freshBlock "strcontains.ascii"
+      detectTwo <- freshBlock "strcontains.detect.two"
+      twoByteScalar <- freshBlock "strcontains.two"
+      detectThree <- freshBlock "strcontains.detect.three"
+      threeByteScalar <- freshBlock "strcontains.three"
+      fourByteScalar <- freshBlock "strcontains.four"
+      compareScalar <- freshBlock "strcontains.compare"
+      loopNext <- freshBlock "strcontains.next"
+      found <- freshBlock "strcontains.found"
+      notFound <- freshBlock "strcontains.not-found"
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock loopHeader
+      curPtr <- emitAssign "strcontains.cur" LLVMPtr (LLVMLoad LLVMPtr curSlot)
+      byte0 <- loadByte "strcontains.b0" curPtr 0
+      isNull <- emitAssign "strcontains.end" (LLVMInt 1) (LLVMICmpEq byte0 (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isNull detectStart [(1, notFound)])
+      startBlock detectStart
+      utf8Class <- emitAssign "strcontains.utf8.class" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0xC0))
+      isContinuation <- emitAssign "strcontains.is.continuation" (LLVMInt 1) (LLVMICmpEq utf8Class (LLVMIntLiteral 8 0x80))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isContinuation detectAscii [(1, loopNext)])
+      startBlock detectAscii
+      asciiClass <- emitAssign "strcontains.ascii.class" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0x80))
+      isAscii <- emitAssign "strcontains.is.ascii" (LLVMInt 1) (LLVMICmpEq asciiClass (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isAscii detectTwo [(1, asciiScalar)])
+      startBlock asciiScalar
+      asciiValue <- extendByte "strcontains.ascii.value" byte0
+      emitStore i32Ty asciiValue scalarSlot
+      finishCurrentBlock (LLVMBr compareScalar)
+      startBlock detectTwo
+      twoClass <- emitAssign "strcontains.two.class" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0xE0))
+      isTwo <- emitAssign "strcontains.is.two" (LLVMInt 1) (LLVMICmpEq twoClass (LLVMIntLiteral 8 0xC0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isTwo detectThree [(1, twoByteScalar)])
+      startBlock twoByteScalar
+      twoByte0Masked <- emitAssign "strcontains.two.b0.masked" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0x1F))
+      twoByte0Value <- extendByte "strcontains.two.b0.value" twoByte0Masked
+      twoByte0Shifted <- emitAssign "strcontains.two.b0.shifted" i32Ty (LLVMShl twoByte0Value (LLVMIntLiteral 32 6))
+      twoByte1 <- loadByte "strcontains.two.b1" curPtr 1
+      twoByte1Masked <- emitAssign "strcontains.two.b1.masked" i8Ty (LLVMAnd twoByte1 (LLVMIntLiteral 8 0x3F))
+      twoByte1Value <- extendByte "strcontains.two.b1.value" twoByte1Masked
+      twoScalar <- emitAssign "strcontains.two.scalar" i32Ty (LLVMOr twoByte0Shifted twoByte1Value)
+      emitStore i32Ty twoScalar scalarSlot
+      finishCurrentBlock (LLVMBr compareScalar)
+      startBlock detectThree
+      threeClass <- emitAssign "strcontains.three.class" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0xF0))
+      isThree <- emitAssign "strcontains.is.three" (LLVMInt 1) (LLVMICmpEq threeClass (LLVMIntLiteral 8 0xE0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isThree fourByteScalar [(1, threeByteScalar)])
+      startBlock threeByteScalar
+      threeByte0Masked <- emitAssign "strcontains.three.b0.masked" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0x0F))
+      threeByte0Value <- extendByte "strcontains.three.b0.value" threeByte0Masked
+      threeByte0Shifted <- emitAssign "strcontains.three.b0.shifted" i32Ty (LLVMShl threeByte0Value (LLVMIntLiteral 32 12))
+      threeByte1 <- loadByte "strcontains.three.b1" curPtr 1
+      threeByte1Masked <- emitAssign "strcontains.three.b1.masked" i8Ty (LLVMAnd threeByte1 (LLVMIntLiteral 8 0x3F))
+      threeByte1Value <- extendByte "strcontains.three.b1.value" threeByte1Masked
+      threeByte1Shifted <- emitAssign "strcontains.three.b1.shifted" i32Ty (LLVMShl threeByte1Value (LLVMIntLiteral 32 6))
+      threePrefix <- emitAssign "strcontains.three.prefix" i32Ty (LLVMOr threeByte0Shifted threeByte1Shifted)
+      threeByte2 <- loadByte "strcontains.three.b2" curPtr 2
+      threeByte2Masked <- emitAssign "strcontains.three.b2.masked" i8Ty (LLVMAnd threeByte2 (LLVMIntLiteral 8 0x3F))
+      threeByte2Value <- extendByte "strcontains.three.b2.value" threeByte2Masked
+      threeScalar <- emitAssign "strcontains.three.scalar" i32Ty (LLVMOr threePrefix threeByte2Value)
+      emitStore i32Ty threeScalar scalarSlot
+      finishCurrentBlock (LLVMBr compareScalar)
+      startBlock fourByteScalar
+      fourByte0Masked <- emitAssign "strcontains.four.b0.masked" i8Ty (LLVMAnd byte0 (LLVMIntLiteral 8 0x07))
+      fourByte0Value <- extendByte "strcontains.four.b0.value" fourByte0Masked
+      fourByte0Shifted <- emitAssign "strcontains.four.b0.shifted" i32Ty (LLVMShl fourByte0Value (LLVMIntLiteral 32 18))
+      fourByte1 <- loadByte "strcontains.four.b1" curPtr 1
+      fourByte1Masked <- emitAssign "strcontains.four.b1.masked" i8Ty (LLVMAnd fourByte1 (LLVMIntLiteral 8 0x3F))
+      fourByte1Value <- extendByte "strcontains.four.b1.value" fourByte1Masked
+      fourByte1Shifted <- emitAssign "strcontains.four.b1.shifted" i32Ty (LLVMShl fourByte1Value (LLVMIntLiteral 32 12))
+      fourPrefix <- emitAssign "strcontains.four.prefix" i32Ty (LLVMOr fourByte0Shifted fourByte1Shifted)
+      fourByte2 <- loadByte "strcontains.four.b2" curPtr 2
+      fourByte2Masked <- emitAssign "strcontains.four.b2.masked" i8Ty (LLVMAnd fourByte2 (LLVMIntLiteral 8 0x3F))
+      fourByte2Value <- extendByte "strcontains.four.b2.value" fourByte2Masked
+      fourByte2Shifted <- emitAssign "strcontains.four.b2.shifted" i32Ty (LLVMShl fourByte2Value (LLVMIntLiteral 32 6))
+      fourPrefix' <- emitAssign "strcontains.four.prefix2" i32Ty (LLVMOr fourPrefix fourByte2Shifted)
+      fourByte3 <- loadByte "strcontains.four.b3" curPtr 3
+      fourByte3Masked <- emitAssign "strcontains.four.b3.masked" i8Ty (LLVMAnd fourByte3 (LLVMIntLiteral 8 0x3F))
+      fourByte3Value <- extendByte "strcontains.four.b3.value" fourByte3Masked
+      fourScalar <- emitAssign "strcontains.four.scalar" i32Ty (LLVMOr fourPrefix' fourByte3Value)
+      emitStore i32Ty fourScalar scalarSlot
+      finishCurrentBlock (LLVMBr compareScalar)
+      startBlock compareScalar
+      scalar <- emitAssign "strcontains.scalar" i32Ty (LLVMLoad i32Ty scalarSlot)
+      isMatch <- emitAssign "strcontains.match" (LLVMInt 1) (LLVMICmpEq scalar needle)
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isMatch loopNext [(1, found)])
+      startBlock loopNext
+      nextPtr <- emitAssign "strcontains.next.ptr" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 1)])
+      emitStore LLVMPtr nextPtr curSlot
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock found
+      finishCurrentBlock (LLVMRet (LLVMInt 1) (LLVMIntLiteral 1 1))
+      startBlock notFound
+      finishCurrentBlock (LLVMRet (LLVMInt 1) (LLVMIntLiteral 1 0))
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_contains_char lowering failed: " ++ renderBackendLLVMError err)
+
 -- IO runtime primitives
 
 ioPureName :: String
@@ -1445,12 +1565,16 @@ runtimeStringIsEmptyName :: String
 runtimeStringIsEmptyName =
   PrimitiveInventory.stringIsEmptyPrimitiveName
 
+runtimeStringContainsCharName :: String
+runtimeStringContainsCharName =
+  PrimitiveInventory.stringContainsCharPrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -1464,6 +1588,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty =
     ++ [ LLVMDeclaration runtimeStringIsEmptyName (LLVMInt 1) [LLVMPtr] False
          | needsStringIsEmpty,
            Map.notMember runtimeStringIsEmptyName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringContainsCharName (LLVMInt 1) [LLVMPtr, LLVMInt 32] False
+         | needsStringContainsChar,
+           Map.notMember runtimeStringContainsCharName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -4714,6 +4842,26 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
               pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
+    Nothing
+      | name == runtimeStringContainsCharName -> do
+          unless (length args == 2) $
+            liftEither (BackendLLVMArityMismatch name 2 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [haystack, needle] -> do
+              requireLLVMType context name LLVMPtr haystack
+              requireLLVMType context name (LLVMInt 32) needle
+              result <-
+                emitAssign
+                  "call"
+                  (LLVMInt 1)
+                  ( LLVMCall
+                      runtimeStringContainsCharName
+                      [(LLVMPtr, lvOperand haystack), (LLVMInt 32, lvOperand needle)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
       | Set.member name ioPrimitiveNames -> do
           callArgs <- traverse (lowerExpr env exprEnv context) args

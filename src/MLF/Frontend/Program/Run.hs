@@ -322,6 +322,7 @@ data RuntimePrimitive
   | RuntimeAnd
   | RuntimeStringLength
   | RuntimeStringIsEmpty
+  | RuntimeStringContainsChar
   deriving (Eq, Show)
 
 data RuntimeIOAction
@@ -493,6 +494,7 @@ runtimePrimitive name =
     name'
       | name' == PrimitiveInventory.stringLengthPrimitiveName -> Just RuntimeStringLength
       | name' == PrimitiveInventory.stringIsEmptyPrimitiveName -> Just RuntimeStringIsEmpty
+      | name' == PrimitiveInventory.stringContainsCharPrimitiveName -> Just RuntimeStringContainsChar
     _ -> Nothing
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -1194,6 +1196,10 @@ applyRuntimePrimitive prim args
           Right (RuntimeLit (LBool (null value)))
         (RuntimeStringIsEmpty, _) ->
           Left (ProgramPipelineError "run-program __string_is_empty expected a String argument")
+        (RuntimeStringContainsChar, [RuntimeLit (LString value), RuntimeLit (LChar needle)]) ->
+          Right (RuntimeLit (LBool (needle `elem` value)))
+        (RuntimeStringContainsChar, _) ->
+          Left (ProgramPipelineError "run-program __string_contains_char expected String and Char arguments")
         _ ->
           Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
 
@@ -1218,6 +1224,7 @@ runtimePrimitiveArity prim =
     RuntimeAnd -> 2
     RuntimeStringLength -> 1
     RuntimeStringIsEmpty -> 1
+    RuntimeStringContainsChar -> 2
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
 executeIOAction context action =
@@ -1386,7 +1393,8 @@ termMentionsName needle =
 runtimePurePrimitiveNames :: [String]
 runtimePurePrimitiveNames =
   [ PrimitiveInventory.stringLengthPrimitiveName,
-    PrimitiveInventory.stringIsEmptyPrimitiveName
+    PrimitiveInventory.stringIsEmptyPrimitiveName,
+    PrimitiveInventory.stringContainsCharPrimitiveName
   ]
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm
