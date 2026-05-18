@@ -53,6 +53,7 @@ Round artifact paths are derived from `round_id`, not persisted in
 | Key | Path |
 |-----|------|
 | `selection_record` | `orchestrator/rounds/<round-id>/selection-record.json` |
+| `roadmap_update_request` | `orchestrator/rounds/<round-id>/roadmap-update-request.md` |
 | `plan` | `orchestrator/rounds/<round-id>/plan.md` |
 | `round_plan_record` | `orchestrator/rounds/<round-id>/round-plan-record.json` |
 | `implementation_notes` | `orchestrator/rounds/<round-id>/implementation-notes.md` |
@@ -60,7 +61,10 @@ Round artifact paths are derived from `round_id`, not persisted in
 | `review_record` | `orchestrator/rounds/<round-id>/review-record.json` |
 | `closeout_record` | `orchestrator/rounds/<round-id>/closeout-record.json` |
 
-`closeout_record` is required only for status-only closeout rounds.
+`roadmap_update_request` is written only by a plan-stage planner when no
+bounded round can be selected before a semantic roadmap split. It is evidence
+for `update-roadmap`, not a mergeable round output. `closeout_record` is
+required only for status-only closeout rounds.
 
 ## Worker Artifact Paths
 
@@ -95,6 +99,10 @@ Semantic roadmap updates use the paths defined by
   `worktree_path`.
 - After a successful round merge, resolve archived round artifacts from the
   parent checkout.
+- For planner-requested roadmap updates, resolve
+  `roadmap_update_request` in the canonical round worktree while the planning
+  round is active, then in the roadmap-update worktree after the controller
+  preserves it there.
 - Resolve active roadmap bundle files from `state.json.roadmap_dir`.
 - Resolve roadmap-update artifacts inside the recorded roadmap-update worktree
   while an update is active.

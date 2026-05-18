@@ -4,10 +4,17 @@ This file is the single machine contract for semantic roadmap updates. It owns
 the `state.json.roadmap_update` shape, update branch/worktree conventions,
 review artifact contract, rejection loop, and activation metadata.
 
-Semantic roadmap updates are used only after a merged round changes future
-coordination, milestone or direction meaning, sequencing, parallel lanes,
-extraction scope, verification meaning, or retry policy. Status-only round
-closeout stays in the round worktree under `round-finalization-schema.md`.
+Semantic roadmap updates are entered through one of two triggers:
+
+- `merged-round`: a merged round changes future coordination, milestone or
+  direction meaning, sequencing, parallel lanes, extraction scope, verification
+  meaning, or retry policy.
+- `planner-request`: a plan-stage `roadmap-update-request.md` shows that no
+  bounded dependency-ready round can be selected without first splitting or
+  resequencing the active roadmap.
+
+Status-only round closeout stays in the round worktree under
+`round-finalization-schema.md`.
 
 ## `state.json.roadmap_update`
 
@@ -18,6 +25,7 @@ When active, it has this shape:
 ```json
 {
   "schema_version": "roadmap-update-v1",
+  "trigger": "merged-round",
   "source_round_id": "round-001-example",
   "branch": "orchestrator/roadmap-update-round-001-example-adjust-roadmap",
   "worktree_path": "orchestrator/worktrees/roadmap-update-round-001-example",
@@ -36,6 +44,7 @@ When active, it has this shape:
 Required fields:
 
 - `schema_version`: must be `roadmap-update-v1`
+- `trigger`: `merged-round` or `planner-request`
 - `source_round_id`
 - `branch`
 - `worktree_path`
@@ -49,8 +58,11 @@ Required fields:
 - `last_rejection_summary`
 - `resume_error`
 
-Only one semantic roadmap update may be active. Additional rounds that require
-semantic roadmap updates remain in `finalize-round`.
+Only one semantic roadmap update may be active. Additional merged rounds that
+require semantic roadmap updates remain in `finalize-round`. A
+planner-requested update must cancel the unselected planning round before
+entering `update-roadmap`; it uses the planning round id only as
+`source_round_id`.
 
 ## Branch And Artifact Conventions
 
@@ -63,6 +75,12 @@ Use:
 - review artifact
   `orchestrator/roadmap-updates/<round-id>-roadmap-update-review.md`
 
+For `planner-request`, the controller must preserve the planner-authored
+`roadmap-update-request.md` verbatim in the roadmap-update worktree at
+`orchestrator/rounds/<round-id>/roadmap-update-request.md` before removing the
+planning round from `active_rounds[]`. The guider reads that preserved request
+as evidence; it does not become an approved roadmap diff.
+
 ## `roadmap-update.md`
 
 The guider authors this artifact and the proposed roadmap bundle revision in
@@ -72,7 +90,8 @@ Required sections:
 
 ### Source Round
 - Round id:
-- Merged commit:
+- Trigger: merged-round | planner-request
+- Merged commit: <commit hash, or `none` for planner-request>
 - Evidence:
 
 ### Roadmap Change

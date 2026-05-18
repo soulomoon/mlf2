@@ -19,6 +19,8 @@ output, boundary, and self-check rules.
   `orchestrator/state.json`
 - Repository status
 - Prior round artifacts when relevant
+- Planner-authored `roadmap-update-request.md` when
+  `state.json.roadmap_update.trigger` is `planner-request`
 
 ## Duties
 - Own semantic `update-roadmap` for the repo-local orchestrator loop. Normal
@@ -31,6 +33,9 @@ output, boundary, and self-check rules.
 - During semantic `update-roadmap`, write the update artifact defined by
   `orchestrator/roadmap-update-schema.md` and author the next roadmap revision
   for controller activation.
+- For planner-requested updates, treat `roadmap-update-request.md` as evidence,
+  not as an approved diff. Derive the actual split or resequencing from the
+  active roadmap plus current docs, ADRs, context, code, and tests.
 - If `roadmap-update-review.md` rejects the update, revise the same
   `roadmap-update.md` and proposed revision in the recorded roadmap-update
   branch/worktree. Do not start a new roadmap-update branch unless the
