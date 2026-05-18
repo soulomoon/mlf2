@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-279",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-broad-string-char-substrate",
+  "extracted_item_id": "item-279-char-is-ascii-upper-native-tracer",
+  "decision": "approved",
+  "evidence_summary": "Focused charIsAsciiUpper native tracer, primitive inventory matcher, neighbor text/native matcher set, required rg evidence and claim-audit checks, git diff --check, cabal build all, cabal test, and thesis conformance gate passed. The diff matches the selected item, preserves prior text tracers including charIsAsciiLower, and docs/changelog record only an explicit ASCII uppercase Char classification helper without implying combined alphabetic, identifier-continuation, Unicode category, locale/regex, formatting, String/List Char conversion, parser parity, or milestone completion.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-279 completed item-279-char-is-ascii-upper-native-tracer: charIsAsciiUpper : Char -> Bool classifies charIsAsciiUpper 'A' as true, charIsAsciiUpper 'a' as false, and charIsAsciiUpper 'λ' as false through source checking, run-program, backend LLVM/object validation, emit-native/native object validation, and linked native execution; evidence: focused charIsAsciiUpper matcher, primitive inventory matcher, neighbor text/native matcher set, rg evidence/claim-audit checks, git diff --check, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

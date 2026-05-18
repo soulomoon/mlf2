@@ -27,7 +27,7 @@ import qualified MLF.Frontend.Syntax.Program as P
 preludeSource :: String
 preludeSource =
   unlines
-    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringStartsWith, stringEndsWith, stringDrop, stringTake, stringSlice, stringCharAt, charIsDigit, charIsAsciiLower, and, id) {",
+    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringStartsWith, stringEndsWith, stringDrop, stringTake, stringSlice, stringCharAt, charIsDigit, charIsAsciiLower, charIsAsciiUpper, and, id) {",
       "  class Eq a {",
       "    eq : a -> a -> Bool;",
       "  }",
@@ -111,6 +111,7 @@ preludeSource =
       "  def stringCharAt : String -> Int -> Char = __string_char_at;",
       "  def charIsDigit : Char -> Bool = __char_is_digit;",
       "  def charIsAsciiLower : Char -> Bool = __char_is_ascii_lower;",
+      "  def charIsAsciiUpper : Char -> Bool = __char_is_ascii_upper;",
       "  def and : Bool -> Bool -> Bool = λleft λright __mlfp_and left right;",
       "  def id : ∀ a. a -> a = λx x;",
       "}"

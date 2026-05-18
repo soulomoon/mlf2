@@ -388,6 +388,14 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   focused charIsAsciiLower matcher, primitive inventory matcher, neighbor
   text/native matcher set, rg evidence/claim-audit checks,
   `git diff --check`, cabal build all, cabal test, and thesis gate passed.
+- round-279 completed item-279-char-is-ascii-upper-native-tracer:
+  `charIsAsciiUpper : Char -> Bool` classifies `charIsAsciiUpper 'A'` as
+  true, `charIsAsciiUpper 'a'` as false, and `charIsAsciiUpper 'λ'` as false
+  through source checking, run-program, backend LLVM/object validation,
+  emit-native/native object validation, and linked native execution; evidence:
+  focused charIsAsciiUpper matcher, primitive inventory matcher, neighbor
+  text/native matcher set, rg evidence/claim-audit checks,
+  `git diff --check`, cabal build all, cabal test, and thesis gate passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

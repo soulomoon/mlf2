@@ -332,6 +332,7 @@ data RuntimePrimitive
   | RuntimeStringCharAt
   | RuntimeCharIsDigit
   | RuntimeCharIsAsciiLower
+  | RuntimeCharIsAsciiUpper
   deriving (Eq, Show)
 
 data RuntimeIOAction
@@ -513,6 +514,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringCharAtPrimitiveName -> Just RuntimeStringCharAt
       | name' == PrimitiveInventory.charIsDigitPrimitiveName -> Just RuntimeCharIsDigit
       | name' == PrimitiveInventory.charIsAsciiLowerPrimitiveName -> Just RuntimeCharIsAsciiLower
+      | name' == PrimitiveInventory.charIsAsciiUpperPrimitiveName -> Just RuntimeCharIsAsciiUpper
     _ -> Nothing
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -1256,6 +1258,10 @@ applyRuntimePrimitive prim args
           Right (RuntimeLit (LBool (isAsciiLower value)))
         (RuntimeCharIsAsciiLower, _) ->
           Left (ProgramPipelineError "run-program __char_is_ascii_lower expected a Char argument")
+        (RuntimeCharIsAsciiUpper, [RuntimeLit (LChar value)]) ->
+          Right (RuntimeLit (LBool (isAsciiUpper value)))
+        (RuntimeCharIsAsciiUpper, _) ->
+          Left (ProgramPipelineError "run-program __char_is_ascii_upper expected a Char argument")
         _ ->
           Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
 
@@ -1266,6 +1272,10 @@ isAsciiDecimalDigit value =
 isAsciiLower :: Char -> Bool
 isAsciiLower value =
   value >= 'a' && value <= 'z'
+
+isAsciiUpper :: Char -> Bool
+isAsciiUpper value =
+  value >= 'A' && value <= 'Z'
 
 dropUnicodeScalars :: Integer -> String -> String
 dropUnicodeScalars count value
@@ -1332,6 +1342,7 @@ runtimePrimitiveArity prim =
     RuntimeStringCharAt -> 2
     RuntimeCharIsDigit -> 1
     RuntimeCharIsAsciiLower -> 1
+    RuntimeCharIsAsciiUpper -> 1
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
 executeIOAction context action =
@@ -1510,7 +1521,8 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringSlicePrimitiveName,
     PrimitiveInventory.stringCharAtPrimitiveName,
     PrimitiveInventory.charIsDigitPrimitiveName,
-    PrimitiveInventory.charIsAsciiLowerPrimitiveName
+    PrimitiveInventory.charIsAsciiLowerPrimitiveName,
+    PrimitiveInventory.charIsAsciiUpperPrimitiveName
   ]
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm

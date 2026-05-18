@@ -433,6 +433,7 @@ stringSlice : String -> Int -> Int -> String
 stringCharAt : String -> Int -> Char
 charIsDigit : Char -> Bool
 charIsAsciiLower : Char -> Bool
+charIsAsciiUpper : Char -> Bool
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -469,6 +470,9 @@ code points, so `charIsDigit '7'` is `true` while `charIsDigit 'λ'` is
 `false`. `charIsAsciiLower` is an explicitly ASCII `Char` classification
 tracer; it classifies ASCII lowercase code points, so `charIsAsciiLower 'a'`
 is `true` while `charIsAsciiLower 'A'` and `charIsAsciiLower 'λ'` are
+`false`. `charIsAsciiUpper` is an explicitly ASCII `Char` classification
+tracer; it classifies ASCII uppercase code points, so `charIsAsciiUpper 'A'`
+is `true` while `charIsAsciiUpper 'a'` and `charIsAsciiUpper 'λ'` are
 `false`. These operations are covered through source checking, `run-program`,
 backend LLVM emission, object generation, and linked native execution for the
 current native-capable tracers. `String`/`List Char` conversion, formatting,
@@ -607,6 +611,7 @@ Current prelude contents:
 - `stringCharAt`
 - `charIsDigit`
 - `charIsAsciiLower`
+- `charIsAsciiUpper`
 - `and`
 - `id`
 
@@ -650,6 +655,8 @@ The first native-capable `Char` classification operation is `charIsDigit`,
 with coverage for ASCII decimal digit classification and a non-digit Unicode
 scalar. The next explicit ASCII helper is `charIsAsciiLower`, with native
 coverage for lowercase ASCII, uppercase ASCII, and non-ASCII Unicode scalar
+examples. The next explicit ASCII helper is `charIsAsciiUpper`, with native
+coverage for uppercase ASCII, lowercase ASCII, and non-ASCII Unicode scalar
 examples. Broad `String`/`List Char` conversion, formatting, full slicing
 coverage, broader classification predicates, complete cursor APIs, and
 parser-parity helpers remain outside this contract.
