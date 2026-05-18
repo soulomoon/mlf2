@@ -5,7 +5,11 @@ Raw eMLF stays thesis-facing and minimal; modules, ADTs, cases, typeclasses,
 diagnostics, and runtime value rendering are owned by `.mlfp`.
 Self-boot readiness is tracked separately in
 `docs/mlfp-self-boot-readiness.md`; this reference does not claim the compiler
-is implemented in `.mlfp`.
+is implemented in `.mlfp`. The accepted end-to-end order is recorded in
+`docs/adr/2026-05-18-full-self-boot-end-to-end-roadmap.md`; implementation
+starts with the shared file-based conformance corpus before broad native text,
+parser parity, platform contracts, compiler package, driver, or first-proof
+work.
 
 ## Modules
 

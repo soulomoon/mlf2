@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-258",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-evidence-ledger-alignment",
+  "extracted_item_id": "item-258-readiness-ledger-baseline-audit",
+  "plan_path": "orchestrator/rounds/round-258/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}

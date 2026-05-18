@@ -1,0 +1,19 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-258",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001",
+  "milestone_id": "milestone-1",
+  "direction_id": "direction-1a-evidence-ledger-alignment",
+  "extracted_item_id": "item-258-readiness-ledger-baseline-audit",
+  "decision": "approved",
+  "evidence_summary": "Docs-only readiness audit passed required diff hygiene, lineage, ADR/self-hosting guardrail, seed-evidence, conformance-absence, manual overclaim, and thesis conformance gate checks.",
+  "roadmap_closeout": {
+    "mode": "semantic-update-required",
+    "status_changes": [],
+    "completion_pointers": [],
+    "history_entries": [],
+    "semantic_update_required_reason": "Operator requested the roadmap to use the TDD skill for each implementation. That changes future implementation coordination and verification meaning by requiring TDD skill / red-green-refactor discipline for implementation rounds, so closeout needs a semantic roadmap revision rather than status-only selectors."
+  }
+}

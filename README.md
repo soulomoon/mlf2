@@ -136,7 +136,10 @@ syntax/corpus freeze is documented in
 The current user-facing `.mlfp` language contract is documented in
 `docs/mlfp-language-reference.md`.
 Self-boot readiness and remaining compiler-in-`.mlfp` gaps are tracked in
-`docs/mlfp-self-boot-readiness.md`.
+`docs/mlfp-self-boot-readiness.md`. The accepted Full Self-Boot ordering is
+`docs/adr/2026-05-18-full-self-boot-end-to-end-roadmap.md`: after the current
+readiness-ledger baseline, implementation starts with the shared file-based
+conformance corpus, not direct compiler self-boot.
 
 ### Compiler frontend seed fixture
 
@@ -165,7 +168,8 @@ source paths, backend/native LLVM emission, object-code generation, and linked
 native execution for this bounded seed. That evidence is not a self-hosting
 claim: it does not provide a source-text lexer/parser, checker-in-`.mlfp`,
 optimizer, backend-in-`.mlfp`, package manager, stable ABI/linker, separate
-compilation mode, or arbitrary compiler workload native support.
+compilation mode, shared conformance corpus, compiler driver, first-proof
+workflow, or arbitrary compiler workload native support.
 
 The first-class-polymorphism program example lives at
 `test/programs/unified/first-class-polymorphism.mlfp`.
