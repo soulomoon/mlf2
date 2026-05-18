@@ -18,7 +18,7 @@ where
 
 import Control.Monad (foldM)
 import Data.Foldable (toList)
-import Data.List (find, intercalate, isInfixOf, isPrefixOf)
+import Data.List (find, intercalate, isInfixOf, isPrefixOf, isSuffixOf)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -325,6 +325,7 @@ data RuntimePrimitive
   | RuntimeStringContainsChar
   | RuntimeStringContains
   | RuntimeStringStartsWith
+  | RuntimeStringEndsWith
   deriving (Eq, Show)
 
 data RuntimeIOAction
@@ -499,6 +500,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringContainsCharPrimitiveName -> Just RuntimeStringContainsChar
       | name' == PrimitiveInventory.stringContainsPrimitiveName -> Just RuntimeStringContains
       | name' == PrimitiveInventory.stringStartsWithPrimitiveName -> Just RuntimeStringStartsWith
+      | name' == PrimitiveInventory.stringEndsWithPrimitiveName -> Just RuntimeStringEndsWith
     _ -> Nothing
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -1212,6 +1214,10 @@ applyRuntimePrimitive prim args
           Right (RuntimeLit (LBool (prefix `isPrefixOf` haystack)))
         (RuntimeStringStartsWith, _) ->
           Left (ProgramPipelineError "run-program __string_starts_with expected String arguments")
+        (RuntimeStringEndsWith, [RuntimeLit (LString haystack), RuntimeLit (LString suffix)]) ->
+          Right (RuntimeLit (LBool (suffix `isSuffixOf` haystack)))
+        (RuntimeStringEndsWith, _) ->
+          Left (ProgramPipelineError "run-program __string_ends_with expected String arguments")
         _ ->
           Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
 
@@ -1239,6 +1245,7 @@ runtimePrimitiveArity prim =
     RuntimeStringContainsChar -> 2
     RuntimeStringContains -> 2
     RuntimeStringStartsWith -> 2
+    RuntimeStringEndsWith -> 2
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
 executeIOAction context action =
@@ -1410,7 +1417,8 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringIsEmptyPrimitiveName,
     PrimitiveInventory.stringContainsCharPrimitiveName,
     PrimitiveInventory.stringContainsPrimitiveName,
-    PrimitiveInventory.stringStartsWithPrimitiveName
+    PrimitiveInventory.stringStartsWithPrimitiveName,
+    PrimitiveInventory.stringEndsWithPrimitiveName
   ]
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm

@@ -331,6 +331,14 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   evidence: focused and neighbor matchers, primitive inventory matcher, rg
   checks, `git diff --check`, cabal build all, cabal test, and thesis gate
   passed.
+- round-272 completed item-272-string-ends-with-native-tracer:
+  `stringEndsWith : String -> String -> Bool` now classifies
+  `stringEndsWith "abλ" "λ"` as true and `stringEndsWith "λab" "λ"` as
+  false through source checking, run-program, backend LLVM/object validation,
+  emit-native, native object validation, and linked native execution;
+  evidence: focused and neighbor matchers, primitive inventory matcher, rg
+  checks, `git diff --check`, cabal build all, cabal test, and thesis gate
+  passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

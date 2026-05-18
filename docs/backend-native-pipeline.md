@@ -39,11 +39,11 @@ Row-5 primitive/eager ownership is part of the same raw/native inspection
 contract. The current primitive surface is the inventory-owned reserved
 runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_length`, `__string_is_empty`, `__string_contains_char`,
-`__string_contains`, `__string_starts_with`, plus the IO primitive names
-classified there for native support. Native lowering consumes that inventory
-directly for lowerable primitive names, while wrapper bodies, C runtime symbol
-names, closure layout, and eager sequencing implementation details remain
-lowerer-local.
+`__string_contains`, `__string_starts_with`, `__string_ends_with`, plus the IO
+primitive names classified there for native support. Native lowering consumes
+that inventory directly for lowerable primitive names, while wrapper bodies, C
+runtime symbol names, closure layout, and eager sequencing implementation
+details remain lowerer-local.
 `emit-backend` and `emit-native` keep those primitives on the same
 `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`,
 no second executable IR, and no broad FFI lane.
@@ -135,6 +135,9 @@ Native emission owns the small process/runtime surface it needs:
 - `__string_starts_with`: inventory-classified as the first native-capable
   prefix `String` search operation; the native helper compares valid UTF-8
   scalar-sequence bytes from the start of the haystack and returns a `Bool`.
+- `__string_ends_with`: inventory-classified as the first native-capable
+  suffix `String` search operation; the native helper compares valid UTF-8
+  scalar-sequence bytes at the end of the haystack and returns a `Bool`.
 - Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
   `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
   functions with entry-point implementations.
@@ -169,6 +172,9 @@ Supported result shapes are:
   substring examples through native execution.
 - `stringStartsWith : String -> String -> Bool` is the first native-capable
   prefix String search tracer and compares non-empty Unicode scalar prefix
+  examples through native execution.
+- `stringEndsWith : String -> String -> Bool` is the first native-capable
+  suffix String search tracer and compares non-empty Unicode scalar suffix
   examples through native execution.
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
