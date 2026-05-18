@@ -104,6 +104,7 @@ prettyEmlfExpr = goExpr 0
     prettyLit lit = case lit of
       LInt i -> show i
       LBool b -> if b then "true" else "false"
+      LChar c -> show c
       LString s -> show s
 
 toListNE :: NonEmpty a -> [a]

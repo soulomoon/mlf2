@@ -116,11 +116,12 @@ type VarName = String
 
 -- | Literal subset used by the pipeline.
 --
--- These map to base types in constraint generation (e.g. `Int`, `Bool`, `String`).
+-- These map to base types in constraint generation (e.g. `Int`, `Bool`, `String`, `Char`).
 data Lit
   = LInt Integer
   | LBool Bool
   | LString String
+  | LChar Char
   deriving (Eq, Show)
 
 -- | Source-level kind syntax for `.mlfp` declaration parameters.

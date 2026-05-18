@@ -14,6 +14,7 @@ module MLF.Parse.Common (
     canonicalBigLambdaTok,
     canonicalBottomTok,
     pLit,
+    pChar,
     pString,
 ) where
 
@@ -110,9 +111,13 @@ pLit =
     choice
         [ LBool True <$ symbol "true"
         , LBool False <$ symbol "false"
+        , LChar <$> pChar
         , LString <$> pString
         , LInt <$> lexeme (L.signed sc L.decimal)
         ]
+
+pChar :: Parser Char
+pChar = lexeme (C.char '\'' *> L.charLiteral <* C.char '\'')
 
 pString :: Parser String
 pString = lexeme (C.char '"' *> manyTill L.charLiteral (C.char '"'))

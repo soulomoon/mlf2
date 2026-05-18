@@ -499,6 +499,7 @@ nativeRenderableKind base ty =
   case ty of
     BTBase (BaseTy "Int") -> NativeScalar
     BTBase (BaseTy "Bool") -> NativeScalar
+    BTBase (BaseTy "Char") -> NativeScalar
     BTBase (BaseTy "String") -> NativeString
     BTBase (BaseTy name)
       | name == ioTypeName -> NativeIO
@@ -565,6 +566,19 @@ lowerNativeScalarRenderer spec =
           finishNativeSuccess
           startBlock falseLabel
           _ <- emitPrintStringGlobal nativeStrFalseName
+          finishNativeSuccess
+    BTBase (BaseTy "Char") ->
+      lowerNativeFunction
+        (nrsFunctionName spec)
+        (LLVMInt 32)
+        [(LLVMInt 32, "value"), (LLVMInt 1, "parenthesize")]
+        $ \params -> do
+          let value = requireNativeParam "value" params
+          valueI64 <- emitAssign "char.code.i64" (LLVMInt 64) (LLVMZext value (LLVMInt 64))
+          _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\'')))
+          _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\\')))
+          _ <- emitPrintf nativeFmtIntName [(LLVMInt 64, valueI64)]
+          _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\'')))
           finishNativeSuccess
     _ ->
       Left (BackendLLVMUnsupportedExpression "native result rendering" ("unsupported scalar renderer " ++ show (nrsType spec)))
@@ -3882,6 +3896,8 @@ lowerLit env context ty lit = do
       pure (LowerValue ty llvmTy (LLVMIntLiteral 64 value) LowerRuntimeValue Nothing)
     LBool value ->
       pure (LowerValue ty llvmTy (LLVMIntLiteral 1 (if value then 1 else 0)) LowerRuntimeValue Nothing)
+    LChar value ->
+      pure (LowerValue ty llvmTy (LLVMIntLiteral 32 (toInteger (ord value))) LowerRuntimeValue Nothing)
     LString value ->
       case Map.lookup value (peStringGlobals env) of
         Just globalName
@@ -5799,6 +5815,7 @@ lowerBackendType env context ty =
   case ty of
     BTBase (BaseTy "Int") -> Right (LLVMInt 64)
     BTBase (BaseTy "Bool") -> Right (LLVMInt 1)
+    BTBase (BaseTy "Char") -> Right (LLVMInt 32)
     BTBase (BaseTy "String") -> Right LLVMPtr
     BTBase (BaseTy "IO") -> Right LLVMPtr
     BTCon (BaseTy "IO") _ -> Right LLVMPtr

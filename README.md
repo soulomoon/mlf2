@@ -224,8 +224,8 @@ a C ABI `i32 @main()` wrapper that calls the checked zero-argument `.mlfp`
 without rendering a result. For pure mains it renders supported results to
 stdout with the same value text used by `run-program`, prints one trailing
 newline, writes no stderr on success, and returns exit status `0`. Native
-rendering currently supports `Int`, `Bool`, `String`, and first-order ADT
-results whose fields are recursively renderable. Function-valued, polymorphic,
+rendering currently supports `Int`, `Bool`, `Char`, `String`, and first-order
+ADT results whose fields are recursively renderable. Function-valued, polymorphic,
 variable-headed, and structurally recursive main results without a named data
 runtime are rejected before native run assertions use them. Native mode declares
 libc `malloc`, vararg `printf`, `putchar`, and defines the backend-owned

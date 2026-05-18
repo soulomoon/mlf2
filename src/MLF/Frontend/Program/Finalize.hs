@@ -249,6 +249,7 @@ literalSourceType lit =
   case lit of
     LInt _ -> STBase "Int"
     LBool _ -> STBase "Bool"
+    LChar _ -> STBase "Char"
     LString _ -> STBase "String"
 
 finalizeBinding :: ElaborateScope -> LoweredBinding -> Either ProgramError CheckedBinding

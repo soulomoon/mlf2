@@ -28,7 +28,7 @@
     {
       "milestone_id": "milestone-3",
       "title": "Native-Capable Broad Text Substrate",
-      "status": "pending",
+      "status": "in-progress",
       "depends_on": ["milestone-2"],
       "parallel_lane": "lane-text-parser",
       "status_anchor": "milestone-3-status",
@@ -149,7 +149,7 @@
     "milestone-1-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "#### Completion Pointers: milestone-1"},
     "milestone-2-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "### [done] 2. Shared File-Based Conformance Corpus"},
     "milestone-2-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "#### Completion Pointers: milestone-2"},
-    "milestone-3-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "### [pending] 3. Native-Capable Broad Text Substrate"},
+    "milestone-3-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "### [in-progress] 3. Native-Capable Broad Text Substrate"},
     "milestone-3-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "#### Completion Pointers: milestone-3"},
     "milestone-4-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "### [pending] 4. Full Canonical `.mlfp` Parser Parity"},
     "milestone-4-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md", "selector": "#### Completion Pointers: milestone-4"},

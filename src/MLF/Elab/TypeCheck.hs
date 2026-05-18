@@ -219,6 +219,7 @@ litType :: Lit -> ElabType
 litType lit = case lit of
   LInt _ -> TBase (BaseTy "Int")
   LBool _ -> TBase (BaseTy "Bool")
+  LChar _ -> TBase (BaseTy "Char")
   LString _ -> TBase (BaseTy "String")
 
 boundType :: Maybe BoundType -> ElabType

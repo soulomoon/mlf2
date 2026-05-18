@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-265",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-broad-string-char-substrate",
+  "extracted_item_id": "item-265-char-literal-native-tracer",
+  "decision": "approved",
+  "evidence_summary": "Round 265 completed the native-capable Unicode scalar Char literal tracer: explicit LChar Char parsing/typechecking/runtime/backend/native lowering for def main : Char = 'λ'; focused public-interface test, cabal build all, cabal test, and thesis conformance gate passed; docs/changelog stayed narrow and did not claim broad string/parser/platform/proof or milestone-3 completion.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-3",
+        "expected_current_status": "pending",
+        "target_status": "in-progress",
+        "roadmap_view_anchor": "milestone-3-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-265 completed item-265-char-literal-native-tracer: explicit Unicode scalar Char literal support through check, run, backend LLVM, object validation, emit-native, and linked native execution for def main : Char = 'λ'; focused/full/thesis gates passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

@@ -1030,6 +1030,7 @@ runtimeValueTypeView context value =
   case value of
     RuntimeLit (LInt _) -> Right (sourceTypeViewInScope scope (STBase "Int"))
     RuntimeLit (LBool _) -> Right (sourceTypeViewInScope scope (STBase "Bool"))
+    RuntimeLit (LChar _) -> Right (sourceTypeViewInScope scope (STBase "Char"))
     RuntimeLit (LString _) -> Right (sourceTypeViewInScope scope (STBase "String"))
     RuntimeUnit -> Right (sourceTypeViewInScope scope (STBase "Prelude.Unit"))
     RuntimeData _ resultTy _ -> Right (sourceTypeViewInScope scope resultTy)
@@ -1401,6 +1402,7 @@ prettyValue :: Value -> String
 prettyValue value = case value of
   VLit (LInt i) -> show i
   VLit (LBool b) -> if b then "true" else "false"
+  VLit (LChar c) -> show c
   VLit (LString s) -> show s
   VData ctor [] -> ctor
   VData ctor args -> unwords (ctor : map prettyValueArg args)

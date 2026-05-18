@@ -1749,6 +1749,7 @@ renderLit lit =
     LInt n -> show n
     LBool True -> "true"
     LBool False -> "false"
+    LChar value -> show value
     LString value -> show value
 
 renderBool :: Bool -> String

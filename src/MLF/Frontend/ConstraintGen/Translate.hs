@@ -768,6 +768,7 @@ baseFor :: Lit -> BaseTy
 baseFor lit = BaseTy $ case lit of
   LInt _ -> "Int"
   LBool _ -> "Bool"
+  LChar _ -> "Char"
   LString _ -> "String"
 
 -- | Register the arity of a type constructor. If the constructor has already

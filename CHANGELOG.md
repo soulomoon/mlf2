@@ -3,6 +3,10 @@
 ## Unreleased
 
 ### Added
+- Added source/interpreter/backend/native support for explicit Unicode scalar
+  `Char` literals, including the focused `.mlfp` tracer
+  `def main : Char = 'λ';` through check, run, LLVM emission, object-code
+  validation, and native execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

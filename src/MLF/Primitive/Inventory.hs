@@ -95,6 +95,7 @@ builtinTypeSpecs =
   Map.fromList
     [ ("Int", BuiltinTypeSpec P.KType [] False),
       ("Bool", BuiltinTypeSpec P.KType [] False),
+      ("Char", BuiltinTypeSpec P.KType [] False),
       ("String", BuiltinTypeSpec P.KType [] False),
       ("IO", BuiltinTypeSpec (P.KArrow P.KType P.KType) ["a"] True),
       ("IORef", BuiltinTypeSpec (P.KArrow P.KType P.KType) ["a"] True)

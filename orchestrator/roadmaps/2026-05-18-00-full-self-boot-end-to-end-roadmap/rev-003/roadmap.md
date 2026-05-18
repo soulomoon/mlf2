@@ -271,7 +271,7 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
 - Extraction notes: start from representative public fixtures and expand after
   harness validation is solid.
 
-### [pending] 3. Native-Capable Broad Text Substrate
+### [in-progress] 3. Native-Capable Broad Text Substrate
 
 - Milestone id: `milestone-3`
 - Depends on: `milestone-2`
@@ -289,7 +289,10 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
 
 #### Completion Pointers: milestone-3
 
-None yet.
+- round-265: completed item-265-char-literal-native-tracer: explicit Unicode
+  scalar Char literal support through check, run, backend LLVM, object
+  validation, emit-native, and linked native execution for
+  `def main : Char = 'λ';`; focused/full/thesis gates passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

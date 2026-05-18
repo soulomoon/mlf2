@@ -79,7 +79,9 @@ xMLF, and `.mlfp` parser APIs where the token or grammar family applies:
 
 ## Implementation Extensions
 
-- eMLF supports literals (`Int`, `Bool`, `String`) as expression atoms.
+- eMLF supports literals (`Int`, `Bool`, `Char`, `String`) as expression atoms.
+  `Char` literals use single quotes around one Unicode scalar value, for example
+  `'λ'`.
 - eMLF parser accepts `let x : τ = e in b` and desugars to `let x = (e : τ) in b`.
 - eMLF source types accept Unicode type lambdas (`Λa. τ`) and explicit general
   type application in annotations. The source normalizer beta-reduces supported
@@ -146,6 +148,7 @@ Expr         ::= QName | Literal
                | "let" lIdent [":" SrcType] "=" Expr "in" Expr
                | "case" Expr "of" "{" Alt (";" Alt)* "}"
                | "(" Expr ":" SrcType ")"
+Literal      ::= integer | "true" | "false" | string | char
 
 Param        ::= lIdent | "(" lIdent [":" SrcType] ")"
 Alt          ::= Pattern "->" Expr

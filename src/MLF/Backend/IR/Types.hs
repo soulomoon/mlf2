@@ -186,6 +186,7 @@ literalBackendType :: Lit -> BackendType
 literalBackendType = \case
   LInt _ -> BTBase (BaseTy "Int")
   LBool _ -> BTBase (BaseTy "Bool")
+  LChar _ -> BTBase (BaseTy "Char")
   LString _ -> BTBase (BaseTy "String")
 
 freeBackendTypeVars :: BackendType -> Set.Set String

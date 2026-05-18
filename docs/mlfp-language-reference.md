@@ -416,7 +416,7 @@ putStrLn : String -> IO Unit
 `putStrLn` and `putStr` use the existing source `String` base type and string
 literals. Native-backed IO also includes `getLine`, `readFile`, `writeFile`,
 `appendFile`, `exitWith`, `newIORef`, `readIORef`, `writeIORef`, and `getArgs`.
-There is no narrower byte/character primitive in the first contract.
+There is no narrower byte/character IO primitive in the first contract.
 
 Pure program entrypoints remain accepted:
 
@@ -557,7 +557,11 @@ Nil
 Cons Zero Nil
 ```
 
-Primitive closed values render as `true`, `false`, integers, and quoted strings.
+Primitive closed values render as `true`, `false`, integers, single-quoted
+characters, and quoted strings. Unicode `Char` literals are scalar values; the
+native tracer covers the non-ASCII scalar example `'λ'` rendering as `'\955'`.
+Broad `String`/`List Char` conversion, slicing, classification, and
+parser-parity helpers remain outside this literal contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 
