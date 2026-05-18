@@ -1,0 +1,165 @@
+{
+  "schema_version": "roadmap-view-v1",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-001",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001",
+  "roadmap_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md",
+  "milestones": [
+    {
+      "milestone_id": "milestone-1",
+      "title": "Readiness Ledger Baseline",
+      "status": "pending",
+      "depends_on": [],
+      "parallel_lane": "lane-docs",
+      "status_anchor": "milestone-1-status",
+      "completion_anchor": "milestone-1-completion",
+      "direction_ids": ["direction-1a-evidence-ledger-alignment"]
+    },
+    {
+      "milestone_id": "milestone-2",
+      "title": "Shared File-Based Conformance Corpus",
+      "status": "pending",
+      "depends_on": ["milestone-1"],
+      "parallel_lane": "lane-evidence-conformance",
+      "status_anchor": "milestone-2-status",
+      "completion_anchor": "milestone-2-completion",
+      "direction_ids": ["direction-2a-conformance-corpus-migration"]
+    },
+    {
+      "milestone_id": "milestone-3",
+      "title": "Native-Capable Broad Text Substrate",
+      "status": "pending",
+      "depends_on": ["milestone-2"],
+      "parallel_lane": "lane-text-parser",
+      "status_anchor": "milestone-3-status",
+      "completion_anchor": "milestone-3-completion",
+      "direction_ids": ["direction-3a-broad-string-char-substrate"]
+    },
+    {
+      "milestone_id": "milestone-4",
+      "title": "Full Canonical .mlfp Parser Parity",
+      "status": "pending",
+      "depends_on": ["milestone-3"],
+      "parallel_lane": "lane-text-parser",
+      "status_anchor": "milestone-4-status",
+      "completion_anchor": "milestone-4-completion",
+      "direction_ids": ["direction-4a-canonical-parser-parity"]
+    },
+    {
+      "milestone_id": "milestone-5",
+      "title": "Self-Boot Platform Contract Implementation",
+      "status": "pending",
+      "depends_on": ["milestone-2", "milestone-3"],
+      "parallel_lane": "lane-platform-substrate",
+      "status_anchor": "milestone-5-status",
+      "completion_anchor": "milestone-5-completion",
+      "direction_ids": ["direction-5a-platform-contract-substrate"]
+    },
+    {
+      "milestone_id": "milestone-6",
+      "title": "Compiler Source Package In .mlfp",
+      "status": "pending",
+      "depends_on": ["milestone-4", "milestone-5"],
+      "parallel_lane": "lane-compiler-package",
+      "status_anchor": "milestone-6-status",
+      "completion_anchor": "milestone-6-completion",
+      "direction_ids": ["direction-6a-compiler-package-semantics"]
+    },
+    {
+      "milestone_id": "milestone-7",
+      "title": "Small Real Self-Boot Driver",
+      "status": "pending",
+      "depends_on": ["milestone-6"],
+      "parallel_lane": "lane-proof-driver",
+      "status_anchor": "milestone-7-status",
+      "completion_anchor": "milestone-7-completion",
+      "direction_ids": ["direction-7a-first-driver-modes"]
+    },
+    {
+      "milestone_id": "milestone-8",
+      "title": "First Self-Boot Proof",
+      "status": "pending",
+      "depends_on": ["milestone-7"],
+      "parallel_lane": "lane-proof-driver",
+      "status_anchor": "milestone-8-status",
+      "completion_anchor": "milestone-8-completion",
+      "direction_ids": ["direction-8a-conformance-first-stage-sequence"]
+    }
+  ],
+  "directions": [
+    {
+      "direction_id": "direction-1a-evidence-ledger-alignment",
+      "milestone_id": "milestone-1",
+      "summary": "Verify and align the readiness ledger, glossary, and docs against the full self-boot ADR order.",
+      "preconditions": ["inspect readiness ledger, CONTEXT, README, accepted 2026-05-18 ADRs, and current seed/package evidence"],
+      "parallel_hints": "serial setup"
+    },
+    {
+      "direction_id": "direction-2a-conformance-corpus-migration",
+      "milestone_id": "milestone-2",
+      "summary": "Create the shared conformance corpus and migrate public .mlfp behavior fixtures into it.",
+      "preconditions": ["milestone-1 complete", "inspect current fixtures, CLI tests, package-mode tests, and diagnostics"],
+      "parallel_hints": "serial until metadata and expected-output meaning are stable"
+    },
+    {
+      "direction_id": "direction-3a-broad-string-char-substrate",
+      "milestone_id": "milestone-3",
+      "summary": "Add native-capable Unicode scalar Char and broad String operations required before source-text parser parity.",
+      "preconditions": ["conformance corpus stable enough to cover public behavior", "inspect Prelude, seed gaps, backend/native text lowering, and runtime representation"],
+      "parallel_hints": "serial with parser parity until text substrate is native proven"
+    },
+    {
+      "direction_id": "direction-4a-canonical-parser-parity",
+      "milestone_id": "milestone-4",
+      "summary": "Implement full canonical .mlfp parser parity on the broad text substrate.",
+      "preconditions": ["milestone-3 complete", "parser-relevant conformance fixtures available"],
+      "parallel_hints": "serial with text substrate"
+    },
+    {
+      "direction_id": "direction-5a-platform-contract-substrate",
+      "milestone_id": "milestone-5",
+      "summary": "Implement stable ABI, runtime/GC/FFI, substrate declarations, bindings, locks, manifests, toolchain, link/native records, and ambient-input contracts.",
+      "preconditions": ["milestone-2 complete", "milestone-3 complete enough for compiler frontend native workload"],
+      "parallel_hints": "serial vertical slices; avoid concurrent ABI/runtime edits without explicit ownership"
+    },
+    {
+      "direction_id": "direction-6a-compiler-package-semantics",
+      "milestone_id": "milestone-6",
+      "summary": "Build the compiler source package in .mlfp under the compiler-semantics boundary.",
+      "preconditions": ["milestone-4 complete", "milestone-5 complete enough for compiler package inputs and substrate use"],
+      "parallel_hints": "likely serial by compiler phase until phase interfaces are stable"
+    },
+    {
+      "direction_id": "direction-7a-first-driver-modes",
+      "milestone_id": "milestone-7",
+      "summary": "Implement the first check, emit-backend, emit-native, and run-conformance driver modes over explicit local manifests and checked locks.",
+      "preconditions": ["milestone-6 complete enough for selected driver modes"],
+      "parallel_hints": "serial by command mode unless manifests and compiler package boundaries are stable"
+    },
+    {
+      "direction_id": "direction-8a-conformance-first-stage-sequence",
+      "milestone_id": "milestone-8",
+      "summary": "Run and harden the two-stage proof sequence, conformance-first gate, proof manifest, and normalized semantic artifact comparison.",
+      "preconditions": ["milestone-7 complete", "shared conformance and substrate ABI conformance pass for both stages"],
+      "parallel_hints": "proof execution is serial; failure investigation follows proof failure taxonomy"
+    }
+  ],
+  "anchors": {
+    "milestone-1-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "### [pending] 1. Readiness Ledger Baseline"},
+    "milestone-1-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "#### Completion Pointers: milestone-1"},
+    "milestone-2-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "### [pending] 2. Shared File-Based Conformance Corpus"},
+    "milestone-2-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "#### Completion Pointers: milestone-2"},
+    "milestone-3-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "### [pending] 3. Native-Capable Broad Text Substrate"},
+    "milestone-3-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "#### Completion Pointers: milestone-3"},
+    "milestone-4-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "### [pending] 4. Full Canonical `.mlfp` Parser Parity"},
+    "milestone-4-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "#### Completion Pointers: milestone-4"},
+    "milestone-5-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "### [pending] 5. Self-Boot Platform Contract Implementation"},
+    "milestone-5-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "#### Completion Pointers: milestone-5"},
+    "milestone-6-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "### [pending] 6. Compiler Source Package In `.mlfp`"},
+    "milestone-6-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "#### Completion Pointers: milestone-6"},
+    "milestone-7-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "### [pending] 7. Small Real Self-Boot Driver"},
+    "milestone-7-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "#### Completion Pointers: milestone-7"},
+    "milestone-8-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "### [pending] 8. First Self-Boot Proof"},
+    "milestone-8-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-001/roadmap.md", "selector": "#### Completion Pointers: milestone-8"}
+  }
+}

@@ -60,6 +60,42 @@ stable contracts instead of restating them in every role or roadmap file.
 - Self-boot readiness claims must stay layer-separated: source checking,
   interpreter/runtime, backend/native, object code, package build mode, and
   compiler-in-`.mlfp` implementation.
+- Full Self-Boot follows the accepted staged order in
+  `docs/adr/2026-05-18-full-self-boot-end-to-end-roadmap.md`; the active
+  control-plane family keeps the entire effort together, and implementation
+  still begins with readiness alignment and Pre-Self-Boot Test Migration before
+  broad string/parser work, platform ABI work, or direct compiler
+  implementation.
+- Pre-Self-Boot Test Migration owns the Shared File-Based Compiler Conformance
+  Corpus under `test/conformance/mlfp/`. It is a behavior-preserving shared
+  oracle for both compiler implementations, not a second parser, checker,
+  resolver, backend, or compatibility mode.
+- Conformance fixtures must use metadata for package roots, command modes,
+  pass/fail status, normalization profiles, stage applicability, and
+  behavioral tags. Stage-inapplicable or unsupported cases belong in metadata,
+  not ad hoc skips.
+- Committed conformance expected outputs are reviewed oracle artifacts.
+  Ordinary test runs must not dynamically regenerate or accept new expected
+  outputs.
+- Internal implementation invariants enter the conformance corpus only through
+  honest user-visible behavioral projections; private invariants without such a
+  projection remain Haskell tests.
+- Full canonical `.mlfp` parser parity depends on native-capable broad
+  Unicode-scalar `Char` and `String` support; parser-private text helpers or
+  interpreter-only string support cannot satisfy that stage.
+- First self-boot platform work must keep trusted substrate explicit,
+  versioned, fingerprinted, and shared by both compiler implementations through
+  stable contracts. Trusted substrate provides capabilities, not compiler
+  semantics.
+- First self-boot proof is conformance-first and compares normalized semantic
+  artifacts after both stages pass the declared suite. Native object and
+  executable bytes are regenerated and recorded but are not the first-proof
+  equality oracle.
+- Self-boot stages must use checked locked local package identities, shared
+  local packages, declared substrate fingerprints, and stage-owned output
+  directories. Cross-stage reuse of generated semantic, backend, object,
+  executable, link, native-execution, or conformance-output caches invalidates
+  proof evidence.
 
 ## Verification Anchors
 
@@ -95,6 +131,24 @@ stable contracts instead of restating them in every role or roadmap file.
 - Compiler frontend seed rounds must prove executable `.mlfp` seed behavior
   through focused assertions, keep unsupported native/backend behavior
   fail-closed, and update readiness docs without claiming full self-hosting.
+- Conformance-corpus rounds must prove migrated fixtures through focused
+  metadata and expected-output assertions, preserve current public behavior by
+  default, and keep normalization narrow and explicit.
+- Conformance-corpus closeout must keep `test/conformance/mlfp/` usable as a
+  shared oracle for the current Haskell compiler and a future `.mlfp` compiler:
+  fixture metadata, expected files, and actual-output policy must not depend on
+  hidden Haskell-only defaults.
+- Broad text and parser-parity rounds must prove behavior through source
+  checking, interpreter/runtime, backend emission, object generation, and native
+  execution when the selected stage requires native-capable support.
+- Platform-contract rounds must prove generated binding drift checks, ABI
+  version/target/substrate identity, managed GC/root policy, FFI
+  ownership/error/export/callback rules, lock validation, toolchain identity,
+  native link records, native execution records, and ambient-input policy as
+  applicable to the selected slice.
+- First-proof rounds must record stage command, link, native execution,
+  conformance, and comparison evidence with stable proof action IDs and a
+  machine-readable failure taxonomy.
 
 ## Update Rule
 
