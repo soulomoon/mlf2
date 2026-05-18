@@ -7,6 +7,10 @@
   `Char` literals, including the focused `.mlfp` tracer
   `def main : Char = 'λ';` through check, run, LLVM emission, object-code
   validation, and native execution.
+- Added the next text-substrate native tracer for the explicit `.mlfp` string
+  literal `def main : String = "λ";`, covering source checking, interpreter
+  output, raw LLVM emission, object-code validation, and native execution with
+  the existing quoted escape rendering.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

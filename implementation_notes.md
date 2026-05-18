@@ -1,3 +1,14 @@
+## 2026-05-18 - Unicode string literal native tracer
+
+- Added a public `.mlfp` tracer for `def main : String = "λ";` that checks,
+  runs, emits raw LLVM, validates assembly/object code, emits native LLVM, and
+  executes natively with the same quoted escape output as `run-program`.
+- String globals are rendered as UTF-8 byte arrays in LLVM, with byte-accurate
+  lengths and escaped non-printable bytes.
+- Native String rendering now handles the selected two-byte UTF-8 scalar by
+  decoding it to the existing decimal escape text; broader Unicode string
+  library operations remain future broad-text-substrate work.
+
 ## 2026-05-03 - Backend IR executable-boundary family closed on the merged 710c92eb baseline
 
 - The backend IR executable-boundary family now has rows 1 through 7 closed on the merged `710c92eb` baseline.

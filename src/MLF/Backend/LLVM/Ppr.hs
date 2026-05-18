@@ -12,7 +12,8 @@ module MLF.Backend.LLVM.Ppr
   )
 where
 
-import Data.Char (isAlphaNum, ord)
+import Data.Bits ((.&.), (.|.), shiftR)
+import Data.Char (chr, isAlphaNum, ord)
 import Data.List (intercalate)
 import Numeric (showHex)
 
@@ -138,6 +139,10 @@ renderLLVMExpression resultTy expression =
         ++ ")"
     LLVMAnd left right ->
       "and " ++ renderLLVMType resultTy ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
+    LLVMOr left right ->
+      "or " ++ renderLLVMType resultTy ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
+    LLVMShl left right ->
+      "shl " ++ renderLLVMType resultTy ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
     LLVMICmpEq left right ->
       "icmp eq " ++ renderLLVMType (operandLLVMType left) ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
     LLVMICmpUgt left right ->
@@ -276,17 +281,41 @@ escapeQuoted =
     escapeChar char = [char]
 
 renderLLVMStringChar :: Char -> String
-renderLLVMStringChar char
-  | code >= 32 && code <= 126 && char /= '"' && char /= '\\' =
-      [char]
-  | otherwise =
-      "\\" ++ twoHex code
-  where
-    code = ord char
+renderLLVMStringChar =
+  concatMap renderLLVMStringByte . utf8Bytes
 
 stringByteLength :: String -> Int
 stringByteLength =
-  length
+  length . concatMap utf8Bytes
+
+renderLLVMStringByte :: Int -> String
+renderLLVMStringByte byte
+  | byte >= 32 && byte <= 126 && byte /= ord '"' && byte /= ord '\\' =
+      [chr byte]
+  | otherwise =
+      "\\" ++ twoHex byte
+
+utf8Bytes :: Char -> [Int]
+utf8Bytes char
+  | code <= 0x7F =
+      [code]
+  | code <= 0x7FF =
+      [ 0xC0 .|. (code `shiftR` 6),
+        0x80 .|. (code .&. 0x3F)
+      ]
+  | code <= 0xFFFF =
+      [ 0xE0 .|. (code `shiftR` 12),
+        0x80 .|. ((code `shiftR` 6) .&. 0x3F),
+        0x80 .|. (code .&. 0x3F)
+      ]
+  | otherwise =
+      [ 0xF0 .|. (code `shiftR` 18),
+        0x80 .|. ((code `shiftR` 12) .&. 0x3F),
+        0x80 .|. ((code `shiftR` 6) .&. 0x3F),
+        0x80 .|. (code .&. 0x3F)
+      ]
+  where
+    code = ord char
 
 twoHex :: Int -> String
 twoHex value =

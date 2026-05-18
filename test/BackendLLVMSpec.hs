@@ -263,6 +263,23 @@ spec = describe "MLF.Backend.LLVM" $ do
     it "renders String main values with quoted escaping in native mode" $
       assertNativeProgram nativeStringSourceProgram "\"hello\""
 
+    it "Unicode String literal source checks, runs, emits backend, and executes natively" $
+      withTempProgram nativeUnicodeStringSourceProgram $ \path -> do
+        checkProgramFile path `shouldReturn` Right "OK\n"
+        runProgramFile path `shouldReturn` Right "\"\\955\"\n"
+
+        backendOutput <- requireRight =<< emitBackendFile path
+        backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+        validateLLVMAssembly backendOutput
+        validateLLVMObjectCode backendOutput
+
+        nativeOutput <- requireRight =<< emitNativeFile path
+        nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+        validateLLVMAssembly nativeOutput
+        validateLLVMObjectCode nativeOutput
+        runLLVMNativeExecutable nativeOutput
+          `shouldReturn` NativeRunResult ExitSuccess "\"\\955\"\n" ""
+
     it "Char literal source checks, runs, emits backend, and executes natively" $
       withTempProgram nativeCharLiteralSourceProgram $ \path -> do
         checkProgramFile path `shouldReturn` Right "OK\n"
@@ -1996,6 +2013,14 @@ nativeStringSourceProgram =
   unlines
     [ "module Main export (main) {",
       "  def main : String = \"hello\";",
+      "}"
+    ]
+
+nativeUnicodeStringSourceProgram :: String
+nativeUnicodeStringSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  def main : String = \"λ\";",
       "}"
     ]
 

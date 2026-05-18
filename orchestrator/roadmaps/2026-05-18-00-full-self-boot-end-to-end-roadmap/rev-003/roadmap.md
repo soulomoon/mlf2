@@ -293,6 +293,11 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   scalar Char literal support through check, run, backend LLVM, object
   validation, emit-native, and linked native execution for
   `def main : Char = 'λ';`; focused/full/thesis gates passed.
+- round-266: completed item-266-unicode-string-literal-native-tracer:
+  non-ASCII String literal support for `def main : String = "λ";` through
+  check, run, backend LLVM, object validation, emit-native, and linked native
+  execution; focused/native-neighbor checks passed and recorded
+  full/thesis gates passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

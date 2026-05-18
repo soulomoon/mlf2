@@ -138,7 +138,9 @@ Supported result shapes are:
 - `Int`
 - `Bool`
 - `Char` (currently covered by the Unicode scalar tracer that renders `'λ'` as `'\955'`)
-- `String` (rendered with quoted escaping via `putchar`)
+- `String` (rendered with quoted escaping via `putchar`; the current
+  non-ASCII coverage is the two-byte Unicode scalar tracer that renders `"λ"`
+  as `"\\955"`)
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 

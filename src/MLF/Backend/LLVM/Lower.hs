@@ -610,9 +610,13 @@ lowerNativeStringRenderer spec =
       chkTab <- freshBlock "str.chk.tab"
       escTab <- freshBlock "str.esc.tab"
       chkPrint <- freshBlock "str.chk.print"
+      chkAscii <- freshBlock "str.chk.ascii"
       printNormal <- freshBlock "str.normal"
+      chkUtf8 <- freshBlock "str.chk.utf8"
+      printUtf8Two <- freshBlock "str.utf8.two"
       printNp <- freshBlock "str.np"
       loopNext <- freshBlock "str.next"
+      loopNextTwo <- freshBlock "str.next.two"
       loopDone <- freshBlock "str.done"
       -- Entry
       finishCurrentBlock (LLVMBr loopHeader)
@@ -666,11 +670,32 @@ lowerNativeStringRenderer spec =
       -- Check: printable (> 31)
       startBlock chkPrint
       isPrint <- emitAssign "str.v.pr" (LLVMInt 1) (LLVMICmpUgt charVal (LLVMIntLiteral 8 31))
-      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isPrint printNp [(1, printNormal)])
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isPrint printNp [(1, chkAscii)])
+      -- ASCII bytes print directly; UTF-8 lead bytes print as escaped code points.
+      startBlock chkAscii
+      isAscii <- emitAssign "str.v.ascii" (LLVMInt 1) (LLVMICmpUgt (LLVMIntLiteral 8 128) charVal)
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isAscii chkUtf8 [(1, printNormal)])
       startBlock printNormal
       charZext <- emitAssign "str.zc" i32Ty (LLVMZext charVal i32Ty)
       _ <- emitPutchar charZext
       finishCurrentBlock (LLVMBr loopNext)
+      startBlock chkUtf8
+      utf8LeadClass <- emitAssign "str.u2.class" i8Ty (LLVMAnd charVal (LLVMIntLiteral 8 0xE0))
+      isTwoByteUtf8 <- emitAssign "str.u2.is" (LLVMInt 1) (LLVMICmpEq utf8LeadClass (LLVMIntLiteral 8 0xC0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isTwoByteUtf8 printNp [(1, printUtf8Two)])
+      startBlock printUtf8Two
+      contPtr <- emitAssign "str.u2.cptr" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 1)])
+      contVal <- emitAssign "str.u2.c" i8Ty (LLVMLoad i8Ty contPtr)
+      leadPayload <- emitAssign "str.u2.lead" i8Ty (LLVMAnd charVal (LLVMIntLiteral 8 0x1F))
+      lead32 <- emitAssign "str.u2.lead32" i32Ty (LLVMZext leadPayload i32Ty)
+      shifted <- emitAssign "str.u2.shift" i32Ty (LLVMShl lead32 (LLVMIntLiteral 32 6))
+      contPayload <- emitAssign "str.u2.cont" i8Ty (LLVMAnd contVal (LLVMIntLiteral 8 0x3F))
+      cont32 <- emitAssign "str.u2.cont32" i32Ty (LLVMZext contPayload i32Ty)
+      code32 <- emitAssign "str.u2.code32" i32Ty (LLVMOr shifted cont32)
+      code64 <- emitAssign "str.u2.code64" i64Ty (LLVMZext code32 i64Ty)
+      _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '\\')))
+      _ <- emitPrintf nativeFmtIntName [(i64Ty, code64)]
+      finishCurrentBlock (LLVMBr loopNextTwo)
       startBlock printNp
       _ <- emitPutchar (LLVMIntLiteral 32 (toInteger (ord '?')))
       finishCurrentBlock (LLVMBr loopNext)
@@ -678,6 +703,10 @@ lowerNativeStringRenderer spec =
       startBlock loopNext
       nextPtr <- emitAssign "str.next" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 1)])
       emitStore LLVMPtr nextPtr curSlot
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock loopNextTwo
+      nextPtrTwo <- emitAssign "str.next.two" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 2)])
+      emitStore LLVMPtr nextPtrTwo curSlot
       finishCurrentBlock (LLVMBr loopHeader)
       -- Done
       startBlock loopDone
@@ -1155,6 +1184,8 @@ functionReferencesIOWrapper fn =
     exprReferencesIO (LLVMLoad _ op) = opReferencesIO op
     exprReferencesIO (LLVMAlloca _ op) = opReferencesIO op
     exprReferencesIO (LLVMAnd a b) = opReferencesIO a || opReferencesIO b
+    exprReferencesIO (LLVMOr a b) = opReferencesIO a || opReferencesIO b
+    exprReferencesIO (LLVMShl a b) = opReferencesIO a || opReferencesIO b
     exprReferencesIO (LLVMICmpEq a b) = opReferencesIO a || opReferencesIO b
     exprReferencesIO (LLVMICmpUgt a b) = opReferencesIO a || opReferencesIO b
     exprReferencesIO (LLVMZext op _) = opReferencesIO op
@@ -2581,9 +2612,9 @@ assignStringGlobals :: [String] -> Map String String
 assignStringGlobals values =
   Map.fromList [(value, "__mlfp_str." ++ show index0) | (index0, value) <- zip [(0 :: Int) ..] values]
 
-asciiString :: String -> Bool
-asciiString =
-  all (\char -> ord char >= 0 && ord char <= 127)
+nativeStringLiteralSupported :: String -> Bool
+nativeStringLiteralSupported =
+  all (\char -> ord char <= 0x7FF)
 
 firstDuplicate :: (Ord a) => [a] -> Maybe a
 firstDuplicate =
@@ -3901,7 +3932,7 @@ lowerLit env context ty lit = do
     LString value ->
       case Map.lookup value (peStringGlobals env) of
         Just globalName
-          | asciiString value ->
+          | nativeStringLiteralSupported value ->
               pure (LowerValue ty llvmTy (LLVMGlobalRef LLVMPtr globalName) LowerRuntimeValue Nothing)
         Just _ ->
           liftEither (BackendLLVMUnsupportedString value)
