@@ -380,6 +380,14 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   native execution; evidence: focused charIsDigit matcher, primitive inventory
   matcher, neighbor text/native matcher set, rg evidence checks,
   `git diff --check`, cabal build all, cabal test, and thesis gate passed.
+- round-278 completed item-278-char-is-ascii-lower-native-tracer:
+  `charIsAsciiLower : Char -> Bool` classifies `charIsAsciiLower 'a'` as
+  true, `charIsAsciiLower 'A'` as false, and `charIsAsciiLower 'λ'` as false
+  through source checking, run-program, backend LLVM/object validation,
+  emit-native/native object validation, and linked native execution; evidence:
+  focused charIsAsciiLower matcher, primitive inventory matcher, neighbor
+  text/native matcher set, rg evidence/claim-audit checks,
+  `git diff --check`, cabal build all, cabal test, and thesis gate passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

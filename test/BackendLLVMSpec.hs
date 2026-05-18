@@ -517,6 +517,29 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "charIsAsciiLower classifies ASCII lowercase Char values through native execution" $
+      forM_
+        [ (nativeAsciiLowercaseCharIsAsciiLowerSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiUppercaseCharIsAsciiLowerSourceProgram, "false\n", NativeRunResult ExitSuccess "false\n" ""),
+          (nativeNonAsciiCharIsAsciiLowerSourceProgram, "false\n", NativeRunResult ExitSuccess "false\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "Char literal source checks, runs, emits backend, and executes natively" $
       withTempProgram nativeCharLiteralSourceProgram $ \path -> do
         checkProgramFile path `shouldReturn` Right "OK\n"
@@ -2447,6 +2470,33 @@ nativeNonDecimalCharIsDigitSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (charIsDigit);",
       "  def main : Bool = charIsDigit 'λ';",
+      "}"
+    ]
+
+nativeAsciiLowercaseCharIsAsciiLowerSourceProgram :: String
+nativeAsciiLowercaseCharIsAsciiLowerSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiLower);",
+      "  def main : Bool = charIsAsciiLower 'a';",
+      "}"
+    ]
+
+nativeAsciiUppercaseCharIsAsciiLowerSourceProgram :: String
+nativeAsciiUppercaseCharIsAsciiLowerSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiLower);",
+      "  def main : Bool = charIsAsciiLower 'A';",
+      "}"
+    ]
+
+nativeNonAsciiCharIsAsciiLowerSourceProgram :: String
+nativeNonAsciiCharIsAsciiLowerSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiLower);",
+      "  def main : Bool = charIsAsciiLower 'λ';",
       "}"
     ]
 

@@ -155,6 +155,9 @@ Native emission owns the small process/runtime surface it needs:
 - `__char_is_digit`: inventory-classified as the first native-capable `Char`
   classification operation; the native helper compares the Unicode scalar
   value against the ASCII decimal digit range.
+- `__char_is_ascii_lower`: inventory-classified as an explicit ASCII
+  lowercase `Char` classification operation; the native helper compares the
+  Unicode scalar value against the ASCII `a` through `z` range.
 - Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
   `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
   functions with entry-point implementations.
@@ -208,6 +211,10 @@ Supported result shapes are:
 - `charIsDigit : Char -> Bool` is the first native-capable Char
   classification tracer and classifies ASCII decimal digit code points through
   native execution while keeping broader classification families out of scope.
+- `charIsAsciiLower : Char -> Bool` is an explicit ASCII lowercase Char
+  classification tracer and classifies only ASCII `a` through `z` code points
+  through native execution while keeping Unicode category and parser-family
+  completion out of scope.
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 

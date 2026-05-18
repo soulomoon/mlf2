@@ -68,6 +68,12 @@
   and `charIsDigit 'λ'` as `false` through `.mlfp` source checking,
   `run-program`, raw LLVM emission, object-code validation, and linked native
   execution.
+- Added an explicit native-capable ASCII lowercase `Char` classification
+  tracer: `charIsAsciiLower : Char -> Bool` now classifies
+  `charIsAsciiLower 'a'` as `true`, `charIsAsciiLower 'A'` as `false`, and
+  `charIsAsciiLower 'λ'` as `false` through `.mlfp` source checking,
+  `run-program`, raw LLVM emission, object-code validation, and linked native
+  execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

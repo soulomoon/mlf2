@@ -47,7 +47,8 @@ spec = describe "MLF.Primitive.Inventory" $ do
           PrimitiveInventory.stringTakePrimitiveName,
           PrimitiveInventory.stringSlicePrimitiveName,
           PrimitiveInventory.stringCharAtPrimitiveName,
-          PrimitiveInventory.charIsDigitPrimitiveName
+          PrimitiveInventory.charIsDigitPrimitiveName,
+          PrimitiveInventory.charIsAsciiLowerPrimitiveName
         ]
         <> PrimitiveInventory.nativeIOPrimitiveNames
     PrimitiveInventory.nativeLowerablePrimitiveNames
@@ -81,6 +82,8 @@ spec = describe "MLF.Primitive.Inventory" $ do
           name `shouldBe` PrimitiveInventory.stringCharAtPrimitiveName
         PrimitiveInventory.PrimitiveNativeCharIsDigit ->
           name `shouldBe` PrimitiveInventory.charIsDigitPrimitiveName
+        PrimitiveInventory.PrimitiveNativeCharIsAsciiLower ->
+          name `shouldBe` PrimitiveInventory.charIsAsciiLowerPrimitiveName
         PrimitiveInventory.PrimitiveNativeIO operation ->
           name `shouldBe` PrimitiveInventory.nativeIOPrimitiveName operation
 
