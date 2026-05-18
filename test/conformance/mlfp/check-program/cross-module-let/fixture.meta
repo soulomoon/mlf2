@@ -1,0 +1,9 @@
+fixture-id: cross-module-let-check-program
+package-root: src
+search-paths: none
+command: check-program
+expect: pass
+normalization: none
+stage-applicability: all
+tags: package,public,cross-module,let-polymorphism,check
+expected-stdout: expected/check-program.stdout

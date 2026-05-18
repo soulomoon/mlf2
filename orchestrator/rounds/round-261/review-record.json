@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-261",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-2",
+  "direction_id": "direction-2a-conformance-corpus-migration",
+  "extracted_item_id": "item-261-conformance-check-program-package-tracer",
+  "decision": "approved",
+  "evidence_summary": "Focused check-program and run-program conformance tests, artifact/source-copy checks, no-dynamic-golden audit, git diff --check, cabal build all, cabal test, and thesis conformance gate passed. The new check-program tracer uses metadata-derived package root through checkProgramArgs with committed OK stdout while existing run-program fixtures continue through runProgramArgs.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-2-completion",
+        "text": "round-261 completed item-261-conformance-check-program-package-tracer by adding a shared conformance corpus check-program package tracer with metadata-driven checkProgramArgs dispatch and committed OK stdout; evidence: focused conformance tests, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

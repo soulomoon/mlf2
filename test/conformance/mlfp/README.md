@@ -7,7 +7,7 @@ them exactly and must not regenerate, bless, or dynamically accept new outputs.
 
 ## Tracer Metadata Contract
 
-The initial tracer fixture uses a plain line-oriented metadata file:
+Tracer fixtures use a plain line-oriented metadata file:
 
 ```text
 fixture-id: cross-module-let-run-program
@@ -26,8 +26,9 @@ Fields are `key: value` lines. For these tracers, `package-root`,
 containing `fixture.meta`. Use `search-paths: none` for fixtures with no extra
 roots. Otherwise, `search-paths` is a comma-separated ordered list of roots;
 the initial search-path tracer uses exactly one root. The only recognized
-command is `run-program`, the only expected status is `pass`, and the only
-normalization profile is `none`.
+commands are `run-program` and `check-program`, the only expected status is
+`pass`, and the only normalization profile is `none`. Each fixture names its
+committed expected stdout with `expected-stdout`.
 
 Any expected-output update is a reviewed source change. A test run may write
 actual outputs only to an explicitly selected actual-output root in a later

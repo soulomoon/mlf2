@@ -6,33 +6,42 @@ import System.Directory (doesFileExist)
 import System.FilePath ((</>), takeDirectory)
 import Test.Hspec
 
-import MLF.Program.CLI (runProgramArgs)
+import MLF.Program.CLI (checkProgramArgs, runProgramArgs)
 
 spec :: Spec
 spec =
     describe "MLF.Program shared conformance corpus" $ do
         it "shared conformance corpus validates run-program package fixture" $ do
             fixture <- loadFixture crossModuleLetFixture
-            actual <- runProgramArgs (fixtureRunProgramArgs fixture)
+            actual <- runFixture fixture
             expected <- readFile (fixtureExpectedStdout fixture)
 
             actual `shouldBe` Right expected
 
         it "shared conformance corpus validates run-program search-path fixture" $ do
             fixture <- loadFixture searchPathFixture
-            actual <- runProgramArgs (fixtureRunProgramArgs fixture)
+            actual <- runFixture fixture
+            expected <- readFile (fixtureExpectedStdout fixture)
+
+            actual `shouldBe` Right expected
+
+        it "shared conformance corpus validates check-program package fixture" $ do
+            fixture <- loadFixture checkProgramCrossModuleLetFixture
+            actual <- runFixture fixture
             expected <- readFile (fixtureExpectedStdout fixture)
 
             actual `shouldBe` Right expected
 
 data ConformanceFixture = ConformanceFixture
-    { fixtureRunProgramArgs :: [FilePath]
+    { fixtureCommand :: String
+    , fixtureArgs :: [FilePath]
     , fixtureExpectedStdout :: FilePath
     }
 
 data FixtureExpectation = FixtureExpectation
     { expectationMetaPath :: FilePath
     , expectationFixtureId :: String
+    , expectationCommand :: String
     , expectationSearchPaths :: String
     , expectationTags :: String
     }
@@ -43,6 +52,7 @@ crossModuleLetFixture =
         { expectationMetaPath =
             "test/conformance/mlfp/run-program/cross-module-let/fixture.meta"
         , expectationFixtureId = "cross-module-let-run-program"
+        , expectationCommand = "run-program"
         , expectationSearchPaths = "none"
         , expectationTags = "package,public,cross-module,let-polymorphism"
         }
@@ -53,8 +63,20 @@ searchPathFixture =
         { expectationMetaPath =
             "test/conformance/mlfp/run-program/search-path-package/fixture.meta"
         , expectationFixtureId = "search-path-run-program"
+        , expectationCommand = "run-program"
         , expectationSearchPaths = "roots/lib"
         , expectationTags = "package,public,search-path,cross-root-import"
+        }
+
+checkProgramCrossModuleLetFixture :: FixtureExpectation
+checkProgramCrossModuleLetFixture =
+    FixtureExpectation
+        { expectationMetaPath =
+            "test/conformance/mlfp/check-program/cross-module-let/fixture.meta"
+        , expectationFixtureId = "cross-module-let-check-program"
+        , expectationCommand = "check-program"
+        , expectationSearchPaths = "none"
+        , expectationTags = "package,public,cross-module,let-polymorphism,check"
         }
 
 loadFixture :: FixtureExpectation -> IO ConformanceFixture
@@ -76,7 +98,7 @@ loadFixture expectation = do
     expectedStdout <- requireField "expected-stdout" fields
 
     fixtureId `shouldBe` expectationFixtureId expectation
-    command `shouldBe` "run-program"
+    command `shouldBe` expectationCommand expectation
     expect `shouldBe` "pass"
     normalization `shouldBe` "none"
     stageApplicability `shouldBe` "all"
@@ -88,9 +110,21 @@ loadFixture expectation = do
 
     pure
         ConformanceFixture
-            { fixtureRunProgramArgs = packageArg : searchPathArgs
+            { fixtureCommand = command
+            , fixtureArgs = packageArg : searchPathArgs
             , fixtureExpectedStdout = fixtureRoot </> expectedStdout
             }
+
+runFixture :: ConformanceFixture -> IO (Either String String)
+runFixture fixture =
+    case fixtureCommand fixture of
+        "run-program" ->
+            runProgramArgs (fixtureArgs fixture)
+        "check-program" ->
+            checkProgramArgs (fixtureArgs fixture)
+        command ->
+            expectationFailure ("unsupported conformance command: " ++ command)
+                >> fail ("unsupported conformance command: " ++ command)
 
 searchPathArg :: FilePath -> [FilePath]
 searchPathArg path =
