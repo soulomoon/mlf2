@@ -298,6 +298,11 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   check, run, backend LLVM, object validation, emit-native, and linked native
   execution; focused/native-neighbor checks passed and recorded
   full/thesis gates passed.
+- round-267: completed item-267-unicode-string-length-native-tracer by adding
+  public Prelude `stringLength : String -> Int` with Unicode scalar counting
+  through check, run, backend LLVM, object validation, emit-native, and linked
+  native execution; evidence: focused matcher, neighbor text tracers, cabal
+  build all, cabal test, and thesis gate passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

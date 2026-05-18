@@ -77,6 +77,7 @@ data LLVMExpression
   | LLVMAnd LLVMOperand LLVMOperand
   | LLVMOr LLVMOperand LLVMOperand
   | LLVMShl LLVMOperand LLVMOperand
+  | LLVMAdd LLVMOperand LLVMOperand
   | LLVMICmpEq LLVMOperand LLVMOperand
   | LLVMICmpUgt LLVMOperand LLVMOperand
   | LLVMZext LLVMOperand LLVMType

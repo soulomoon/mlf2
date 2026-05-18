@@ -280,6 +280,23 @@ spec = describe "MLF.Backend.LLVM" $ do
         runLLVMNativeExecutable nativeOutput
           `shouldReturn` NativeRunResult ExitSuccess "\"\\955\"\n" ""
 
+    it "Unicode stringLength source checks, runs, emits backend, and executes natively" $
+      withTempProgram nativeUnicodeStringLengthSourceProgram $ \path -> do
+        checkProgramFile path `shouldReturn` Right "OK\n"
+        runProgramFile path `shouldReturn` Right "2\n"
+
+        backendOutput <- requireRight =<< emitBackendFile path
+        backendOutput `shouldSatisfy` isInfixOf "define i64 @\"Main__main\"()"
+        validateLLVMAssembly backendOutput
+        validateLLVMObjectCode backendOutput
+
+        nativeOutput <- requireRight =<< emitNativeFile path
+        nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+        validateLLVMAssembly nativeOutput
+        validateLLVMObjectCode nativeOutput
+        runLLVMNativeExecutable nativeOutput
+          `shouldReturn` NativeRunResult ExitSuccess "2\n" ""
+
     it "Char literal source checks, runs, emits backend, and executes natively" $
       withTempProgram nativeCharLiteralSourceProgram $ \path -> do
         checkProgramFile path `shouldReturn` Right "OK\n"
@@ -2021,6 +2038,15 @@ nativeUnicodeStringSourceProgram =
   unlines
     [ "module Main export (main) {",
       "  def main : String = \"λ\";",
+      "}"
+    ]
+
+nativeUnicodeStringLengthSourceProgram :: String
+nativeUnicodeStringLengthSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringLength);",
+      "  def main : Int = stringLength \"λa\";",
       "}"
     ]
 

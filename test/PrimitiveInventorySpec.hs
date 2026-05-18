@@ -35,7 +35,11 @@ spec = describe "MLF.Primitive.Inventory" $ do
     PrimitiveInventory.nativeIOPrimitiveNames
       `shouldBe` Set.fromList (map PrimitiveInventory.nativeIOPrimitiveName allNativeIOOperations)
     PrimitiveInventory.nativeLowerablePrimitiveNames
-      `shouldBe` Set.insert PrimitiveInventory.nativeAndPrimitiveName PrimitiveInventory.nativeIOPrimitiveNames
+      `shouldBe` Set.fromList
+        [ PrimitiveInventory.nativeAndPrimitiveName,
+          PrimitiveInventory.stringLengthPrimitiveName
+        ]
+        <> PrimitiveInventory.nativeIOPrimitiveNames
     PrimitiveInventory.nativeLowerablePrimitiveNames
       `shouldSatisfy` (`Set.isSubsetOf` PrimitiveInventory.primitiveValueNames)
 
@@ -45,6 +49,8 @@ spec = describe "MLF.Primitive.Inventory" $ do
           name `shouldNotSatisfy` (`Set.member` PrimitiveInventory.nativeLowerablePrimitiveNames)
         PrimitiveInventory.PrimitiveNativeBooleanAnd ->
           name `shouldBe` PrimitiveInventory.nativeAndPrimitiveName
+        PrimitiveInventory.PrimitiveNativeStringLength ->
+          name `shouldBe` PrimitiveInventory.stringLengthPrimitiveName
         PrimitiveInventory.PrimitiveNativeIO operation ->
           name `shouldBe` PrimitiveInventory.nativeIOPrimitiveName operation
 

@@ -81,6 +81,7 @@ import MLF.Frontend.Program.Types
 import MLF.Frontend.Syntax (Lit (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
 import qualified MLF.Frontend.Syntax as Surface
 import qualified MLF.Frontend.Syntax.Program as ProgramSyntax
+import qualified MLF.Primitive.Inventory as PrimitiveInventory
 
 data Value
   = VLit Lit
@@ -152,7 +153,10 @@ runCheckedPureProgram checked =
   case classifyMainMode checked of
     MainPure -> do
       rejectOpaqueDependencies checked
-      pure (toValueWithProgram checked (normalizeProgramTerm (programMainTerm checked)))
+      let normalizedTerm = normalizeProgramTerm (programMainTerm checked)
+      if termMentionsName PrimitiveInventory.stringLengthPrimitiveName normalizedTerm
+        then runtimeValueToValue <$> mainRuntimeValue checked
+        else pure (toValueWithProgram checked normalizedTerm)
     MainIOUnit ->
       Left (ProgramPipelineError "runProgram value API does not return IO main output")
     MainIOOther ty ->
@@ -316,6 +320,7 @@ data RuntimePrimitive
   | RuntimeIOWriteIORef
   | RuntimeIOGetArgs
   | RuntimeAnd
+  | RuntimeStringLength
   deriving (Eq, Show)
 
 data RuntimeIOAction
@@ -345,6 +350,16 @@ mainIOAction checked = do
   case value of
     RuntimeIO action -> Right action
     _ -> Left (ProgramPipelineError "run-program IO main did not evaluate to an IO action")
+  where
+    context = mkRuntimeContext checked
+
+mainRuntimeValue :: CheckedProgram -> Either ProgramError RuntimeValue
+mainRuntimeValue checked = do
+  binding <-
+    case Map.lookup (checkedProgramMain checked) (runtimeBindings context) of
+      Just found -> Right found
+      Nothing -> Left ProgramMainNotFound
+  evalRuntimeBinding context [] binding
   where
     context = mkRuntimeContext checked
 
@@ -474,6 +489,8 @@ runtimePrimitive name =
     "__io_writeIORef" -> Just RuntimeIOWriteIORef
     "__io_getArgs" -> Just RuntimeIOGetArgs
     "__mlfp_and" -> Just RuntimeAnd
+    name'
+      | name' == PrimitiveInventory.stringLengthPrimitiveName -> Just RuntimeStringLength
     _ -> Nothing
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -1167,6 +1184,10 @@ applyRuntimePrimitive prim args
           Right (RuntimeLit (LBool (left && right)))
         (RuntimeAnd, _) ->
           Left (ProgramPipelineError "run-program __mlfp_and expected Bool arguments")
+        (RuntimeStringLength, [RuntimeLit (LString value)]) ->
+          Right (RuntimeLit (LInt (toInteger (length value))))
+        (RuntimeStringLength, _) ->
+          Left (ProgramPipelineError "run-program __string_length expected a String argument")
         _ ->
           Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
 
@@ -1189,6 +1210,7 @@ runtimePrimitiveArity prim =
     RuntimeIOWriteIORef -> 2
     RuntimeIOGetArgs -> 0
     RuntimeAnd -> 2
+    RuntimeStringLength -> 1
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
 executeIOAction context action =
@@ -1332,6 +1354,23 @@ freeTermVariables =
         ELam name _ body -> go (Set.insert name bound) body
         EApp fun arg -> go bound fun `Set.union` go bound arg
         ELet name _ rhs body -> go bound rhs `Set.union` go (Set.insert name bound) body
+        ETyAbs _ _ body -> go bound body
+        ETyInst inner _ -> go bound inner
+        ERoll _ body -> go bound body
+        EUnroll body -> go bound body
+
+termMentionsName :: String -> ElabTerm -> Bool
+termMentionsName needle =
+  go Set.empty
+  where
+    go bound term =
+      case term of
+        EVar name ->
+          name == needle && name `Set.notMember` bound
+        ELit {} -> False
+        ELam name _ body -> go (Set.insert name bound) body
+        EApp fun arg -> go bound fun || go bound arg
+        ELet name _ rhs body -> go bound rhs || go (Set.insert name bound) body
         ETyAbs _ _ body -> go bound body
         ETyInst inner _ -> go bound inner
         ERoll _ body -> go bound body

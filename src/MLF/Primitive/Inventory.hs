@@ -21,6 +21,7 @@ module MLF.Primitive.Inventory
     primitiveValueNames,
     primitiveNativeSupport,
     nativeAndPrimitiveName,
+    stringLengthPrimitiveName,
     nativeIOPrimitiveName,
     nativeIOPrimitiveNames,
     nativeLowerablePrimitiveNames,
@@ -77,6 +78,7 @@ data PrimitiveIOOperation
 data PrimitiveNativeSupport
   = PrimitiveNativeUnsupported
   | PrimitiveNativeBooleanAnd
+  | PrimitiveNativeStringLength
   | PrimitiveNativeIO PrimitiveIOOperation
   deriving (Eq, Ord, Show)
 
@@ -139,6 +141,12 @@ primitiveValueSpecs =
         primitiveValueSpec
           PrimitiveNativeBooleanAnd
           (boolTy `PrimitiveTypeArrow` (boolTy `PrimitiveTypeArrow` boolTy))
+          Set.empty
+      ),
+      ( stringLengthPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringLength
+          (stringTy `PrimitiveTypeArrow` intTy)
           Set.empty
       ),
       nativeIOSpec
@@ -290,6 +298,10 @@ andPrimitiveName :: String
 andPrimitiveName =
   "__mlfp_and"
 
+stringLengthPrimitiveName :: String
+stringLengthPrimitiveName =
+  "__string_length"
+
 requireSinglePrimitiveNativeSupport :: PrimitiveNativeSupport -> String
 requireSinglePrimitiveNativeSupport nativeSupport =
   case Set.toList (Map.keysSet (Map.filter ((== nativeSupport) . primitiveValueNativeSupport) primitiveValueSpecs)) of
@@ -313,6 +325,7 @@ isPrimitiveNativeLowerable =
   \case
     PrimitiveNativeUnsupported -> False
     PrimitiveNativeBooleanAnd -> True
+    PrimitiveNativeStringLength -> True
     PrimitiveNativeIO {} -> True
 
 primitiveTypeToSourceType :: PrimitiveType -> SrcType

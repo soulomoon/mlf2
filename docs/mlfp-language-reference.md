@@ -418,6 +418,19 @@ literals. Native-backed IO also includes `getLine`, `readFile`, `writeFile`,
 `appendFile`, `exitWith`, `newIORef`, `readIORef`, `writeIORef`, and `getArgs`.
 There is no narrower byte/character IO primitive in the first contract.
 
+The first pure broad string operation is:
+
+```mlf
+stringLength : String -> Int
+```
+
+`stringLength` counts Unicode scalar values in the source `String`, not UTF-8
+bytes. It is covered through source checking, `run-program`, backend LLVM
+emission, object generation, and linked native execution for the current
+native-capable tracer. `String`/`List Char` conversion, substring, search,
+formatting, slicing/classification, cursor APIs, locale, and regex remain out
+of scope.
+
 Pure program entrypoints remain accepted:
 
 ```mlf
@@ -538,6 +551,7 @@ Current prelude contents:
 - `map`, `pure`, `ap`, and `bind`
 - `putStrLn`, `putStr`, `getLine`, `readFile`, `writeFile`, `appendFile`,
   `exitWith`, `newIORef`, `readIORef`, `writeIORef`, and `getArgs`
+- `stringLength`
 - `and`
 - `id`
 
@@ -560,8 +574,10 @@ Cons Zero Nil
 Primitive closed values render as `true`, `false`, integers, single-quoted
 characters, and quoted strings. Unicode `Char` literals are scalar values; the
 native tracer covers the non-ASCII scalar example `'λ'` rendering as `'\955'`.
-Broad `String`/`List Char` conversion, slicing, classification, and
-parser-parity helpers remain outside this literal contract.
+The first pure broad `String` operation is `stringLength`, which counts Unicode
+scalar values rather than UTF-8 bytes. Broad `String`/`List Char` conversion,
+substring, search, formatting, slicing/classification, cursor APIs, and
+parser-parity helpers remain outside this contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 

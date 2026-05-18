@@ -11,6 +11,10 @@
   literal `def main : String = "λ";`, covering source checking, interpreter
   output, raw LLVM emission, object-code validation, and native execution with
   the existing quoted escape rendering.
+- Added the first native-capable broad string operation tracer:
+  `stringLength : String -> Int` now counts Unicode scalar values through
+  `.mlfp` source checking, `run-program`, raw LLVM emission, object-code
+  validation, and linked native execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

@@ -143,6 +143,8 @@ renderLLVMExpression resultTy expression =
       "or " ++ renderLLVMType resultTy ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
     LLVMShl left right ->
       "shl " ++ renderLLVMType resultTy ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
+    LLVMAdd left right ->
+      "add " ++ renderLLVMType resultTy ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
     LLVMICmpEq left right ->
       "icmp eq " ++ renderLLVMType (operandLLVMType left) ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
     LLVMICmpUgt left right ->

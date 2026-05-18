@@ -83,7 +83,8 @@ metadata and term nodes.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Row-5 primitive/eager ownership keeps the primitive surface at the
 inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
-`__mlfp_and` plus the IO primitive names classified there for native support.
+`__mlfp_and`, `__string_length`, plus the IO primitive names classified there
+for native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
 The lowerer relies on the current eager order exactly as written:
@@ -163,7 +164,8 @@ lowerBackendProgram program = do
   lowered <- lowerBackendProgramCore program
   let base = lpBase lowered
       needsIO = any functionReferencesIOWrapper (lpFunctions lowered)
-      existingDecls = runtimeDeclarations base
+      needsStringLength = any (functionReferencesGlobalNames (Set.singleton runtimeStringLengthName)) (lpFunctions lowered)
+      existingDecls = runtimeDeclarations base needsStringLength
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -292,6 +294,7 @@ nativeRuntimeDeclarations base =
 nativeRuntimeFunctions :: ProgramBase -> [LLVMFunction]
 nativeRuntimeFunctions base =
   [nativeAndFunction | Map.notMember runtimeAndName (pbBindings base)]
+    ++ [nativeStringLengthFunction | Map.notMember runtimeStringLengthName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -838,6 +841,49 @@ nativeAndFunction =
     Right function -> function
     Left err -> error ("internal native __mlfp_and lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringLengthFunction :: LLVMFunction
+nativeStringLengthFunction =
+  case
+    lowerNativeFunction runtimeStringLengthName (LLVMInt 64) [(LLVMPtr, "value")] $ \params -> do
+      let value = requireNativeParam "value" params
+          i8Ty = LLVMInt 8
+          i64Ty = LLVMInt 64
+      countSlot <- emitAssign "strlen.count.slot" LLVMPtr (LLVMAlloca i64Ty (LLVMIntLiteral 64 1))
+      emitStore i64Ty (LLVMIntLiteral 64 0) countSlot
+      curSlot <- emitAssign "strlen.cur.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitStore LLVMPtr value curSlot
+      loopHeader <- freshBlock "strlen.header"
+      checkContinuation <- freshBlock "strlen.chk.continuation"
+      incrementCount <- freshBlock "strlen.increment"
+      loopNext <- freshBlock "strlen.next"
+      loopDone <- freshBlock "strlen.done"
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock loopHeader
+      curPtr <- emitAssign "strlen.cur" LLVMPtr (LLVMLoad LLVMPtr curSlot)
+      charPtr <- emitAssign "strlen.cptr" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 0)])
+      charVal <- emitAssign "strlen.c" i8Ty (LLVMLoad i8Ty charPtr)
+      isNull <- emitAssign "strlen.end" (LLVMInt 1) (LLVMICmpEq charVal (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isNull checkContinuation [(1, loopDone)])
+      startBlock checkContinuation
+      utf8Class <- emitAssign "strlen.utf8.class" i8Ty (LLVMAnd charVal (LLVMIntLiteral 8 0xC0))
+      isContinuation <- emitAssign "strlen.is.continuation" (LLVMInt 1) (LLVMICmpEq utf8Class (LLVMIntLiteral 8 0x80))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isContinuation incrementCount [(1, loopNext)])
+      startBlock incrementCount
+      count <- emitAssign "strlen.count" i64Ty (LLVMLoad i64Ty countSlot)
+      nextCount <- emitAssign "strlen.count.next" i64Ty (LLVMAdd count (LLVMIntLiteral 64 1))
+      emitStore i64Ty nextCount countSlot
+      finishCurrentBlock (LLVMBr loopNext)
+      startBlock loopNext
+      nextPtr <- emitAssign "strlen.next.ptr" LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 1)])
+      emitStore LLVMPtr nextPtr curSlot
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock loopDone
+      result <- emitAssign "strlen.result" i64Ty (LLVMLoad i64Ty countSlot)
+      finishCurrentBlock (LLVMRet i64Ty result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_length lowering failed: " ++ renderBackendLLVMError err)
+
 -- IO runtime primitives
 
 ioPureName :: String
@@ -1164,38 +1210,43 @@ ioWrapperNames = Set.map nativeIOWrapperName ioPrimitiveNames
 
 -- | Check whether an LLVM function references any IO wrapper function.
 functionReferencesIOWrapper :: LLVMFunction -> Bool
-functionReferencesIOWrapper fn =
-  any blockReferencesIO (llvmFunctionBlocks fn)
+functionReferencesIOWrapper =
+  functionReferencesGlobalNames ioWrapperNames
+
+functionReferencesGlobalNames :: Set.Set String -> LLVMFunction -> Bool
+functionReferencesGlobalNames names fn =
+  any blockReferencesName (llvmFunctionBlocks fn)
   where
-    blockReferencesIO block =
-      any instrReferencesIO (llvmBlockInstructions block)
-        || terminatorReferencesIO (llvmBlockTerminator block)
-    instrReferencesIO (LLVMAssign _ _ expr) = exprReferencesIO expr
-    instrReferencesIO (LLVMStore _ src dst) = opReferencesIO src || opReferencesIO dst
-    instrReferencesIO (LLVMComment _) = False
-    exprReferencesIO (LLVMCall name args) =
-      Set.member name ioWrapperNames || any (opReferencesIO . snd) args
-    exprReferencesIO (LLVMCallVarArgs name _ args) =
-      Set.member name ioWrapperNames || any (opReferencesIO . snd) args
-    exprReferencesIO (LLVMCallOperand op args) =
-      opReferencesIO op || any (opReferencesIO . snd) args
-    exprReferencesIO (LLVMGetElementPtr _ base idxs) =
-      opReferencesIO base || any (opReferencesIO . snd) idxs
-    exprReferencesIO (LLVMLoad _ op) = opReferencesIO op
-    exprReferencesIO (LLVMAlloca _ op) = opReferencesIO op
-    exprReferencesIO (LLVMAnd a b) = opReferencesIO a || opReferencesIO b
-    exprReferencesIO (LLVMOr a b) = opReferencesIO a || opReferencesIO b
-    exprReferencesIO (LLVMShl a b) = opReferencesIO a || opReferencesIO b
-    exprReferencesIO (LLVMICmpEq a b) = opReferencesIO a || opReferencesIO b
-    exprReferencesIO (LLVMICmpUgt a b) = opReferencesIO a || opReferencesIO b
-    exprReferencesIO (LLVMZext op _) = opReferencesIO op
-    exprReferencesIO (LLVMPhi _ arms) = any (opReferencesIO . fst) arms
-    opReferencesIO (LLVMGlobalRef _ name) = Set.member name ioWrapperNames
-    opReferencesIO _ = False
-    terminatorReferencesIO (LLVMRet _ op) = opReferencesIO op
-    terminatorReferencesIO (LLVMBr _) = False
-    terminatorReferencesIO (LLVMSwitch _ op _ _) = opReferencesIO op
-    terminatorReferencesIO LLVMUnreachable = False
+    blockReferencesName block =
+      any instrReferencesName (llvmBlockInstructions block)
+        || terminatorReferencesName (llvmBlockTerminator block)
+    instrReferencesName (LLVMAssign _ _ expr) = exprReferencesName expr
+    instrReferencesName (LLVMStore _ src dst) = opReferencesName src || opReferencesName dst
+    instrReferencesName (LLVMComment _) = False
+    exprReferencesName (LLVMCall name args) =
+      Set.member name names || any (opReferencesName . snd) args
+    exprReferencesName (LLVMCallVarArgs name _ args) =
+      Set.member name names || any (opReferencesName . snd) args
+    exprReferencesName (LLVMCallOperand op args) =
+      opReferencesName op || any (opReferencesName . snd) args
+    exprReferencesName (LLVMGetElementPtr _ base idxs) =
+      opReferencesName base || any (opReferencesName . snd) idxs
+    exprReferencesName (LLVMLoad _ op) = opReferencesName op
+    exprReferencesName (LLVMAlloca _ op) = opReferencesName op
+    exprReferencesName (LLVMAnd a b) = opReferencesName a || opReferencesName b
+    exprReferencesName (LLVMOr a b) = opReferencesName a || opReferencesName b
+    exprReferencesName (LLVMShl a b) = opReferencesName a || opReferencesName b
+    exprReferencesName (LLVMAdd a b) = opReferencesName a || opReferencesName b
+    exprReferencesName (LLVMICmpEq a b) = opReferencesName a || opReferencesName b
+    exprReferencesName (LLVMICmpUgt a b) = opReferencesName a || opReferencesName b
+    exprReferencesName (LLVMZext op _) = opReferencesName op
+    exprReferencesName (LLVMPhi _ arms) = any (opReferencesName . fst) arms
+    opReferencesName (LLVMGlobalRef _ name) = Set.member name names
+    opReferencesName _ = False
+    terminatorReferencesName (LLVMRet _ op) = opReferencesName op
+    terminatorReferencesName (LLVMBr _) = False
+    terminatorReferencesName (LLVMSwitch _ op _ _) = opReferencesName op
+    terminatorReferencesName LLVMUnreachable = False
 
 lowerNativeFunction ::
   String ->
@@ -1370,17 +1421,25 @@ runtimeAndName :: String
 runtimeAndName =
   PrimitiveInventory.nativeAndPrimitiveName
 
+runtimeStringLengthName :: String
+runtimeStringLengthName =
+  PrimitiveInventory.stringLengthPrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> [LLVMDeclaration]
-runtimeDeclarations base =
+runtimeDeclarations :: ProgramBase -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
     ++ [ LLVMDeclaration runtimeAndName (LLVMInt 1) [LLVMInt 1, LLVMInt 1] False
          | Map.notMember runtimeAndName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringLengthName (LLVMInt 64) [LLVMPtr] False
+         | needsStringLength,
+           Map.notMember runtimeStringLengthName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -4607,6 +4666,18 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
           zipWithM_ (requireLLVMType context name) expectedTypes callArgs
           result <- emitAssign "call" (LLVMInt 1) (LLVMCall runtimeAndName [(LLVMInt 1, lvOperand arg) | arg <- callArgs])
           pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+    Nothing
+      | name == runtimeStringLengthName -> do
+          unless (length args == 1) $
+            liftEither (BackendLLVMArityMismatch name 1 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [arg] -> do
+              requireLLVMType context name LLVMPtr arg
+              result <- emitAssign "call" (LLVMInt 64) (LLVMCall runtimeStringLengthName [(LLVMPtr, lvOperand arg)])
+              pure (LowerValue (BTBase (BaseTy "Int")) (LLVMInt 64) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
       | Set.member name ioPrimitiveNames -> do
           callArgs <- traverse (lowerExpr env exprEnv context) args
