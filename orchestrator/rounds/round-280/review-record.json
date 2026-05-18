@@ -1,0 +1,71 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-280",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-broad-string-char-substrate",
+  "extracted_item_id": "item-280-char-is-ascii-alpha-native-tracer",
+  "decision": "approved",
+  "findings": [],
+  "validations": [
+    {
+      "command": "cabal test mlf2-test --test-options='--match \"charIsAsciiAlpha classifies ASCII alphabetic Char values through native execution\"'",
+      "result": "PASS, 1 example, 0 failures"
+    },
+    {
+      "command": "cabal test mlf2-test --test-options='--match \"classifies native-lowerable primitive support from the shared primitive inventory owner\"'",
+      "result": "PASS, 1 example, 0 failures"
+    },
+    {
+      "command": "cabal test mlf2-test --test-options='--match \"charIsAsciiUpper classifies ASCII uppercase Char values through native execution\" --match \"charIsAsciiLower classifies ASCII lowercase Char values through native execution\" --match \"charIsDigit classifies decimal Char values through native execution\" --match \"stringCharAt indexes Unicode scalar cursor positions through native execution\" --match \"stringSlice slices Unicode scalar ranges through native execution\" --match \"stringTake slices Unicode scalar prefixes through native execution\" --match \"stringDrop slices Unicode scalar prefixes through native execution\" --match \"stringEndsWith classifies Unicode suffixes through native execution\" --match \"stringStartsWith classifies Unicode prefixes through native execution\" --match \"stringContains searches Unicode substrings through native execution\" --match \"stringContainsChar searches Unicode scalars through native execution\" --match \"stringIsEmpty classifies empty and non-empty Unicode strings through native execution\" --match \"Unicode stringLength source checks, runs, emits backend, and executes natively\" --match \"Unicode String literal source checks, runs, emits backend, and executes natively\" --match \"Char literal source checks, runs, emits backend, and executes natively\"'",
+      "result": "PASS, 15 examples, 0 failures"
+    },
+    {
+      "command": "rg -n 'charIsAsciiAlpha : Char -> Bool|__char_is_ascii_alpha|charIsAsciiAlphaPrimitiveName|PrimitiveNativeCharIsAsciiAlpha|RuntimeCharIsAsciiAlpha' src test docs CONTEXT.md README.md CHANGELOG.md",
+      "result": "PASS; implementation, tests, docs, and changelog references found"
+    },
+    {
+      "command": "rg -n 'charIsAsciiAlpha classifies ASCII alphabetic Char values through native execution|charIsAsciiAlpha '\\''a'\\''|charIsAsciiAlpha '\\''A'\\''|charIsAsciiAlpha '\\''7'\\''|charIsAsciiAlpha '\\''λ'\\''|NativeRunResult ExitSuccess \"true\\\\n\"|NativeRunResult ExitSuccess \"false\\\\n\"' test/BackendLLVMSpec.hs",
+      "result": "PASS; focused test, all four source snippets, and expected native results found"
+    },
+    {
+      "command": "rg -n 'Unicode scalar|ASCII alphabetic|ASCII helper|Char classification|charIsAsciiAlpha|charIsAsciiUpper|charIsAsciiLower|charIsDigit|stringCharAt|stringSlice|stringTake|stringDrop|stringEndsWith|stringStartsWith|stringContains|stringContainsChar|stringIsEmpty|stringLength|String/List Char|formatting|classification|cursor|parser parity' docs/mlfp-language-reference.md docs/backend-native-pipeline.md docs/mlfp-self-boot-readiness.md CONTEXT.md CHANGELOG.md",
+      "result": "PASS; explicit ASCII alphabetic helper found and exclusions retained"
+    },
+    {
+      "command": "git diff --check",
+      "result": "PASS before broad gates and PASS after validation"
+    },
+    {
+      "command": "cabal build all",
+      "result": "PASS"
+    },
+    {
+      "command": "cabal test",
+      "result": "PASS, 2584 examples, 0 failures"
+    },
+    {
+      "command": "./scripts/thesis-conformance-gate.sh",
+      "result": "PASS; thesis conformance anchors are green"
+    },
+    {
+      "command": "jq -e '.anchors[\"milestone-3-completion\"]' orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap-view.json",
+      "result": "PASS; closeout anchor resolves"
+    }
+  ],
+  "evidence_summary": "Focused charIsAsciiAlpha native tracer, primitive inventory matcher, neighbor text/native matcher set, required rg evidence and claim-audit checks, git diff --check, cabal build all, cabal test, and thesis conformance gate passed. The diff matches item-280, preserves prior text and Char tracers, and docs/changelog record only an explicit ASCII alphabetic Char classification helper without implying identifier-start, identifier-continuation, Unicode category, locale/regex, formatting, String/List Char conversion, parser parity, platform contracts, self-boot proof, or milestone completion.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-280 completed item-280-char-is-ascii-alpha-native-tracer: charIsAsciiAlpha : Char -> Bool classifies charIsAsciiAlpha 'a' and charIsAsciiAlpha 'A' as true, and charIsAsciiAlpha '7' and charIsAsciiAlpha 'λ' as false through source checking, run-program, backend LLVM/object validation, emit-native/native object validation, and linked native execution; evidence: focused charIsAsciiAlpha matcher, primitive inventory matcher, neighbor text/native matcher set, rg evidence/claim-audit checks, git diff --check, cabal build all, cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}
