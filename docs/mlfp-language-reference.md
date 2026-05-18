@@ -418,18 +418,21 @@ literals. Native-backed IO also includes `getLine`, `readFile`, `writeFile`,
 `appendFile`, `exitWith`, `newIORef`, `readIORef`, `writeIORef`, and `getArgs`.
 There is no narrower byte/character IO primitive in the first contract.
 
-The first pure broad string operation is:
+The current pure broad string operations are:
 
 ```mlf
 stringLength : String -> Int
+stringIsEmpty : String -> Bool
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
-bytes. It is covered through source checking, `run-program`, backend LLVM
-emission, object generation, and linked native execution for the current
-native-capable tracer. `String`/`List Char` conversion, substring, search,
-formatting, slicing/classification, cursor APIs, locale, and regex remain out
-of scope.
+bytes. `stringIsEmpty` is the first broad `String` classification operation; it
+classifies the valid source text boundary where `""` is empty and a non-empty
+Unicode scalar string such as `"λ"` is not. Both operations are covered through
+source checking, `run-program`, backend LLVM emission, object generation, and
+linked native execution for the current native-capable tracers. `String`/`List
+Char` conversion, substring, search, formatting, slicing, broader
+classification predicates, cursor APIs, locale, and regex remain out of scope.
 
 Pure program entrypoints remain accepted:
 
@@ -552,6 +555,7 @@ Current prelude contents:
 - `putStrLn`, `putStr`, `getLine`, `readFile`, `writeFile`, `appendFile`,
   `exitWith`, `newIORef`, `readIORef`, `writeIORef`, and `getArgs`
 - `stringLength`
+- `stringIsEmpty`
 - `and`
 - `id`
 
@@ -575,9 +579,11 @@ Primitive closed values render as `true`, `false`, integers, single-quoted
 characters, and quoted strings. Unicode `Char` literals are scalar values; the
 native tracer covers the non-ASCII scalar example `'λ'` rendering as `'\955'`.
 The first pure broad `String` operation is `stringLength`, which counts Unicode
-scalar values rather than UTF-8 bytes. Broad `String`/`List Char` conversion,
-substring, search, formatting, slicing/classification, cursor APIs, and
-parser-parity helpers remain outside this contract.
+scalar values rather than UTF-8 bytes. The first broad `String` classification
+operation is `stringIsEmpty`, which renders `true` for `""` and `false` for a
+non-empty Unicode string such as `"λ"`. Broad `String`/`List Char` conversion,
+substring, search, formatting, slicing, broader classification predicates,
+cursor APIs, and parser-parity helpers remain outside this contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 

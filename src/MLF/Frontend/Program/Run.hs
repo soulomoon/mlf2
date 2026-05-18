@@ -154,7 +154,7 @@ runCheckedPureProgram checked =
     MainPure -> do
       rejectOpaqueDependencies checked
       let normalizedTerm = normalizeProgramTerm (programMainTerm checked)
-      if termMentionsName PrimitiveInventory.stringLengthPrimitiveName normalizedTerm
+      if any (`termMentionsName` normalizedTerm) runtimePurePrimitiveNames
         then runtimeValueToValue <$> mainRuntimeValue checked
         else pure (toValueWithProgram checked normalizedTerm)
     MainIOUnit ->
@@ -321,6 +321,7 @@ data RuntimePrimitive
   | RuntimeIOGetArgs
   | RuntimeAnd
   | RuntimeStringLength
+  | RuntimeStringIsEmpty
   deriving (Eq, Show)
 
 data RuntimeIOAction
@@ -491,6 +492,7 @@ runtimePrimitive name =
     "__mlfp_and" -> Just RuntimeAnd
     name'
       | name' == PrimitiveInventory.stringLengthPrimitiveName -> Just RuntimeStringLength
+      | name' == PrimitiveInventory.stringIsEmptyPrimitiveName -> Just RuntimeStringIsEmpty
     _ -> Nothing
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -1188,6 +1190,10 @@ applyRuntimePrimitive prim args
           Right (RuntimeLit (LInt (toInteger (length value))))
         (RuntimeStringLength, _) ->
           Left (ProgramPipelineError "run-program __string_length expected a String argument")
+        (RuntimeStringIsEmpty, [RuntimeLit (LString value)]) ->
+          Right (RuntimeLit (LBool (null value)))
+        (RuntimeStringIsEmpty, _) ->
+          Left (ProgramPipelineError "run-program __string_is_empty expected a String argument")
         _ ->
           Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
 
@@ -1211,6 +1217,7 @@ runtimePrimitiveArity prim =
     RuntimeIOGetArgs -> 0
     RuntimeAnd -> 2
     RuntimeStringLength -> 1
+    RuntimeStringIsEmpty -> 1
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
 executeIOAction context action =
@@ -1375,6 +1382,12 @@ termMentionsName needle =
         ETyInst inner _ -> go bound inner
         ERoll _ body -> go bound body
         EUnroll body -> go bound body
+
+runtimePurePrimitiveNames :: [String]
+runtimePurePrimitiveNames =
+  [ PrimitiveInventory.stringLengthPrimitiveName,
+    PrimitiveInventory.stringIsEmptyPrimitiveName
+  ]
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm
 normalizeProgramTerm term =

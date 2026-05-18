@@ -27,7 +27,7 @@ import qualified MLF.Frontend.Syntax.Program as P
 preludeSource :: String
 preludeSource =
   unlines
-    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, and, id) {",
+    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, and, id) {",
       "  class Eq a {",
       "    eq : a -> a -> Bool;",
       "  }",
@@ -100,6 +100,7 @@ preludeSource =
       "  def writeIORef : ∀ a. IORef a -> a -> IO Unit = __io_writeIORef;",
       "  def getArgs : IO (List String) = __io_getArgs;",
       "  def stringLength : String -> Int = __string_length;",
+      "  def stringIsEmpty : String -> Bool = __string_is_empty;",
       "  def and : Bool -> Bool -> Bool = λleft λright __mlfp_and left right;",
       "  def id : ∀ a. a -> a = λx x;",
       "}"

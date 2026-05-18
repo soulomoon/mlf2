@@ -83,8 +83,8 @@ metadata and term nodes.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Row-5 primitive/eager ownership keeps the primitive surface at the
 inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
-`__mlfp_and`, `__string_length`, plus the IO primitive names classified there
-for native support.
+`__mlfp_and`, `__string_length`, `__string_is_empty`, plus the IO primitive
+names classified there for native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
 The lowerer relies on the current eager order exactly as written:
@@ -165,7 +165,8 @@ lowerBackendProgram program = do
   let base = lpBase lowered
       needsIO = any functionReferencesIOWrapper (lpFunctions lowered)
       needsStringLength = any (functionReferencesGlobalNames (Set.singleton runtimeStringLengthName)) (lpFunctions lowered)
-      existingDecls = runtimeDeclarations base needsStringLength
+      needsStringIsEmpty = any (functionReferencesGlobalNames (Set.singleton runtimeStringIsEmptyName)) (lpFunctions lowered)
+      existingDecls = runtimeDeclarations base needsStringLength needsStringIsEmpty
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -295,6 +296,7 @@ nativeRuntimeFunctions :: ProgramBase -> [LLVMFunction]
 nativeRuntimeFunctions base =
   [nativeAndFunction | Map.notMember runtimeAndName (pbBindings base)]
     ++ [nativeStringLengthFunction | Map.notMember runtimeStringLengthName (pbBindings base)]
+    ++ [nativeStringIsEmptyFunction | Map.notMember runtimeStringIsEmptyName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -884,6 +886,20 @@ nativeStringLengthFunction =
     Right function -> function
     Left err -> error ("internal native __string_length lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringIsEmptyFunction :: LLVMFunction
+nativeStringIsEmptyFunction =
+  case
+    lowerNativeFunction runtimeStringIsEmptyName (LLVMInt 1) [(LLVMPtr, "value")] $ \params -> do
+      let value = requireNativeParam "value" params
+          i8Ty = LLVMInt 8
+      charPtr <- emitAssign "strisempty.cptr" LLVMPtr (LLVMGetElementPtr i8Ty value [(LLVMInt 64, LLVMIntLiteral 64 0)])
+      charVal <- emitAssign "strisempty.c" i8Ty (LLVMLoad i8Ty charPtr)
+      result <- emitAssign "strisempty.result" (LLVMInt 1) (LLVMICmpEq charVal (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMRet (LLVMInt 1) result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_is_empty lowering failed: " ++ renderBackendLLVMError err)
+
 -- IO runtime primitives
 
 ioPureName :: String
@@ -1425,12 +1441,16 @@ runtimeStringLengthName :: String
 runtimeStringLengthName =
   PrimitiveInventory.stringLengthPrimitiveName
 
+runtimeStringIsEmptyName :: String
+runtimeStringIsEmptyName =
+  PrimitiveInventory.stringIsEmptyPrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -1440,6 +1460,10 @@ runtimeDeclarations base needsStringLength =
     ++ [ LLVMDeclaration runtimeStringLengthName (LLVMInt 64) [LLVMPtr] False
          | needsStringLength,
            Map.notMember runtimeStringLengthName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringIsEmptyName (LLVMInt 1) [LLVMPtr] False
+         | needsStringIsEmpty,
+           Map.notMember runtimeStringIsEmptyName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -4676,6 +4700,18 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
               requireLLVMType context name LLVMPtr arg
               result <- emitAssign "call" (LLVMInt 64) (LLVMCall runtimeStringLengthName [(LLVMPtr, lvOperand arg)])
               pure (LowerValue (BTBase (BaseTy "Int")) (LLVMInt 64) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 1 (length args))
+    Nothing
+      | name == runtimeStringIsEmptyName -> do
+          unless (length args == 1) $
+            liftEither (BackendLLVMArityMismatch name 1 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [arg] -> do
+              requireLLVMType context name LLVMPtr arg
+              result <- emitAssign "call" (LLVMInt 1) (LLVMCall runtimeStringIsEmptyName [(LLVMPtr, lvOperand arg)])
+              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
