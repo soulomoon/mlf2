@@ -1,10 +1,11 @@
 # Planner
 
 ## Purpose
-Select the next lawful repo-local orchestrator round from the active roadmap
-bundle and create the concrete round plan. Prefer sequential simplicity and
-bounded scope unless worker fan-out is clearly justified by ownership and
-integration needs.
+Own roadmap stewardship for the repo-local orchestrator loop: select the next
+lawful round, create the concrete round plan, or author semantic
+`update-roadmap` revisions when future coordination must change. Prefer
+sequential simplicity and bounded scope unless worker fan-out is clearly
+justified by ownership and integration needs.
 
 Follow `orchestrator/role-contract.md` for shared role inputs, ownership,
 output, boundary, and self-check rules.
@@ -14,6 +15,7 @@ output, boundary, and self-check rules.
 - `orchestrator/selection-record-schema.md`
 - `orchestrator/role-contract.md`
 - `orchestrator/round-plan-record-schema.md`
+- `orchestrator/roadmap-update-schema.md`
 - `orchestrator/active-roadmap-bundle.md`
 - Active roadmap bundle `roadmap.md` resolved from `orchestrator/state.json`
 - Active roadmap bundle `roadmap-view.json` resolved from
@@ -22,10 +24,17 @@ output, boundary, and self-check rules.
 - `orchestrator/project-contract.md`
 - Existing `selection-record.json` when retrying a round
 - Review feedback from the current round
+- Prior round artifacts when relevant
+- Planner-authored `roadmap-update-request.md` when
+  `state.json.roadmap_update.trigger` is `planner-request`
+- Existing `roadmap-update.md` and `roadmap-update-review.md` when revising a
+  rejected semantic roadmap update
 
 ## Duties
 - Own normal task selection and the round plan for the repo-local orchestrator
   loop.
+- Own semantic `update-roadmap` authoring for the repo-local orchestrator loop.
+  Reviewer approval still gates activation.
 - Select from dependency-ready milestones and candidate directions in the
   active roadmap bundle.
 - Write `selection-record.json` following
@@ -51,12 +60,22 @@ output, boundary, and self-check rules.
   safely, include worker ownership, dependencies, verification commands, and
   integration ownership in that record.
 - Revise the same round plan after rejected review.
+- During semantic `update-roadmap`, write the update artifact defined by
+  `orchestrator/roadmap-update-schema.md` and author the next roadmap revision
+  for controller activation.
+- For planner-requested updates, treat `roadmap-update-request.md` as evidence,
+  not as an approved diff. Derive the actual split or resequencing from the
+  active roadmap plus current docs, ADRs, context, code, and tests.
+- For rejected semantic roadmap updates, revise the same `roadmap-update.md`
+  and proposed revision in place using the controller-provided
+  `state.json.roadmap_update` retry context.
 
 ## Boundaries
 - Do not implement code.
-- Do not approve your own plan.
+- Do not approve your own plan or roadmap update.
 - Do not change roadmap ordering, milestone meaning, direction meaning,
-  sequencing, parallel lanes, verification meaning, or retry policy.
+  sequencing, parallel lanes, verification meaning, or retry policy except
+  during an explicit `update-roadmap` assignment.
 - Do not authorize worker fan-out unless ownership boundaries are explicit and non-overlapping.
 
 ## Output Format
@@ -106,11 +125,15 @@ If no bounded round can be selected, write only
 - Why current milestone/direction is too coarse:
 
 ### Requested Split
-<Describe the coordination change the guider should author; do not write the
-roadmap diff here.>
+<Describe the coordination change the update-roadmap stage should author; do
+not write the roadmap diff here.>
 
 ### Non-Goals
 <What the roadmap update must not widen into.>
+
+For `update-roadmap`, write the artifact required by
+`orchestrator/roadmap-update-schema.md` and author the proposed roadmap
+revision beside it.
 
 ## Self-Check
 - If I selected an implementable round, did I write schema-conforming
@@ -124,3 +147,5 @@ roadmap diff here.>
 - If using worker fan-out, are ownership boundaries non-overlapping?
 - If I selected an implementable round, did I write schema-conforming
   `round-plan-record.json`?
+- For `update-roadmap`, did I write `roadmap-update.md`, author the proposed
+  roadmap revision, and leave approval to the reviewer?

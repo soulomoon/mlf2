@@ -78,12 +78,12 @@ Use:
 For `planner-request`, the controller must preserve the planner-authored
 `roadmap-update-request.md` verbatim in the roadmap-update worktree at
 `orchestrator/rounds/<round-id>/roadmap-update-request.md` before removing the
-planning round from `active_rounds[]`. The guider reads that preserved request
+planning round from `active_rounds[]`. The planner reads that preserved request
 as evidence; it does not become an approved roadmap diff.
 
 ## `roadmap-update.md`
 
-The guider authors this artifact and the proposed roadmap bundle revision in
+The planner authors this artifact and the proposed roadmap bundle revision in
 the roadmap-update worktree.
 
 Required sections:
@@ -129,9 +129,9 @@ If review rejects the update:
 - set `roadmap_update.status` to `rejected`;
 - increment `roadmap_update.attempt`;
 - record `last_rejection_artifact` and `last_rejection_summary`; and
-- return the update to the guider for in-place revision.
+- return the update to the planner for in-place revision.
 
-After the guider revises the update, set status back to `review` and dispatch
+After the planner revises the update, set status back to `review` and dispatch
 the reviewer again.
 
 After three rejected attempts for the same semantic update, set status to

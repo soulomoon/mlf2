@@ -18,7 +18,6 @@ The scaffolded `orchestrator/` directory must contain:
 - `round-plan-record-schema.md`
 - `round-finalization-schema.md`
 - `roadmap-update-schema.md`
-- `roles/guider.md`
 - `roles/planner.md`
 - `roles/implementer.md`
 - `roles/reviewer.md`

@@ -64,10 +64,10 @@ retry policy, and delegation boundaries before changing state, stepping a round
 backward, or recording blockage.
 
 ## Boundaries
-- Do not write `selection-record.json`, `plan.md`, implementation artifacts,
-  `review.md`, or `review-record.json`.
+- Do not write `selection-record.json`, `plan.md`, `roadmap-update.md`,
+  implementation artifacts, `review.md`, or `review-record.json`.
 - Do not write `orchestrator/state.json`.
-- Do not perform guider, planner, implementer, or reviewer substantive work.
+- Do not perform planner, implementer, or reviewer substantive work.
 - Do not act as the stage reviewer during review-stage failures.
 - Do not author the controller-owned recovery note.
 - Do not perform repo or worktree repair actions.
