@@ -41,6 +41,11 @@
   `stringEndsWith "abλ" "λ"` as `true` and `stringEndsWith "λab" "λ"` as
   `false` through `.mlfp` source checking, `run-program`, raw LLVM emission,
   object-code validation, and linked native execution.
+- Added the first native-capable drop slicing string tracer:
+  `stringDrop : String -> Int -> String` now returns `"ab"` for
+  `stringDrop "λab" 1` and `"b"` for `stringDrop "aλb" 2` through `.mlfp`
+  source checking, `run-program`, raw LLVM emission, object-code validation,
+  and linked native execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

@@ -427,6 +427,7 @@ stringContainsChar : String -> Char -> Bool
 stringContains : String -> String -> Bool
 stringStartsWith : String -> String -> Bool
 stringEndsWith : String -> String -> Bool
+stringDrop : String -> Int -> String
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -444,11 +445,15 @@ non-empty Unicode scalar prefix, so `stringStartsWith "λab" "λ"` is `true`
 while `stringStartsWith "aλb" "λ"` is `false`. `stringEndsWith` is the first
 suffix `String` search operation; the current native-capable tracer covers a
 non-empty Unicode scalar suffix, so `stringEndsWith "abλ" "λ"` is `true` while
-`stringEndsWith "λab" "λ"` is `false`. These operations are covered through
-source checking, `run-program`, backend LLVM emission, object generation, and
-linked native execution for the current native-capable tracers. `String`/`List
-Char` conversion, formatting, slicing, broader classification predicates,
-cursor APIs, locale, regex, and full parser parity remain out of scope.
+`stringEndsWith "λab" "λ"` is `false`. `stringDrop` is the first drop slicing
+operation; the current native-capable tracer drops a non-negative count of
+Unicode scalar values, so `stringDrop "λab" 1` returns `"ab"` and
+`stringDrop "aλb" 2` returns `"b"`. These operations are covered through source
+checking, `run-program`, backend LLVM emission, object generation, and linked
+native execution for the current native-capable tracers. `String`/`List Char`
+conversion, formatting, full slicing coverage, broader classification
+predicates, cursor APIs, locale, regex, and full parser parity remain out of
+scope.
 
 Pure program entrypoints remain accepted:
 
@@ -576,6 +581,7 @@ Current prelude contents:
 - `stringContains`
 - `stringStartsWith`
 - `stringEndsWith`
+- `stringDrop`
 - `and`
 - `id`
 
@@ -608,10 +614,11 @@ Unicode scalar values. The first substring `String` search operation is
 substring. The first prefix `String` search operation is `stringStartsWith`,
 with native coverage for a non-empty Unicode scalar prefix. The first suffix
 `String` search operation is `stringEndsWith`, with native coverage for a
-non-empty Unicode scalar suffix. Broad
-`String`/`List Char` conversion, formatting, slicing, broader classification
-predicates, cursor APIs, and parser-parity helpers remain outside this
-contract.
+non-empty Unicode scalar suffix. The first drop slicing operation is
+`stringDrop`, with native coverage for non-negative Unicode scalar prefix-drop
+examples. Broad `String`/`List Char` conversion, formatting, full slicing
+coverage, broader classification predicates, cursor APIs, and parser-parity
+helpers remain outside this contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 

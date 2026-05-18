@@ -85,8 +85,8 @@ Row-5 primitive/eager ownership keeps the primitive surface at the
 inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__mlfp_and`, `__string_length`, `__string_is_empty`,
 `__string_contains_char`, `__string_contains`, `__string_starts_with`,
-`__string_ends_with`, plus the IO primitive names classified there for native
-support.
+`__string_ends_with`, `__string_drop`, plus the IO primitive names classified
+there for native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
 The lowerer relies on the current eager order exactly as written:
@@ -172,6 +172,7 @@ lowerBackendProgram program = do
       needsStringContains = any (functionReferencesGlobalNames (Set.singleton runtimeStringContainsName)) (lpFunctions lowered)
       needsStringStartsWith = any (functionReferencesGlobalNames (Set.singleton runtimeStringStartsWithName)) (lpFunctions lowered)
       needsStringEndsWith = any (functionReferencesGlobalNames (Set.singleton runtimeStringEndsWithName)) (lpFunctions lowered)
+      needsStringDrop = any (functionReferencesGlobalNames (Set.singleton runtimeStringDropName)) (lpFunctions lowered)
       existingDecls =
         runtimeDeclarations
           base
@@ -181,6 +182,7 @@ lowerBackendProgram program = do
           needsStringContains
           needsStringStartsWith
           needsStringEndsWith
+          needsStringDrop
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -315,6 +317,7 @@ nativeRuntimeFunctions base =
     ++ [nativeStringContainsFunction | Map.notMember runtimeStringContainsName (pbBindings base)]
     ++ [nativeStringStartsWithFunction | Map.notMember runtimeStringStartsWithName (pbBindings base)]
     ++ [nativeStringEndsWithFunction | Map.notMember runtimeStringEndsWithName (pbBindings base)]
+    ++ [nativeStringDropFunction | Map.notMember runtimeStringDropName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -1256,6 +1259,83 @@ nativeStringEndsWithFunction =
     Right function -> function
     Left err -> error ("internal native __string_ends_with lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringDropFunction :: LLVMFunction
+nativeStringDropFunction =
+  case
+    lowerNativeFunction runtimeStringDropName LLVMPtr [(LLVMPtr, "value"), (LLVMInt 64, "count")] $ \params -> do
+      let value = requireNativeParam "value" params
+          count = requireNativeParam "count" params
+          i8Ty = LLVMInt 8
+          i64Ty = LLVMInt 64
+          loadByte label curPtr = do
+            bytePtr <- emitAssign (label ++ ".ptr") LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 0)])
+            emitAssign label i8Ty (LLVMLoad i8Ty bytePtr)
+          advancePtr label offset curPtr =
+            emitAssign label LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 offset)])
+      curSlot <- emitAssign "strdrop.cur.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      droppedSlot <- emitAssign "strdrop.dropped.slot" LLVMPtr (LLVMAlloca i64Ty (LLVMIntLiteral 64 1))
+      let advanceScalar label offset curPtr = do
+            nextPtr <- advancePtr (label ++ ".next.ptr") offset curPtr
+            dropped <- emitAssign (label ++ ".dropped") i64Ty (LLVMLoad i64Ty droppedSlot)
+            nextDropped <- emitAssign (label ++ ".dropped.next") i64Ty (LLVMAdd dropped (LLVMIntLiteral 64 1))
+            emitStore i64Ty nextDropped droppedSlot
+            emitStore LLVMPtr nextPtr curSlot
+      emitStore LLVMPtr value curSlot
+      emitStore i64Ty (LLVMIntLiteral 64 0) droppedSlot
+      loopHeader <- freshBlock "strdrop.header"
+      readByte <- freshBlock "strdrop.read-byte"
+      detectAscii <- freshBlock "strdrop.detect.ascii"
+      advanceOne <- freshBlock "strdrop.advance.one"
+      detectTwo <- freshBlock "strdrop.detect.two"
+      advanceTwo <- freshBlock "strdrop.advance.two"
+      detectThree <- freshBlock "strdrop.detect.three"
+      advanceThree <- freshBlock "strdrop.advance.three"
+      advanceFour <- freshBlock "strdrop.advance.four"
+      done <- freshBlock "strdrop.done"
+      countZero <- emitAssign "strdrop.count.zero" (LLVMInt 1) (LLVMICmpEq count (LLVMIntLiteral 64 0))
+      countNegative <- emitAssign "strdrop.count.negative" (LLVMInt 1) (LLVMICmpUgt count (LLVMIntLiteral 64 9223372036854775807))
+      countNonPositive <- emitAssign "strdrop.count.nonpositive" (LLVMInt 1) (LLVMOr countZero countNegative)
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) countNonPositive loopHeader [(1, done)])
+      startBlock loopHeader
+      dropped <- emitAssign "strdrop.dropped" i64Ty (LLVMLoad i64Ty droppedSlot)
+      droppedEnough <- emitAssign "strdrop.dropped.enough" (LLVMInt 1) (LLVMICmpEq dropped count)
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) droppedEnough readByte [(1, done)])
+      startBlock readByte
+      curPtr <- emitAssign "strdrop.cur" LLVMPtr (LLVMLoad LLVMPtr curSlot)
+      byte <- loadByte "strdrop.byte" curPtr
+      isNull <- emitAssign "strdrop.end" (LLVMInt 1) (LLVMICmpEq byte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isNull detectAscii [(1, done)])
+      startBlock detectAscii
+      asciiClass <- emitAssign "strdrop.ascii.class" i8Ty (LLVMAnd byte (LLVMIntLiteral 8 0x80))
+      isAscii <- emitAssign "strdrop.is.ascii" (LLVMInt 1) (LLVMICmpEq asciiClass (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isAscii detectTwo [(1, advanceOne)])
+      startBlock advanceOne
+      advanceScalar "strdrop.one" 1 curPtr
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock detectTwo
+      twoClass <- emitAssign "strdrop.two.class" i8Ty (LLVMAnd byte (LLVMIntLiteral 8 0xE0))
+      isTwo <- emitAssign "strdrop.is.two" (LLVMInt 1) (LLVMICmpEq twoClass (LLVMIntLiteral 8 0xC0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isTwo detectThree [(1, advanceTwo)])
+      startBlock advanceTwo
+      advanceScalar "strdrop.two" 2 curPtr
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock detectThree
+      threeClass <- emitAssign "strdrop.three.class" i8Ty (LLVMAnd byte (LLVMIntLiteral 8 0xF0))
+      isThree <- emitAssign "strdrop.is.three" (LLVMInt 1) (LLVMICmpEq threeClass (LLVMIntLiteral 8 0xE0))
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isThree advanceFour [(1, advanceThree)])
+      startBlock advanceThree
+      advanceScalar "strdrop.three" 3 curPtr
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock advanceFour
+      advanceScalar "strdrop.four" 4 curPtr
+      finishCurrentBlock (LLVMBr loopHeader)
+      startBlock done
+      result <- emitAssign "strdrop.result" LLVMPtr (LLVMLoad LLVMPtr curSlot)
+      finishCurrentBlock (LLVMRet LLVMPtr result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_drop lowering failed: " ++ renderBackendLLVMError err)
+
 -- IO runtime primitives
 
 ioPureName :: String
@@ -1817,12 +1897,16 @@ runtimeStringEndsWithName :: String
 runtimeStringEndsWithName =
   PrimitiveInventory.stringEndsWithPrimitiveName
 
+runtimeStringDropName :: String
+runtimeStringDropName =
+  PrimitiveInventory.stringDropPrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -1852,6 +1936,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeStringEndsWithName (LLVMInt 1) [LLVMPtr, LLVMPtr] False
          | needsStringEndsWith,
            Map.notMember runtimeStringEndsWithName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringDropName LLVMPtr [LLVMPtr, LLVMInt 64] False
+         | needsStringDrop,
+           Map.notMember runtimeStringDropName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -5180,6 +5268,26 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
                       [(LLVMPtr, lvOperand haystack), (LLVMPtr, lvOperand suffix)]
                   )
               pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 2 (length args))
+    Nothing
+      | name == runtimeStringDropName -> do
+          unless (length args == 2) $
+            liftEither (BackendLLVMArityMismatch name 2 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [value, count] -> do
+              requireLLVMType context name LLVMPtr value
+              requireLLVMType context name (LLVMInt 64) count
+              result <-
+                emitAssign
+                  "call"
+                  LLVMPtr
+                  ( LLVMCall
+                      runtimeStringDropName
+                      [(LLVMPtr, lvOperand value), (LLVMInt 64, lvOperand count)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
