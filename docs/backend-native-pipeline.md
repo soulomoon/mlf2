@@ -40,7 +40,7 @@ contract. The current primitive surface is the inventory-owned reserved
 runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_length`, `__string_is_empty`, `__string_contains_char`,
 `__string_contains`, `__string_starts_with`, `__string_ends_with`,
-`__string_drop`, `__string_take`, plus the IO primitive names classified there
+`__string_drop`, `__string_take`, `__string_slice`, plus the IO primitive names classified there
 for native support. Native lowering consumes that inventory directly for lowerable
 primitive names, while wrapper bodies, C runtime symbol names, closure layout,
 and eager sequencing implementation details remain lowerer-local.
@@ -144,6 +144,10 @@ Native emission owns the small process/runtime surface it needs:
 - `__string_take`: inventory-classified as the first native-capable take
   slicing `String` operation; the native helper copies complete UTF-8 scalar
   sequences up to a non-negative count and returns a new `String` pointer.
+- `__string_slice`: inventory-classified as the first native-capable range
+  slicing `String` operation; the native helper advances by UTF-8 scalar starts
+  for a non-negative start offset, copies complete UTF-8 scalar sequences up to
+  a non-negative count, and returns a new `String` pointer.
 - Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
   `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
   functions with entry-point implementations.
@@ -188,6 +192,9 @@ Supported result shapes are:
 - `stringTake : String -> Int -> String` is the first native-capable take
   slicing String tracer and keeps non-negative Unicode scalar prefix counts
   through native execution.
+- `stringSlice : String -> Int -> Int -> String` is the first native-capable
+  range slicing String tracer and keeps non-negative Unicode scalar start/count
+  examples through native execution.
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 

@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-275",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-broad-string-char-substrate",
+  "extracted_item_id": "item-275-string-slice-native-tracer",
+  "decision": "approved",
+  "evidence_summary": "Focused stringSlice native range-slicing tracer, primitive inventory matcher, neighbor text/native matcher set, required rg evidence checks, git diff --check, cabal build all, cabal test, and thesis conformance gate passed. The diff matches the selected item, preserves prior text tracers, and docs/changelog record only the new first range-slicing tracer without widening future-work claims.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-275 completed item-275-string-slice-native-tracer: `stringSlice : String -> Int -> Int -> String` returns `\"\\\\955b\"` for `stringSlice \"aλbc\" 1 2` and `\"ab\"` for `stringSlice \"λabc\" 1 2` with the current escaped string display through source checking, run-program, backend LLVM/object validation, emit-native/native object validation, and linked native execution; evidence: focused stringSlice matcher, primitive inventory matcher, neighbor text/native matcher set, rg evidence checks, `git diff --check`, `cabal build all`, `cabal test`, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

@@ -429,6 +429,7 @@ stringStartsWith : String -> String -> Bool
 stringEndsWith : String -> String -> Bool
 stringDrop : String -> Int -> String
 stringTake : String -> Int -> String
+stringSlice : String -> Int -> Int -> String
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -452,7 +453,11 @@ Unicode scalar values, so `stringDrop "λab" 1` returns `"ab"` and
 `stringDrop "aλb" 2` returns `"b"`. `stringTake` is the first take slicing
 operation; the current native-capable tracer keeps a non-negative count of
 Unicode scalar values, so `stringTake "λab" 1` returns `"λ"` and
-`stringTake "aλb" 2` returns `"aλ"`. These operations are covered through
+`stringTake "aλb" 2` returns `"aλ"`. `stringSlice` is the first range slicing
+operation; the current native-capable tracer drops a non-negative scalar start
+offset and then keeps a non-negative scalar count, so
+`stringSlice "aλbc" 1 2` returns `"λb"` and
+`stringSlice "λabc" 1 2` returns `"ab"`. These operations are covered through
 source checking, `run-program`, backend LLVM emission, object generation, and
 linked native execution for the current native-capable tracers. `String`/`List
 Char` conversion, formatting, full slicing coverage, broader classification
@@ -587,6 +592,7 @@ Current prelude contents:
 - `stringEndsWith`
 - `stringDrop`
 - `stringTake`
+- `stringSlice`
 - `and`
 - `id`
 
@@ -622,7 +628,9 @@ with native coverage for a non-empty Unicode scalar prefix. The first suffix
 non-empty Unicode scalar suffix. The first drop slicing operation is
 `stringDrop`, with native coverage for non-negative Unicode scalar prefix-drop
 examples. The first take slicing operation is `stringTake`, with native
-coverage for non-negative Unicode scalar prefix-take examples. Broad
+coverage for non-negative Unicode scalar prefix-take examples. The first range
+slicing operation is `stringSlice`, with native coverage for non-negative
+Unicode scalar start/count examples. Broad
 `String`/`List Char` conversion, formatting, full slicing coverage, broader
 classification predicates, cursor APIs, and parser-parity helpers remain
 outside this contract.

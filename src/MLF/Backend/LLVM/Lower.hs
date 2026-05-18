@@ -85,7 +85,7 @@ Row-5 primitive/eager ownership keeps the primitive surface at the
 inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__mlfp_and`, `__string_length`, `__string_is_empty`,
 `__string_contains_char`, `__string_contains`, `__string_starts_with`,
-`__string_ends_with`, `__string_drop`, `__string_take`, plus the IO primitive
+`__string_ends_with`, `__string_drop`, `__string_take`, `__string_slice`, plus the IO primitive
 names classified there for native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
@@ -174,6 +174,7 @@ lowerBackendProgram program = do
       needsStringEndsWith = any (functionReferencesGlobalNames (Set.singleton runtimeStringEndsWithName)) (lpFunctions lowered)
       needsStringDrop = any (functionReferencesGlobalNames (Set.singleton runtimeStringDropName)) (lpFunctions lowered)
       needsStringTake = any (functionReferencesGlobalNames (Set.singleton runtimeStringTakeName)) (lpFunctions lowered)
+      needsStringSlice = any (functionReferencesGlobalNames (Set.singleton runtimeStringSliceName)) (lpFunctions lowered)
       existingDecls =
         runtimeDeclarations
           base
@@ -185,6 +186,7 @@ lowerBackendProgram program = do
           needsStringEndsWith
           needsStringDrop
           needsStringTake
+          needsStringSlice
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -321,6 +323,7 @@ nativeRuntimeFunctions base =
     ++ [nativeStringEndsWithFunction | Map.notMember runtimeStringEndsWithName (pbBindings base)]
     ++ [nativeStringDropFunction | Map.notMember runtimeStringDropName (pbBindings base)]
     ++ [nativeStringTakeFunction | Map.notMember runtimeStringTakeName (pbBindings base)]
+    ++ [nativeStringSliceFunction | Map.notMember runtimeStringSliceName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -1441,6 +1444,34 @@ nativeStringTakeFunction =
     Right function -> function
     Left err -> error ("internal native __string_take lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringSliceFunction :: LLVMFunction
+nativeStringSliceFunction =
+  case
+    lowerNativeFunction runtimeStringSliceName LLVMPtr [(LLVMPtr, "value"), (LLVMInt 64, "start"), (LLVMInt 64, "count")] $ \params -> do
+      let value = requireNativeParam "value" params
+          start = requireNativeParam "start" params
+          count = requireNativeParam "count" params
+      dropped <-
+        emitAssign
+          "strslice.drop"
+          LLVMPtr
+          ( LLVMCall
+              runtimeStringDropName
+              [(LLVMPtr, value), (LLVMInt 64, start)]
+          )
+      sliced <-
+        emitAssign
+          "strslice.take"
+          LLVMPtr
+          ( LLVMCall
+              runtimeStringTakeName
+              [(LLVMPtr, dropped), (LLVMInt 64, count)]
+          )
+      finishCurrentBlock (LLVMRet LLVMPtr sliced)
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_slice lowering failed: " ++ renderBackendLLVMError err)
+
 -- IO runtime primitives
 
 ioPureName :: String
@@ -2010,12 +2041,16 @@ runtimeStringTakeName :: String
 runtimeStringTakeName =
   PrimitiveInventory.stringTakePrimitiveName
 
+runtimeStringSliceName :: String
+runtimeStringSliceName =
+  PrimitiveInventory.stringSlicePrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -2053,6 +2088,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeStringTakeName LLVMPtr [LLVMPtr, LLVMInt 64] False
          | needsStringTake,
            Map.notMember runtimeStringTakeName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringSliceName LLVMPtr [LLVMPtr, LLVMInt 64, LLVMInt 64] False
+         | needsStringSlice,
+           Map.notMember runtimeStringSliceName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -5423,6 +5462,27 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
               pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
+    Nothing
+      | name == runtimeStringSliceName -> do
+          unless (length args == 3) $
+            liftEither (BackendLLVMArityMismatch name 3 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [value, start, count] -> do
+              requireLLVMType context name LLVMPtr value
+              requireLLVMType context name (LLVMInt 64) start
+              requireLLVMType context name (LLVMInt 64) count
+              result <-
+                emitAssign
+                  "call"
+                  LLVMPtr
+                  ( LLVMCall
+                      runtimeStringSliceName
+                      [(LLVMPtr, lvOperand value), (LLVMInt 64, lvOperand start), (LLVMInt 64, lvOperand count)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 3 (length args))
     Nothing
       | Set.member name ioPrimitiveNames -> do
           callArgs <- traverse (lowerExpr env exprEnv context) args

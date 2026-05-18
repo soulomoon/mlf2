@@ -355,6 +355,14 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   native execution; evidence: focused stringTake matcher, primitive inventory
   matcher, neighbor text/native matcher set, rg evidence checks,
   `git diff --check`, cabal build all, cabal test, and thesis gate passed.
+- round-275 completed item-275-string-slice-native-tracer:
+  `stringSlice : String -> Int -> Int -> String` returns `"\\955b"` for
+  `stringSlice "aλbc" 1 2` and `"ab"` for `stringSlice "λabc" 1 2` with the
+  current escaped string display through source checking, run-program, backend
+  LLVM/object validation, emit-native/native object validation, and linked
+  native execution; evidence: focused stringSlice matcher, primitive inventory
+  matcher, neighbor text/native matcher set, rg evidence checks,
+  `git diff --check`, cabal build all, cabal test, and thesis gate passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

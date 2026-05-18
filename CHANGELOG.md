@@ -52,6 +52,12 @@
   existing escaped Haskell-style string display, through `.mlfp` source
   checking, `run-program`, raw LLVM emission, object-code validation, and
   linked native execution.
+- Added the first native-capable range slicing string tracer:
+  `stringSlice : String -> Int -> Int -> String` now returns `"\\955b"` for
+  `stringSlice "aλbc" 1 2` and `"ab"` for `stringSlice "λabc" 1 2` with the
+  existing escaped Haskell-style string display, through `.mlfp` source
+  checking, `run-program`, raw LLVM emission, object-code validation, and
+  linked native execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered
