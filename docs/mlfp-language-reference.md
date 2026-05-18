@@ -424,6 +424,7 @@ The current pure broad string operations are:
 stringLength : String -> Int
 stringIsEmpty : String -> Bool
 stringContainsChar : String -> Char -> Bool
+stringContains : String -> String -> Bool
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -432,12 +433,15 @@ classifies the valid source text boundary where `""` is empty and a non-empty
 Unicode scalar string such as `"λ"` is not. `stringContainsChar` is the first
 single-character `String`/`Char` search operation; it compares Unicode scalar
 values, so `stringContainsChar "aλb" 'λ'` is `true` while
-`stringContainsChar "ab" 'λ'` is `false`. These operations are covered through
-source checking, `run-program`, backend LLVM emission, object generation, and
-linked native execution for the current native-capable tracers. `String`/`List
-Char` conversion, substring search, formatting, slicing, broader
-classification predicates, cursor APIs, locale, regex, and full parser parity
-remain out of scope.
+`stringContainsChar "ab" 'λ'` is `false`. `stringContains` is the first
+substring `String` search operation; the current native-capable tracer covers a
+non-empty Unicode scalar substring, so `stringContains "aλb" "λ"` is `true`
+while `stringContains "ab" "λ"` is `false`. These operations are covered
+through source checking, `run-program`, backend LLVM emission, object
+generation, and linked native execution for the current native-capable tracers.
+`String`/`List Char` conversion, formatting, slicing, broader classification
+predicates, cursor APIs, locale, regex, and full parser parity remain out of
+scope.
 
 Pure program entrypoints remain accepted:
 
@@ -562,6 +566,7 @@ Current prelude contents:
 - `stringLength`
 - `stringIsEmpty`
 - `stringContainsChar`
+- `stringContains`
 - `and`
 - `id`
 
@@ -589,9 +594,11 @@ scalar values rather than UTF-8 bytes. The first broad `String` classification
 operation is `stringIsEmpty`, which renders `true` for `""` and `false` for a
 non-empty Unicode string such as `"λ"`. The first single-character
 `String`/`Char` search operation is `stringContainsChar`, which compares
-Unicode scalar values. Broad `String`/`List Char` conversion, substring search,
-formatting, slicing, broader classification predicates, cursor APIs, and
-parser-parity helpers remain outside this contract.
+Unicode scalar values. The first substring `String` search operation is
+`stringContains`, with native coverage for a non-empty Unicode scalar
+substring. Broad `String`/`List Char` conversion, formatting, slicing, broader
+classification predicates, cursor APIs, and parser-parity helpers remain
+outside this contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 

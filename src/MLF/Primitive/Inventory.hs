@@ -24,6 +24,7 @@ module MLF.Primitive.Inventory
     stringLengthPrimitiveName,
     stringIsEmptyPrimitiveName,
     stringContainsCharPrimitiveName,
+    stringContainsPrimitiveName,
     nativeIOPrimitiveName,
     nativeIOPrimitiveNames,
     nativeLowerablePrimitiveNames,
@@ -83,6 +84,7 @@ data PrimitiveNativeSupport
   | PrimitiveNativeStringLength
   | PrimitiveNativeStringIsEmpty
   | PrimitiveNativeStringContainsChar
+  | PrimitiveNativeStringContains
   | PrimitiveNativeIO PrimitiveIOOperation
   deriving (Eq, Ord, Show)
 
@@ -163,6 +165,12 @@ primitiveValueSpecs =
         primitiveValueSpec
           PrimitiveNativeStringContainsChar
           (stringTy `PrimitiveTypeArrow` (charTy `PrimitiveTypeArrow` boolTy))
+          Set.empty
+      ),
+      ( stringContainsPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringContains
+          (stringTy `PrimitiveTypeArrow` (stringTy `PrimitiveTypeArrow` boolTy))
           Set.empty
       ),
       nativeIOSpec
@@ -327,6 +335,10 @@ stringContainsCharPrimitiveName :: String
 stringContainsCharPrimitiveName =
   "__string_contains_char"
 
+stringContainsPrimitiveName :: String
+stringContainsPrimitiveName =
+  "__string_contains"
+
 requireSinglePrimitiveNativeSupport :: PrimitiveNativeSupport -> String
 requireSinglePrimitiveNativeSupport nativeSupport =
   case Set.toList (Map.keysSet (Map.filter ((== nativeSupport) . primitiveValueNativeSupport) primitiveValueSpecs)) of
@@ -353,6 +365,7 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeStringLength -> True
     PrimitiveNativeStringIsEmpty -> True
     PrimitiveNativeStringContainsChar -> True
+    PrimitiveNativeStringContains -> True
     PrimitiveNativeIO {} -> True
 
 primitiveTypeToSourceType :: PrimitiveType -> SrcType

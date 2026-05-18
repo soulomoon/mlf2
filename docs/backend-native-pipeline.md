@@ -38,10 +38,11 @@ a second IR or public lowering interface.
 Row-5 primitive/eager ownership is part of the same raw/native inspection
 contract. The current primitive surface is the inventory-owned reserved
 runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
-`__string_length`, `__string_is_empty`, plus the IO primitive names classified
-there for native support. Native lowering consumes that inventory directly for
-lowerable primitive names, while wrapper bodies, C runtime symbol names, closure
-layout, and eager sequencing implementation details remain lowerer-local.
+`__string_length`, `__string_is_empty`, `__string_contains_char`,
+`__string_contains`, plus the IO primitive names classified there for native
+support. Native lowering consumes that inventory directly for lowerable
+primitive names, while wrapper bodies, C runtime symbol names, closure layout,
+and eager sequencing implementation details remain lowerer-local.
 `emit-backend` and `emit-native` keep those primitives on the same
 `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`,
 no second executable IR, and no broad FFI lane.
@@ -127,6 +128,9 @@ Native emission owns the small process/runtime surface it needs:
 - `__string_contains_char`: inventory-classified as the first native-capable
   single-character `String`/`Char` search operation; the native helper compares
   Unicode scalar values and returns a `Bool`.
+- `__string_contains`: inventory-classified as the first native-capable
+  substring `String` search operation; the native helper compares valid UTF-8
+  scalar-sequence slices from scalar boundaries and returns a `Bool`.
 - Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
   `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
   functions with entry-point implementations.
@@ -156,6 +160,9 @@ Supported result shapes are:
   classification tracer and distinguishes `""` from a non-empty Unicode string.
 - `stringContainsChar : String -> Char -> Bool` is the first native-capable
   single-character String search tracer and compares Unicode scalar values.
+- `stringContains : String -> String -> Bool` is the first native-capable
+  substring String search tracer and compares non-empty Unicode scalar
+  substring examples through native execution.
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 

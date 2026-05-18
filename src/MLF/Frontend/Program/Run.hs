@@ -18,7 +18,7 @@ where
 
 import Control.Monad (foldM)
 import Data.Foldable (toList)
-import Data.List (find, intercalate)
+import Data.List (find, intercalate, isInfixOf)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -323,6 +323,7 @@ data RuntimePrimitive
   | RuntimeStringLength
   | RuntimeStringIsEmpty
   | RuntimeStringContainsChar
+  | RuntimeStringContains
   deriving (Eq, Show)
 
 data RuntimeIOAction
@@ -495,6 +496,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringLengthPrimitiveName -> Just RuntimeStringLength
       | name' == PrimitiveInventory.stringIsEmptyPrimitiveName -> Just RuntimeStringIsEmpty
       | name' == PrimitiveInventory.stringContainsCharPrimitiveName -> Just RuntimeStringContainsChar
+      | name' == PrimitiveInventory.stringContainsPrimitiveName -> Just RuntimeStringContains
     _ -> Nothing
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -1200,6 +1202,10 @@ applyRuntimePrimitive prim args
           Right (RuntimeLit (LBool (needle `elem` value)))
         (RuntimeStringContainsChar, _) ->
           Left (ProgramPipelineError "run-program __string_contains_char expected String and Char arguments")
+        (RuntimeStringContains, [RuntimeLit (LString haystack), RuntimeLit (LString needle)]) ->
+          Right (RuntimeLit (LBool (needle `isInfixOf` haystack)))
+        (RuntimeStringContains, _) ->
+          Left (ProgramPipelineError "run-program __string_contains expected String arguments")
         _ ->
           Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
 
@@ -1225,6 +1231,7 @@ runtimePrimitiveArity prim =
     RuntimeStringLength -> 1
     RuntimeStringIsEmpty -> 1
     RuntimeStringContainsChar -> 2
+    RuntimeStringContains -> 2
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
 executeIOAction context action =
@@ -1394,7 +1401,8 @@ runtimePurePrimitiveNames :: [String]
 runtimePurePrimitiveNames =
   [ PrimitiveInventory.stringLengthPrimitiveName,
     PrimitiveInventory.stringIsEmptyPrimitiveName,
-    PrimitiveInventory.stringContainsCharPrimitiveName
+    PrimitiveInventory.stringContainsCharPrimitiveName,
+    PrimitiveInventory.stringContainsPrimitiveName
   ]
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm

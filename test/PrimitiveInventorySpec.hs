@@ -39,7 +39,8 @@ spec = describe "MLF.Primitive.Inventory" $ do
         [ PrimitiveInventory.nativeAndPrimitiveName,
           PrimitiveInventory.stringLengthPrimitiveName,
           PrimitiveInventory.stringIsEmptyPrimitiveName,
-          PrimitiveInventory.stringContainsCharPrimitiveName
+          PrimitiveInventory.stringContainsCharPrimitiveName,
+          PrimitiveInventory.stringContainsPrimitiveName
         ]
         <> PrimitiveInventory.nativeIOPrimitiveNames
     PrimitiveInventory.nativeLowerablePrimitiveNames
@@ -57,6 +58,8 @@ spec = describe "MLF.Primitive.Inventory" $ do
           name `shouldBe` PrimitiveInventory.stringIsEmptyPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringContainsChar ->
           name `shouldBe` PrimitiveInventory.stringContainsCharPrimitiveName
+        PrimitiveInventory.PrimitiveNativeStringContains ->
+          name `shouldBe` PrimitiveInventory.stringContainsPrimitiveName
         PrimitiveInventory.PrimitiveNativeIO operation ->
           name `shouldBe` PrimitiveInventory.nativeIOPrimitiveName operation
 
