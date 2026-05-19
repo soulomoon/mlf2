@@ -439,6 +439,7 @@ charIsAsciiAlphaNum : Char -> Bool
 charIsAsciiIdentifierStart : Char -> Bool
 charIsAsciiIdentifierContinue : Char -> Bool
 charIsAsciiWhitespace : Char -> Bool
+charIsAsciiPunctuation : Char -> Bool
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -507,8 +508,13 @@ so `charIsAsciiWhitespace ' '`, `charIsAsciiWhitespace '\t'`,
 `charIsAsciiWhitespace '\n'`, `charIsAsciiWhitespace '\r'`,
 `charIsAsciiWhitespace '\f'`, and `charIsAsciiWhitespace '\v'` are `true`
 while `charIsAsciiWhitespace 'a'` and `charIsAsciiWhitespace 'λ'` are
-`false`. These
-operations are covered through source checking, `run-program`,
+`false`. `charIsAsciiPunctuation` is an explicitly ASCII punctuation `Char`
+classification tracer; it classifies exactly the ASCII ranges `0x21..0x2f`,
+`0x3a..0x40`, `0x5b..0x60`, and `0x7b..0x7e`, so
+`charIsAsciiPunctuation '!'`, `charIsAsciiPunctuation '_'`, and
+`charIsAsciiPunctuation '~'` are `true` while `charIsAsciiPunctuation 'a'`,
+`charIsAsciiPunctuation '7'`, `charIsAsciiPunctuation ' '`, and
+`charIsAsciiPunctuation 'λ'` are `false`. These operations are covered through source checking, `run-program`,
 backend LLVM emission, object generation, and linked native execution for the
 current native-capable tracers. `String`/`List Char` conversion, formatting,
 full slicing coverage, broader classification families, complete cursor APIs,
@@ -652,6 +658,7 @@ Current prelude contents:
 - `charIsAsciiIdentifierStart`
 - `charIsAsciiIdentifierContinue`
 - `charIsAsciiWhitespace`
+- `charIsAsciiPunctuation`
 - `and`
 - `id`
 
@@ -713,6 +720,10 @@ Unicode scalar is false.
 The next explicit ASCII helper is `charIsAsciiWhitespace`, with native coverage
 for exactly ASCII space, tab, newline, carriage return, form feed, and vertical
 tab as true while ASCII `a` and a non-ASCII Unicode scalar are false.
+The next explicit ASCII helper is `charIsAsciiPunctuation`, with native
+coverage for the ASCII punctuation ranges `0x21..0x2f`, `0x3a..0x40`,
+`0x5b..0x60`, and `0x7b..0x7e`: `!`, `_`, and `~` are true while ASCII `a`,
+ASCII digit `7`, ASCII space, and a non-ASCII Unicode scalar are false.
 Broad `String`/`List Char` conversion, formatting, full slicing coverage,
 broader classification families, complete cursor APIs, and parser-parity
 helpers remain outside this contract.

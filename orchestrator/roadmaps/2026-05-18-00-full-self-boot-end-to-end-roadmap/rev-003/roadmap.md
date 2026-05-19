@@ -441,6 +441,16 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   native execution; evidence: focused matcher, primitive inventory matcher,
   neighbor text/Char native matcher set, rg evidence/claim-audit checks,
   `git diff --check`, cabal build all, cabal test, and thesis gate passed.
+- round-285 completed item-285-char-is-ascii-punctuation-native-tracer:
+  `charIsAsciiPunctuation : Char -> Bool` classifies ASCII punctuation ranges
+  `0x21..0x2f`, `0x3a..0x40`, `0x5b..0x60`, and `0x7b..0x7e` as true and
+  letters, digits, space, and non-ASCII lambda as false through source
+  checking, run-program, backend LLVM/object validation, emit-native/native
+  object validation, and linked native execution; evidence: focused matcher,
+  primitive inventory matcher, neighbor text/Char native matcher set, rg
+  evidence/claim-audit checks, `git diff --check`, cabal build all,
+  cabal test, thesis gate, and reviewer rerun of diff, focused matcher, and
+  primitive inventory matcher passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

@@ -89,8 +89,9 @@ inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__string_char_at`, `__char_is_digit`, `__char_is_ascii_lower`,
 `__char_is_ascii_upper`, `__char_is_ascii_alpha`,
 `__char_is_ascii_alpha_num`, `__char_is_ascii_identifier_start`,
-`__char_is_ascii_identifier_continue`, `__char_is_ascii_whitespace`, plus the
-IO primitive names classified there for native support.
+`__char_is_ascii_identifier_continue`, `__char_is_ascii_whitespace`,
+`__char_is_ascii_punctuation`, plus the IO primitive names classified there for
+native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
 The lowerer relies on the current eager order exactly as written:
@@ -188,6 +189,7 @@ lowerBackendProgram program = do
       needsCharIsAsciiIdentifierStart = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiIdentifierStartName)) (lpFunctions lowered)
       needsCharIsAsciiIdentifierContinue = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiIdentifierContinueName)) (lpFunctions lowered)
       needsCharIsAsciiWhitespace = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiWhitespaceName)) (lpFunctions lowered)
+      needsCharIsAsciiPunctuation = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiPunctuationName)) (lpFunctions lowered)
       existingDecls =
         runtimeDeclarations
           base
@@ -209,6 +211,7 @@ lowerBackendProgram program = do
           needsCharIsAsciiIdentifierStart
           needsCharIsAsciiIdentifierContinue
           needsCharIsAsciiWhitespace
+          needsCharIsAsciiPunctuation
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -355,6 +358,7 @@ nativeRuntimeFunctions base =
     ++ [nativeCharIsAsciiIdentifierStartFunction | Map.notMember runtimeCharIsAsciiIdentifierStartName (pbBindings base)]
     ++ [nativeCharIsAsciiIdentifierContinueFunction | Map.notMember runtimeCharIsAsciiIdentifierContinueName (pbBindings base)]
     ++ [nativeCharIsAsciiWhitespaceFunction | Map.notMember runtimeCharIsAsciiWhitespaceName (pbBindings base)]
+    ++ [nativeCharIsAsciiPunctuationFunction | Map.notMember runtimeCharIsAsciiPunctuationName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -1070,6 +1074,32 @@ nativeCharIsAsciiWhitespaceFunction =
   of
     Right function -> function
     Left err -> error ("internal native __char_is_ascii_whitespace lowering failed: " ++ renderBackendLLVMError err)
+
+nativeCharIsAsciiPunctuationFunction :: LLVMFunction
+nativeCharIsAsciiPunctuationFunction =
+  case
+    lowerNativeFunction runtimeCharIsAsciiPunctuationName (LLVMInt 1) [(LLVMInt 32, "value")] $ \params -> do
+      let value = requireNativeParam "value" params
+          i1Ty = LLVMInt 1
+      aboveBeforeBang <- emitAssign "charisasciipunctuation.above.before.bang" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 32))
+      belowAfterSlash <- emitAssign "charisasciipunctuation.below.after.slash" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 48) value)
+      bangToSlashResult <- emitAssign "charisasciipunctuation.bangtoslash.result" i1Ty (LLVMAnd aboveBeforeBang belowAfterSlash)
+      aboveBeforeColon <- emitAssign "charisasciipunctuation.above.before.colon" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 57))
+      belowAfterAt <- emitAssign "charisasciipunctuation.below.after.at" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 65) value)
+      colonToAtResult <- emitAssign "charisasciipunctuation.colontoat.result" i1Ty (LLVMAnd aboveBeforeColon belowAfterAt)
+      aboveBeforeLeftBracket <- emitAssign "charisasciipunctuation.above.before.leftbracket" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 90))
+      belowAfterBacktick <- emitAssign "charisasciipunctuation.below.after.backtick" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 97) value)
+      leftBracketToBacktickResult <- emitAssign "charisasciipunctuation.leftbrackettobacktick.result" i1Ty (LLVMAnd aboveBeforeLeftBracket belowAfterBacktick)
+      aboveBeforeLeftBrace <- emitAssign "charisasciipunctuation.above.before.leftbrace" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 122))
+      belowAfterTilde <- emitAssign "charisasciipunctuation.below.after.tilde" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 127) value)
+      leftBraceToTildeResult <- emitAssign "charisasciipunctuation.leftbracetotilde.result" i1Ty (LLVMAnd aboveBeforeLeftBrace belowAfterTilde)
+      firstHalfResult <- emitAssign "charisasciipunctuation.firsthalf.result" i1Ty (LLVMOr bangToSlashResult colonToAtResult)
+      secondHalfResult <- emitAssign "charisasciipunctuation.secondhalf.result" i1Ty (LLVMOr leftBracketToBacktickResult leftBraceToTildeResult)
+      result <- emitAssign "charisasciipunctuation.result" i1Ty (LLVMOr firstHalfResult secondHalfResult)
+      finishCurrentBlock (LLVMRet i1Ty result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __char_is_ascii_punctuation lowering failed: " ++ renderBackendLLVMError err)
 
 nativeStringLengthFunction :: LLVMFunction
 nativeStringLengthFunction =
@@ -2371,12 +2401,16 @@ runtimeCharIsAsciiWhitespaceName :: String
 runtimeCharIsAsciiWhitespaceName =
   PrimitiveInventory.charIsAsciiWhitespacePrimitiveName
 
+runtimeCharIsAsciiPunctuationName :: String
+runtimeCharIsAsciiPunctuationName =
+  PrimitiveInventory.charIsAsciiPunctuationPrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -2454,6 +2488,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeCharIsAsciiWhitespaceName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiWhitespace,
            Map.notMember runtimeCharIsAsciiWhitespaceName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeCharIsAsciiPunctuationName (LLVMInt 1) [LLVMInt 32] False
+         | needsCharIsAsciiPunctuation,
+           Map.notMember runtimeCharIsAsciiPunctuationName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -6012,6 +6050,25 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
                   (LLVMInt 1)
                   ( LLVMCall
                       runtimeCharIsAsciiWhitespaceName
+                      [(LLVMInt 32, lvOperand value)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 1 (length args))
+    Nothing
+      | name == runtimeCharIsAsciiPunctuationName -> do
+          unless (length args == 1) $
+            liftEither (BackendLLVMArityMismatch name 1 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [value] -> do
+              requireLLVMType context name (LLVMInt 32) value
+              result <-
+                emitAssign
+                  "call"
+                  (LLVMInt 1)
+                  ( LLVMCall
+                      runtimeCharIsAsciiPunctuationName
                       [(LLVMInt 32, lvOperand value)]
                   )
               pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)

@@ -1,0 +1,44 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-285",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-broad-string-char-substrate",
+  "extracted_item_id": "item-285-char-is-ascii-punctuation-native-tracer",
+  "decision": "approved",
+  "findings": [],
+  "required_changes": [],
+  "validations": [
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/round285-review-cargo-target cabal test mlf2-test --test-options='--match \"charIsAsciiPunctuation classifies ASCII punctuation Char values through native execution\"'",
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/round285-review-cargo-target cabal test mlf2-test --test-options='--match \"classifies native-lowerable primitive support from the shared primitive inventory owner\"'",
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    }
+  ],
+  "evidence_summary": "Narrowed review of the integrated round-285 worktree found the implementation in scope: public Prelude charIsAsciiPunctuation : Char -> Bool is backed by __char_is_ascii_punctuation; runtime and LLVM/native lowering classify exactly ASCII punctuation ranges 0x21..0x2f, 0x3a..0x40, 0x5b..0x60, and 0x7b..0x7e as true and reject letters, digits, space, and non-ASCII lambda. The focused native punctuation matcher, primitive inventory matcher, and git diff --check passed. Docs/changelog stay within ASCII punctuation scope and do not claim Unicode punctuation, locale, regex, formatting, parser parity, String/List Char conversion, platform/proof, roadmap status, or controller-state expansion.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-285 completed item-285-char-is-ascii-punctuation-native-tracer: charIsAsciiPunctuation : Char -> Bool classifies ASCII punctuation ranges 0x21..0x2f, 0x3a..0x40, 0x5b..0x60, and 0x7b..0x7e as true and letters, digits, space, and non-ASCII lambda as false through source checking, run-program, backend LLVM/object validation, emit-native/native object validation, and linked native execution; reviewer evidence: git diff --check, focused native punctuation matcher, and primitive inventory matcher passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}
