@@ -532,6 +532,13 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   execution, primitive inventory, Option tag/layout audit, planned neighbor
   text/char checks, docs scope audit, git diff --check, and broad
   build/test/thesis evidence.
+- round-297 completed item-297-string-index-of-native-tracer: added
+  stringIndexOf : String -> String -> Option Int backed by __string_index_of
+  and proved first Unicode-scalar substring index Some 1, absent substring
+  None, and empty needle Some 0 through source checking, run-program, backend
+  LLVM/object validation, emit-native/native object validation, linked native
+  execution, primitive inventory, planned neighbor text/char checks, docs scope
+  audit, git diff --check, cabal build all, cabal test, and thesis gate.
 
 #### Candidate Direction: Broad String And Char Substrate
 

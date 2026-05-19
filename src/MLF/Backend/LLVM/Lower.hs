@@ -183,6 +183,7 @@ lowerBackendProgram program = do
       needsStringAppend = any (functionReferencesGlobalNames (Set.singleton runtimeStringAppendName)) (lpFunctions lowered)
       needsStringReplaceChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringReplaceCharName)) (lpFunctions lowered)
       needsStringIndexOfChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringIndexOfCharName)) (lpFunctions lowered)
+      needsStringIndexOf = any (functionReferencesGlobalNames (Set.singleton runtimeStringIndexOfName)) (lpFunctions lowered)
       needsStringFromChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringFromCharName)) (lpFunctions lowered)
       needsStringFromInt = any (functionReferencesGlobalNames (Set.singleton runtimeStringFromIntName)) (lpFunctions lowered)
       needsStringFromBool = any (functionReferencesGlobalNames (Set.singleton runtimeStringFromBoolName)) (lpFunctions lowered)
@@ -214,6 +215,7 @@ lowerBackendProgram program = do
           needsStringAppend
           needsStringReplaceChar
           needsStringIndexOfChar
+          needsStringIndexOf
           needsStringFromChar
           needsStringFromInt
           needsStringFromBool
@@ -371,6 +373,7 @@ nativeRuntimeFunctions base =
     ++ [nativeStringAppendFunction | Map.notMember runtimeStringAppendName (pbBindings base)]
     ++ [nativeStringReplaceCharFunction | Map.notMember runtimeStringReplaceCharName (pbBindings base)]
     ++ [nativeStringIndexOfCharFunction | Map.notMember runtimeStringIndexOfCharName (pbBindings base)]
+    ++ [nativeStringIndexOfFunction | Map.notMember runtimeStringIndexOfName (pbBindings base)]
     ++ [nativeStringFromCharFunction | Map.notMember runtimeStringFromCharName (pbBindings base)]
     ++ [nativeStringFromIntFunction | Map.notMember runtimeStringFromIntName (pbBindings base)]
     ++ [nativeStringFromBoolFunction | Map.notMember runtimeStringFromBoolName (pbBindings base)]
@@ -1989,6 +1992,134 @@ nativeStringIndexOfCharFunction =
     Right function -> function
     Left err -> error ("internal native __string_index_of_char lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringIndexOfFunction :: LLVMFunction
+nativeStringIndexOfFunction =
+  case
+    lowerNativeFunction runtimeStringIndexOfName LLVMPtr [(LLVMPtr, "haystack"), (LLVMPtr, "needle")] $ \params -> do
+      let haystack = requireNativeParam "haystack" params
+          needle = requireNativeParam "needle" params
+          i1Ty = LLVMInt 1
+          i8Ty = LLVMInt 8
+          i64Ty = LLVMInt 64
+          bytePtrAt label base offset =
+            emitAssign label LLVMPtr (LLVMGetElementPtr i8Ty base [(i64Ty, LLVMIntLiteral 64 offset)])
+          loadByteAt label base offset = do
+            ptr <- bytePtrAt (label ++ ".ptr") base offset
+            emitAssign label i8Ty (LLVMLoad i8Ty ptr)
+          advancePtr label base offset =
+            bytePtrAt label base offset
+          allocateNone label = do
+            cell <-
+              emitAssign
+                (label ++ ".cell")
+                LLVMPtr
+                (LLVMCall runtimeMallocName [(i64Ty, LLVMIntLiteral 64 (toInteger (constructorObjectBytes 0)))])
+            tagPtr <- emitGep (label ++ ".tag") cell constructorTagOffset
+            emitStore i64Ty (LLVMIntLiteral 64 0) tagPtr
+            pure cell
+          allocateSome label index = do
+            cell <-
+              emitAssign
+                (label ++ ".cell")
+                LLVMPtr
+                (LLVMCall runtimeMallocName [(i64Ty, LLVMIntLiteral 64 (toInteger (constructorObjectBytes 1)))])
+            tagPtr <- emitGep (label ++ ".tag") cell constructorTagOffset
+            emitStore i64Ty (LLVMIntLiteral 64 1) tagPtr
+            valuePtr <- emitGep (label ++ ".value") cell (constructorFieldOffset 0)
+            emitStore i64Ty index valuePtr
+            pure cell
+      candidateSlot <- emitAssign "strindexof.candidate.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      indexSlot <- emitAssign "strindexof.index.slot" LLVMPtr (LLVMAlloca i64Ty (LLVMIntLiteral 64 1))
+      matchHaystackSlot <- emitAssign "strindexof.match.haystack.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      matchNeedleSlot <- emitAssign "strindexof.match.needle.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitStore LLVMPtr haystack candidateSlot
+      emitStore i64Ty (LLVMIntLiteral 64 0) indexSlot
+      candidateHeader <- freshBlock "strindexof.candidate.header"
+      candidateStart <- freshBlock "strindexof.candidate.start"
+      matchHeader <- freshBlock "strindexof.match.header"
+      matchHaystackEnd <- freshBlock "strindexof.match.haystack-end"
+      matchCompare <- freshBlock "strindexof.match.compare"
+      matchAdvance <- freshBlock "strindexof.match.advance"
+      candidateAdvance <- freshBlock "strindexof.candidate.advance"
+      advanceAscii <- freshBlock "strindexof.advance.ascii"
+      advanceDetectTwo <- freshBlock "strindexof.advance.detect.two"
+      advanceTwo <- freshBlock "strindexof.advance.two"
+      advanceDetectThree <- freshBlock "strindexof.advance.detect.three"
+      advanceThree <- freshBlock "strindexof.advance.three"
+      advanceFour <- freshBlock "strindexof.advance.four"
+      found <- freshBlock "strindexof.found"
+      absent <- freshBlock "strindexof.absent"
+      let finishCandidateAdvance label offset currentCandidate = do
+            nextCandidate <- advancePtr (label ++ ".next") currentCandidate offset
+            oldIndex <- emitAssign (label ++ ".index") i64Ty (LLVMLoad i64Ty indexSlot)
+            nextIndex <- emitAssign (label ++ ".index.next") i64Ty (LLVMAdd oldIndex (LLVMIntLiteral 64 1))
+            emitStore LLVMPtr nextCandidate candidateSlot
+            emitStore i64Ty nextIndex indexSlot
+            finishCurrentBlock (LLVMBr candidateHeader)
+      firstNeedle <- loadByteAt "strindexof.needle.first" needle 0
+      needleEmpty <- emitAssign "strindexof.needle.empty" i1Ty (LLVMICmpEq firstNeedle (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty needleEmpty candidateHeader [(1, found)])
+      startBlock candidateHeader
+      candidate <- emitAssign "strindexof.candidate" LLVMPtr (LLVMLoad LLVMPtr candidateSlot)
+      candidateByte <- loadByteAt "strindexof.candidate.byte" candidate 0
+      candidateEnd <- emitAssign "strindexof.candidate.end" i1Ty (LLVMICmpEq candidateByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty candidateEnd candidateStart [(1, absent)])
+      startBlock candidateStart
+      emitStore LLVMPtr candidate matchHaystackSlot
+      emitStore LLVMPtr needle matchNeedleSlot
+      finishCurrentBlock (LLVMBr matchHeader)
+      startBlock matchHeader
+      haystackCursor <- emitAssign "strindexof.match.haystack" LLVMPtr (LLVMLoad LLVMPtr matchHaystackSlot)
+      needleCursor <- emitAssign "strindexof.match.needle" LLVMPtr (LLVMLoad LLVMPtr matchNeedleSlot)
+      needleByte <- loadByteAt "strindexof.match.needle.byte" needleCursor 0
+      needleDone <- emitAssign "strindexof.match.needle.done" i1Ty (LLVMICmpEq needleByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty needleDone matchHaystackEnd [(1, found)])
+      startBlock matchHaystackEnd
+      haystackByte <- loadByteAt "strindexof.match.haystack.byte" haystackCursor 0
+      haystackDone <- emitAssign "strindexof.match.haystack.done" i1Ty (LLVMICmpEq haystackByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty haystackDone matchCompare [(1, candidateAdvance)])
+      startBlock matchCompare
+      bytesMatch <- emitAssign "strindexof.match.bytes" i1Ty (LLVMICmpEq haystackByte needleByte)
+      finishCurrentBlock (LLVMSwitch i1Ty bytesMatch candidateAdvance [(1, matchAdvance)])
+      startBlock matchAdvance
+      nextHaystack <- advancePtr "strindexof.match.haystack.next" haystackCursor 1
+      nextNeedle <- advancePtr "strindexof.match.needle.next" needleCursor 1
+      emitStore LLVMPtr nextHaystack matchHaystackSlot
+      emitStore LLVMPtr nextNeedle matchNeedleSlot
+      finishCurrentBlock (LLVMBr matchHeader)
+      startBlock candidateAdvance
+      currentCandidate <- emitAssign "strindexof.advance.candidate" LLVMPtr (LLVMLoad LLVMPtr candidateSlot)
+      advanceByte <- loadByteAt "strindexof.advance.byte" currentCandidate 0
+      asciiClass <- emitAssign "strindexof.advance.ascii.class" i8Ty (LLVMAnd advanceByte (LLVMIntLiteral 8 0x80))
+      isAscii <- emitAssign "strindexof.advance.is.ascii" i1Ty (LLVMICmpEq asciiClass (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty isAscii advanceDetectTwo [(1, advanceAscii)])
+      startBlock advanceAscii
+      finishCandidateAdvance "strindexof.advance.ascii" 1 currentCandidate
+      startBlock advanceDetectTwo
+      twoClass <- emitAssign "strindexof.advance.two.class" i8Ty (LLVMAnd advanceByte (LLVMIntLiteral 8 0xE0))
+      isTwo <- emitAssign "strindexof.advance.is.two" i1Ty (LLVMICmpEq twoClass (LLVMIntLiteral 8 0xC0))
+      finishCurrentBlock (LLVMSwitch i1Ty isTwo advanceDetectThree [(1, advanceTwo)])
+      startBlock advanceTwo
+      finishCandidateAdvance "strindexof.advance.two" 2 currentCandidate
+      startBlock advanceDetectThree
+      threeClass <- emitAssign "strindexof.advance.three.class" i8Ty (LLVMAnd advanceByte (LLVMIntLiteral 8 0xF0))
+      isThree <- emitAssign "strindexof.advance.is.three" i1Ty (LLVMICmpEq threeClass (LLVMIntLiteral 8 0xE0))
+      finishCurrentBlock (LLVMSwitch i1Ty isThree advanceFour [(1, advanceThree)])
+      startBlock advanceThree
+      finishCandidateAdvance "strindexof.advance.three" 3 currentCandidate
+      startBlock advanceFour
+      finishCandidateAdvance "strindexof.advance.four" 4 currentCandidate
+      startBlock found
+      index <- emitAssign "strindexof.result.index" i64Ty (LLVMLoad i64Ty indexSlot)
+      some <- allocateSome "strindexof.some" index
+      finishCurrentBlock (LLVMRet LLVMPtr some)
+      startBlock absent
+      none <- allocateNone "strindexof.none"
+      finishCurrentBlock (LLVMRet LLVMPtr none)
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_index_of lowering failed: " ++ renderBackendLLVMError err)
+
 nativeStringFromCharFunction :: LLVMFunction
 nativeStringFromCharFunction =
   case
@@ -3198,6 +3329,10 @@ runtimeStringIndexOfCharName :: String
 runtimeStringIndexOfCharName =
   PrimitiveInventory.stringIndexOfCharPrimitiveName
 
+runtimeStringIndexOfName :: String
+runtimeStringIndexOfName =
+  PrimitiveInventory.stringIndexOfPrimitiveName
+
 runtimeStringFromCharName :: String
 runtimeStringFromCharName =
   PrimitiveInventory.stringFromCharPrimitiveName
@@ -3278,8 +3413,8 @@ runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringReplaceChar needsStringIndexOfChar needsStringFromChar needsStringFromInt needsStringFromBool needsStringFromNat needsStringToList needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringReplaceChar needsStringIndexOfChar needsStringIndexOf needsStringFromChar needsStringFromInt needsStringFromBool needsStringFromNat needsStringToList needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -3321,6 +3456,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeStringIndexOfCharName LLVMPtr [LLVMPtr, LLVMInt 32] False
          | needsStringIndexOfChar,
            Map.notMember runtimeStringIndexOfCharName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringIndexOfName LLVMPtr [LLVMPtr, LLVMPtr] False
+         | needsStringIndexOf,
+           Map.notMember runtimeStringIndexOfName (pbBindings base)
        ]
     ++ [ LLVMDeclaration runtimeStringFromCharName LLVMPtr [LLVMInt 32] False
          | needsStringFromChar,
@@ -6787,6 +6926,33 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
                   ( LLVMCall
                       runtimeStringIndexOfCharName
                       [(LLVMPtr, lvOperand value), (LLVMInt 32, lvOperand needle)]
+                  )
+              pure
+                ( LowerValue
+                    (BTCon (BaseTy "Option") (BTBase (BaseTy "Int") :| []))
+                    LLVMPtr
+                    result
+                    LowerRuntimeValue
+                    Nothing
+                )
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 2 (length args))
+    Nothing
+      | name == runtimeStringIndexOfName -> do
+          unless (length args == 2) $
+            liftEither (BackendLLVMArityMismatch name 2 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [haystack, needle] -> do
+              requireLLVMType context name LLVMPtr haystack
+              requireLLVMType context name LLVMPtr needle
+              result <-
+                emitAssign
+                  "call"
+                  LLVMPtr
+                  ( LLVMCall
+                      runtimeStringIndexOfName
+                      [(LLVMPtr, lvOperand haystack), (LLVMPtr, lvOperand needle)]
                   )
               pure
                 ( LowerValue

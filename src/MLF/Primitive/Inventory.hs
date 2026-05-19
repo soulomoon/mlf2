@@ -30,6 +30,7 @@ module MLF.Primitive.Inventory
     stringAppendPrimitiveName,
     stringReplaceCharPrimitiveName,
     stringIndexOfCharPrimitiveName,
+    stringIndexOfPrimitiveName,
     stringFromCharPrimitiveName,
     stringFromIntPrimitiveName,
     stringFromBoolPrimitiveName,
@@ -114,6 +115,7 @@ data PrimitiveNativeSupport
   | PrimitiveNativeStringAppend
   | PrimitiveNativeStringReplaceChar
   | PrimitiveNativeStringIndexOfChar
+  | PrimitiveNativeStringIndexOf
   | PrimitiveNativeStringFromChar
   | PrimitiveNativeStringFromInt
   | PrimitiveNativeStringFromBool
@@ -249,6 +251,12 @@ primitiveValueSpecs =
         primitiveValueSpec
           PrimitiveNativeStringIndexOfChar
           (stringTy `PrimitiveTypeArrow` (charTy `PrimitiveTypeArrow` optionOf intTy))
+          Set.empty
+      ),
+      ( stringIndexOfPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringIndexOf
+          (stringTy `PrimitiveTypeArrow` (stringTy `PrimitiveTypeArrow` optionOf intTy))
           Set.empty
       ),
       ( stringFromCharPrimitiveName,
@@ -553,6 +561,10 @@ stringIndexOfCharPrimitiveName :: String
 stringIndexOfCharPrimitiveName =
   "__string_index_of_char"
 
+stringIndexOfPrimitiveName :: String
+stringIndexOfPrimitiveName =
+  "__string_index_of"
+
 stringFromCharPrimitiveName :: String
 stringFromCharPrimitiveName =
   "__string_from_char"
@@ -661,6 +673,7 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeStringAppend -> True
     PrimitiveNativeStringReplaceChar -> True
     PrimitiveNativeStringIndexOfChar -> True
+    PrimitiveNativeStringIndexOf -> True
     PrimitiveNativeStringFromChar -> True
     PrimitiveNativeStringFromInt -> True
     PrimitiveNativeStringFromBool -> True

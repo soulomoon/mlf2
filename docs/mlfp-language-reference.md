@@ -430,6 +430,7 @@ stringEndsWith : String -> String -> Bool
 stringAppend : String -> String -> String
 stringReplaceChar : String -> Char -> Char -> String
 stringIndexOfChar : String -> Char -> Option Int
+stringIndexOf : String -> String -> Option Int
 stringFromChar : Char -> String
 stringFromInt : Int -> String
 stringFromBool : Bool -> String
@@ -481,8 +482,15 @@ normalization, or locale behavior. `stringIndexOfChar` is the first
 first-match `String`/`Char` index search operation; the current
 native-capable tracer reports zero-based Unicode scalar positions, so
 `stringIndexOfChar "aλbλ" 'λ'` returns `Some 1`, while
-`stringIndexOfChar "ab" 'λ'` returns `None`. It does not claim substring
-index APIs, splitting, regex, Unicode normalization, locale behavior, or
+`stringIndexOfChar "ab" 'λ'` returns `None`. It does not claim broader
+substring index APIs, splitting, regex, Unicode normalization, locale
+behavior, or complete cursor APIs. `stringIndexOf` is the first substring
+index search operation; the current native-capable tracer reports zero-based
+Unicode scalar
+positions, so `stringIndexOf "aλbcλ" "λb"` returns `Some 1`,
+`stringIndexOf "abc" "λ"` returns `None`, and
+`stringIndexOf "λ" ""` returns `Some 0`. It does not claim splitting,
+substring replacement, regex, Unicode normalization, locale behavior, or
 complete cursor APIs. `stringFromChar` is the first `Char` to
 singleton `String` construction operation; the current native-capable tracer
 preserves Unicode scalar values, so `stringFromChar 'λ'` returns `"λ"`
@@ -707,6 +715,7 @@ Current prelude contents:
 - `stringAppend`
 - `stringReplaceChar`
 - `stringIndexOfChar`
+- `stringIndexOf`
 - `stringFromChar`
 - `stringFromInt`
 - `stringFromBool`
@@ -766,7 +775,10 @@ replacement operation is `stringReplaceChar`, with native
 coverage for replacing matching Unicode scalar `Char` values and preserving
 no-match strings. The first `String`/`Char` first-match index search operation
 is `stringIndexOfChar`, with native coverage for zero-based Unicode scalar
-indexes and absent matches through `Option Int`. The first `Char` to singleton
+indexes and absent matches through `Option Int`. The first substring index
+search operation is `stringIndexOf`, with native coverage for zero-based
+Unicode scalar substring indexes, absent matches, and the empty needle
+returning `Some 0`. The first `Char` to singleton
 `String` construction operation is `stringFromChar`, with native coverage for
 Unicode scalar preserving singleton strings. The first decimal `Int` to
 `String` conversion operation is `stringFromInt`, with native coverage for

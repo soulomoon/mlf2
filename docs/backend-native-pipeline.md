@@ -278,7 +278,13 @@ Supported result shapes are:
 - `stringIndexOfChar : String -> Char -> Option Int` is the first
   native-capable first-match String/Char index search tracer and reports
   zero-based Unicode scalar indexes through `Some` while returning `None` for
-  absent matches. Substring index APIs, splitting, regex, Unicode
+  absent matches. Broader substring index APIs, splitting, regex, Unicode
+  normalization, locale behavior, complete cursor APIs, parser parity,
+  platform contracts, and proof records remain out of scope.
+- `stringIndexOf : String -> String -> Option Int` is the first native-capable
+  substring index search tracer and reports zero-based Unicode scalar indexes
+  through `Some`, returns `None` for absent substrings, and returns `Some 0`
+  for an empty needle. Splitting, substring replacement, regex, Unicode
   normalization, locale behavior, complete cursor APIs, parser parity,
   platform contracts, and proof records remain out of scope.
 - `stringFromChar : Char -> String` is the first native-capable Char to

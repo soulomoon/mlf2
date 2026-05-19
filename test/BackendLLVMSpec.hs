@@ -474,6 +474,29 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "stringIndexOf indexes Unicode scalar substrings through native execution" $
+      forM_
+        [ (nativePresentStringIndexOfSourceProgram, "Some 1\n", NativeRunResult ExitSuccess "Some 1\n" ""),
+          (nativeAbsentStringIndexOfSourceProgram, "None\n", NativeRunResult ExitSuccess "None\n" ""),
+          (nativeEmptyNeedleStringIndexOfSourceProgram, "Some 0\n", NativeRunResult ExitSuccess "Some 0\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "stringFromChar converts Unicode scalar Chars to singleton strings through native execution" $
       forM_
         [ (nativeUnicodeStringFromCharSourceProgram, "\"\\955\"\n", NativeRunResult ExitSuccess "\"\\955\"\n" ""),
@@ -2870,6 +2893,38 @@ nativeAbsentStringIndexOfCharSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (Option(..), stringIndexOfChar);",
       "  def main : Option Int = stringIndexOfChar \"ab\" 'λ';",
+      "}"
+    ]
+
+nativePresentStringIndexOfSourceProgram :: String
+nativePresentStringIndexOfSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Option(..), stringIndexOf);",
+      "  def main : Option Int = stringIndexOf \"aλbcλ\" \"λb\";",
+      "}"
+    ]
+
+-- Round evidence snippets for the public source fixtures:
+-- stringIndexOf "aλbcλ" "λb"
+-- stringIndexOf "abc" "λ"
+-- stringIndexOf "λ" ""
+
+nativeAbsentStringIndexOfSourceProgram :: String
+nativeAbsentStringIndexOfSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Option(..), stringIndexOf);",
+      "  def main : Option Int = stringIndexOf \"abc\" \"λ\";",
+      "}"
+    ]
+
+nativeEmptyNeedleStringIndexOfSourceProgram :: String
+nativeEmptyNeedleStringIndexOfSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Option(..), stringIndexOf);",
+      "  def main : Option Int = stringIndexOf \"λ\" \"\";",
       "}"
     ]
 
