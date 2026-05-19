@@ -522,6 +522,28 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "stringFromBool formats Bool values as strings through native execution" $
+      forM_
+        [ (nativeTrueStringFromBoolSourceProgram, "\"true\"\n", NativeRunResult ExitSuccess "\"true\"\n" ""),
+          (nativeFalseStringFromBoolSourceProgram, "\"false\"\n", NativeRunResult ExitSuccess "\"false\"\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "stringDrop slices Unicode scalar prefixes through native execution" $
       forM_
         [ (nativeDropLeadingUnicodeStringSourceProgram, "\"ab\"\n", NativeRunResult ExitSuccess "\"ab\"\n" ""),
@@ -2811,6 +2833,24 @@ nativeZeroStringFromIntSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (stringFromInt);",
       "  def main : String = stringFromInt 0;",
+      "}"
+    ]
+
+nativeTrueStringFromBoolSourceProgram :: String
+nativeTrueStringFromBoolSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringFromBool);",
+      "  def main : String = stringFromBool true;",
+      "}"
+    ]
+
+nativeFalseStringFromBoolSourceProgram :: String
+nativeFalseStringFromBoolSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringFromBool);",
+      "  def main : String = stringFromBool false;",
       "}"
     ]
 

@@ -329,6 +329,7 @@ data RuntimePrimitive
   | RuntimeStringAppend
   | RuntimeStringFromChar
   | RuntimeStringFromInt
+  | RuntimeStringFromBool
   | RuntimePreludeStringFromList
   | RuntimeStringToList
   | RuntimeStringDrop
@@ -525,6 +526,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringAppendPrimitiveName -> Just RuntimeStringAppend
       | name' == PrimitiveInventory.stringFromCharPrimitiveName -> Just RuntimeStringFromChar
       | name' == PrimitiveInventory.stringFromIntPrimitiveName -> Just RuntimeStringFromInt
+      | name' == PrimitiveInventory.stringFromBoolPrimitiveName -> Just RuntimeStringFromBool
       | name' == PrimitiveInventory.stringToListPrimitiveName -> Just RuntimeStringToList
       | name' == PrimitiveInventory.stringDropPrimitiveName -> Just RuntimeStringDrop
       | name' == PrimitiveInventory.stringTakePrimitiveName -> Just RuntimeStringTake
@@ -1269,6 +1271,10 @@ applyRuntimePrimitive context prim args
           Right (RuntimeLit (LString (show value)))
         (RuntimeStringFromInt, _) ->
           Left (ProgramPipelineError "run-program __string_from_int expected an Int argument")
+        (RuntimeStringFromBool, [RuntimeLit (LBool value)]) ->
+          Right (RuntimeLit (LString (if value then "true" else "false")))
+        (RuntimeStringFromBool, _) ->
+          Left (ProgramPipelineError "run-program __string_from_bool expected a Bool argument")
         (RuntimePreludeStringFromList, [value]) ->
           RuntimeLit . LString <$> runtimeListCharToString value
         (RuntimePreludeStringFromList, _) ->
@@ -1491,6 +1497,7 @@ runtimePrimitiveArity prim =
     RuntimeStringAppend -> 2
     RuntimeStringFromChar -> 1
     RuntimeStringFromInt -> 1
+    RuntimeStringFromBool -> 1
     RuntimePreludeStringFromList -> 1
     RuntimeStringToList -> 1
     RuntimeStringDrop -> 2
@@ -1683,6 +1690,7 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringAppendPrimitiveName,
     PrimitiveInventory.stringFromCharPrimitiveName,
     PrimitiveInventory.stringFromIntPrimitiveName,
+    PrimitiveInventory.stringFromBoolPrimitiveName,
     PrimitiveInventory.stringToListPrimitiveName,
     PrimitiveInventory.stringDropPrimitiveName,
     PrimitiveInventory.stringTakePrimitiveName,
