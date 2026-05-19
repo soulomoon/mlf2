@@ -520,6 +520,30 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "stringSplit splits Unicode scalar substrings through native execution" $
+      forM_
+        [ (nativeUnicodeStringSplitSourceProgram, "Cons \"a\" (Cons \"b\" (Cons \"c\" Nil))\n", NativeRunResult ExitSuccess "Cons \"a\" (Cons \"b\" (Cons \"c\" Nil))\n" ""),
+          (nativeNoMatchStringSplitSourceProgram, "Cons \"abc\" Nil\n", NativeRunResult ExitSuccess "Cons \"abc\" Nil\n" ""),
+          (nativeEmptyNeedleStringSplitSourceProgram, "Cons \"abc\" Nil\n", NativeRunResult ExitSuccess "Cons \"abc\" Nil\n" ""),
+          (nativeEdgeEmptyStringSplitSourceProgram, "Cons \"\" (Cons \"a\" (Cons \"\" Nil))\n", NativeRunResult ExitSuccess "Cons \"\" (Cons \"a\" (Cons \"\" Nil))\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "stringFromChar converts Unicode scalar Chars to singleton strings through native execution" $
       forM_
         [ (nativeUnicodeStringFromCharSourceProgram, "\"\\955\"\n", NativeRunResult ExitSuccess "\"\\955\"\n" ""),
@@ -2978,6 +3002,46 @@ nativeEmptyNeedleStringIndexOfSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (Option(..), stringIndexOf);",
       "  def main : Option Int = stringIndexOf \"λ\" \"\";",
+      "}"
+    ]
+
+nativeUnicodeStringSplitSourceProgram :: String
+nativeUnicodeStringSplitSourceProgram =
+  -- Fixture: import Prelude exposing (List(..), stringSplit); def main : List String = stringSplit "aλbλc" "λ";
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (List(..), stringSplit);",
+      "  def main : List String = stringSplit \"aλbλc\" \"λ\";",
+      "}"
+    ]
+
+nativeNoMatchStringSplitSourceProgram :: String
+nativeNoMatchStringSplitSourceProgram =
+  -- Fixture: import Prelude exposing (List(..), stringSplit); def main : List String = stringSplit "abc" "λ";
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (List(..), stringSplit);",
+      "  def main : List String = stringSplit \"abc\" \"λ\";",
+      "}"
+    ]
+
+nativeEmptyNeedleStringSplitSourceProgram :: String
+nativeEmptyNeedleStringSplitSourceProgram =
+  -- Fixture: import Prelude exposing (List(..), stringSplit); def main : List String = stringSplit "abc" "";
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (List(..), stringSplit);",
+      "  def main : List String = stringSplit \"abc\" \"\";",
+      "}"
+    ]
+
+nativeEdgeEmptyStringSplitSourceProgram :: String
+nativeEdgeEmptyStringSplitSourceProgram =
+  -- Fixture: import Prelude exposing (List(..), stringSplit); def main : List String = stringSplit "λaλ" "λ";
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (List(..), stringSplit);",
+      "  def main : List String = stringSplit \"λaλ\" \"λ\";",
       "}"
     ]
 

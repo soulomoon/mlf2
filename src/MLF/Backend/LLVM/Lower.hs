@@ -87,6 +87,7 @@ inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__string_contains_char`, `__string_contains`, `__string_starts_with`,
 `__string_ends_with`, `__string_append`, `__string_from_char`,
 `__string_replace_char`, `__string_replace`, `__string_from_int`, `__string_from_bool`,
+`__string_index_of_char`, `__string_index_of`, `__string_split`,
 `__string_from_nat`, `__string_to_list`, `__string_drop`, `__string_take`,
 `__string_slice`, `__string_char_at`,
 `__char_is_digit`, `__char_is_ascii_lower`, `__char_is_ascii_upper`,
@@ -185,6 +186,7 @@ lowerBackendProgram program = do
       needsStringReplace = any (functionReferencesGlobalNames (Set.singleton runtimeStringReplaceName)) (lpFunctions lowered)
       needsStringIndexOfChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringIndexOfCharName)) (lpFunctions lowered)
       needsStringIndexOf = any (functionReferencesGlobalNames (Set.singleton runtimeStringIndexOfName)) (lpFunctions lowered)
+      needsStringSplit = any (functionReferencesGlobalNames (Set.singleton runtimeStringSplitName)) (lpFunctions lowered)
       needsStringFromChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringFromCharName)) (lpFunctions lowered)
       needsStringFromInt = any (functionReferencesGlobalNames (Set.singleton runtimeStringFromIntName)) (lpFunctions lowered)
       needsStringFromBool = any (functionReferencesGlobalNames (Set.singleton runtimeStringFromBoolName)) (lpFunctions lowered)
@@ -218,6 +220,7 @@ lowerBackendProgram program = do
           needsStringReplace
           needsStringIndexOfChar
           needsStringIndexOf
+          needsStringSplit
           needsStringFromChar
           needsStringFromInt
           needsStringFromBool
@@ -377,6 +380,7 @@ nativeRuntimeFunctions base =
     ++ [nativeStringReplaceFunction | Map.notMember runtimeStringReplaceName (pbBindings base)]
     ++ [nativeStringIndexOfCharFunction | Map.notMember runtimeStringIndexOfCharName (pbBindings base)]
     ++ [nativeStringIndexOfFunction | Map.notMember runtimeStringIndexOfName (pbBindings base)]
+    ++ [nativeStringSplitFunction | Map.notMember runtimeStringSplitName (pbBindings base)]
     ++ [nativeStringFromCharFunction | Map.notMember runtimeStringFromCharName (pbBindings base)]
     ++ [nativeStringFromIntFunction | Map.notMember runtimeStringFromIntName (pbBindings base)]
     ++ [nativeStringFromBoolFunction | Map.notMember runtimeStringFromBoolName (pbBindings base)]
@@ -2388,6 +2392,265 @@ nativeStringIndexOfFunction =
     Right function -> function
     Left err -> error ("internal native __string_index_of lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringSplitFunction :: LLVMFunction
+nativeStringSplitFunction =
+  case
+    lowerNativeFunction runtimeStringSplitName LLVMPtr [(LLVMPtr, "haystack"), (LLVMPtr, "delimiter")] $ \params -> do
+      let haystack = requireNativeParam "haystack" params
+          delimiter = requireNativeParam "delimiter" params
+          i1Ty = LLVMInt 1
+          i8Ty = LLVMInt 8
+          i64Ty = LLVMInt 64
+          bytePtrAt label base offset =
+            emitAssign label LLVMPtr (LLVMGetElementPtr i8Ty base [(i64Ty, LLVMIntLiteral 64 offset)])
+          bytePtrAtOperand label base offset =
+            emitAssign label LLVMPtr (LLVMGetElementPtr i8Ty base [(i64Ty, offset)])
+          loadByteAt label base offset = do
+            ptr <- bytePtrAt (label ++ ".ptr") base offset
+            emitAssign label i8Ty (LLVMLoad i8Ty ptr)
+          allocateNil label = do
+            cell <-
+              emitAssign
+                (label ++ ".cell")
+                LLVMPtr
+                (LLVMCall runtimeMallocName [(i64Ty, LLVMIntLiteral 64 (toInteger (constructorObjectBytes 0)))])
+            tagPtr <- emitGep (label ++ ".tag") cell constructorTagOffset
+            emitStore i64Ty (LLVMIntLiteral 64 0) tagPtr
+            pure cell
+          allocateCons label headValue tailValue = do
+            cell <-
+              emitAssign
+                (label ++ ".cell")
+                LLVMPtr
+                (LLVMCall runtimeMallocName [(i64Ty, LLVMIntLiteral 64 (toInteger (constructorObjectBytes 2)))])
+            tagPtr <- emitGep (label ++ ".tag") cell constructorTagOffset
+            emitStore i64Ty (LLVMIntLiteral 64 1) tagPtr
+            headPtr <- emitGep (label ++ ".head") cell (constructorFieldOffset 0)
+            emitStore LLVMPtr headValue headPtr
+            tailPtr <- emitGep (label ++ ".tail") cell (constructorFieldOffset 1)
+            emitStore LLVMPtr tailValue tailPtr
+            pure cell
+          countBytes label sourceInitial = do
+            sourceSlot <- emitAssign (label ++ ".source.slot") LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+            countSlot <- emitAssign (label ++ ".count.slot") LLVMPtr (LLVMAlloca i64Ty (LLVMIntLiteral 64 1))
+            emitStore LLVMPtr sourceInitial sourceSlot
+            emitStore i64Ty (LLVMIntLiteral 64 0) countSlot
+            header <- freshBlock (label ++ ".header")
+            advance <- freshBlock (label ++ ".advance")
+            done <- freshBlock (label ++ ".done")
+            finishCurrentBlock (LLVMBr header)
+            startBlock header
+            source <- emitAssign (label ++ ".source") LLVMPtr (LLVMLoad LLVMPtr sourceSlot)
+            byte <- loadByteAt (label ++ ".byte") source 0
+            isNull <- emitAssign (label ++ ".end") i1Ty (LLVMICmpEq byte (LLVMIntLiteral 8 0))
+            finishCurrentBlock (LLVMSwitch i1Ty isNull advance [(1, done)])
+            startBlock advance
+            nextSource <- bytePtrAt (label ++ ".source.next") source 1
+            count <- emitAssign (label ++ ".count") i64Ty (LLVMLoad i64Ty countSlot)
+            nextCount <- emitAssign (label ++ ".count.next") i64Ty (LLVMAdd count (LLVMIntLiteral 64 1))
+            emitStore LLVMPtr nextSource sourceSlot
+            emitStore i64Ty nextCount countSlot
+            finishCurrentBlock (LLVMBr header)
+            startBlock done
+            emitAssign (label ++ ".result") i64Ty (LLVMLoad i64Ty countSlot)
+          copyRangeString label sourceInitial endPtr = do
+            countSourceSlot <- emitAssign (label ++ ".count.source.slot") LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+            countSlot <- emitAssign (label ++ ".count.slot") LLVMPtr (LLVMAlloca i64Ty (LLVMIntLiteral 64 1))
+            emitStore LLVMPtr sourceInitial countSourceSlot
+            emitStore i64Ty (LLVMIntLiteral 64 0) countSlot
+            countHeader <- freshBlock (label ++ ".count.header")
+            countAdvance <- freshBlock (label ++ ".count.advance")
+            countDone <- freshBlock (label ++ ".count.done")
+            finishCurrentBlock (LLVMBr countHeader)
+            startBlock countHeader
+            countSource <- emitAssign (label ++ ".count.source") LLVMPtr (LLVMLoad LLVMPtr countSourceSlot)
+            countAtEnd <- emitAssign (label ++ ".count.at.end") i1Ty (LLVMICmpEq countSource endPtr)
+            finishCurrentBlock (LLVMSwitch i1Ty countAtEnd countAdvance [(1, countDone)])
+            startBlock countAdvance
+            nextCountSource <- bytePtrAt (label ++ ".count.source.next") countSource 1
+            count <- emitAssign (label ++ ".count") i64Ty (LLVMLoad i64Ty countSlot)
+            nextCount <- emitAssign (label ++ ".count.next") i64Ty (LLVMAdd count (LLVMIntLiteral 64 1))
+            emitStore LLVMPtr nextCountSource countSourceSlot
+            emitStore i64Ty nextCount countSlot
+            finishCurrentBlock (LLVMBr countHeader)
+            startBlock countDone
+            totalBytes <- emitAssign (label ++ ".bytes") i64Ty (LLVMLoad i64Ty countSlot)
+            allocationSize <- emitAssign (label ++ ".allocation.size") i64Ty (LLVMAdd totalBytes (LLVMIntLiteral 64 1))
+            result <- emitAssign (label ++ ".result") LLVMPtr (LLVMCall runtimeMallocName [(i64Ty, allocationSize)])
+            copySourceSlot <- emitAssign (label ++ ".copy.source.slot") LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+            destSlot <- emitAssign (label ++ ".copy.dest.slot") LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+            copiedSlot <- emitAssign (label ++ ".copied.slot") LLVMPtr (LLVMAlloca i64Ty (LLVMIntLiteral 64 1))
+            emitStore LLVMPtr sourceInitial copySourceSlot
+            emitStore LLVMPtr result destSlot
+            emitStore i64Ty (LLVMIntLiteral 64 0) copiedSlot
+            copyHeader <- freshBlock (label ++ ".copy.header")
+            copyBody <- freshBlock (label ++ ".copy.body")
+            copyDone <- freshBlock (label ++ ".copy.done")
+            finishCurrentBlock (LLVMBr copyHeader)
+            startBlock copyHeader
+            copied <- emitAssign (label ++ ".copied") i64Ty (LLVMLoad i64Ty copiedSlot)
+            copiedAll <- emitAssign (label ++ ".copied.all") i1Ty (LLVMICmpEq copied totalBytes)
+            finishCurrentBlock (LLVMSwitch i1Ty copiedAll copyBody [(1, copyDone)])
+            startBlock copyBody
+            copySource <- emitAssign (label ++ ".copy.source") LLVMPtr (LLVMLoad LLVMPtr copySourceSlot)
+            dest <- emitAssign (label ++ ".copy.dest") LLVMPtr (LLVMLoad LLVMPtr destSlot)
+            byte <- loadByteAt (label ++ ".copy.byte") copySource 0
+            destPtr <- bytePtrAt (label ++ ".copy.dest.ptr") dest 0
+            emitStore i8Ty byte destPtr
+            nextCopySource <- bytePtrAt (label ++ ".copy.source.next") copySource 1
+            nextDest <- bytePtrAt (label ++ ".copy.dest.next") dest 1
+            nextCopied <- emitAssign (label ++ ".copied.next") i64Ty (LLVMAdd copied (LLVMIntLiteral 64 1))
+            emitStore LLVMPtr nextCopySource copySourceSlot
+            emitStore LLVMPtr nextDest destSlot
+            emitStore i64Ty nextCopied copiedSlot
+            finishCurrentBlock (LLVMBr copyHeader)
+            startBlock copyDone
+            doneDest <- emitAssign (label ++ ".done.dest") LLVMPtr (LLVMLoad LLVMPtr destSlot)
+            donePtr <- bytePtrAt (label ++ ".done.ptr") doneDest 0
+            emitStore i8Ty (LLVMIntLiteral 8 0) donePtr
+            pure result
+      emptyDelimiter <- freshBlock "strsplit.empty-delimiter"
+      initSplit <- freshBlock "strsplit.init"
+      firstDelimiterByte <- loadByteAt "strsplit.delimiter.first" delimiter 0
+      delimiterIsEmpty <- emitAssign "strsplit.delimiter.empty" i1Ty (LLVMICmpEq firstDelimiterByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty delimiterIsEmpty initSplit [(1, emptyDelimiter)])
+      startBlock emptyDelimiter
+      singletonNil <- allocateNil "strsplit.empty.nil"
+      singleton <- allocateCons "strsplit.empty.cons" haystack singletonNil
+      finishCurrentBlock (LLVMRet LLVMPtr singleton)
+      startBlock initSplit
+      delimiterBytes <- countBytes "strsplit.delimiter.bytes" delimiter
+      segmentStartSlot <- emitAssign "strsplit.segment.start.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      candidateSlot <- emitAssign "strsplit.candidate.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      accSlot <- emitAssign "strsplit.acc.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      matchHaystackSlot <- emitAssign "strsplit.match.haystack.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      matchDelimiterSlot <- emitAssign "strsplit.match.delimiter.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      initialNil <- allocateNil "strsplit.initial.nil"
+      emitStore LLVMPtr haystack segmentStartSlot
+      emitStore LLVMPtr haystack candidateSlot
+      emitStore LLVMPtr initialNil accSlot
+      candidateHeader <- freshBlock "strsplit.candidate.header"
+      tryMatch <- freshBlock "strsplit.try-match"
+      matchHeader <- freshBlock "strsplit.match.header"
+      matchHaystackEnd <- freshBlock "strsplit.match.haystack-end"
+      matchCompare <- freshBlock "strsplit.match.compare"
+      matchAdvance <- freshBlock "strsplit.match.advance"
+      matchFound <- freshBlock "strsplit.match.found"
+      candidateAdvance <- freshBlock "strsplit.candidate.advance"
+      advanceAscii <- freshBlock "strsplit.advance.ascii"
+      advanceDetectTwo <- freshBlock "strsplit.advance.detect.two"
+      advanceTwo <- freshBlock "strsplit.advance.two"
+      advanceDetectThree <- freshBlock "strsplit.advance.detect.three"
+      advanceThree <- freshBlock "strsplit.advance.three"
+      advanceFour <- freshBlock "strsplit.advance.four"
+      finalSegment <- freshBlock "strsplit.final-segment"
+      reverseInit <- freshBlock "strsplit.reverse.init"
+      let pushSegment label segmentEnd nextSegmentStart nextCandidate = do
+            segmentStart <- emitAssign (label ++ ".segment.start") LLVMPtr (LLVMLoad LLVMPtr segmentStartSlot)
+            segment <- copyRangeString (label ++ ".segment") segmentStart segmentEnd
+            acc <- emitAssign (label ++ ".acc") LLVMPtr (LLVMLoad LLVMPtr accSlot)
+            cons <- allocateCons (label ++ ".cons") segment acc
+            emitStore LLVMPtr cons accSlot
+            emitStore LLVMPtr nextSegmentStart segmentStartSlot
+            emitStore LLVMPtr nextCandidate candidateSlot
+          finishCandidateAdvance label offset currentCandidate = do
+            nextCandidate <- bytePtrAt (label ++ ".next") currentCandidate offset
+            emitStore LLVMPtr nextCandidate candidateSlot
+            finishCurrentBlock (LLVMBr candidateHeader)
+      finishCurrentBlock (LLVMBr candidateHeader)
+      startBlock candidateHeader
+      candidate <- emitAssign "strsplit.candidate" LLVMPtr (LLVMLoad LLVMPtr candidateSlot)
+      candidateByte <- loadByteAt "strsplit.candidate.byte" candidate 0
+      candidateEnd <- emitAssign "strsplit.candidate.end" i1Ty (LLVMICmpEq candidateByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty candidateEnd tryMatch [(1, finalSegment)])
+      startBlock tryMatch
+      emitStore LLVMPtr candidate matchHaystackSlot
+      emitStore LLVMPtr delimiter matchDelimiterSlot
+      finishCurrentBlock (LLVMBr matchHeader)
+      startBlock matchHeader
+      delimiterCursor <- emitAssign "strsplit.match.delimiter" LLVMPtr (LLVMLoad LLVMPtr matchDelimiterSlot)
+      delimiterByte <- loadByteAt "strsplit.match.delimiter.byte" delimiterCursor 0
+      delimiterDone <- emitAssign "strsplit.match.delimiter.done" i1Ty (LLVMICmpEq delimiterByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty delimiterDone matchHaystackEnd [(1, matchFound)])
+      startBlock matchHaystackEnd
+      haystackCursor <- emitAssign "strsplit.match.haystack" LLVMPtr (LLVMLoad LLVMPtr matchHaystackSlot)
+      haystackByte <- loadByteAt "strsplit.match.haystack.byte" haystackCursor 0
+      haystackDone <- emitAssign "strsplit.match.haystack.done" i1Ty (LLVMICmpEq haystackByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty haystackDone matchCompare [(1, candidateAdvance)])
+      startBlock matchCompare
+      bytesMatch <- emitAssign "strsplit.match.bytes" i1Ty (LLVMICmpEq haystackByte delimiterByte)
+      finishCurrentBlock (LLVMSwitch i1Ty bytesMatch candidateAdvance [(1, matchAdvance)])
+      startBlock matchAdvance
+      nextHaystackCursor <- bytePtrAt "strsplit.match.haystack.next" haystackCursor 1
+      nextDelimiterCursor <- bytePtrAt "strsplit.match.delimiter.next" delimiterCursor 1
+      emitStore LLVMPtr nextHaystackCursor matchHaystackSlot
+      emitStore LLVMPtr nextDelimiterCursor matchDelimiterSlot
+      finishCurrentBlock (LLVMBr matchHeader)
+      startBlock matchFound
+      matchCandidate <- emitAssign "strsplit.match.candidate" LLVMPtr (LLVMLoad LLVMPtr candidateSlot)
+      afterDelimiter <- bytePtrAtOperand "strsplit.match.after-delimiter" matchCandidate delimiterBytes
+      pushSegment "strsplit.match" matchCandidate afterDelimiter afterDelimiter
+      finishCurrentBlock (LLVMBr candidateHeader)
+      startBlock candidateAdvance
+      advanceCandidate <- emitAssign "strsplit.advance.candidate" LLVMPtr (LLVMLoad LLVMPtr candidateSlot)
+      advanceByte <- loadByteAt "strsplit.advance.byte" advanceCandidate 0
+      asciiClass <- emitAssign "strsplit.advance.ascii.class" i8Ty (LLVMAnd advanceByte (LLVMIntLiteral 8 0x80))
+      isAscii <- emitAssign "strsplit.advance.is.ascii" i1Ty (LLVMICmpEq asciiClass (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty isAscii advanceDetectTwo [(1, advanceAscii)])
+      startBlock advanceAscii
+      finishCandidateAdvance "strsplit.advance.ascii" 1 advanceCandidate
+      startBlock advanceDetectTwo
+      twoClass <- emitAssign "strsplit.advance.two.class" i8Ty (LLVMAnd advanceByte (LLVMIntLiteral 8 0xE0))
+      isTwo <- emitAssign "strsplit.advance.is.two" i1Ty (LLVMICmpEq twoClass (LLVMIntLiteral 8 0xC0))
+      finishCurrentBlock (LLVMSwitch i1Ty isTwo advanceDetectThree [(1, advanceTwo)])
+      startBlock advanceTwo
+      finishCandidateAdvance "strsplit.advance.two" 2 advanceCandidate
+      startBlock advanceDetectThree
+      threeClass <- emitAssign "strsplit.advance.three.class" i8Ty (LLVMAnd advanceByte (LLVMIntLiteral 8 0xF0))
+      isThree <- emitAssign "strsplit.advance.is.three" i1Ty (LLVMICmpEq threeClass (LLVMIntLiteral 8 0xE0))
+      finishCurrentBlock (LLVMSwitch i1Ty isThree advanceFour [(1, advanceThree)])
+      startBlock advanceThree
+      finishCandidateAdvance "strsplit.advance.three" 3 advanceCandidate
+      startBlock advanceFour
+      finishCandidateAdvance "strsplit.advance.four" 4 advanceCandidate
+      startBlock finalSegment
+      finalEnd <- emitAssign "strsplit.final.end" LLVMPtr (LLVMLoad LLVMPtr candidateSlot)
+      pushSegment "strsplit.final" finalEnd finalEnd finalEnd
+      finishCurrentBlock (LLVMBr reverseInit)
+      startBlock reverseInit
+      revCurSlot <- emitAssign "strsplit.reverse.cur.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      resultSlot <- emitAssign "strsplit.result.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      reversed <- emitAssign "strsplit.reversed" LLVMPtr (LLVMLoad LLVMPtr accSlot)
+      emitStore LLVMPtr reversed revCurSlot
+      resultNil <- allocateNil "strsplit.result.nil"
+      emitStore LLVMPtr resultNil resultSlot
+      reverseHeader <- freshBlock "strsplit.reverse.header"
+      reverseBody <- freshBlock "strsplit.reverse.body"
+      reverseDone <- freshBlock "strsplit.reverse.done"
+      finishCurrentBlock (LLVMBr reverseHeader)
+      startBlock reverseHeader
+      listCell <- emitAssign "strsplit.reverse.cell" LLVMPtr (LLVMLoad LLVMPtr revCurSlot)
+      tagPtr <- emitGep "strsplit.reverse.tag.ptr" listCell constructorTagOffset
+      tag <- emitAssign "strsplit.reverse.tag" i64Ty (LLVMLoad i64Ty tagPtr)
+      isNil <- emitAssign "strsplit.reverse.is.nil" i1Ty (LLVMICmpEq tag (LLVMIntLiteral 64 0))
+      finishCurrentBlock (LLVMSwitch i1Ty isNil reverseBody [(1, reverseDone)])
+      startBlock reverseBody
+      headPtr <- emitGep "strsplit.reverse.head.ptr" listCell (constructorFieldOffset 0)
+      headValue <- emitAssign "strsplit.reverse.head" LLVMPtr (LLVMLoad LLVMPtr headPtr)
+      tailPtr <- emitGep "strsplit.reverse.tail.ptr" listCell (constructorFieldOffset 1)
+      tailValue <- emitAssign "strsplit.reverse.tail" LLVMPtr (LLVMLoad LLVMPtr tailPtr)
+      resultAcc <- emitAssign "strsplit.reverse.acc" LLVMPtr (LLVMLoad LLVMPtr resultSlot)
+      resultCons <- allocateCons "strsplit.reverse.cons" headValue resultAcc
+      emitStore LLVMPtr resultCons resultSlot
+      emitStore LLVMPtr tailValue revCurSlot
+      finishCurrentBlock (LLVMBr reverseHeader)
+      startBlock reverseDone
+      result <- emitAssign "strsplit.result" LLVMPtr (LLVMLoad LLVMPtr resultSlot)
+      finishCurrentBlock (LLVMRet LLVMPtr result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_split lowering failed: " ++ renderBackendLLVMError err)
+
 nativeStringFromCharFunction :: LLVMFunction
 nativeStringFromCharFunction =
   case
@@ -3605,6 +3868,10 @@ runtimeStringIndexOfName :: String
 runtimeStringIndexOfName =
   PrimitiveInventory.stringIndexOfPrimitiveName
 
+runtimeStringSplitName :: String
+runtimeStringSplitName =
+  PrimitiveInventory.stringSplitPrimitiveName
+
 runtimeStringFromCharName :: String
 runtimeStringFromCharName =
   PrimitiveInventory.stringFromCharPrimitiveName
@@ -3685,8 +3952,8 @@ runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringReplaceChar needsStringReplace needsStringIndexOfChar needsStringIndexOf needsStringFromChar needsStringFromInt needsStringFromBool needsStringFromNat needsStringToList needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringReplaceChar needsStringReplace needsStringIndexOfChar needsStringIndexOf needsStringSplit needsStringFromChar needsStringFromInt needsStringFromBool needsStringFromNat needsStringToList needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -3736,6 +4003,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeStringIndexOfName LLVMPtr [LLVMPtr, LLVMPtr] False
          | needsStringIndexOf,
            Map.notMember runtimeStringIndexOfName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringSplitName LLVMPtr [LLVMPtr, LLVMPtr] False
+         | needsStringSplit,
+           Map.notMember runtimeStringSplitName (pbBindings base)
        ]
     ++ [ LLVMDeclaration runtimeStringFromCharName LLVMPtr [LLVMInt 32] False
          | needsStringFromChar,
@@ -7254,6 +7525,33 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
               pure
                 ( LowerValue
                     (BTCon (BaseTy "Option") (BTBase (BaseTy "Int") :| []))
+                    LLVMPtr
+                    result
+                    LowerRuntimeValue
+                    Nothing
+                )
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 2 (length args))
+    Nothing
+      | name == runtimeStringSplitName -> do
+          unless (length args == 2) $
+            liftEither (BackendLLVMArityMismatch name 2 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [haystack, delimiter] -> do
+              requireLLVMType context name LLVMPtr haystack
+              requireLLVMType context name LLVMPtr delimiter
+              result <-
+                emitAssign
+                  "call"
+                  LLVMPtr
+                  ( LLVMCall
+                      runtimeStringSplitName
+                      [(LLVMPtr, lvOperand haystack), (LLVMPtr, lvOperand delimiter)]
+                  )
+              pure
+                ( LowerValue
+                    (BTCon (BaseTy "List") (BTBase (BaseTy "String") :| []))
                     LLVMPtr
                     result
                     LowerRuntimeValue

@@ -161,6 +161,15 @@
   `stringIndexOf "abc" "λ"`, and `Some 0` for
   `stringIndexOf "λ" ""` through `.mlfp` source checking, `run-program`, raw
   LLVM emission, object-code validation, and linked native execution.
+- Added the first native-capable substring splitting tracer:
+  `stringSplit : String -> String -> List String` now splits
+  non-overlapping Unicode scalar substring delimiters left to right, including
+  `stringSplit "aλbλc" "λ"` as `Cons "a" (Cons "b" (Cons "c" Nil))`,
+  preserves no-match inputs such as `stringSplit "abc" "λ"` as
+  `Cons "abc" Nil`, treats `stringSplit "abc" ""` as the same singleton
+  case, and preserves leading/trailing empty segments for
+  `stringSplit "λaλ" "λ"` through `.mlfp` source checking, `run-program`,
+  raw LLVM emission, object-code validation, and linked native execution.
 - Added the first native-capable `Char` to singleton `String` construction
   tracer: `stringFromChar : Char -> String` now preserves Unicode scalar
   values, including `stringFromChar 'λ'` and `stringFromChar 'A'`, through

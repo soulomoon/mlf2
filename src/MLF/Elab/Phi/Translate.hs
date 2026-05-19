@@ -287,7 +287,11 @@ phiFromEdgeWitnessCore traceCfg generalizeAtWith presolutionView mbGaParents mSc
                     replayMapRaw = etBinderReplayMap tr
                     replayMapDomain = IntSet.fromList (IntMap.keys replayMapRaw)
                     replayBinderDomainRaw =
-                        IntSet.fromList (IntMap.keys (siSubst siReplay))
+                        case etReplayDomainBinders tr of
+                            replayBinders@(_ : _) ->
+                                IntSet.fromList (map getNodeId replayBinders)
+                            [] ->
+                                IntSet.fromList (IntMap.keys (siSubst siReplay))
                     targetInReplayDomainRaw replayTarget =
                         IntSet.member (getNodeId replayTarget) replayBinderDomainRaw
                     missingSources =

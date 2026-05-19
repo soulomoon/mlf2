@@ -331,6 +331,7 @@ data RuntimePrimitive
   | RuntimeStringReplace
   | RuntimeStringIndexOfChar
   | RuntimeStringIndexOf
+  | RuntimeStringSplit
   | RuntimeStringFromChar
   | RuntimeStringFromInt
   | RuntimeStringFromBool
@@ -533,6 +534,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringReplacePrimitiveName -> Just RuntimeStringReplace
       | name' == PrimitiveInventory.stringIndexOfCharPrimitiveName -> Just RuntimeStringIndexOfChar
       | name' == PrimitiveInventory.stringIndexOfPrimitiveName -> Just RuntimeStringIndexOf
+      | name' == PrimitiveInventory.stringSplitPrimitiveName -> Just RuntimeStringSplit
       | name' == PrimitiveInventory.stringFromCharPrimitiveName -> Just RuntimeStringFromChar
       | name' == PrimitiveInventory.stringFromIntPrimitiveName -> Just RuntimeStringFromInt
       | name' == PrimitiveInventory.stringFromBoolPrimitiveName -> Just RuntimeStringFromBool
@@ -1289,6 +1291,10 @@ applyRuntimePrimitive context prim args
           runtimeStringIndexOf context haystack needle
         (RuntimeStringIndexOf, _) ->
           Left (ProgramPipelineError "run-program __string_index_of expected String arguments")
+        (RuntimeStringSplit, [RuntimeLit (LString haystack), RuntimeLit (LString delimiter)]) ->
+          runtimeStringSplit context haystack delimiter
+        (RuntimeStringSplit, _) ->
+          Left (ProgramPipelineError "run-program __string_split expected String arguments")
         (RuntimeStringFromChar, [RuntimeLit (LChar value)]) ->
           Right (RuntimeLit (LString [value]))
         (RuntimeStringFromChar, _) ->
@@ -1405,6 +1411,31 @@ replaceString haystack needle replacement
         Just afterMatch -> replacement ++ go afterMatch
         Nothing -> char : go afterChar
 
+runtimeStringSplit :: RuntimeContext -> String -> String -> Either ProgramError RuntimeValue
+runtimeStringSplit context haystack delimiter =
+  runtimeStringList context (splitString haystack delimiter)
+
+splitString :: String -> String -> [String]
+splitString haystack delimiter
+  | null delimiter = [haystack]
+  | otherwise = go haystack
+  where
+    go rest =
+      case splitFirst rest of
+        Just (segment, afterMatch) -> segment : go afterMatch
+        Nothing -> [rest]
+
+    splitFirst =
+      scan []
+
+    scan prefix rest =
+      case stripPrefix delimiter rest of
+        Just afterMatch -> Just (reverse prefix, afterMatch)
+        Nothing ->
+          case rest of
+            [] -> Nothing
+            char : afterChar -> scan (char : prefix) afterChar
+
 runtimeSomeInt :: RuntimeContext -> Integer -> Either ProgramError RuntimeValue
 runtimeSomeInt context value = do
   someCtor <- requirePreludeOptionConstructor context "Some"
@@ -1417,18 +1448,26 @@ runtimeNoneInt context = do
 
 runtimeStringToList :: RuntimeContext -> String -> Either ProgramError RuntimeValue
 runtimeStringToList context value = do
+  runtimeList context [RuntimeLit (LChar char) | char <- value]
+
+runtimeStringList :: RuntimeContext -> [String] -> Either ProgramError RuntimeValue
+runtimeStringList context values =
+  runtimeList context [RuntimeLit (LString value) | value <- values]
+
+runtimeList :: RuntimeContext -> [RuntimeValue] -> Either ProgramError RuntimeValue
+runtimeList context values = do
   nilCtor <- requirePreludeListConstructor context "Nil"
   consCtor <- requirePreludeListConstructor context "Cons"
   nilValue <- runtimeConstructorValue context (RuntimeConstructorSpec nilCtor Nothing) []
   foldM
-    ( \tailValue char ->
+    ( \tailValue value ->
         runtimeConstructorValue
           context
           (RuntimeConstructorSpec consCtor Nothing)
-          [RuntimeLit (LChar char), tailValue]
+          [value, tailValue]
     )
     nilValue
-    (reverse value)
+    (reverse values)
 
 runtimeListCharToString :: RuntimeValue -> Either ProgramError String
 runtimeListCharToString =
@@ -1592,6 +1631,7 @@ runtimePrimitiveArity prim =
     RuntimeStringReplace -> 3
     RuntimeStringIndexOfChar -> 2
     RuntimeStringIndexOf -> 2
+    RuntimeStringSplit -> 2
     RuntimeStringFromChar -> 1
     RuntimeStringFromInt -> 1
     RuntimeStringFromBool -> 1
@@ -1790,6 +1830,7 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringReplacePrimitiveName,
     PrimitiveInventory.stringIndexOfCharPrimitiveName,
     PrimitiveInventory.stringIndexOfPrimitiveName,
+    PrimitiveInventory.stringSplitPrimitiveName,
     PrimitiveInventory.stringFromCharPrimitiveName,
     PrimitiveInventory.stringFromIntPrimitiveName,
     PrimitiveInventory.stringFromBoolPrimitiveName,

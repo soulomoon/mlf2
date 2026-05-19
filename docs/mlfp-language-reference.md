@@ -432,6 +432,7 @@ stringReplaceChar : String -> Char -> Char -> String
 stringReplace : String -> String -> String -> String
 stringIndexOfChar : String -> Char -> Option Int
 stringIndexOf : String -> String -> Option Int
+stringSplit : String -> String -> List String
 stringFromChar : Char -> String
 stringFromInt : Int -> String
 stringFromBool : Bool -> String
@@ -485,7 +486,7 @@ tracer replaces non-overlapping matches from left to right at Unicode scalar
 boundaries, so `stringReplace "aλbλb" "λb" "WXYZ"` returns `"aWXYZWXYZ"`,
 `stringReplace "abc" "λ" "x"` returns `"abc"`, and
 `stringReplace "abc" "" "x"` returns `"abc"`. Empty needle replacement is a
-no-op. It does not claim splitting, split-family collection APIs, regex,
+no-op. It does not claim split-family collection APIs, regex,
 Unicode normalization, locale behavior, case conversion, interpolation,
 formatting, or replacement-family completion beyond this exact substring
 operation. `stringIndexOfChar` is the first
@@ -493,15 +494,26 @@ first-match `String`/`Char` index search operation; the current
 native-capable tracer reports zero-based Unicode scalar positions, so
 `stringIndexOfChar "aλbλ" 'λ'` returns `Some 1`, while
 `stringIndexOfChar "ab" 'λ'` returns `None`. It does not claim broader
-substring index APIs, splitting, regex, Unicode normalization, locale
-behavior, or complete cursor APIs. `stringIndexOf` is the first substring
+substring index APIs, regex, Unicode normalization, locale behavior, or
+complete cursor APIs. `stringIndexOf` is the first substring
 index search operation; the current native-capable tracer reports zero-based
 Unicode scalar
 positions, so `stringIndexOf "aλbcλ" "λb"` returns `Some 1`,
 `stringIndexOf "abc" "λ"` returns `None`, and
-`stringIndexOf "λ" ""` returns `Some 0`. It does not claim splitting,
-regex, Unicode normalization, locale behavior, complete cursor APIs, or
-replacement-family completion beyond `stringReplace`. `stringFromChar` is the first `Char` to
+`stringIndexOf "λ" ""` returns `Some 0`. It does not claim regex, Unicode
+normalization, locale behavior, complete cursor APIs, or replacement-family
+completion beyond `stringReplace`. `stringSplit` is the first substring
+splitting `String` operation; the current native-capable tracer splits
+left-to-right at non-overlapping Unicode scalar substring delimiters, preserves
+leading and trailing empty segments, returns `Cons input Nil` for no-match
+inputs, and treats an empty delimiter as `Cons input Nil`. For example,
+`stringSplit "aλbλc" "λ"` returns `Cons "a" (Cons "b" (Cons "c" Nil))`,
+`stringSplit "abc" "λ"` returns `Cons "abc" Nil`, `stringSplit "abc" ""`
+returns `Cons "abc" Nil`, and `stringSplit "λaλ" "λ"` returns
+`Cons "" (Cons "a" (Cons "" Nil))`. It does not claim split-on-character
+aliases, `lines`/`words`/`trim`/`reverse` APIs, regex, Unicode normalization,
+locale behavior, case conversion, broader `List String` APIs, parser parity,
+platform contracts, or proof completion. `stringFromChar` is the first `Char` to
 singleton `String` construction operation; the current native-capable tracer
 preserves Unicode scalar values, so `stringFromChar 'λ'` returns `"λ"`
 (rendered as `"\955"`) and `stringFromChar 'A'` returns `"A"`. `stringFromInt`
@@ -727,6 +739,7 @@ Current prelude contents:
 - `stringReplace`
 - `stringIndexOfChar`
 - `stringIndexOf`
+- `stringSplit`
 - `stringFromChar`
 - `stringFromInt`
 - `stringFromBool`
@@ -792,7 +805,10 @@ is `stringIndexOfChar`, with native coverage for zero-based Unicode scalar
 indexes and absent matches through `Option Int`. The first substring index
 search operation is `stringIndexOf`, with native coverage for zero-based
 Unicode scalar substring indexes, absent matches, and the empty needle
-returning `Some 0`. The first `Char` to singleton
+returning `Some 0`. The first substring splitting operation is `stringSplit`,
+with native coverage for non-overlapping Unicode scalar substring delimiters,
+leading/trailing empty segments, no-match singleton results, and empty-delimiter
+singleton results. The first `Char` to singleton
 `String` construction operation is `stringFromChar`, with native coverage for
 Unicode scalar preserving singleton strings. The first decimal `Int` to
 `String` conversion operation is `stringFromInt`, with native coverage for

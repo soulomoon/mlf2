@@ -547,6 +547,15 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   emit-native/native object validation, linked native execution, primitive
   inventory, planned neighbor text/char checks, docs scope audit,
   git diff --check, cabal build all, cabal test, and thesis gate.
+- round-299 completed item-299-string-split-native-tracer: added
+  stringSplit : String -> String -> List String backed by __string_split and
+  proved Unicode-scalar substring delimiter splitting, no-match singleton
+  behavior, empty-delimiter singleton behavior, and leading/trailing empty
+  segment preservation through source checking, run-program, backend
+  LLVM/object validation, emit-native/native object validation, linked native
+  execution, primitive inventory, planned neighbor text checks, Phi
+  replay-domain audit, docs scope audit, git diff --check, cabal build all,
+  cabal test, and thesis gate.
 
 #### Candidate Direction: Broad String And Char Substrate
 
