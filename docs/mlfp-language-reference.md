@@ -435,6 +435,7 @@ charIsDigit : Char -> Bool
 charIsAsciiLower : Char -> Bool
 charIsAsciiUpper : Char -> Bool
 charIsAsciiAlpha : Char -> Bool
+charIsAsciiAlphaNum : Char -> Bool
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -477,12 +478,18 @@ is `true` while `charIsAsciiUpper 'a'` and `charIsAsciiUpper 'λ'` are
 `false`. `charIsAsciiAlpha` is an explicitly ASCII `Char` classification
 tracer; it classifies ASCII uppercase or lowercase code points, so
 `charIsAsciiAlpha 'a'` and `charIsAsciiAlpha 'A'` are `true` while
-`charIsAsciiAlpha '7'` and `charIsAsciiAlpha 'λ'` are `false`. These
+`charIsAsciiAlpha '7'` and `charIsAsciiAlpha 'λ'` are `false`.
+`charIsAsciiAlphaNum` is an explicitly ASCII alphanumeric `Char`
+classification tracer; it classifies ASCII uppercase, lowercase, or decimal
+digit code points, so `charIsAsciiAlphaNum 'a'`, `charIsAsciiAlphaNum 'A'`,
+and `charIsAsciiAlphaNum '7'` are `true` while `charIsAsciiAlphaNum '_'` and
+`charIsAsciiAlphaNum 'λ'` are `false`. These
 operations are covered through source checking, `run-program`,
 backend LLVM emission, object generation, and linked native execution for the
 current native-capable tracers. `String`/`List Char` conversion, formatting,
-full slicing coverage, broader classification families, complete cursor
-APIs, locale, regex, and full parser parity remain out of scope.
+full slicing coverage, identifier-start or identifier-continuation helpers,
+broader classification families, complete cursor APIs, locale, regex, and full
+parser parity remain out of scope.
 
 Pure program entrypoints remain accepted:
 
@@ -618,6 +625,7 @@ Current prelude contents:
 - `charIsAsciiLower`
 - `charIsAsciiUpper`
 - `charIsAsciiAlpha`
+- `charIsAsciiAlphaNum`
 - `and`
 - `id`
 
@@ -665,9 +673,13 @@ examples. The next explicit ASCII helper is `charIsAsciiUpper`, with native
 coverage for uppercase ASCII, lowercase ASCII, and non-ASCII Unicode scalar
 examples. The next explicit ASCII helper is `charIsAsciiAlpha`, with native
 coverage for lowercase ASCII, uppercase ASCII, ASCII digit, and non-ASCII
-Unicode scalar examples. Broad `String`/`List Char` conversion, formatting,
-full slicing coverage, broader classification families, complete cursor APIs,
-and parser-parity helpers remain outside this contract.
+Unicode scalar examples. The next explicit ASCII helper is
+`charIsAsciiAlphaNum`, with native coverage for lowercase ASCII, uppercase
+ASCII, ASCII digit, ASCII underscore, and non-ASCII Unicode scalar examples.
+Broad `String`/`List Char` conversion, formatting, full slicing coverage,
+identifier-start or identifier-continuation helpers, broader classification
+families, complete cursor APIs, and parser-parity helpers remain outside this
+contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 

@@ -87,8 +87,9 @@ inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__string_contains_char`, `__string_contains`, `__string_starts_with`,
 `__string_ends_with`, `__string_drop`, `__string_take`, `__string_slice`,
 `__string_char_at`, `__char_is_digit`, `__char_is_ascii_lower`,
-`__char_is_ascii_upper`, `__char_is_ascii_alpha`, plus the IO primitive
-names classified there for native support.
+`__char_is_ascii_upper`, `__char_is_ascii_alpha`,
+`__char_is_ascii_alpha_num`, plus the IO primitive names classified there for
+native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
 The lowerer relies on the current eager order exactly as written:
@@ -182,6 +183,7 @@ lowerBackendProgram program = do
       needsCharIsAsciiLower = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiLowerName)) (lpFunctions lowered)
       needsCharIsAsciiUpper = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiUpperName)) (lpFunctions lowered)
       needsCharIsAsciiAlpha = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiAlphaName)) (lpFunctions lowered)
+      needsCharIsAsciiAlphaNum = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiAlphaNumName)) (lpFunctions lowered)
       existingDecls =
         runtimeDeclarations
           base
@@ -199,6 +201,7 @@ lowerBackendProgram program = do
           needsCharIsAsciiLower
           needsCharIsAsciiUpper
           needsCharIsAsciiAlpha
+          needsCharIsAsciiAlphaNum
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -341,6 +344,7 @@ nativeRuntimeFunctions base =
     ++ [nativeCharIsAsciiLowerFunction | Map.notMember runtimeCharIsAsciiLowerName (pbBindings base)]
     ++ [nativeCharIsAsciiUpperFunction | Map.notMember runtimeCharIsAsciiUpperName (pbBindings base)]
     ++ [nativeCharIsAsciiAlphaFunction | Map.notMember runtimeCharIsAsciiAlphaName (pbBindings base)]
+    ++ [nativeCharIsAsciiAlphaNumFunction | Map.notMember runtimeCharIsAsciiAlphaNumName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -966,6 +970,28 @@ nativeCharIsAsciiAlphaFunction =
   of
     Right function -> function
     Left err -> error ("internal native __char_is_ascii_alpha lowering failed: " ++ renderBackendLLVMError err)
+
+nativeCharIsAsciiAlphaNumFunction :: LLVMFunction
+nativeCharIsAsciiAlphaNumFunction =
+  case
+    lowerNativeFunction runtimeCharIsAsciiAlphaNumName (LLVMInt 1) [(LLVMInt 32, "value")] $ \params -> do
+      let value = requireNativeParam "value" params
+          i1Ty = LLVMInt 1
+      aboveBeforeLowerA <- emitAssign "charisasciialphanum.above.before.lower.a" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 96))
+      belowAfterLowerZ <- emitAssign "charisasciialphanum.below.after.lower.z" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 123) value)
+      lowerResult <- emitAssign "charisasciialphanum.lower.result" i1Ty (LLVMAnd aboveBeforeLowerA belowAfterLowerZ)
+      aboveBeforeUpperA <- emitAssign "charisasciialphanum.above.before.upper.a" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 64))
+      belowAfterUpperZ <- emitAssign "charisasciialphanum.below.after.upper.z" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 91) value)
+      upperResult <- emitAssign "charisasciialphanum.upper.result" i1Ty (LLVMAnd aboveBeforeUpperA belowAfterUpperZ)
+      alphaResult <- emitAssign "charisasciialphanum.alpha.result" i1Ty (LLVMOr lowerResult upperResult)
+      aboveBeforeZero <- emitAssign "charisasciialphanum.above.before.zero" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 47))
+      belowAfterNine <- emitAssign "charisasciialphanum.below.after.nine" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 58) value)
+      digitResult <- emitAssign "charisasciialphanum.digit.result" i1Ty (LLVMAnd aboveBeforeZero belowAfterNine)
+      result <- emitAssign "charisasciialphanum.result" i1Ty (LLVMOr alphaResult digitResult)
+      finishCurrentBlock (LLVMRet i1Ty result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __char_is_ascii_alpha_num lowering failed: " ++ renderBackendLLVMError err)
 
 nativeStringLengthFunction :: LLVMFunction
 nativeStringLengthFunction =
@@ -2251,12 +2277,16 @@ runtimeCharIsAsciiAlphaName :: String
 runtimeCharIsAsciiAlphaName =
   PrimitiveInventory.charIsAsciiAlphaPrimitiveName
 
+runtimeCharIsAsciiAlphaNumName :: String
+runtimeCharIsAsciiAlphaNumName =
+  PrimitiveInventory.charIsAsciiAlphaNumPrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -2318,6 +2348,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeCharIsAsciiAlphaName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiAlpha,
            Map.notMember runtimeCharIsAsciiAlphaName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeCharIsAsciiAlphaNumName (LLVMInt 1) [LLVMInt 32] False
+         | needsCharIsAsciiAlphaNum,
+           Map.notMember runtimeCharIsAsciiAlphaNumName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -5800,6 +5834,25 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
                   (LLVMInt 1)
                   ( LLVMCall
                       runtimeCharIsAsciiAlphaName
+                      [(LLVMInt 32, lvOperand value)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 1 (length args))
+    Nothing
+      | name == runtimeCharIsAsciiAlphaNumName -> do
+          unless (length args == 1) $
+            liftEither (BackendLLVMArityMismatch name 1 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [value] -> do
+              requireLLVMType context name (LLVMInt 32) value
+              result <-
+                emitAssign
+                  "call"
+                  (LLVMInt 1)
+                  ( LLVMCall
+                      runtimeCharIsAsciiAlphaNumName
                       [(LLVMInt 32, lvOperand value)]
                   )
               pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)

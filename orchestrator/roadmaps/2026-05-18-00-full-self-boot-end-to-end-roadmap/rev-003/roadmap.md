@@ -405,6 +405,15 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   primitive inventory matcher, neighbor text/native matcher set, rg
   evidence/claim-audit checks, `git diff --check`, cabal build all,
   cabal test, and thesis gate passed.
+- round-281 completed item-281-char-is-ascii-alphanum-native-tracer:
+  `charIsAsciiAlphaNum : Char -> Bool` classifies `charIsAsciiAlphaNum 'a'`,
+  `charIsAsciiAlphaNum 'A'`, and `charIsAsciiAlphaNum '7'` as true, and
+  `charIsAsciiAlphaNum '_'` and `charIsAsciiAlphaNum 'λ'` as false through
+  source checking, run-program, backend LLVM/object validation,
+  emit-native/native object validation, and linked native execution; evidence:
+  focused charIsAsciiAlphaNum matcher, primitive inventory matcher, neighbor
+  text/native matcher set, rg evidence/claim-audit checks,
+  `git diff --check`, cabal build all, cabal test, and thesis gate passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

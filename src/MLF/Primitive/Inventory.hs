@@ -35,6 +35,7 @@ module MLF.Primitive.Inventory
     charIsAsciiLowerPrimitiveName,
     charIsAsciiUpperPrimitiveName,
     charIsAsciiAlphaPrimitiveName,
+    charIsAsciiAlphaNumPrimitiveName,
     nativeIOPrimitiveName,
     nativeIOPrimitiveNames,
     nativeLowerablePrimitiveNames,
@@ -105,6 +106,7 @@ data PrimitiveNativeSupport
   | PrimitiveNativeCharIsAsciiLower
   | PrimitiveNativeCharIsAsciiUpper
   | PrimitiveNativeCharIsAsciiAlpha
+  | PrimitiveNativeCharIsAsciiAlphaNum
   | PrimitiveNativeIO PrimitiveIOOperation
   deriving (Eq, Ord, Show)
 
@@ -250,6 +252,12 @@ primitiveValueSpecs =
       ( charIsAsciiAlphaPrimitiveName,
         primitiveValueSpec
           PrimitiveNativeCharIsAsciiAlpha
+          (charTy `PrimitiveTypeArrow` boolTy)
+          Set.empty
+      ),
+      ( charIsAsciiAlphaNumPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeCharIsAsciiAlphaNum
           (charTy `PrimitiveTypeArrow` boolTy)
           Set.empty
       ),
@@ -459,6 +467,10 @@ charIsAsciiAlphaPrimitiveName :: String
 charIsAsciiAlphaPrimitiveName =
   "__char_is_ascii_alpha"
 
+charIsAsciiAlphaNumPrimitiveName :: String
+charIsAsciiAlphaNumPrimitiveName =
+  "__char_is_ascii_alpha_num"
+
 requireSinglePrimitiveNativeSupport :: PrimitiveNativeSupport -> String
 requireSinglePrimitiveNativeSupport nativeSupport =
   case Set.toList (Map.keysSet (Map.filter ((== nativeSupport) . primitiveValueNativeSupport) primitiveValueSpecs)) of
@@ -496,6 +508,7 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeCharIsAsciiLower -> True
     PrimitiveNativeCharIsAsciiUpper -> True
     PrimitiveNativeCharIsAsciiAlpha -> True
+    PrimitiveNativeCharIsAsciiAlphaNum -> True
     PrimitiveNativeIO {} -> True
 
 primitiveTypeToSourceType :: PrimitiveType -> SrcType

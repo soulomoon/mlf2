@@ -41,10 +41,12 @@ runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_length`, `__string_is_empty`, `__string_contains_char`,
 `__string_contains`, `__string_starts_with`, `__string_ends_with`,
 `__string_drop`, `__string_take`, `__string_slice`, `__string_char_at`,
-`__char_is_digit`, plus the IO primitive names classified there
-for native support. Native lowering consumes that inventory directly for lowerable
-primitive names, while wrapper bodies, C runtime symbol names, closure layout,
-and eager sequencing implementation details remain lowerer-local.
+`__char_is_digit`, `__char_is_ascii_lower`, `__char_is_ascii_upper`,
+`__char_is_ascii_alpha`, `__char_is_ascii_alpha_num`, plus the IO primitive
+names classified there for native support. Native lowering consumes that
+inventory directly for lowerable primitive names, while wrapper bodies, C
+runtime symbol names, closure layout, and eager sequencing implementation
+details remain lowerer-local.
 `emit-backend` and `emit-native` keep those primitives on the same
 `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`,
 no second executable IR, and no broad FFI lane.
@@ -165,6 +167,10 @@ Native emission owns the small process/runtime surface it needs:
   alphabetic `Char` classification operation; the native helper compares the
   Unicode scalar value against the ASCII `a` through `z` and `A` through `Z`
   ranges.
+- `__char_is_ascii_alpha_num`: inventory-classified as an explicit ASCII
+  alphanumeric `Char` classification operation; the native helper compares the
+  Unicode scalar value against the ASCII `a` through `z`, `A` through `Z`, and
+  `0` through `9` ranges.
 - Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
   `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
   functions with entry-point implementations.
@@ -231,6 +237,11 @@ Supported result shapes are:
   through `Z` code points through native execution while keeping
   identifier-start, identifier-continuation, Unicode category, and
   parser-family completion out of scope.
+- `charIsAsciiAlphaNum : Char -> Bool` is an explicit ASCII alphanumeric Char
+  classification tracer and classifies only ASCII letters or decimal digit
+  code points through native execution while keeping underscore/apostrophe
+  identifier-continuation semantics, Unicode category, and parser-family
+  completion out of scope.
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 
