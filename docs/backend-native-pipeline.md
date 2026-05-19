@@ -288,6 +288,12 @@ Supported result shapes are:
   decimal strings through native execution while keeping general Show support,
   generic ADT rendering, interpolation, printf-style formatting, locale
   behavior, parser parity, platform contracts, and proof records out of scope.
+- `stringFromUnit : Unit -> String` is the first native-capable Unit to String
+  conversion tracer. The Prelude definition stays pure and returns the `"Unit"`
+  string literal for canonical `Unit`; no reserved primitive, runtime dispatch,
+  or backend primitive lowerer is added, and general Show support, generic ADT
+  rendering, interpolation, printf-style formatting, locale behavior, parser
+  parity, platform contracts, and proof records remain out of scope.
 - `stringFromList : List Char -> String` is the first native-capable `List Char`
   to String conversion tracer. The Prelude definition stays high-level over
   `List`, `stringFromChar`, and `stringAppend`; linked native execution proves

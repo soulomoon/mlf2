@@ -432,6 +432,7 @@ stringFromChar : Char -> String
 stringFromInt : Int -> String
 stringFromBool : Bool -> String
 stringFromNat : Nat -> String
+stringFromUnit : Unit -> String
 stringFromList : List Char -> String
 stringToList : String -> List Char
 stringDrop : String -> Int -> String
@@ -482,7 +483,10 @@ native-capable tracer formats `stringFromBool true` as `"true"` and
 is the first `Nat` to `String` conversion operation; the current
 native-capable tracer walks canonical Prelude `Zero`/`Succ` values and formats
 `stringFromNat Zero` as `"0"` and
-`stringFromNat (Succ (Succ Zero))` as `"2"`. `stringFromList`
+`stringFromNat (Succ (Succ Zero))` as `"2"`. `stringFromUnit`
+is the first `Unit` to `String` conversion operation; the current
+native-capable tracer is a pure Prelude definition and formats
+`stringFromUnit Unit` as `"Unit"`. `stringFromList`
 is the first `List Char` to `String` conversion operation; the current
 native-capable tracer preserves Unicode scalar list values, so
 `stringFromList (Cons 'a' (Cons 'λ' Nil))` returns `"aλ"` (rendered as
@@ -692,6 +696,7 @@ Current prelude contents:
 - `stringFromInt`
 - `stringFromBool`
 - `stringFromNat`
+- `stringFromUnit`
 - `stringFromList`
 - `stringDrop`
 - `stringTake`
@@ -749,7 +754,9 @@ decimal integer strings. The first `Bool` to `String` conversion operation is
 `stringFromBool`, with native coverage for lowercase `true` and `false`
 strings. The first `Nat` to `String` conversion operation is `stringFromNat`,
 with native coverage for canonical decimal strings by walking Prelude
-`Zero`/`Succ` values. The first `List Char` to `String`
+`Zero`/`Succ` values. The first `Unit` to `String` conversion operation is
+`stringFromUnit`, with native coverage through a pure Prelude definition that
+returns the `"Unit"` string literal for `Unit`. The first `List Char` to `String`
 conversion operation is `stringFromList`, with native coverage for Unicode
 scalar preserving list construction. The first `String` to `List Char`
 conversion operation is `stringToList`, with native coverage for Unicode

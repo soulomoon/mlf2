@@ -165,6 +165,11 @@
   and `stringFromNat (Succ (Succ Zero))` as `"2"` by walking canonical
   Prelude `Zero`/`Succ` values through `.mlfp` source checking, `run-program`,
   raw LLVM emission, object-code validation, and linked native execution.
+- Added the first native-capable `Unit` to `String` conversion tracer:
+  `stringFromUnit : Unit -> String` now formats `stringFromUnit Unit` as
+  `"Unit"` through a pure Prelude definition and `.mlfp` source checking,
+  `run-program`, raw LLVM emission, object-code validation, and linked native
+  execution without adding a reserved string formatting primitive.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

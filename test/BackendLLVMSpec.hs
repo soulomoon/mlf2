@@ -566,6 +566,23 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "stringFromUnit formats Unit as a string through native execution" $
+      withTempProgram nativeStringFromUnitSourceProgram $ \path -> do
+        checkProgramFile path `shouldReturn` Right "OK\n"
+        runProgramFile path `shouldReturn` Right "\"Unit\"\n"
+
+        backendOutput <- requireRight =<< emitBackendFile path
+        backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+        validateLLVMAssembly backendOutput
+        validateLLVMObjectCode backendOutput
+
+        nativeOutput <- requireRight =<< emitNativeFile path
+        nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+        validateLLVMAssembly nativeOutput
+        validateLLVMObjectCode nativeOutput
+        runLLVMNativeExecutable nativeOutput
+          `shouldReturn` NativeRunResult ExitSuccess "\"Unit\"\n" ""
+
     it "stringDrop slices Unicode scalar prefixes through native execution" $
       forM_
         [ (nativeDropLeadingUnicodeStringSourceProgram, "\"ab\"\n", NativeRunResult ExitSuccess "\"ab\"\n" ""),
@@ -2891,6 +2908,15 @@ nativeTwoStringFromNatSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (Nat(..), stringFromNat);",
       "  def main : String = stringFromNat (Succ (Succ Zero));",
+      "}"
+    ]
+
+nativeStringFromUnitSourceProgram :: String
+nativeStringFromUnitSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Unit(..), stringFromUnit);",
+      "  def main : String = stringFromUnit Unit;",
       "}"
     ]
 
