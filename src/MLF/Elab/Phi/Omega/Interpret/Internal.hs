@@ -659,8 +659,9 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                 Forall binds _ -> length binds
               missingIdPositions =
                 [ i
-                  | (i, Nothing) <- zip [(0 :: Int) ..] ids,
-                    i < schemeArity
+                  | ((i, (name, _)), Nothing) <- zip (zip [(0 :: Int) ..] schemeBinders) ids,
+                    i < schemeArity,
+                    binderRequiresIdentity name
                 ]
           -- Builtin type schemes (e.g. __io_bind) have synthetic binder names
           -- that never flow through the generalizer, so all identities are
@@ -686,6 +687,14 @@ phiWithSchemeOmega ctx namedSet si introCount omegaOps = phiWithScheme
                       else orderKeys
               desired <- desiredBinderOrder orderKeysForSort vs0
               reorderTo vs0 ty ids desired
+      where
+        schemeBinders =
+          case siScheme si of
+            Forall binds _ -> binds
+
+        binderRequiresIdentity name = case parseBinderId name of
+          Just _ -> True
+          Nothing -> name `elem` IntMap.elems (siSubst si)
 
     desiredBinderOrder :: IntMap.IntMap Order.OrderKey -> VSpine -> Either ElabError [Maybe NodeId]
     desiredBinderOrder orderKeysActive vs0 = do

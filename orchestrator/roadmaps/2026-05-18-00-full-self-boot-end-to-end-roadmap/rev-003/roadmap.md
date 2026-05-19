@@ -482,6 +482,14 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   execution; reviewer evidence: git diff --check, focused native
   stringFromList matcher, primitive absence audit, active-roadmap diff check,
   and docs scope audit passed.
+- round-290 completed item-290-string-to-list-native-tracer: fixed the public
+  PhiReorder checker regression for named functions returning `List Char`,
+  then added `stringToList : String -> List Char` backed by
+  `__string_to_list` and proved non-ASCII lambda plus empty string behavior
+  through source checking, run-program, backend LLVM/object validation,
+  emit-native/native object validation, linked native execution, primitive
+  inventory, docs scope audit, git diff --check, and broad build/test/thesis
+  evidence.
 
 #### Candidate Direction: Broad String And Char Substrate
 

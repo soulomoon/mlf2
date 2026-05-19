@@ -144,6 +144,12 @@
   contents, including `stringFromList (Cons 'a' (Cons 'λ' Nil))` and
   `stringFromList Nil`, through `.mlfp` source checking, `run-program`, raw
   LLVM emission, object-code validation, and linked native execution.
+- Added the first native-capable `String` to `List Char` conversion tracer:
+  `stringToList : String -> List Char` now preserves Unicode scalar order,
+  including `stringToList "aλ"` as `Cons 'a' (Cons '\955' Nil)` and
+  `stringToList ""` as `Nil`, through `.mlfp` source checking,
+  `run-program`, raw LLVM emission, object-code validation, and linked native
+  execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

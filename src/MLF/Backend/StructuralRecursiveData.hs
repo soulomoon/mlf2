@@ -374,13 +374,20 @@ backendStructuralDataBoundaryMatches typeBounds mbDataDecls expectedTy actualTy 
 
     structuralMuMatchesKnownData base@(BaseTy dataName) args muName body =
       metadataLightStructuralDataMatches base args muName body
-        || case mbDataDecls >>= Map.lookup dataName of
+        || case matchingDataDecl dataName muName of
           Just dataDecl
-            | structuralMuNameMatches dataName muName,
+            | structuralMuNameMatches (backendDataName dataDecl) muName,
               Just substitution <- structuralDataArgumentSubstitution dataDecl args ->
                 structuralDataDeclarationMatches typeBounds dataDecl substitution (BTMu muName body)
           _ ->
             False
+
+    matchingDataDecl dataName muName =
+      case mbDataDecls >>= Map.lookup dataName of
+        Just dataDecl -> Just dataDecl
+        Nothing -> do
+          structuralName <- structuralRecursiveDataName muName
+          mbDataDecls >>= Map.lookup structuralName
 
     freshBinderName leftName rightName leftBound rightBound leftBody rightBody =
       freshNameLike

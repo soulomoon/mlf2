@@ -40,8 +40,9 @@ contract. The current primitive surface is the inventory-owned reserved
 runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_length`, `__string_is_empty`, `__string_contains_char`,
 `__string_contains`, `__string_starts_with`, `__string_ends_with`,
-`__string_append`, `__string_from_char`, `__string_drop`, `__string_take`,
-`__string_slice`, `__string_char_at`, `__char_is_digit`,
+`__string_append`, `__string_from_char`, `__string_to_list`,
+`__string_drop`, `__string_take`, `__string_slice`, `__string_char_at`,
+`__char_is_digit`,
 `__char_is_ascii_lower`, `__char_is_ascii_upper`, `__char_is_ascii_alpha`,
 `__char_is_ascii_alpha_num`,
 `__char_is_ascii_identifier_start`,
@@ -254,18 +255,21 @@ Supported result shapes are:
   execution.
 - `stringAppend : String -> String -> String` is the first native-capable
   append String tracer and concatenates valid Unicode-scalar strings through
-  native execution while keeping reverse `String -> List Char` conversion,
-  formatting, parser parity, platform contracts, and proof records out of scope.
+  native execution while keeping formatting, parser parity, platform contracts,
+  and proof records out of scope.
 - `stringFromChar : Char -> String` is the first native-capable Char to
   singleton String construction tracer and encodes Unicode scalar values
-  through native execution while keeping reverse `String -> List Char`
-  conversion, formatting, parser parity, platform contracts, and proof records
-  out of scope.
+  through native execution while keeping formatting, parser parity, platform
+  contracts, and proof records out of scope.
 - `stringFromList : List Char -> String` is the first native-capable `List Char`
   to String conversion tracer. The Prelude definition stays high-level over
   `List`, `stringFromChar`, and `stringAppend`; linked native execution proves
-  Unicode scalar list construction while reverse `String -> List Char`
-  conversion, formatting, parser parity, platform contracts, and proof records
+  Unicode scalar list construction while formatting, parser parity, platform
+  contracts, and proof records remain out of scope.
+- `stringToList : String -> List Char` is the first native-capable String to
+  `List Char` conversion tracer. The reserved `__string_to_list` primitive
+  decodes valid UTF-8 into Unicode scalar `Char` list cells while formatting,
+  broader collection APIs, parser parity, platform contracts, and proof records
   remain out of scope.
 - `charIsDigit : Char -> Bool` is the first native-capable Char
   classification tracer and classifies ASCII decimal digit code points through

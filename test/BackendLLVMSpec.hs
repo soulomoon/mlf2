@@ -474,6 +474,32 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "named functions returning List Char source check without PhiReorder binder identity failure" $
+      withTempProgram namedListCharReturnSourceProgram $ \path ->
+        checkProgramFile path `shouldReturn` Right "OK\n"
+
+    it "stringToList converts Unicode scalar strings to List Char values through native execution" $
+      forM_
+        [ (nativeUnicodeStringToListSourceProgram, "Cons 'a' (Cons '\\955' Nil)\n", NativeRunResult ExitSuccess "Cons 'a' (Cons '\\955' Nil)\n" ""),
+          (nativeEmptyStringToListSourceProgram, "Nil\n", NativeRunResult ExitSuccess "Nil\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "stringDrop slices Unicode scalar prefixes through native execution" $
       forM_
         [ (nativeDropLeadingUnicodeStringSourceProgram, "\"ab\"\n", NativeRunResult ExitSuccess "\"ab\"\n" ""),
@@ -2717,6 +2743,34 @@ nativeEmptyStringFromListSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (List(..), stringFromList);",
       "  def main : String = stringFromList Nil;",
+      "}"
+    ]
+
+namedListCharReturnSourceProgram :: String
+namedListCharReturnSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (List(..));",
+      "  def f : String -> List Char = λ(value : String) Nil;",
+      "  def main : List Char = f \"aλ\";",
+      "}"
+    ]
+
+nativeUnicodeStringToListSourceProgram :: String
+nativeUnicodeStringToListSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (List(..), stringToList);",
+      "  def main : List Char = stringToList \"aλ\";",
+      "}"
+    ]
+
+nativeEmptyStringToListSourceProgram :: String
+nativeEmptyStringToListSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (List(..), stringToList);",
+      "  def main : List Char = stringToList \"\";",
       "}"
     ]
 

@@ -736,6 +736,11 @@ backendVariableTypeMatches context0 name expectedTy actualTy =
     (Just (bvcData context0))
     expectedTy
     actualTy
+    || backendStructuralDataBoundaryMatches
+      (bvcTypeBounds context0)
+      (Just (bvcData context0))
+      expectedTy
+      actualTy
 
 backendVariableTypeMatchesWithBounds :: Map.Map String (Maybe BackendType) -> BackendType -> BackendType -> Bool
 backendVariableTypeMatchesWithBounds typeBounds expectedTy actualTy =

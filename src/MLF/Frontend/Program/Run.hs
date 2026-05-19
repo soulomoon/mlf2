@@ -329,6 +329,7 @@ data RuntimePrimitive
   | RuntimeStringAppend
   | RuntimeStringFromChar
   | RuntimePreludeStringFromList
+  | RuntimeStringToList
   | RuntimeStringDrop
   | RuntimeStringTake
   | RuntimeStringSlice
@@ -522,6 +523,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringEndsWithPrimitiveName -> Just RuntimeStringEndsWith
       | name' == PrimitiveInventory.stringAppendPrimitiveName -> Just RuntimeStringAppend
       | name' == PrimitiveInventory.stringFromCharPrimitiveName -> Just RuntimeStringFromChar
+      | name' == PrimitiveInventory.stringToListPrimitiveName -> Just RuntimeStringToList
       | name' == PrimitiveInventory.stringDropPrimitiveName -> Just RuntimeStringDrop
       | name' == PrimitiveInventory.stringTakePrimitiveName -> Just RuntimeStringTake
       | name' == PrimitiveInventory.stringSlicePrimitiveName -> Just RuntimeStringSlice
@@ -635,7 +637,7 @@ applyRuntimeValue context funValue argValue =
     RuntimeClosure name body closureEnv closureStack closureDeferredValues ->
       evalRuntimeExprWithStack context closureStack closureDeferredValues (Map.insert name argValue closureEnv) body
     RuntimePrimitive prim args ->
-      applyRuntimePrimitive prim (args ++ [argValue])
+      applyRuntimePrimitive context prim (args ++ [argValue])
     RuntimeConstructor spec args
       | length args < length (ctorArgs (runtimeConstructorInfo spec)) ->
           runtimeConstructorValue context spec (args ++ [argValue])
@@ -1168,8 +1170,8 @@ methodFullArityFromInfo :: MethodInfo -> Int
 methodFullArityFromInfo methodInfo =
   length (fst (splitArrows (snd (splitForalls (methodType methodInfo)))))
 
-applyRuntimePrimitive :: RuntimePrimitive -> [RuntimeValue] -> Either ProgramError RuntimeValue
-applyRuntimePrimitive prim args
+applyRuntimePrimitive :: RuntimeContext -> RuntimePrimitive -> [RuntimeValue] -> Either ProgramError RuntimeValue
+applyRuntimePrimitive context prim args
   | length args < runtimePrimitiveArity prim = Right (RuntimePrimitive prim args)
   | length args > runtimePrimitiveArity prim =
       Left (ProgramPipelineError ("run-program IO primitive over-applied: " ++ show prim))
@@ -1265,6 +1267,10 @@ applyRuntimePrimitive prim args
           RuntimeLit . LString <$> runtimeListCharToString value
         (RuntimePreludeStringFromList, _) ->
           Left (ProgramPipelineError "run-program stringFromList expected a List Char argument")
+        (RuntimeStringToList, [RuntimeLit (LString value)]) ->
+          runtimeStringToList context value
+        (RuntimeStringToList, _) ->
+          Left (ProgramPipelineError "run-program __string_to_list expected a String argument")
         (RuntimeStringDrop, [RuntimeLit (LString value), RuntimeLit (LInt count)]) ->
           Right (RuntimeLit (LString (dropUnicodeScalars count value)))
         (RuntimeStringDrop, _) ->
@@ -1334,6 +1340,21 @@ preludeStringFromListRuntimeName :: String
 preludeStringFromListRuntimeName =
   "Prelude__stringFromList"
 
+runtimeStringToList :: RuntimeContext -> String -> Either ProgramError RuntimeValue
+runtimeStringToList context value = do
+  nilCtor <- requirePreludeListConstructor context "Nil"
+  consCtor <- requirePreludeListConstructor context "Cons"
+  nilValue <- runtimeConstructorValue context (RuntimeConstructorSpec nilCtor Nothing) []
+  foldM
+    ( \tailValue char ->
+        runtimeConstructorValue
+          context
+          (RuntimeConstructorSpec consCtor Nothing)
+          [RuntimeLit (LChar char), tailValue]
+    )
+    nilValue
+    (reverse value)
+
 runtimeListCharToString :: RuntimeValue -> Either ProgramError String
 runtimeListCharToString =
   fmap reverse . go []
@@ -1345,6 +1366,12 @@ runtimeListCharToString =
         RuntimeData ctor _ [RuntimeLit (LChar char), rest]
           | isPreludeListConstructor "Cons" ctor -> go (char : chars) rest
         _ -> Left (ProgramPipelineError "run-program stringFromList expected a List Char argument")
+
+requirePreludeListConstructor :: RuntimeContext -> String -> Either ProgramError ConstructorInfo
+requirePreludeListConstructor context name =
+  case find (isPreludeListConstructor name) (Map.elems (runtimeConstructors context)) of
+    Just ctor -> Right ctor
+    Nothing -> Left (ProgramPipelineError ("run-program __string_to_list missing Prelude List constructor " ++ name))
 
 isPreludeListConstructor :: String -> ConstructorInfo -> Bool
 isPreludeListConstructor name ctor =
@@ -1458,6 +1485,7 @@ runtimePrimitiveArity prim =
     RuntimeStringAppend -> 2
     RuntimeStringFromChar -> 1
     RuntimePreludeStringFromList -> 1
+    RuntimeStringToList -> 1
     RuntimeStringDrop -> 2
     RuntimeStringTake -> 2
     RuntimeStringSlice -> 3
@@ -1647,6 +1675,7 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringEndsWithPrimitiveName,
     PrimitiveInventory.stringAppendPrimitiveName,
     PrimitiveInventory.stringFromCharPrimitiveName,
+    PrimitiveInventory.stringToListPrimitiveName,
     PrimitiveInventory.stringDropPrimitiveName,
     PrimitiveInventory.stringTakePrimitiveName,
     PrimitiveInventory.stringSlicePrimitiveName,
