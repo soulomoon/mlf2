@@ -429,6 +429,7 @@ stringStartsWith : String -> String -> Bool
 stringEndsWith : String -> String -> Bool
 stringAppend : String -> String -> String
 stringFromChar : Char -> String
+stringFromList : List Char -> String
 stringDrop : String -> Int -> String
 stringTake : String -> Int -> String
 stringSlice : String -> Int -> Int -> String
@@ -467,7 +468,11 @@ as `"a\955b"`), while `stringAppend "" "λ"` and `stringAppend "λ" ""` return
 `"λ"` (rendered as `"\955"`). `stringFromChar` is the first `Char` to
 singleton `String` construction operation; the current native-capable tracer
 preserves Unicode scalar values, so `stringFromChar 'λ'` returns `"λ"`
-(rendered as `"\955"`) and `stringFromChar 'A'` returns `"A"`. `stringDrop`
+(rendered as `"\955"`) and `stringFromChar 'A'` returns `"A"`. `stringFromList`
+is the first `List Char` to `String` conversion operation; the current
+native-capable tracer preserves Unicode scalar list values, so
+`stringFromList (Cons 'a' (Cons 'λ' Nil))` returns `"aλ"` (rendered as
+`"a\955"`) and `stringFromList Nil` returns `""`. `stringDrop`
 is the first drop slicing operation; the current native-capable tracer drops a
 non-negative count of
 Unicode scalar values, so `stringDrop "λab" 1` returns `"ab"` and
@@ -534,9 +539,9 @@ ASCII scalar values `0x20..0x7e`, so `charIsAsciiPrintable ' '`,
 `charIsAsciiPrintable 'λ'` are `false`. These operations are covered through
 source checking, `run-program`,
 backend LLVM emission, object generation, and linked native execution for the
-current native-capable tracers. `String`/`List Char` conversion, formatting,
-full slicing coverage, broader classification families, complete cursor APIs,
-locale, regex, and full parser parity remain out of scope.
+current native-capable tracers. Reverse `String -> List Char` conversion,
+formatting, full slicing coverage, broader classification families, complete
+cursor APIs, locale, regex, and full parser parity remain out of scope.
 
 Pure program entrypoints remain accepted:
 
@@ -666,6 +671,7 @@ Current prelude contents:
 - `stringEndsWith`
 - `stringAppend`
 - `stringFromChar`
+- `stringFromList`
 - `stringDrop`
 - `stringTake`
 - `stringSlice`
@@ -716,7 +722,9 @@ non-empty Unicode scalar suffix. The first append `String` operation is
 `stringAppend`, with native coverage for Unicode scalar preserving string
 concatenation and empty-side identity examples. The first `Char` to singleton
 `String` construction operation is `stringFromChar`, with native coverage for
-Unicode scalar preserving singleton strings. `stringDrop` is the first drop
+Unicode scalar preserving singleton strings. The first `List Char` to `String`
+conversion operation is `stringFromList`, with native coverage for Unicode
+scalar preserving list construction. `stringDrop` is the first drop
 slicing operation, with native coverage for non-negative Unicode scalar
 prefix-drop examples. The first take slicing operation is `stringTake`, with
 native coverage for non-negative Unicode scalar prefix-take examples. The first
@@ -752,7 +760,7 @@ ASCII digit `7`, ASCII space, and a non-ASCII Unicode scalar are false.
 The next explicit ASCII helper is `charIsAsciiPrintable`, with native coverage
 for exactly ASCII scalar values `0x20..0x7e`: space, `!`, `A`, `7`, and `~`
 are true while tab, newline, and a non-ASCII Unicode scalar are false.
-Broad `String`/`List Char` conversion, formatting, full slicing coverage,
+Reverse `String -> List Char` conversion, formatting, full slicing coverage,
 broader classification families, complete cursor APIs, and parser-parity
 helpers remain outside this contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF

@@ -254,13 +254,19 @@ Supported result shapes are:
   execution.
 - `stringAppend : String -> String -> String` is the first native-capable
   append String tracer and concatenates valid Unicode-scalar strings through
-  native execution while keeping `String`/`List Char` conversion, formatting,
-  parser parity, platform contracts, and proof records out of scope.
+  native execution while keeping reverse `String -> List Char` conversion,
+  formatting, parser parity, platform contracts, and proof records out of scope.
 - `stringFromChar : Char -> String` is the first native-capable Char to
   singleton String construction tracer and encodes Unicode scalar values
-  through native execution while keeping `String`/`List Char` conversion,
-  formatting, parser parity, platform contracts, and proof records out of
-  scope.
+  through native execution while keeping reverse `String -> List Char`
+  conversion, formatting, parser parity, platform contracts, and proof records
+  out of scope.
+- `stringFromList : List Char -> String` is the first native-capable `List Char`
+  to String conversion tracer. The Prelude definition stays high-level over
+  `List`, `stringFromChar`, and `stringAppend`; linked native execution proves
+  Unicode scalar list construction while reverse `String -> List Char`
+  conversion, formatting, parser parity, platform contracts, and proof records
+  remain out of scope.
 - `charIsDigit : Char -> Bool` is the first native-capable Char
   classification tracer and classifies ASCII decimal digit code points through
   native execution while keeping broader classification families out of scope.

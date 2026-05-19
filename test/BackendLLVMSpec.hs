@@ -452,6 +452,28 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "stringFromList converts List Char values to Unicode scalar strings through native execution" $
+      forM_
+        [ (nativeUnicodeStringFromListSourceProgram, "\"a\\955\"\n", NativeRunResult ExitSuccess "\"a\\955\"\n" ""),
+          (nativeEmptyStringFromListSourceProgram, "\"\"\n", NativeRunResult ExitSuccess "\"\"\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "stringDrop slices Unicode scalar prefixes through native execution" $
       forM_
         [ (nativeDropLeadingUnicodeStringSourceProgram, "\"ab\"\n", NativeRunResult ExitSuccess "\"ab\"\n" ""),
@@ -2677,6 +2699,24 @@ nativeAsciiStringFromCharSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (stringFromChar);",
       "  def main : String = stringFromChar 'A';",
+      "}"
+    ]
+
+nativeUnicodeStringFromListSourceProgram :: String
+nativeUnicodeStringFromListSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (List(..), stringFromList);",
+      "  def main : String = stringFromList (Cons 'a' (Cons 'λ' Nil));",
+      "}"
+    ]
+
+nativeEmptyStringFromListSourceProgram :: String
+nativeEmptyStringFromListSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (List(..), stringFromList);",
+      "  def main : String = stringFromList Nil;",
       "}"
     ]
 

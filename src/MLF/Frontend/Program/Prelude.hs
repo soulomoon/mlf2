@@ -27,7 +27,7 @@ import qualified MLF.Frontend.Syntax.Program as P
 preludeSource :: String
 preludeSource =
   unlines
-    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringStartsWith, stringEndsWith, stringAppend, stringFromChar, stringDrop, stringTake, stringSlice, stringCharAt, charIsDigit, charIsAsciiLower, charIsAsciiUpper, charIsAsciiAlpha, charIsAsciiAlphaNum, charIsAsciiIdentifierStart, charIsAsciiIdentifierContinue, charIsAsciiWhitespace, charIsAsciiPunctuation, charIsAsciiPrintable, and, id) {",
+    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringStartsWith, stringEndsWith, stringAppend, stringFromChar, stringFromList, stringDrop, stringTake, stringSlice, stringCharAt, charIsDigit, charIsAsciiLower, charIsAsciiUpper, charIsAsciiAlpha, charIsAsciiAlphaNum, charIsAsciiIdentifierStart, charIsAsciiIdentifierContinue, charIsAsciiWhitespace, charIsAsciiPunctuation, charIsAsciiPrintable, and, id) {",
       "  class Eq a {",
       "    eq : a -> a -> Bool;",
       "  }",
@@ -107,6 +107,10 @@ preludeSource =
       "  def stringEndsWith : String -> String -> Bool = __string_ends_with;",
       "  def stringAppend : String -> String -> String = __string_append;",
       "  def stringFromChar : Char -> String = __string_from_char;",
+      "  def stringFromList : List Char -> String = λ(chars : List Char) case chars of {",
+      "    Nil -> \"\";",
+      "    Cons head tail -> stringAppend (stringFromChar head) (stringFromList tail)",
+      "  };",
       "  def stringDrop : String -> Int -> String = __string_drop;",
       "  def stringTake : String -> Int -> String = __string_take;",
       "  def stringSlice : String -> Int -> Int -> String = __string_slice;",

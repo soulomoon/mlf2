@@ -328,6 +328,7 @@ data RuntimePrimitive
   | RuntimeStringEndsWith
   | RuntimeStringAppend
   | RuntimeStringFromChar
+  | RuntimePreludeStringFromList
   | RuntimeStringDrop
   | RuntimeStringTake
   | RuntimeStringSlice
@@ -453,6 +454,8 @@ lookupRuntimeValue context stack deferredValues env name =
     Nothing ->
       case runtimePrimitive name of
         Just prim -> Right (RuntimePrimitive prim [])
+        Nothing
+          | name == preludeStringFromListRuntimeName -> Right (RuntimePrimitive RuntimePreludeStringFromList [])
         Nothing
           | Just deferred <- Map.lookup name deferredValues ->
               lookupRuntimeDeferredValue context stack deferredValues env deferred
@@ -1258,6 +1261,10 @@ applyRuntimePrimitive prim args
           Right (RuntimeLit (LString [value]))
         (RuntimeStringFromChar, _) ->
           Left (ProgramPipelineError "run-program __string_from_char expected a Char argument")
+        (RuntimePreludeStringFromList, [value]) ->
+          RuntimeLit . LString <$> runtimeListCharToString value
+        (RuntimePreludeStringFromList, _) ->
+          Left (ProgramPipelineError "run-program stringFromList expected a List Char argument")
         (RuntimeStringDrop, [RuntimeLit (LString value), RuntimeLit (LInt count)]) ->
           Right (RuntimeLit (LString (dropUnicodeScalars count value)))
         (RuntimeStringDrop, _) ->
@@ -1322,6 +1329,28 @@ applyRuntimePrimitive prim args
 isAsciiDecimalDigit :: Char -> Bool
 isAsciiDecimalDigit value =
   value >= '0' && value <= '9'
+
+preludeStringFromListRuntimeName :: String
+preludeStringFromListRuntimeName =
+  "Prelude__stringFromList"
+
+runtimeListCharToString :: RuntimeValue -> Either ProgramError String
+runtimeListCharToString =
+  fmap reverse . go []
+  where
+    go chars value =
+      case value of
+        RuntimeData ctor _ []
+          | isPreludeListConstructor "Nil" ctor -> Right chars
+        RuntimeData ctor _ [RuntimeLit (LChar char), rest]
+          | isPreludeListConstructor "Cons" ctor -> go (char : chars) rest
+        _ -> Left (ProgramPipelineError "run-program stringFromList expected a List Char argument")
+
+isPreludeListConstructor :: String -> ConstructorInfo -> Bool
+isPreludeListConstructor name ctor =
+  symbolNamespace (ctorInfoSymbol ctor) == SymbolConstructor
+    && symbolDefiningModule (ctorInfoSymbol ctor) == "Prelude"
+    && symbolDefiningName (ctorInfoSymbol ctor) == name
 
 isAsciiLower :: Char -> Bool
 isAsciiLower value =
@@ -1428,6 +1457,7 @@ runtimePrimitiveArity prim =
     RuntimeStringEndsWith -> 2
     RuntimeStringAppend -> 2
     RuntimeStringFromChar -> 1
+    RuntimePreludeStringFromList -> 1
     RuntimeStringDrop -> 2
     RuntimeStringTake -> 2
     RuntimeStringSlice -> 3
