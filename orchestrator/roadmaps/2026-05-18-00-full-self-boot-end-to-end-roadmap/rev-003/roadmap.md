@@ -524,6 +524,14 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   primitive inventory, planned neighbor text/char checks, docs scope audit,
   Unicode-scalar replacement allocation audit, git diff --check, and broad
   build/test/thesis evidence.
+- round-296 completed item-296-string-index-of-char-native-tracer: added
+  `stringIndexOfChar : String -> Char -> Option Int` backed by
+  `__string_index_of_char` and proved first lambda index `Some 1` plus
+  absent-match `None` through source checking, run-program, backend
+  LLVM/object validation, emit-native/native object validation, linked native
+  execution, primitive inventory, Option tag/layout audit, planned neighbor
+  text/char checks, docs scope audit, git diff --check, and broad
+  build/test/thesis evidence.
 
 #### Candidate Direction: Broad String And Char Substrate
 

@@ -27,7 +27,7 @@ import qualified MLF.Frontend.Syntax.Program as P
 preludeSource :: String
 preludeSource =
   unlines
-    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringStartsWith, stringEndsWith, stringAppend, stringReplaceChar, stringFromChar, stringFromInt, stringFromBool, stringFromNat, stringFromUnit, stringFromList, stringToList, stringDrop, stringTake, stringSlice, stringCharAt, charIsDigit, charIsAsciiLower, charIsAsciiUpper, charIsAsciiAlpha, charIsAsciiAlphaNum, charIsAsciiIdentifierStart, charIsAsciiIdentifierContinue, charIsAsciiWhitespace, charIsAsciiPunctuation, charIsAsciiPrintable, and, id) {",
+    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringStartsWith, stringEndsWith, stringAppend, stringReplaceChar, stringIndexOfChar, stringFromChar, stringFromInt, stringFromBool, stringFromNat, stringFromUnit, stringFromList, stringToList, stringDrop, stringTake, stringSlice, stringCharAt, charIsDigit, charIsAsciiLower, charIsAsciiUpper, charIsAsciiAlpha, charIsAsciiAlphaNum, charIsAsciiIdentifierStart, charIsAsciiIdentifierContinue, charIsAsciiWhitespace, charIsAsciiPunctuation, charIsAsciiPrintable, and, id) {",
       "  class Eq a {",
       "    eq : a -> a -> Bool;",
       "  }",
@@ -107,6 +107,7 @@ preludeSource =
       "  def stringEndsWith : String -> String -> Bool = __string_ends_with;",
       "  def stringAppend : String -> String -> String = __string_append;",
       "  def stringReplaceChar : String -> Char -> Char -> String = __string_replace_char;",
+      "  def stringIndexOfChar : String -> Char -> Option Int = __string_index_of_char;",
       "  def stringFromChar : Char -> String = __string_from_char;",
       "  def stringFromInt : Int -> String = __string_from_int;",
       "  def stringFromBool : Bool -> String = __string_from_bool;",

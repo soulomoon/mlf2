@@ -18,7 +18,7 @@ where
 
 import Control.Monad (foldM)
 import Data.Foldable (toList)
-import Data.List (find, intercalate, isInfixOf, isPrefixOf, isSuffixOf)
+import Data.List (elemIndex, find, intercalate, isInfixOf, isPrefixOf, isSuffixOf)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -328,6 +328,7 @@ data RuntimePrimitive
   | RuntimeStringEndsWith
   | RuntimeStringAppend
   | RuntimeStringReplaceChar
+  | RuntimeStringIndexOfChar
   | RuntimeStringFromChar
   | RuntimeStringFromInt
   | RuntimeStringFromBool
@@ -527,6 +528,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringEndsWithPrimitiveName -> Just RuntimeStringEndsWith
       | name' == PrimitiveInventory.stringAppendPrimitiveName -> Just RuntimeStringAppend
       | name' == PrimitiveInventory.stringReplaceCharPrimitiveName -> Just RuntimeStringReplaceChar
+      | name' == PrimitiveInventory.stringIndexOfCharPrimitiveName -> Just RuntimeStringIndexOfChar
       | name' == PrimitiveInventory.stringFromCharPrimitiveName -> Just RuntimeStringFromChar
       | name' == PrimitiveInventory.stringFromIntPrimitiveName -> Just RuntimeStringFromInt
       | name' == PrimitiveInventory.stringFromBoolPrimitiveName -> Just RuntimeStringFromBool
@@ -1271,6 +1273,10 @@ applyRuntimePrimitive context prim args
           Right (RuntimeLit (LString (map (\char -> if char == needle then replacement else char) value)))
         (RuntimeStringReplaceChar, _) ->
           Left (ProgramPipelineError "run-program __string_replace_char expected String and Char arguments")
+        (RuntimeStringIndexOfChar, [RuntimeLit (LString value), RuntimeLit (LChar needle)]) ->
+          runtimeStringIndexOfChar context value needle
+        (RuntimeStringIndexOfChar, _) ->
+          Left (ProgramPipelineError "run-program __string_index_of_char expected String and Char arguments")
         (RuntimeStringFromChar, [RuntimeLit (LChar value)]) ->
           Right (RuntimeLit (LString [value]))
         (RuntimeStringFromChar, _) ->
@@ -1364,6 +1370,22 @@ preludeStringFromListRuntimeName :: String
 preludeStringFromListRuntimeName =
   "Prelude__stringFromList"
 
+runtimeStringIndexOfChar :: RuntimeContext -> String -> Char -> Either ProgramError RuntimeValue
+runtimeStringIndexOfChar context value needle = do
+  case elemIndex needle value of
+    Just index -> runtimeSomeInt context (toInteger index)
+    Nothing -> runtimeNoneInt context
+
+runtimeSomeInt :: RuntimeContext -> Integer -> Either ProgramError RuntimeValue
+runtimeSomeInt context value = do
+  someCtor <- requirePreludeOptionConstructor context "Some"
+  runtimeConstructorValue context (RuntimeConstructorSpec someCtor Nothing) [RuntimeLit (LInt value)]
+
+runtimeNoneInt :: RuntimeContext -> Either ProgramError RuntimeValue
+runtimeNoneInt context = do
+  noneCtor <- requirePreludeOptionConstructor context "None"
+  runtimeConstructorValue context (RuntimeConstructorSpec noneCtor Nothing) []
+
 runtimeStringToList :: RuntimeContext -> String -> Either ProgramError RuntimeValue
 runtimeStringToList context value = do
   nilCtor <- requirePreludeListConstructor context "Nil"
@@ -1409,8 +1431,20 @@ requirePreludeListConstructor context name =
     Just ctor -> Right ctor
     Nothing -> Left (ProgramPipelineError ("run-program __string_to_list missing Prelude List constructor " ++ name))
 
+requirePreludeOptionConstructor :: RuntimeContext -> String -> Either ProgramError ConstructorInfo
+requirePreludeOptionConstructor context name =
+  case find (isPreludeOptionConstructor name) (Map.elems (runtimeConstructors context)) of
+    Just ctor -> Right ctor
+    Nothing -> Left (ProgramPipelineError ("run-program __string_index_of_char missing Prelude Option constructor " ++ name))
+
 isPreludeListConstructor :: String -> ConstructorInfo -> Bool
 isPreludeListConstructor name ctor =
+  symbolNamespace (ctorInfoSymbol ctor) == SymbolConstructor
+    && symbolDefiningModule (ctorInfoSymbol ctor) == "Prelude"
+    && symbolDefiningName (ctorInfoSymbol ctor) == name
+
+isPreludeOptionConstructor :: String -> ConstructorInfo -> Bool
+isPreludeOptionConstructor name ctor =
   symbolNamespace (ctorInfoSymbol ctor) == SymbolConstructor
     && symbolDefiningModule (ctorInfoSymbol ctor) == "Prelude"
     && symbolDefiningName (ctorInfoSymbol ctor) == name
@@ -1526,6 +1560,7 @@ runtimePrimitiveArity prim =
     RuntimeStringEndsWith -> 2
     RuntimeStringAppend -> 2
     RuntimeStringReplaceChar -> 3
+    RuntimeStringIndexOfChar -> 2
     RuntimeStringFromChar -> 1
     RuntimeStringFromInt -> 1
     RuntimeStringFromBool -> 1
@@ -1721,6 +1756,7 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringEndsWithPrimitiveName,
     PrimitiveInventory.stringAppendPrimitiveName,
     PrimitiveInventory.stringReplaceCharPrimitiveName,
+    PrimitiveInventory.stringIndexOfCharPrimitiveName,
     PrimitiveInventory.stringFromCharPrimitiveName,
     PrimitiveInventory.stringFromIntPrimitiveName,
     PrimitiveInventory.stringFromBoolPrimitiveName,

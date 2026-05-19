@@ -275,6 +275,12 @@ Supported result shapes are:
   native execution. Substring replacement, splitting, regex, Unicode
   normalization, locale behavior, parser parity, platform contracts, and proof
   records remain out of scope.
+- `stringIndexOfChar : String -> Char -> Option Int` is the first
+  native-capable first-match String/Char index search tracer and reports
+  zero-based Unicode scalar indexes through `Some` while returning `None` for
+  absent matches. Substring index APIs, splitting, regex, Unicode
+  normalization, locale behavior, complete cursor APIs, parser parity,
+  platform contracts, and proof records remain out of scope.
 - `stringFromChar : Char -> String` is the first native-capable Char to
   singleton String construction tracer and encodes Unicode scalar values
   through native execution while keeping formatting, parser parity, platform

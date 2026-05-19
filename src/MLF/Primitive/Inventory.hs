@@ -29,6 +29,7 @@ module MLF.Primitive.Inventory
     stringEndsWithPrimitiveName,
     stringAppendPrimitiveName,
     stringReplaceCharPrimitiveName,
+    stringIndexOfCharPrimitiveName,
     stringFromCharPrimitiveName,
     stringFromIntPrimitiveName,
     stringFromBoolPrimitiveName,
@@ -112,6 +113,7 @@ data PrimitiveNativeSupport
   | PrimitiveNativeStringEndsWith
   | PrimitiveNativeStringAppend
   | PrimitiveNativeStringReplaceChar
+  | PrimitiveNativeStringIndexOfChar
   | PrimitiveNativeStringFromChar
   | PrimitiveNativeStringFromInt
   | PrimitiveNativeStringFromBool
@@ -241,6 +243,12 @@ primitiveValueSpecs =
         primitiveValueSpec
           PrimitiveNativeStringReplaceChar
           (stringTy `PrimitiveTypeArrow` (charTy `PrimitiveTypeArrow` (charTy `PrimitiveTypeArrow` stringTy)))
+          Set.empty
+      ),
+      ( stringIndexOfCharPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringIndexOfChar
+          (stringTy `PrimitiveTypeArrow` (charTy `PrimitiveTypeArrow` optionOf intTy))
           Set.empty
       ),
       ( stringFromCharPrimitiveName,
@@ -466,6 +474,7 @@ primitiveValueSpecs =
     ioOf ty = PrimitiveTypeCon "IO" (ty :| [])
     ioRefOf ty = PrimitiveTypeCon "IORef" (ty :| [])
     listOf ty = PrimitiveTypeCon "List" (ty :| [])
+    optionOf ty = PrimitiveTypeCon "Option" (ty :| [])
 
 primitiveValueNames :: Set String
 primitiveValueNames = Map.keysSet primitiveValueSpecs
@@ -539,6 +548,10 @@ stringAppendPrimitiveName =
 stringReplaceCharPrimitiveName :: String
 stringReplaceCharPrimitiveName =
   "__string_replace_char"
+
+stringIndexOfCharPrimitiveName :: String
+stringIndexOfCharPrimitiveName =
+  "__string_index_of_char"
 
 stringFromCharPrimitiveName :: String
 stringFromCharPrimitiveName =
@@ -647,6 +660,7 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeStringEndsWith -> True
     PrimitiveNativeStringAppend -> True
     PrimitiveNativeStringReplaceChar -> True
+    PrimitiveNativeStringIndexOfChar -> True
     PrimitiveNativeStringFromChar -> True
     PrimitiveNativeStringFromInt -> True
     PrimitiveNativeStringFromBool -> True

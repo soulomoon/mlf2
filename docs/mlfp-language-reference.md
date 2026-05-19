@@ -429,6 +429,7 @@ stringStartsWith : String -> String -> Bool
 stringEndsWith : String -> String -> Bool
 stringAppend : String -> String -> String
 stringReplaceChar : String -> Char -> Char -> String
+stringIndexOfChar : String -> Char -> Option Int
 stringFromChar : Char -> String
 stringFromInt : Int -> String
 stringFromBool : Bool -> String
@@ -476,7 +477,13 @@ replacement `String` operation; the current native-capable tracer replaces
 matching Unicode scalar values, so `stringReplaceChar "aλbλ" 'λ' 'x'` returns
 `"axbx"`, while the no-match input `stringReplaceChar "ab" 'λ' 'x'` returns
 `"ab"`. It does not claim substring replacement, splitting, regex, Unicode
-normalization, or locale behavior. `stringFromChar` is the first `Char` to
+normalization, or locale behavior. `stringIndexOfChar` is the first
+first-match `String`/`Char` index search operation; the current
+native-capable tracer reports zero-based Unicode scalar positions, so
+`stringIndexOfChar "aλbλ" 'λ'` returns `Some 1`, while
+`stringIndexOfChar "ab" 'λ'` returns `None`. It does not claim substring
+index APIs, splitting, regex, Unicode normalization, locale behavior, or
+complete cursor APIs. `stringFromChar` is the first `Char` to
 singleton `String` construction operation; the current native-capable tracer
 preserves Unicode scalar values, so `stringFromChar 'λ'` returns `"λ"`
 (rendered as `"\955"`) and `stringFromChar 'A'` returns `"A"`. `stringFromInt`
@@ -699,6 +706,7 @@ Current prelude contents:
 - `stringEndsWith`
 - `stringAppend`
 - `stringReplaceChar`
+- `stringIndexOfChar`
 - `stringFromChar`
 - `stringFromInt`
 - `stringFromBool`
@@ -756,7 +764,9 @@ non-empty Unicode scalar suffix. The first append `String` operation is
 concatenation and empty-side identity examples. The first `String` character
 replacement operation is `stringReplaceChar`, with native
 coverage for replacing matching Unicode scalar `Char` values and preserving
-no-match strings. The first `Char` to singleton
+no-match strings. The first `String`/`Char` first-match index search operation
+is `stringIndexOfChar`, with native coverage for zero-based Unicode scalar
+indexes and absent matches through `Option Int`. The first `Char` to singleton
 `String` construction operation is `stringFromChar`, with native coverage for
 Unicode scalar preserving singleton strings. The first decimal `Int` to
 `String` conversion operation is `stringFromInt`, with native coverage for

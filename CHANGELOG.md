@@ -141,6 +141,12 @@
   `stringReplaceChar "ab" 'λ' 'x'` through `.mlfp` source checking,
   `run-program`, raw LLVM emission, object-code validation, and linked native
   execution.
+- Added the first native-capable first-match `String`/`Char` index search
+  tracer: `stringIndexOfChar : String -> Char -> Option Int` now returns
+  `Some 1` for `stringIndexOfChar "aλbλ" 'λ'` and `None` for
+  `stringIndexOfChar "ab" 'λ'` through `.mlfp` source checking,
+  `run-program`, raw LLVM emission, object-code validation, and linked native
+  execution.
 - Added the first native-capable `Char` to singleton `String` construction
   tracer: `stringFromChar : Char -> String` now preserves Unicode scalar
   values, including `stringFromChar 'λ'` and `stringFromChar 'A'`, through
