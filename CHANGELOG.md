@@ -93,6 +93,15 @@
   `charIsAsciiAlphaNum 'λ'` are `false` through `.mlfp` source checking,
   `run-program`, raw LLVM emission, object-code validation, and linked native
   execution.
+- Added an explicit native-capable ASCII identifier-start `Char`
+  classification tracer: `charIsAsciiIdentifierStart : Char -> Bool` now
+  matches the current parser start set by classifying
+  `charIsAsciiIdentifierStart 'a'`, `charIsAsciiIdentifierStart 'A'`, and
+  `charIsAsciiIdentifierStart '_'` as `true`, while
+  `charIsAsciiIdentifierStart '7'`, `charIsAsciiIdentifierStart '\''`, and
+  `charIsAsciiIdentifierStart 'λ'` are `false` through `.mlfp` source
+  checking, `run-program`, raw LLVM emission, object-code validation, and
+  linked native execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered
