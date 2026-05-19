@@ -330,6 +330,7 @@ data RuntimePrimitive
   | RuntimeStringFromChar
   | RuntimeStringFromInt
   | RuntimeStringFromBool
+  | RuntimeStringFromNat
   | RuntimePreludeStringFromList
   | RuntimeStringToList
   | RuntimeStringDrop
@@ -527,6 +528,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringFromCharPrimitiveName -> Just RuntimeStringFromChar
       | name' == PrimitiveInventory.stringFromIntPrimitiveName -> Just RuntimeStringFromInt
       | name' == PrimitiveInventory.stringFromBoolPrimitiveName -> Just RuntimeStringFromBool
+      | name' == PrimitiveInventory.stringFromNatPrimitiveName -> Just RuntimeStringFromNat
       | name' == PrimitiveInventory.stringToListPrimitiveName -> Just RuntimeStringToList
       | name' == PrimitiveInventory.stringDropPrimitiveName -> Just RuntimeStringDrop
       | name' == PrimitiveInventory.stringTakePrimitiveName -> Just RuntimeStringTake
@@ -1275,6 +1277,10 @@ applyRuntimePrimitive context prim args
           Right (RuntimeLit (LString (if value then "true" else "false")))
         (RuntimeStringFromBool, _) ->
           Left (ProgramPipelineError "run-program __string_from_bool expected a Bool argument")
+        (RuntimeStringFromNat, [value]) ->
+          RuntimeLit . LString . show <$> runtimeNatToInteger value
+        (RuntimeStringFromNat, _) ->
+          Left (ProgramPipelineError "run-program __string_from_nat expected a Nat argument")
         (RuntimePreludeStringFromList, [value]) ->
           RuntimeLit . LString <$> runtimeListCharToString value
         (RuntimePreludeStringFromList, _) ->
@@ -1379,6 +1385,18 @@ runtimeListCharToString =
           | isPreludeListConstructor "Cons" ctor -> go (char : chars) rest
         _ -> Left (ProgramPipelineError "run-program stringFromList expected a List Char argument")
 
+runtimeNatToInteger :: RuntimeValue -> Either ProgramError Integer
+runtimeNatToInteger =
+  go 0
+  where
+    go count value =
+      case value of
+        RuntimeData ctor _ []
+          | isPreludeNatConstructor "Zero" ctor -> Right count
+        RuntimeData ctor _ [rest]
+          | isPreludeNatConstructor "Succ" ctor -> go (count + 1) rest
+        _ -> Left (ProgramPipelineError "run-program __string_from_nat expected a Nat argument")
+
 requirePreludeListConstructor :: RuntimeContext -> String -> Either ProgramError ConstructorInfo
 requirePreludeListConstructor context name =
   case find (isPreludeListConstructor name) (Map.elems (runtimeConstructors context)) of
@@ -1387,6 +1405,12 @@ requirePreludeListConstructor context name =
 
 isPreludeListConstructor :: String -> ConstructorInfo -> Bool
 isPreludeListConstructor name ctor =
+  symbolNamespace (ctorInfoSymbol ctor) == SymbolConstructor
+    && symbolDefiningModule (ctorInfoSymbol ctor) == "Prelude"
+    && symbolDefiningName (ctorInfoSymbol ctor) == name
+
+isPreludeNatConstructor :: String -> ConstructorInfo -> Bool
+isPreludeNatConstructor name ctor =
   symbolNamespace (ctorInfoSymbol ctor) == SymbolConstructor
     && symbolDefiningModule (ctorInfoSymbol ctor) == "Prelude"
     && symbolDefiningName (ctorInfoSymbol ctor) == name
@@ -1498,6 +1522,7 @@ runtimePrimitiveArity prim =
     RuntimeStringFromChar -> 1
     RuntimeStringFromInt -> 1
     RuntimeStringFromBool -> 1
+    RuntimeStringFromNat -> 1
     RuntimePreludeStringFromList -> 1
     RuntimeStringToList -> 1
     RuntimeStringDrop -> 2
@@ -1691,6 +1716,7 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringFromCharPrimitiveName,
     PrimitiveInventory.stringFromIntPrimitiveName,
     PrimitiveInventory.stringFromBoolPrimitiveName,
+    PrimitiveInventory.stringFromNatPrimitiveName,
     PrimitiveInventory.stringToListPrimitiveName,
     PrimitiveInventory.stringDropPrimitiveName,
     PrimitiveInventory.stringTakePrimitiveName,

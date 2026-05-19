@@ -160,6 +160,11 @@
   `"true"` and `stringFromBool false` as `"false"` through `.mlfp` source
   checking, `run-program`, raw LLVM emission, object-code validation, and
   linked native execution.
+- Added the first native-capable `Nat` to `String` conversion tracer:
+  `stringFromNat : Nat -> String` now formats `stringFromNat Zero` as `"0"`
+  and `stringFromNat (Succ (Succ Zero))` as `"2"` by walking canonical
+  Prelude `Zero`/`Succ` values through `.mlfp` source checking, `run-program`,
+  raw LLVM emission, object-code validation, and linked native execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

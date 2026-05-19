@@ -1,0 +1,84 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-293",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-broad-string-char-substrate",
+  "extracted_item_id": "item-293-string-from-nat-native-tracer",
+  "decision": "approved",
+  "status": "approved",
+  "findings": [],
+  "required_changes": [],
+  "validations": [
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/round293-review-cargo-target cabal test mlf2-test --test-options='--match \"stringFromNat formats Nat values as decimal strings through native execution\"'",
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/round293-review-cargo-target cabal test mlf2-test --test-options='--match \"classifies native-lowerable primitive support from the shared primitive inventory owner\"'",
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/round293-review-cargo-target cabal test mlf2-test --test-options='--match \"stringFromBool formats Bool values as strings through native execution\" --match \"stringFromInt formats Int values as decimal strings through native execution\" --match \"stringToList converts Unicode scalar strings to List Char values through native execution\" --match \"stringFromList converts List Char values to Unicode scalar strings through native execution\" --match \"stringFromChar converts Unicode scalar Chars to singleton strings through native execution\" --match \"stringAppend concatenates Unicode scalar strings through native execution\" --match \"Unicode stringLength source checks, runs, emits backend, and executes natively\" --match \"charIsAsciiPrintable classifies ASCII printable Char values through native execution\" --match \"Unicode String literal source checks, runs, emits backend, and executes natively\"'",
+      "result": "passed",
+      "examples": 9,
+      "failures": 0
+    },
+    {
+      "command": "rg -n -e 'stringFromNat : Nat -> String' -e '__string_from_nat' -e 'stringFromNatPrimitiveName' -e 'PrimitiveNativeStringFromNat' -e 'RuntimeStringFromNat' src test docs CHANGELOG.md",
+      "result": "passed"
+    },
+    {
+      "command": "rg -n -e 'stringFromNat formats Nat values as decimal strings through native execution' -e 'stringFromNat Zero' -e 'stringFromNat \\(Succ \\(Succ Zero\\)\\)' test/BackendLLVMSpec.hs",
+      "result": "passed"
+    },
+    {
+      "command": "rg -n 'Unicode scalar|stringFromNat|stringFromBool|stringFromInt|String/List Char|formatting|Explicit String Formatting|Show Nat|Show|generic ADT|printf|interpolation|locale|regex|classification|cursor|parser parity|platform contract|self-boot proof|milestone-3 completion|milestone completion' docs/mlfp-language-reference.md docs/backend-native-pipeline.md docs/mlfp-self-boot-readiness.md CONTEXT.md CHANGELOG.md",
+      "result": "passed",
+      "summary": "Docs/changelog stay bounded to canonical Nat to String decimal conversion and do not claim Show Nat, generic ADT rendering, interpolation, printf-facing source formatting, locale behavior, regex, parser parity, platform contracts, milestone completion, or self-boot proof."
+    },
+    {
+      "command": "git diff master -- runtime/mlfp_io/target/release/libmlfp_io.d",
+      "result": "passed",
+      "summary": "Empty diff; no generated depfile churn remains."
+    },
+    {
+      "command": "git diff master -- orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap.md orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/roadmap-view.json orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003/verification.md",
+      "result": "passed",
+      "summary": "Empty diff; no active roadmap edits are included in the implementation diff."
+    },
+    {
+      "command": "git diff master -- orchestrator/state.json",
+      "result": "passed",
+      "summary": "Diff is limited to the controller-owned active round-293 review entry."
+    },
+    {
+      "command": "reuse implementation-notes.md broad validation evidence",
+      "result": "accepted",
+      "summary": "Implementation notes report cabal build all passed, CARGO_TARGET_DIR=/tmp/round293-cargo-target cabal test passed with 2598 examples and 0 failures, and CARGO_TARGET_DIR=/tmp/round293-cargo-target ./scripts/thesis-conformance-gate.sh passed. Reviewer reran focused, inventory, and neighbor targets and audited the diff before relying on this broad evidence."
+    }
+  ],
+  "evidence_summary": "Reviewed the integrated round-293 worktree. The focused stringFromNat test proves stringFromNat Zero formats as \"0\" and stringFromNat (Succ (Succ Zero)) formats as \"2\" through source checking, run-program, backend LLVM/object validation, emit-native/native object validation, and linked native execution. Prelude, primitive inventory, run-program, and backend/native lowering agree on __string_from_nat; runtime and native paths walk canonical Prelude Nat constructors rather than adding a generic ADT renderer. Primitive inventory, planned neighbor tracers, diff hygiene, evidence scans, docs scope audit, depfile, controller-state, and active-roadmap checks passed. The implementer-recorded broad build, full test, and thesis gate evidence is consistent with the inspected diff.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-293 completed item-293-string-from-nat-native-tracer: added stringFromNat : Nat -> String backed by __string_from_nat and proved canonical decimal outputs for Zero and Succ (Succ Zero) through source checking, run-program, backend LLVM/object validation, emit-native/native object validation, linked native execution, primitive inventory, planned neighbor text/char checks, docs scope audit, git diff --check, and broad build/test/thesis evidence."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

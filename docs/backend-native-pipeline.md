@@ -41,7 +41,7 @@ runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_length`, `__string_is_empty`, `__string_contains_char`,
 `__string_contains`, `__string_starts_with`, `__string_ends_with`,
 `__string_append`, `__string_from_char`, `__string_from_int`,
-`__string_from_bool`, `__string_to_list`,
+`__string_from_bool`, `__string_from_nat`, `__string_to_list`,
 `__string_drop`, `__string_take`, `__string_slice`, `__string_char_at`,
 `__char_is_digit`,
 `__char_is_ascii_lower`, `__char_is_ascii_upper`, `__char_is_ascii_alpha`,
@@ -124,7 +124,7 @@ Native emission owns the small process/runtime surface it needs:
 
 - `main`: the C ABI wrapper added only by `emit-native`.
 - `printf`: declared for deterministic result printing.
-- `sprintf`: declared for the narrow decimal `Int` to `String` helper.
+- `sprintf`: declared for narrow decimal `Int` and `Nat` to `String` helpers.
 - `malloc`: declared when heap-allocated constructors or closure records need
   allocation.
 - `putchar`: declared for character-by-character String rendering.
@@ -161,6 +161,10 @@ Native emission owns the small process/runtime surface it needs:
 - `__string_from_bool`: inventory-classified as the first native-capable
   `Bool` to `String` conversion operation; the native helper returns ordinary
   string values for lowercase `true` and `false`.
+- `__string_from_nat`: inventory-classified as the first native-capable `Nat`
+  to `String` conversion operation; the native helper walks canonical Prelude
+  `Zero`/`Succ` constructor chains and writes a decimal count into a new
+  `String` pointer.
 - `__string_drop`: inventory-classified as the first native-capable drop
   slicing `String` operation; the native helper advances by UTF-8 scalar
   starts for a non-negative count and returns the remaining `String` pointer.
@@ -279,6 +283,11 @@ Supported result shapes are:
   through native execution while keeping general Show support, interpolation,
   printf-style formatting, locale behavior, parser parity, platform contracts,
   and proof records out of scope.
+- `stringFromNat : Nat -> String` is the first native-capable Nat to String
+  conversion tracer and formats canonical Prelude `Zero`/`Succ` values as
+  decimal strings through native execution while keeping general Show support,
+  generic ADT rendering, interpolation, printf-style formatting, locale
+  behavior, parser parity, platform contracts, and proof records out of scope.
 - `stringFromList : List Char -> String` is the first native-capable `List Char`
   to String conversion tracer. The Prelude definition stays high-level over
   `List`, `stringFromChar`, and `stringAppend`; linked native execution proves

@@ -27,7 +27,7 @@ import qualified MLF.Frontend.Syntax.Program as P
 preludeSource :: String
 preludeSource =
   unlines
-    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringStartsWith, stringEndsWith, stringAppend, stringFromChar, stringFromInt, stringFromBool, stringFromList, stringToList, stringDrop, stringTake, stringSlice, stringCharAt, charIsDigit, charIsAsciiLower, charIsAsciiUpper, charIsAsciiAlpha, charIsAsciiAlphaNum, charIsAsciiIdentifierStart, charIsAsciiIdentifierContinue, charIsAsciiWhitespace, charIsAsciiPunctuation, charIsAsciiPrintable, and, id) {",
+    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringStartsWith, stringEndsWith, stringAppend, stringFromChar, stringFromInt, stringFromBool, stringFromNat, stringFromList, stringToList, stringDrop, stringTake, stringSlice, stringCharAt, charIsDigit, charIsAsciiLower, charIsAsciiUpper, charIsAsciiAlpha, charIsAsciiAlphaNum, charIsAsciiIdentifierStart, charIsAsciiIdentifierContinue, charIsAsciiWhitespace, charIsAsciiPunctuation, charIsAsciiPrintable, and, id) {",
       "  class Eq a {",
       "    eq : a -> a -> Bool;",
       "  }",
@@ -109,6 +109,7 @@ preludeSource =
       "  def stringFromChar : Char -> String = __string_from_char;",
       "  def stringFromInt : Int -> String = __string_from_int;",
       "  def stringFromBool : Bool -> String = __string_from_bool;",
+      "  def stringFromNat : Nat -> String = __string_from_nat;",
       "  def stringFromList : List Char -> String = λ(chars : List Char) case chars of {",
       "    Nil -> \"\";",
       "    Cons head tail -> stringAppend (stringFromChar head) (stringFromList tail)",

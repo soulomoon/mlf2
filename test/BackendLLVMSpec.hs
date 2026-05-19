@@ -544,6 +544,28 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "stringFromNat formats Nat values as decimal strings through native execution" $
+      forM_
+        [ (nativeZeroStringFromNatSourceProgram, "\"0\"\n", NativeRunResult ExitSuccess "\"0\"\n" ""),
+          (nativeTwoStringFromNatSourceProgram, "\"2\"\n", NativeRunResult ExitSuccess "\"2\"\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "stringDrop slices Unicode scalar prefixes through native execution" $
       forM_
         [ (nativeDropLeadingUnicodeStringSourceProgram, "\"ab\"\n", NativeRunResult ExitSuccess "\"ab\"\n" ""),
@@ -2851,6 +2873,24 @@ nativeFalseStringFromBoolSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (stringFromBool);",
       "  def main : String = stringFromBool false;",
+      "}"
+    ]
+
+nativeZeroStringFromNatSourceProgram :: String
+nativeZeroStringFromNatSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Nat(..), stringFromNat);",
+      "  def main : String = stringFromNat Zero;",
+      "}"
+    ]
+
+nativeTwoStringFromNatSourceProgram :: String
+nativeTwoStringFromNatSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Nat(..), stringFromNat);",
+      "  def main : String = stringFromNat (Succ (Succ Zero));",
       "}"
     ]
 

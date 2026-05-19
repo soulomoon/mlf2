@@ -431,6 +431,7 @@ stringAppend : String -> String -> String
 stringFromChar : Char -> String
 stringFromInt : Int -> String
 stringFromBool : Bool -> String
+stringFromNat : Nat -> String
 stringFromList : List Char -> String
 stringToList : String -> List Char
 stringDrop : String -> Int -> String
@@ -477,7 +478,11 @@ native-capable tracer formats `stringFromInt 42` as `"42"` and
 `stringFromInt 0` as `"0"`. `stringFromBool`
 is the first `Bool` to `String` conversion operation; the current
 native-capable tracer formats `stringFromBool true` as `"true"` and
-`stringFromBool false` as `"false"`. `stringFromList`
+`stringFromBool false` as `"false"`. `stringFromNat`
+is the first `Nat` to `String` conversion operation; the current
+native-capable tracer walks canonical Prelude `Zero`/`Succ` values and formats
+`stringFromNat Zero` as `"0"` and
+`stringFromNat (Succ (Succ Zero))` as `"2"`. `stringFromList`
 is the first `List Char` to `String` conversion operation; the current
 native-capable tracer preserves Unicode scalar list values, so
 `stringFromList (Cons 'a' (Cons 'λ' Nil))` returns `"aλ"` (rendered as
@@ -686,6 +691,7 @@ Current prelude contents:
 - `stringFromChar`
 - `stringFromInt`
 - `stringFromBool`
+- `stringFromNat`
 - `stringFromList`
 - `stringDrop`
 - `stringTake`
@@ -741,7 +747,9 @@ Unicode scalar preserving singleton strings. The first decimal `Int` to
 `String` conversion operation is `stringFromInt`, with native coverage for
 decimal integer strings. The first `Bool` to `String` conversion operation is
 `stringFromBool`, with native coverage for lowercase `true` and `false`
-strings. The first `List Char` to `String`
+strings. The first `Nat` to `String` conversion operation is `stringFromNat`,
+with native coverage for canonical decimal strings by walking Prelude
+`Zero`/`Succ` values. The first `List Char` to `String`
 conversion operation is `stringFromList`, with native coverage for Unicode
 scalar preserving list construction. The first `String` to `List Char`
 conversion operation is `stringToList`, with native coverage for Unicode

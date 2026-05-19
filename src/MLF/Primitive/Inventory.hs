@@ -31,6 +31,7 @@ module MLF.Primitive.Inventory
     stringFromCharPrimitiveName,
     stringFromIntPrimitiveName,
     stringFromBoolPrimitiveName,
+    stringFromNatPrimitiveName,
     stringToListPrimitiveName,
     stringDropPrimitiveName,
     stringTakePrimitiveName,
@@ -112,6 +113,7 @@ data PrimitiveNativeSupport
   | PrimitiveNativeStringFromChar
   | PrimitiveNativeStringFromInt
   | PrimitiveNativeStringFromBool
+  | PrimitiveNativeStringFromNat
   | PrimitiveNativeStringToList
   | PrimitiveNativeStringDrop
   | PrimitiveNativeStringTake
@@ -249,6 +251,12 @@ primitiveValueSpecs =
         primitiveValueSpec
           PrimitiveNativeStringFromBool
           (boolTy `PrimitiveTypeArrow` stringTy)
+          Set.empty
+      ),
+      ( stringFromNatPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringFromNat
+          (natTy `PrimitiveTypeArrow` stringTy)
           Set.empty
       ),
       ( stringToListPrimitiveName,
@@ -444,6 +452,7 @@ primitiveValueSpecs =
     boolTy = PrimitiveTypeBase "Bool"
     charTy = PrimitiveTypeBase "Char"
     intTy = PrimitiveTypeBase "Int"
+    natTy = PrimitiveTypeBase "Nat"
     stringTy = PrimitiveTypeBase "String"
     unitTy = PrimitiveTypeBase "Unit"
     ioOf ty = PrimitiveTypeCon "IO" (ty :| [])
@@ -530,6 +539,10 @@ stringFromIntPrimitiveName =
 stringFromBoolPrimitiveName :: String
 stringFromBoolPrimitiveName =
   "__string_from_bool"
+
+stringFromNatPrimitiveName :: String
+stringFromNatPrimitiveName =
+  "__string_from_nat"
 
 stringToListPrimitiveName :: String
 stringToListPrimitiveName =
@@ -624,6 +637,7 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeStringFromChar -> True
     PrimitiveNativeStringFromInt -> True
     PrimitiveNativeStringFromBool -> True
+    PrimitiveNativeStringFromNat -> True
     PrimitiveNativeStringToList -> True
     PrimitiveNativeStringDrop -> True
     PrimitiveNativeStringTake -> True
