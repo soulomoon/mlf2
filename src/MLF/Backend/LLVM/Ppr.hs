@@ -50,6 +50,12 @@ renderLLVMGlobal (LLVMStringGlobal name value) =
     ++ " c\""
     ++ concatMap renderLLVMStringChar value
     ++ "\\00\""
+renderLLVMGlobal (LLVMVariableGlobal name ty initializer) =
+  renderLLVMGlobalName name
+    ++ " = private global "
+    ++ renderLLVMType ty
+    ++ " "
+    ++ renderLLVMOperand initializer
 
 renderLLVMDeclaration :: LLVMDeclaration -> String
 renderLLVMDeclaration declaration =

@@ -39,7 +39,7 @@ Row-5 primitive/eager ownership is part of the same raw/native inspection
 contract. The current primitive surface is the inventory-owned reserved
 runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_length`, `__string_is_empty`, `__string_contains_char`,
-`__string_contains`, `__string_starts_with`, `__string_ends_with`,
+`__string_contains`, `__string_equals`, `__string_starts_with`, `__string_ends_with`,
 `__string_append`, `__string_replace_char`, `__string_replace`,
 `__string_index_of_char`, `__string_index_of`, `__string_split`,
 `__string_from_char`, `__string_from_int`,
@@ -145,6 +145,11 @@ Native emission owns the small process/runtime surface it needs:
 - `__string_contains`: inventory-classified as the first native-capable
   substring `String` search operation; the native helper compares valid UTF-8
   scalar-sequence slices from scalar boundaries and returns a `Bool`.
+- `__string_equals`: inventory-classified as the first native-capable exact
+  `String` equality operation; the native helper compares strings by exact
+  UTF-8 byte length for module string globals and for native helper outputs
+  registered by `__string_append`, so embedded U+0000 bytes in those values are
+  not treated as C terminators, and returns a `Bool`.
 - `__string_starts_with`: inventory-classified as the first native-capable
   prefix `String` search operation; the native helper compares valid UTF-8
   scalar-sequence bytes from the start of the haystack and returns a `Bool`.
@@ -267,6 +272,14 @@ Supported result shapes are:
 - `stringContains : String -> String -> Bool` is the first native-capable
   substring String search tracer and compares non-empty Unicode scalar
   substring examples through native execution.
+- `stringEquals : String -> String -> Bool` is the first native-capable exact
+  string equality tracer. The current native evidence covers equal non-ASCII,
+  unequal-prefix, empty-string, embedded-U+0000 source-literal inequality, and
+  `stringAppend`-created embedded-U+0000 inequality examples through native
+  execution. Collation, ordering, `Eq String`, case conversion, Unicode
+  normalization, locale behavior, regex, parser parity, platform contracts,
+  driver work, proof records, and broad exact metadata for every
+  string-producing helper remain out of scope.
 - `stringStartsWith : String -> String -> Bool` is the first native-capable
   prefix String search tracer and compares non-empty Unicode scalar prefix
   examples through native execution.

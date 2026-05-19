@@ -425,6 +425,7 @@ stringLength : String -> Int
 stringIsEmpty : String -> Bool
 stringContainsChar : String -> Char -> Bool
 stringContains : String -> String -> Bool
+stringEquals : String -> String -> Bool
 stringStartsWith : String -> String -> Bool
 stringEndsWith : String -> String -> Bool
 stringAppend : String -> String -> String
@@ -466,7 +467,17 @@ values, so `stringContainsChar "aλb" 'λ'` is `true` while
 `stringContainsChar "ab" 'λ'` is `false`. `stringContains` is the first
 substring `String` search operation; the current native-capable tracer covers a
 non-empty Unicode scalar substring, so `stringContains "aλb" "λ"` is `true`
-while `stringContains "ab" "λ"` is `false`. `stringStartsWith` is the first
+while `stringContains "ab" "λ"` is `false`. `stringEquals` is the first exact
+`String` equality operation; the current native-capable tracer covers exact
+equality for source literals and `stringAppend` outputs registered by the
+native append helper, so `stringEquals "aλ" "aλ"` is `true`,
+`stringEquals "aλ" "a"` is `false`, `stringEquals "" ""` is `true`,
+source-literal `stringEquals "a\0b" "a"` is `false`, and
+`stringEquals (stringAppend "a" "\0b") "a"` is `false` rather than
+C-terminator equal. It does not claim collation, ordering, an `Eq String`
+instance, case conversion, Unicode normalization, locale behavior, regex,
+parser parity, platform contracts, driver work, proof completion, or broad
+exact metadata for every string-producing helper. `stringStartsWith` is the first
 prefix `String` search operation; the current native-capable tracer covers a
 non-empty Unicode scalar prefix, so `stringStartsWith "λab" "λ"` is `true`
 while `stringStartsWith "aλb" "λ"` is `false`. `stringEndsWith` is the first
@@ -799,7 +810,12 @@ non-empty Unicode string such as `"λ"`. The first single-character
 `String`/`Char` search operation is `stringContainsChar`, which compares
 Unicode scalar values. The first substring `String` search operation is
 `stringContains`, with native coverage for a non-empty Unicode scalar
-substring. The first prefix `String` search operation is `stringStartsWith`,
+substring. The first exact `String` equality operation is `stringEquals`, with
+native coverage for equal non-ASCII, unequal-prefix, empty-string, source
+literal embedded-U+0000, and `stringAppend`-created embedded-U+0000 examples.
+It does not add collation, ordering, an `Eq String` instance, or broad exact
+metadata for every string-producing helper. The first prefix `String` search
+operation is `stringStartsWith`,
 with native coverage for a non-empty Unicode scalar prefix. The first suffix
 `String` search operation is `stringEndsWith`, with native coverage for a
 non-empty Unicode scalar suffix. The first append `String` operation is

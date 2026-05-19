@@ -561,6 +561,9 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   __string_char_at_option, with Unicode scalar Some/None behavior proven
   through check, run-program, backend/object, emit-native/native-object, and
   linked native execution.
+- round-301 completed item-301-string-equals-native-tracer; evidence: focused
+  stringEquals, primitive inventory, neighbor, full build/test, thesis gate,
+  and final generated-artifact audit passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

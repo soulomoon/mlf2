@@ -27,7 +27,7 @@ import qualified MLF.Frontend.Syntax.Program as P
 preludeSource :: String
 preludeSource =
   unlines
-    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringStartsWith, stringEndsWith, stringAppend, stringReplaceChar, stringReplace, stringIndexOfChar, stringIndexOf, stringSplit, stringFromChar, stringFromInt, stringFromBool, stringFromNat, stringFromUnit, stringFromList, stringToList, stringDrop, stringTake, stringSlice, stringCharAt, stringCharAtOption, charIsDigit, charIsAsciiLower, charIsAsciiUpper, charIsAsciiAlpha, charIsAsciiAlphaNum, charIsAsciiIdentifierStart, charIsAsciiIdentifierContinue, charIsAsciiWhitespace, charIsAsciiPunctuation, charIsAsciiPrintable, and, id) {",
+    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringEquals, stringStartsWith, stringEndsWith, stringAppend, stringReplaceChar, stringReplace, stringIndexOfChar, stringIndexOf, stringSplit, stringFromChar, stringFromInt, stringFromBool, stringFromNat, stringFromUnit, stringFromList, stringToList, stringDrop, stringTake, stringSlice, stringCharAt, stringCharAtOption, charIsDigit, charIsAsciiLower, charIsAsciiUpper, charIsAsciiAlpha, charIsAsciiAlphaNum, charIsAsciiIdentifierStart, charIsAsciiIdentifierContinue, charIsAsciiWhitespace, charIsAsciiPunctuation, charIsAsciiPrintable, and, id) {",
       "  class Eq a {",
       "    eq : a -> a -> Bool;",
       "  }",
@@ -103,6 +103,7 @@ preludeSource =
       "  def stringIsEmpty : String -> Bool = __string_is_empty;",
       "  def stringContainsChar : String -> Char -> Bool = __string_contains_char;",
       "  def stringContains : String -> String -> Bool = __string_contains;",
+      "  def stringEquals : String -> String -> Bool = __string_equals;",
       "  def stringStartsWith : String -> String -> Bool = __string_starts_with;",
       "  def stringEndsWith : String -> String -> Bool = __string_ends_with;",
       "  def stringAppend : String -> String -> String = __string_append;",

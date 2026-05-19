@@ -363,6 +363,38 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    {- Round 301 public fixtures:
+       stringEquals "aλ" "aλ"
+       stringEquals "aλ" "a"
+       stringEquals "" ""
+       stringEquals "a\0b" "a"
+       stringEquals (stringAppend "a" "\0b") "a"
+    -}
+    it "stringEquals compares Unicode scalar strings through native execution" $
+      forM_
+        [ (nativeEqualStringEqualsSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeUnequalStringEqualsSourceProgram, "false\n", NativeRunResult ExitSuccess "false\n" ""),
+          (nativeEmptyStringEqualsSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeEmbeddedNulStringEqualsSourceProgram, "false\n", NativeRunResult ExitSuccess "false\n" ""),
+          (nativeAppendEmbeddedNulStringEqualsSourceProgram, "false\n", NativeRunResult ExitSuccess "false\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "stringStartsWith classifies Unicode prefixes through native execution" $
       forM_
         [ (nativePresentStringStartsWithSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
@@ -2871,6 +2903,51 @@ nativeAbsentStringContainsSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (stringContains);",
       "  def main : Bool = stringContains \"ab\" \"λ\";",
+      "}"
+    ]
+
+nativeEqualStringEqualsSourceProgram :: String
+nativeEqualStringEqualsSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringEquals);",
+      "  def main : Bool = stringEquals \"aλ\" \"aλ\";",
+      "}"
+    ]
+
+nativeUnequalStringEqualsSourceProgram :: String
+nativeUnequalStringEqualsSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringEquals);",
+      "  def main : Bool = stringEquals \"aλ\" \"a\";",
+      "}"
+    ]
+
+nativeEmptyStringEqualsSourceProgram :: String
+nativeEmptyStringEqualsSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringEquals);",
+      "  def main : Bool = stringEquals \"\" \"\";",
+      "}"
+    ]
+
+nativeEmbeddedNulStringEqualsSourceProgram :: String
+nativeEmbeddedNulStringEqualsSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringEquals);",
+      "  def main : Bool = stringEquals \"a\\0b\" \"a\";",
+      "}"
+    ]
+
+nativeAppendEmbeddedNulStringEqualsSourceProgram :: String
+nativeAppendEmbeddedNulStringEqualsSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringAppend, stringEquals);",
+      "  def main : Bool = stringEquals (stringAppend \"a\" \"\\0b\") \"a\";",
       "}"
     ]
 

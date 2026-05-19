@@ -324,6 +324,7 @@ data RuntimePrimitive
   | RuntimeStringIsEmpty
   | RuntimeStringContainsChar
   | RuntimeStringContains
+  | RuntimeStringEquals
   | RuntimeStringStartsWith
   | RuntimeStringEndsWith
   | RuntimeStringAppend
@@ -528,6 +529,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringIsEmptyPrimitiveName -> Just RuntimeStringIsEmpty
       | name' == PrimitiveInventory.stringContainsCharPrimitiveName -> Just RuntimeStringContainsChar
       | name' == PrimitiveInventory.stringContainsPrimitiveName -> Just RuntimeStringContains
+      | name' == PrimitiveInventory.stringEqualsPrimitiveName -> Just RuntimeStringEquals
       | name' == PrimitiveInventory.stringStartsWithPrimitiveName -> Just RuntimeStringStartsWith
       | name' == PrimitiveInventory.stringEndsWithPrimitiveName -> Just RuntimeStringEndsWith
       | name' == PrimitiveInventory.stringAppendPrimitiveName -> Just RuntimeStringAppend
@@ -1265,6 +1267,10 @@ applyRuntimePrimitive context prim args
           Right (RuntimeLit (LBool (needle `isInfixOf` haystack)))
         (RuntimeStringContains, _) ->
           Left (ProgramPipelineError "run-program __string_contains expected String arguments")
+        (RuntimeStringEquals, [RuntimeLit (LString left), RuntimeLit (LString right)]) ->
+          Right (RuntimeLit (LBool (left == right)))
+        (RuntimeStringEquals, _) ->
+          Left (ProgramPipelineError "run-program __string_equals expected String arguments")
         (RuntimeStringStartsWith, [RuntimeLit (LString haystack), RuntimeLit (LString prefix)]) ->
           Right (RuntimeLit (LBool (prefix `isPrefixOf` haystack)))
         (RuntimeStringStartsWith, _) ->
@@ -1649,6 +1655,7 @@ runtimePrimitiveArity prim =
     RuntimeStringIsEmpty -> 1
     RuntimeStringContainsChar -> 2
     RuntimeStringContains -> 2
+    RuntimeStringEquals -> 2
     RuntimeStringStartsWith -> 2
     RuntimeStringEndsWith -> 2
     RuntimeStringAppend -> 2
@@ -1849,6 +1856,7 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringIsEmptyPrimitiveName,
     PrimitiveInventory.stringContainsCharPrimitiveName,
     PrimitiveInventory.stringContainsPrimitiveName,
+    PrimitiveInventory.stringEqualsPrimitiveName,
     PrimitiveInventory.stringStartsWithPrimitiveName,
     PrimitiveInventory.stringEndsWithPrimitiveName,
     PrimitiveInventory.stringAppendPrimitiveName,

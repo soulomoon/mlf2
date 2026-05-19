@@ -25,6 +25,7 @@ module MLF.Primitive.Inventory
     stringIsEmptyPrimitiveName,
     stringContainsCharPrimitiveName,
     stringContainsPrimitiveName,
+    stringEqualsPrimitiveName,
     stringStartsWithPrimitiveName,
     stringEndsWithPrimitiveName,
     stringAppendPrimitiveName,
@@ -113,6 +114,7 @@ data PrimitiveNativeSupport
   | PrimitiveNativeStringIsEmpty
   | PrimitiveNativeStringContainsChar
   | PrimitiveNativeStringContains
+  | PrimitiveNativeStringEquals
   | PrimitiveNativeStringStartsWith
   | PrimitiveNativeStringEndsWith
   | PrimitiveNativeStringAppend
@@ -226,6 +228,12 @@ primitiveValueSpecs =
       ( stringContainsPrimitiveName,
         primitiveValueSpec
           PrimitiveNativeStringContains
+          (stringTy `PrimitiveTypeArrow` (stringTy `PrimitiveTypeArrow` boolTy))
+          Set.empty
+      ),
+      ( stringEqualsPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringEquals
           (stringTy `PrimitiveTypeArrow` (stringTy `PrimitiveTypeArrow` boolTy))
           Set.empty
       ),
@@ -565,6 +573,10 @@ stringContainsPrimitiveName :: String
 stringContainsPrimitiveName =
   "__string_contains"
 
+stringEqualsPrimitiveName :: String
+stringEqualsPrimitiveName =
+  "__string_equals"
+
 stringStartsWithPrimitiveName :: String
 stringStartsWithPrimitiveName =
   "__string_starts_with"
@@ -704,6 +716,7 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeStringIsEmpty -> True
     PrimitiveNativeStringContainsChar -> True
     PrimitiveNativeStringContains -> True
+    PrimitiveNativeStringEquals -> True
     PrimitiveNativeStringStartsWith -> True
     PrimitiveNativeStringEndsWith -> True
     PrimitiveNativeStringAppend -> True

@@ -41,6 +41,7 @@ spec = describe "MLF.Primitive.Inventory" $ do
           PrimitiveInventory.stringIsEmptyPrimitiveName,
           PrimitiveInventory.stringContainsCharPrimitiveName,
           PrimitiveInventory.stringContainsPrimitiveName,
+          PrimitiveInventory.stringEqualsPrimitiveName,
           PrimitiveInventory.stringStartsWithPrimitiveName,
           PrimitiveInventory.stringEndsWithPrimitiveName,
           PrimitiveInventory.stringAppendPrimitiveName,
@@ -88,6 +89,8 @@ spec = describe "MLF.Primitive.Inventory" $ do
           name `shouldBe` PrimitiveInventory.stringContainsCharPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringContains ->
           name `shouldBe` PrimitiveInventory.stringContainsPrimitiveName
+        PrimitiveInventory.PrimitiveNativeStringEquals ->
+          name `shouldBe` PrimitiveInventory.stringEqualsPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringStartsWith ->
           name `shouldBe` PrimitiveInventory.stringStartsWithPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringEndsWith ->

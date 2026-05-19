@@ -30,6 +30,13 @@
   `stringContains "aλb" "λ"` as `true` and `stringContains "ab" "λ"` as
   `false` through `.mlfp` source checking, `run-program`, raw LLVM emission,
   object-code validation, and linked native execution.
+- Added the first native-capable exact string equality tracer:
+  `stringEquals : String -> String -> Bool` now classifies
+  `stringEquals "aλ" "aλ"` as `true`, `stringEquals "aλ" "a"` as `false`,
+  `stringEquals "" ""` as `true`, and source-literal
+  `stringEquals "a\0b" "a"` plus `stringEquals (stringAppend "a" "\0b") "a"`
+  as `false` through `.mlfp` source checking, `run-program`, raw LLVM
+  emission, object-code validation, and linked native execution.
 - Added the first native-capable prefix string search tracer:
   `stringStartsWith : String -> String -> Bool` now classifies
   `stringStartsWith "λab" "λ"` as `true` and

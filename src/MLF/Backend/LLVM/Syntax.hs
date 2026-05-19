@@ -36,10 +36,16 @@ data LLVMDeclaration = LLVMDeclaration
   }
   deriving (Eq, Show)
 
-data LLVMGlobal = LLVMStringGlobal
-  { llvmGlobalName :: String,
-    llvmGlobalBytes :: String
-  }
+data LLVMGlobal
+  = LLVMStringGlobal
+      { llvmGlobalName :: String,
+        llvmGlobalBytes :: String
+      }
+  | LLVMVariableGlobal
+      { llvmGlobalName :: String,
+        llvmGlobalType :: LLVMType,
+        llvmGlobalInitializer :: LLVMOperand
+      }
   deriving (Eq, Show)
 
 data LLVMFunction = LLVMFunction
