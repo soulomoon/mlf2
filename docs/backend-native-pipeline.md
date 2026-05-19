@@ -244,6 +244,10 @@ Supported result shapes are:
 - `stringCharAt : String -> Int -> Char` is the first native-capable in-range
   cursor/index String tracer and returns Unicode scalar values through native
   execution.
+- `stringAppend : String -> String -> String` is the first native-capable
+  append String tracer and concatenates valid Unicode-scalar strings through
+  native execution while keeping `String`/`List Char` conversion, formatting,
+  parser parity, platform contracts, and proof records out of scope.
 - `charIsDigit : Char -> Bool` is the first native-capable Char
   classification tracer and classifies ASCII decimal digit code points through
   native execution while keeping broader classification families out of scope.

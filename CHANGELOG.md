@@ -129,6 +129,11 @@
   scalar values `0x20..0x7e` as `true`; tab, newline, and non-ASCII scalars
   are `false` through `.mlfp` source checking, `run-program`, raw LLVM
   emission, object-code validation, and linked native execution.
+- Added an explicit native-capable broad `String` append tracer:
+  `stringAppend : String -> String -> String` now concatenates Unicode-scalar
+  strings, including `stringAppend "aλ" "b"` and empty-side identity cases,
+  through `.mlfp` source checking, `run-program`, raw LLVM emission,
+  object-code validation, and linked native execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

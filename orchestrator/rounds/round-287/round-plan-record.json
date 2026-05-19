@@ -1,0 +1,14 @@
+{
+  "schema_version": "round-plan-record-v1",
+  "round_id": "round-287",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-broad-string-char-substrate",
+  "extracted_item_id": "item-287-string-append-native-tracer",
+  "plan_path": "orchestrator/rounds/round-287/plan.md",
+  "worker_mode": "none",
+  "workers": [],
+  "integration": null
+}
