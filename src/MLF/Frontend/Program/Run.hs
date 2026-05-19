@@ -342,6 +342,7 @@ data RuntimePrimitive
   | RuntimeStringTake
   | RuntimeStringSlice
   | RuntimeStringCharAt
+  | RuntimeStringCharAtOption
   | RuntimeCharIsDigit
   | RuntimeCharIsAsciiLower
   | RuntimeCharIsAsciiUpper
@@ -544,6 +545,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringTakePrimitiveName -> Just RuntimeStringTake
       | name' == PrimitiveInventory.stringSlicePrimitiveName -> Just RuntimeStringSlice
       | name' == PrimitiveInventory.stringCharAtPrimitiveName -> Just RuntimeStringCharAt
+      | name' == PrimitiveInventory.stringCharAtOptionPrimitiveName -> Just RuntimeStringCharAtOption
       | name' == PrimitiveInventory.charIsDigitPrimitiveName -> Just RuntimeCharIsDigit
       | name' == PrimitiveInventory.charIsAsciiLowerPrimitiveName -> Just RuntimeCharIsAsciiLower
       | name' == PrimitiveInventory.charIsAsciiUpperPrimitiveName -> Just RuntimeCharIsAsciiUpper
@@ -1337,6 +1339,10 @@ applyRuntimePrimitive context prim args
             Nothing -> Left (ProgramPipelineError "run-program __string_char_at index out of range")
         (RuntimeStringCharAt, _) ->
           Left (ProgramPipelineError "run-program __string_char_at expected String and Int arguments")
+        (RuntimeStringCharAtOption, [RuntimeLit (LString value), RuntimeLit (LInt index)]) ->
+          runtimeStringCharAtOption context value index
+        (RuntimeStringCharAtOption, _) ->
+          Left (ProgramPipelineError "run-program __string_char_at_option expected String and Int arguments")
         (RuntimeCharIsDigit, [RuntimeLit (LChar value)]) ->
           Right (RuntimeLit (LBool (isAsciiDecimalDigit value)))
         (RuntimeCharIsDigit, _) ->
@@ -1442,9 +1448,28 @@ runtimeSomeInt context value = do
   runtimeConstructorValue context (RuntimeConstructorSpec someCtor Nothing) [RuntimeLit (LInt value)]
 
 runtimeNoneInt :: RuntimeContext -> Either ProgramError RuntimeValue
-runtimeNoneInt context = do
+runtimeNoneInt =
+  runtimeNone
+
+runtimeSomeChar :: RuntimeContext -> Char -> Either ProgramError RuntimeValue
+runtimeSomeChar context value =
+  runtimeSome context (RuntimeLit (LChar value))
+
+runtimeNone :: RuntimeContext -> Either ProgramError RuntimeValue
+runtimeNone context = do
   noneCtor <- requirePreludeOptionConstructor context "None"
   runtimeConstructorValue context (RuntimeConstructorSpec noneCtor Nothing) []
+
+runtimeSome :: RuntimeContext -> RuntimeValue -> Either ProgramError RuntimeValue
+runtimeSome context value = do
+  someCtor <- requirePreludeOptionConstructor context "Some"
+  runtimeConstructorValue context (RuntimeConstructorSpec someCtor Nothing) [value]
+
+runtimeStringCharAtOption :: RuntimeContext -> String -> Integer -> Either ProgramError RuntimeValue
+runtimeStringCharAtOption context value index =
+  case charAtUnicodeScalar index value of
+    Just char -> runtimeSomeChar context char
+    Nothing -> runtimeNone context
 
 runtimeStringToList :: RuntimeContext -> String -> Either ProgramError RuntimeValue
 runtimeStringToList context value = do
@@ -1642,6 +1667,7 @@ runtimePrimitiveArity prim =
     RuntimeStringTake -> 2
     RuntimeStringSlice -> 3
     RuntimeStringCharAt -> 2
+    RuntimeStringCharAtOption -> 2
     RuntimeCharIsDigit -> 1
     RuntimeCharIsAsciiLower -> 1
     RuntimeCharIsAsciiUpper -> 1
@@ -1840,6 +1866,7 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringTakePrimitiveName,
     PrimitiveInventory.stringSlicePrimitiveName,
     PrimitiveInventory.stringCharAtPrimitiveName,
+    PrimitiveInventory.stringCharAtOptionPrimitiveName,
     PrimitiveInventory.charIsDigitPrimitiveName,
     PrimitiveInventory.charIsAsciiLowerPrimitiveName,
     PrimitiveInventory.charIsAsciiUpperPrimitiveName,

@@ -785,6 +785,36 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    {- Round 300 public fixtures:
+       stringCharAtOption "aλb" 1
+       stringCharAtOption "λab" 2
+       stringCharAtOption "λ" 1
+       stringCharAtOption "" 0
+    -}
+    it "stringCharAtOption returns optional Unicode scalar cursor lookups through native execution" $
+      forM_
+        [ (nativeCharAtOptionMixedUnicodeStringSourceProgram, "Some '\\955'\n", NativeRunResult ExitSuccess "Some '\\955'\n" ""),
+          (nativeCharAtOptionAfterLeadingUnicodeStringSourceProgram, "Some 'b'\n", NativeRunResult ExitSuccess "Some 'b'\n" ""),
+          (nativeCharAtOptionEndOfInputSourceProgram, "None\n", NativeRunResult ExitSuccess "None\n" ""),
+          (nativeCharAtOptionEmptyStringSourceProgram, "None\n", NativeRunResult ExitSuccess "None\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "charIsDigit classifies decimal Char values through native execution" $
       forM_
         [ (nativeDecimalCharIsDigitSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
@@ -3241,6 +3271,42 @@ nativeCharAtAfterLeadingUnicodeStringSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (stringCharAt);",
       "  def main : Char = stringCharAt \"λab\" 2;",
+      "}"
+    ]
+
+nativeCharAtOptionMixedUnicodeStringSourceProgram :: String
+nativeCharAtOptionMixedUnicodeStringSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Option(..), stringCharAtOption);",
+      "  def main : Option Char = stringCharAtOption \"aλb\" 1;",
+      "}"
+    ]
+
+nativeCharAtOptionAfterLeadingUnicodeStringSourceProgram :: String
+nativeCharAtOptionAfterLeadingUnicodeStringSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Option(..), stringCharAtOption);",
+      "  def main : Option Char = stringCharAtOption \"λab\" 2;",
+      "}"
+    ]
+
+nativeCharAtOptionEndOfInputSourceProgram :: String
+nativeCharAtOptionEndOfInputSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Option(..), stringCharAtOption);",
+      "  def main : Option Char = stringCharAtOption \"λ\" 1;",
+      "}"
+    ]
+
+nativeCharAtOptionEmptyStringSourceProgram :: String
+nativeCharAtOptionEmptyStringSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (Option(..), stringCharAtOption);",
+      "  def main : Option Char = stringCharAtOption \"\" 0;",
       "}"
     ]
 

@@ -556,6 +556,11 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   execution, primitive inventory, planned neighbor text checks, Phi
   replay-domain audit, docs scope audit, git diff --check, cabal build all,
   cabal test, and thesis gate.
+- round-300 completed item-300-string-char-at-option-native-tracer: public
+  stringCharAtOption : String -> Int -> Option Char backed by
+  __string_char_at_option, with Unicode scalar Some/None behavior proven
+  through check, run-program, backend/object, emit-native/native-object, and
+  linked native execution.
 
 #### Candidate Direction: Broad String And Char Substrate
 

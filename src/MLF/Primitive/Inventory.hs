@@ -42,6 +42,7 @@ module MLF.Primitive.Inventory
     stringTakePrimitiveName,
     stringSlicePrimitiveName,
     stringCharAtPrimitiveName,
+    stringCharAtOptionPrimitiveName,
     charIsDigitPrimitiveName,
     charIsAsciiLowerPrimitiveName,
     charIsAsciiUpperPrimitiveName,
@@ -129,6 +130,7 @@ data PrimitiveNativeSupport
   | PrimitiveNativeStringTake
   | PrimitiveNativeStringSlice
   | PrimitiveNativeStringCharAt
+  | PrimitiveNativeStringCharAtOption
   | PrimitiveNativeCharIsDigit
   | PrimitiveNativeCharIsAsciiLower
   | PrimitiveNativeCharIsAsciiUpper
@@ -327,6 +329,12 @@ primitiveValueSpecs =
         primitiveValueSpec
           PrimitiveNativeStringCharAt
           (stringTy `PrimitiveTypeArrow` (intTy `PrimitiveTypeArrow` charTy))
+          Set.empty
+      ),
+      ( stringCharAtOptionPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringCharAtOption
+          (stringTy `PrimitiveTypeArrow` (intTy `PrimitiveTypeArrow` optionOf charTy))
           Set.empty
       ),
       ( charIsDigitPrimitiveName,
@@ -625,6 +633,10 @@ stringCharAtPrimitiveName :: String
 stringCharAtPrimitiveName =
   "__string_char_at"
 
+stringCharAtOptionPrimitiveName :: String
+stringCharAtOptionPrimitiveName =
+  "__string_char_at_option"
+
 charIsDigitPrimitiveName :: String
 charIsDigitPrimitiveName =
   "__char_is_digit"
@@ -709,6 +721,7 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeStringTake -> True
     PrimitiveNativeStringSlice -> True
     PrimitiveNativeStringCharAt -> True
+    PrimitiveNativeStringCharAtOption -> True
     PrimitiveNativeCharIsDigit -> True
     PrimitiveNativeCharIsAsciiLower -> True
     PrimitiveNativeCharIsAsciiUpper -> True

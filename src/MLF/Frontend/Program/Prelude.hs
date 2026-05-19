@@ -27,7 +27,7 @@ import qualified MLF.Frontend.Syntax.Program as P
 preludeSource :: String
 preludeSource =
   unlines
-    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringStartsWith, stringEndsWith, stringAppend, stringReplaceChar, stringReplace, stringIndexOfChar, stringIndexOf, stringSplit, stringFromChar, stringFromInt, stringFromBool, stringFromNat, stringFromUnit, stringFromList, stringToList, stringDrop, stringTake, stringSlice, stringCharAt, charIsDigit, charIsAsciiLower, charIsAsciiUpper, charIsAsciiAlpha, charIsAsciiAlphaNum, charIsAsciiIdentifierStart, charIsAsciiIdentifierContinue, charIsAsciiWhitespace, charIsAsciiPunctuation, charIsAsciiPrintable, and, id) {",
+    [ "module Prelude export (Unit(..), IO, Nat(..), Option(..), List(..), Eq, Show, Functor, Applicative, Monad, eq, show, map, pure, ap, bind, putStrLn, getLine, putStr, readFile, writeFile, appendFile, exitWith, newIORef, readIORef, writeIORef, getArgs, stringLength, stringIsEmpty, stringContainsChar, stringContains, stringStartsWith, stringEndsWith, stringAppend, stringReplaceChar, stringReplace, stringIndexOfChar, stringIndexOf, stringSplit, stringFromChar, stringFromInt, stringFromBool, stringFromNat, stringFromUnit, stringFromList, stringToList, stringDrop, stringTake, stringSlice, stringCharAt, stringCharAtOption, charIsDigit, charIsAsciiLower, charIsAsciiUpper, charIsAsciiAlpha, charIsAsciiAlphaNum, charIsAsciiIdentifierStart, charIsAsciiIdentifierContinue, charIsAsciiWhitespace, charIsAsciiPunctuation, charIsAsciiPrintable, and, id) {",
       "  class Eq a {",
       "    eq : a -> a -> Bool;",
       "  }",
@@ -125,6 +125,7 @@ preludeSource =
       "  def stringTake : String -> Int -> String = __string_take;",
       "  def stringSlice : String -> Int -> Int -> String = __string_slice;",
       "  def stringCharAt : String -> Int -> Char = __string_char_at;",
+      "  def stringCharAtOption : String -> Int -> Option Char = __string_char_at_option;",
       "  def charIsDigit : Char -> Bool = __char_is_digit;",
       "  def charIsAsciiLower : Char -> Bool = __char_is_ascii_lower;",
       "  def charIsAsciiUpper : Char -> Bool = __char_is_ascii_upper;",

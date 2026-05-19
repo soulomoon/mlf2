@@ -63,6 +63,13 @@
   `stringCharAt "aλb" 1` and `'b'` for `stringCharAt "λab" 2` through
   `.mlfp` source checking, `run-program`, raw LLVM emission, object-code
   validation, and linked native execution.
+- Added the first native-capable safe optional string cursor lookup tracer:
+  `stringCharAtOption : String -> Int -> Option Char` now returns
+  `Some '\\955'` for `stringCharAtOption "aλb" 1`, `Some 'b'` for
+  `stringCharAtOption "λab" 2`, and `None` for end-of-input/out-of-range
+  examples `stringCharAtOption "λ" 1` and `stringCharAtOption "" 0` through
+  `.mlfp` source checking, `run-program`, raw LLVM emission, object-code
+  validation, and linked native execution.
 - Added the first native-capable `Char` classification tracer:
   `charIsDigit : Char -> Bool` now classifies `charIsDigit '7'` as `true`
   and `charIsDigit 'λ'` as `false` through `.mlfp` source checking,

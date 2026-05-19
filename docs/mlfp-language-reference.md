@@ -444,6 +444,7 @@ stringDrop : String -> Int -> String
 stringTake : String -> Int -> String
 stringSlice : String -> Int -> Int -> String
 stringCharAt : String -> Int -> Char
+stringCharAtOption : String -> Int -> Option Char
 charIsDigit : Char -> Bool
 charIsAsciiLower : Char -> Bool
 charIsAsciiUpper : Char -> Bool
@@ -551,7 +552,15 @@ offset and then keeps a non-negative scalar count, so
 `stringSlice "λabc" 1 2` returns `"ab"`. `stringCharAt` is the first
 in-range cursor/index `String` operation; the current native-capable tracer
 indexes Unicode scalar positions, so `stringCharAt "aλb" 1` returns `'λ'` and
-`stringCharAt "λab" 2` returns `'b'`. `charIsDigit` is the first
+`stringCharAt "λab" 2` returns `'b'`. `stringCharAtOption` is the first safe
+optional cursor lookup operation; the current native-capable tracer indexes
+zero-based Unicode scalar positions, so `stringCharAtOption "aλb" 1` returns
+`Some '\955'`, `stringCharAtOption "λab" 2` returns `Some 'b'`,
+`stringCharAtOption "λ" 1` returns `None`, and
+`stringCharAtOption "" 0` returns `None`. It does not claim parser
+combinators, parser parity, broader cursor state APIs, split-family APIs,
+Unicode normalization, locale behavior, regex, platform contracts, driver
+work, or proof completion. `charIsDigit` is the first
 native-capable `Char` classification tracer; it classifies ASCII decimal digit
 code points, so `charIsDigit '7'` is `true` while `charIsDigit 'λ'` is
 `false`. `charIsAsciiLower` is an explicitly ASCII `Char` classification
@@ -750,6 +759,7 @@ Current prelude contents:
 - `stringTake`
 - `stringSlice`
 - `stringCharAt`
+- `stringCharAtOption`
 - `charIsDigit`
 - `charIsAsciiLower`
 - `charIsAsciiUpper`
@@ -829,6 +839,9 @@ native coverage for non-negative Unicode scalar prefix-take examples. The first
 range slicing operation is `stringSlice`, with native coverage for non-negative
 Unicode scalar start/count examples. The first in-range cursor/index operation
 is `stringCharAt`, with native coverage for Unicode scalar index examples.
+The first safe optional cursor lookup operation is `stringCharAtOption`, with
+native coverage for Unicode scalar in-range `Some Char`, end-of-input `None`,
+and empty-string `None` examples.
 The first native-capable `Char` classification operation is `charIsDigit`,
 with coverage for ASCII decimal digit classification and a non-digit Unicode
 scalar. The next explicit ASCII helper is `charIsAsciiLower`, with native

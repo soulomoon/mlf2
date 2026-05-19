@@ -45,6 +45,7 @@ runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_from_char`, `__string_from_int`,
 `__string_from_bool`, `__string_from_nat`, `__string_to_list`,
 `__string_drop`, `__string_take`, `__string_slice`, `__string_char_at`,
+`__string_char_at_option`,
 `__char_is_digit`,
 `__char_is_ascii_lower`, `__char_is_ascii_upper`, `__char_is_ascii_alpha`,
 `__char_is_ascii_alpha_num`,
@@ -193,6 +194,10 @@ Native emission owns the small process/runtime surface it needs:
 - `__string_char_at`: inventory-classified as the first native-capable
   in-range cursor/index `String` operation; the native helper advances by
   UTF-8 scalar starts and returns the Unicode scalar value as a `Char`.
+- `__string_char_at_option`: inventory-classified as the first native-capable
+  safe optional cursor lookup `String` operation; the native helper advances
+  by UTF-8 scalar starts, returns `Some Char` for an in-range Unicode scalar,
+  and returns `None` for end-of-input or out-of-range cursor positions.
 - `__char_is_digit`: inventory-classified as the first native-capable `Char`
   classification operation; the native helper compares the Unicode scalar
   value against the ASCII decimal digit range.
@@ -280,6 +285,10 @@ Supported result shapes are:
 - `stringCharAt : String -> Int -> Char` is the first native-capable in-range
   cursor/index String tracer and returns Unicode scalar values through native
   execution.
+- `stringCharAtOption : String -> Int -> Option Char` is the first
+  native-capable safe optional cursor lookup tracer and returns `Some Char`
+  for in-range Unicode scalar positions while returning `None` for
+  end-of-input or out-of-range cursor positions.
 - `stringAppend : String -> String -> String` is the first native-capable
   append String tracer and concatenates valid Unicode-scalar strings through
   native execution while keeping formatting, parser parity, platform contracts,

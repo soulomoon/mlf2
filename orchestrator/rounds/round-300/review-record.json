@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-300",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-broad-string-char-substrate",
+  "extracted_item_id": "item-300-string-char-at-option-native-tracer",
+  "decision": "approved",
+  "evidence_summary": "Focused stringCharAtOption behavior, primitive inventory, neighbor matchers, evidence scans, generated-artifact audit, cabal build all, cabal test, and thesis conformance gate all passed; diff stays inside the selected native-capable optional Unicode scalar cursor lookup tracer.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-300 completed item-300-string-char-at-option-native-tracer: public stringCharAtOption : String -> Int -> Option Char backed by __string_char_at_option, with Unicode scalar Some/None behavior proven through check, run-program, backend/object, emit-native/native-object, and linked native execution."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

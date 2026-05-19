@@ -89,7 +89,7 @@ inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__string_replace_char`, `__string_replace`, `__string_from_int`, `__string_from_bool`,
 `__string_index_of_char`, `__string_index_of`, `__string_split`,
 `__string_from_nat`, `__string_to_list`, `__string_drop`, `__string_take`,
-`__string_slice`, `__string_char_at`,
+`__string_slice`, `__string_char_at`, `__string_char_at_option`,
 `__char_is_digit`, `__char_is_ascii_lower`, `__char_is_ascii_upper`,
 `__char_is_ascii_alpha`,
 `__char_is_ascii_alpha_num`, `__char_is_ascii_identifier_start`,
@@ -196,6 +196,7 @@ lowerBackendProgram program = do
       needsStringTake = any (functionReferencesGlobalNames (Set.singleton runtimeStringTakeName)) (lpFunctions lowered)
       needsStringSlice = any (functionReferencesGlobalNames (Set.singleton runtimeStringSliceName)) (lpFunctions lowered)
       needsStringCharAt = any (functionReferencesGlobalNames (Set.singleton runtimeStringCharAtName)) (lpFunctions lowered)
+      needsStringCharAtOption = any (functionReferencesGlobalNames (Set.singleton runtimeStringCharAtOptionName)) (lpFunctions lowered)
       needsCharIsDigit = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsDigitName)) (lpFunctions lowered)
       needsCharIsAsciiLower = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiLowerName)) (lpFunctions lowered)
       needsCharIsAsciiUpper = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiUpperName)) (lpFunctions lowered)
@@ -230,6 +231,7 @@ lowerBackendProgram program = do
           needsStringTake
           needsStringSlice
           needsStringCharAt
+          needsStringCharAtOption
           needsCharIsDigit
           needsCharIsAsciiLower
           needsCharIsAsciiUpper
@@ -390,6 +392,7 @@ nativeRuntimeFunctions base =
     ++ [nativeStringTakeFunction | Map.notMember runtimeStringTakeName (pbBindings base)]
     ++ [nativeStringSliceFunction | Map.notMember runtimeStringSliceName (pbBindings base)]
     ++ [nativeStringCharAtFunction | Map.notMember runtimeStringCharAtName (pbBindings base)]
+    ++ [nativeStringCharAtOptionFunction | Map.notMember runtimeStringCharAtOptionName (pbBindings base)]
     ++ [nativeCharIsDigitFunction | Map.notMember runtimeCharIsDigitName (pbBindings base)]
     ++ [nativeCharIsAsciiLowerFunction | Map.notMember runtimeCharIsAsciiLowerName (pbBindings base)]
     ++ [nativeCharIsAsciiUpperFunction | Map.notMember runtimeCharIsAsciiUpperName (pbBindings base)]
@@ -3287,6 +3290,74 @@ nativeStringCharAtFunction =
     Right function -> function
     Left err -> error ("internal native __string_char_at lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringCharAtOptionFunction :: LLVMFunction
+nativeStringCharAtOptionFunction =
+  case
+    lowerNativeFunction runtimeStringCharAtOptionName LLVMPtr [(LLVMPtr, "value"), (LLVMInt 64, "index")] $ \params -> do
+      let value = requireNativeParam "value" params
+          index = requireNativeParam "index" params
+          i1Ty = LLVMInt 1
+          i8Ty = LLVMInt 8
+          i32Ty = LLVMInt 32
+          i64Ty = LLVMInt 64
+          loadByte label curPtr = do
+            bytePtr <- emitAssign (label ++ ".ptr") LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 0)])
+            emitAssign label i8Ty (LLVMLoad i8Ty bytePtr)
+          allocateNone label = do
+            cell <-
+              emitAssign
+                (label ++ ".cell")
+                LLVMPtr
+                (LLVMCall runtimeMallocName [(i64Ty, LLVMIntLiteral 64 (toInteger (constructorObjectBytes 0)))])
+            tagPtr <- emitGep (label ++ ".tag") cell constructorTagOffset
+            emitStore i64Ty (LLVMIntLiteral 64 0) tagPtr
+            pure cell
+          allocateSome label char = do
+            cell <-
+              emitAssign
+                (label ++ ".cell")
+                LLVMPtr
+                (LLVMCall runtimeMallocName [(i64Ty, LLVMIntLiteral 64 (toInteger (constructorObjectBytes 1)))])
+            tagPtr <- emitGep (label ++ ".tag") cell constructorTagOffset
+            emitStore i64Ty (LLVMIntLiteral 64 1) tagPtr
+            valuePtr <- emitGep (label ++ ".value") cell (constructorFieldOffset 0)
+            emitStore i32Ty char valuePtr
+            pure cell
+      dropCursor <- freshBlock "strcharatopt.drop"
+      decode <- freshBlock "strcharatopt.decode"
+      noneBlock <- freshBlock "strcharatopt.none"
+      indexNegative <- emitAssign "strcharatopt.index.negative" i1Ty (LLVMICmpUgt index (LLVMIntLiteral 64 9223372036854775807))
+      finishCurrentBlock (LLVMSwitch i1Ty indexNegative dropCursor [(1, noneBlock)])
+      startBlock dropCursor
+      cursor <-
+        emitAssign
+          "strcharatopt.cursor"
+          LLVMPtr
+          ( LLVMCall
+              runtimeStringDropName
+              [(LLVMPtr, value), (i64Ty, index)]
+          )
+      byte0 <- loadByte "strcharatopt.byte0" cursor
+      isNull <- emitAssign "strcharatopt.is.null" i1Ty (LLVMICmpEq byte0 (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty isNull decode [(1, noneBlock)])
+      startBlock decode
+      char <-
+        emitAssign
+          "strcharatopt.char"
+          i32Ty
+          ( LLVMCall
+              runtimeStringCharAtName
+              [(LLVMPtr, value), (i64Ty, index)]
+          )
+      some <- allocateSome "strcharatopt.some" char
+      finishCurrentBlock (LLVMRet LLVMPtr some)
+      startBlock noneBlock
+      none <- allocateNone "strcharatopt.none"
+      finishCurrentBlock (LLVMRet LLVMPtr none)
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_char_at_option lowering failed: " ++ renderBackendLLVMError err)
+
 -- IO runtime primitives
 
 ioPureName :: String
@@ -3908,6 +3979,10 @@ runtimeStringCharAtName :: String
 runtimeStringCharAtName =
   PrimitiveInventory.stringCharAtPrimitiveName
 
+runtimeStringCharAtOptionName :: String
+runtimeStringCharAtOptionName =
+  PrimitiveInventory.stringCharAtOptionPrimitiveName
+
 runtimeCharIsDigitName :: String
 runtimeCharIsDigitName =
   PrimitiveInventory.charIsDigitPrimitiveName
@@ -3952,8 +4027,8 @@ runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringReplaceChar needsStringReplace needsStringIndexOfChar needsStringIndexOf needsStringSplit needsStringFromChar needsStringFromInt needsStringFromBool needsStringFromNat needsStringToList needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringReplaceChar needsStringReplace needsStringIndexOfChar needsStringIndexOf needsStringSplit needsStringFromChar needsStringFromInt needsStringFromBool needsStringFromNat needsStringToList needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsStringCharAtOption needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -4046,6 +4121,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeStringCharAtName (LLVMInt 32) [LLVMPtr, LLVMInt 64] False
          | needsStringCharAt,
            Map.notMember runtimeStringCharAtName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringCharAtOptionName LLVMPtr [LLVMPtr, LLVMInt 64] False
+         | needsStringCharAtOption,
+           Map.notMember runtimeStringCharAtOptionName (pbBindings base)
        ]
     ++ [ LLVMDeclaration runtimeCharIsDigitName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsDigit,
@@ -7740,6 +7819,33 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
                       [(LLVMPtr, lvOperand value), (LLVMInt 64, lvOperand index)]
                   )
               pure (LowerValue (BTBase (BaseTy "Char")) (LLVMInt 32) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 2 (length args))
+    Nothing
+      | name == runtimeStringCharAtOptionName -> do
+          unless (length args == 2) $
+            liftEither (BackendLLVMArityMismatch name 2 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [value, index] -> do
+              requireLLVMType context name LLVMPtr value
+              requireLLVMType context name (LLVMInt 64) index
+              result <-
+                emitAssign
+                  "call"
+                  LLVMPtr
+                  ( LLVMCall
+                      runtimeStringCharAtOptionName
+                      [(LLVMPtr, lvOperand value), (LLVMInt 64, lvOperand index)]
+                  )
+              pure
+                ( LowerValue
+                    (BTCon (BaseTy "Option") (BTBase (BaseTy "Char") :| []))
+                    LLVMPtr
+                    result
+                    LowerRuntimeValue
+                    Nothing
+                )
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
     Nothing
