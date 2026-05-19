@@ -44,8 +44,8 @@ runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__char_is_digit`, `__char_is_ascii_lower`, `__char_is_ascii_upper`,
 `__char_is_ascii_alpha`, `__char_is_ascii_alpha_num`,
 `__char_is_ascii_identifier_start`,
-`__char_is_ascii_identifier_continue`, plus the IO primitive names classified
-there for native support. Native lowering consumes that inventory directly for
+`__char_is_ascii_identifier_continue`, `__char_is_ascii_whitespace`, plus the
+IO primitive names classified there for native support. Native lowering consumes that inventory directly for
 lowerable primitive names, while wrapper bodies, C
 runtime symbol names, closure layout, and eager sequencing implementation
 details remain lowerer-local.
@@ -182,6 +182,10 @@ Native emission owns the small process/runtime surface it needs:
   current parser continuation set; the native helper compares the Unicode
   scalar value against the ASCII `a` through `z`, `A` through `Z`, `0` through
   `9`, `_`, and apostrophe cases.
+- `__char_is_ascii_whitespace`: inventory-classified as an explicit ASCII
+  whitespace `Char` classification operation; the native helper compares the
+  Unicode scalar value against exactly space, tab, newline, carriage return,
+  form feed, and vertical tab.
 - Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
   `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
   functions with entry-point implementations.
@@ -265,6 +269,11 @@ Supported result shapes are:
   ASCII, ASCII digit, underscore, and apostrophe are true while non-ASCII
   scalars are false. Unicode categories, broader punctuation families, and
   parser-family completion remain out of scope.
+- `charIsAsciiWhitespace : Char -> Bool` is an explicit ASCII whitespace Char
+  classification tracer and classifies exactly ASCII space, tab, newline,
+  carriage return, form feed, and vertical tab through native execution while
+  keeping Unicode whitespace categories, locale, regex, and parser-family
+  completion out of scope.
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 

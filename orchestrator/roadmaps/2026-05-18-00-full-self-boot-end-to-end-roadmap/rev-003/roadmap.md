@@ -433,6 +433,14 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   execution; evidence: focused matcher, primitive inventory matcher, neighbor
   text/Char native matcher set, rg evidence/claim-audit checks,
   `git diff --check`, cabal build all, cabal test, and thesis gate passed.
+- round-284 completed item-284-char-is-ascii-whitespace-native-tracer:
+  `charIsAsciiWhitespace : Char -> Bool` classifies ASCII space, tab, newline,
+  carriage return, form feed, and vertical tab as true, and ASCII `a` plus
+  non-ASCII lambda as false through source checking, run-program, backend
+  LLVM/object validation, emit-native/native object validation, and linked
+  native execution; evidence: focused matcher, primitive inventory matcher,
+  neighbor text/Char native matcher set, rg evidence/claim-audit checks,
+  `git diff --check`, cabal build all, cabal test, and thesis gate passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

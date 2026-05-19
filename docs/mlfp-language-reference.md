@@ -438,6 +438,7 @@ charIsAsciiAlpha : Char -> Bool
 charIsAsciiAlphaNum : Char -> Bool
 charIsAsciiIdentifierStart : Char -> Bool
 charIsAsciiIdentifierContinue : Char -> Bool
+charIsAsciiWhitespace : Char -> Bool
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -499,7 +500,14 @@ decimal digit, underscore, or apostrophe code points, so
 `charIsAsciiIdentifierContinue 'a'`, `charIsAsciiIdentifierContinue 'A'`,
 `charIsAsciiIdentifierContinue '7'`, `charIsAsciiIdentifierContinue '_'`, and
 `charIsAsciiIdentifierContinue '\''` are `true` while
-`charIsAsciiIdentifierContinue 'λ'` is `false`. These
+`charIsAsciiIdentifierContinue 'λ'` is `false`. `charIsAsciiWhitespace` is an
+explicitly ASCII whitespace `Char` classification tracer; it classifies exactly
+space, tab, newline, carriage return, form feed, and vertical tab code points,
+so `charIsAsciiWhitespace ' '`, `charIsAsciiWhitespace '\t'`,
+`charIsAsciiWhitespace '\n'`, `charIsAsciiWhitespace '\r'`,
+`charIsAsciiWhitespace '\f'`, and `charIsAsciiWhitespace '\v'` are `true`
+while `charIsAsciiWhitespace 'a'` and `charIsAsciiWhitespace 'λ'` are
+`false`. These
 operations are covered through source checking, `run-program`,
 backend LLVM emission, object generation, and linked native execution for the
 current native-capable tracers. `String`/`List Char` conversion, formatting,
@@ -643,6 +651,7 @@ Current prelude contents:
 - `charIsAsciiAlphaNum`
 - `charIsAsciiIdentifierStart`
 - `charIsAsciiIdentifierContinue`
+- `charIsAsciiWhitespace`
 - `and`
 - `id`
 
@@ -701,6 +710,9 @@ The next explicit ASCII helper is `charIsAsciiIdentifierContinue`, with native
 coverage for the current parser continuation set: lowercase ASCII, uppercase
 ASCII, ASCII digit, underscore, and apostrophe are true while a non-ASCII
 Unicode scalar is false.
+The next explicit ASCII helper is `charIsAsciiWhitespace`, with native coverage
+for exactly ASCII space, tab, newline, carriage return, form feed, and vertical
+tab as true while ASCII `a` and a non-ASCII Unicode scalar are false.
 Broad `String`/`List Char` conversion, formatting, full slicing coverage,
 broader classification families, complete cursor APIs, and parser-parity
 helpers remain outside this contract.

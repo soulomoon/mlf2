@@ -337,6 +337,7 @@ data RuntimePrimitive
   | RuntimeCharIsAsciiAlphaNum
   | RuntimeCharIsAsciiIdentifierStart
   | RuntimeCharIsAsciiIdentifierContinue
+  | RuntimeCharIsAsciiWhitespace
   deriving (Eq, Show)
 
 data RuntimeIOAction
@@ -523,6 +524,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.charIsAsciiAlphaNumPrimitiveName -> Just RuntimeCharIsAsciiAlphaNum
       | name' == PrimitiveInventory.charIsAsciiIdentifierStartPrimitiveName -> Just RuntimeCharIsAsciiIdentifierStart
       | name' == PrimitiveInventory.charIsAsciiIdentifierContinuePrimitiveName -> Just RuntimeCharIsAsciiIdentifierContinue
+      | name' == PrimitiveInventory.charIsAsciiWhitespacePrimitiveName -> Just RuntimeCharIsAsciiWhitespace
     _ -> Nothing
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -1286,6 +1288,10 @@ applyRuntimePrimitive prim args
           Right (RuntimeLit (LBool (isAsciiIdentifierContinue value)))
         (RuntimeCharIsAsciiIdentifierContinue, _) ->
           Left (ProgramPipelineError "run-program __char_is_ascii_identifier_continue expected a Char argument")
+        (RuntimeCharIsAsciiWhitespace, [RuntimeLit (LChar value)]) ->
+          Right (RuntimeLit (LBool (isAsciiWhitespace value)))
+        (RuntimeCharIsAsciiWhitespace, _) ->
+          Left (ProgramPipelineError "run-program __char_is_ascii_whitespace expected a Char argument")
         _ ->
           Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
 
@@ -1316,6 +1322,15 @@ isAsciiIdentifierStart value =
 isAsciiIdentifierContinue :: Char -> Bool
 isAsciiIdentifierContinue value =
   value == '_' || value == '\'' || isAsciiAlphaNum value
+
+isAsciiWhitespace :: Char -> Bool
+isAsciiWhitespace value =
+  value == ' '
+    || value == '\t'
+    || value == '\n'
+    || value == '\r'
+    || value == '\f'
+    || value == '\v'
 
 dropUnicodeScalars :: Integer -> String -> String
 dropUnicodeScalars count value
@@ -1387,6 +1402,7 @@ runtimePrimitiveArity prim =
     RuntimeCharIsAsciiAlphaNum -> 1
     RuntimeCharIsAsciiIdentifierStart -> 1
     RuntimeCharIsAsciiIdentifierContinue -> 1
+    RuntimeCharIsAsciiWhitespace -> 1
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
 executeIOAction context action =
@@ -1570,7 +1586,8 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.charIsAsciiAlphaPrimitiveName,
     PrimitiveInventory.charIsAsciiAlphaNumPrimitiveName,
     PrimitiveInventory.charIsAsciiIdentifierStartPrimitiveName,
-    PrimitiveInventory.charIsAsciiIdentifierContinuePrimitiveName
+    PrimitiveInventory.charIsAsciiIdentifierContinuePrimitiveName,
+    PrimitiveInventory.charIsAsciiWhitespacePrimitiveName
   ]
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm

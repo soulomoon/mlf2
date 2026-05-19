@@ -22,6 +22,15 @@ end-to-end roadmap order is decided in
 | Diagnostics | Located package parsing and checking preserve file paths/spans for common package, import, and visibility failures. The lexer and parser seeds have seed-owned diagnostic ADTs carrying symbolic source spans for rejected inputs. | Compiler-grade diagnostics need real source ranges, recovery strategy, structured error payloads, and golden diagnostics for package builds. |
 | Fixture evidence | Static fixture files cover trivial file-as-package inputs, multi-file package roots, ordered search paths, runtime parity rows, backend emission over package mode, the compiler frontend seed contract fixture, the bounded lexer evidence fixture, the bounded parser/AST evidence fixture, and bounded compiler-seed backend/native execution for the current package entrypoint. | Fixtures do not prove source-text lexing/parsing, separate compilation, stable ABI/linking, **Self-Boot Total Native Coverage**, or self-hosting. |
 
+Round 284 adds the next explicit ASCII `Char` classification helper,
+`charIsAsciiWhitespace : Char -> Bool`, to the same source-checking,
+`run-program`, backend/object, `emit-native`/native-object, and linked native
+execution evidence chain. It classifies exactly ASCII space, tab, newline,
+carriage return, form feed, and vertical tab as `true`, while ASCII `a` and a
+non-ASCII Unicode scalar remain `false`; it does not claim Unicode whitespace,
+locale, regex, parser parity, formatting, `String`/`List Char` conversion, or
+platform/proof completion.
+
 ## Seed-Driven Primitive And Standard-Library Gap Budget
 
 This budget is tied to the merged compiler frontend seed at
@@ -215,8 +224,10 @@ oracle rather than immediate self-boot implementation.
   `charIsAsciiAlpha` explicit ASCII alphabetic `Char` classification tracer,
   `charIsAsciiAlphaNum` explicit ASCII alphanumeric `Char` classification
   tracer, `charIsAsciiIdentifierStart` explicit ASCII identifier-start
-  `Char` classification tracer, and `charIsAsciiIdentifierContinue` explicit
-  ASCII identifier-continuation `Char` classification tracer
+  `Char` classification tracer, `charIsAsciiIdentifierContinue` explicit
+  ASCII identifier-continuation `Char` classification tracer, and
+  `charIsAsciiWhitespace` explicit ASCII whitespace `Char` classification
+  tracer
   are not the complete broad string library; continue
   adding the Prelude-level Unicode-scalar string library required by
   `docs/adr/2026-05-18-native-broad-string-library-before-parser-parity.md`,

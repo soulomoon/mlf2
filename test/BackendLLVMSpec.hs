@@ -664,6 +664,34 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "charIsAsciiWhitespace classifies ASCII whitespace Char values through native execution" $
+      forM_
+        [ (nativeAsciiSpaceCharIsAsciiWhitespaceSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiTabCharIsAsciiWhitespaceSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiNewlineCharIsAsciiWhitespaceSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiCarriageReturnCharIsAsciiWhitespaceSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiFormFeedCharIsAsciiWhitespaceSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiVerticalTabCharIsAsciiWhitespaceSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiLowercaseCharIsAsciiWhitespaceSourceProgram, "false\n", NativeRunResult ExitSuccess "false\n" ""),
+          (nativeNonAsciiCharIsAsciiWhitespaceSourceProgram, "false\n", NativeRunResult ExitSuccess "false\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "Char literal source checks, runs, emits backend, and executes natively" $
       withTempProgram nativeCharLiteralSourceProgram $ \path -> do
         checkProgramFile path `shouldReturn` Right "OK\n"
@@ -2837,6 +2865,78 @@ nativeNonAsciiCharIsAsciiIdentifierContinueSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (charIsAsciiIdentifierContinue);",
       "  def main : Bool = charIsAsciiIdentifierContinue 'λ';",
+      "}"
+    ]
+
+nativeAsciiSpaceCharIsAsciiWhitespaceSourceProgram :: String
+nativeAsciiSpaceCharIsAsciiWhitespaceSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiWhitespace);",
+      "  def main : Bool = charIsAsciiWhitespace ' ';",
+      "}"
+    ]
+
+nativeAsciiTabCharIsAsciiWhitespaceSourceProgram :: String
+nativeAsciiTabCharIsAsciiWhitespaceSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiWhitespace);",
+      "  def main : Bool = charIsAsciiWhitespace '\\t';",
+      "}"
+    ]
+
+nativeAsciiNewlineCharIsAsciiWhitespaceSourceProgram :: String
+nativeAsciiNewlineCharIsAsciiWhitespaceSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiWhitespace);",
+      "  def main : Bool = charIsAsciiWhitespace '\\n';",
+      "}"
+    ]
+
+nativeAsciiCarriageReturnCharIsAsciiWhitespaceSourceProgram :: String
+nativeAsciiCarriageReturnCharIsAsciiWhitespaceSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiWhitespace);",
+      "  def main : Bool = charIsAsciiWhitespace '\\r';",
+      "}"
+    ]
+
+nativeAsciiFormFeedCharIsAsciiWhitespaceSourceProgram :: String
+nativeAsciiFormFeedCharIsAsciiWhitespaceSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiWhitespace);",
+      "  def main : Bool = charIsAsciiWhitespace '\\f';",
+      "}"
+    ]
+
+nativeAsciiVerticalTabCharIsAsciiWhitespaceSourceProgram :: String
+nativeAsciiVerticalTabCharIsAsciiWhitespaceSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiWhitespace);",
+      "  def main : Bool = charIsAsciiWhitespace '\\v';",
+      "}"
+    ]
+
+nativeAsciiLowercaseCharIsAsciiWhitespaceSourceProgram :: String
+nativeAsciiLowercaseCharIsAsciiWhitespaceSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiWhitespace);",
+      "  def main : Bool = charIsAsciiWhitespace 'a';",
+      "}"
+    ]
+
+nativeNonAsciiCharIsAsciiWhitespaceSourceProgram :: String
+nativeNonAsciiCharIsAsciiWhitespaceSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiWhitespace);",
+      "  def main : Bool = charIsAsciiWhitespace 'λ';",
       "}"
     ]
 

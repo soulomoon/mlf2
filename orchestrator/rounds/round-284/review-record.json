@@ -1,0 +1,77 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-284",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-003",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-003",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-broad-string-char-substrate",
+  "extracted_item_id": "item-284-char-is-ascii-whitespace-native-tracer",
+  "decision": "approved",
+  "findings": [],
+  "validations": [
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/round284-cargo-target cabal test mlf2-test --test-options='--match \"charIsAsciiWhitespace classifies ASCII whitespace Char values through native execution\"'",
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/round284-cargo-target cabal test mlf2-test --test-options='--match \"classifies native-lowerable primitive support from the shared primitive inventory owner\"'",
+      "result": "passed",
+      "examples": 1,
+      "failures": 0
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/round284-cargo-target cabal test mlf2-test with the plan's neighbor text/Char matcher set",
+      "result": "passed",
+      "examples": 19,
+      "failures": 0
+    },
+    {
+      "command": "rg evidence checks for charIsAsciiWhitespace surface, primitive inventory, runtime, LLVM/backend test literals, and docs",
+      "result": "passed",
+      "note": "Used fixed-string and targeted double-escaped literal checks for the Haskell escaped whitespace cases where the plan's literal-newline regex was not locally reliable."
+    },
+    {
+      "command": "rg claim-audit checks over docs/mlfp-language-reference.md docs/backend-native-pipeline.md docs/mlfp-self-boot-readiness.md CONTEXT.md CHANGELOG.md",
+      "result": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    },
+    {
+      "command": "cabal build all",
+      "result": "passed"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/round284-cargo-target cabal test",
+      "result": "passed",
+      "examples": 2588,
+      "failures": 0
+    },
+    {
+      "command": "CARGO_TARGET_DIR=/tmp/round284-cargo-target ./scripts/thesis-conformance-gate.sh",
+      "result": "passed"
+    },
+    {
+      "command": "git diff -- runtime/mlfp_io/target/release/libmlfp_io.d",
+      "result": "passed",
+      "note": "No depfile churn after validation."
+    }
+  ],
+  "evidence_summary": "Reviewed the integrated round-284 worktree against the plan and active roadmap bundle. The implementation adds public Prelude charIsAsciiWhitespace : Char -> Bool backed by __char_is_ascii_whitespace; interpreter/runtime and LLVM/native lowering classify exactly ASCII space, tab, newline, carriage return, form feed, and vertical tab as true and reject ASCII a plus non-ASCII lambda. Focused native execution, primitive inventory, neighbor text/Char native matchers, evidence and claim-audit rg checks, git diff --check, cabal build all, cabal test (2588 examples, 0 failures), and thesis conformance gate all passed. Docs stay within ASCII whitespace scope and do not claim Unicode whitespace, locale/regex/category behavior, parser parity, formatting, String/List Char conversion, or milestone completion.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-3-completion",
+        "text": "round-284 completed item-284-char-is-ascii-whitespace-native-tracer: charIsAsciiWhitespace : Char -> Bool classifies ASCII space, tab, newline, carriage return, form feed, and vertical tab as true and ASCII a plus non-ASCII lambda as false through source checking, run-program, backend LLVM/object validation, emit-native/native object validation, and linked native execution; evidence: focused matcher, primitive inventory matcher, neighbor text/Char native matcher set, evidence and claim-audit rg checks, git diff --check, cabal build all, cabal test (2588 examples), and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}
