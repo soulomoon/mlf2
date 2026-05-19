@@ -86,8 +86,8 @@ inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__mlfp_and`, `__string_length`, `__string_is_empty`,
 `__string_contains_char`, `__string_contains`, `__string_starts_with`,
 `__string_ends_with`, `__string_append`, `__string_from_char`,
-`__string_to_list`, `__string_drop`, `__string_take`, `__string_slice`,
-`__string_char_at`,
+`__string_from_int`, `__string_to_list`, `__string_drop`, `__string_take`,
+`__string_slice`, `__string_char_at`,
 `__char_is_digit`, `__char_is_ascii_lower`, `__char_is_ascii_upper`,
 `__char_is_ascii_alpha`,
 `__char_is_ascii_alpha_num`, `__char_is_ascii_identifier_start`,
@@ -181,6 +181,7 @@ lowerBackendProgram program = do
       needsStringEndsWith = any (functionReferencesGlobalNames (Set.singleton runtimeStringEndsWithName)) (lpFunctions lowered)
       needsStringAppend = any (functionReferencesGlobalNames (Set.singleton runtimeStringAppendName)) (lpFunctions lowered)
       needsStringFromChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringFromCharName)) (lpFunctions lowered)
+      needsStringFromInt = any (functionReferencesGlobalNames (Set.singleton runtimeStringFromIntName)) (lpFunctions lowered)
       needsStringToList = any (functionReferencesGlobalNames (Set.singleton runtimeStringToListName)) (lpFunctions lowered)
       needsStringDrop = any (functionReferencesGlobalNames (Set.singleton runtimeStringDropName)) (lpFunctions lowered)
       needsStringTake = any (functionReferencesGlobalNames (Set.singleton runtimeStringTakeName)) (lpFunctions lowered)
@@ -207,6 +208,7 @@ lowerBackendProgram program = do
           needsStringEndsWith
           needsStringAppend
           needsStringFromChar
+          needsStringFromInt
           needsStringToList
           needsStringDrop
           needsStringTake
@@ -338,6 +340,7 @@ nativeRuntimeDeclarations base =
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
     ++ [LLVMDeclaration nativePrintfName (LLVMInt 32) [LLVMPtr] True]
+    ++ [LLVMDeclaration nativeSprintfName (LLVMInt 32) [LLVMPtr, LLVMPtr] True]
     ++ [LLVMDeclaration nativePutcharName (LLVMInt 32) [LLVMInt 32] False]
     ++ [LLVMDeclaration nativeReadLineName LLVMPtr [] False]
     ++ [LLVMDeclaration nativeReadFileName LLVMPtr [LLVMPtr] False]
@@ -358,6 +361,7 @@ nativeRuntimeFunctions base =
     ++ [nativeStringEndsWithFunction | Map.notMember runtimeStringEndsWithName (pbBindings base)]
     ++ [nativeStringAppendFunction | Map.notMember runtimeStringAppendName (pbBindings base)]
     ++ [nativeStringFromCharFunction | Map.notMember runtimeStringFromCharName (pbBindings base)]
+    ++ [nativeStringFromIntFunction | Map.notMember runtimeStringFromIntName (pbBindings base)]
     ++ [nativeStringToListFunction | Map.notMember runtimeStringToListName (pbBindings base)]
     ++ [nativeStringDropFunction | Map.notMember runtimeStringDropName (pbBindings base)]
     ++ [nativeStringTakeFunction | Map.notMember runtimeStringTakeName (pbBindings base)]
@@ -382,6 +386,10 @@ nativeCMainName =
 nativePrintfName :: String
 nativePrintfName =
   "printf"
+
+nativeSprintfName :: String
+nativeSprintfName =
+  "sprintf"
 
 nativeRenderPrefix :: String
 nativeRenderPrefix =
@@ -508,6 +516,7 @@ rejectNativeSymbolConflicts base renderSpecs =
       Set.fromList
         ( [ nativeCMainName,
             nativePrintfName,
+            nativeSprintfName,
             nativeFmtIntName,
             nativeFmtStringName,
             nativeStrTrueName,
@@ -1723,6 +1732,31 @@ nativeStringFromCharFunction =
     Right function -> function
     Left err -> error ("internal native __string_from_char lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringFromIntFunction :: LLVMFunction
+nativeStringFromIntFunction =
+  case
+    lowerNativeFunction runtimeStringFromIntName LLVMPtr [(LLVMInt 64, "value")] $ \params -> do
+      let value = requireNativeParam "value" params
+          i32Ty = LLVMInt 32
+          i64Ty = LLVMInt 64
+      result <- emitAssign "strfromint.result" LLVMPtr (LLVMCall runtimeMallocName [(i64Ty, LLVMIntLiteral 64 22)])
+      _ <-
+        emitAssign
+          "strfromint.render"
+          i32Ty
+          ( LLVMCallVarArgs
+              nativeSprintfName
+              [LLVMPtr, LLVMPtr]
+              [ (LLVMPtr, result),
+                (LLVMPtr, LLVMGlobalRef LLVMPtr nativeFmtIntName),
+                (i64Ty, value)
+              ]
+          )
+      finishCurrentBlock (LLVMRet LLVMPtr result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_from_int lowering failed: " ++ renderBackendLLVMError err)
+
 nativeStringToListFunction :: LLVMFunction
 nativeStringToListFunction =
   case
@@ -2740,6 +2774,10 @@ runtimeStringFromCharName :: String
 runtimeStringFromCharName =
   PrimitiveInventory.stringFromCharPrimitiveName
 
+runtimeStringFromIntName :: String
+runtimeStringFromIntName =
+  PrimitiveInventory.stringFromIntPrimitiveName
+
 runtimeStringToListName :: String
 runtimeStringToListName =
   PrimitiveInventory.stringToListPrimitiveName
@@ -2804,8 +2842,8 @@ runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringFromChar needsStringToList needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringFromChar needsStringFromInt needsStringToList needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -2843,6 +2881,13 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeStringFromCharName LLVMPtr [LLVMInt 32] False
          | needsStringFromChar,
            Map.notMember runtimeStringFromCharName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringFromIntName LLVMPtr [LLVMInt 64] False
+         | needsStringFromInt,
+           Map.notMember runtimeStringFromIntName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration nativeSprintfName (LLVMInt 32) [LLVMPtr, LLVMPtr] True
+         | needsStringFromInt
        ]
     ++ [ LLVMDeclaration runtimeStringToListName LLVMPtr [LLVMPtr] False
          | needsStringToList,
@@ -6268,6 +6313,25 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
                   ( LLVMCall
                       runtimeStringFromCharName
                       [(LLVMInt 32, lvOperand value)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 1 (length args))
+    Nothing
+      | name == runtimeStringFromIntName -> do
+          unless (length args == 1) $
+            liftEither (BackendLLVMArityMismatch name 1 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [value] -> do
+              requireLLVMType context name (LLVMInt 64) value
+              result <-
+                emitAssign
+                  "call"
+                  LLVMPtr
+                  ( LLVMCall
+                      runtimeStringFromIntName
+                      [(LLVMInt 64, lvOperand value)]
                   )
               pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
             _ ->

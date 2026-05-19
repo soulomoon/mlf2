@@ -429,6 +429,7 @@ stringStartsWith : String -> String -> Bool
 stringEndsWith : String -> String -> Bool
 stringAppend : String -> String -> String
 stringFromChar : Char -> String
+stringFromInt : Int -> String
 stringFromList : List Char -> String
 stringToList : String -> List Char
 stringDrop : String -> Int -> String
@@ -469,7 +470,10 @@ as `"a\955b"`), while `stringAppend "" "λ"` and `stringAppend "λ" ""` return
 `"λ"` (rendered as `"\955"`). `stringFromChar` is the first `Char` to
 singleton `String` construction operation; the current native-capable tracer
 preserves Unicode scalar values, so `stringFromChar 'λ'` returns `"λ"`
-(rendered as `"\955"`) and `stringFromChar 'A'` returns `"A"`. `stringFromList`
+(rendered as `"\955"`) and `stringFromChar 'A'` returns `"A"`. `stringFromInt`
+is the first decimal `Int` to `String` conversion operation; the current
+native-capable tracer formats `stringFromInt 42` as `"42"` and
+`stringFromInt 0` as `"0"`. `stringFromList`
 is the first `List Char` to `String` conversion operation; the current
 native-capable tracer preserves Unicode scalar list values, so
 `stringFromList (Cons 'a' (Cons 'λ' Nil))` returns `"aλ"` (rendered as
@@ -676,6 +680,7 @@ Current prelude contents:
 - `stringEndsWith`
 - `stringAppend`
 - `stringFromChar`
+- `stringFromInt`
 - `stringFromList`
 - `stringDrop`
 - `stringTake`
@@ -727,7 +732,9 @@ non-empty Unicode scalar suffix. The first append `String` operation is
 `stringAppend`, with native coverage for Unicode scalar preserving string
 concatenation and empty-side identity examples. The first `Char` to singleton
 `String` construction operation is `stringFromChar`, with native coverage for
-Unicode scalar preserving singleton strings. The first `List Char` to `String`
+Unicode scalar preserving singleton strings. The first decimal `Int` to
+`String` conversion operation is `stringFromInt`, with native coverage for
+decimal integer strings. The first `List Char` to `String`
 conversion operation is `stringFromList`, with native coverage for Unicode
 scalar preserving list construction. The first `String` to `List Char`
 conversion operation is `stringToList`, with native coverage for Unicode
@@ -767,7 +774,8 @@ ASCII digit `7`, ASCII space, and a non-ASCII Unicode scalar are false.
 The next explicit ASCII helper is `charIsAsciiPrintable`, with native coverage
 for exactly ASCII scalar values `0x20..0x7e`: space, `!`, `A`, `7`, and `~`
 are true while tab, newline, and a non-ASCII Unicode scalar are false.
-Formatting, full slicing coverage, broader classification families, complete
+General formatting, interpolation, printf-style format strings, locale-aware
+formatting, full slicing coverage, broader classification families, complete
 cursor APIs, broader String/List Char collection APIs, and parser-parity
 helpers remain outside this contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF

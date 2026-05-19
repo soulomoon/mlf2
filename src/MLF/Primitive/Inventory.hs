@@ -29,6 +29,7 @@ module MLF.Primitive.Inventory
     stringEndsWithPrimitiveName,
     stringAppendPrimitiveName,
     stringFromCharPrimitiveName,
+    stringFromIntPrimitiveName,
     stringToListPrimitiveName,
     stringDropPrimitiveName,
     stringTakePrimitiveName,
@@ -108,6 +109,7 @@ data PrimitiveNativeSupport
   | PrimitiveNativeStringEndsWith
   | PrimitiveNativeStringAppend
   | PrimitiveNativeStringFromChar
+  | PrimitiveNativeStringFromInt
   | PrimitiveNativeStringToList
   | PrimitiveNativeStringDrop
   | PrimitiveNativeStringTake
@@ -233,6 +235,12 @@ primitiveValueSpecs =
         primitiveValueSpec
           PrimitiveNativeStringFromChar
           (charTy `PrimitiveTypeArrow` stringTy)
+          Set.empty
+      ),
+      ( stringFromIntPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringFromInt
+          (intTy `PrimitiveTypeArrow` stringTy)
           Set.empty
       ),
       ( stringToListPrimitiveName,
@@ -507,6 +515,10 @@ stringFromCharPrimitiveName :: String
 stringFromCharPrimitiveName =
   "__string_from_char"
 
+stringFromIntPrimitiveName :: String
+stringFromIntPrimitiveName =
+  "__string_from_int"
+
 stringToListPrimitiveName :: String
 stringToListPrimitiveName =
   "__string_to_list"
@@ -598,6 +610,7 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeStringEndsWith -> True
     PrimitiveNativeStringAppend -> True
     PrimitiveNativeStringFromChar -> True
+    PrimitiveNativeStringFromInt -> True
     PrimitiveNativeStringToList -> True
     PrimitiveNativeStringDrop -> True
     PrimitiveNativeStringTake -> True

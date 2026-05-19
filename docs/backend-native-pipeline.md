@@ -40,7 +40,8 @@ contract. The current primitive surface is the inventory-owned reserved
 runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_length`, `__string_is_empty`, `__string_contains_char`,
 `__string_contains`, `__string_starts_with`, `__string_ends_with`,
-`__string_append`, `__string_from_char`, `__string_to_list`,
+`__string_append`, `__string_from_char`, `__string_from_int`,
+`__string_to_list`,
 `__string_drop`, `__string_take`, `__string_slice`, `__string_char_at`,
 `__char_is_digit`,
 `__char_is_ascii_lower`, `__char_is_ascii_upper`, `__char_is_ascii_alpha`,
@@ -123,6 +124,7 @@ Native emission owns the small process/runtime surface it needs:
 
 - `main`: the C ABI wrapper added only by `emit-native`.
 - `printf`: declared for deterministic result printing.
+- `sprintf`: declared for the narrow decimal `Int` to `String` helper.
 - `malloc`: declared when heap-allocated constructors or closure records need
   allocation.
 - `putchar`: declared for character-by-character String rendering.
@@ -153,6 +155,9 @@ Native emission owns the small process/runtime surface it needs:
   `Char` to singleton `String` construction operation; the native helper
   encodes the Unicode scalar as valid UTF-8 and returns a new `String`
   pointer.
+- `__string_from_int`: inventory-classified as the first native-capable
+  decimal `Int` to `String` conversion operation; the native helper writes a
+  decimal integer string into a new `String` pointer.
 - `__string_drop`: inventory-classified as the first native-capable drop
   slicing `String` operation; the native helper advances by UTF-8 scalar
   starts for a non-negative count and returns the remaining `String` pointer.
@@ -261,6 +266,11 @@ Supported result shapes are:
   singleton String construction tracer and encodes Unicode scalar values
   through native execution while keeping formatting, parser parity, platform
   contracts, and proof records out of scope.
+- `stringFromInt : Int -> String` is the first native-capable decimal Int to
+  String conversion tracer and formats decimal integer strings through native
+  execution while keeping general Show support, interpolation, printf-style
+  formatting, locale behavior, parser parity, platform contracts, and proof
+  records out of scope.
 - `stringFromList : List Char -> String` is the first native-capable `List Char`
   to String conversion tracer. The Prelude definition stays high-level over
   `List`, `stringFromChar`, and `stringAppend`; linked native execution proves

@@ -490,6 +490,13 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   emit-native/native object validation, linked native execution, primitive
   inventory, docs scope audit, git diff --check, and broad build/test/thesis
   evidence.
+- round-291 completed item-291-string-from-int-native-tracer: added
+  `stringFromInt : Int -> String` backed by `__string_from_int` and proved
+  decimal outputs for 42 and 0 through source checking, run-program, backend
+  LLVM/object validation, emit-native/native object validation, linked native
+  execution, primitive inventory, neighbor text/char checks including current
+  stringLength matcher, docs scope audit, git diff --check, and broad
+  build/test/thesis evidence.
 
 #### Candidate Direction: Broad String And Char Substrate
 

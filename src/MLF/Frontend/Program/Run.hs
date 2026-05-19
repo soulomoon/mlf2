@@ -328,6 +328,7 @@ data RuntimePrimitive
   | RuntimeStringEndsWith
   | RuntimeStringAppend
   | RuntimeStringFromChar
+  | RuntimeStringFromInt
   | RuntimePreludeStringFromList
   | RuntimeStringToList
   | RuntimeStringDrop
@@ -523,6 +524,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringEndsWithPrimitiveName -> Just RuntimeStringEndsWith
       | name' == PrimitiveInventory.stringAppendPrimitiveName -> Just RuntimeStringAppend
       | name' == PrimitiveInventory.stringFromCharPrimitiveName -> Just RuntimeStringFromChar
+      | name' == PrimitiveInventory.stringFromIntPrimitiveName -> Just RuntimeStringFromInt
       | name' == PrimitiveInventory.stringToListPrimitiveName -> Just RuntimeStringToList
       | name' == PrimitiveInventory.stringDropPrimitiveName -> Just RuntimeStringDrop
       | name' == PrimitiveInventory.stringTakePrimitiveName -> Just RuntimeStringTake
@@ -1263,6 +1265,10 @@ applyRuntimePrimitive context prim args
           Right (RuntimeLit (LString [value]))
         (RuntimeStringFromChar, _) ->
           Left (ProgramPipelineError "run-program __string_from_char expected a Char argument")
+        (RuntimeStringFromInt, [RuntimeLit (LInt value)]) ->
+          Right (RuntimeLit (LString (show value)))
+        (RuntimeStringFromInt, _) ->
+          Left (ProgramPipelineError "run-program __string_from_int expected an Int argument")
         (RuntimePreludeStringFromList, [value]) ->
           RuntimeLit . LString <$> runtimeListCharToString value
         (RuntimePreludeStringFromList, _) ->
@@ -1484,6 +1490,7 @@ runtimePrimitiveArity prim =
     RuntimeStringEndsWith -> 2
     RuntimeStringAppend -> 2
     RuntimeStringFromChar -> 1
+    RuntimeStringFromInt -> 1
     RuntimePreludeStringFromList -> 1
     RuntimeStringToList -> 1
     RuntimeStringDrop -> 2
@@ -1675,6 +1682,7 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringEndsWithPrimitiveName,
     PrimitiveInventory.stringAppendPrimitiveName,
     PrimitiveInventory.stringFromCharPrimitiveName,
+    PrimitiveInventory.stringFromIntPrimitiveName,
     PrimitiveInventory.stringToListPrimitiveName,
     PrimitiveInventory.stringDropPrimitiveName,
     PrimitiveInventory.stringTakePrimitiveName,
