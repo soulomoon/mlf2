@@ -428,6 +428,7 @@ stringContains : String -> String -> Bool
 stringStartsWith : String -> String -> Bool
 stringEndsWith : String -> String -> Bool
 stringAppend : String -> String -> String
+stringFromChar : Char -> String
 stringDrop : String -> Int -> String
 stringTake : String -> Int -> String
 stringSlice : String -> Int -> Int -> String
@@ -463,8 +464,12 @@ non-empty Unicode scalar suffix, so `stringEndsWith "abλ" "λ"` is `true` while
 `String` operation; the current native-capable tracer concatenates valid
 Unicode scalar strings, so `stringAppend "aλ" "b"` returns `"aλb"` (rendered
 as `"a\955b"`), while `stringAppend "" "λ"` and `stringAppend "λ" ""` return
-`"λ"` (rendered as `"\955"`). `stringDrop` is the first drop slicing
-operation; the current native-capable tracer drops a non-negative count of
+`"λ"` (rendered as `"\955"`). `stringFromChar` is the first `Char` to
+singleton `String` construction operation; the current native-capable tracer
+preserves Unicode scalar values, so `stringFromChar 'λ'` returns `"λ"`
+(rendered as `"\955"`) and `stringFromChar 'A'` returns `"A"`. `stringDrop`
+is the first drop slicing operation; the current native-capable tracer drops a
+non-negative count of
 Unicode scalar values, so `stringDrop "λab" 1` returns `"ab"` and
 `stringDrop "aλb" 2` returns `"b"`. `stringTake` is the first take slicing
 operation; the current native-capable tracer keeps a non-negative count of
@@ -660,6 +665,7 @@ Current prelude contents:
 - `stringStartsWith`
 - `stringEndsWith`
 - `stringAppend`
+- `stringFromChar`
 - `stringDrop`
 - `stringTake`
 - `stringSlice`
@@ -708,11 +714,13 @@ with native coverage for a non-empty Unicode scalar prefix. The first suffix
 `String` search operation is `stringEndsWith`, with native coverage for a
 non-empty Unicode scalar suffix. The first append `String` operation is
 `stringAppend`, with native coverage for Unicode scalar preserving string
-concatenation and empty-side identity examples. The first drop slicing
-operation is `stringDrop`, with native coverage for non-negative Unicode
-scalar prefix-drop examples. The first take slicing operation is `stringTake`, with native
-coverage for non-negative Unicode scalar prefix-take examples. The first range
-slicing operation is `stringSlice`, with native coverage for non-negative
+concatenation and empty-side identity examples. The first `Char` to singleton
+`String` construction operation is `stringFromChar`, with native coverage for
+Unicode scalar preserving singleton strings. `stringDrop` is the first drop
+slicing operation, with native coverage for non-negative Unicode scalar
+prefix-drop examples. The first take slicing operation is `stringTake`, with
+native coverage for non-negative Unicode scalar prefix-take examples. The first
+range slicing operation is `stringSlice`, with native coverage for non-negative
 Unicode scalar start/count examples. The first in-range cursor/index operation
 is `stringCharAt`, with native coverage for Unicode scalar index examples.
 The first native-capable `Char` classification operation is `charIsDigit`,

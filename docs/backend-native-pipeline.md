@@ -40,9 +40,10 @@ contract. The current primitive surface is the inventory-owned reserved
 runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_length`, `__string_is_empty`, `__string_contains_char`,
 `__string_contains`, `__string_starts_with`, `__string_ends_with`,
-`__string_drop`, `__string_take`, `__string_slice`, `__string_char_at`,
-`__char_is_digit`, `__char_is_ascii_lower`, `__char_is_ascii_upper`,
-`__char_is_ascii_alpha`, `__char_is_ascii_alpha_num`,
+`__string_append`, `__string_from_char`, `__string_drop`, `__string_take`,
+`__string_slice`, `__string_char_at`, `__char_is_digit`,
+`__char_is_ascii_lower`, `__char_is_ascii_upper`, `__char_is_ascii_alpha`,
+`__char_is_ascii_alpha_num`,
 `__char_is_ascii_identifier_start`,
 `__char_is_ascii_identifier_continue`, `__char_is_ascii_whitespace`,
 `__char_is_ascii_punctuation`, `__char_is_ascii_printable`, plus the IO
@@ -144,6 +145,13 @@ Native emission owns the small process/runtime surface it needs:
 - `__string_ends_with`: inventory-classified as the first native-capable
   suffix `String` search operation; the native helper compares valid UTF-8
   scalar-sequence bytes at the end of the haystack and returns a `Bool`.
+- `__string_append`: inventory-classified as the first native-capable append
+  `String` operation; the native helper copies valid UTF-8 scalar sequences
+  from both inputs and returns a new `String` pointer.
+- `__string_from_char`: inventory-classified as the first native-capable
+  `Char` to singleton `String` construction operation; the native helper
+  encodes the Unicode scalar as valid UTF-8 and returns a new `String`
+  pointer.
 - `__string_drop`: inventory-classified as the first native-capable drop
   slicing `String` operation; the native helper advances by UTF-8 scalar
   starts for a non-negative count and returns the remaining `String` pointer.
@@ -248,6 +256,11 @@ Supported result shapes are:
   append String tracer and concatenates valid Unicode-scalar strings through
   native execution while keeping `String`/`List Char` conversion, formatting,
   parser parity, platform contracts, and proof records out of scope.
+- `stringFromChar : Char -> String` is the first native-capable Char to
+  singleton String construction tracer and encodes Unicode scalar values
+  through native execution while keeping `String`/`List Char` conversion,
+  formatting, parser parity, platform contracts, and proof records out of
+  scope.
 - `charIsDigit : Char -> Bool` is the first native-capable Char
   classification tracer and classifies ASCII decimal digit code points through
   native execution while keeping broader classification families out of scope.

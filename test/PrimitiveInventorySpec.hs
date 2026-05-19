@@ -44,6 +44,7 @@ spec = describe "MLF.Primitive.Inventory" $ do
           PrimitiveInventory.stringStartsWithPrimitiveName,
           PrimitiveInventory.stringEndsWithPrimitiveName,
           PrimitiveInventory.stringAppendPrimitiveName,
+          PrimitiveInventory.stringFromCharPrimitiveName,
           PrimitiveInventory.stringDropPrimitiveName,
           PrimitiveInventory.stringTakePrimitiveName,
           PrimitiveInventory.stringSlicePrimitiveName,
@@ -83,6 +84,8 @@ spec = describe "MLF.Primitive.Inventory" $ do
           name `shouldBe` PrimitiveInventory.stringEndsWithPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringAppend ->
           name `shouldBe` PrimitiveInventory.stringAppendPrimitiveName
+        PrimitiveInventory.PrimitiveNativeStringFromChar ->
+          name `shouldBe` PrimitiveInventory.stringFromCharPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringDrop ->
           name `shouldBe` PrimitiveInventory.stringDropPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringTake ->

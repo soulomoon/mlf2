@@ -134,6 +134,11 @@
   strings, including `stringAppend "aλ" "b"` and empty-side identity cases,
   through `.mlfp` source checking, `run-program`, raw LLVM emission,
   object-code validation, and linked native execution.
+- Added the first native-capable `Char` to singleton `String` construction
+  tracer: `stringFromChar : Char -> String` now preserves Unicode scalar
+  values, including `stringFromChar 'λ'` and `stringFromChar 'A'`, through
+  `.mlfp` source checking, `run-program`, raw LLVM emission, object-code
+  validation, and linked native execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

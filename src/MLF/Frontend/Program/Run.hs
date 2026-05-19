@@ -327,6 +327,7 @@ data RuntimePrimitive
   | RuntimeStringStartsWith
   | RuntimeStringEndsWith
   | RuntimeStringAppend
+  | RuntimeStringFromChar
   | RuntimeStringDrop
   | RuntimeStringTake
   | RuntimeStringSlice
@@ -517,6 +518,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringStartsWithPrimitiveName -> Just RuntimeStringStartsWith
       | name' == PrimitiveInventory.stringEndsWithPrimitiveName -> Just RuntimeStringEndsWith
       | name' == PrimitiveInventory.stringAppendPrimitiveName -> Just RuntimeStringAppend
+      | name' == PrimitiveInventory.stringFromCharPrimitiveName -> Just RuntimeStringFromChar
       | name' == PrimitiveInventory.stringDropPrimitiveName -> Just RuntimeStringDrop
       | name' == PrimitiveInventory.stringTakePrimitiveName -> Just RuntimeStringTake
       | name' == PrimitiveInventory.stringSlicePrimitiveName -> Just RuntimeStringSlice
@@ -1252,6 +1254,10 @@ applyRuntimePrimitive prim args
           Right (RuntimeLit (LString (left ++ right)))
         (RuntimeStringAppend, _) ->
           Left (ProgramPipelineError "run-program __string_append expected String arguments")
+        (RuntimeStringFromChar, [RuntimeLit (LChar value)]) ->
+          Right (RuntimeLit (LString [value]))
+        (RuntimeStringFromChar, _) ->
+          Left (ProgramPipelineError "run-program __string_from_char expected a Char argument")
         (RuntimeStringDrop, [RuntimeLit (LString value), RuntimeLit (LInt count)]) ->
           Right (RuntimeLit (LString (dropUnicodeScalars count value)))
         (RuntimeStringDrop, _) ->
@@ -1421,6 +1427,7 @@ runtimePrimitiveArity prim =
     RuntimeStringStartsWith -> 2
     RuntimeStringEndsWith -> 2
     RuntimeStringAppend -> 2
+    RuntimeStringFromChar -> 1
     RuntimeStringDrop -> 2
     RuntimeStringTake -> 2
     RuntimeStringSlice -> 3
@@ -1609,6 +1616,7 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringStartsWithPrimitiveName,
     PrimitiveInventory.stringEndsWithPrimitiveName,
     PrimitiveInventory.stringAppendPrimitiveName,
+    PrimitiveInventory.stringFromCharPrimitiveName,
     PrimitiveInventory.stringDropPrimitiveName,
     PrimitiveInventory.stringTakePrimitiveName,
     PrimitiveInventory.stringSlicePrimitiveName,

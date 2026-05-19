@@ -85,9 +85,10 @@ Row-5 primitive/eager ownership keeps the primitive surface at the
 inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__mlfp_and`, `__string_length`, `__string_is_empty`,
 `__string_contains_char`, `__string_contains`, `__string_starts_with`,
-`__string_ends_with`, `__string_append`, `__string_drop`, `__string_take`,
-`__string_slice`, `__string_char_at`, `__char_is_digit`, `__char_is_ascii_lower`,
-`__char_is_ascii_upper`, `__char_is_ascii_alpha`,
+`__string_ends_with`, `__string_append`, `__string_from_char`,
+`__string_drop`, `__string_take`, `__string_slice`, `__string_char_at`,
+`__char_is_digit`, `__char_is_ascii_lower`, `__char_is_ascii_upper`,
+`__char_is_ascii_alpha`,
 `__char_is_ascii_alpha_num`, `__char_is_ascii_identifier_start`,
 `__char_is_ascii_identifier_continue`, `__char_is_ascii_whitespace`,
 `__char_is_ascii_punctuation`, `__char_is_ascii_printable`, plus the IO
@@ -178,6 +179,7 @@ lowerBackendProgram program = do
       needsStringStartsWith = any (functionReferencesGlobalNames (Set.singleton runtimeStringStartsWithName)) (lpFunctions lowered)
       needsStringEndsWith = any (functionReferencesGlobalNames (Set.singleton runtimeStringEndsWithName)) (lpFunctions lowered)
       needsStringAppend = any (functionReferencesGlobalNames (Set.singleton runtimeStringAppendName)) (lpFunctions lowered)
+      needsStringFromChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringFromCharName)) (lpFunctions lowered)
       needsStringDrop = any (functionReferencesGlobalNames (Set.singleton runtimeStringDropName)) (lpFunctions lowered)
       needsStringTake = any (functionReferencesGlobalNames (Set.singleton runtimeStringTakeName)) (lpFunctions lowered)
       needsStringSlice = any (functionReferencesGlobalNames (Set.singleton runtimeStringSliceName)) (lpFunctions lowered)
@@ -202,6 +204,7 @@ lowerBackendProgram program = do
           needsStringStartsWith
           needsStringEndsWith
           needsStringAppend
+          needsStringFromChar
           needsStringDrop
           needsStringTake
           needsStringSlice
@@ -351,6 +354,7 @@ nativeRuntimeFunctions base =
     ++ [nativeStringStartsWithFunction | Map.notMember runtimeStringStartsWithName (pbBindings base)]
     ++ [nativeStringEndsWithFunction | Map.notMember runtimeStringEndsWithName (pbBindings base)]
     ++ [nativeStringAppendFunction | Map.notMember runtimeStringAppendName (pbBindings base)]
+    ++ [nativeStringFromCharFunction | Map.notMember runtimeStringFromCharName (pbBindings base)]
     ++ [nativeStringDropFunction | Map.notMember runtimeStringDropName (pbBindings base)]
     ++ [nativeStringTakeFunction | Map.notMember runtimeStringTakeName (pbBindings base)]
     ++ [nativeStringSliceFunction | Map.notMember runtimeStringSliceName (pbBindings base)]
@@ -1618,6 +1622,103 @@ nativeStringAppendFunction =
     Right function -> function
     Left err -> error ("internal native __string_append lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringFromCharFunction :: LLVMFunction
+nativeStringFromCharFunction =
+  case
+    lowerNativeFunction runtimeStringFromCharName LLVMPtr [(LLVMInt 32, "value")] $ \params -> do
+      let value = requireNativeParam "value" params
+          i8Ty = LLVMInt 8
+          i32Ty = LLVMInt 32
+          i64Ty = LLVMInt 64
+          bytePtrAt label base offset =
+            emitAssign label LLVMPtr (LLVMGetElementPtr i8Ty base [(i64Ty, LLVMIntLiteral 64 offset)])
+          storeNull label base offset = do
+            ptr <- bytePtrAt (label ++ ".ptr") base offset
+            emitStore i8Ty (LLVMIntLiteral 8 0) ptr
+          finishWith label result packed byteLength = do
+            emitStore i32Ty packed result
+            storeNull (label ++ ".null") result byteLength
+            finishCurrentBlock (LLVMRet LLVMPtr result)
+          shiftByte label byte shift =
+            emitAssign label i32Ty (LLVMShl byte (LLVMIntLiteral 32 shift))
+          continuationByte label payload =
+            emitAssign label i32Ty (LLVMOr (LLVMIntLiteral 32 0x80) payload)
+          floorDivBy label divisor operand = do
+            quotientSlot <- emitAssign (label ++ ".quotient.slot") LLVMPtr (LLVMAlloca i32Ty (LLVMIntLiteral 64 1))
+            thresholdSlot <- emitAssign (label ++ ".threshold.slot") LLVMPtr (LLVMAlloca i32Ty (LLVMIntLiteral 64 1))
+            emitStore i32Ty (LLVMIntLiteral 32 0) quotientSlot
+            emitStore i32Ty (LLVMIntLiteral 32 divisor) thresholdSlot
+            header <- freshBlock (label ++ ".header")
+            advance <- freshBlock (label ++ ".advance")
+            done <- freshBlock (label ++ ".done")
+            finishCurrentBlock (LLVMBr header)
+            startBlock header
+            threshold <- emitAssign (label ++ ".threshold") i32Ty (LLVMLoad i32Ty thresholdSlot)
+            past <- emitAssign (label ++ ".past") (LLVMInt 1) (LLVMICmpUgt threshold operand)
+            finishCurrentBlock (LLVMSwitch (LLVMInt 1) past advance [(1, done)])
+            startBlock advance
+            quotient <- emitAssign (label ++ ".quotient") i32Ty (LLVMLoad i32Ty quotientSlot)
+            nextQuotient <- emitAssign (label ++ ".quotient.next") i32Ty (LLVMAdd quotient (LLVMIntLiteral 32 1))
+            nextThreshold <- emitAssign (label ++ ".threshold.next") i32Ty (LLVMAdd threshold (LLVMIntLiteral 32 divisor))
+            emitStore i32Ty nextQuotient quotientSlot
+            emitStore i32Ty nextThreshold thresholdSlot
+            finishCurrentBlock (LLVMBr header)
+            startBlock done
+            emitAssign (label ++ ".result") i32Ty (LLVMLoad i32Ty quotientSlot)
+          packBytes label byte0 rest = do
+            shifted <- zipWithM (\index byte -> shiftByte (label ++ ".b" ++ show index ++ ".shifted") byte (index * 8)) [1 :: Integer ..] rest
+            foldM (\acc byte -> emitAssign (label ++ ".packed") i32Ty (LLVMOr acc byte)) byte0 shifted
+      result <- emitAssign "strfromchar.result" LLVMPtr (LLVMCall runtimeMallocName [(i64Ty, LLVMIntLiteral 64 5)])
+      asciiBlock <- freshBlock "strfromchar.ascii"
+      detectTwo <- freshBlock "strfromchar.detect.two"
+      twoBlock <- freshBlock "strfromchar.two"
+      detectThree <- freshBlock "strfromchar.detect.three"
+      threeBlock <- freshBlock "strfromchar.three"
+      fourBlock <- freshBlock "strfromchar.four"
+      isAscii <- emitAssign "strfromchar.is.ascii" (LLVMInt 1) (LLVMICmpUgt (LLVMIntLiteral 32 128) value)
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isAscii detectTwo [(1, asciiBlock)])
+      startBlock asciiBlock
+      finishWith "strfromchar.ascii" result value 1
+      startBlock detectTwo
+      isTwo <- emitAssign "strfromchar.is.two" (LLVMInt 1) (LLVMICmpUgt (LLVMIntLiteral 32 2048) value)
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isTwo detectThree [(1, twoBlock)])
+      startBlock twoBlock
+      twoByte0Payload <- floorDivBy "strfromchar.two.b0.payload" 64 value
+      twoByte0 <- emitAssign "strfromchar.two.b0" i32Ty (LLVMOr (LLVMIntLiteral 32 0xC0) twoByte0Payload)
+      twoByte1Payload <- emitAssign "strfromchar.two.b1.payload" i32Ty (LLVMAnd value (LLVMIntLiteral 32 0x3F))
+      twoByte1 <- continuationByte "strfromchar.two.b1" twoByte1Payload
+      twoPacked <- packBytes "strfromchar.two" twoByte0 [twoByte1]
+      finishWith "strfromchar.two" result twoPacked 2
+      startBlock detectThree
+      isThree <- emitAssign "strfromchar.is.three" (LLVMInt 1) (LLVMICmpUgt (LLVMIntLiteral 32 65536) value)
+      finishCurrentBlock (LLVMSwitch (LLVMInt 1) isThree fourBlock [(1, threeBlock)])
+      startBlock threeBlock
+      threeByte0Payload <- floorDivBy "strfromchar.three.b0.payload" 4096 value
+      threeByte0 <- emitAssign "strfromchar.three.b0" i32Ty (LLVMOr (LLVMIntLiteral 32 0xE0) threeByte0Payload)
+      threeQ6 <- floorDivBy "strfromchar.three.q6" 64 value
+      threeByte1Payload <- emitAssign "strfromchar.three.b1.payload" i32Ty (LLVMAnd threeQ6 (LLVMIntLiteral 32 0x3F))
+      threeByte1 <- continuationByte "strfromchar.three.b1" threeByte1Payload
+      threeByte2Payload <- emitAssign "strfromchar.three.b2.payload" i32Ty (LLVMAnd value (LLVMIntLiteral 32 0x3F))
+      threeByte2 <- continuationByte "strfromchar.three.b2" threeByte2Payload
+      threePacked <- packBytes "strfromchar.three" threeByte0 [threeByte1, threeByte2]
+      finishWith "strfromchar.three" result threePacked 3
+      startBlock fourBlock
+      fourByte0Payload <- floorDivBy "strfromchar.four.b0.payload" 262144 value
+      fourByte0 <- emitAssign "strfromchar.four.b0" i32Ty (LLVMOr (LLVMIntLiteral 32 0xF0) fourByte0Payload)
+      fourQ12 <- floorDivBy "strfromchar.four.q12" 4096 value
+      fourByte1Payload <- emitAssign "strfromchar.four.b1.payload" i32Ty (LLVMAnd fourQ12 (LLVMIntLiteral 32 0x3F))
+      fourByte1 <- continuationByte "strfromchar.four.b1" fourByte1Payload
+      fourQ6 <- floorDivBy "strfromchar.four.q6" 64 value
+      fourByte2Payload <- emitAssign "strfromchar.four.b2.payload" i32Ty (LLVMAnd fourQ6 (LLVMIntLiteral 32 0x3F))
+      fourByte2 <- continuationByte "strfromchar.four.b2" fourByte2Payload
+      fourByte3Payload <- emitAssign "strfromchar.four.b3.payload" i32Ty (LLVMAnd value (LLVMIntLiteral 32 0x3F))
+      fourByte3 <- continuationByte "strfromchar.four.b3" fourByte3Payload
+      fourPacked <- packBytes "strfromchar.four" fourByte0 [fourByte1, fourByte2, fourByte3]
+      finishWith "strfromchar.four" result fourPacked 4
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_from_char lowering failed: " ++ renderBackendLLVMError err)
+
 nativeStringDropFunction :: LLVMFunction
 nativeStringDropFunction =
   case
@@ -2479,6 +2580,10 @@ runtimeStringAppendName :: String
 runtimeStringAppendName =
   PrimitiveInventory.stringAppendPrimitiveName
 
+runtimeStringFromCharName :: String
+runtimeStringFromCharName =
+  PrimitiveInventory.stringFromCharPrimitiveName
+
 runtimeStringDropName :: String
 runtimeStringDropName =
   PrimitiveInventory.stringDropPrimitiveName
@@ -2539,8 +2644,8 @@ runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringFromChar needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -2574,6 +2679,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeStringAppendName LLVMPtr [LLVMPtr, LLVMPtr] False
          | needsStringAppend,
            Map.notMember runtimeStringAppendName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringFromCharName LLVMPtr [LLVMInt 32] False
+         | needsStringFromChar,
+           Map.notMember runtimeStringFromCharName (pbBindings base)
        ]
     ++ [ LLVMDeclaration runtimeStringDropName LLVMPtr [LLVMPtr, LLVMInt 64] False
          | needsStringDrop,
@@ -5980,6 +6089,25 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
               pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
             _ ->
               liftEither (BackendLLVMArityMismatch name 2 (length args))
+    Nothing
+      | name == runtimeStringFromCharName -> do
+          unless (length args == 1) $
+            liftEither (BackendLLVMArityMismatch name 1 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [value] -> do
+              requireLLVMType context name (LLVMInt 32) value
+              result <-
+                emitAssign
+                  "call"
+                  LLVMPtr
+                  ( LLVMCall
+                      runtimeStringFromCharName
+                      [(LLVMInt 32, lvOperand value)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 1 (length args))
     Nothing
       | name == runtimeStringDropName -> do
           unless (length args == 2) $
