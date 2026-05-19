@@ -516,6 +516,14 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   emit-native/native object validation, linked native execution, primitive
   absence audit, planned neighbor text/char checks, docs scope audit, git
   diff --check, and broad build/test/thesis evidence.
+- round-295 completed item-295-string-replace-char-native-tracer: added
+  `stringReplaceChar : String -> Char -> Char -> String` backed by
+  `__string_replace_char` and proved non-ASCII lambda replacement plus no-match
+  preservation through source checking, run-program, backend LLVM/object
+  validation, emit-native/native object validation, linked native execution,
+  primitive inventory, planned neighbor text/char checks, docs scope audit,
+  Unicode-scalar replacement allocation audit, git diff --check, and broad
+  build/test/thesis evidence.
 
 #### Candidate Direction: Broad String And Char Substrate
 

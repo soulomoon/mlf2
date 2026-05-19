@@ -134,6 +134,13 @@
   strings, including `stringAppend "aλ" "b"` and empty-side identity cases,
   through `.mlfp` source checking, `run-program`, raw LLVM emission,
   object-code validation, and linked native execution.
+- Added the first native-capable character replacement `String` tracer:
+  `stringReplaceChar : String -> Char -> Char -> String` now replaces every
+  matching Unicode scalar `Char`, including
+  `stringReplaceChar "aλbλ" 'λ' 'x'`, and preserves no-match inputs such as
+  `stringReplaceChar "ab" 'λ' 'x'` through `.mlfp` source checking,
+  `run-program`, raw LLVM emission, object-code validation, and linked native
+  execution.
 - Added the first native-capable `Char` to singleton `String` construction
   tracer: `stringFromChar : Char -> String` now preserves Unicode scalar
   values, including `stringFromChar 'λ'` and `stringFromChar 'A'`, through

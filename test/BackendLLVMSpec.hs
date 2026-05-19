@@ -430,6 +430,28 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "stringReplaceChar replaces Unicode scalar characters through native execution" $
+      forM_
+        [ (nativeUnicodeStringReplaceCharSourceProgram, "\"axbx\"\n", NativeRunResult ExitSuccess "\"axbx\"\n" ""),
+          (nativeNoMatchStringReplaceCharSourceProgram, "\"ab\"\n", NativeRunResult ExitSuccess "\"ab\"\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "stringFromChar converts Unicode scalar Chars to singleton strings through native execution" $
       forM_
         [ (nativeUnicodeStringFromCharSourceProgram, "\"\\955\"\n", NativeRunResult ExitSuccess "\"\\955\"\n" ""),
@@ -2790,6 +2812,24 @@ nativeRightEmptyStringAppendSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (stringAppend);",
       "  def main : String = stringAppend \"λ\" \"\";",
+      "}"
+    ]
+
+nativeUnicodeStringReplaceCharSourceProgram :: String
+nativeUnicodeStringReplaceCharSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringReplaceChar);",
+      "  def main : String = stringReplaceChar \"aλbλ\" 'λ' 'x';",
+      "}"
+    ]
+
+nativeNoMatchStringReplaceCharSourceProgram :: String
+nativeNoMatchStringReplaceCharSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringReplaceChar);",
+      "  def main : String = stringReplaceChar \"ab\" 'λ' 'x';",
       "}"
     ]
 

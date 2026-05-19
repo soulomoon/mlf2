@@ -269,6 +269,12 @@ Supported result shapes are:
   append String tracer and concatenates valid Unicode-scalar strings through
   native execution while keeping formatting, parser parity, platform contracts,
   and proof records out of scope.
+- `stringReplaceChar : String -> Char -> Char -> String` is the first
+  native-capable character replacement String tracer and replaces every
+  matching Unicode scalar `Char` while preserving no-match inputs through
+  native execution. Substring replacement, splitting, regex, Unicode
+  normalization, locale behavior, parser parity, platform contracts, and proof
+  records remain out of scope.
 - `stringFromChar : Char -> String` is the first native-capable Char to
   singleton String construction tracer and encodes Unicode scalar values
   through native execution while keeping formatting, parser parity, platform

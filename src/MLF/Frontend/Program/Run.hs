@@ -327,6 +327,7 @@ data RuntimePrimitive
   | RuntimeStringStartsWith
   | RuntimeStringEndsWith
   | RuntimeStringAppend
+  | RuntimeStringReplaceChar
   | RuntimeStringFromChar
   | RuntimeStringFromInt
   | RuntimeStringFromBool
@@ -525,6 +526,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringStartsWithPrimitiveName -> Just RuntimeStringStartsWith
       | name' == PrimitiveInventory.stringEndsWithPrimitiveName -> Just RuntimeStringEndsWith
       | name' == PrimitiveInventory.stringAppendPrimitiveName -> Just RuntimeStringAppend
+      | name' == PrimitiveInventory.stringReplaceCharPrimitiveName -> Just RuntimeStringReplaceChar
       | name' == PrimitiveInventory.stringFromCharPrimitiveName -> Just RuntimeStringFromChar
       | name' == PrimitiveInventory.stringFromIntPrimitiveName -> Just RuntimeStringFromInt
       | name' == PrimitiveInventory.stringFromBoolPrimitiveName -> Just RuntimeStringFromBool
@@ -1265,6 +1267,10 @@ applyRuntimePrimitive context prim args
           Right (RuntimeLit (LString (left ++ right)))
         (RuntimeStringAppend, _) ->
           Left (ProgramPipelineError "run-program __string_append expected String arguments")
+        (RuntimeStringReplaceChar, [RuntimeLit (LString value), RuntimeLit (LChar needle), RuntimeLit (LChar replacement)]) ->
+          Right (RuntimeLit (LString (map (\char -> if char == needle then replacement else char) value)))
+        (RuntimeStringReplaceChar, _) ->
+          Left (ProgramPipelineError "run-program __string_replace_char expected String and Char arguments")
         (RuntimeStringFromChar, [RuntimeLit (LChar value)]) ->
           Right (RuntimeLit (LString [value]))
         (RuntimeStringFromChar, _) ->
@@ -1519,6 +1525,7 @@ runtimePrimitiveArity prim =
     RuntimeStringStartsWith -> 2
     RuntimeStringEndsWith -> 2
     RuntimeStringAppend -> 2
+    RuntimeStringReplaceChar -> 3
     RuntimeStringFromChar -> 1
     RuntimeStringFromInt -> 1
     RuntimeStringFromBool -> 1
@@ -1713,6 +1720,7 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringStartsWithPrimitiveName,
     PrimitiveInventory.stringEndsWithPrimitiveName,
     PrimitiveInventory.stringAppendPrimitiveName,
+    PrimitiveInventory.stringReplaceCharPrimitiveName,
     PrimitiveInventory.stringFromCharPrimitiveName,
     PrimitiveInventory.stringFromIntPrimitiveName,
     PrimitiveInventory.stringFromBoolPrimitiveName,
