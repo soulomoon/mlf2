@@ -86,7 +86,7 @@ inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__mlfp_and`, `__string_length`, `__string_is_empty`,
 `__string_contains_char`, `__string_contains`, `__string_starts_with`,
 `__string_ends_with`, `__string_append`, `__string_from_char`,
-`__string_replace_char`, `__string_from_int`, `__string_from_bool`,
+`__string_replace_char`, `__string_replace`, `__string_from_int`, `__string_from_bool`,
 `__string_from_nat`, `__string_to_list`, `__string_drop`, `__string_take`,
 `__string_slice`, `__string_char_at`,
 `__char_is_digit`, `__char_is_ascii_lower`, `__char_is_ascii_upper`,
@@ -182,6 +182,7 @@ lowerBackendProgram program = do
       needsStringEndsWith = any (functionReferencesGlobalNames (Set.singleton runtimeStringEndsWithName)) (lpFunctions lowered)
       needsStringAppend = any (functionReferencesGlobalNames (Set.singleton runtimeStringAppendName)) (lpFunctions lowered)
       needsStringReplaceChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringReplaceCharName)) (lpFunctions lowered)
+      needsStringReplace = any (functionReferencesGlobalNames (Set.singleton runtimeStringReplaceName)) (lpFunctions lowered)
       needsStringIndexOfChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringIndexOfCharName)) (lpFunctions lowered)
       needsStringIndexOf = any (functionReferencesGlobalNames (Set.singleton runtimeStringIndexOfName)) (lpFunctions lowered)
       needsStringFromChar = any (functionReferencesGlobalNames (Set.singleton runtimeStringFromCharName)) (lpFunctions lowered)
@@ -214,6 +215,7 @@ lowerBackendProgram program = do
           needsStringEndsWith
           needsStringAppend
           needsStringReplaceChar
+          needsStringReplace
           needsStringIndexOfChar
           needsStringIndexOf
           needsStringFromChar
@@ -372,6 +374,7 @@ nativeRuntimeFunctions base =
     ++ [nativeStringEndsWithFunction | Map.notMember runtimeStringEndsWithName (pbBindings base)]
     ++ [nativeStringAppendFunction | Map.notMember runtimeStringAppendName (pbBindings base)]
     ++ [nativeStringReplaceCharFunction | Map.notMember runtimeStringReplaceCharName (pbBindings base)]
+    ++ [nativeStringReplaceFunction | Map.notMember runtimeStringReplaceName (pbBindings base)]
     ++ [nativeStringIndexOfCharFunction | Map.notMember runtimeStringIndexOfCharName (pbBindings base)]
     ++ [nativeStringIndexOfFunction | Map.notMember runtimeStringIndexOfName (pbBindings base)]
     ++ [nativeStringFromCharFunction | Map.notMember runtimeStringFromCharName (pbBindings base)]
@@ -1851,6 +1854,271 @@ nativeStringReplaceCharFunction =
     Right function -> function
     Left err -> error ("internal native __string_replace_char lowering failed: " ++ renderBackendLLVMError err)
 
+nativeStringReplaceFunction :: LLVMFunction
+nativeStringReplaceFunction =
+  case
+    lowerNativeFunction runtimeStringReplaceName LLVMPtr [(LLVMPtr, "haystack"), (LLVMPtr, "needle"), (LLVMPtr, "replacement")] $ \params -> do
+      let haystack = requireNativeParam "haystack" params
+          needle = requireNativeParam "needle" params
+          replacement = requireNativeParam "replacement" params
+          i1Ty = LLVMInt 1
+          i8Ty = LLVMInt 8
+          i64Ty = LLVMInt 64
+          loadByte label curPtr offset = do
+            bytePtr <- emitAssign (label ++ ".ptr") LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 offset)])
+            emitAssign label i8Ty (LLVMLoad i8Ty bytePtr)
+          ptrAt label curPtr offset =
+            emitAssign label LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, LLVMIntLiteral 64 offset)])
+          ptrAtOperand label curPtr offset =
+            emitAssign label LLVMPtr (LLVMGetElementPtr i8Ty curPtr [(i64Ty, offset)])
+          copyByte label source dest offset = do
+            byte <- loadByte (label ++ ".byte") source offset
+            destPtr <- ptrAt (label ++ ".dest") dest offset
+            emitStore i8Ty byte destPtr
+          countBytes label sourceInitial = do
+            sourceSlot <- emitAssign (label ++ ".source.slot") LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+            countSlot <- emitAssign (label ++ ".count.slot") LLVMPtr (LLVMAlloca i64Ty (LLVMIntLiteral 64 1))
+            emitStore LLVMPtr sourceInitial sourceSlot
+            emitStore i64Ty (LLVMIntLiteral 64 0) countSlot
+            header <- freshBlock (label ++ ".header")
+            advance <- freshBlock (label ++ ".advance")
+            done <- freshBlock (label ++ ".done")
+            finishCurrentBlock (LLVMBr header)
+            startBlock header
+            source <- emitAssign (label ++ ".source") LLVMPtr (LLVMLoad LLVMPtr sourceSlot)
+            byte <- loadByte (label ++ ".byte") source 0
+            isNull <- emitAssign (label ++ ".end") i1Ty (LLVMICmpEq byte (LLVMIntLiteral 8 0))
+            finishCurrentBlock (LLVMSwitch i1Ty isNull advance [(1, done)])
+            startBlock advance
+            nextSource <- ptrAt (label ++ ".source.next") source 1
+            count <- emitAssign (label ++ ".count") i64Ty (LLVMLoad i64Ty countSlot)
+            nextCount <- emitAssign (label ++ ".count.next") i64Ty (LLVMAdd count (LLVMIntLiteral 64 1))
+            emitStore LLVMPtr nextSource sourceSlot
+            emitStore i64Ty nextCount countSlot
+            finishCurrentBlock (LLVMBr header)
+            startBlock done
+            emitAssign (label ++ ".result") i64Ty (LLVMLoad i64Ty countSlot)
+          copyFixedBytes label sourceInitial destInitial totalCount = do
+            sourceSlot <- emitAssign (label ++ ".source.slot") LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+            destSlot <- emitAssign (label ++ ".dest.slot") LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+            copiedSlot <- emitAssign (label ++ ".copied.slot") LLVMPtr (LLVMAlloca i64Ty (LLVMIntLiteral 64 1))
+            emitStore LLVMPtr sourceInitial sourceSlot
+            emitStore LLVMPtr destInitial destSlot
+            emitStore i64Ty (LLVMIntLiteral 64 0) copiedSlot
+            header <- freshBlock (label ++ ".header")
+            copy <- freshBlock (label ++ ".copy")
+            done <- freshBlock (label ++ ".done")
+            finishCurrentBlock (LLVMBr header)
+            startBlock header
+            copied <- emitAssign (label ++ ".copied") i64Ty (LLVMLoad i64Ty copiedSlot)
+            copiedEnough <- emitAssign (label ++ ".copied.enough") i1Ty (LLVMICmpEq copied totalCount)
+            finishCurrentBlock (LLVMSwitch i1Ty copiedEnough copy [(1, done)])
+            startBlock copy
+            source <- emitAssign (label ++ ".source") LLVMPtr (LLVMLoad LLVMPtr sourceSlot)
+            dest <- emitAssign (label ++ ".dest") LLVMPtr (LLVMLoad LLVMPtr destSlot)
+            byte <- loadByte (label ++ ".byte") source 0
+            destPtr <- ptrAt (label ++ ".dest.ptr") dest 0
+            emitStore i8Ty byte destPtr
+            nextSource <- ptrAt (label ++ ".source.next") source 1
+            nextDest <- ptrAt (label ++ ".dest.next") dest 1
+            nextCopied <- emitAssign (label ++ ".copied.next") i64Ty (LLVMAdd copied (LLVMIntLiteral 64 1))
+            emitStore LLVMPtr nextSource sourceSlot
+            emitStore LLVMPtr nextDest destSlot
+            emitStore i64Ty nextCopied copiedSlot
+            finishCurrentBlock (LLVMBr header)
+            startBlock done
+            emitAssign (label ++ ".dest.result") LLVMPtr (LLVMLoad LLVMPtr destSlot)
+      returnOriginal <- freshBlock "strreplace.return.original"
+      countInit <- freshBlock "strreplace.count.init"
+      firstNeedle <- loadByte "strreplace.needle.first" needle 0
+      needleEmpty <- emitAssign "strreplace.needle.empty" i1Ty (LLVMICmpEq firstNeedle (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty needleEmpty countInit [(1, returnOriginal)])
+      startBlock returnOriginal
+      finishCurrentBlock (LLVMRet LLVMPtr haystack)
+      startBlock countInit
+      needleBytes <- countBytes "strreplace.needle.bytes" needle
+      replacementBytes <- countBytes "strreplace.replacement.bytes" replacement
+      scanSourceSlot <- emitAssign "strreplace.scan.source.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      scanResultBytesSlot <- emitAssign "strreplace.scan.result.bytes.slot" LLVMPtr (LLVMAlloca i64Ty (LLVMIntLiteral 64 1))
+      scanMatchHaystackSlot <- emitAssign "strreplace.scan.match.haystack.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      scanMatchNeedleSlot <- emitAssign "strreplace.scan.match.needle.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitStore LLVMPtr haystack scanSourceSlot
+      emitStore i64Ty (LLVMIntLiteral 64 0) scanResultBytesSlot
+      scanHeader <- freshBlock "strreplace.scan.header"
+      scanTryMatch <- freshBlock "strreplace.scan.try-match"
+      scanMatchHeader <- freshBlock "strreplace.scan.match.header"
+      scanMatchHaystackEnd <- freshBlock "strreplace.scan.match.haystack-end"
+      scanMatchCompare <- freshBlock "strreplace.scan.match.compare"
+      scanMatchAdvance <- freshBlock "strreplace.scan.match.advance"
+      scanMatchFound <- freshBlock "strreplace.scan.match.found"
+      scanNoMatchDetectAscii <- freshBlock "strreplace.scan.nomatch.detect.ascii"
+      scanNoMatchOne <- freshBlock "strreplace.scan.nomatch.one"
+      scanNoMatchDetectTwo <- freshBlock "strreplace.scan.nomatch.detect.two"
+      scanNoMatchTwo <- freshBlock "strreplace.scan.nomatch.two"
+      scanNoMatchDetectThree <- freshBlock "strreplace.scan.nomatch.detect.three"
+      scanNoMatchThree <- freshBlock "strreplace.scan.nomatch.three"
+      scanNoMatchFour <- freshBlock "strreplace.scan.nomatch.four"
+      allocateResult <- freshBlock "strreplace.allocate"
+      let finishScanAdvance label amount nextSource = do
+            currentBytes <- emitAssign (label ++ ".result.bytes") i64Ty (LLVMLoad i64Ty scanResultBytesSlot)
+            nextBytes <- emitAssign (label ++ ".result.bytes.next") i64Ty (LLVMAdd currentBytes amount)
+            emitStore i64Ty nextBytes scanResultBytesSlot
+            emitStore LLVMPtr nextSource scanSourceSlot
+            finishCurrentBlock (LLVMBr scanHeader)
+          finishScanScalar label byteCount candidate = do
+            nextSource <- ptrAt (label ++ ".source.next") candidate byteCount
+            finishScanAdvance label (LLVMIntLiteral 64 (toInteger byteCount)) nextSource
+      finishCurrentBlock (LLVMBr scanHeader)
+      startBlock scanHeader
+      scanCandidate <- emitAssign "strreplace.scan.candidate" LLVMPtr (LLVMLoad LLVMPtr scanSourceSlot)
+      scanCandidateByte <- loadByte "strreplace.scan.candidate.byte" scanCandidate 0
+      scanCandidateEnd <- emitAssign "strreplace.scan.candidate.end" i1Ty (LLVMICmpEq scanCandidateByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty scanCandidateEnd scanTryMatch [(1, allocateResult)])
+      startBlock scanTryMatch
+      emitStore LLVMPtr scanCandidate scanMatchHaystackSlot
+      emitStore LLVMPtr needle scanMatchNeedleSlot
+      finishCurrentBlock (LLVMBr scanMatchHeader)
+      startBlock scanMatchHeader
+      scanNeedleCursor <- emitAssign "strreplace.scan.match.needle" LLVMPtr (LLVMLoad LLVMPtr scanMatchNeedleSlot)
+      scanNeedleByte <- loadByte "strreplace.scan.match.needle.byte" scanNeedleCursor 0
+      scanNeedleDone <- emitAssign "strreplace.scan.match.needle.done" i1Ty (LLVMICmpEq scanNeedleByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty scanNeedleDone scanMatchHaystackEnd [(1, scanMatchFound)])
+      startBlock scanMatchHaystackEnd
+      scanHaystackCursor <- emitAssign "strreplace.scan.match.haystack" LLVMPtr (LLVMLoad LLVMPtr scanMatchHaystackSlot)
+      scanHaystackByte <- loadByte "strreplace.scan.match.haystack.byte" scanHaystackCursor 0
+      scanHaystackDone <- emitAssign "strreplace.scan.match.haystack.done" i1Ty (LLVMICmpEq scanHaystackByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty scanHaystackDone scanMatchCompare [(1, scanNoMatchDetectAscii)])
+      startBlock scanMatchCompare
+      scanBytesMatch <- emitAssign "strreplace.scan.match.bytes" i1Ty (LLVMICmpEq scanHaystackByte scanNeedleByte)
+      finishCurrentBlock (LLVMSwitch i1Ty scanBytesMatch scanNoMatchDetectAscii [(1, scanMatchAdvance)])
+      startBlock scanMatchAdvance
+      scanNextHaystack <- ptrAt "strreplace.scan.match.haystack.next" scanHaystackCursor 1
+      scanNextNeedle <- ptrAt "strreplace.scan.match.needle.next" scanNeedleCursor 1
+      emitStore LLVMPtr scanNextHaystack scanMatchHaystackSlot
+      emitStore LLVMPtr scanNextNeedle scanMatchNeedleSlot
+      finishCurrentBlock (LLVMBr scanMatchHeader)
+      startBlock scanMatchFound
+      scanMatchNext <- ptrAtOperand "strreplace.scan.match.source.next" scanCandidate needleBytes
+      finishScanAdvance "strreplace.scan.match" replacementBytes scanMatchNext
+      startBlock scanNoMatchDetectAscii
+      scanAsciiClass <- emitAssign "strreplace.scan.nomatch.ascii.class" i8Ty (LLVMAnd scanCandidateByte (LLVMIntLiteral 8 0x80))
+      scanIsAscii <- emitAssign "strreplace.scan.nomatch.is.ascii" i1Ty (LLVMICmpEq scanAsciiClass (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty scanIsAscii scanNoMatchDetectTwo [(1, scanNoMatchOne)])
+      startBlock scanNoMatchOne
+      finishScanScalar "strreplace.scan.nomatch.one" 1 scanCandidate
+      startBlock scanNoMatchDetectTwo
+      scanTwoClass <- emitAssign "strreplace.scan.nomatch.two.class" i8Ty (LLVMAnd scanCandidateByte (LLVMIntLiteral 8 0xE0))
+      scanIsTwo <- emitAssign "strreplace.scan.nomatch.is.two" i1Ty (LLVMICmpEq scanTwoClass (LLVMIntLiteral 8 0xC0))
+      finishCurrentBlock (LLVMSwitch i1Ty scanIsTwo scanNoMatchDetectThree [(1, scanNoMatchTwo)])
+      startBlock scanNoMatchTwo
+      finishScanScalar "strreplace.scan.nomatch.two" 2 scanCandidate
+      startBlock scanNoMatchDetectThree
+      scanThreeClass <- emitAssign "strreplace.scan.nomatch.three.class" i8Ty (LLVMAnd scanCandidateByte (LLVMIntLiteral 8 0xF0))
+      scanIsThree <- emitAssign "strreplace.scan.nomatch.is.three" i1Ty (LLVMICmpEq scanThreeClass (LLVMIntLiteral 8 0xE0))
+      finishCurrentBlock (LLVMSwitch i1Ty scanIsThree scanNoMatchFour [(1, scanNoMatchThree)])
+      startBlock scanNoMatchThree
+      finishScanScalar "strreplace.scan.nomatch.three" 3 scanCandidate
+      startBlock scanNoMatchFour
+      finishScanScalar "strreplace.scan.nomatch.four" 4 scanCandidate
+      startBlock allocateResult
+      resultBytes <- emitAssign "strreplace.result.bytes" i64Ty (LLVMLoad i64Ty scanResultBytesSlot)
+      allocationSize <- emitAssign "strreplace.allocation.size" i64Ty (LLVMAdd resultBytes (LLVMIntLiteral 64 1))
+      result <- emitAssign "strreplace.result" LLVMPtr (LLVMCall runtimeMallocName [(i64Ty, allocationSize)])
+      emitSourceSlot <- emitAssign "strreplace.emit.source.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitDestSlot <- emitAssign "strreplace.emit.dest.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitMatchHaystackSlot <- emitAssign "strreplace.emit.match.haystack.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitMatchNeedleSlot <- emitAssign "strreplace.emit.match.needle.slot" LLVMPtr (LLVMAlloca LLVMPtr (LLVMIntLiteral 64 1))
+      emitStore LLVMPtr haystack emitSourceSlot
+      emitStore LLVMPtr result emitDestSlot
+      emitHeader <- freshBlock "strreplace.emit.header"
+      emitTryMatch <- freshBlock "strreplace.emit.try-match"
+      emitMatchHeader <- freshBlock "strreplace.emit.match.header"
+      emitMatchHaystackEnd <- freshBlock "strreplace.emit.match.haystack-end"
+      emitMatchCompare <- freshBlock "strreplace.emit.match.compare"
+      emitMatchAdvance <- freshBlock "strreplace.emit.match.advance"
+      emitMatchFound <- freshBlock "strreplace.emit.match.found"
+      emitNoMatchDetectAscii <- freshBlock "strreplace.emit.nomatch.detect.ascii"
+      emitNoMatchOne <- freshBlock "strreplace.emit.nomatch.one"
+      emitNoMatchDetectTwo <- freshBlock "strreplace.emit.nomatch.detect.two"
+      emitNoMatchTwo <- freshBlock "strreplace.emit.nomatch.two"
+      emitNoMatchDetectThree <- freshBlock "strreplace.emit.nomatch.detect.three"
+      emitNoMatchThree <- freshBlock "strreplace.emit.nomatch.three"
+      emitNoMatchFour <- freshBlock "strreplace.emit.nomatch.four"
+      done <- freshBlock "strreplace.done"
+      let finishEmitScalar label byteCount source dest = do
+            mapM_ (copyByte label source dest) [0 .. byteCount - 1]
+            nextSource <- ptrAt (label ++ ".source.next") source byteCount
+            nextDest <- ptrAt (label ++ ".dest.next") dest byteCount
+            emitStore LLVMPtr nextSource emitSourceSlot
+            emitStore LLVMPtr nextDest emitDestSlot
+            finishCurrentBlock (LLVMBr emitHeader)
+      finishCurrentBlock (LLVMBr emitHeader)
+      startBlock emitHeader
+      emitSource <- emitAssign "strreplace.emit.source" LLVMPtr (LLVMLoad LLVMPtr emitSourceSlot)
+      emitDest <- emitAssign "strreplace.emit.dest" LLVMPtr (LLVMLoad LLVMPtr emitDestSlot)
+      emitCandidateByte <- loadByte "strreplace.emit.candidate.byte" emitSource 0
+      emitCandidateEnd <- emitAssign "strreplace.emit.candidate.end" i1Ty (LLVMICmpEq emitCandidateByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty emitCandidateEnd emitTryMatch [(1, done)])
+      startBlock emitTryMatch
+      emitStore LLVMPtr emitSource emitMatchHaystackSlot
+      emitStore LLVMPtr needle emitMatchNeedleSlot
+      finishCurrentBlock (LLVMBr emitMatchHeader)
+      startBlock emitMatchHeader
+      emitNeedleCursor <- emitAssign "strreplace.emit.match.needle" LLVMPtr (LLVMLoad LLVMPtr emitMatchNeedleSlot)
+      emitNeedleByte <- loadByte "strreplace.emit.match.needle.byte" emitNeedleCursor 0
+      emitNeedleDone <- emitAssign "strreplace.emit.match.needle.done" i1Ty (LLVMICmpEq emitNeedleByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty emitNeedleDone emitMatchHaystackEnd [(1, emitMatchFound)])
+      startBlock emitMatchHaystackEnd
+      emitHaystackCursor <- emitAssign "strreplace.emit.match.haystack" LLVMPtr (LLVMLoad LLVMPtr emitMatchHaystackSlot)
+      emitHaystackByte <- loadByte "strreplace.emit.match.haystack.byte" emitHaystackCursor 0
+      emitHaystackDone <- emitAssign "strreplace.emit.match.haystack.done" i1Ty (LLVMICmpEq emitHaystackByte (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty emitHaystackDone emitMatchCompare [(1, emitNoMatchDetectAscii)])
+      startBlock emitMatchCompare
+      emitBytesMatch <- emitAssign "strreplace.emit.match.bytes" i1Ty (LLVMICmpEq emitHaystackByte emitNeedleByte)
+      finishCurrentBlock (LLVMSwitch i1Ty emitBytesMatch emitNoMatchDetectAscii [(1, emitMatchAdvance)])
+      startBlock emitMatchAdvance
+      emitNextHaystack <- ptrAt "strreplace.emit.match.haystack.next" emitHaystackCursor 1
+      emitNextNeedle <- ptrAt "strreplace.emit.match.needle.next" emitNeedleCursor 1
+      emitStore LLVMPtr emitNextHaystack emitMatchHaystackSlot
+      emitStore LLVMPtr emitNextNeedle emitMatchNeedleSlot
+      finishCurrentBlock (LLVMBr emitMatchHeader)
+      startBlock emitMatchFound
+      emitDestAtMatch <- emitAssign "strreplace.emit.match.dest" LLVMPtr (LLVMLoad LLVMPtr emitDestSlot)
+      afterReplacement <- copyFixedBytes "strreplace.emit.copy.replacement" replacement emitDestAtMatch replacementBytes
+      emitSourceAtMatch <- emitAssign "strreplace.emit.match.source" LLVMPtr (LLVMLoad LLVMPtr emitSourceSlot)
+      emitMatchNextSource <- ptrAtOperand "strreplace.emit.match.source.next" emitSourceAtMatch needleBytes
+      emitStore LLVMPtr emitMatchNextSource emitSourceSlot
+      emitStore LLVMPtr afterReplacement emitDestSlot
+      finishCurrentBlock (LLVMBr emitHeader)
+      startBlock emitNoMatchDetectAscii
+      emitAsciiClass <- emitAssign "strreplace.emit.nomatch.ascii.class" i8Ty (LLVMAnd emitCandidateByte (LLVMIntLiteral 8 0x80))
+      emitIsAscii <- emitAssign "strreplace.emit.nomatch.is.ascii" i1Ty (LLVMICmpEq emitAsciiClass (LLVMIntLiteral 8 0))
+      finishCurrentBlock (LLVMSwitch i1Ty emitIsAscii emitNoMatchDetectTwo [(1, emitNoMatchOne)])
+      startBlock emitNoMatchOne
+      finishEmitScalar "strreplace.emit.nomatch.one" 1 emitSource emitDest
+      startBlock emitNoMatchDetectTwo
+      emitTwoClass <- emitAssign "strreplace.emit.nomatch.two.class" i8Ty (LLVMAnd emitCandidateByte (LLVMIntLiteral 8 0xE0))
+      emitIsTwo <- emitAssign "strreplace.emit.nomatch.is.two" i1Ty (LLVMICmpEq emitTwoClass (LLVMIntLiteral 8 0xC0))
+      finishCurrentBlock (LLVMSwitch i1Ty emitIsTwo emitNoMatchDetectThree [(1, emitNoMatchTwo)])
+      startBlock emitNoMatchTwo
+      finishEmitScalar "strreplace.emit.nomatch.two" 2 emitSource emitDest
+      startBlock emitNoMatchDetectThree
+      emitThreeClass <- emitAssign "strreplace.emit.nomatch.three.class" i8Ty (LLVMAnd emitCandidateByte (LLVMIntLiteral 8 0xF0))
+      emitIsThree <- emitAssign "strreplace.emit.nomatch.is.three" i1Ty (LLVMICmpEq emitThreeClass (LLVMIntLiteral 8 0xE0))
+      finishCurrentBlock (LLVMSwitch i1Ty emitIsThree emitNoMatchFour [(1, emitNoMatchThree)])
+      startBlock emitNoMatchThree
+      finishEmitScalar "strreplace.emit.nomatch.three" 3 emitSource emitDest
+      startBlock emitNoMatchFour
+      finishEmitScalar "strreplace.emit.nomatch.four" 4 emitSource emitDest
+      startBlock done
+      doneDest <- emitAssign "strreplace.done.dest" LLVMPtr (LLVMLoad LLVMPtr emitDestSlot)
+      donePtr <- ptrAt "strreplace.done.ptr" doneDest 0
+      emitStore i8Ty (LLVMIntLiteral 8 0) donePtr
+      finishCurrentBlock (LLVMRet LLVMPtr result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __string_replace lowering failed: " ++ renderBackendLLVMError err)
+
 nativeStringIndexOfCharFunction :: LLVMFunction
 nativeStringIndexOfCharFunction =
   case
@@ -3325,6 +3593,10 @@ runtimeStringReplaceCharName :: String
 runtimeStringReplaceCharName =
   PrimitiveInventory.stringReplaceCharPrimitiveName
 
+runtimeStringReplaceName :: String
+runtimeStringReplaceName =
+  PrimitiveInventory.stringReplacePrimitiveName
+
 runtimeStringIndexOfCharName :: String
 runtimeStringIndexOfCharName =
   PrimitiveInventory.stringIndexOfCharPrimitiveName
@@ -3413,8 +3685,8 @@ runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringReplaceChar needsStringIndexOfChar needsStringIndexOf needsStringFromChar needsStringFromInt needsStringFromBool needsStringFromNat needsStringToList needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringAppend needsStringReplaceChar needsStringReplace needsStringIndexOfChar needsStringIndexOf needsStringFromChar needsStringFromInt needsStringFromBool needsStringFromNat needsStringToList needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -3452,6 +3724,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeStringReplaceCharName LLVMPtr [LLVMPtr, LLVMInt 32, LLVMInt 32] False
          | needsStringReplaceChar,
            Map.notMember runtimeStringReplaceCharName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeStringReplaceName LLVMPtr [LLVMPtr, LLVMPtr, LLVMPtr] False
+         | needsStringReplace,
+           Map.notMember runtimeStringReplaceName (pbBindings base)
        ]
     ++ [ LLVMDeclaration runtimeStringIndexOfCharName LLVMPtr [LLVMPtr, LLVMInt 32] False
          | needsStringIndexOfChar,
@@ -6906,6 +7182,27 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
                   ( LLVMCall
                       runtimeStringReplaceCharName
                       [(LLVMPtr, lvOperand value), (LLVMInt 32, lvOperand needle), (LLVMInt 32, lvOperand replacement)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 3 (length args))
+    Nothing
+      | name == runtimeStringReplaceName -> do
+          unless (length args == 3) $
+            liftEither (BackendLLVMArityMismatch name 3 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [haystack, needle, replacement] -> do
+              requireLLVMType context name LLVMPtr haystack
+              requireLLVMType context name LLVMPtr needle
+              requireLLVMType context name LLVMPtr replacement
+              result <-
+                emitAssign
+                  "call"
+                  LLVMPtr
+                  ( LLVMCall
+                      runtimeStringReplaceName
+                      [(LLVMPtr, lvOperand haystack), (LLVMPtr, lvOperand needle), (LLVMPtr, lvOperand replacement)]
                   )
               pure (LowerValue (BTBase (BaseTy "String")) LLVMPtr result LowerRuntimeValue Nothing)
             _ ->

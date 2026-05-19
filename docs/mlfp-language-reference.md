@@ -429,6 +429,7 @@ stringStartsWith : String -> String -> Bool
 stringEndsWith : String -> String -> Bool
 stringAppend : String -> String -> String
 stringReplaceChar : String -> Char -> Char -> String
+stringReplace : String -> String -> String -> String
 stringIndexOfChar : String -> Char -> Option Int
 stringIndexOf : String -> String -> Option Int
 stringFromChar : Char -> String
@@ -477,8 +478,17 @@ as `"a\955b"`), while `stringAppend "" "λ"` and `stringAppend "λ" ""` return
 replacement `String` operation; the current native-capable tracer replaces
 matching Unicode scalar values, so `stringReplaceChar "aλbλ" 'λ' 'x'` returns
 `"axbx"`, while the no-match input `stringReplaceChar "ab" 'λ' 'x'` returns
-`"ab"`. It does not claim substring replacement, splitting, regex, Unicode
-normalization, or locale behavior. `stringIndexOfChar` is the first
+`"ab"`. It does not claim splitting, regex, Unicode normalization, locale
+behavior, or replacement APIs beyond character replacement. `stringReplace` is
+the first substring replacement `String` operation; the current native-capable
+tracer replaces non-overlapping matches from left to right at Unicode scalar
+boundaries, so `stringReplace "aλbλb" "λb" "WXYZ"` returns `"aWXYZWXYZ"`,
+`stringReplace "abc" "λ" "x"` returns `"abc"`, and
+`stringReplace "abc" "" "x"` returns `"abc"`. Empty needle replacement is a
+no-op. It does not claim splitting, split-family collection APIs, regex,
+Unicode normalization, locale behavior, case conversion, interpolation,
+formatting, or replacement-family completion beyond this exact substring
+operation. `stringIndexOfChar` is the first
 first-match `String`/`Char` index search operation; the current
 native-capable tracer reports zero-based Unicode scalar positions, so
 `stringIndexOfChar "aλbλ" 'λ'` returns `Some 1`, while
@@ -490,8 +500,8 @@ Unicode scalar
 positions, so `stringIndexOf "aλbcλ" "λb"` returns `Some 1`,
 `stringIndexOf "abc" "λ"` returns `None`, and
 `stringIndexOf "λ" ""` returns `Some 0`. It does not claim splitting,
-substring replacement, regex, Unicode normalization, locale behavior, or
-complete cursor APIs. `stringFromChar` is the first `Char` to
+regex, Unicode normalization, locale behavior, complete cursor APIs, or
+replacement-family completion beyond `stringReplace`. `stringFromChar` is the first `Char` to
 singleton `String` construction operation; the current native-capable tracer
 preserves Unicode scalar values, so `stringFromChar 'λ'` returns `"λ"`
 (rendered as `"\955"`) and `stringFromChar 'A'` returns `"A"`. `stringFromInt`
@@ -714,6 +724,7 @@ Current prelude contents:
 - `stringEndsWith`
 - `stringAppend`
 - `stringReplaceChar`
+- `stringReplace`
 - `stringIndexOfChar`
 - `stringIndexOf`
 - `stringFromChar`
@@ -773,7 +784,10 @@ non-empty Unicode scalar suffix. The first append `String` operation is
 concatenation and empty-side identity examples. The first `String` character
 replacement operation is `stringReplaceChar`, with native
 coverage for replacing matching Unicode scalar `Char` values and preserving
-no-match strings. The first `String`/`Char` first-match index search operation
+no-match strings. The first substring replacement `String` operation is
+`stringReplace`, with native coverage for left-to-right non-overlapping
+Unicode scalar substring replacement, no-match preservation, and empty-needle
+no-op behavior. The first `String`/`Char` first-match index search operation
 is `stringIndexOfChar`, with native coverage for zero-based Unicode scalar
 indexes and absent matches through `Option Int`. The first substring index
 search operation is `stringIndexOf`, with native coverage for zero-based

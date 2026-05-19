@@ -141,6 +141,14 @@
   `stringReplaceChar "ab" 'λ' 'x'` through `.mlfp` source checking,
   `run-program`, raw LLVM emission, object-code validation, and linked native
   execution.
+- Added the first native-capable substring replacement `String` tracer:
+  `stringReplace : String -> String -> String -> String` now replaces
+  non-overlapping Unicode scalar substrings from left to right, including
+  `stringReplace "aλbλb" "λb" "WXYZ"` as `"aWXYZWXYZ"`, preserves no-match
+  inputs such as `stringReplace "abc" "λ" "x"`, and treats
+  `stringReplace "abc" "" "x"` as an empty-needle no-op through `.mlfp`
+  source checking, `run-program`, raw LLVM emission, object-code validation,
+  and linked native execution.
 - Added the first native-capable first-match `String`/`Char` index search
   tracer: `stringIndexOfChar : String -> Char -> Option Int` now returns
   `Some 1` for `stringIndexOfChar "aλbλ" 'λ'` and `None` for

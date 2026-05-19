@@ -40,7 +40,8 @@ contract. The current primitive surface is the inventory-owned reserved
 runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_length`, `__string_is_empty`, `__string_contains_char`,
 `__string_contains`, `__string_starts_with`, `__string_ends_with`,
-`__string_append`, `__string_from_char`, `__string_from_int`,
+`__string_append`, `__string_replace_char`, `__string_replace`,
+`__string_from_char`, `__string_from_int`,
 `__string_from_bool`, `__string_from_nat`, `__string_to_list`,
 `__string_drop`, `__string_take`, `__string_slice`, `__string_char_at`,
 `__char_is_digit`,
@@ -151,6 +152,14 @@ Native emission owns the small process/runtime surface it needs:
 - `__string_append`: inventory-classified as the first native-capable append
   `String` operation; the native helper copies valid UTF-8 scalar sequences
   from both inputs and returns a new `String` pointer.
+- `__string_replace_char`: inventory-classified as the first native-capable
+  character replacement `String` operation; the native helper replaces every
+  matching Unicode scalar `Char` while preserving no-match inputs.
+- `__string_replace`: inventory-classified as the first native-capable
+  substring replacement `String` operation; the native helper replaces
+  non-overlapping matches from left to right at UTF-8 scalar boundaries,
+  preserves no-match inputs, treats the empty needle as a no-op, and returns a
+  `String` pointer.
 - `__string_from_char`: inventory-classified as the first native-capable
   `Char` to singleton `String` construction operation; the native helper
   encodes the Unicode scalar as valid UTF-8 and returns a new `String`
@@ -272,8 +281,15 @@ Supported result shapes are:
 - `stringReplaceChar : String -> Char -> Char -> String` is the first
   native-capable character replacement String tracer and replaces every
   matching Unicode scalar `Char` while preserving no-match inputs through
-  native execution. Substring replacement, splitting, regex, Unicode
-  normalization, locale behavior, parser parity, platform contracts, and proof
+  native execution. Splitting, regex, Unicode normalization, locale behavior,
+  parser parity, platform contracts, and proof records remain out of scope.
+- `stringReplace : String -> String -> String -> String` is the first
+  native-capable substring replacement String tracer and replaces
+  non-overlapping Unicode scalar substrings from left to right, preserves
+  no-match inputs, and treats the empty needle as a no-op through native
+  execution. Split-family APIs, regex, Unicode normalization, locale behavior,
+  case conversion, interpolation, formatting, parser parity, platform
+  contracts, replacement-family completion beyond this operation, and proof
   records remain out of scope.
 - `stringIndexOfChar : String -> Char -> Option Int` is the first
   native-capable first-match String/Char index search tracer and reports
@@ -284,9 +300,10 @@ Supported result shapes are:
 - `stringIndexOf : String -> String -> Option Int` is the first native-capable
   substring index search tracer and reports zero-based Unicode scalar indexes
   through `Some`, returns `None` for absent substrings, and returns `Some 0`
-  for an empty needle. Splitting, substring replacement, regex, Unicode
-  normalization, locale behavior, complete cursor APIs, parser parity,
-  platform contracts, and proof records remain out of scope.
+  for an empty needle. Splitting, regex, Unicode normalization, locale
+  behavior, complete cursor APIs, parser parity, platform contracts,
+  replacement-family completion beyond `stringReplace`, and proof records
+  remain out of scope.
 - `stringFromChar : Char -> String` is the first native-capable Char to
   singleton String construction tracer and encodes Unicode scalar values
   through native execution while keeping formatting, parser parity, platform

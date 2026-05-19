@@ -539,6 +539,14 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   LLVM/object validation, emit-native/native object validation, linked native
   execution, primitive inventory, planned neighbor text/char checks, docs scope
   audit, git diff --check, cabal build all, cabal test, and thesis gate.
+- round-298 completed item-298-string-replace-native-tracer: added
+  stringReplace : String -> String -> String -> String backed by
+  __string_replace and proved left-to-right non-overlapping Unicode-scalar
+  substring replacement, no-match preservation, and empty-needle no-op through
+  source checking, run-program, backend LLVM/object validation,
+  emit-native/native object validation, linked native execution, primitive
+  inventory, planned neighbor text/char checks, docs scope audit,
+  git diff --check, cabal build all, cabal test, and thesis gate.
 
 #### Candidate Direction: Broad String And Char Substrate
 

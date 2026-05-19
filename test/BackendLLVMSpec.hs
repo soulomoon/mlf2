@@ -452,6 +452,29 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "stringReplace replaces Unicode scalar substrings through native execution" $
+      forM_
+        [ (nativeUnicodeStringReplaceSourceProgram, "\"aWXYZWXYZ\"\n", NativeRunResult ExitSuccess "\"aWXYZWXYZ\"\n" ""),
+          (nativeNoMatchStringReplaceSourceProgram, "\"abc\"\n", NativeRunResult ExitSuccess "\"abc\"\n" ""),
+          (nativeEmptyNeedleStringReplaceSourceProgram, "\"abc\"\n", NativeRunResult ExitSuccess "\"abc\"\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define ptr @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "stringIndexOfChar indexes Unicode scalar characters through native execution" $
       forM_
         [ (nativePresentStringIndexOfCharSourceProgram, "Some 1\n", NativeRunResult ExitSuccess "Some 1\n" ""),
@@ -2875,6 +2898,36 @@ nativeNoMatchStringReplaceCharSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (stringReplaceChar);",
       "  def main : String = stringReplaceChar \"ab\" 'λ' 'x';",
+      "}"
+    ]
+
+nativeUnicodeStringReplaceSourceProgram :: String
+nativeUnicodeStringReplaceSourceProgram =
+  -- Fixture: import Prelude exposing (stringReplace); def main : String = stringReplace "aλbλb" "λb" "WXYZ";
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringReplace);",
+      "  def main : String = stringReplace \"aλbλb\" \"λb\" \"WXYZ\";",
+      "}"
+    ]
+
+nativeNoMatchStringReplaceSourceProgram :: String
+nativeNoMatchStringReplaceSourceProgram =
+  -- Fixture: import Prelude exposing (stringReplace); def main : String = stringReplace "abc" "λ" "x";
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringReplace);",
+      "  def main : String = stringReplace \"abc\" \"λ\" \"x\";",
+      "}"
+    ]
+
+nativeEmptyNeedleStringReplaceSourceProgram :: String
+nativeEmptyNeedleStringReplaceSourceProgram =
+  -- Fixture: import Prelude exposing (stringReplace); def main : String = stringReplace "abc" "" "x";
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (stringReplace);",
+      "  def main : String = stringReplace \"abc\" \"\" \"x\";",
       "}"
     ]
 

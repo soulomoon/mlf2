@@ -18,7 +18,7 @@ where
 
 import Control.Monad (foldM)
 import Data.Foldable (toList)
-import Data.List (elemIndex, find, findIndex, intercalate, isInfixOf, isPrefixOf, isSuffixOf, tails)
+import Data.List (elemIndex, find, findIndex, intercalate, isInfixOf, isPrefixOf, isSuffixOf, stripPrefix, tails)
 import qualified Data.List.NonEmpty as NE
 import qualified Data.Map.Strict as Map
 import qualified Data.Set as Set
@@ -328,6 +328,7 @@ data RuntimePrimitive
   | RuntimeStringEndsWith
   | RuntimeStringAppend
   | RuntimeStringReplaceChar
+  | RuntimeStringReplace
   | RuntimeStringIndexOfChar
   | RuntimeStringIndexOf
   | RuntimeStringFromChar
@@ -529,6 +530,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringEndsWithPrimitiveName -> Just RuntimeStringEndsWith
       | name' == PrimitiveInventory.stringAppendPrimitiveName -> Just RuntimeStringAppend
       | name' == PrimitiveInventory.stringReplaceCharPrimitiveName -> Just RuntimeStringReplaceChar
+      | name' == PrimitiveInventory.stringReplacePrimitiveName -> Just RuntimeStringReplace
       | name' == PrimitiveInventory.stringIndexOfCharPrimitiveName -> Just RuntimeStringIndexOfChar
       | name' == PrimitiveInventory.stringIndexOfPrimitiveName -> Just RuntimeStringIndexOf
       | name' == PrimitiveInventory.stringFromCharPrimitiveName -> Just RuntimeStringFromChar
@@ -1275,6 +1277,10 @@ applyRuntimePrimitive context prim args
           Right (RuntimeLit (LString (map (\char -> if char == needle then replacement else char) value)))
         (RuntimeStringReplaceChar, _) ->
           Left (ProgramPipelineError "run-program __string_replace_char expected String and Char arguments")
+        (RuntimeStringReplace, [RuntimeLit (LString haystack), RuntimeLit (LString needle), RuntimeLit (LString replacement)]) ->
+          Right (RuntimeLit (LString (replaceString haystack needle replacement)))
+        (RuntimeStringReplace, _) ->
+          Left (ProgramPipelineError "run-program __string_replace expected String arguments")
         (RuntimeStringIndexOfChar, [RuntimeLit (LString value), RuntimeLit (LChar needle)]) ->
           runtimeStringIndexOfChar context value needle
         (RuntimeStringIndexOfChar, _) ->
@@ -1387,6 +1393,17 @@ runtimeStringIndexOf context haystack needle =
   case findIndex (needle `isPrefixOf`) (tails haystack) of
     Just index -> runtimeSomeInt context (toInteger index)
     Nothing -> runtimeNoneInt context
+
+replaceString :: String -> String -> String -> String
+replaceString haystack needle replacement
+  | null needle = haystack
+  | otherwise = go haystack
+  where
+    go [] = []
+    go rest@(char : afterChar) =
+      case stripPrefix needle rest of
+        Just afterMatch -> replacement ++ go afterMatch
+        Nothing -> char : go afterChar
 
 runtimeSomeInt :: RuntimeContext -> Integer -> Either ProgramError RuntimeValue
 runtimeSomeInt context value = do
@@ -1572,6 +1589,7 @@ runtimePrimitiveArity prim =
     RuntimeStringEndsWith -> 2
     RuntimeStringAppend -> 2
     RuntimeStringReplaceChar -> 3
+    RuntimeStringReplace -> 3
     RuntimeStringIndexOfChar -> 2
     RuntimeStringIndexOf -> 2
     RuntimeStringFromChar -> 1
@@ -1769,6 +1787,7 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringEndsWithPrimitiveName,
     PrimitiveInventory.stringAppendPrimitiveName,
     PrimitiveInventory.stringReplaceCharPrimitiveName,
+    PrimitiveInventory.stringReplacePrimitiveName,
     PrimitiveInventory.stringIndexOfCharPrimitiveName,
     PrimitiveInventory.stringIndexOfPrimitiveName,
     PrimitiveInventory.stringFromCharPrimitiveName,
