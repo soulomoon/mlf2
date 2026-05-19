@@ -43,7 +43,8 @@ runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__string_drop`, `__string_take`, `__string_slice`, `__string_char_at`,
 `__char_is_digit`, `__char_is_ascii_lower`, `__char_is_ascii_upper`,
 `__char_is_ascii_alpha`, `__char_is_ascii_alpha_num`,
-`__char_is_ascii_identifier_start`, plus the IO primitive names classified
+`__char_is_ascii_identifier_start`,
+`__char_is_ascii_identifier_continue`, plus the IO primitive names classified
 there for native support. Native lowering consumes that inventory directly for
 lowerable primitive names, while wrapper bodies, C
 runtime symbol names, closure layout, and eager sequencing implementation
@@ -176,6 +177,11 @@ Native emission owns the small process/runtime surface it needs:
   ASCII identifier-start `Char` classification operation matching the current
   parser start set; the native helper compares the Unicode scalar value against
   the ASCII `a` through `z`, `A` through `Z`, and `_` ranges.
+- `__char_is_ascii_identifier_continue`: inventory-classified as an explicit
+  ASCII identifier-continuation `Char` classification operation matching the
+  current parser continuation set; the native helper compares the Unicode
+  scalar value against the ASCII `a` through `z`, `A` through `Z`, `0` through
+  `9`, `_`, and apostrophe cases.
 - Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
   `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
   functions with entry-point implementations.
@@ -251,8 +257,14 @@ Supported result shapes are:
   identifier-start Char classification tracer and matches the current parser
   start set through native execution: lowercase ASCII, uppercase ASCII, and
   underscore are true while ASCII digit, apostrophe, and non-ASCII scalars are
-  false. Identifier-continuation helpers, apostrophe continuation semantics,
-  Unicode category, and parser-family completion remain out of scope.
+  false. Identifier-continuation behavior is exposed separately and full
+  parser-family completion remains out of scope.
+- `charIsAsciiIdentifierContinue : Char -> Bool` is an explicit ASCII
+  identifier-continuation Char classification tracer and matches the current
+  parser continuation set through native execution: lowercase ASCII, uppercase
+  ASCII, ASCII digit, underscore, and apostrophe are true while non-ASCII
+  scalars are false. Unicode categories, broader punctuation families, and
+  parser-family completion remain out of scope.
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 

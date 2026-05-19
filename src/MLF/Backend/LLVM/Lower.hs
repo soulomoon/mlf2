@@ -185,6 +185,7 @@ lowerBackendProgram program = do
       needsCharIsAsciiAlpha = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiAlphaName)) (lpFunctions lowered)
       needsCharIsAsciiAlphaNum = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiAlphaNumName)) (lpFunctions lowered)
       needsCharIsAsciiIdentifierStart = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiIdentifierStartName)) (lpFunctions lowered)
+      needsCharIsAsciiIdentifierContinue = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiIdentifierContinueName)) (lpFunctions lowered)
       existingDecls =
         runtimeDeclarations
           base
@@ -204,6 +205,7 @@ lowerBackendProgram program = do
           needsCharIsAsciiAlpha
           needsCharIsAsciiAlphaNum
           needsCharIsAsciiIdentifierStart
+          needsCharIsAsciiIdentifierContinue
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -348,6 +350,7 @@ nativeRuntimeFunctions base =
     ++ [nativeCharIsAsciiAlphaFunction | Map.notMember runtimeCharIsAsciiAlphaName (pbBindings base)]
     ++ [nativeCharIsAsciiAlphaNumFunction | Map.notMember runtimeCharIsAsciiAlphaNumName (pbBindings base)]
     ++ [nativeCharIsAsciiIdentifierStartFunction | Map.notMember runtimeCharIsAsciiIdentifierStartName (pbBindings base)]
+    ++ [nativeCharIsAsciiIdentifierContinueFunction | Map.notMember runtimeCharIsAsciiIdentifierContinueName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -1015,6 +1018,32 @@ nativeCharIsAsciiIdentifierStartFunction =
   of
     Right function -> function
     Left err -> error ("internal native __char_is_ascii_identifier_start lowering failed: " ++ renderBackendLLVMError err)
+
+nativeCharIsAsciiIdentifierContinueFunction :: LLVMFunction
+nativeCharIsAsciiIdentifierContinueFunction =
+  case
+    lowerNativeFunction runtimeCharIsAsciiIdentifierContinueName (LLVMInt 1) [(LLVMInt 32, "value")] $ \params -> do
+      let value = requireNativeParam "value" params
+          i1Ty = LLVMInt 1
+      aboveBeforeLowerA <- emitAssign "charisasciiidentifiercontinue.above.before.lower.a" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 96))
+      belowAfterLowerZ <- emitAssign "charisasciiidentifiercontinue.below.after.lower.z" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 123) value)
+      lowerResult <- emitAssign "charisasciiidentifiercontinue.lower.result" i1Ty (LLVMAnd aboveBeforeLowerA belowAfterLowerZ)
+      aboveBeforeUpperA <- emitAssign "charisasciiidentifiercontinue.above.before.upper.a" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 64))
+      belowAfterUpperZ <- emitAssign "charisasciiidentifiercontinue.below.after.upper.z" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 91) value)
+      upperResult <- emitAssign "charisasciiidentifiercontinue.upper.result" i1Ty (LLVMAnd aboveBeforeUpperA belowAfterUpperZ)
+      alphaResult <- emitAssign "charisasciiidentifiercontinue.alpha.result" i1Ty (LLVMOr lowerResult upperResult)
+      aboveBeforeZero <- emitAssign "charisasciiidentifiercontinue.above.before.zero" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 47))
+      belowAfterNine <- emitAssign "charisasciiidentifiercontinue.below.after.nine" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 58) value)
+      digitResult <- emitAssign "charisasciiidentifiercontinue.digit.result" i1Ty (LLVMAnd aboveBeforeZero belowAfterNine)
+      alphaNumResult <- emitAssign "charisasciiidentifiercontinue.alphanum.result" i1Ty (LLVMOr alphaResult digitResult)
+      underscoreResult <- emitAssign "charisasciiidentifiercontinue.underscore.result" i1Ty (LLVMICmpEq value (LLVMIntLiteral 32 95))
+      nameCharResult <- emitAssign "charisasciiidentifiercontinue.namechar.result" i1Ty (LLVMOr alphaNumResult underscoreResult)
+      apostropheResult <- emitAssign "charisasciiidentifiercontinue.apostrophe.result" i1Ty (LLVMICmpEq value (LLVMIntLiteral 32 39))
+      result <- emitAssign "charisasciiidentifiercontinue.result" i1Ty (LLVMOr nameCharResult apostropheResult)
+      finishCurrentBlock (LLVMRet i1Ty result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __char_is_ascii_identifier_continue lowering failed: " ++ renderBackendLLVMError err)
 
 nativeStringLengthFunction :: LLVMFunction
 nativeStringLengthFunction =
@@ -2308,12 +2337,16 @@ runtimeCharIsAsciiIdentifierStartName :: String
 runtimeCharIsAsciiIdentifierStartName =
   PrimitiveInventory.charIsAsciiIdentifierStartPrimitiveName
 
+runtimeCharIsAsciiIdentifierContinueName :: String
+runtimeCharIsAsciiIdentifierContinueName =
+  PrimitiveInventory.charIsAsciiIdentifierContinuePrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -2383,6 +2416,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeCharIsAsciiIdentifierStartName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiIdentifierStart,
            Map.notMember runtimeCharIsAsciiIdentifierStartName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeCharIsAsciiIdentifierContinueName (LLVMInt 1) [LLVMInt 32] False
+         | needsCharIsAsciiIdentifierContinue,
+           Map.notMember runtimeCharIsAsciiIdentifierContinueName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -5903,6 +5940,25 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
                   (LLVMInt 1)
                   ( LLVMCall
                       runtimeCharIsAsciiIdentifierStartName
+                      [(LLVMInt 32, lvOperand value)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 1 (length args))
+    Nothing
+      | name == runtimeCharIsAsciiIdentifierContinueName -> do
+          unless (length args == 1) $
+            liftEither (BackendLLVMArityMismatch name 1 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [value] -> do
+              requireLLVMType context name (LLVMInt 32) value
+              result <-
+                emitAssign
+                  "call"
+                  (LLVMInt 1)
+                  ( LLVMCall
+                      runtimeCharIsAsciiIdentifierContinueName
                       [(LLVMInt 32, lvOperand value)]
                   )
               pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)

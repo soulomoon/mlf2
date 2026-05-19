@@ -437,6 +437,7 @@ charIsAsciiUpper : Char -> Bool
 charIsAsciiAlpha : Char -> Bool
 charIsAsciiAlphaNum : Char -> Bool
 charIsAsciiIdentifierStart : Char -> Bool
+charIsAsciiIdentifierContinue : Char -> Bool
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -491,13 +492,19 @@ underscore code points, so `charIsAsciiIdentifierStart 'a'`,
 `charIsAsciiIdentifierStart 'A'`, and `charIsAsciiIdentifierStart '_'` are
 `true` while `charIsAsciiIdentifierStart '7'`,
 `charIsAsciiIdentifierStart '\''`, and `charIsAsciiIdentifierStart 'λ'` are
-`false`. These
+`false`. `charIsAsciiIdentifierContinue` is an explicitly ASCII
+identifier-continuation `Char` classification tracer matching the current
+parser continuation set; it classifies ASCII lowercase, ASCII uppercase,
+decimal digit, underscore, or apostrophe code points, so
+`charIsAsciiIdentifierContinue 'a'`, `charIsAsciiIdentifierContinue 'A'`,
+`charIsAsciiIdentifierContinue '7'`, `charIsAsciiIdentifierContinue '_'`, and
+`charIsAsciiIdentifierContinue '\''` are `true` while
+`charIsAsciiIdentifierContinue 'λ'` is `false`. These
 operations are covered through source checking, `run-program`,
 backend LLVM emission, object generation, and linked native execution for the
 current native-capable tracers. `String`/`List Char` conversion, formatting,
-full slicing coverage, identifier-continuation helpers, broader classification
-families, complete cursor APIs, locale, regex, and full parser parity remain
-out of scope.
+full slicing coverage, broader classification families, complete cursor APIs,
+locale, regex, and full parser parity remain out of scope.
 
 Pure program entrypoints remain accepted:
 
@@ -635,6 +642,7 @@ Current prelude contents:
 - `charIsAsciiAlpha`
 - `charIsAsciiAlphaNum`
 - `charIsAsciiIdentifierStart`
+- `charIsAsciiIdentifierContinue`
 - `and`
 - `id`
 
@@ -689,9 +697,13 @@ The next explicit ASCII helper is `charIsAsciiIdentifierStart`, with native
 coverage for the current parser start set: lowercase ASCII, uppercase ASCII,
 and underscore are true while ASCII digit, apostrophe, and a non-ASCII Unicode
 scalar are false.
+The next explicit ASCII helper is `charIsAsciiIdentifierContinue`, with native
+coverage for the current parser continuation set: lowercase ASCII, uppercase
+ASCII, ASCII digit, underscore, and apostrophe are true while a non-ASCII
+Unicode scalar is false.
 Broad `String`/`List Char` conversion, formatting, full slicing coverage,
-identifier-continuation helpers, broader classification families, complete
-cursor APIs, and parser-parity helpers remain outside this contract.
+broader classification families, complete cursor APIs, and parser-parity
+helpers remain outside this contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 
