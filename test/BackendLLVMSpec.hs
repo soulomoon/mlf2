@@ -719,6 +719,34 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "charIsAsciiPrintable classifies ASCII printable Char values through native execution" $
+      forM_
+        [ (nativeAsciiSpaceCharIsAsciiPrintableSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiExclamationCharIsAsciiPrintableSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiUppercaseCharIsAsciiPrintableSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiDigitCharIsAsciiPrintableSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiTildeCharIsAsciiPrintableSourceProgram, "true\n", NativeRunResult ExitSuccess "true\n" ""),
+          (nativeAsciiTabCharIsAsciiPrintableSourceProgram, "false\n", NativeRunResult ExitSuccess "false\n" ""),
+          (nativeAsciiNewlineCharIsAsciiPrintableSourceProgram, "false\n", NativeRunResult ExitSuccess "false\n" ""),
+          (nativeNonAsciiCharIsAsciiPrintableSourceProgram, "false\n", NativeRunResult ExitSuccess "false\n" "")
+        ]
+        $ \(programText, expectedOutput, expectedNativeResult) ->
+          withTempProgram programText $ \path -> do
+            checkProgramFile path `shouldReturn` Right "OK\n"
+            runProgramFile path `shouldReturn` Right expectedOutput
+
+            backendOutput <- requireRight =<< emitBackendFile path
+            backendOutput `shouldSatisfy` isInfixOf "define i1 @\"Main__main\"()"
+            validateLLVMAssembly backendOutput
+            validateLLVMObjectCode backendOutput
+
+            nativeOutput <- requireRight =<< emitNativeFile path
+            nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+            validateLLVMAssembly nativeOutput
+            validateLLVMObjectCode nativeOutput
+            runLLVMNativeExecutable nativeOutput
+              `shouldReturn` expectedNativeResult
+
     it "Char literal source checks, runs, emits backend, and executes natively" $
       withTempProgram nativeCharLiteralSourceProgram $ \path -> do
         checkProgramFile path `shouldReturn` Right "OK\n"
@@ -3027,6 +3055,78 @@ nativeNonAsciiCharIsAsciiPunctuationSourceProgram =
     [ "module Main export (main) {",
       "  import Prelude exposing (charIsAsciiPunctuation);",
       "  def main : Bool = charIsAsciiPunctuation 'λ';",
+      "}"
+    ]
+
+nativeAsciiSpaceCharIsAsciiPrintableSourceProgram :: String
+nativeAsciiSpaceCharIsAsciiPrintableSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiPrintable);",
+      "  def main : Bool = charIsAsciiPrintable ' ';",
+      "}"
+    ]
+
+nativeAsciiExclamationCharIsAsciiPrintableSourceProgram :: String
+nativeAsciiExclamationCharIsAsciiPrintableSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiPrintable);",
+      "  def main : Bool = charIsAsciiPrintable '!';",
+      "}"
+    ]
+
+nativeAsciiUppercaseCharIsAsciiPrintableSourceProgram :: String
+nativeAsciiUppercaseCharIsAsciiPrintableSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiPrintable);",
+      "  def main : Bool = charIsAsciiPrintable 'A';",
+      "}"
+    ]
+
+nativeAsciiDigitCharIsAsciiPrintableSourceProgram :: String
+nativeAsciiDigitCharIsAsciiPrintableSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiPrintable);",
+      "  def main : Bool = charIsAsciiPrintable '7';",
+      "}"
+    ]
+
+nativeAsciiTildeCharIsAsciiPrintableSourceProgram :: String
+nativeAsciiTildeCharIsAsciiPrintableSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiPrintable);",
+      "  def main : Bool = charIsAsciiPrintable '~';",
+      "}"
+    ]
+
+nativeAsciiTabCharIsAsciiPrintableSourceProgram :: String
+nativeAsciiTabCharIsAsciiPrintableSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiPrintable);",
+      "  def main : Bool = charIsAsciiPrintable '\\t';",
+      "}"
+    ]
+
+nativeAsciiNewlineCharIsAsciiPrintableSourceProgram :: String
+nativeAsciiNewlineCharIsAsciiPrintableSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiPrintable);",
+      "  def main : Bool = charIsAsciiPrintable '\\n';",
+      "}"
+    ]
+
+nativeNonAsciiCharIsAsciiPrintableSourceProgram :: String
+nativeNonAsciiCharIsAsciiPrintableSourceProgram =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (charIsAsciiPrintable);",
+      "  def main : Bool = charIsAsciiPrintable 'λ';",
       "}"
     ]
 

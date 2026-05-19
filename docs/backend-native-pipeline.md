@@ -45,8 +45,8 @@ runtime-binding set in `MLF.Primitive.Inventory`: `__mlfp_and`,
 `__char_is_ascii_alpha`, `__char_is_ascii_alpha_num`,
 `__char_is_ascii_identifier_start`,
 `__char_is_ascii_identifier_continue`, `__char_is_ascii_whitespace`,
-`__char_is_ascii_punctuation`, plus the IO primitive names classified there
-for native support. Native lowering consumes that inventory directly for
+`__char_is_ascii_punctuation`, `__char_is_ascii_printable`, plus the IO
+primitive names classified there for native support. Native lowering consumes that inventory directly for
 lowerable primitive names, while wrapper bodies, C
 runtime symbol names, closure layout, and eager sequencing implementation
 details remain lowerer-local.
@@ -191,6 +191,9 @@ Native emission owns the small process/runtime surface it needs:
   punctuation `Char` classification operation; the native helper compares the
   Unicode scalar value against exactly the ASCII punctuation ranges
   `0x21..0x2f`, `0x3a..0x40`, `0x5b..0x60`, and `0x7b..0x7e`.
+- `__char_is_ascii_printable`: inventory-classified as an explicit ASCII
+  printable `Char` classification operation; the native helper compares the
+  Unicode scalar value against exactly ASCII scalar values `0x20..0x7e`.
 - Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
   `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
   functions with entry-point implementations.
@@ -284,6 +287,11 @@ Supported result shapes are:
   ranges `0x21..0x2f`, `0x3a..0x40`, `0x5b..0x60`, and `0x7b..0x7e` through
   native execution while keeping Unicode punctuation categories, locale, regex,
   formatting, and parser-family completion out of scope.
+- `charIsAsciiPrintable : Char -> Bool` is an explicit ASCII printable Char
+  classification tracer and classifies exactly ASCII scalar values
+  `0x20..0x7e` through native execution while keeping Unicode printability
+  categories, locale, regex, formatting, and parser-family completion out of
+  scope.
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 

@@ -440,6 +440,7 @@ charIsAsciiIdentifierStart : Char -> Bool
 charIsAsciiIdentifierContinue : Char -> Bool
 charIsAsciiWhitespace : Char -> Bool
 charIsAsciiPunctuation : Char -> Bool
+charIsAsciiPrintable : Char -> Bool
 ```
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
@@ -514,7 +515,14 @@ classification tracer; it classifies exactly the ASCII ranges `0x21..0x2f`,
 `charIsAsciiPunctuation '!'`, `charIsAsciiPunctuation '_'`, and
 `charIsAsciiPunctuation '~'` are `true` while `charIsAsciiPunctuation 'a'`,
 `charIsAsciiPunctuation '7'`, `charIsAsciiPunctuation ' '`, and
-`charIsAsciiPunctuation 'λ'` are `false`. These operations are covered through source checking, `run-program`,
+`charIsAsciiPunctuation 'λ'` are `false`. `charIsAsciiPrintable` is an
+explicitly ASCII printable `Char` classification tracer; it classifies exactly
+ASCII scalar values `0x20..0x7e`, so `charIsAsciiPrintable ' '`,
+`charIsAsciiPrintable '!'`, `charIsAsciiPrintable 'A'`,
+`charIsAsciiPrintable '7'`, and `charIsAsciiPrintable '~'` are `true` while
+`charIsAsciiPrintable '\t'`, `charIsAsciiPrintable '\n'`, and
+`charIsAsciiPrintable 'λ'` are `false`. These operations are covered through
+source checking, `run-program`,
 backend LLVM emission, object generation, and linked native execution for the
 current native-capable tracers. `String`/`List Char` conversion, formatting,
 full slicing coverage, broader classification families, complete cursor APIs,
@@ -659,6 +667,7 @@ Current prelude contents:
 - `charIsAsciiIdentifierContinue`
 - `charIsAsciiWhitespace`
 - `charIsAsciiPunctuation`
+- `charIsAsciiPrintable`
 - `and`
 - `id`
 
@@ -724,6 +733,9 @@ The next explicit ASCII helper is `charIsAsciiPunctuation`, with native
 coverage for the ASCII punctuation ranges `0x21..0x2f`, `0x3a..0x40`,
 `0x5b..0x60`, and `0x7b..0x7e`: `!`, `_`, and `~` are true while ASCII `a`,
 ASCII digit `7`, ASCII space, and a non-ASCII Unicode scalar are false.
+The next explicit ASCII helper is `charIsAsciiPrintable`, with native coverage
+for exactly ASCII scalar values `0x20..0x7e`: space, `!`, `A`, `7`, and `~`
+are true while tab, newline, and a non-ASCII Unicode scalar are false.
 Broad `String`/`List Char` conversion, formatting, full slicing coverage,
 broader classification families, complete cursor APIs, and parser-parity
 helpers remain outside this contract.

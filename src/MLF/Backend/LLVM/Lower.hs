@@ -90,8 +90,8 @@ inventory-owned reserved runtime-binding set in `MLF.Primitive.Inventory`:
 `__char_is_ascii_upper`, `__char_is_ascii_alpha`,
 `__char_is_ascii_alpha_num`, `__char_is_ascii_identifier_start`,
 `__char_is_ascii_identifier_continue`, `__char_is_ascii_whitespace`,
-`__char_is_ascii_punctuation`, plus the IO primitive names classified there for
-native support.
+`__char_is_ascii_punctuation`, `__char_is_ascii_printable`, plus the IO
+primitive names classified there for native support.
 Those primitives still arrive through the existing `BackendVar`, `BackendApp`, and `BackendTyApp` surface, with no new `BackendPrim`, no broad FFI surface, and no fallback runtime executor hidden inside lowering.
 
 The lowerer relies on the current eager order exactly as written:
@@ -190,6 +190,7 @@ lowerBackendProgram program = do
       needsCharIsAsciiIdentifierContinue = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiIdentifierContinueName)) (lpFunctions lowered)
       needsCharIsAsciiWhitespace = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiWhitespaceName)) (lpFunctions lowered)
       needsCharIsAsciiPunctuation = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiPunctuationName)) (lpFunctions lowered)
+      needsCharIsAsciiPrintable = any (functionReferencesGlobalNames (Set.singleton runtimeCharIsAsciiPrintableName)) (lpFunctions lowered)
       existingDecls =
         runtimeDeclarations
           base
@@ -212,6 +213,7 @@ lowerBackendProgram program = do
           needsCharIsAsciiIdentifierContinue
           needsCharIsAsciiWhitespace
           needsCharIsAsciiPunctuation
+          needsCharIsAsciiPrintable
       existingNames = Set.fromList (map llvmDeclarationName existingDecls)
       extraDecls
         | needsIO = filter (\d -> Set.notMember (llvmDeclarationName d) existingNames) (nativeRuntimeDeclarations base)
@@ -359,6 +361,7 @@ nativeRuntimeFunctions base =
     ++ [nativeCharIsAsciiIdentifierContinueFunction | Map.notMember runtimeCharIsAsciiIdentifierContinueName (pbBindings base)]
     ++ [nativeCharIsAsciiWhitespaceFunction | Map.notMember runtimeCharIsAsciiWhitespaceName (pbBindings base)]
     ++ [nativeCharIsAsciiPunctuationFunction | Map.notMember runtimeCharIsAsciiPunctuationName (pbBindings base)]
+    ++ [nativeCharIsAsciiPrintableFunction | Map.notMember runtimeCharIsAsciiPrintableName (pbBindings base)]
     ++ nativeIOFunctions base
 
 nativeCMainName :: String
@@ -1100,6 +1103,20 @@ nativeCharIsAsciiPunctuationFunction =
   of
     Right function -> function
     Left err -> error ("internal native __char_is_ascii_punctuation lowering failed: " ++ renderBackendLLVMError err)
+
+nativeCharIsAsciiPrintableFunction :: LLVMFunction
+nativeCharIsAsciiPrintableFunction =
+  case
+    lowerNativeFunction runtimeCharIsAsciiPrintableName (LLVMInt 1) [(LLVMInt 32, "value")] $ \params -> do
+      let value = requireNativeParam "value" params
+          i1Ty = LLVMInt 1
+      aboveBeforeSpace <- emitAssign "charisasciiprintable.above.before.space" i1Ty (LLVMICmpUgt value (LLVMIntLiteral 32 31))
+      belowAfterTilde <- emitAssign "charisasciiprintable.below.after.tilde" i1Ty (LLVMICmpUgt (LLVMIntLiteral 32 127) value)
+      result <- emitAssign "charisasciiprintable.result" i1Ty (LLVMAnd aboveBeforeSpace belowAfterTilde)
+      finishCurrentBlock (LLVMRet i1Ty result)
+  of
+    Right function -> function
+    Left err -> error ("internal native __char_is_ascii_printable lowering failed: " ++ renderBackendLLVMError err)
 
 nativeStringLengthFunction :: LLVMFunction
 nativeStringLengthFunction =
@@ -2405,12 +2422,16 @@ runtimeCharIsAsciiPunctuationName :: String
 runtimeCharIsAsciiPunctuationName =
   PrimitiveInventory.charIsAsciiPunctuationPrimitiveName
 
+runtimeCharIsAsciiPrintableName :: String
+runtimeCharIsAsciiPrintableName =
+  PrimitiveInventory.charIsAsciiPrintablePrimitiveName
+
 runtimeMallocName :: String
 runtimeMallocName =
   "malloc"
 
-runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
-runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation =
+runtimeDeclarations :: ProgramBase -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> Bool -> [LLVMDeclaration]
+runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContainsChar needsStringContains needsStringStartsWith needsStringEndsWith needsStringDrop needsStringTake needsStringSlice needsStringCharAt needsCharIsDigit needsCharIsAsciiLower needsCharIsAsciiUpper needsCharIsAsciiAlpha needsCharIsAsciiAlphaNum needsCharIsAsciiIdentifierStart needsCharIsAsciiIdentifierContinue needsCharIsAsciiWhitespace needsCharIsAsciiPunctuation needsCharIsAsciiPrintable =
   [ LLVMDeclaration runtimeMallocName LLVMPtr [LLVMInt 64] False
     | Map.notMember runtimeMallocName (pbBindings base)
   ]
@@ -2492,6 +2513,10 @@ runtimeDeclarations base needsStringLength needsStringIsEmpty needsStringContain
     ++ [ LLVMDeclaration runtimeCharIsAsciiPunctuationName (LLVMInt 1) [LLVMInt 32] False
          | needsCharIsAsciiPunctuation,
            Map.notMember runtimeCharIsAsciiPunctuationName (pbBindings base)
+       ]
+    ++ [ LLVMDeclaration runtimeCharIsAsciiPrintableName (LLVMInt 1) [LLVMInt 32] False
+         | needsCharIsAsciiPrintable,
+           Map.notMember runtimeCharIsAsciiPrintableName (pbBindings base)
        ]
 
 buildProgramBase :: BackendProgram -> Either BackendLLVMError ProgramBase
@@ -6069,6 +6094,25 @@ lowerGlobalCall env exprEnv context resultTy name typeArgs args =
                   (LLVMInt 1)
                   ( LLVMCall
                       runtimeCharIsAsciiPunctuationName
+                      [(LLVMInt 32, lvOperand value)]
+                  )
+              pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)
+            _ ->
+              liftEither (BackendLLVMArityMismatch name 1 (length args))
+    Nothing
+      | name == runtimeCharIsAsciiPrintableName -> do
+          unless (length args == 1) $
+            liftEither (BackendLLVMArityMismatch name 1 (length args))
+          callArgs <- traverse (lowerExpr env exprEnv context) args
+          case callArgs of
+            [value] -> do
+              requireLLVMType context name (LLVMInt 32) value
+              result <-
+                emitAssign
+                  "call"
+                  (LLVMInt 1)
+                  ( LLVMCall
+                      runtimeCharIsAsciiPrintableName
                       [(LLVMInt 32, lvOperand value)]
                   )
               pure (LowerValue (BTBase (BaseTy "Bool")) (LLVMInt 1) result LowerRuntimeValue Nothing)

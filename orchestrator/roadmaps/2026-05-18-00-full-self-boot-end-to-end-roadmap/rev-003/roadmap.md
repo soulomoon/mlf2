@@ -451,6 +451,15 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   evidence/claim-audit checks, `git diff --check`, cabal build all,
   cabal test, thesis gate, and reviewer rerun of diff, focused matcher, and
   primitive inventory matcher passed.
+- round-286 completed item-286-char-is-ascii-printable-native-tracer:
+  `charIsAsciiPrintable : Char -> Bool` classifies ASCII scalar values
+  `0x20..0x7e` as true and tab, newline, and non-ASCII lambda as false through
+  source checking, run-program, backend LLVM/object validation,
+  emit-native/native object validation, and linked native execution; evidence:
+  focused matcher, primitive inventory matcher, neighbor text/Char native
+  matcher set, rg evidence/claim-audit checks, `git diff --check`, cabal build
+  all, cabal test, thesis gate, and reviewer rerun of diff, focused matcher,
+  and primitive inventory matcher passed.
 
 #### Candidate Direction: Broad String And Char Substrate
 

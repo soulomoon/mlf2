@@ -124,6 +124,11 @@
   `0x7b..0x7e` as `true`; letters, digits, space, and non-ASCII scalars are
   `false` through `.mlfp` source checking, `run-program`, raw LLVM emission,
   object-code validation, and linked native execution.
+- Added an explicit native-capable ASCII printable `Char` classification
+  tracer: `charIsAsciiPrintable : Char -> Bool` now classifies exactly ASCII
+  scalar values `0x20..0x7e` as `true`; tab, newline, and non-ASCII scalars
+  are `false` through `.mlfp` source checking, `run-program`, raw LLVM
+  emission, object-code validation, and linked native execution.
 - Added an internal `MLF.Frontend.TypeLevel` normalization owner for the
   richer pre-core type layer, including kind variables in its AST,
   capture-avoiding type-lambda beta reduction, closed type-family ordered

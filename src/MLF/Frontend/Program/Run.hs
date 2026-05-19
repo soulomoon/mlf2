@@ -339,6 +339,7 @@ data RuntimePrimitive
   | RuntimeCharIsAsciiIdentifierContinue
   | RuntimeCharIsAsciiWhitespace
   | RuntimeCharIsAsciiPunctuation
+  | RuntimeCharIsAsciiPrintable
   deriving (Eq, Show)
 
 data RuntimeIOAction
@@ -527,6 +528,7 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.charIsAsciiIdentifierContinuePrimitiveName -> Just RuntimeCharIsAsciiIdentifierContinue
       | name' == PrimitiveInventory.charIsAsciiWhitespacePrimitiveName -> Just RuntimeCharIsAsciiWhitespace
       | name' == PrimitiveInventory.charIsAsciiPunctuationPrimitiveName -> Just RuntimeCharIsAsciiPunctuation
+      | name' == PrimitiveInventory.charIsAsciiPrintablePrimitiveName -> Just RuntimeCharIsAsciiPrintable
     _ -> Nothing
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -1298,6 +1300,10 @@ applyRuntimePrimitive prim args
           Right (RuntimeLit (LBool (isAsciiPunctuation value)))
         (RuntimeCharIsAsciiPunctuation, _) ->
           Left (ProgramPipelineError "run-program __char_is_ascii_punctuation expected a Char argument")
+        (RuntimeCharIsAsciiPrintable, [RuntimeLit (LChar value)]) ->
+          Right (RuntimeLit (LBool (isAsciiPrintable value)))
+        (RuntimeCharIsAsciiPrintable, _) ->
+          Left (ProgramPipelineError "run-program __char_is_ascii_printable expected a Char argument")
         _ ->
           Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
 
@@ -1344,6 +1350,10 @@ isAsciiPunctuation value =
     || (value >= ':' && value <= '@')
     || (value >= '[' && value <= '`')
     || (value >= '{' && value <= '~')
+
+isAsciiPrintable :: Char -> Bool
+isAsciiPrintable value =
+  value >= ' ' && value <= '~'
 
 dropUnicodeScalars :: Integer -> String -> String
 dropUnicodeScalars count value
@@ -1417,6 +1427,7 @@ runtimePrimitiveArity prim =
     RuntimeCharIsAsciiIdentifierContinue -> 1
     RuntimeCharIsAsciiWhitespace -> 1
     RuntimeCharIsAsciiPunctuation -> 1
+    RuntimeCharIsAsciiPrintable -> 1
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
 executeIOAction context action =
@@ -1602,7 +1613,8 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.charIsAsciiIdentifierStartPrimitiveName,
     PrimitiveInventory.charIsAsciiIdentifierContinuePrimitiveName,
     PrimitiveInventory.charIsAsciiWhitespacePrimitiveName,
-    PrimitiveInventory.charIsAsciiPunctuationPrimitiveName
+    PrimitiveInventory.charIsAsciiPunctuationPrimitiveName,
+    PrimitiveInventory.charIsAsciiPrintablePrimitiveName
   ]
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm
