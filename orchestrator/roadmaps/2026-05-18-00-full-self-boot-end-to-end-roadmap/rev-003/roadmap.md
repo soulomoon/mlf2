@@ -489,7 +489,7 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
   proven.
 - Boundary notes: exclude locale and regex unless a semantic roadmap update
   selects them.
-- Extraction notes: choose narrow vertical slices that prove source,
+- Extraction notes: prove source,
   interpreter, backend, object, and native behavior together.
 
 ### [pending] 4. Full Canonical `.mlfp` Parser Parity
