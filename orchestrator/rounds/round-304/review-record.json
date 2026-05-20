@@ -1,0 +1,31 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-304",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-304-parser-parity-basic-module-def-bool-spans",
+  "decision": "approved",
+  "evidence_summary": "Focused parser-parity positive and retry mismatch matchers passed; direct package smoke printed the committed projection; git diff --check, cabal build all, cabal test with 2614 examples, and thesis gate passed.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [
+      {
+        "milestone_id": "milestone-4",
+        "expected_current_status": "pending",
+        "target_status": "in-progress",
+        "roadmap_view_anchor": "milestone-4-status"
+      }
+    ],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-304 completed item-304-parser-parity-basic-module-def-bool-spans: parser-owned .mlfp modules emit the canonical basic Bool parser projection and retry evidence covers lexer/parser mismatches; reviewer gates passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

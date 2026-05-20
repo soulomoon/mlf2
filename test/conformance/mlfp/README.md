@@ -35,3 +35,11 @@ profile is `none`. Passing fixtures name committed stdout with
 Any expected-output update is a reviewed source change. A test run may write
 actual outputs only to an explicitly selected actual-output root in a later
 round; this tracer does not provide regeneration or blessing tooling.
+
+## Parser Parity Projections
+
+`parser-parity/` contains committed parser-program projection oracles for
+bounded canonical-parser parity tracers. These artifacts are compared exactly
+against both the current Haskell canonical parser projection and the matching
+`.mlfp` parser-owned package output. They are not generated or blessed during
+test runs, and they do not imply full `.mlfp` parser parity.

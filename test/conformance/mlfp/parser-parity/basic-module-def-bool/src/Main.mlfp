@@ -1,0 +1,3 @@
+module Main export (main) {
+  def main : Bool = true;
+}

@@ -41,6 +41,7 @@ import ProgramFixturePackageSpec qualified
 import ProgramInterfaceSpec qualified
 import ProgramPackageSpec qualified
 import ProgramPackageDiscoverySpec qualified
+import ProgramParserParitySpec qualified
 import ProgramSpec qualified
 import Presolution.EdgeInterpreterSpec qualified
 import Presolution.EdgePlannerSpec qualified
@@ -121,6 +122,7 @@ main = do
     ProgramFixturePackageSpec.spec
     ProgramPackageSpec.spec
     ProgramPackageDiscoverySpec.spec
+    ProgramParserParitySpec.spec
     ProgramSpec.spec
     ResolvedSymbolSpec.spec
     PipelineSpec.spec

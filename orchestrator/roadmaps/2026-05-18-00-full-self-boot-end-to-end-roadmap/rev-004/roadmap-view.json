@@ -38,7 +38,7 @@
     {
       "milestone_id": "milestone-4",
       "title": "Full Canonical .mlfp Parser Parity",
-      "status": "pending",
+      "status": "in-progress",
       "depends_on": ["milestone-3"],
       "parallel_lane": "lane-text-parser",
       "status_anchor": "milestone-4-status",
@@ -151,7 +151,7 @@
     "milestone-2-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004/roadmap.md", "selector": "#### Completion Pointers: milestone-2"},
     "milestone-3-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004/roadmap.md", "selector": "### [done] 3. Native-Capable Broad Text Substrate"},
     "milestone-3-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004/roadmap.md", "selector": "#### Completion Pointers: milestone-3"},
-    "milestone-4-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004/roadmap.md", "selector": "### [pending] 4. Full Canonical `.mlfp` Parser Parity"},
+    "milestone-4-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004/roadmap.md", "selector": "### [in-progress] 4. Full Canonical `.mlfp` Parser Parity"},
     "milestone-4-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004/roadmap.md", "selector": "#### Completion Pointers: milestone-4"},
     "milestone-5-status": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004/roadmap.md", "selector": "### [pending] 5. Self-Boot Platform Contract Implementation"},
     "milestone-5-completion": {"target_file": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004/roadmap.md", "selector": "#### Completion Pointers: milestone-5"},

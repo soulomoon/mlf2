@@ -754,7 +754,7 @@ Milestone-3 closeout criteria after the whole-library round:
   backend, object, and native behavior together with grouped public behavior
   tests rather than one-function-per-round tracers.
 
-### [pending] 4. Full Canonical `.mlfp` Parser Parity
+### [in-progress] 4. Full Canonical `.mlfp` Parser Parity
 
 - Milestone id: `milestone-4`
 - Depends on: `milestone-3`
@@ -770,7 +770,7 @@ Milestone-3 closeout criteria after the whole-library round:
 
 #### Completion Pointers: milestone-4
 
-None yet.
+- round-304 completed item-304-parser-parity-basic-module-def-bool-spans: parser-owned `.mlfp` modules emit the canonical basic Bool parser projection and retry evidence covers lexer/parser mismatches; reviewer gates passed.
 
 #### Candidate Direction: Canonical Parser Parity
 

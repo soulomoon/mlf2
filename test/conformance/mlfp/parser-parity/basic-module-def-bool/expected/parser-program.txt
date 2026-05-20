@@ -1,0 +1,3 @@
+module Main span=test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp:1:1-4:1
+export value main span=test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp:1:21-1:25
+def main type=Bool expr=true span=test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp:2:3-3:1

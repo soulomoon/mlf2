@@ -3,6 +3,12 @@
 ## Unreleased
 
 ### Added
+- Added the first bounded canonical parser parity tracer for a basic
+  source-text Bool definition. The `.mlfp` package under
+  `test/programs/compiler-parser-parity/basic-module-def-bool/` owns its
+  source/token/AST/parser modules and prints the committed parser-program
+  projection with source-span evidence matching the Haskell canonical parser;
+  this is not a full parser parity or self-boot claim.
 - Completed the rev-004 initial native-capable Broad String Library matrix as a
   unified slice: delimiter join, single-`Char` split, bytewise compare, ASCII
   hex/line/control classification, ASCII-only `Char`/`String` case conversion,

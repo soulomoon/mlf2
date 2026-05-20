@@ -408,6 +408,7 @@ test-suite mlf2-test
                       ProgramFixturePackageSpec,
                       ProgramPackageSpec,
                       ProgramPackageDiscoverySpec,
+                      ProgramParserParitySpec,
                       ProgramSpec,
                       ResolvedSymbolSpec,
                       PipelineSpec,
