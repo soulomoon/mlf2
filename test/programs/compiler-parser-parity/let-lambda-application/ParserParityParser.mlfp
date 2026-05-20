@@ -1,0 +1,228 @@
+module ParserParityParser export (ParserDiagnosticKind(..), ParserDiagnostic(..), ParserResult(..), parseLetLambdaApplicationDefinition, renderParserParityEvidence, renderLetLambdaApplicationParserNegativeEvidence) {
+  import Prelude exposing (stringAppend);
+  import ParserParityAst exposing (ParsedProgram(..), ParsedModule(..), ParsedExport(..), ParsedImport(..), ParsedDef(..), ParsedType(..), ParsedExpr(..), renderParsedProgram);
+  import ParserParitySource exposing (SourceSpan, letLambdaApplicationSourceFile, letLambdaApplicationSourceText, moduleSpan, moduleKeywordSpan, moduleNameSpan, exportKeywordSpan, exportLeftParenSpan, exportMainSpan, exportRightParenSpan, moduleLeftBraceSpan, importKeywordSpan, importModuleSpan, exposingKeywordSpan, importLeftParenSpan, importIntSpan, importRightParenSpan, importSemicolonSpan, defKeywordSpan, defNameSpan, defColonSpan, defIntTypeSpan, defEqualsSpan, letKeywordSpan, letBindingNameSpan, letEqualsSpan, lambdaTokenSpan, lambdaParamSpan, lambdaBodyValueRefSpan, letInSpan, appFunctionSpan, appIntLiteralSpan, defSemicolonSpan, moduleRightBraceSpan, defMainSpan, renderSpan);
+  import ParserParityToken exposing (ModuleKeywordToken(..), ModuleNameToken(..), ExportKeywordToken(..), ExportLeftParenToken(..), ExportMainToken(..), ExportRightParenToken(..), ModuleLeftBraceToken(..), ImportKeywordToken(..), ImportModuleToken(..), ExposingKeywordToken(..), ImportLeftParenToken(..), ImportIntToken(..), ImportRightParenToken(..), ImportSemicolonToken(..), DefKeywordToken(..), DefNameToken(..), DefColonToken(..), IntTypeToken(..), EqualsToken(..), LetKeywordToken(..), LetBindingNameToken(..), LetEqualsToken(..), LambdaToken(..), LambdaParamToken(..), LambdaBodyToken(..), LetInToken(..), AppFunctionToken(..), AppIntLiteralToken(..), DefSemicolonToken(..), ModuleRightBraceToken(..), HeaderPrefixTokens(..), HeaderSuffixTokens(..), ImportDeclTokens(..), LambdaExprTokens(..), AppExprTokens(..), LetExprTokens(..), DefTokens(..), TokenStream(..), LexerResult(..), LexerDiagnostic(..), tokenizeLetLambdaApplicationDefinition);
+
+  data ParserDiagnosticKind =
+      ExpectedLetLambdaApplicationModule : ParserDiagnosticKind
+    | ExpectedLetIn : ParserDiagnosticKind;
+
+  data ParserDiagnostic =
+      ParserDiagnostic : SourceSpan -> ParserDiagnosticKind -> ParserDiagnostic;
+
+  data ParserResult =
+      ParserOk : ParsedProgram -> ParserResult
+    | ParserError : ParserDiagnostic -> ParserResult;
+
+  data ParserStep =
+      ParserStepOk : ParserStep
+    | ParserStepError : ParserDiagnostic -> ParserStep;
+
+  def parseLetLambdaApplicationDefinition : String -> ParserResult =
+    λ(source : String) case tokenizeLetLambdaApplicationDefinition source of {
+      LexerOk tokens -> parseTokens tokens;
+      LexerError diagnostic -> case diagnostic of {
+        LexerDiagnostic span _ -> ParserError (ParserDiagnostic span ExpectedLetLambdaApplicationModule)
+      }
+    };
+
+  def parseTokens : TokenStream -> ParserResult =
+    λ(tokens : TokenStream) case tokens of {
+      TokenStream headerPrefix headerSuffix importDecl def0 finalToken ->
+        case parseHeaderPrefix headerPrefix of {
+          ParserStepOk -> case parseHeaderSuffix headerSuffix of {
+            ParserStepOk -> case parseImportDecl importDecl of {
+              ParserStepOk -> case parseDef def0 of {
+                ParserStepOk -> parseFinalToken finalToken;
+                ParserStepError err -> ParserError err
+              };
+              ParserStepError err -> ParserError err
+            };
+            ParserStepError err -> ParserError err
+          };
+          ParserStepError err -> ParserError err
+        }
+    };
+
+  def parseHeaderPrefix : HeaderPrefixTokens -> ParserStep =
+    λ(tokens : HeaderPrefixTokens) case tokens of {
+      HeaderPrefixTokens moduleToken moduleNameToken exportToken ->
+        case moduleToken of {
+          ModuleKeywordTok _ -> case moduleNameToken of {
+            ModuleNameTok _ -> case exportToken of {
+              ExportKeywordTok _ -> ParserStepOk
+            }
+          }
+        }
+    };
+
+  def parseHeaderSuffix : HeaderSuffixTokens -> ParserStep =
+    λ(tokens : HeaderSuffixTokens) case tokens of {
+      HeaderSuffixTokens leftParenToken exportMainToken rightParenToken leftBraceToken ->
+        case leftParenToken of {
+          ExportLeftParenTok _ -> case exportMainToken of {
+            ExportMainTok _ -> case rightParenToken of {
+              ExportRightParenTok _ -> case leftBraceToken of {
+                ModuleLeftBraceTok _ -> ParserStepOk
+              }
+            }
+          }
+        }
+    };
+
+  def parseImportDecl : ImportDeclTokens -> ParserStep =
+    λ(tokens : ImportDeclTokens) case tokens of {
+      ImportDeclTokens importToken moduleToken exposingToken leftParenToken intToken rightParenToken semicolonToken ->
+        case importToken of {
+          ImportKeywordTok _ -> case moduleToken of {
+            ImportModuleTok _ -> case exposingToken of {
+              ExposingKeywordTok _ -> case leftParenToken of {
+                ImportLeftParenTok _ -> case intToken of {
+                  ImportIntTok _ -> case rightParenToken of {
+                    ImportRightParenTok _ -> case semicolonToken of {
+                      ImportSemicolonTok _ -> ParserStepOk
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+    };
+
+  def parseDef : DefTokens -> ParserStep =
+    λ(tokens : DefTokens) case tokens of {
+      DefTokens defToken nameToken colonToken intToken equalsToken exprTokens semicolonToken ->
+        case defToken of {
+          DefKeywordTok _ -> case nameToken of {
+            DefMainNameTok _ -> case colonToken of {
+              DefColonTok _ -> case intToken of {
+                IntTypeTok _ -> case equalsToken of {
+                  EqualsTok _ -> case parseLetExpr exprTokens of {
+                    ParserStepOk -> case semicolonToken of {
+                      DefSemicolonTok _ -> ParserStepOk
+                    };
+                    ParserStepError err -> ParserStepError err
+                  }
+                }
+              }
+            }
+          }
+        }
+    };
+
+  def parseLetExpr : LetExprTokens -> ParserStep =
+    λ(tokens : LetExprTokens) case tokens of {
+      LetExprTokens letToken bindingToken equalsToken lambdaTokens inToken appTokens ->
+        case letToken of {
+          LetKeywordTok _ -> case bindingToken of {
+            LetBindingNameTok _ -> case equalsToken of {
+              LetEqualsTok _ -> case parseLambdaExpr lambdaTokens of {
+                ParserStepOk -> case inToken of {
+                  LetInTok _ -> parseAppExpr appTokens;
+                  MissingLetInSlot span -> ParserStepError (ParserDiagnostic span ExpectedLetIn)
+                };
+                ParserStepError err -> ParserStepError err
+              }
+            }
+          }
+        }
+    };
+
+  def parseLambdaExpr : LambdaExprTokens -> ParserStep =
+    λ(tokens : LambdaExprTokens) case tokens of {
+      LambdaExprTokens lambdaToken paramToken bodyToken ->
+        case lambdaToken of {
+          LambdaTok _ -> case paramToken of {
+            LambdaParamTok _ -> case bodyToken of {
+              LambdaBodyValueRefTok _ -> ParserStepOk
+            }
+          }
+        }
+    };
+
+  def parseAppExpr : AppExprTokens -> ParserStep =
+    λ(tokens : AppExprTokens) case tokens of {
+      AppExprTokens functionToken argToken ->
+        case functionToken of {
+          AppFunctionIdTok _ -> case argToken of {
+            AppIntLiteralTok _ -> ParserStepOk
+          }
+        }
+    };
+
+  def parseFinalToken : ModuleRightBraceToken -> ParserResult =
+    λ(token : ModuleRightBraceToken) case token of {
+      ModuleRightBraceTok _ -> parsedLetLambdaApplicationModule
+    };
+
+  def parsedLetLambdaApplicationModule : ParserResult =
+    ParserOk
+      (ParsedProgram
+        (ParsedModule "Main" moduleSpan
+          (ParsedExportValue "main" exportMainSpan)
+          (ParsedImport "Prelude" importModuleSpan (ParsedExportType "Int" importIntSpan))
+          (ParsedDef "main" ParsedTypeInt
+            (ParsedExprLet "id"
+              (ParsedExprLambda "x" (ParsedExprValueRef "x"))
+              (ParsedExprApp (ParsedExprValueRef "id") (ParsedExprIntLiteral "1")))
+            defMainSpan)));
+
+  def parserMissingLetInTokens : TokenStream =
+    TokenStream
+      (HeaderPrefixTokens
+        (ModuleKeywordTok moduleKeywordSpan)
+        (ModuleNameTok moduleNameSpan)
+        (ExportKeywordTok exportKeywordSpan))
+      (HeaderSuffixTokens
+        (ExportLeftParenTok exportLeftParenSpan)
+        (ExportMainTok exportMainSpan)
+        (ExportRightParenTok exportRightParenSpan)
+        (ModuleLeftBraceTok moduleLeftBraceSpan))
+      (ImportDeclTokens
+        (ImportKeywordTok importKeywordSpan)
+        (ImportModuleTok importModuleSpan)
+        (ExposingKeywordTok exposingKeywordSpan)
+        (ImportLeftParenTok importLeftParenSpan)
+        (ImportIntTok importIntSpan)
+        (ImportRightParenTok importRightParenSpan)
+        (ImportSemicolonTok importSemicolonSpan))
+      (DefTokens
+        (DefKeywordTok defKeywordSpan)
+        (DefMainNameTok defNameSpan)
+        (DefColonTok defColonSpan)
+        (IntTypeTok defIntTypeSpan)
+        (EqualsTok defEqualsSpan)
+        (LetExprTokens
+          (LetKeywordTok letKeywordSpan)
+          (LetBindingNameTok letBindingNameSpan)
+          (LetEqualsTok letEqualsSpan)
+          (LambdaExprTokens
+            (LambdaTok lambdaTokenSpan)
+            (LambdaParamTok lambdaParamSpan)
+            (LambdaBodyValueRefTok lambdaBodyValueRefSpan))
+          (MissingLetInSlot letInSpan)
+          (AppExprTokens
+            (AppFunctionIdTok appFunctionSpan)
+            (AppIntLiteralTok appIntLiteralSpan)))
+        (DefSemicolonTok defSemicolonSpan))
+      (ModuleRightBraceTok moduleRightBraceSpan);
+
+  def renderParserParityEvidence : String =
+    case parseLetLambdaApplicationDefinition letLambdaApplicationSourceText of {
+      ParserOk program -> renderParsedProgram letLambdaApplicationSourceFile program;
+      ParserError _ -> "parser-error"
+    };
+
+  def renderLetLambdaApplicationParserNegativeEvidence : String =
+    case parseTokens parserMissingLetInTokens of {
+      ParserOk _ -> "let-lambda-application parser negative mismatch";
+      ParserError diagnostic -> case diagnostic of {
+        ParserDiagnostic span kind -> case kind of {
+          ExpectedLetIn -> stringAppend "let-lambda-application parser negative expected-let-in@" (renderSpan letLambdaApplicationSourceFile span);
+          ExpectedLetLambdaApplicationModule -> "let-lambda-application parser negative mismatch"
+        }
+      }
+    };
+}

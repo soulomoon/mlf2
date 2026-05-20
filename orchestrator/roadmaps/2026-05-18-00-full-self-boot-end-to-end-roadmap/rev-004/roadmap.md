@@ -773,6 +773,7 @@ Milestone-3 closeout criteria after the whole-library round:
 - round-304 completed item-304-parser-parity-basic-module-def-bool-spans: parser-owned `.mlfp` modules emit the canonical basic Bool parser projection and retry evidence covers lexer/parser mismatches; reviewer gates passed.
 - round-305 completed item-305-parser-parity-import-exposing-spans: parser-owned `.mlfp` modules emit canonical import-exposing Bool parser projection and malformed-import evidence; reviewer recheck passed generated hygiene, focused parser checks, parser-parity group, and package smokes.
 - round-306 completed item-306-parser-parity-value-definition-list-spans: parser-owned `.mlfp` modules emit canonical value-definition-list parser projection with `Int` literal and value-reference spans plus malformed sequencing evidence; reviewer recheck passed generated hygiene, the parser parity group, and direct package smoke.
+- round-307 completed item-307-parser-parity-let-lambda-application-spans as a partial milestone-4 parser-parity tracer; evidence: focused let/lambda/application matcher, malformed-let matcher, parser-parity group, package smokes, full Cabal gate, and thesis gate passed.
 
 #### Candidate Direction: Canonical Parser Parity
 

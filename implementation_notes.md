@@ -1,3 +1,24 @@
+## 2026-05-20 - Round 307 parser parity let/lambda/application tracer
+
+- Added a bounded parser-owned `.mlfp` parity package for
+  `import Prelude exposing (Int);` and
+  `def main : Int = let id = λx x in id 1;` under
+  `test/programs/compiler-parser-parity/let-lambda-application/`.
+- Added the matching canonical parser fixture and committed projection under
+  `test/conformance/mlfp/parser-parity/let-lambda-application/`, covering
+  module/export/import spans, the `Int` exposing-item span, the carried
+  value-definition span, and a stable rendered expression shape for `let`,
+  bare lambda, and left-associated application.
+- Extended `ProgramParserParitySpec` only inside test-owned projection and
+  package evidence helpers: it now renders `ELet`, `ELam`, and `EApp` shapes,
+  and checks malformed let-expression sequencing through the public
+  `run-program` path.
+- Scope remains parser-only. This does not claim full parser parity, checker,
+  backend, driver, platform, compiler-package, proof, parser combinators, or
+  self-boot progress.
+- Evidence: focused RED/GREEN let/lambda/application matcher, focused GREEN
+  malformed-let matcher, and full parser-parity group covering rounds 304-307.
+
 ## 2026-05-20 - Round 306 parser parity value-definition-list tracer
 
 - Added a bounded parser-owned `.mlfp` parity package for

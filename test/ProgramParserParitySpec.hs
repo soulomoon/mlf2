@@ -51,6 +51,16 @@ spec =
             canonicalProjection `shouldBe` expected
             parserParityOutput `shouldBe` Right expected
 
+        it "parser-owned .mlfp parser matches canonical parser for let, lambda, and application expressions" $ do
+            source <- readFile letLambdaApplicationCanonicalSourcePath
+            expected <- readFile letLambdaApplicationExpectedProjectionPath
+
+            canonicalProjection <- renderCanonicalProjection letLambdaApplicationCanonicalSourcePath source
+            parserParityOutput <- runProgramArgs [letLambdaApplicationParserParityPackageRoot]
+
+            canonicalProjection `shouldBe` expected
+            parserParityOutput `shouldBe` Right expected
+
         it "parser-owned .mlfp parser rejects malformed import syntax through public run-program" $ do
             evidenceRoot <- writeImportNegativeEvidencePackage
             runProgramArgs [evidenceRoot]
@@ -60,6 +70,11 @@ spec =
             evidenceRoot <- writeValueDefListNegativeEvidencePackage
             runProgramArgs [evidenceRoot]
                 `shouldReturn` Right valueDefListNegativeEvidenceProjection
+
+        it "parser-owned .mlfp parser rejects malformed let expressions through public run-program" $ do
+            evidenceRoot <- writeLetLambdaApplicationNegativeEvidencePackage
+            runProgramArgs [evidenceRoot]
+                `shouldReturn` Right letLambdaApplicationNegativeEvidenceProjection
 
         it "parser-owned .mlfp tokenizer and parser reject discrete token mismatches" $ do
             evidenceRoot <- writeRetryEvidencePackage
@@ -78,6 +93,10 @@ valueDefListCanonicalSourcePath :: FilePath
 valueDefListCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp"
 
+letLambdaApplicationCanonicalSourcePath :: FilePath
+letLambdaApplicationCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/let-lambda-application/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -89,6 +108,10 @@ importExpectedProjectionPath =
 valueDefListExpectedProjectionPath :: FilePath
 valueDefListExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/value-def-list-int-ref/expected/parser-program.txt"
+
+letLambdaApplicationExpectedProjectionPath :: FilePath
+letLambdaApplicationExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/let-lambda-application/expected/parser-program.txt"
 
 parserParityPackageRoot :: FilePath
 parserParityPackageRoot =
@@ -102,6 +125,10 @@ valueDefListParserParityPackageRoot :: FilePath
 valueDefListParserParityPackageRoot =
     "test/programs/compiler-parser-parity/value-def-list-int-ref"
 
+letLambdaApplicationParserParityPackageRoot :: FilePath
+letLambdaApplicationParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/let-lambda-application"
+
 retryEvidencePackageRoot :: FilePath
 retryEvidencePackageRoot =
     "dist-newstyle/parser-parity-basic-module-def-bool-retry-evidence"
@@ -113,6 +140,10 @@ importNegativeEvidencePackageRoot =
 valueDefListNegativeEvidencePackageRoot :: FilePath
 valueDefListNegativeEvidencePackageRoot =
     "dist-newstyle/parser-parity-value-def-list-int-ref-negative-evidence"
+
+letLambdaApplicationNegativeEvidencePackageRoot :: FilePath
+letLambdaApplicationNegativeEvidencePackageRoot =
+    "dist-newstyle/parser-parity-let-lambda-application-negative-evidence"
 
 parserParitySupportModules :: [FilePath]
 parserParitySupportModules =
@@ -128,6 +159,10 @@ importParserParitySupportModules =
 
 valueDefListParserParitySupportModules :: [FilePath]
 valueDefListParserParitySupportModules =
+    parserParitySupportModules
+
+letLambdaApplicationParserParitySupportModules :: [FilePath]
+letLambdaApplicationParserParitySupportModules =
     parserParitySupportModules
 
 writeRetryEvidencePackage :: IO FilePath
@@ -169,6 +204,19 @@ writeValueDefListNegativeEvidencePackage = do
             (valueDefListParserParityPackageRoot </> name)
             (valueDefListNegativeEvidencePackageRoot </> name)
 
+writeLetLambdaApplicationNegativeEvidencePackage :: IO FilePath
+writeLetLambdaApplicationNegativeEvidencePackage = do
+    removePathForcibly letLambdaApplicationNegativeEvidencePackageRoot
+    createDirectoryIfMissing True letLambdaApplicationNegativeEvidencePackageRoot
+    mapM_ copySupportModule letLambdaApplicationParserParitySupportModules
+    writeFile (letLambdaApplicationNegativeEvidencePackageRoot </> "Main.mlfp") letLambdaApplicationNegativeEvidenceMainSource
+    pure letLambdaApplicationNegativeEvidencePackageRoot
+  where
+    copySupportModule name =
+        copyFile
+            (letLambdaApplicationParserParityPackageRoot </> name)
+            (letLambdaApplicationNegativeEvidencePackageRoot </> name)
+
 retryEvidenceMainSource :: String
 retryEvidenceMainSource =
     unlines
@@ -205,6 +253,18 @@ valueDefListNegativeEvidenceMainSource =
         , "}"
         ]
 
+letLambdaApplicationNegativeEvidenceMainSource :: String
+letLambdaApplicationNegativeEvidenceMainSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
+        , "  import ParserParityParser exposing (renderLetLambdaApplicationParserNegativeEvidence);"
+        , ""
+        , "  def main : IO Unit ="
+        , "    putStrLn renderLetLambdaApplicationParserNegativeEvidence;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -223,6 +283,12 @@ valueDefListNegativeEvidenceProjection :: String
 valueDefListNegativeEvidenceProjection =
     unlines
         [ "value-def-list parser negative expected-def-semicolon@test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp:3:20-3:21"
+        ]
+
+letLambdaApplicationNegativeEvidenceProjection :: String
+letLambdaApplicationNegativeEvidenceProjection =
+    unlines
+        [ "let-lambda-application parser negative expected-let-in@test/conformance/mlfp/parser-parity/let-lambda-application/src/Main.mlfp:3:34-3:36"
         ]
 
 renderCanonicalProjection :: FilePath -> String -> IO String
@@ -354,12 +420,41 @@ renderSrcType ty =
 
 renderExpr :: P.Expr -> String
 renderExpr expr =
+    renderExprPrec 0 expr
+
+renderExprPrec :: Int -> P.Expr -> String
+renderExprPrec precedence expr =
     case expr of
         P.EVar name -> name
         P.ELit (LInt value) -> show value
         P.ELit (LBool True) -> "true"
         P.ELit (LBool False) -> "false"
+        P.ELam param body ->
+            parenthesizeIf (precedence > 0) $
+                "λ" ++ renderParam param ++ " " ++ renderExprPrec 0 body
+        P.EApp fun arg ->
+            parenthesizeIf (precedence > 1) $
+                renderExprPrec 1 fun ++ " " ++ renderExprPrec 2 arg
+        P.ELet name mbTy rhs body ->
+            parenthesizeIf (precedence > 0) $
+                "let "
+                    ++ name
+                    ++ maybe "" ((" : " ++) . renderSrcType) mbTy
+                    ++ " = "
+                    ++ renderExprPrec 0 rhs
+                    ++ " in "
+                    ++ renderExprPrec 0 body
         other -> show other
+
+renderParam :: P.Param -> String
+renderParam param =
+    P.paramName param ++ maybe "" ((" : " ++) . renderSrcType) (P.paramType param)
+
+parenthesizeIf :: Bool -> String -> String
+parenthesizeIf shouldParenthesize rendered =
+    if shouldParenthesize
+        then "(" ++ rendered ++ ")"
+        else rendered
 
 renderSpan :: P.SourceSpan -> String
 renderSpan span0 =

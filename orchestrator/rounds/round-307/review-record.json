@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-307",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-307-parser-parity-let-lambda-application-spans",
+  "decision": "approved",
+  "evidence_summary": "Focused let/lambda/application parity test, malformed-let public run-program evidence, full parser-parity group, direct package smokes, git diff hygiene, cabal build all && cabal test, and thesis conformance gate passed.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-307 completed item-307-parser-parity-let-lambda-application-spans as a partial milestone-4 parser-parity tracer; evidence: focused let/lambda/application matcher, malformed-let matcher, parser-parity group, package smokes, full Cabal gate, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}
