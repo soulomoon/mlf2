@@ -434,6 +434,9 @@ stringReplace : String -> String -> String -> String
 stringIndexOfChar : String -> Char -> Option Int
 stringIndexOf : String -> String -> Option Int
 stringSplit : String -> String -> List String
+stringJoin : String -> List String -> String
+stringSplitChar : String -> Char -> List String
+stringCompare : String -> String -> Int
 stringFromChar : Char -> String
 stringFromInt : Int -> String
 stringFromBool : Bool -> String
@@ -456,7 +459,20 @@ charIsAsciiIdentifierContinue : Char -> Bool
 charIsAsciiWhitespace : Char -> Bool
 charIsAsciiPunctuation : Char -> Bool
 charIsAsciiPrintable : Char -> Bool
+charIsAsciiHexDigit : Char -> Bool
+charIsAsciiLineBreak : Char -> Bool
+charIsAsciiControl : Char -> Bool
+charToAsciiLower : Char -> Char
+charToAsciiUpper : Char -> Char
+stringToAsciiLower : String -> String
+stringToAsciiUpper : String -> String
 ```
+
+The rev-004 initial broad string matrix is now native-capable across source
+checking, `run-program`, backend LLVM emission, object generation, and linked
+native execution. Native string helpers carry exact byte-length metadata for
+module string globals and helper-created strings, so embedded U+0000 is data,
+not a C terminator.
 
 `stringLength` counts Unicode scalar values in the source `String`, not UTF-8
 bytes. `stringIsEmpty` is the first broad `String` classification operation; it
@@ -475,9 +491,9 @@ native append helper, so `stringEquals "aλ" "aλ"` is `true`,
 source-literal `stringEquals "a\0b" "a"` is `false`, and
 `stringEquals (stringAppend "a" "\0b") "a"` is `false` rather than
 C-terminator equal. It does not claim collation, ordering, an `Eq String`
-instance, case conversion, Unicode normalization, locale behavior, regex,
-parser parity, platform contracts, driver work, proof completion, or broad
-exact metadata for every string-producing helper. `stringStartsWith` is the first
+instance, Unicode default case conversion, Unicode normalization, locale
+behavior, regex, parser parity, platform contracts, driver work, or proof
+completion. `stringStartsWith` is the first
 prefix `String` search operation; the current native-capable tracer covers a
 non-empty Unicode scalar prefix, so `stringStartsWith "λab" "λ"` is `true`
 while `stringStartsWith "aλb" "λ"` is `false`. `stringEndsWith` is the first
@@ -499,7 +515,8 @@ boundaries, so `stringReplace "aλbλb" "λb" "WXYZ"` returns `"aWXYZWXYZ"`,
 `stringReplace "abc" "λ" "x"` returns `"abc"`, and
 `stringReplace "abc" "" "x"` returns `"abc"`. Empty needle replacement is a
 no-op. It does not claim split-family collection APIs, regex,
-Unicode normalization, locale behavior, case conversion, interpolation,
+Unicode normalization, locale behavior, Unicode default case conversion,
+interpolation,
 formatting, or replacement-family completion beyond this exact substring
 operation. `stringIndexOfChar` is the first
 first-match `String`/`Char` index search operation; the current
@@ -523,9 +540,18 @@ inputs, and treats an empty delimiter as `Cons input Nil`. For example,
 `stringSplit "abc" "λ"` returns `Cons "abc" Nil`, `stringSplit "abc" ""`
 returns `Cons "abc" Nil`, and `stringSplit "λaλ" "λ"` returns
 `Cons "" (Cons "a" (Cons "" Nil))`. It does not claim split-on-character
-aliases, `lines`/`words`/`trim`/`reverse` APIs, regex, Unicode normalization,
-locale behavior, case conversion, broader `List String` APIs, parser parity,
-platform contracts, or proof completion. `stringFromChar` is the first `Char` to
+aliases beyond `stringSplitChar`, `lines`/`words`/`trim`/`reverse` APIs, regex,
+Unicode normalization, locale behavior, Unicode default case conversion,
+parser parity, platform contracts, or proof completion. `stringJoin` is the
+delimiter join operation for `List String`; it preserves empty inputs,
+singletons, empty delimiters, non-empty delimiters, and Unicode scalar
+segments. `stringSplitChar` is the single-`Char` delimiter split helper; it
+matches Unicode scalar `Char` values and preserves the same leading/trailing
+empty segment behavior as `stringSplit`. `stringCompare` is the deterministic
+bytewise ordering helper for valid UTF-8 strings; it returns `0` for equal
+strings, a negative value when the first input sorts before the second input,
+and a positive value when it sorts after. It does not claim locale collation or
+Unicode collation. `stringFromChar` is the first `Char` to
 singleton `String` construction operation; the current native-capable tracer
 preserves Unicode scalar values, so `stringFromChar 'λ'` returns `"λ"`
 (rendered as `"\955"`) and `stringFromChar 'A'` returns `"A"`. `stringFromInt`
@@ -545,22 +571,29 @@ native-capable tracer is a pure Prelude definition and formats
 is the first `List Char` to `String` conversion operation; the current
 native-capable tracer preserves Unicode scalar list values, so
 `stringFromList (Cons 'a' (Cons 'λ' Nil))` returns `"aλ"` (rendered as
-`"a\955"`) and `stringFromList Nil` returns `""`. `stringToList`
+`"a\955"`), `stringFromList (Cons 'a' (Cons '\0' (Cons 'b' Nil)))` round trips
+as `"a\NULb"` through native rendering, and `stringFromList Nil` returns `""`.
+`stringToList`
 is the first `String` to `List Char` conversion operation; the current
 native-capable tracer preserves Unicode scalar order, so `stringToList "aλ"`
-returns `Cons 'a' (Cons '\955' Nil)` and `stringToList ""` returns `Nil`.
+returns `Cons 'a' (Cons '\955' Nil)`, `stringToList "a\0b"` preserves the
+embedded U+0000 cell, and `stringToList ""` returns `Nil`.
 `stringDrop`
 is the first drop slicing operation; the current native-capable tracer drops a
 non-negative count of
 Unicode scalar values, so `stringDrop "λab" 1` returns `"ab"` and
-`stringDrop "aλb" 2` returns `"b"`. `stringTake` is the first take slicing
+`stringDrop "aλb" 2` returns `"b"`. Negative counts behave like zero and
+overlarge counts produce the empty suffix. `stringTake` is the first take slicing
 operation; the current native-capable tracer keeps a non-negative count of
 Unicode scalar values, so `stringTake "λab" 1` returns `"λ"` and
-`stringTake "aλb" 2` returns `"aλ"`. `stringSlice` is the first range slicing
+`stringTake "aλb" 2` returns `"aλ"`. Negative counts produce `""` and
+overlarge counts keep the available suffix. `stringSlice` is the first range slicing
 operation; the current native-capable tracer drops a non-negative scalar start
 offset and then keeps a non-negative scalar count, so
 `stringSlice "aλbc" 1 2` returns `"λb"` and
-`stringSlice "λabc" 1 2` returns `"ab"`. `stringCharAt` is the first
+`stringSlice "λabc" 1 2` returns `"ab"`. Negative starts clamp to zero,
+negative counts produce `""`, and overlarge ranges keep the available suffix.
+`stringCharAt` is the first
 in-range cursor/index `String` operation; the current native-capable tracer
 indexes Unicode scalar positions, so `stringCharAt "aλb" 1` returns `'λ'` and
 `stringCharAt "λab" 2` returns `'b'`. `stringCharAtOption` is the first safe
@@ -621,12 +654,22 @@ ASCII scalar values `0x20..0x7e`, so `charIsAsciiPrintable ' '`,
 `charIsAsciiPrintable '!'`, `charIsAsciiPrintable 'A'`,
 `charIsAsciiPrintable '7'`, and `charIsAsciiPrintable '~'` are `true` while
 `charIsAsciiPrintable '\t'`, `charIsAsciiPrintable '\n'`, and
-`charIsAsciiPrintable 'λ'` are `false`. These operations are covered through
+`charIsAsciiPrintable 'λ'` are `false`. `charIsAsciiHexDigit` classifies only
+ASCII decimal digits and `a..f`/`A..F`. `charIsAsciiLineBreak` classifies only
+line feed and carriage return. `charIsAsciiControl` classifies only ASCII
+control values `0x00..0x1f` and `0x7f`. `charToAsciiLower` and
+`charToAsciiUpper` convert only ASCII letters and leave non-ASCII scalars
+unchanged. `stringToAsciiLower` and `stringToAsciiUpper` apply those ASCII-only
+case conversions across each Unicode scalar in the string and leave non-ASCII
+scalars unchanged. These operations are covered through
 source checking, `run-program`,
 backend LLVM emission, object generation, and linked native execution for the
 current native-capable tracers. General String/List Char collection-library
-completion, formatting, full slicing coverage, broader classification families, complete
-cursor APIs, locale, regex, and full parser parity remain out of scope.
+completion beyond the listed operations, formatting/interpolation,
+locale-sensitive or Unicode-default case behavior, Unicode normalization,
+Unicode collation, regex, parser combinators, parser parity, platform
+contracts, driver/proof work, generic collection libraries, ABI, and linker
+policy remain out of scope.
 
 Pure program entrypoints remain accepted:
 
@@ -887,10 +930,16 @@ ASCII digit `7`, ASCII space, and a non-ASCII Unicode scalar are false.
 The next explicit ASCII helper is `charIsAsciiPrintable`, with native coverage
 for exactly ASCII scalar values `0x20..0x7e`: space, `!`, `A`, `7`, and `~`
 are true while tab, newline, and a non-ASCII Unicode scalar are false.
+The rev-004 completion also covers ASCII hex-digit, ASCII line-break, ASCII
+control, ASCII-only `Char` case conversion, and ASCII-only `String` case
+conversion helpers through the same source/interpreter/backend/object/native
+path, plus `stringJoin`, `stringSplitChar`, and bytewise `stringCompare`.
 General formatting, interpolation, printf-style format strings, locale-aware
-formatting, full slicing coverage, broader classification families, complete
-cursor APIs, broader String/List Char collection APIs, and parser-parity
-helpers remain outside this contract.
+formatting, locale-sensitive or Unicode-default case behavior, Unicode
+normalization, Unicode collation, generic String/List collection APIs beyond the
+listed operations, parser-combinator helpers, parser parity, platform
+contracts, driver/proof work, ABI, and linker policy remain outside this
+contract.
 If the runner cannot recover an ADT shape, it falls back to the existing xMLF
 term pretty-printer instead of exposing a second runtime.
 

@@ -151,6 +151,8 @@ renderLLVMExpression resultTy expression =
       "shl " ++ renderLLVMType resultTy ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
     LLVMAdd left right ->
       "add " ++ renderLLVMType resultTy ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
+    LLVMSub left right ->
+      "sub " ++ renderLLVMType resultTy ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
     LLVMICmpEq left right ->
       "icmp eq " ++ renderLLVMType (operandLLVMType left) ++ " " ++ renderLLVMOperand left ++ ", " ++ renderLLVMOperand right
     LLVMICmpUgt left right ->

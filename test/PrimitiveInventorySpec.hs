@@ -50,10 +50,14 @@ spec = describe "MLF.Primitive.Inventory" $ do
           PrimitiveInventory.stringIndexOfCharPrimitiveName,
           PrimitiveInventory.stringIndexOfPrimitiveName,
           PrimitiveInventory.stringSplitPrimitiveName,
+          PrimitiveInventory.stringJoinPrimitiveName,
+          PrimitiveInventory.stringSplitCharPrimitiveName,
+          PrimitiveInventory.stringComparePrimitiveName,
           PrimitiveInventory.stringFromCharPrimitiveName,
           PrimitiveInventory.stringFromIntPrimitiveName,
           PrimitiveInventory.stringFromBoolPrimitiveName,
           PrimitiveInventory.stringFromNatPrimitiveName,
+          PrimitiveInventory.stringFromListPrimitiveName,
           PrimitiveInventory.stringToListPrimitiveName,
           PrimitiveInventory.stringDropPrimitiveName,
           PrimitiveInventory.stringTakePrimitiveName,
@@ -69,7 +73,14 @@ spec = describe "MLF.Primitive.Inventory" $ do
           PrimitiveInventory.charIsAsciiIdentifierContinuePrimitiveName,
           PrimitiveInventory.charIsAsciiWhitespacePrimitiveName,
           PrimitiveInventory.charIsAsciiPunctuationPrimitiveName,
-          PrimitiveInventory.charIsAsciiPrintablePrimitiveName
+          PrimitiveInventory.charIsAsciiPrintablePrimitiveName,
+          PrimitiveInventory.charIsAsciiHexDigitPrimitiveName,
+          PrimitiveInventory.charIsAsciiLineBreakPrimitiveName,
+          PrimitiveInventory.charIsAsciiControlPrimitiveName,
+          PrimitiveInventory.charToAsciiLowerPrimitiveName,
+          PrimitiveInventory.charToAsciiUpperPrimitiveName,
+          PrimitiveInventory.stringToAsciiLowerPrimitiveName,
+          PrimitiveInventory.stringToAsciiUpperPrimitiveName
         ]
         <> PrimitiveInventory.nativeIOPrimitiveNames
     PrimitiveInventory.nativeLowerablePrimitiveNames
@@ -107,6 +118,12 @@ spec = describe "MLF.Primitive.Inventory" $ do
           name `shouldBe` PrimitiveInventory.stringIndexOfPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringSplit ->
           name `shouldBe` PrimitiveInventory.stringSplitPrimitiveName
+        PrimitiveInventory.PrimitiveNativeStringJoin ->
+          name `shouldBe` PrimitiveInventory.stringJoinPrimitiveName
+        PrimitiveInventory.PrimitiveNativeStringSplitChar ->
+          name `shouldBe` PrimitiveInventory.stringSplitCharPrimitiveName
+        PrimitiveInventory.PrimitiveNativeStringCompare ->
+          name `shouldBe` PrimitiveInventory.stringComparePrimitiveName
         PrimitiveInventory.PrimitiveNativeStringFromChar ->
           name `shouldBe` PrimitiveInventory.stringFromCharPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringFromInt ->
@@ -115,6 +132,8 @@ spec = describe "MLF.Primitive.Inventory" $ do
           name `shouldBe` PrimitiveInventory.stringFromBoolPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringFromNat ->
           name `shouldBe` PrimitiveInventory.stringFromNatPrimitiveName
+        PrimitiveInventory.PrimitiveNativeStringFromList ->
+          name `shouldBe` PrimitiveInventory.stringFromListPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringToList ->
           name `shouldBe` PrimitiveInventory.stringToListPrimitiveName
         PrimitiveInventory.PrimitiveNativeStringDrop ->
@@ -147,6 +166,20 @@ spec = describe "MLF.Primitive.Inventory" $ do
           name `shouldBe` PrimitiveInventory.charIsAsciiPunctuationPrimitiveName
         PrimitiveInventory.PrimitiveNativeCharIsAsciiPrintable ->
           name `shouldBe` PrimitiveInventory.charIsAsciiPrintablePrimitiveName
+        PrimitiveInventory.PrimitiveNativeCharIsAsciiHexDigit ->
+          name `shouldBe` PrimitiveInventory.charIsAsciiHexDigitPrimitiveName
+        PrimitiveInventory.PrimitiveNativeCharIsAsciiLineBreak ->
+          name `shouldBe` PrimitiveInventory.charIsAsciiLineBreakPrimitiveName
+        PrimitiveInventory.PrimitiveNativeCharIsAsciiControl ->
+          name `shouldBe` PrimitiveInventory.charIsAsciiControlPrimitiveName
+        PrimitiveInventory.PrimitiveNativeCharToAsciiLower ->
+          name `shouldBe` PrimitiveInventory.charToAsciiLowerPrimitiveName
+        PrimitiveInventory.PrimitiveNativeCharToAsciiUpper ->
+          name `shouldBe` PrimitiveInventory.charToAsciiUpperPrimitiveName
+        PrimitiveInventory.PrimitiveNativeStringToAsciiLower ->
+          name `shouldBe` PrimitiveInventory.stringToAsciiLowerPrimitiveName
+        PrimitiveInventory.PrimitiveNativeStringToAsciiUpper ->
+          name `shouldBe` PrimitiveInventory.stringToAsciiUpperPrimitiveName
         PrimitiveInventory.PrimitiveNativeIO operation ->
           name `shouldBe` PrimitiveInventory.nativeIOPrimitiveName operation
 

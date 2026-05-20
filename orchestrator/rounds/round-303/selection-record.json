@@ -1,0 +1,16 @@
+{
+  "schema_version": "selection-record-v1",
+  "round_id": "round-303",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-3",
+  "direction_id": "direction-3a-broad-string-char-substrate",
+  "extracted_item_id": "item-302-broad-string-library-completion",
+  "summary": "Complete the rev-004 native-capable Broad String Library matrix as one integrated whole-library round, adding the remaining public helpers and proving carried string behavior, boundary semantics, String/List Char round trips, grouped search/split/replace edges, ASCII classification/case helpers, stringCompare, and exact native string metadata across interpreter and native paths.",
+  "scheduler": {
+    "depends_on_round_ids": [],
+    "merge_after_item_ids": [],
+    "parallel_group": null
+  }
+}

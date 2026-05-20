@@ -34,10 +34,14 @@ module MLF.Primitive.Inventory
     stringIndexOfCharPrimitiveName,
     stringIndexOfPrimitiveName,
     stringSplitPrimitiveName,
+    stringJoinPrimitiveName,
+    stringSplitCharPrimitiveName,
+    stringComparePrimitiveName,
     stringFromCharPrimitiveName,
     stringFromIntPrimitiveName,
     stringFromBoolPrimitiveName,
     stringFromNatPrimitiveName,
+    stringFromListPrimitiveName,
     stringToListPrimitiveName,
     stringDropPrimitiveName,
     stringTakePrimitiveName,
@@ -54,6 +58,13 @@ module MLF.Primitive.Inventory
     charIsAsciiWhitespacePrimitiveName,
     charIsAsciiPunctuationPrimitiveName,
     charIsAsciiPrintablePrimitiveName,
+    charIsAsciiHexDigitPrimitiveName,
+    charIsAsciiLineBreakPrimitiveName,
+    charIsAsciiControlPrimitiveName,
+    charToAsciiLowerPrimitiveName,
+    charToAsciiUpperPrimitiveName,
+    stringToAsciiLowerPrimitiveName,
+    stringToAsciiUpperPrimitiveName,
     nativeIOPrimitiveName,
     nativeIOPrimitiveNames,
     nativeLowerablePrimitiveNames,
@@ -88,6 +99,7 @@ data PrimitiveType
   | PrimitiveTypeBase String
   | PrimitiveTypeCon String (NonEmpty PrimitiveType)
   | PrimitiveTypeForall String PrimitiveType
+  | PrimitiveTypeMu String PrimitiveType
   deriving (Eq, Show)
 
 data PrimitiveIOOperation
@@ -123,10 +135,14 @@ data PrimitiveNativeSupport
   | PrimitiveNativeStringIndexOfChar
   | PrimitiveNativeStringIndexOf
   | PrimitiveNativeStringSplit
+  | PrimitiveNativeStringJoin
+  | PrimitiveNativeStringSplitChar
+  | PrimitiveNativeStringCompare
   | PrimitiveNativeStringFromChar
   | PrimitiveNativeStringFromInt
   | PrimitiveNativeStringFromBool
   | PrimitiveNativeStringFromNat
+  | PrimitiveNativeStringFromList
   | PrimitiveNativeStringToList
   | PrimitiveNativeStringDrop
   | PrimitiveNativeStringTake
@@ -143,6 +159,13 @@ data PrimitiveNativeSupport
   | PrimitiveNativeCharIsAsciiWhitespace
   | PrimitiveNativeCharIsAsciiPunctuation
   | PrimitiveNativeCharIsAsciiPrintable
+  | PrimitiveNativeCharIsAsciiHexDigit
+  | PrimitiveNativeCharIsAsciiLineBreak
+  | PrimitiveNativeCharIsAsciiControl
+  | PrimitiveNativeCharToAsciiLower
+  | PrimitiveNativeCharToAsciiUpper
+  | PrimitiveNativeStringToAsciiLower
+  | PrimitiveNativeStringToAsciiUpper
   | PrimitiveNativeIO PrimitiveIOOperation
   deriving (Eq, Ord, Show)
 
@@ -285,6 +308,24 @@ primitiveValueSpecs =
           (stringTy `PrimitiveTypeArrow` (stringTy `PrimitiveTypeArrow` listOf stringTy))
           Set.empty
       ),
+      ( stringJoinPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringJoin
+          (stringTy `PrimitiveTypeArrow` (listOf stringTy `PrimitiveTypeArrow` stringTy))
+          Set.empty
+      ),
+      ( stringSplitCharPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringSplitChar
+          (stringTy `PrimitiveTypeArrow` (charTy `PrimitiveTypeArrow` listOf stringTy))
+          Set.empty
+      ),
+      ( stringComparePrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringCompare
+          (stringTy `PrimitiveTypeArrow` (stringTy `PrimitiveTypeArrow` intTy))
+          Set.empty
+      ),
       ( stringFromCharPrimitiveName,
         primitiveValueSpec
           PrimitiveNativeStringFromChar
@@ -307,6 +348,12 @@ primitiveValueSpecs =
         primitiveValueSpec
           PrimitiveNativeStringFromNat
           (natTy `PrimitiveTypeArrow` stringTy)
+          Set.empty
+      ),
+      ( stringFromListPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringFromList
+          (listCharStructuralTy `PrimitiveTypeArrow` stringTy)
           Set.empty
       ),
       ( stringToListPrimitiveName,
@@ -403,6 +450,48 @@ primitiveValueSpecs =
         primitiveValueSpec
           PrimitiveNativeCharIsAsciiPrintable
           (charTy `PrimitiveTypeArrow` boolTy)
+          Set.empty
+      ),
+      ( charIsAsciiHexDigitPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeCharIsAsciiHexDigit
+          (charTy `PrimitiveTypeArrow` boolTy)
+          Set.empty
+      ),
+      ( charIsAsciiLineBreakPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeCharIsAsciiLineBreak
+          (charTy `PrimitiveTypeArrow` boolTy)
+          Set.empty
+      ),
+      ( charIsAsciiControlPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeCharIsAsciiControl
+          (charTy `PrimitiveTypeArrow` boolTy)
+          Set.empty
+      ),
+      ( charToAsciiLowerPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeCharToAsciiLower
+          (charTy `PrimitiveTypeArrow` charTy)
+          Set.empty
+      ),
+      ( charToAsciiUpperPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeCharToAsciiUpper
+          (charTy `PrimitiveTypeArrow` charTy)
+          Set.empty
+      ),
+      ( stringToAsciiLowerPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringToAsciiLower
+          (stringTy `PrimitiveTypeArrow` stringTy)
+          Set.empty
+      ),
+      ( stringToAsciiUpperPrimitiveName,
+        primitiveValueSpec
+          PrimitiveNativeStringToAsciiUpper
+          (stringTy `PrimitiveTypeArrow` stringTy)
           Set.empty
       ),
       nativeIOSpec
@@ -511,6 +600,17 @@ primitiveValueSpecs =
     natTy = PrimitiveTypeBase "Nat"
     stringTy = PrimitiveTypeBase "String"
     unitTy = PrimitiveTypeBase "Unit"
+    listCharStructuralTy =
+      PrimitiveTypeMu
+        "$List_self"
+        ( PrimitiveTypeForall
+            "$List_result"
+            ( PrimitiveTypeVar "$List_result"
+                `PrimitiveTypeArrow` ( (charTy `PrimitiveTypeArrow` (PrimitiveTypeVar "$List_self" `PrimitiveTypeArrow` PrimitiveTypeVar "$List_result"))
+                                         `PrimitiveTypeArrow` PrimitiveTypeVar "$List_result"
+                                     )
+            )
+        )
     ioOf ty = PrimitiveTypeCon "IO" (ty :| [])
     ioRefOf ty = PrimitiveTypeCon "IORef" (ty :| [])
     listOf ty = PrimitiveTypeCon "List" (ty :| [])
@@ -609,6 +709,18 @@ stringSplitPrimitiveName :: String
 stringSplitPrimitiveName =
   "__string_split"
 
+stringJoinPrimitiveName :: String
+stringJoinPrimitiveName =
+  "__string_join"
+
+stringSplitCharPrimitiveName :: String
+stringSplitCharPrimitiveName =
+  "__string_split_char"
+
+stringComparePrimitiveName :: String
+stringComparePrimitiveName =
+  "__string_compare"
+
 stringFromCharPrimitiveName :: String
 stringFromCharPrimitiveName =
   "__string_from_char"
@@ -624,6 +736,10 @@ stringFromBoolPrimitiveName =
 stringFromNatPrimitiveName :: String
 stringFromNatPrimitiveName =
   "__string_from_nat"
+
+stringFromListPrimitiveName :: String
+stringFromListPrimitiveName =
+  "__string_from_list"
 
 stringToListPrimitiveName :: String
 stringToListPrimitiveName =
@@ -689,6 +805,34 @@ charIsAsciiPrintablePrimitiveName :: String
 charIsAsciiPrintablePrimitiveName =
   "__char_is_ascii_printable"
 
+charIsAsciiHexDigitPrimitiveName :: String
+charIsAsciiHexDigitPrimitiveName =
+  "__char_is_ascii_hex_digit"
+
+charIsAsciiLineBreakPrimitiveName :: String
+charIsAsciiLineBreakPrimitiveName =
+  "__char_is_ascii_line_break"
+
+charIsAsciiControlPrimitiveName :: String
+charIsAsciiControlPrimitiveName =
+  "__char_is_ascii_control"
+
+charToAsciiLowerPrimitiveName :: String
+charToAsciiLowerPrimitiveName =
+  "__char_to_ascii_lower"
+
+charToAsciiUpperPrimitiveName :: String
+charToAsciiUpperPrimitiveName =
+  "__char_to_ascii_upper"
+
+stringToAsciiLowerPrimitiveName :: String
+stringToAsciiLowerPrimitiveName =
+  "__string_to_ascii_lower"
+
+stringToAsciiUpperPrimitiveName :: String
+stringToAsciiUpperPrimitiveName =
+  "__string_to_ascii_upper"
+
 requireSinglePrimitiveNativeSupport :: PrimitiveNativeSupport -> String
 requireSinglePrimitiveNativeSupport nativeSupport =
   case Set.toList (Map.keysSet (Map.filter ((== nativeSupport) . primitiveValueNativeSupport) primitiveValueSpecs)) of
@@ -725,10 +869,14 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeStringIndexOfChar -> True
     PrimitiveNativeStringIndexOf -> True
     PrimitiveNativeStringSplit -> True
+    PrimitiveNativeStringJoin -> True
+    PrimitiveNativeStringSplitChar -> True
+    PrimitiveNativeStringCompare -> True
     PrimitiveNativeStringFromChar -> True
     PrimitiveNativeStringFromInt -> True
     PrimitiveNativeStringFromBool -> True
     PrimitiveNativeStringFromNat -> True
+    PrimitiveNativeStringFromList -> True
     PrimitiveNativeStringToList -> True
     PrimitiveNativeStringDrop -> True
     PrimitiveNativeStringTake -> True
@@ -745,6 +893,13 @@ isPrimitiveNativeLowerable =
     PrimitiveNativeCharIsAsciiWhitespace -> True
     PrimitiveNativeCharIsAsciiPunctuation -> True
     PrimitiveNativeCharIsAsciiPrintable -> True
+    PrimitiveNativeCharIsAsciiHexDigit -> True
+    PrimitiveNativeCharIsAsciiLineBreak -> True
+    PrimitiveNativeCharIsAsciiControl -> True
+    PrimitiveNativeCharToAsciiLower -> True
+    PrimitiveNativeCharToAsciiUpper -> True
+    PrimitiveNativeStringToAsciiLower -> True
+    PrimitiveNativeStringToAsciiUpper -> True
     PrimitiveNativeIO {} -> True
 
 primitiveTypeToSourceType :: PrimitiveType -> SrcType
@@ -758,6 +913,8 @@ primitiveTypeToSourceType =
       STCon name (fmap primitiveTypeToSourceType args)
     PrimitiveTypeForall name body ->
       STForall name Nothing (primitiveTypeToSourceType body)
+    PrimitiveTypeMu name body ->
+      STMu name (primitiveTypeToSourceType body)
 
 primitiveTypeToElabType :: PrimitiveType -> ElabType
 primitiveTypeToElabType =
@@ -770,6 +927,8 @@ primitiveTypeToElabType =
       TCon (BaseTy name) (fmap primitiveTypeToElabType args)
     PrimitiveTypeForall name body ->
       TForall name Nothing (primitiveTypeToElabType body)
+    PrimitiveTypeMu name body ->
+      TMu name (primitiveTypeToElabType body)
 
 canonicalizeBuiltinSourceType :: SrcType -> SrcType
 canonicalizeBuiltinSourceType =

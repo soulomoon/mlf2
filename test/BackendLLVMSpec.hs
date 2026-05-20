@@ -1099,6 +1099,312 @@ spec = describe "MLF.Backend.LLVM" $ do
             runLLVMNativeExecutable nativeOutput
               `shouldReturn` expectedNativeResult
 
+    it "broad string library exposes the rev-004 public API through native execution" $
+      forM_
+        [ ( nativePreludeMain "List(..), stringJoin" "String" "stringJoin \",\" (Cons \"a\" (Cons \"b\" Nil))",
+            "\"a,b\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringSplitChar" "List String" "stringSplitChar \"aλb\" 'λ'",
+            "Cons \"a\" (Cons \"b\" Nil)\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringCompare" "Int" "stringCompare \"a\" \"b\"",
+            "-1\n",
+            "define i64 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charIsAsciiHexDigit" "Bool" "charIsAsciiHexDigit 'f'",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charIsAsciiLineBreak" "Bool" "charIsAsciiLineBreak '\\n'",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charIsAsciiControl" "Bool" "charIsAsciiControl '\\t'",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charToAsciiLower" "Char" "charToAsciiLower 'A'",
+            "'a'\n",
+            "define i32 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charToAsciiUpper" "Char" "charToAsciiUpper 'z'",
+            "'Z'\n",
+            "define i32 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringToAsciiLower" "String" "stringToAsciiLower \"AλZ!\"",
+            "\"a\\955z!\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringToAsciiUpper" "String" "stringToAsciiUpper \"aλz!\"",
+            "\"A\\955Z!\"\n",
+            "define ptr @\"Main__main\"()"
+          )
+        ]
+        $ \(programText, expectedOutput, backendSignature) ->
+          assertNativeProgramBehavior programText expectedOutput backendSignature
+
+    it "broad string library fixes slicing and cursor boundary behavior through native execution" $
+      forM_
+        [ ( nativePreludeMain "stringDrop" "String" "stringDrop \"abc\" (-1)",
+            "\"abc\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringTake" "String" "stringTake \"abc\" (-1)",
+            "\"\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringTake" "String" "stringTake \"abc\" 0",
+            "\"\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringDrop" "String" "stringDrop \"abc\" 3",
+            "\"\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringDrop" "String" "stringDrop \"abc\" 99",
+            "\"\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringTake" "String" "stringTake \"λab\" 99",
+            "\"\\955ab\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringSlice" "String" "stringSlice \"abc\" (-1) 2",
+            "\"ab\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringSlice" "String" "stringSlice \"abc\" 1 0",
+            "\"\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringSlice" "String" "stringSlice \"abc\" 9 2",
+            "\"\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringSlice" "String" "stringSlice \"aλbc\" 1 2",
+            "\"\\955b\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "Option(..), stringCharAtOption" "Option Char" "stringCharAtOption \"abc\" (-1)",
+            "None\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "Option(..), stringCharAtOption" "Option Char" "stringCharAtOption \"abc\" 3",
+            "None\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "Option(..), stringCharAtOption" "Option Char" "stringCharAtOption \"\" 0",
+            "None\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "Option(..), stringCharAtOption" "Option Char" "stringCharAtOption \"aλb\" 1",
+            "Some '\\955'\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringLength, stringTake" "Int" "stringLength (stringTake \"a\\0b\" 3)",
+            "3\n",
+            "define i64 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringLength, stringDrop" "Int" "stringLength (stringDrop \"a\\0b\" 1)",
+            "2\n",
+            "define i64 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringLength, stringSlice" "Int" "stringLength (stringSlice \"a\\0b\" 1 2)",
+            "2\n",
+            "define i64 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "Option(..), stringCharAtOption, charIsAsciiControl" "Bool" "case stringCharAtOption \"a\\0b\" 1 of { None -> false; Some ch -> charIsAsciiControl ch }",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          )
+        ]
+        $ \(programText, expectedOutput, backendSignature) ->
+          assertNativeProgramBehavior programText expectedOutput backendSignature
+
+    it "broad string library covers search split replace and join edges through native execution" $
+      forM_
+        [ ( nativePreludeMain "List(..), stringJoin" "String" "stringJoin \",\" Nil",
+            "\"\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringJoin" "String" "stringJoin \",\" (Cons \"\" (Cons \"b\" (Cons \"\" Nil)))",
+            "\",b,\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringSplit" "List String" "stringSplit \"λaλ\" \"λ\"",
+            "Cons \"\" (Cons \"a\" (Cons \"\" Nil))\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringSplitChar" "List String" "stringSplitChar \"a::b:\" ':'",
+            "Cons \"a\" (Cons \"\" (Cons \"b\" (Cons \"\" Nil)))\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringReplace" "String" "stringReplace \"aaaa\" \"aa\" \"b\"",
+            "\"bb\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringReplace" "String" "stringReplace \"abc\" \"\" \"x\"",
+            "\"abc\"\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringContainsChar" "Bool" "stringContainsChar \"a\\0b\" 'b'",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringContains" "Bool" "stringContains \"a\\0b\" \"b\"",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "Option(..), stringIndexOfChar" "Option Int" "stringIndexOfChar \"a\\0b\" 'b'",
+            "Some 2\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "Option(..), stringIndexOf" "Option Int" "stringIndexOf \"a\\0bc\" \"bc\"",
+            "Some 2\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringSplit" "List String" "stringSplit \"a\\0b\\0c\" \"\\0\"",
+            "Cons \"a\" (Cons \"b\" (Cons \"c\" Nil))\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringSplitChar" "List String" "stringSplitChar \"a\\0b\\0c\" '\\0'",
+            "Cons \"a\" (Cons \"b\" (Cons \"c\" Nil))\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringEquals, stringReplace" "Bool" "stringEquals (stringReplace \"a\\0b\" \"\\0\" \"x\") \"axb\"",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringEquals, stringReplaceChar" "Bool" "stringEquals (stringReplaceChar \"a\\0b\" '\\0' 'x') \"axb\"",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringEquals, stringJoin" "Bool" "stringEquals (stringJoin \"\\0\" (Cons \"a\" (Cons \"b\" Nil))) \"a\\0b\"",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          )
+        ]
+        $ \(programText, expectedOutput, backendSignature) ->
+          assertNativeProgramBehavior programText expectedOutput backendSignature
+
+    it "broad string library covers ASCII classification case and scalar compare through native execution" $
+      forM_
+        [ ( nativePreludeMain "charIsAsciiHexDigit" "Bool" "charIsAsciiHexDigit 'F'",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charIsAsciiHexDigit" "Bool" "charIsAsciiHexDigit 'g'",
+            "false\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charIsAsciiHexDigit" "Bool" "charIsAsciiHexDigit 'λ'",
+            "false\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charIsAsciiLineBreak" "Bool" "charIsAsciiLineBreak '\\r'",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charIsAsciiLineBreak" "Bool" "charIsAsciiLineBreak '\\t'",
+            "false\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charIsAsciiControl" "Bool" "charIsAsciiControl '\\0'",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charIsAsciiControl" "Bool" "charIsAsciiControl ' '",
+            "false\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charToAsciiLower" "Char" "charToAsciiLower '!'",
+            "'!'\n",
+            "define i32 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charToAsciiLower" "Char" "charToAsciiLower 'λ'",
+            "'\\955'\n",
+            "define i32 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charToAsciiUpper" "Char" "charToAsciiUpper '!'",
+            "'!'\n",
+            "define i32 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "charToAsciiUpper" "Char" "charToAsciiUpper 'λ'",
+            "'\\955'\n",
+            "define i32 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringEquals, stringToAsciiLower" "Bool" "stringEquals (stringToAsciiLower \"A\\0Zλ!\") \"a\\0zλ!\"",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringEquals, stringToAsciiUpper" "Bool" "stringEquals (stringToAsciiUpper \"a\\0zλ!\") \"A\\0Zλ!\"",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringCompare" "Int" "stringCompare \"a\" \"a\"",
+            "0\n",
+            "define i64 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringCompare" "Int" "stringCompare \"a\" \"aa\"",
+            "-1\n",
+            "define i64 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringCompare" "Int" "stringCompare \"b\" \"a\"",
+            "1\n",
+            "define i64 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringCompare" "Int" "stringCompare \"λ\" \"z\"",
+            "1\n",
+            "define i64 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringCompare" "Int" "stringCompare \"\\0b\" \"\\0c\"",
+            "-1\n",
+            "define i64 @\"Main__main\"()"
+          )
+        ]
+        $ \(programText, expectedOutput, backendSignature) ->
+          assertNativeProgramBehavior programText expectedOutput backendSignature
+
+    it "broad string library preserves String List Char round trips and exact native metadata" $
+      forM_
+        [ ( nativePreludeMain "List(..), stringEquals, stringFromList, stringToList" "Bool" "stringEquals (stringFromList (stringToList \"\")) \"\"",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringEquals, stringFromList, stringToList" "Bool" "stringEquals (stringFromList (stringToList \"abc\")) \"abc\"",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringEquals, stringFromList, stringToList" "Bool" "stringEquals (stringFromList (stringToList \"aλ\")) \"aλ\"",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringEquals, stringFromList, stringToList" "Bool" "stringEquals (stringFromList (stringToList \"a\\0b\")) \"a\\0b\"",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringFromList, stringToList" "List Char" "stringToList (stringFromList Nil)",
+            "Nil\n",
+            "define ptr @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringLength, stringFromList" "Int" "stringLength (stringFromList (Cons 'a' (Cons '\\0' (Cons 'b' Nil))))",
+            "3\n",
+            "define i64 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "List(..), stringEquals, stringFromList" "Bool" "stringEquals (stringFromList (Cons 'a' (Cons '\\0' (Cons 'b' Nil)))) \"a\\0b\"",
+            "true\n",
+            "define i1 @\"Main__main\"()"
+          ),
+          ( nativePreludeMain "stringTake" "String" "stringTake \"a\\0b\" 3",
+            "\"a\\NULb\"\n",
+            "define ptr @\"Main__main\"()"
+          )
+        ]
+        $ \(programText, expectedOutput, backendSignature) ->
+          assertNativeProgramBehavior programText expectedOutput backendSignature
+
     it "Char literal source checks, runs, emits backend, and executes natively" $
       withTempProgram nativeCharLiteralSourceProgram $ \path -> do
         checkProgramFile path `shouldReturn` Right "OK\n"
@@ -2568,6 +2874,24 @@ assertNativeProgram programText expectedValue = do
   runLLVMNativeExecutable output
     `shouldReturn` NativeRunResult ExitSuccess (expectedValue ++ "\n") ""
 
+assertNativeProgramBehavior :: String -> String -> String -> Expectation
+assertNativeProgramBehavior programText expectedOutput backendSignature =
+  withTempProgram programText $ \path -> do
+    checkProgramFile path `shouldReturn` Right "OK\n"
+    runProgramFile path `shouldReturn` Right expectedOutput
+
+    backendOutput <- requireRight =<< emitBackendFile path
+    backendOutput `shouldSatisfy` isInfixOf backendSignature
+    validateLLVMAssembly backendOutput
+    validateLLVMObjectCode backendOutput
+
+    nativeOutput <- requireRight =<< emitNativeFile path
+    nativeOutput `shouldSatisfy` isInfixOf "define i32 @\"main\"()"
+    validateLLVMAssembly nativeOutput
+    validateLLVMObjectCode nativeOutput
+    runLLVMNativeExecutable nativeOutput
+      `shouldReturn` NativeRunResult ExitSuccess expectedOutput ""
+
 emitNativeSource :: String -> IO (Either String String)
 emitNativeSource programText =
   withTempProgram programText emitNativeFile
@@ -2583,6 +2907,15 @@ renderProgramMatrixSourceLLVM source =
       requireRight =<< withTempProgram programText emitBackendFile
     ProgramFile path ->
       requireRight =<< emitBackendFile path
+
+nativePreludeMain :: String -> String -> String -> String
+nativePreludeMain imports resultType expression =
+  unlines
+    [ "module Main export (main) {",
+      "  import Prelude exposing (" ++ imports ++ ");",
+      "  def main : " ++ resultType ++ " = " ++ expression ++ ";",
+      "}"
+    ]
 
 simpleFunctionProgram :: String
 simpleFunctionProgram =

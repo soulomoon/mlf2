@@ -1576,3 +1576,5 @@ primitiveTypeToBackendType =
       BTCon (BaseTy name) (fmap primitiveTypeToBackendType args)
     PrimitiveInventory.PrimitiveTypeForall name body ->
       BTForall name Nothing (primitiveTypeToBackendType body)
+    PrimitiveInventory.PrimitiveTypeMu name body ->
+      BTMu name (primitiveTypeToBackendType body)

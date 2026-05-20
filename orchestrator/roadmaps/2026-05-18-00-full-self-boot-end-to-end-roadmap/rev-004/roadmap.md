@@ -274,7 +274,7 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
 - Extraction notes: start from representative public fixtures and expand after
   harness validation is solid.
 
-### [in-progress] 3. Native-Capable Broad Text Substrate
+### [done] 3. Native-Capable Broad Text Substrate
 
 - Milestone id: `milestone-3`
 - Depends on: `milestone-2`
@@ -301,6 +301,7 @@ selection and handoff; they do not authorize concurrent rounds by themselves.
 
 #### Completion Pointers: milestone-3
 
+- round-303 completed item-302-broad-string-library-completion: rev-004 Broad String Library matrix satisfied across source checking, run-program, backend/object, emit-native/native-object, linked native execution, exact native metadata, carried regressions, full cabal build/test, and thesis gate; milestone 4 may start without additional Prelude-level string requirements.
 - round-265: completed item-265-char-literal-native-tracer: explicit Unicode
   scalar Char literal support through check, run, backend LLVM, object
   validation, emit-native, and linked native execution for

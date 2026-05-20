@@ -21,6 +21,10 @@ spec = describe "MLF.Backend.StructuralRecursiveData" $ do
     metadataLightStructuralDataMatches (BaseTy "Other.T") [] "$T_self" nullaryStructuralBody
       `shouldBe` False
 
+  it "matches metadata-light recursive payload parameters without counting self fields" $
+    metadataLightStructuralDataMatches (BaseTy "List") [intTy] "$List_self" (listStructuralBody intTy)
+      `shouldBe` True
+
   it "matches recursive payloads with a self-cycle guard and returns focused field evidence" $ do
     let structuralTy = structuralListTy intTy
         substitution = Map.fromList [("a", intTy)]

@@ -333,6 +333,9 @@ data RuntimePrimitive
   | RuntimeStringIndexOfChar
   | RuntimeStringIndexOf
   | RuntimeStringSplit
+  | RuntimeStringJoin
+  | RuntimeStringSplitChar
+  | RuntimeStringCompare
   | RuntimeStringFromChar
   | RuntimeStringFromInt
   | RuntimeStringFromBool
@@ -354,6 +357,13 @@ data RuntimePrimitive
   | RuntimeCharIsAsciiWhitespace
   | RuntimeCharIsAsciiPunctuation
   | RuntimeCharIsAsciiPrintable
+  | RuntimeCharIsAsciiHexDigit
+  | RuntimeCharIsAsciiLineBreak
+  | RuntimeCharIsAsciiControl
+  | RuntimeCharToAsciiLower
+  | RuntimeCharToAsciiUpper
+  | RuntimeStringToAsciiLower
+  | RuntimeStringToAsciiUpper
   deriving (Eq, Show)
 
 data RuntimeIOAction
@@ -538,10 +548,14 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.stringIndexOfCharPrimitiveName -> Just RuntimeStringIndexOfChar
       | name' == PrimitiveInventory.stringIndexOfPrimitiveName -> Just RuntimeStringIndexOf
       | name' == PrimitiveInventory.stringSplitPrimitiveName -> Just RuntimeStringSplit
+      | name' == PrimitiveInventory.stringJoinPrimitiveName -> Just RuntimeStringJoin
+      | name' == PrimitiveInventory.stringSplitCharPrimitiveName -> Just RuntimeStringSplitChar
+      | name' == PrimitiveInventory.stringComparePrimitiveName -> Just RuntimeStringCompare
       | name' == PrimitiveInventory.stringFromCharPrimitiveName -> Just RuntimeStringFromChar
       | name' == PrimitiveInventory.stringFromIntPrimitiveName -> Just RuntimeStringFromInt
       | name' == PrimitiveInventory.stringFromBoolPrimitiveName -> Just RuntimeStringFromBool
       | name' == PrimitiveInventory.stringFromNatPrimitiveName -> Just RuntimeStringFromNat
+      | name' == PrimitiveInventory.stringFromListPrimitiveName -> Just RuntimePreludeStringFromList
       | name' == PrimitiveInventory.stringToListPrimitiveName -> Just RuntimeStringToList
       | name' == PrimitiveInventory.stringDropPrimitiveName -> Just RuntimeStringDrop
       | name' == PrimitiveInventory.stringTakePrimitiveName -> Just RuntimeStringTake
@@ -558,6 +572,13 @@ runtimePrimitive name =
       | name' == PrimitiveInventory.charIsAsciiWhitespacePrimitiveName -> Just RuntimeCharIsAsciiWhitespace
       | name' == PrimitiveInventory.charIsAsciiPunctuationPrimitiveName -> Just RuntimeCharIsAsciiPunctuation
       | name' == PrimitiveInventory.charIsAsciiPrintablePrimitiveName -> Just RuntimeCharIsAsciiPrintable
+      | name' == PrimitiveInventory.charIsAsciiHexDigitPrimitiveName -> Just RuntimeCharIsAsciiHexDigit
+      | name' == PrimitiveInventory.charIsAsciiLineBreakPrimitiveName -> Just RuntimeCharIsAsciiLineBreak
+      | name' == PrimitiveInventory.charIsAsciiControlPrimitiveName -> Just RuntimeCharIsAsciiControl
+      | name' == PrimitiveInventory.charToAsciiLowerPrimitiveName -> Just RuntimeCharToAsciiLower
+      | name' == PrimitiveInventory.charToAsciiUpperPrimitiveName -> Just RuntimeCharToAsciiUpper
+      | name' == PrimitiveInventory.stringToAsciiLowerPrimitiveName -> Just RuntimeStringToAsciiLower
+      | name' == PrimitiveInventory.stringToAsciiUpperPrimitiveName -> Just RuntimeStringToAsciiUpper
     _ -> Nothing
 
 runtimeConstructorValue :: RuntimeContext -> RuntimeConstructorSpec -> [RuntimeValue] -> Either ProgramError RuntimeValue
@@ -1303,6 +1324,18 @@ applyRuntimePrimitive context prim args
           runtimeStringSplit context haystack delimiter
         (RuntimeStringSplit, _) ->
           Left (ProgramPipelineError "run-program __string_split expected String arguments")
+        (RuntimeStringJoin, [RuntimeLit (LString separator), values]) ->
+          RuntimeLit . LString . intercalate separator <$> runtimeStringListToStrings values
+        (RuntimeStringJoin, _) ->
+          Left (ProgramPipelineError "run-program __string_join expected String and List String arguments")
+        (RuntimeStringSplitChar, [RuntimeLit (LString haystack), RuntimeLit (LChar delimiter)]) ->
+          runtimeStringSplit context haystack [delimiter]
+        (RuntimeStringSplitChar, _) ->
+          Left (ProgramPipelineError "run-program __string_split_char expected String and Char arguments")
+        (RuntimeStringCompare, [RuntimeLit (LString left), RuntimeLit (LString right)]) ->
+          Right (RuntimeLit (LInt (orderingToInt (compare left right))))
+        (RuntimeStringCompare, _) ->
+          Left (ProgramPipelineError "run-program __string_compare expected String arguments")
         (RuntimeStringFromChar, [RuntimeLit (LChar value)]) ->
           Right (RuntimeLit (LString [value]))
         (RuntimeStringFromChar, _) ->
@@ -1389,6 +1422,34 @@ applyRuntimePrimitive context prim args
           Right (RuntimeLit (LBool (isAsciiPrintable value)))
         (RuntimeCharIsAsciiPrintable, _) ->
           Left (ProgramPipelineError "run-program __char_is_ascii_printable expected a Char argument")
+        (RuntimeCharIsAsciiHexDigit, [RuntimeLit (LChar value)]) ->
+          Right (RuntimeLit (LBool (isAsciiHexDigit value)))
+        (RuntimeCharIsAsciiHexDigit, _) ->
+          Left (ProgramPipelineError "run-program __char_is_ascii_hex_digit expected a Char argument")
+        (RuntimeCharIsAsciiLineBreak, [RuntimeLit (LChar value)]) ->
+          Right (RuntimeLit (LBool (isAsciiLineBreak value)))
+        (RuntimeCharIsAsciiLineBreak, _) ->
+          Left (ProgramPipelineError "run-program __char_is_ascii_line_break expected a Char argument")
+        (RuntimeCharIsAsciiControl, [RuntimeLit (LChar value)]) ->
+          Right (RuntimeLit (LBool (isAsciiControl value)))
+        (RuntimeCharIsAsciiControl, _) ->
+          Left (ProgramPipelineError "run-program __char_is_ascii_control expected a Char argument")
+        (RuntimeCharToAsciiLower, [RuntimeLit (LChar value)]) ->
+          Right (RuntimeLit (LChar (toAsciiLower value)))
+        (RuntimeCharToAsciiLower, _) ->
+          Left (ProgramPipelineError "run-program __char_to_ascii_lower expected a Char argument")
+        (RuntimeCharToAsciiUpper, [RuntimeLit (LChar value)]) ->
+          Right (RuntimeLit (LChar (toAsciiUpper value)))
+        (RuntimeCharToAsciiUpper, _) ->
+          Left (ProgramPipelineError "run-program __char_to_ascii_upper expected a Char argument")
+        (RuntimeStringToAsciiLower, [RuntimeLit (LString value)]) ->
+          Right (RuntimeLit (LString (map toAsciiLower value)))
+        (RuntimeStringToAsciiLower, _) ->
+          Left (ProgramPipelineError "run-program __string_to_ascii_lower expected a String argument")
+        (RuntimeStringToAsciiUpper, [RuntimeLit (LString value)]) ->
+          Right (RuntimeLit (LString (map toAsciiUpper value)))
+        (RuntimeStringToAsciiUpper, _) ->
+          Left (ProgramPipelineError "run-program __string_to_ascii_upper expected a String argument")
         _ ->
           Left (ProgramPipelineError ("run-program malformed IO primitive call: " ++ show prim))
 
@@ -1512,6 +1573,18 @@ runtimeListCharToString =
           | isPreludeListConstructor "Cons" ctor -> go (char : chars) rest
         _ -> Left (ProgramPipelineError "run-program stringFromList expected a List Char argument")
 
+runtimeStringListToStrings :: RuntimeValue -> Either ProgramError [String]
+runtimeStringListToStrings =
+  fmap reverse . go []
+  where
+    go strings value =
+      case value of
+        RuntimeData ctor _ []
+          | isPreludeListConstructor "Nil" ctor -> Right strings
+        RuntimeData ctor _ [RuntimeLit (LString string), rest]
+          | isPreludeListConstructor "Cons" ctor -> go (string : strings) rest
+        _ -> Left (ProgramPipelineError "run-program __string_join expected a List String argument")
+
 runtimeNatToInteger :: RuntimeValue -> Either ProgramError Integer
 runtimeNatToInteger =
   go 0
@@ -1598,6 +1671,37 @@ isAsciiPrintable :: Char -> Bool
 isAsciiPrintable value =
   value >= ' ' && value <= '~'
 
+isAsciiHexDigit :: Char -> Bool
+isAsciiHexDigit value =
+  isAsciiDecimalDigit value
+    || (value >= 'a' && value <= 'f')
+    || (value >= 'A' && value <= 'F')
+
+isAsciiLineBreak :: Char -> Bool
+isAsciiLineBreak value =
+  value == '\n' || value == '\r'
+
+isAsciiControl :: Char -> Bool
+isAsciiControl value =
+  value < ' ' || value == '\DEL'
+
+toAsciiLower :: Char -> Char
+toAsciiLower value
+  | isAsciiUpper value = toEnum (fromEnum value + 32)
+  | otherwise = value
+
+toAsciiUpper :: Char -> Char
+toAsciiUpper value
+  | isAsciiLower value = toEnum (fromEnum value - 32)
+  | otherwise = value
+
+orderingToInt :: Ordering -> Integer
+orderingToInt ordering =
+  case ordering of
+    LT -> -1
+    EQ -> 0
+    GT -> 1
+
 dropUnicodeScalars :: Integer -> String -> String
 dropUnicodeScalars count value
   | count <= 0 = value
@@ -1664,6 +1768,9 @@ runtimePrimitiveArity prim =
     RuntimeStringIndexOfChar -> 2
     RuntimeStringIndexOf -> 2
     RuntimeStringSplit -> 2
+    RuntimeStringJoin -> 2
+    RuntimeStringSplitChar -> 2
+    RuntimeStringCompare -> 2
     RuntimeStringFromChar -> 1
     RuntimeStringFromInt -> 1
     RuntimeStringFromBool -> 1
@@ -1685,6 +1792,13 @@ runtimePrimitiveArity prim =
     RuntimeCharIsAsciiWhitespace -> 1
     RuntimeCharIsAsciiPunctuation -> 1
     RuntimeCharIsAsciiPrintable -> 1
+    RuntimeCharIsAsciiHexDigit -> 1
+    RuntimeCharIsAsciiLineBreak -> 1
+    RuntimeCharIsAsciiControl -> 1
+    RuntimeCharToAsciiLower -> 1
+    RuntimeCharToAsciiUpper -> 1
+    RuntimeStringToAsciiLower -> 1
+    RuntimeStringToAsciiUpper -> 1
 
 executeIOAction :: RuntimeContext -> RuntimeIOAction -> Either ProgramError (String, RuntimeValue)
 executeIOAction context action =
@@ -1865,10 +1979,14 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.stringIndexOfCharPrimitiveName,
     PrimitiveInventory.stringIndexOfPrimitiveName,
     PrimitiveInventory.stringSplitPrimitiveName,
+    PrimitiveInventory.stringJoinPrimitiveName,
+    PrimitiveInventory.stringSplitCharPrimitiveName,
+    PrimitiveInventory.stringComparePrimitiveName,
     PrimitiveInventory.stringFromCharPrimitiveName,
     PrimitiveInventory.stringFromIntPrimitiveName,
     PrimitiveInventory.stringFromBoolPrimitiveName,
     PrimitiveInventory.stringFromNatPrimitiveName,
+    PrimitiveInventory.stringFromListPrimitiveName,
     PrimitiveInventory.stringToListPrimitiveName,
     PrimitiveInventory.stringDropPrimitiveName,
     PrimitiveInventory.stringTakePrimitiveName,
@@ -1884,7 +2002,14 @@ runtimePurePrimitiveNames =
     PrimitiveInventory.charIsAsciiIdentifierContinuePrimitiveName,
     PrimitiveInventory.charIsAsciiWhitespacePrimitiveName,
     PrimitiveInventory.charIsAsciiPunctuationPrimitiveName,
-    PrimitiveInventory.charIsAsciiPrintablePrimitiveName
+    PrimitiveInventory.charIsAsciiPrintablePrimitiveName,
+    PrimitiveInventory.charIsAsciiHexDigitPrimitiveName,
+    PrimitiveInventory.charIsAsciiLineBreakPrimitiveName,
+    PrimitiveInventory.charIsAsciiControlPrimitiveName,
+    PrimitiveInventory.charToAsciiLowerPrimitiveName,
+    PrimitiveInventory.charToAsciiUpperPrimitiveName,
+    PrimitiveInventory.stringToAsciiLowerPrimitiveName,
+    PrimitiveInventory.stringToAsciiUpperPrimitiveName
   ]
 
 normalizeProgramTerm :: ElabTerm -> ElabTerm

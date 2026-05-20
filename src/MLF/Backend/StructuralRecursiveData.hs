@@ -162,7 +162,7 @@ matchStructuralDataLight (BaseTy dataName) args muName body = do
     case structuralBackendHandlerFields body of
       Just fields -> Right fields
       Nothing -> Left (StructuralRecursiveDataPayloadUnavailable muName)
-  let payloadTypes = concat payloadFields
+  let payloadTypes = filter (not . alphaEqBackendType (BTVar muName)) (concat payloadFields)
       matches
         | null args = null payloadTypes
         | null payloadTypes = all isBareTypeVariable args

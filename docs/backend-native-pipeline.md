@@ -172,6 +172,17 @@ Native emission owns the small process/runtime surface it needs:
   non-overlapping UTF-8 scalar-boundary delimiter matches, preserves
   leading/trailing empty segments, returns a singleton `List String` for
   no-match inputs, and treats an empty delimiter as the same singleton case.
+- `__string_join`: inventory-classified as the native-capable delimiter join
+  operation for `List String`; the native helper preserves empty input,
+  singleton input, empty delimiters, non-empty delimiters, and Unicode scalar
+  segments.
+- `__string_split_char`: inventory-classified as the native-capable
+  single-`Char` delimiter split operation; the native helper splits at matching
+  Unicode scalar `Char` values and preserves leading/trailing empty segments.
+- `__string_compare`: inventory-classified as the native-capable deterministic
+  ordering helper for valid UTF-8 strings; the native helper returns `0`, a
+  negative value, or a positive value for bytewise equality/less-than/greater-
+  than results. Locale and Unicode collation are not part of the helper.
 - `__string_from_char`: inventory-classified as the first native-capable
   `Char` to singleton `String` construction operation; the native helper
   encodes the Unicode scalar as valid UTF-8 and returns a new `String`
@@ -186,6 +197,14 @@ Native emission owns the small process/runtime surface it needs:
   to `String` conversion operation; the native helper walks canonical Prelude
   `Zero`/`Succ` constructor chains and writes a decimal count into a new
   `String` pointer.
+- `__string_from_list`: inventory-classified as the native-capable `List Char`
+  to `String` conversion operation; the native helper walks canonical Prelude
+  `List` cells, encodes Unicode scalar `Char` payloads as valid UTF-8, and
+  records the exact byte length.
+- `__string_to_list`: inventory-classified as the native-capable `String` to
+  `List Char` conversion operation; the native helper scans by registered byte
+  length, decodes valid UTF-8 scalars, and preserves embedded U+0000 as a
+  `Char` cell.
 - `__string_drop`: inventory-classified as the first native-capable drop
   slicing `String` operation; the native helper advances by UTF-8 scalar
   starts for a non-negative count and returns the remaining `String` pointer.
@@ -240,6 +259,22 @@ Native emission owns the small process/runtime surface it needs:
 - `__char_is_ascii_printable`: inventory-classified as an explicit ASCII
   printable `Char` classification operation; the native helper compares the
   Unicode scalar value against exactly ASCII scalar values `0x20..0x7e`.
+- `__char_is_ascii_hex_digit`: inventory-classified as an explicit ASCII
+  hexadecimal digit classification operation; the native helper accepts only
+  `0..9`, `a..f`, and `A..F`.
+- `__char_is_ascii_line_break`: inventory-classified as an explicit ASCII line
+  break classification operation; the native helper accepts only line feed and
+  carriage return.
+- `__char_is_ascii_control`: inventory-classified as an explicit ASCII control
+  classification operation; the native helper accepts only `0x00..0x1f` and
+  `0x7f`.
+- `__char_to_ascii_lower` and `__char_to_ascii_upper`: inventory-classified as
+  ASCII-only `Char` case conversion operations; the native helpers convert
+  only ASCII letters and leave other scalars unchanged.
+- `__string_to_ascii_lower` and `__string_to_ascii_upper`: inventory-
+  classified as ASCII-only `String` case conversion operations; the native
+  helpers apply the matching ASCII `Char` conversion over each Unicode scalar
+  and leave non-ASCII scalars unchanged.
 - Inventory-classified IO primitives such as `__io_pure`, `__io_bind`,
   `__io_putStrLn`, and `__io_getArgs`: emitted as closure-allocating wrapper
   functions with entry-point implementations.
@@ -276,10 +311,9 @@ Supported result shapes are:
   string equality tracer. The current native evidence covers equal non-ASCII,
   unequal-prefix, empty-string, embedded-U+0000 source-literal inequality, and
   `stringAppend`-created embedded-U+0000 inequality examples through native
-  execution. Collation, ordering, `Eq String`, case conversion, Unicode
+  execution. Collation, `Eq String`, Unicode default case conversion, Unicode
   normalization, locale behavior, regex, parser parity, platform contracts,
-  driver work, proof records, and broad exact metadata for every
-  string-producing helper remain out of scope.
+  driver work, and proof records remain out of scope.
 - `stringStartsWith : String -> String -> Bool` is the first native-capable
   prefix String search tracer and compares non-empty Unicode scalar prefix
   examples through native execution.
@@ -315,9 +349,9 @@ Supported result shapes are:
   native-capable substring replacement String tracer and replaces
   non-overlapping Unicode scalar substrings from left to right, preserves
   no-match inputs, and treats the empty needle as a no-op through native
-  execution. Split-family APIs, regex, Unicode normalization, locale behavior,
-  case conversion, interpolation, formatting, parser parity, platform
-  contracts, replacement-family completion beyond this operation, and proof
+  execution. Regex, Unicode normalization, locale behavior,
+  Unicode default case conversion, interpolation, formatting, parser parity,
+  platform contracts, replacement-family completion beyond this operation, and proof
   records remain out of scope.
 - `stringIndexOfChar : String -> Char -> Option Int` is the first
   native-capable first-match String/Char index search tracer and reports
@@ -337,10 +371,18 @@ Supported result shapes are:
   left-to-right at non-overlapping delimiter matches through native execution.
   It preserves leading/trailing empty segments, returns a singleton list for
   no-match inputs, and treats an empty delimiter as the same singleton case.
-  Split-on-character aliases, `lines`/`words`/`trim`/`reverse` APIs, regex,
-  Unicode normalization, locale behavior, case conversion, broader `List
-  String` APIs, parser parity, platform contracts, and proof records remain
-  out of scope.
+  `lines`/`words`/`trim`/`reverse` APIs, regex, Unicode normalization, locale
+  behavior, Unicode default case conversion, parser parity, platform
+  contracts, and proof records remain out of scope.
+- `stringJoin : String -> List String -> String` is the native-capable
+  delimiter join tracer and joins empty, singleton, and multi-segment
+  `List String` values through native execution.
+- `stringSplitChar : String -> Char -> List String` is the native-capable
+  single-`Char` delimiter split tracer and preserves Unicode scalar delimiter
+  behavior plus leading/trailing empty segments through native execution.
+- `stringCompare : String -> String -> Int` is the native-capable deterministic
+  bytewise comparison tracer. Locale collation and Unicode collation remain out
+  of scope.
 - `stringFromChar : Char -> String` is the first native-capable Char to
   singleton String construction tracer and encodes Unicode scalar values
   through native execution while keeping formatting, parser parity, platform
@@ -366,16 +408,17 @@ Supported result shapes are:
   or backend primitive lowerer is added, and general Show support, generic ADT
   rendering, interpolation, printf-style formatting, locale behavior, parser
   parity, platform contracts, and proof records remain out of scope.
-- `stringFromList : List Char -> String` is the first native-capable `List Char`
-  to String conversion tracer. The Prelude definition stays high-level over
-  `List`, `stringFromChar`, and `stringAppend`; linked native execution proves
-  Unicode scalar list construction while formatting, parser parity, platform
-  contracts, and proof records remain out of scope.
+- `stringFromList : List Char -> String` is the native-capable `List Char` to
+  String conversion tracer. The reserved `__string_from_list` primitive walks
+  canonical Prelude `List` cells, preserves Unicode scalar values and embedded
+  U+0000, and records exact native byte-length metadata while formatting,
+  parser parity, platform contracts, and proof records remain out of scope.
 - `stringToList : String -> List Char` is the first native-capable String to
   `List Char` conversion tracer. The reserved `__string_to_list` primitive
-  decodes valid UTF-8 into Unicode scalar `Char` list cells while formatting,
-  broader collection APIs, parser parity, platform contracts, and proof records
-  remain out of scope.
+  scans by registered byte length, decodes valid UTF-8 into Unicode scalar
+  `Char` list cells, and preserves embedded U+0000 while formatting, broader
+  collection APIs, parser parity, platform contracts, and proof records remain
+  out of scope.
 - `charIsDigit : Char -> Bool` is the first native-capable Char
   classification tracer and classifies ASCII decimal digit code points through
   native execution while keeping broader classification families out of scope.
@@ -424,11 +467,23 @@ Supported result shapes are:
   `0x20..0x7e` through native execution while keeping Unicode printability
   categories, locale, regex, formatting, and parser-family completion out of
   scope.
+- `charIsAsciiHexDigit`, `charIsAsciiLineBreak`, and `charIsAsciiControl` are
+  explicit ASCII classification tracers for hexadecimal digits, CR/LF line
+  breaks, and ASCII control values through native execution.
+- `charToAsciiLower` and `charToAsciiUpper` are ASCII-only `Char` case
+  conversion tracers through native execution. Unicode default case conversion
+  remains out of scope.
+- `stringToAsciiLower` and `stringToAsciiUpper` are ASCII-only `String` case
+  conversion tracers through native execution. Unicode normalization, Unicode
+  default case conversion, and locale-sensitive case behavior remain out of
+  scope.
 - `IO Unit` (executes the action closure, does not render the result)
 - first-order ADT values whose fields are recursively native-renderable
 
-The native renderer uses the same value text expected by `run-program`, adds one
-newline, and requires empty stderr plus `ExitSuccess`.
+The native renderer uses the same value text expected by `run-program`, scans
+registered byte lengths for `String` values instead of C-string terminators,
+prints embedded U+0000 as `\NUL`, adds one newline, and requires empty stderr
+plus `ExitSuccess`.
 
 For `IO` mains, the native entrypoint calls the main closure to execute the IO
 action and exits with status 0 without rendering any result value.

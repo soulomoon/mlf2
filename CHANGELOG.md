@@ -3,6 +3,13 @@
 ## Unreleased
 
 ### Added
+- Completed the rev-004 initial native-capable Broad String Library matrix as a
+  unified slice: delimiter join, single-`Char` split, bytewise compare, ASCII
+  hex/line/control classification, ASCII-only `Char`/`String` case conversion,
+  slicing/cursor boundary behavior, carried search/split/replace/append
+  regressions, `String`/`List Char` round trips, and exact embedded-U+0000
+  native metadata now pass through `.mlfp` source checking, `run-program`, raw
+  LLVM emission, object-code validation, and linked native execution.
 - Added source/interpreter/backend/native support for explicit Unicode scalar
   `Char` literals, including the focused `.mlfp` tracer
   `def main : Char = 'λ';` through check, run, LLVM emission, object-code
