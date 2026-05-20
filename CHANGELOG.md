@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Added
+- Added the next bounded canonical parser parity tracer for one
+  `import Prelude exposing (Int);` declaration plus two `Int` value
+  definitions, `def two : Int = 2;` and `def main : Int = two;`. The `.mlfp`
+  package under
+  `test/programs/compiler-parser-parity/value-def-list-int-ref/` owns its
+  source/token/AST/parser modules, prints the committed parser-program
+  projection with two value-definition spans, integer-literal syntax, and
+  value-reference syntax, and records malformed definition-semicolon evidence
+  through the public `run-program` path; this is not full parser parity,
+  checker/backend, compiler-package, driver, platform, proof, or self-boot
+  work.
 - Added the next bounded canonical parser parity tracer for a single
   `import Prelude exposing (Bool);` declaration before the carried Bool
   definition. The `.mlfp` package under

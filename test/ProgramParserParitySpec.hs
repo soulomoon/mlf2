@@ -41,10 +41,25 @@ spec =
             canonicalProjection `shouldBe` expected
             parserParityOutput `shouldBe` Right expected
 
+        it "parser-owned .mlfp parser matches canonical parser for multiple value definitions and value-reference spans" $ do
+            source <- readFile valueDefListCanonicalSourcePath
+            expected <- readFile valueDefListExpectedProjectionPath
+
+            canonicalProjection <- renderCanonicalProjection valueDefListCanonicalSourcePath source
+            parserParityOutput <- runProgramArgs [valueDefListParserParityPackageRoot]
+
+            canonicalProjection `shouldBe` expected
+            parserParityOutput `shouldBe` Right expected
+
         it "parser-owned .mlfp parser rejects malformed import syntax through public run-program" $ do
             evidenceRoot <- writeImportNegativeEvidencePackage
             runProgramArgs [evidenceRoot]
                 `shouldReturn` Right importNegativeEvidenceProjection
+
+        it "parser-owned .mlfp parser rejects malformed value-definition sequencing through public run-program" $ do
+            evidenceRoot <- writeValueDefListNegativeEvidencePackage
+            runProgramArgs [evidenceRoot]
+                `shouldReturn` Right valueDefListNegativeEvidenceProjection
 
         it "parser-owned .mlfp tokenizer and parser reject discrete token mismatches" $ do
             evidenceRoot <- writeRetryEvidencePackage
@@ -59,6 +74,10 @@ importCanonicalSourcePath :: FilePath
 importCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp"
 
+valueDefListCanonicalSourcePath :: FilePath
+valueDefListCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -66,6 +85,10 @@ expectedProjectionPath =
 importExpectedProjectionPath :: FilePath
 importExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/import-exposing-def-bool/expected/parser-program.txt"
+
+valueDefListExpectedProjectionPath :: FilePath
+valueDefListExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/value-def-list-int-ref/expected/parser-program.txt"
 
 parserParityPackageRoot :: FilePath
 parserParityPackageRoot =
@@ -75,6 +98,10 @@ importParserParityPackageRoot :: FilePath
 importParserParityPackageRoot =
     "test/programs/compiler-parser-parity/import-exposing-def-bool"
 
+valueDefListParserParityPackageRoot :: FilePath
+valueDefListParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/value-def-list-int-ref"
+
 retryEvidencePackageRoot :: FilePath
 retryEvidencePackageRoot =
     "dist-newstyle/parser-parity-basic-module-def-bool-retry-evidence"
@@ -82,6 +109,10 @@ retryEvidencePackageRoot =
 importNegativeEvidencePackageRoot :: FilePath
 importNegativeEvidencePackageRoot =
     "dist-newstyle/parser-parity-import-exposing-def-bool-negative-evidence"
+
+valueDefListNegativeEvidencePackageRoot :: FilePath
+valueDefListNegativeEvidencePackageRoot =
+    "dist-newstyle/parser-parity-value-def-list-int-ref-negative-evidence"
 
 parserParitySupportModules :: [FilePath]
 parserParitySupportModules =
@@ -93,6 +124,10 @@ parserParitySupportModules =
 
 importParserParitySupportModules :: [FilePath]
 importParserParitySupportModules =
+    parserParitySupportModules
+
+valueDefListParserParitySupportModules :: [FilePath]
+valueDefListParserParitySupportModules =
     parserParitySupportModules
 
 writeRetryEvidencePackage :: IO FilePath
@@ -121,6 +156,19 @@ writeImportNegativeEvidencePackage = do
             (importParserParityPackageRoot </> name)
             (importNegativeEvidencePackageRoot </> name)
 
+writeValueDefListNegativeEvidencePackage :: IO FilePath
+writeValueDefListNegativeEvidencePackage = do
+    removePathForcibly valueDefListNegativeEvidencePackageRoot
+    createDirectoryIfMissing True valueDefListNegativeEvidencePackageRoot
+    mapM_ copySupportModule valueDefListParserParitySupportModules
+    writeFile (valueDefListNegativeEvidencePackageRoot </> "Main.mlfp") valueDefListNegativeEvidenceMainSource
+    pure valueDefListNegativeEvidencePackageRoot
+  where
+    copySupportModule name =
+        copyFile
+            (valueDefListParserParityPackageRoot </> name)
+            (valueDefListNegativeEvidencePackageRoot </> name)
+
 retryEvidenceMainSource :: String
 retryEvidenceMainSource =
     unlines
@@ -145,6 +193,18 @@ importNegativeEvidenceMainSource =
         , "}"
         ]
 
+valueDefListNegativeEvidenceMainSource :: String
+valueDefListNegativeEvidenceMainSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
+        , "  import ParserParityParser exposing (renderValueDefListParserNegativeEvidence);"
+        , ""
+        , "  def main : IO Unit ="
+        , "    putStrLn renderValueDefListParserNegativeEvidence;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -157,6 +217,12 @@ importNegativeEvidenceProjection :: String
 importNegativeEvidenceProjection =
     unlines
         [ "import parser negative expected-import-semicolon@test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp:2:33-2:34"
+        ]
+
+valueDefListNegativeEvidenceProjection :: String
+valueDefListNegativeEvidenceProjection =
+    unlines
+        [ "value-def-list parser negative expected-def-semicolon@test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp:3:20-3:21"
         ]
 
 renderCanonicalProjection :: FilePath -> String -> IO String
@@ -179,10 +245,9 @@ renderModuleProjection :: P.ProgramSpanIndex -> P.Module -> IO String
 renderModuleProjection spans module0 = do
     exportName <- requireSingleValueExport (P.moduleExports module0)
     renderedImports <- renderImportProjections spans (P.moduleImports module0)
-    def0 <- requireSingleDef (P.moduleDecls module0)
+    renderedDefs <- renderDefProjections spans (P.moduleDecls module0)
     moduleSpan <- requireMapSpan "module" (P.moduleName module0) (P.spanModules spans)
     exportSpan <- requireListSpan "export" exportName (P.spanExportItems spans)
-    defSpan <- requireListSpan "definition" (P.defDeclName def0) (P.spanValues spans)
 
     pure $
         unlines
@@ -190,15 +255,7 @@ renderModuleProjection spans module0 = do
               , "export value " ++ exportName ++ " span=" ++ renderSpan exportSpan
               ]
                 ++ renderedImports
-                ++ [ "def "
-                ++ P.defDeclName def0
-                ++ " type="
-                ++ renderSrcType (P.constrainedBody (P.defDeclType def0))
-                ++ " expr="
-                ++ renderExpr (P.defDeclExpr def0)
-                ++ " span="
-                ++ renderSpan defSpan
-                   ]
+                ++ renderedDefs
             )
 
 renderImportProjections :: P.ProgramSpanIndex -> [P.Import] -> IO [String]
@@ -248,12 +305,26 @@ requireSingleValueExport exports =
             expectationFailure ("expected one value export, got: " ++ show other)
                 >> fail "unexpected export shape"
 
-requireSingleDef :: [P.Decl] -> IO P.DefDecl
-requireSingleDef decls =
-    case decls of
-        [P.DeclDef def0] -> pure def0
+renderDefProjections :: P.ProgramSpanIndex -> [P.Decl] -> IO [String]
+renderDefProjections spans decls =
+    traverse (renderDefProjection spans) decls
+
+renderDefProjection :: P.ProgramSpanIndex -> P.Decl -> IO String
+renderDefProjection spans decl =
+    case decl of
+        P.DeclDef def0 -> do
+            defSpan <- requireListSpan "definition" (P.defDeclName def0) (P.spanValues spans)
+            pure $
+                "def "
+                    ++ P.defDeclName def0
+                    ++ " type="
+                    ++ renderSrcType (P.constrainedBody (P.defDeclType def0))
+                    ++ " expr="
+                    ++ renderExpr (P.defDeclExpr def0)
+                    ++ " span="
+                    ++ renderSpan defSpan
         other ->
-            expectationFailure ("expected one def declaration, got: " ++ show other)
+            expectationFailure ("expected def declaration, got: " ++ show other)
                 >> fail "unexpected declaration shape"
 
 requireMapSpan :: String -> String -> Map.Map String P.SourceSpan -> IO P.SourceSpan
@@ -284,6 +355,8 @@ renderSrcType ty =
 renderExpr :: P.Expr -> String
 renderExpr expr =
     case expr of
+        P.EVar name -> name
+        P.ELit (LInt value) -> show value
         P.ELit (LBool True) -> "true"
         P.ELit (LBool False) -> "false"
         other -> show other

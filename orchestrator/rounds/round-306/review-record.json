@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-306",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-306-parser-parity-value-definition-list-spans",
+  "decision": "approved",
+  "evidence_summary": "Generated target is clean; diff hygiene, the MLF.Program parser parity group with 6 examples, and the direct value-definition-list package smoke passed after the generated-only retry. Prior full Cabal and thesis gates remain applicable because the retry restored only generated depfile churn.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-306 completed item-306-parser-parity-value-definition-list-spans: parser-owned `.mlfp` modules emit canonical value-definition-list parser projection with `Int` literal and value-reference spans plus malformed sequencing evidence; reviewer recheck passed generated hygiene, the parser parity group, and direct package smoke."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

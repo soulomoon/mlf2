@@ -1,0 +1,5 @@
+module Main export (main) {
+  import Prelude exposing (Int);
+  def two : Int = 2;
+  def main : Int = two;
+}

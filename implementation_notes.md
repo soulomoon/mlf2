@@ -1,3 +1,25 @@
+## 2026-05-20 - Round 306 parser parity value-definition-list tracer
+
+- Added a bounded parser-owned `.mlfp` parity package for
+  `import Prelude exposing (Int);`, `def two : Int = 2;`, and
+  `def main : Int = two;` under
+  `test/programs/compiler-parser-parity/value-def-list-int-ref/`.
+- Added the matching canonical parser fixture and committed projection under
+  `test/conformance/mlfp/parser-parity/value-def-list-int-ref/`, including
+  spans for the module, export, import, `Int` exposing item, two value
+  definitions, integer literal `2`, and lower-case reference `two`.
+- Extended `ProgramParserParitySpec` only inside test-owned projection and
+  package evidence helpers: it now renders value-definition lists and the two
+  selected expression atoms, and checks malformed value-definition sequencing
+  through the public `run-program` path.
+- Scope remains parser-only. This does not claim full parser parity, checker,
+  backend, driver, platform, compiler-package, proof, or self-boot progress.
+- Evidence: focused RED/GREEN value-definition-list matcher, focused
+  RED/GREEN negative sequencing matcher, full parser-parity group, direct
+  package smokes for the new tracer plus round-304/round-305 tracers,
+  `git diff --check`, `cabal build all && cabal test`, and
+  `./scripts/thesis-conformance-gate.sh`.
+
 ## 2026-05-18 - Unicode string literal native tracer
 
 - Added a public `.mlfp` tracer for `def main : String = "λ";` that checks,

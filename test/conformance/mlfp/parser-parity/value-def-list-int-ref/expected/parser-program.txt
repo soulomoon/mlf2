@@ -1,0 +1,6 @@
+module Main span=test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp:1:1-6:1
+export value main span=test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp:1:21-1:25
+import Prelude span=test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp:2:10-2:18
+import exposing type Int span=test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp:2:28-2:31
+def two type=Int expr=2 span=test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp:3:3-4:3
+def main type=Int expr=two span=test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp:4:3-5:1
