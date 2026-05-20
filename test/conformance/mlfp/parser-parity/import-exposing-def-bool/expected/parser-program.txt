@@ -1,0 +1,5 @@
+module Main span=test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp:1:1-5:1
+export value main span=test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp:1:21-1:25
+import Prelude span=test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp:2:10-2:18
+import exposing type Bool span=test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp:2:28-2:32
+def main type=Bool expr=true span=test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp:3:3-4:1

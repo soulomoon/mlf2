@@ -1,0 +1,186 @@
+module ParserParityParser export (ParserDiagnosticKind(..), ParserDiagnostic(..), ParserResult(..), parseImportModuleDefinition, renderParserParityEvidence, renderImportParserNegativeEvidence) {
+  import Prelude exposing (stringAppend);
+  import ParserParityAst exposing (ParsedProgram(..), ParsedModule(..), ParsedExport(..), ParsedImport(..), ParsedDef(..), ParsedType(..), ParsedExpr(..), renderParsedProgram);
+  import ParserParitySource exposing (SourceSpan, importModuleSourceFile, importModuleSourceText, moduleSpan, moduleKeywordSpan, moduleNameSpan, exportKeywordSpan, exportLeftParenSpan, exportMainSpan, exportRightParenSpan, moduleLeftBraceSpan, importKeywordSpan, importModuleSpan, exposingKeywordSpan, importLeftParenSpan, importBoolSpan, importRightParenSpan, importSemicolonSpan, defKeywordSpan, defNameSpan, defColonSpan, boolTypeSpan, defEqualsSpan, boolLiteralSpan, defSemicolonSpan, moduleRightBraceSpan, defMainSpan, renderSpan);
+  import ParserParityToken exposing (ModuleKeywordToken(..), ModuleNameToken(..), ExportKeywordToken(..), ExportLeftParenToken(..), ExportMainToken(..), ExportRightParenToken(..), ModuleLeftBraceToken(..), ImportKeywordToken(..), ImportModuleToken(..), ExposingKeywordToken(..), ImportLeftParenToken(..), ImportBoolToken(..), ImportRightParenToken(..), ImportSemicolonToken(..), DefKeywordToken(..), DefNameToken(..), DefColonToken(..), BoolTypeToken(..), EqualsToken(..), BoolLiteralToken(..), DefSemicolonToken(..), ModuleRightBraceToken(..), HeaderPrefixTokens(..), HeaderSuffixTokens(..), ImportDeclTokens(..), DefPrefixTokens(..), DefSuffixTokens(..), TokenStream(..), LexerResult(..), LexerDiagnostic(..), tokenizeImportModuleDefinition);
+
+  data ParserDiagnosticKind =
+      ExpectedImportModule : ParserDiagnosticKind
+    | ExpectedImportSemicolon : ParserDiagnosticKind
+    | ExpectedEquals : ParserDiagnosticKind;
+
+  data ParserDiagnostic =
+      ParserDiagnostic : SourceSpan -> ParserDiagnosticKind -> ParserDiagnostic;
+
+  data ParserResult =
+      ParserOk : ParsedProgram -> ParserResult
+    | ParserError : ParserDiagnostic -> ParserResult;
+
+  data ParserStep =
+      ParserStepOk : ParserStep
+    | ParserStepError : ParserDiagnostic -> ParserStep;
+
+  def parseImportModuleDefinition : String -> ParserResult =
+    λ(source : String) case tokenizeImportModuleDefinition source of {
+      LexerOk tokens -> parseTokens tokens;
+      LexerError diagnostic -> case diagnostic of {
+        LexerDiagnostic span _ -> ParserError (ParserDiagnostic span ExpectedImportModule)
+      }
+    };
+
+  def parseTokens : TokenStream -> ParserResult =
+    λ(tokens : TokenStream) case tokens of {
+      TokenStream headerPrefix headerSuffix importDecl defPrefix defSuffix finalToken ->
+        case parseHeaderPrefix headerPrefix of {
+          ParserStepOk -> case parseHeaderSuffix headerSuffix of {
+            ParserStepOk -> case parseImportDecl importDecl of {
+              ParserStepOk -> case parseDefPrefix defPrefix of {
+                ParserStepOk -> case parseDefSuffix defSuffix of {
+                  ParserStepOk -> parseFinalToken finalToken;
+                  ParserStepError err -> ParserError err
+                };
+                ParserStepError err -> ParserError err
+              };
+              ParserStepError err -> ParserError err
+            };
+            ParserStepError err -> ParserError err
+          };
+          ParserStepError err -> ParserError err
+        }
+    };
+
+  def parseHeaderPrefix : HeaderPrefixTokens -> ParserStep =
+    λ(tokens : HeaderPrefixTokens) case tokens of {
+      HeaderPrefixTokens moduleToken moduleNameToken exportToken ->
+        case moduleToken of {
+          ModuleKeywordTok _ -> case moduleNameToken of {
+            ModuleNameTok _ -> case exportToken of {
+              ExportKeywordTok _ -> ParserStepOk
+            }
+          }
+        }
+    };
+
+  def parseHeaderSuffix : HeaderSuffixTokens -> ParserStep =
+    λ(tokens : HeaderSuffixTokens) case tokens of {
+      HeaderSuffixTokens leftParenToken exportMainToken rightParenToken leftBraceToken ->
+        case leftParenToken of {
+          ExportLeftParenTok _ -> case exportMainToken of {
+            ExportMainTok _ -> case rightParenToken of {
+              ExportRightParenTok _ -> case leftBraceToken of {
+                ModuleLeftBraceTok _ -> ParserStepOk
+              }
+            }
+          }
+        }
+    };
+
+  def parseImportDecl : ImportDeclTokens -> ParserStep =
+    λ(tokens : ImportDeclTokens) case tokens of {
+      ImportDeclTokens importToken moduleToken exposingToken leftParenToken boolToken rightParenToken semicolonToken ->
+        case importToken of {
+          ImportKeywordTok _ -> case moduleToken of {
+            ImportModuleTok _ -> case exposingToken of {
+              ExposingKeywordTok _ -> case leftParenToken of {
+                ImportLeftParenTok _ -> case boolToken of {
+                  ImportBoolTok _ -> case rightParenToken of {
+                    ImportRightParenTok _ -> case semicolonToken of {
+                      ImportSemicolonTok _ -> ParserStepOk;
+                      MissingImportSemicolonSlot span -> ParserStepError (ParserDiagnostic span ExpectedImportSemicolon)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+    };
+
+  def parseDefPrefix : DefPrefixTokens -> ParserStep =
+    λ(tokens : DefPrefixTokens) case tokens of {
+      DefPrefixTokens defToken defNameToken colonToken boolToken ->
+        case defToken of {
+          DefKeywordTok _ -> case defNameToken of {
+            DefNameTok _ -> case colonToken of {
+              DefColonTok _ -> case boolToken of {
+                BoolTypeTok _ -> ParserStepOk
+              }
+            }
+          }
+        }
+    };
+
+  def parseDefSuffix : DefSuffixTokens -> ParserStep =
+    λ(tokens : DefSuffixTokens) case tokens of {
+      DefSuffixTokens equalsToken boolLiteralToken semicolonToken ->
+        case equalsToken of {
+          EqualsTok _ -> case boolLiteralToken of {
+            BoolLiteralTok _ -> case semicolonToken of {
+              DefSemicolonTok _ -> ParserStepOk
+            }
+          };
+          UnexpectedTrueInEqualsSlot span -> ParserStepError (ParserDiagnostic span ExpectedEquals)
+        }
+    };
+
+  def parseFinalToken : ModuleRightBraceToken -> ParserResult =
+    λ(token : ModuleRightBraceToken) case token of {
+      ModuleRightBraceTok _ -> parsedImportModule
+    };
+
+  def parsedImportModule : ParserResult =
+    ParserOk
+      (ParsedProgram
+        (ParsedModule "Main" moduleSpan
+          (ParsedExportValue "main" exportMainSpan)
+          (ParsedImport "Prelude" importModuleSpan (ParsedExportType "Bool" importBoolSpan))
+          (ParsedDef "main" ParsedTypeBool ParsedExprTrue defMainSpan)));
+
+  def parserMissingImportSemicolonTokens : TokenStream =
+    TokenStream
+      (HeaderPrefixTokens
+        (ModuleKeywordTok moduleKeywordSpan)
+        (ModuleNameTok moduleNameSpan)
+        (ExportKeywordTok exportKeywordSpan))
+      (HeaderSuffixTokens
+        (ExportLeftParenTok exportLeftParenSpan)
+        (ExportMainTok exportMainSpan)
+        (ExportRightParenTok exportRightParenSpan)
+        (ModuleLeftBraceTok moduleLeftBraceSpan))
+      (ImportDeclTokens
+        (ImportKeywordTok importKeywordSpan)
+        (ImportModuleTok importModuleSpan)
+        (ExposingKeywordTok exposingKeywordSpan)
+        (ImportLeftParenTok importLeftParenSpan)
+        (ImportBoolTok importBoolSpan)
+        (ImportRightParenTok importRightParenSpan)
+        (MissingImportSemicolonSlot importSemicolonSpan))
+      (DefPrefixTokens
+        (DefKeywordTok defKeywordSpan)
+        (DefNameTok defNameSpan)
+        (DefColonTok defColonSpan)
+        (BoolTypeTok boolTypeSpan))
+      (DefSuffixTokens
+        (EqualsTok defEqualsSpan)
+        (BoolLiteralTok boolLiteralSpan)
+        (DefSemicolonTok defSemicolonSpan))
+      (ModuleRightBraceTok moduleRightBraceSpan);
+
+  def renderParserParityEvidence : String =
+    case parseImportModuleDefinition importModuleSourceText of {
+      ParserOk program -> renderParsedProgram importModuleSourceFile program;
+      ParserError _ -> "parser-error"
+    };
+
+  def renderImportParserNegativeEvidence : String =
+    case parseTokens parserMissingImportSemicolonTokens of {
+      ParserOk _ -> "import parser negative mismatch";
+      ParserError diagnostic -> case diagnostic of {
+        ParserDiagnostic span kind -> case kind of {
+          ExpectedImportSemicolon -> stringAppend "import parser negative expected-import-semicolon@" (renderSpan importModuleSourceFile span);
+          ExpectedImportModule -> "import parser negative mismatch";
+          ExpectedEquals -> "import parser negative mismatch"
+        }
+      }
+    };
+}

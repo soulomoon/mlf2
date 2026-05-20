@@ -1,0 +1,98 @@
+module ParserParitySource export (SourceSpan(..), SourceCursor(..), importModuleSourceFile, importModuleSourceText, lexerMismatchSourceText, moduleSpan, moduleKeywordSpan, moduleNameSpan, exportKeywordSpan, exportLeftParenSpan, exportMainSpan, exportRightParenSpan, moduleLeftBraceSpan, importKeywordSpan, importModuleSpan, exposingKeywordSpan, importLeftParenSpan, importBoolSpan, importRightParenSpan, importSemicolonSpan, defKeywordSpan, defNameSpan, defColonSpan, boolTypeSpan, defEqualsSpan, boolLiteralSpan, defSemicolonSpan, moduleRightBraceSpan, defMainSpan, unexpectedSpan, renderSpan) {
+  import Prelude exposing (stringAppend);
+
+  data SourceSpan =
+      SourceSpan : String -> SourceSpan;
+
+  data SourceCursor =
+      SourceCursor : String -> SourceCursor;
+
+  def importModuleSourceFile : String =
+    "test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp";
+
+  def importModuleSourceText : String =
+    "module Main export (main) {\n  import Prelude exposing (Bool);\n  def main : Bool = true;\n}\n";
+
+  def lexerMismatchSourceText : String =
+    "module Main export (main) {\n  imxort Prelude exposing (Bool);\n  def main : Bool = true;\n}\n";
+
+  def moduleSpan : SourceSpan =
+    SourceSpan "1:1-5:1";
+
+  def moduleKeywordSpan : SourceSpan =
+    SourceSpan "1:1-1:7";
+
+  def moduleNameSpan : SourceSpan =
+    SourceSpan "1:8-1:12";
+
+  def exportKeywordSpan : SourceSpan =
+    SourceSpan "1:13-1:19";
+
+  def exportLeftParenSpan : SourceSpan =
+    SourceSpan "1:20-1:21";
+
+  def exportMainSpan : SourceSpan =
+    SourceSpan "1:21-1:25";
+
+  def exportRightParenSpan : SourceSpan =
+    SourceSpan "1:25-1:26";
+
+  def moduleLeftBraceSpan : SourceSpan =
+    SourceSpan "1:27-1:28";
+
+  def importKeywordSpan : SourceSpan =
+    SourceSpan "2:3-2:9";
+
+  def importModuleSpan : SourceSpan =
+    SourceSpan "2:10-2:18";
+
+  def exposingKeywordSpan : SourceSpan =
+    SourceSpan "2:18-2:26";
+
+  def importLeftParenSpan : SourceSpan =
+    SourceSpan "2:27-2:28";
+
+  def importBoolSpan : SourceSpan =
+    SourceSpan "2:28-2:32";
+
+  def importRightParenSpan : SourceSpan =
+    SourceSpan "2:32-2:33";
+
+  def importSemicolonSpan : SourceSpan =
+    SourceSpan "2:33-2:34";
+
+  def defKeywordSpan : SourceSpan =
+    SourceSpan "3:3-3:6";
+
+  def defNameSpan : SourceSpan =
+    SourceSpan "3:7-3:11";
+
+  def defColonSpan : SourceSpan =
+    SourceSpan "3:12-3:13";
+
+  def boolTypeSpan : SourceSpan =
+    SourceSpan "3:14-3:18";
+
+  def defEqualsSpan : SourceSpan =
+    SourceSpan "3:19-3:20";
+
+  def boolLiteralSpan : SourceSpan =
+    SourceSpan "3:21-3:25";
+
+  def defSemicolonSpan : SourceSpan =
+    SourceSpan "3:25-3:26";
+
+  def moduleRightBraceSpan : SourceSpan =
+    SourceSpan "4:1-4:2";
+
+  def defMainSpan : SourceSpan =
+    SourceSpan "3:3-4:1";
+
+  def unexpectedSpan : SourceSpan =
+    SourceSpan "1:1-1:1";
+
+  def renderSpan : String -> SourceSpan -> String =
+    λ(file : String) λ(span : SourceSpan) case span of {
+      SourceSpan coordinates -> stringAppend file (stringAppend ":" coordinates)
+    };
+}

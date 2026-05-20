@@ -3081,3 +3081,11 @@ This repo’s design is primarily informed by:
 - Recursive-ADT repair stayed local to the producer/conversion seams: raw variable bounds are normalized before bound conversion, recursive existential constructor handlers keep ownership of their Church result binder, and constructor result naming remains canonical only where it is not capture-prone.
 - Final closure cleanup prunes vacuous leading type abstractions from non-recursive xMLF output; the `church-true` and `choose` goldens now record the non-vacuous `forall a. forall b. a -> b -> a` shape.
 - Evidence: fail-fast `mlf2-test` passed with 1582 examples, 0 failures; `MLF.Program execution corpus` passed with 9 examples, 0 failures; `MLF.Program` passed with 34 examples, 0 failures; direct `.mlfp` probes returned `true` for `authoritative-overloaded-method.mlfp` and `1` for `authoritative-case-analysis.mlfp`; final serial gates passed with `cabal test`, `cabal build all`, and `cabal test` again.
+
+## 2026-05-20 — Round 305 parser parity import exposing tracer
+
+- Added the bounded parser-owned `.mlfp` parser parity package `test/programs/compiler-parser-parity/import-exposing-def-bool/` for a single import declaration before `def main : Bool = true;`.
+- Added the canonical projection fixture `test/conformance/mlfp/parser-parity/import-exposing-def-bool/expected/parser-program.txt`, covering module, export, import module, import exposed `Bool`, and carried def source spans.
+- Extended `test/ProgramParserParitySpec.hs` with the public behavior test for import-exposing source-span parity and an import-specific malformed-syntax negative through the public `run-program` path.
+- Scope remains parser-only: no Prelude or production facade widening, and no checker, backend, driver, platform, compiler-package, proof, parser-complete, or self-boot completion claim.
+- Evidence: focused RED/GREEN import parity matcher, focused RED/GREEN import negative matcher, full parser-parity group, direct new and round-304 package smokes, `git diff --check`, `cabal build all && cabal test`, and `./scripts/thesis-conformance-gate.sh`.

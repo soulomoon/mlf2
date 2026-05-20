@@ -1,0 +1,4 @@
+module Main export (main) {
+  import Prelude exposing (Bool);
+  def main : Bool = true;
+}

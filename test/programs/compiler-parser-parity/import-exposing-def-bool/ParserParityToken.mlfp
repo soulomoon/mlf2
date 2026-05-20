@@ -1,0 +1,309 @@
+module ParserParityToken export (ModuleKeywordToken(..), ModuleNameToken(..), ExportKeywordToken(..), ExportLeftParenToken(..), ExportMainToken(..), ExportRightParenToken(..), ModuleLeftBraceToken(..), ImportKeywordToken(..), ImportModuleToken(..), ExposingKeywordToken(..), ImportLeftParenToken(..), ImportBoolToken(..), ImportRightParenToken(..), ImportSemicolonToken(..), DefKeywordToken(..), DefNameToken(..), DefColonToken(..), BoolTypeToken(..), EqualsToken(..), BoolLiteralToken(..), DefSemicolonToken(..), ModuleRightBraceToken(..), HeaderPrefixTokens(..), HeaderSuffixTokens(..), ImportDeclTokens(..), DefPrefixTokens(..), DefSuffixTokens(..), TokenStream(..), LexerDiagnosticKind(..), LexerDiagnostic(..), LexerResult(..), tokenizeImportModuleDefinition, renderTokenPrefixEvidence) {
+  import Prelude exposing (Option(..), stringAppend, stringCharAtOption, stringIndexOf, stringSlice);
+  import ParserParitySource exposing (SourceSpan, SourceCursor(..), importModuleSourceFile, moduleKeywordSpan, moduleNameSpan, exportKeywordSpan, exportLeftParenSpan, exportMainSpan, exportRightParenSpan, moduleLeftBraceSpan, importKeywordSpan, importModuleSpan, exposingKeywordSpan, importLeftParenSpan, importBoolSpan, importRightParenSpan, importSemicolonSpan, defKeywordSpan, defNameSpan, defColonSpan, boolTypeSpan, defEqualsSpan, boolLiteralSpan, defSemicolonSpan, moduleRightBraceSpan, unexpectedSpan, renderSpan);
+
+  data ModuleKeywordToken =
+      ModuleKeywordTok : SourceSpan -> ModuleKeywordToken;
+
+  data ModuleNameToken =
+      ModuleNameTok : SourceSpan -> ModuleNameToken;
+
+  data ExportKeywordToken =
+      ExportKeywordTok : SourceSpan -> ExportKeywordToken;
+
+  data ExportLeftParenToken =
+      ExportLeftParenTok : SourceSpan -> ExportLeftParenToken;
+
+  data ExportMainToken =
+      ExportMainTok : SourceSpan -> ExportMainToken;
+
+  data ExportRightParenToken =
+      ExportRightParenTok : SourceSpan -> ExportRightParenToken;
+
+  data ModuleLeftBraceToken =
+      ModuleLeftBraceTok : SourceSpan -> ModuleLeftBraceToken;
+
+  data ImportKeywordToken =
+      ImportKeywordTok : SourceSpan -> ImportKeywordToken;
+
+  data ImportModuleToken =
+      ImportModuleTok : SourceSpan -> ImportModuleToken;
+
+  data ExposingKeywordToken =
+      ExposingKeywordTok : SourceSpan -> ExposingKeywordToken;
+
+  data ImportLeftParenToken =
+      ImportLeftParenTok : SourceSpan -> ImportLeftParenToken;
+
+  data ImportBoolToken =
+      ImportBoolTok : SourceSpan -> ImportBoolToken;
+
+  data ImportRightParenToken =
+      ImportRightParenTok : SourceSpan -> ImportRightParenToken;
+
+  data ImportSemicolonToken =
+      ImportSemicolonTok : SourceSpan -> ImportSemicolonToken
+    | MissingImportSemicolonSlot : SourceSpan -> ImportSemicolonToken;
+
+  data DefKeywordToken =
+      DefKeywordTok : SourceSpan -> DefKeywordToken;
+
+  data DefNameToken =
+      DefNameTok : SourceSpan -> DefNameToken;
+
+  data DefColonToken =
+      DefColonTok : SourceSpan -> DefColonToken;
+
+  data BoolTypeToken =
+      BoolTypeTok : SourceSpan -> BoolTypeToken;
+
+  data EqualsToken =
+      EqualsTok : SourceSpan -> EqualsToken
+    | UnexpectedTrueInEqualsSlot : SourceSpan -> EqualsToken;
+
+  data BoolLiteralToken =
+      BoolLiteralTok : SourceSpan -> BoolLiteralToken;
+
+  data DefSemicolonToken =
+      DefSemicolonTok : SourceSpan -> DefSemicolonToken;
+
+  data ModuleRightBraceToken =
+      ModuleRightBraceTok : SourceSpan -> ModuleRightBraceToken;
+
+  data HeaderPrefixTokens =
+      HeaderPrefixTokens : ModuleKeywordToken -> ModuleNameToken -> ExportKeywordToken -> HeaderPrefixTokens;
+
+  data HeaderSuffixTokens =
+      HeaderSuffixTokens : ExportLeftParenToken -> ExportMainToken -> ExportRightParenToken -> ModuleLeftBraceToken -> HeaderSuffixTokens;
+
+  data ImportDeclTokens =
+      ImportDeclTokens : ImportKeywordToken -> ImportModuleToken -> ExposingKeywordToken -> ImportLeftParenToken -> ImportBoolToken -> ImportRightParenToken -> ImportSemicolonToken -> ImportDeclTokens;
+
+  data DefPrefixTokens =
+      DefPrefixTokens : DefKeywordToken -> DefNameToken -> DefColonToken -> BoolTypeToken -> DefPrefixTokens;
+
+  data DefSuffixTokens =
+      DefSuffixTokens : EqualsToken -> BoolLiteralToken -> DefSemicolonToken -> DefSuffixTokens;
+
+  data TokenStream =
+      TokenStream : HeaderPrefixTokens -> HeaderSuffixTokens -> ImportDeclTokens -> DefPrefixTokens -> DefSuffixTokens -> ModuleRightBraceToken -> TokenStream;
+
+  data LexerDiagnosticKind =
+      UnexpectedSourceText : LexerDiagnosticKind;
+
+  data LexerDiagnostic =
+      LexerDiagnostic : SourceSpan -> LexerDiagnosticKind -> LexerDiagnostic;
+
+  data LexerResult =
+      LexerOk : TokenStream -> LexerResult
+    | LexerError : LexerDiagnostic -> LexerResult;
+
+  def tokenizeImportModuleDefinition : String -> LexerResult =
+    λ(source : String) tokensFromCursor (SourceCursor source);
+
+  def tokensFromCursor : SourceCursor -> LexerResult =
+    λ(cursor : SourceCursor) case cursor of {
+      SourceCursor source -> lexModule source
+    };
+
+  def lexModule : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 0 6) "module" of {
+      None -> LexerError (LexerDiagnostic moduleKeywordSpan UnexpectedSourceText);
+      Some _ -> lexAfterModule source
+    };
+
+  def lexAfterModule : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 7 4) "Main" of {
+      None -> LexerError (LexerDiagnostic moduleNameSpan UnexpectedSourceText);
+      Some _ -> lexAfterModuleName source
+    };
+
+  def lexAfterModuleName : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 12 6) "export" of {
+      None -> LexerError (LexerDiagnostic exportKeywordSpan UnexpectedSourceText);
+      Some _ -> lexAfterExport source
+    };
+
+  def lexAfterExport : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 19 1) "(" of {
+      None -> LexerError (LexerDiagnostic exportLeftParenSpan UnexpectedSourceText);
+      Some _ -> lexAfterExportLeftParen source
+    };
+
+  def lexAfterExportLeftParen : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 20 4) "main" of {
+      None -> LexerError (LexerDiagnostic exportMainSpan UnexpectedSourceText);
+      Some _ -> lexAfterExportMain source
+    };
+
+  def lexAfterExportMain : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 24 1) ")" of {
+      None -> LexerError (LexerDiagnostic exportRightParenSpan UnexpectedSourceText);
+      Some _ -> lexAfterExportRightParen source
+    };
+
+  def lexAfterExportRightParen : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 26 1) "{" of {
+      None -> LexerError (LexerDiagnostic moduleLeftBraceSpan UnexpectedSourceText);
+      Some _ -> lexAfterModuleLeftBrace source
+    };
+
+  def lexAfterModuleLeftBrace : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 30 6) "import" of {
+      None -> LexerError (LexerDiagnostic importKeywordSpan UnexpectedSourceText);
+      Some _ -> lexAfterImport source
+    };
+
+  def lexAfterImport : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 37 7) "Prelude" of {
+      None -> LexerError (LexerDiagnostic importModuleSpan UnexpectedSourceText);
+      Some _ -> lexAfterImportModule source
+    };
+
+  def lexAfterImportModule : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 45 8) "exposing" of {
+      None -> LexerError (LexerDiagnostic exposingKeywordSpan UnexpectedSourceText);
+      Some _ -> lexAfterExposing source
+    };
+
+  def lexAfterExposing : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 54 1) "(" of {
+      None -> LexerError (LexerDiagnostic importLeftParenSpan UnexpectedSourceText);
+      Some _ -> lexAfterImportLeftParen source
+    };
+
+  def lexAfterImportLeftParen : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 55 4) "Bool" of {
+      None -> LexerError (LexerDiagnostic importBoolSpan UnexpectedSourceText);
+      Some _ -> lexAfterImportBool source
+    };
+
+  def lexAfterImportBool : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 59 1) ")" of {
+      None -> LexerError (LexerDiagnostic importRightParenSpan UnexpectedSourceText);
+      Some _ -> lexAfterImportRightParen source
+    };
+
+  def lexAfterImportRightParen : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 60 1) ";" of {
+      None -> LexerError (LexerDiagnostic importSemicolonSpan UnexpectedSourceText);
+      Some _ -> lexAfterImportSemicolon source
+    };
+
+  def lexAfterImportSemicolon : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 64 3) "def" of {
+      None -> LexerError (LexerDiagnostic defKeywordSpan UnexpectedSourceText);
+      Some _ -> lexAfterDef source
+    };
+
+  def lexAfterDef : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 68 4) "main" of {
+      None -> LexerError (LexerDiagnostic defNameSpan UnexpectedSourceText);
+      Some _ -> lexAfterDefName source
+    };
+
+  def lexAfterDefName : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 73 1) ":" of {
+      None -> LexerError (LexerDiagnostic defColonSpan UnexpectedSourceText);
+      Some _ -> lexAfterColon source
+    };
+
+  def lexAfterColon : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 75 4) "Bool" of {
+      None -> LexerError (LexerDiagnostic boolTypeSpan UnexpectedSourceText);
+      Some _ -> lexAfterBool source
+    };
+
+  def lexAfterBool : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 80 1) "=" of {
+      None -> LexerError (LexerDiagnostic defEqualsSpan UnexpectedSourceText);
+      Some _ -> lexAfterEquals source
+    };
+
+  def lexAfterEquals : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 82 4) "true" of {
+      None -> LexerError (LexerDiagnostic boolLiteralSpan UnexpectedSourceText);
+      Some _ -> lexAfterTrue source
+    };
+
+  def lexAfterTrue : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 86 1) ";" of {
+      None -> LexerError (LexerDiagnostic defSemicolonSpan UnexpectedSourceText);
+      Some _ -> lexAfterSemicolon source
+    };
+
+  def lexAfterSemicolon : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 88 1) "}" of {
+      None -> LexerError (LexerDiagnostic moduleRightBraceSpan UnexpectedSourceText);
+      Some _ -> lexAfterRightBrace source
+    };
+
+  def lexAfterRightBrace : String -> LexerResult =
+    λ(source : String) case stringIndexOf (stringSlice source 89 1) "\n" of {
+      None -> LexerError (LexerDiagnostic unexpectedSpan UnexpectedSourceText);
+      Some _ -> lexEnd source
+    };
+
+  def lexEnd : String -> LexerResult =
+    λ(source : String) case stringCharAtOption source 90 of {
+      None -> LexerOk importModuleTokenStream;
+      Some _ -> LexerError (LexerDiagnostic unexpectedSpan UnexpectedSourceText)
+    };
+
+  def importModuleTokenStream : TokenStream =
+    TokenStream
+      (HeaderPrefixTokens
+        (ModuleKeywordTok moduleKeywordSpan)
+        (ModuleNameTok moduleNameSpan)
+        (ExportKeywordTok exportKeywordSpan))
+      (HeaderSuffixTokens
+        (ExportLeftParenTok exportLeftParenSpan)
+        (ExportMainTok exportMainSpan)
+        (ExportRightParenTok exportRightParenSpan)
+        (ModuleLeftBraceTok moduleLeftBraceSpan))
+      (ImportDeclTokens
+        (ImportKeywordTok importKeywordSpan)
+        (ImportModuleTok importModuleSpan)
+        (ExposingKeywordTok exposingKeywordSpan)
+        (ImportLeftParenTok importLeftParenSpan)
+        (ImportBoolTok importBoolSpan)
+        (ImportRightParenTok importRightParenSpan)
+        (ImportSemicolonTok importSemicolonSpan))
+      (DefPrefixTokens
+        (DefKeywordTok defKeywordSpan)
+        (DefNameTok defNameSpan)
+        (DefColonTok defColonSpan)
+        (BoolTypeTok boolTypeSpan))
+      (DefSuffixTokens
+        (EqualsTok defEqualsSpan)
+        (BoolLiteralTok boolLiteralSpan)
+        (DefSemicolonTok defSemicolonSpan))
+      (ModuleRightBraceTok moduleRightBraceSpan);
+
+  def renderTokenPrefixEvidence : TokenStream -> String =
+    λ(tokens : TokenStream) case tokens of {
+      TokenStream prefix _ _ _ _ _ -> case prefix of {
+        HeaderPrefixTokens moduleToken moduleNameToken exportToken ->
+          stringAppend "tokens module@"
+            (stringAppend (renderModuleKeywordSpan moduleToken)
+              (stringAppend " Main@"
+                (stringAppend (renderModuleNameSpan moduleNameToken)
+                  (stringAppend " export@" (renderExportKeywordSpan exportToken)))))
+      }
+    };
+
+  def renderModuleKeywordSpan : ModuleKeywordToken -> String =
+    λ(token : ModuleKeywordToken) case token of {
+      ModuleKeywordTok span -> renderSpan importModuleSourceFile span
+    };
+
+  def renderModuleNameSpan : ModuleNameToken -> String =
+    λ(token : ModuleNameToken) case token of {
+      ModuleNameTok span -> renderSpan importModuleSourceFile span
+    };
+
+  def renderExportKeywordSpan : ExportKeywordToken -> String =
+    λ(token : ExportKeywordToken) case token of {
+      ExportKeywordTok span -> renderSpan importModuleSourceFile span
+    };
+}

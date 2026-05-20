@@ -42,4 +42,6 @@ round; this tracer does not provide regeneration or blessing tooling.
 bounded canonical-parser parity tracers. These artifacts are compared exactly
 against both the current Haskell canonical parser projection and the matching
 `.mlfp` parser-owned package output. They are not generated or blessed during
-test runs, and they do not imply full `.mlfp` parser parity.
+test runs, and they do not imply full `.mlfp` parser parity. Current bounded
+projection fixtures cover the basic Bool module and one import-exposing Bool
+module.

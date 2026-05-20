@@ -25,11 +25,26 @@ spec =
             source <- readFile canonicalSourcePath
             expected <- readFile expectedProjectionPath
 
-            canonicalProjection <- renderCanonicalProjection source
+            canonicalProjection <- renderCanonicalProjection canonicalSourcePath source
             parserParityOutput <- runProgramArgs [parserParityPackageRoot]
 
             canonicalProjection `shouldBe` expected
             parserParityOutput `shouldBe` Right expected
+
+        it "parser-owned .mlfp parser matches canonical parser for a single import declaration and source spans" $ do
+            source <- readFile importCanonicalSourcePath
+            expected <- readFile importExpectedProjectionPath
+
+            canonicalProjection <- renderCanonicalProjection importCanonicalSourcePath source
+            parserParityOutput <- runProgramArgs [importParserParityPackageRoot]
+
+            canonicalProjection `shouldBe` expected
+            parserParityOutput `shouldBe` Right expected
+
+        it "parser-owned .mlfp parser rejects malformed import syntax through public run-program" $ do
+            evidenceRoot <- writeImportNegativeEvidencePackage
+            runProgramArgs [evidenceRoot]
+                `shouldReturn` Right importNegativeEvidenceProjection
 
         it "parser-owned .mlfp tokenizer and parser reject discrete token mismatches" $ do
             evidenceRoot <- writeRetryEvidencePackage
@@ -40,17 +55,33 @@ canonicalSourcePath :: FilePath
 canonicalSourcePath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp"
 
+importCanonicalSourcePath :: FilePath
+importCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
+
+importExpectedProjectionPath :: FilePath
+importExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/import-exposing-def-bool/expected/parser-program.txt"
 
 parserParityPackageRoot :: FilePath
 parserParityPackageRoot =
     "test/programs/compiler-parser-parity/basic-module-def-bool"
 
+importParserParityPackageRoot :: FilePath
+importParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/import-exposing-def-bool"
+
 retryEvidencePackageRoot :: FilePath
 retryEvidencePackageRoot =
     "dist-newstyle/parser-parity-basic-module-def-bool-retry-evidence"
+
+importNegativeEvidencePackageRoot :: FilePath
+importNegativeEvidencePackageRoot =
+    "dist-newstyle/parser-parity-import-exposing-def-bool-negative-evidence"
 
 parserParitySupportModules :: [FilePath]
 parserParitySupportModules =
@@ -59,6 +90,10 @@ parserParitySupportModules =
     , "ParserParityAst.mlfp"
     , "ParserParityParser.mlfp"
     ]
+
+importParserParitySupportModules :: [FilePath]
+importParserParitySupportModules =
+    parserParitySupportModules
 
 writeRetryEvidencePackage :: IO FilePath
 writeRetryEvidencePackage = do
@@ -73,6 +108,19 @@ writeRetryEvidencePackage = do
             (parserParityPackageRoot </> name)
             (retryEvidencePackageRoot </> name)
 
+writeImportNegativeEvidencePackage :: IO FilePath
+writeImportNegativeEvidencePackage = do
+    removePathForcibly importNegativeEvidencePackageRoot
+    createDirectoryIfMissing True importNegativeEvidencePackageRoot
+    mapM_ copySupportModule importParserParitySupportModules
+    writeFile (importNegativeEvidencePackageRoot </> "Main.mlfp") importNegativeEvidenceMainSource
+    pure importNegativeEvidencePackageRoot
+  where
+    copySupportModule name =
+        copyFile
+            (importParserParityPackageRoot </> name)
+            (importNegativeEvidencePackageRoot </> name)
+
 retryEvidenceMainSource :: String
 retryEvidenceMainSource =
     unlines
@@ -85,6 +133,18 @@ retryEvidenceMainSource =
         , "}"
         ]
 
+importNegativeEvidenceMainSource :: String
+importNegativeEvidenceMainSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
+        , "  import ParserParityParser exposing (renderImportParserNegativeEvidence);"
+        , ""
+        , "  def main : IO Unit ="
+        , "    putStrLn renderImportParserNegativeEvidence;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -93,9 +153,15 @@ retryEvidenceProjection =
         , "parser negative expected-equals@test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp:2:21-2:25"
         ]
 
-renderCanonicalProjection :: String -> IO String
-renderCanonicalProjection source =
-    case parseLocatedProgramWithFile canonicalSourcePath source of
+importNegativeEvidenceProjection :: String
+importNegativeEvidenceProjection =
+    unlines
+        [ "import parser negative expected-import-semicolon@test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp:2:33-2:34"
+        ]
+
+renderCanonicalProjection :: FilePath -> String -> IO String
+renderCanonicalProjection path source =
+    case parseLocatedProgramWithFile path source of
         Left err ->
             expectationFailure (renderProgramParseError err) >> fail "parse failed"
         Right located ->
@@ -112,6 +178,7 @@ renderLocatedProjection located =
 renderModuleProjection :: P.ProgramSpanIndex -> P.Module -> IO String
 renderModuleProjection spans module0 = do
     exportName <- requireSingleValueExport (P.moduleExports module0)
+    renderedImports <- renderImportProjections spans (P.moduleImports module0)
     def0 <- requireSingleDef (P.moduleDecls module0)
     moduleSpan <- requireMapSpan "module" (P.moduleName module0) (P.spanModules spans)
     exportSpan <- requireListSpan "export" exportName (P.spanExportItems spans)
@@ -119,9 +186,11 @@ renderModuleProjection spans module0 = do
 
     pure $
         unlines
-            [ "module " ++ P.moduleName module0 ++ " span=" ++ renderSpan moduleSpan
-            , "export value " ++ exportName ++ " span=" ++ renderSpan exportSpan
-            , "def "
+            ( [ "module " ++ P.moduleName module0 ++ " span=" ++ renderSpan moduleSpan
+              , "export value " ++ exportName ++ " span=" ++ renderSpan exportSpan
+              ]
+                ++ renderedImports
+                ++ [ "def "
                 ++ P.defDeclName def0
                 ++ " type="
                 ++ renderSrcType (P.constrainedBody (P.defDeclType def0))
@@ -129,7 +198,47 @@ renderModuleProjection spans module0 = do
                 ++ renderExpr (P.defDeclExpr def0)
                 ++ " span="
                 ++ renderSpan defSpan
-            ]
+                   ]
+            )
+
+renderImportProjections :: P.ProgramSpanIndex -> [P.Import] -> IO [String]
+renderImportProjections spans imports =
+    case imports of
+        [] -> pure []
+        [import0] -> do
+            importSpan <- requireListSpan "import" (P.importModuleName import0) (P.spanImports spans)
+            exposingItem <- requireSingleImportExposing (P.importExposing import0)
+            exposingSpan <- requireListSpan "import exposing item" (P.exportItemName exposingItem) (P.spanImportItems spans)
+            pure
+                [ "import "
+                    ++ P.importModuleName import0
+                    ++ " span="
+                    ++ renderSpan importSpan
+                , "import exposing "
+                    ++ renderExportKind exposingItem
+                    ++ " "
+                    ++ P.exportItemName exposingItem
+                    ++ " span="
+                    ++ renderSpan exposingSpan
+                ]
+        other ->
+            expectationFailure ("expected zero or one import declaration, got: " ++ show other)
+                >> fail "unexpected import shape"
+
+requireSingleImportExposing :: Maybe [P.ExportItem] -> IO P.ExportItem
+requireSingleImportExposing exposing =
+    case exposing of
+        Just [item] -> pure item
+        other ->
+            expectationFailure ("expected one import exposing item, got: " ++ show other)
+                >> fail "unexpected import exposing shape"
+
+renderExportKind :: P.ExportItem -> String
+renderExportKind item =
+    case item of
+        P.ExportValue _ -> "value"
+        P.ExportType _ -> "type"
+        P.ExportTypeWithConstructors _ -> "type-with-constructors"
 
 requireSingleValueExport :: Maybe [P.ExportItem] -> IO String
 requireSingleValueExport exports =

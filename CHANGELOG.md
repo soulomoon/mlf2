@@ -3,6 +3,15 @@
 ## Unreleased
 
 ### Added
+- Added the next bounded canonical parser parity tracer for a single
+  `import Prelude exposing (Bool);` declaration before the carried Bool
+  definition. The `.mlfp` package under
+  `test/programs/compiler-parser-parity/import-exposing-def-bool/` owns its
+  source/token/AST/parser modules, prints the committed parser-program
+  projection with import module and exposing-item source-span evidence, and
+  records malformed import-semicolon evidence through the public
+  `run-program` path; this is not a full parser parity, checker/backend, or
+  self-boot claim.
 - Added the first bounded canonical parser parity tracer for a basic
   source-text Bool definition. The `.mlfp` package under
   `test/programs/compiler-parser-parity/basic-module-def-bool/` owns its
