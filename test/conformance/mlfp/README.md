@@ -44,4 +44,5 @@ against both the current Haskell canonical parser projection and the matching
 `.mlfp` parser-owned package output. They are not generated or blessed during
 test runs, and they do not imply full `.mlfp` parser parity. Current bounded
 projection fixtures cover the basic Bool module, one import-exposing Bool
-module, and one value-definition-list Int/reference module.
+module, one value-definition-list Int/reference module, one let/lambda/app
+Int expression module, and one typed-annotation Int expression module.

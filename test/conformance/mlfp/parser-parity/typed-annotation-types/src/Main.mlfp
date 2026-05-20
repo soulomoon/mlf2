@@ -1,0 +1,4 @@
+module Main export (main) {
+  import Prelude exposing (Int);
+  def main : Int = let id : ∀a. a -> a = λ(x : Int) x in (id 1 : Int);
+}

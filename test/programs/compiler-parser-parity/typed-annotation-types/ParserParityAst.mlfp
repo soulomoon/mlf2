@@ -1,0 +1,202 @@
+module ParserParityAst export (ParsedProgram(..), ParsedModule(..), ParsedExport(..), ParsedImport(..), ParsedDef(..), ParsedType(..), ParsedExpr(..), renderParsedProgram) {
+  import Prelude exposing (stringAppend);
+  import ParserParitySource exposing (SourceSpan(..), renderSpan);
+
+  data ParsedProgram =
+      ParsedProgram : ParsedModule -> ParsedProgram;
+
+  data ParsedModule =
+      ParsedModule : String -> SourceSpan -> ParsedExport -> ParsedImport -> ParsedDef -> ParsedModule;
+
+  data ParsedExport =
+      ParsedExportValue : String -> SourceSpan -> ParsedExport
+    | ParsedExportType : String -> SourceSpan -> ParsedExport;
+
+  data ParsedImport =
+      ParsedImport : String -> SourceSpan -> ParsedExport -> ParsedImport;
+
+  data ParsedDef =
+      ParsedDef : String -> ParsedType -> ParsedExpr -> SourceSpan -> ParsedDef;
+
+  data ParsedType =
+      ParsedTypeInt : ParsedType
+    | ParsedTypeVar : String -> ParsedType
+    | ParsedTypeArrow : ParsedType -> ParsedType -> ParsedType
+    | ParsedTypeForall : String -> ParsedType -> ParsedType;
+
+  data ParsedExpr =
+      ParsedExprIntLiteral : String -> ParsedExpr
+    | ParsedExprValueRef : String -> ParsedExpr
+    | ParsedExprLambda : String -> ParsedType -> ParsedExpr -> ParsedExpr
+    | ParsedExprApp : ParsedExpr -> ParsedExpr -> ParsedExpr
+    | ParsedExprLet : String -> ParsedType -> ParsedExpr -> ParsedExpr -> ParsedExpr
+    | ParsedExprAnn : ParsedExpr -> ParsedType -> ParsedExpr;
+
+  def renderParsedProgram : String -> ParsedProgram -> String =
+    λ(sourceFile : String) λ(program : ParsedProgram) case program of {
+      ParsedProgram module0 -> renderParsedModule sourceFile module0
+    };
+
+  def renderParsedModule : String -> ParsedModule -> String =
+    λ(sourceFile : String) λ(module0 : ParsedModule) case module0 of {
+      ParsedModule name moduleSpan export0 import0 def0 ->
+        stringAppend
+          (stringAppend "module " (stringAppend name (stringAppend " span=" (renderSpan sourceFile moduleSpan))))
+          (stringAppend "\n"
+            (stringAppend
+              (renderExport sourceFile export0)
+              (stringAppend "\n"
+                (stringAppend
+                  (renderImport sourceFile import0)
+                  (stringAppend "\n" (renderDef sourceFile def0))))))
+    };
+
+  def renderExport : String -> ParsedExport -> String =
+    λ(sourceFile : String) λ(export0 : ParsedExport) case export0 of {
+      ParsedExportValue name span ->
+        stringAppend "export value " (stringAppend name (stringAppend " span=" (renderSpan sourceFile span)));
+      ParsedExportType name span ->
+        stringAppend "export type " (stringAppend name (stringAppend " span=" (renderSpan sourceFile span)))
+    };
+
+  def renderImport : String -> ParsedImport -> String =
+    λ(sourceFile : String) λ(import0 : ParsedImport) case import0 of {
+      ParsedImport name span exposingItem ->
+        stringAppend
+          (stringAppend "import " (stringAppend name (stringAppend " span=" (renderSpan sourceFile span))))
+          (stringAppend "\n" (renderImportExposing sourceFile exposingItem))
+    };
+
+  def renderImportExposing : String -> ParsedExport -> String =
+    λ(sourceFile : String) λ(exposingItem : ParsedExport) case exposingItem of {
+      ParsedExportValue name span ->
+        stringAppend "import exposing value " (stringAppend name (stringAppend " span=" (renderSpan sourceFile span)));
+      ParsedExportType name span ->
+        stringAppend "import exposing type " (stringAppend name (stringAppend " span=" (renderSpan sourceFile span)))
+    };
+
+  def renderDef : String -> ParsedDef -> String =
+    λ(sourceFile : String) λ(def0 : ParsedDef) case def0 of {
+      ParsedDef name ty expr span ->
+        stringAppend "def "
+          (stringAppend name
+            (stringAppend " type="
+              (stringAppend (renderType ty)
+                (stringAppend " expr="
+                  (stringAppend (renderExpr expr)
+                    (stringAppend " span=" (renderSpan sourceFile span)))))))
+    };
+
+  def renderType : ParsedType -> String =
+    λ(ty : ParsedType) case ty of {
+      ParsedTypeInt -> "Int";
+      ParsedTypeVar name -> name;
+      ParsedTypeArrow dom cod -> renderArrowType dom cod;
+      ParsedTypeForall name body -> renderForallType name body
+    };
+
+  def renderArrowType : ParsedType -> ParsedType -> String =
+    λ(dom : ParsedType) λ(cod : ParsedType) case dom of {
+      ParsedTypeVar domName -> case cod of {
+        ParsedTypeVar codName -> stringAppend domName (stringAppend " -> " codName);
+        ParsedTypeInt -> stringAppend domName " -> Int";
+        ParsedTypeArrow _ _ -> "type-shape-mismatch";
+        ParsedTypeForall _ _ -> "type-shape-mismatch"
+      };
+      ParsedTypeInt -> case cod of {
+        ParsedTypeVar codName -> stringAppend "Int -> " codName;
+        ParsedTypeInt -> "Int -> Int";
+        ParsedTypeArrow _ _ -> "type-shape-mismatch";
+        ParsedTypeForall _ _ -> "type-shape-mismatch"
+      };
+      ParsedTypeArrow _ _ -> "type-shape-mismatch";
+      ParsedTypeForall _ _ -> "type-shape-mismatch"
+    };
+
+  def renderForallType : String -> ParsedType -> String =
+    λ(name : String) λ(body : ParsedType) case body of {
+      ParsedTypeArrow dom cod -> stringAppend "∀" (stringAppend name (stringAppend ". " (renderArrowType dom cod)));
+      ParsedTypeVar varName -> stringAppend "∀" (stringAppend name (stringAppend ". " varName));
+      ParsedTypeInt -> stringAppend "∀" (stringAppend name ". Int");
+      ParsedTypeForall _ _ -> "type-shape-mismatch"
+    };
+
+  def renderExpr : ParsedExpr -> String =
+    λ(expr : ParsedExpr) case expr of {
+      ParsedExprIntLiteral value -> value;
+      ParsedExprValueRef name -> name;
+      ParsedExprLambda param paramTy body -> renderLambdaExpr param paramTy body;
+      ParsedExprApp fun arg -> renderAppExpr fun arg;
+      ParsedExprLet name annTy rhs body -> renderLetExpr name annTy rhs body;
+      ParsedExprAnn inner annTy -> renderAnnExpr inner annTy
+    };
+
+  def renderLambdaExpr : String -> ParsedType -> ParsedExpr -> String =
+    λ(param : String) λ(paramTy : ParsedType) λ(body : ParsedExpr) case body of {
+      ParsedExprValueRef bodyName ->
+        stringAppend "λ("
+          (stringAppend param
+            (stringAppend " : "
+              (stringAppend (renderType paramTy)
+                (stringAppend ") " bodyName))));
+      ParsedExprIntLiteral _ -> "lambda-shape-mismatch";
+      ParsedExprLambda _ _ _ -> "lambda-shape-mismatch";
+      ParsedExprApp _ _ -> "lambda-shape-mismatch";
+      ParsedExprLet _ _ _ _ -> "lambda-shape-mismatch";
+      ParsedExprAnn _ _ -> "lambda-shape-mismatch"
+    };
+
+  def renderAppExpr : ParsedExpr -> ParsedExpr -> String =
+    λ(fun : ParsedExpr) λ(arg : ParsedExpr) case fun of {
+      ParsedExprValueRef funName -> case arg of {
+        ParsedExprIntLiteral value -> stringAppend funName (stringAppend " " value);
+        ParsedExprValueRef _ -> "app-shape-mismatch";
+        ParsedExprLambda _ _ _ -> "app-shape-mismatch";
+        ParsedExprApp _ _ -> "app-shape-mismatch";
+        ParsedExprLet _ _ _ _ -> "app-shape-mismatch";
+        ParsedExprAnn _ _ -> "app-shape-mismatch"
+      };
+      ParsedExprIntLiteral _ -> "app-shape-mismatch";
+      ParsedExprLambda _ _ _ -> "app-shape-mismatch";
+      ParsedExprApp _ _ -> "app-shape-mismatch";
+      ParsedExprLet _ _ _ _ -> "app-shape-mismatch";
+      ParsedExprAnn _ _ -> "app-shape-mismatch"
+    };
+
+  def renderAnnExpr : ParsedExpr -> ParsedType -> String =
+    λ(inner : ParsedExpr) λ(annTy : ParsedType) case inner of {
+      ParsedExprApp fun arg ->
+        stringAppend "("
+          (stringAppend (renderAppExpr fun arg)
+            (stringAppend " : " (stringAppend (renderType annTy) ")")));
+      ParsedExprIntLiteral _ -> "ann-shape-mismatch";
+      ParsedExprValueRef _ -> "ann-shape-mismatch";
+      ParsedExprLambda _ _ _ -> "ann-shape-mismatch";
+      ParsedExprLet _ _ _ _ -> "ann-shape-mismatch";
+      ParsedExprAnn _ _ -> "ann-shape-mismatch"
+    };
+
+  def renderLetExpr : String -> ParsedType -> ParsedExpr -> ParsedExpr -> String =
+    λ(name : String) λ(annTy : ParsedType) λ(rhs : ParsedExpr) λ(body : ParsedExpr) case rhs of {
+      ParsedExprLambda param paramTy lambdaBody -> case body of {
+        ParsedExprAnn inner innerTy ->
+          stringAppend "let "
+            (stringAppend name
+              (stringAppend " : "
+                (stringAppend (renderType annTy)
+                  (stringAppend " = "
+                    (stringAppend (renderLambdaExpr param paramTy lambdaBody)
+                      (stringAppend " in " (renderAnnExpr inner innerTy)))))));
+        ParsedExprIntLiteral _ -> "let-shape-mismatch";
+        ParsedExprValueRef _ -> "let-shape-mismatch";
+        ParsedExprLambda _ _ _ -> "let-shape-mismatch";
+        ParsedExprApp _ _ -> "let-shape-mismatch";
+        ParsedExprLet _ _ _ _ -> "let-shape-mismatch"
+      };
+      ParsedExprIntLiteral _ -> "let-shape-mismatch";
+      ParsedExprValueRef _ -> "let-shape-mismatch";
+      ParsedExprApp _ _ -> "let-shape-mismatch";
+      ParsedExprLet _ _ _ _ -> "let-shape-mismatch";
+      ParsedExprAnn _ _ -> "let-shape-mismatch"
+    };
+}

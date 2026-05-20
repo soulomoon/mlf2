@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-308",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-308-parser-parity-typed-annotation-types",
+  "decision": "approved",
+  "evidence_summary": "Focused typed-annotation and malformed-annotation parser-parity checks passed; the full parser-parity group, package smokes, git diff hygiene, full Cabal gate, and thesis gate passed. Scope stayed parser-only and milestone-4 remains in-progress.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-308 completed item-308-parser-parity-typed-annotation-types as a partial milestone-4 parser-parity tracer; evidence: focused typed-annotation and malformed-annotation checks, parser-parity group, package smokes, full Cabal gate, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

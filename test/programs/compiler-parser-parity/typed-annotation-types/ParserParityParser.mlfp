@@ -1,0 +1,238 @@
+module ParserParityParser export (ParserDiagnostic(..), ParserResult(..), parseTypedAnnotationTypesDefinition, renderParserParityEvidence, renderTypedAnnotationTypesParserNegativeEvidence) {
+  import Prelude exposing (stringAppend);
+  import ParserParityAst exposing (ParsedProgram(..), ParsedModule(..), ParsedExport(..), ParsedImport(..), ParsedDef(..), ParsedType(..), ParsedExpr(..), renderParsedProgram);
+  import ParserParitySource exposing (SourceSpan, typedAnnotationTypesSourceFile, typedAnnotationTypesSourceText, moduleSpan, moduleKeywordSpan, moduleNameSpan, exportKeywordSpan, exportLeftParenSpan, exportMainSpan, exportRightParenSpan, moduleLeftBraceSpan, importKeywordSpan, importModuleSpan, exposingKeywordSpan, importLeftParenSpan, importIntSpan, importRightParenSpan, importSemicolonSpan, defKeywordSpan, defNameSpan, defColonSpan, defIntTypeSpan, defEqualsSpan, letKeywordSpan, letBindingNameSpan, letAnnotationColonSpan, letEqualsSpan, lambdaTokenSpan, lambdaLeftParenSpan, lambdaParamSpan, lambdaParamColonSpan, lambdaParamIntSpan, lambdaRightParenSpan, lambdaBodyValueRefSpan, letInSpan, annotationLeftParenSpan, appFunctionSpan, appIntLiteralSpan, expressionAnnotationColonSpan, expressionAnnotationIntSpan, annotationRightParenSpan, defSemicolonSpan, moduleRightBraceSpan, defMainSpan, renderSpan);
+  import ParserParityToken exposing (ModuleKeywordToken(..), ModuleNameToken(..), ExportKeywordToken(..), ExportLeftParenToken(..), ExportMainToken(..), ExportRightParenToken(..), ModuleLeftBraceToken(..), ImportKeywordToken(..), ImportModuleToken(..), ExposingKeywordToken(..), ImportLeftParenToken(..), ImportIntToken(..), ImportRightParenToken(..), ImportSemicolonToken(..), DefKeywordToken(..), DefNameToken(..), DefColonToken(..), IntTypeToken(..), EqualsToken(..), LetKeywordToken(..), LetBindingNameToken(..), LetAnnotationColonToken(..), ForallToken(..), TypeVarToken(..), TypeDotToken(..), ArrowToken(..), LetEqualsToken(..), LambdaToken(..), LambdaLeftParenToken(..), LambdaParamToken(..), LambdaParamColonToken(..), LambdaRightParenToken(..), LambdaBodyToken(..), LetInToken(..), AnnotationLeftParenToken(..), AppFunctionToken(..), AppIntLiteralToken(..), ExpressionAnnotationColonToken(..), AnnotationRightParenToken(..), DefSemicolonToken(..), ModuleRightBraceToken(..), HeaderPrefixTokens(..), HeaderSuffixTokens(..), ImportDeclTokens(..), LetAnnotationTypeTokens(..), LambdaExprTokens(..), AppExprTokens(..), ExpressionAnnotationTokens(..), LetExprTokens(..), DefTokens(..), TokenStream(..), LexerResult(..), LexerDiagnostic(..), tokenizeTypedAnnotationTypesDefinition, parserMissingLetAnnotationTypeTokens);
+
+  data ParserDiagnostic =
+      ParserDiagnostic : SourceSpan -> ParserDiagnostic;
+
+  data ParserResult =
+      ParserOk : ParsedProgram -> ParserResult
+    | ParserError : ParserDiagnostic -> ParserResult;
+
+  data ParserStep =
+      ParserStepOk : ParserStep
+    | ParserStepError : ParserDiagnostic -> ParserStep;
+
+  data ParserTypeResult =
+      ParserTypeOk : ParsedType -> ParserTypeResult
+    | ParserTypeError : ParserDiagnostic -> ParserTypeResult;
+
+  data ParserExprResult =
+      ParserExprOk : ParsedExpr -> ParserExprResult
+    | ParserExprError : ParserDiagnostic -> ParserExprResult;
+
+  def parseTypedAnnotationTypesDefinition : String -> ParserResult =
+    λ(source : String) case tokenizeTypedAnnotationTypesDefinition source of {
+      LexerOk tokens -> parseTokens tokens;
+      LexerError diagnostic -> case diagnostic of {
+        LexerDiagnostic span _ -> ParserError (ParserDiagnostic span)
+      }
+    };
+
+  def parseTokens : TokenStream -> ParserResult =
+    λ(tokens : TokenStream) case tokens of {
+      TokenStream headerPrefix headerSuffix importDecl def0 finalToken ->
+        case parseHeaderPrefix headerPrefix of {
+          ParserStepOk -> case parseHeaderSuffix headerSuffix of {
+            ParserStepOk -> case parseImportDecl importDecl of {
+              ParserStepOk -> case parseDef def0 of {
+                ParserExprOk expr -> parseFinalToken finalToken expr;
+                ParserExprError err -> ParserError err
+              };
+              ParserStepError err -> ParserError err
+            };
+            ParserStepError err -> ParserError err
+          };
+          ParserStepError err -> ParserError err
+        }
+    };
+
+  def parseHeaderPrefix : HeaderPrefixTokens -> ParserStep =
+    λ(tokens : HeaderPrefixTokens) case tokens of {
+      HeaderPrefixTokens moduleToken moduleNameToken exportToken ->
+        case moduleToken of {
+          ModuleKeywordTok _ -> case moduleNameToken of {
+            ModuleNameTok _ -> case exportToken of {
+              ExportKeywordTok _ -> ParserStepOk
+            }
+          }
+        }
+    };
+
+  def parseHeaderSuffix : HeaderSuffixTokens -> ParserStep =
+    λ(tokens : HeaderSuffixTokens) case tokens of {
+      HeaderSuffixTokens leftParenToken exportMainToken rightParenToken leftBraceToken ->
+        case leftParenToken of {
+          ExportLeftParenTok _ -> case exportMainToken of {
+            ExportMainTok _ -> case rightParenToken of {
+              ExportRightParenTok _ -> case leftBraceToken of {
+                ModuleLeftBraceTok _ -> ParserStepOk
+              }
+            }
+          }
+        }
+    };
+
+  def parseImportDecl : ImportDeclTokens -> ParserStep =
+    λ(tokens : ImportDeclTokens) case tokens of {
+      ImportDeclTokens importToken moduleToken exposingToken leftParenToken intToken rightParenToken semicolonToken ->
+        case importToken of {
+          ImportKeywordTok _ -> case moduleToken of {
+            ImportModuleTok _ -> case exposingToken of {
+              ExposingKeywordTok _ -> case leftParenToken of {
+                ImportLeftParenTok _ -> case intToken of {
+                  ImportIntTok _ -> case rightParenToken of {
+                    ImportRightParenTok _ -> case semicolonToken of {
+                      ImportSemicolonTok _ -> ParserStepOk
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+    };
+
+  def parseDef : DefTokens -> ParserExprResult =
+    λ(tokens : DefTokens) case tokens of {
+      DefTokens defToken nameToken colonToken intToken equalsToken exprTokens semicolonToken ->
+        case defToken of {
+          DefKeywordTok _ -> case nameToken of {
+            DefMainNameTok _ -> case colonToken of {
+              DefColonTok _ -> case intToken of {
+                IntTypeTok _ -> case equalsToken of {
+                  EqualsTok _ -> case parseLetExpr exprTokens of {
+                    ParserExprOk expr -> case semicolonToken of {
+                      DefSemicolonTok _ -> ParserExprOk expr
+                    };
+                    ParserExprError err -> ParserExprError err
+                  }
+                }
+              }
+            }
+          }
+        }
+    };
+
+  def parseLetExpr : LetExprTokens -> ParserExprResult =
+    λ(tokens : LetExprTokens) case tokens of {
+      LetExprTokens letToken bindingToken colonToken typeTokens equalsToken lambdaTokens inToken annTokens ->
+        case letToken of {
+          LetKeywordTok _ -> case bindingToken of {
+            LetBindingNameTok _ -> case colonToken of {
+              LetAnnotationColonTok _ -> case parseLetAnnotationType typeTokens of {
+                ParserTypeOk letTy -> case equalsToken of {
+                  LetEqualsTok _ -> case parseLambdaExpr lambdaTokens of {
+                    ParserExprOk lambdaExpr -> case inToken of {
+                      LetInTok _ -> case parseExpressionAnnotation annTokens of {
+                        ParserExprOk annExpr -> ParserExprOk (ParsedExprLet "id" letTy lambdaExpr annExpr);
+                        ParserExprError err -> ParserExprError err
+                      }
+                    };
+                    ParserExprError err -> ParserExprError err
+                  }
+                };
+                ParserTypeError err -> ParserExprError err
+              }
+            }
+          }
+        }
+    };
+
+  def parseLetAnnotationType : LetAnnotationTypeTokens -> ParserTypeResult =
+    λ(tokens : LetAnnotationTypeTokens) case tokens of {
+      LetAnnotationForallIdTokens forallToken binderToken dotToken domainToken arrowToken codomainToken ->
+        case forallToken of {
+          ForallTok _ -> case binderToken of {
+            TypeVarATok _ -> case dotToken of {
+              TypeDotTok _ -> case domainToken of {
+                TypeVarATok _ -> case arrowToken of {
+                  ArrowTok _ -> case codomainToken of {
+                    TypeVarATok _ ->
+                      ParserTypeOk
+                        (ParsedTypeForall "a"
+                          (ParsedTypeArrow (ParsedTypeVar "a") (ParsedTypeVar "a")))
+                  }
+                }
+              }
+            }
+          }
+        };
+      MissingLetAnnotationTypeSlot span -> ParserTypeError (ParserDiagnostic span)
+    };
+
+  def parseLambdaExpr : LambdaExprTokens -> ParserExprResult =
+    λ(tokens : LambdaExprTokens) case tokens of {
+      LambdaExprTokens lambdaToken leftParenToken paramToken colonToken intToken rightParenToken bodyToken ->
+        case lambdaToken of {
+          LambdaTok _ -> case leftParenToken of {
+            LambdaLeftParenTok _ -> case paramToken of {
+              LambdaParamTok _ -> case colonToken of {
+                LambdaParamColonTok _ -> case intToken of {
+                  IntTypeTok _ -> case rightParenToken of {
+                    LambdaRightParenTok _ -> case bodyToken of {
+                      LambdaBodyValueRefTok _ ->
+                        ParserExprOk (ParsedExprLambda "x" ParsedTypeInt (ParsedExprValueRef "x"))
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+    };
+
+  def parseExpressionAnnotation : ExpressionAnnotationTokens -> ParserExprResult =
+    λ(tokens : ExpressionAnnotationTokens) case tokens of {
+      ExpressionAnnotationTokens leftParenToken appTokens colonToken intToken rightParenToken ->
+        case leftParenToken of {
+          AnnotationLeftParenTok _ -> case parseAppExpr appTokens of {
+            ParserExprOk appExpr -> case colonToken of {
+              ExpressionAnnotationColonTok _ -> case intToken of {
+                IntTypeTok _ -> case rightParenToken of {
+                  AnnotationRightParenTok _ -> ParserExprOk (ParsedExprAnn appExpr ParsedTypeInt)
+                }
+              }
+            };
+            ParserExprError err -> ParserExprError err
+          }
+        }
+    };
+
+  def parseAppExpr : AppExprTokens -> ParserExprResult =
+    λ(tokens : AppExprTokens) case tokens of {
+      AppExprTokens functionToken argToken ->
+        case functionToken of {
+          AppFunctionIdTok _ -> case argToken of {
+            AppIntLiteralTok _ -> ParserExprOk (ParsedExprApp (ParsedExprValueRef "id") (ParsedExprIntLiteral "1"))
+          }
+        }
+    };
+
+  def parseFinalToken : ModuleRightBraceToken -> ParsedExpr -> ParserResult =
+    λ(token : ModuleRightBraceToken) λ(expr : ParsedExpr) case token of {
+      ModuleRightBraceTok _ ->
+        ParserOk
+          (ParsedProgram
+            (ParsedModule "Main" moduleSpan
+              (ParsedExportValue "main" exportMainSpan)
+              (ParsedImport "Prelude" importModuleSpan (ParsedExportType "Int" importIntSpan))
+              (ParsedDef "main" ParsedTypeInt expr defMainSpan)))
+    };
+
+  def renderParserParityEvidence : String =
+    case parseTypedAnnotationTypesDefinition typedAnnotationTypesSourceText of {
+      ParserOk program -> renderParsedProgram typedAnnotationTypesSourceFile program;
+      ParserError _ -> "parser-error"
+    };
+
+  def renderTypedAnnotationTypesParserNegativeEvidence : String =
+    case parseTokens parserMissingLetAnnotationTypeTokens of {
+      ParserOk _ -> "typed-annotation-types parser negative mismatch";
+      ParserError diagnostic -> case diagnostic of {
+        ParserDiagnostic span -> stringAppend "typed-annotation-types parser negative expected-let-annotation-type@" (renderSpan typedAnnotationTypesSourceFile span)
+      }
+    };
+}

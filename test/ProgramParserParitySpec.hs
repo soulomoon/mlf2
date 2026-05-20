@@ -61,6 +61,21 @@ spec =
             canonicalProjection `shouldBe` expected
             parserParityOutput `shouldBe` Right expected
 
+        it "parser-owned .mlfp parser matches canonical parser for typed let, annotated lambda, and expression annotations" $ do
+            source <- readFile typedAnnotationTypesCanonicalSourcePath
+            expected <- readFile typedAnnotationTypesExpectedProjectionPath
+
+            canonicalProjection <- renderCanonicalProjection typedAnnotationTypesCanonicalSourcePath source
+            parserParityOutput <- runProgramArgs [typedAnnotationTypesParserParityPackageRoot]
+
+            canonicalProjection `shouldBe` expected
+            parserParityOutput `shouldBe` Right expected
+
+        it "parser-owned .mlfp parser rejects malformed annotation syntax through public run-program" $ do
+            evidenceRoot <- writeTypedAnnotationTypesNegativeEvidencePackage
+            runProgramArgs [evidenceRoot]
+                `shouldReturn` Right typedAnnotationTypesNegativeEvidenceProjection
+
         it "parser-owned .mlfp parser rejects malformed import syntax through public run-program" $ do
             evidenceRoot <- writeImportNegativeEvidencePackage
             runProgramArgs [evidenceRoot]
@@ -97,6 +112,10 @@ letLambdaApplicationCanonicalSourcePath :: FilePath
 letLambdaApplicationCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/let-lambda-application/src/Main.mlfp"
 
+typedAnnotationTypesCanonicalSourcePath :: FilePath
+typedAnnotationTypesCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/typed-annotation-types/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -112,6 +131,10 @@ valueDefListExpectedProjectionPath =
 letLambdaApplicationExpectedProjectionPath :: FilePath
 letLambdaApplicationExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/let-lambda-application/expected/parser-program.txt"
+
+typedAnnotationTypesExpectedProjectionPath :: FilePath
+typedAnnotationTypesExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/typed-annotation-types/expected/parser-program.txt"
 
 parserParityPackageRoot :: FilePath
 parserParityPackageRoot =
@@ -129,6 +152,10 @@ letLambdaApplicationParserParityPackageRoot :: FilePath
 letLambdaApplicationParserParityPackageRoot =
     "test/programs/compiler-parser-parity/let-lambda-application"
 
+typedAnnotationTypesParserParityPackageRoot :: FilePath
+typedAnnotationTypesParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/typed-annotation-types"
+
 retryEvidencePackageRoot :: FilePath
 retryEvidencePackageRoot =
     "dist-newstyle/parser-parity-basic-module-def-bool-retry-evidence"
@@ -144,6 +171,10 @@ valueDefListNegativeEvidencePackageRoot =
 letLambdaApplicationNegativeEvidencePackageRoot :: FilePath
 letLambdaApplicationNegativeEvidencePackageRoot =
     "dist-newstyle/parser-parity-let-lambda-application-negative-evidence"
+
+typedAnnotationTypesNegativeEvidencePackageRoot :: FilePath
+typedAnnotationTypesNegativeEvidencePackageRoot =
+    "dist-newstyle/parser-parity-typed-annotation-types-negative-evidence"
 
 parserParitySupportModules :: [FilePath]
 parserParitySupportModules =
@@ -163,6 +194,10 @@ valueDefListParserParitySupportModules =
 
 letLambdaApplicationParserParitySupportModules :: [FilePath]
 letLambdaApplicationParserParitySupportModules =
+    parserParitySupportModules
+
+typedAnnotationTypesParserParitySupportModules :: [FilePath]
+typedAnnotationTypesParserParitySupportModules =
     parserParitySupportModules
 
 writeRetryEvidencePackage :: IO FilePath
@@ -217,6 +252,19 @@ writeLetLambdaApplicationNegativeEvidencePackage = do
             (letLambdaApplicationParserParityPackageRoot </> name)
             (letLambdaApplicationNegativeEvidencePackageRoot </> name)
 
+writeTypedAnnotationTypesNegativeEvidencePackage :: IO FilePath
+writeTypedAnnotationTypesNegativeEvidencePackage = do
+    removePathForcibly typedAnnotationTypesNegativeEvidencePackageRoot
+    createDirectoryIfMissing True typedAnnotationTypesNegativeEvidencePackageRoot
+    mapM_ copySupportModule typedAnnotationTypesParserParitySupportModules
+    writeFile (typedAnnotationTypesNegativeEvidencePackageRoot </> "Main.mlfp") typedAnnotationTypesNegativeEvidenceMainSource
+    pure typedAnnotationTypesNegativeEvidencePackageRoot
+  where
+    copySupportModule name =
+        copyFile
+            (typedAnnotationTypesParserParityPackageRoot </> name)
+            (typedAnnotationTypesNegativeEvidencePackageRoot </> name)
+
 retryEvidenceMainSource :: String
 retryEvidenceMainSource =
     unlines
@@ -265,6 +313,18 @@ letLambdaApplicationNegativeEvidenceMainSource =
         , "}"
         ]
 
+typedAnnotationTypesNegativeEvidenceMainSource :: String
+typedAnnotationTypesNegativeEvidenceMainSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
+        , "  import ParserParityParser exposing (renderTypedAnnotationTypesParserNegativeEvidence);"
+        , ""
+        , "  def main : IO Unit ="
+        , "    putStrLn renderTypedAnnotationTypesParserNegativeEvidence;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -289,6 +349,12 @@ letLambdaApplicationNegativeEvidenceProjection :: String
 letLambdaApplicationNegativeEvidenceProjection =
     unlines
         [ "let-lambda-application parser negative expected-let-in@test/conformance/mlfp/parser-parity/let-lambda-application/src/Main.mlfp:3:34-3:36"
+        ]
+
+typedAnnotationTypesNegativeEvidenceProjection :: String
+typedAnnotationTypesNegativeEvidenceProjection =
+    unlines
+        [ "typed-annotation-types parser negative expected-let-annotation-type@test/conformance/mlfp/parser-parity/typed-annotation-types/src/Main.mlfp:3:29-3:30"
         ]
 
 renderCanonicalProjection :: FilePath -> String -> IO String
@@ -414,8 +480,19 @@ requireListSpan label name spans =
 
 renderSrcType :: SrcType -> String
 renderSrcType ty =
+    renderSrcTypePrec 0 ty
+
+renderSrcTypePrec :: Int -> SrcType -> String
+renderSrcTypePrec precedence ty =
     case ty of
+        STVar name -> name
         STBase name -> name
+        STArrow dom cod ->
+            parenthesizeIf (precedence > 1) $
+                renderSrcTypePrec 2 dom ++ " -> " ++ renderSrcTypePrec 1 cod
+        STForall name Nothing body ->
+            parenthesizeIf (precedence > 0) $
+                "∀" ++ name ++ ". " ++ renderSrcTypePrec 0 body
         other -> show other
 
 renderExpr :: P.Expr -> String
@@ -444,11 +521,15 @@ renderExprPrec precedence expr =
                     ++ renderExprPrec 0 rhs
                     ++ " in "
                     ++ renderExprPrec 0 body
+        P.EAnn inner ty ->
+            "(" ++ renderExprPrec 0 inner ++ " : " ++ renderSrcType ty ++ ")"
         other -> show other
 
 renderParam :: P.Param -> String
 renderParam param =
-    P.paramName param ++ maybe "" ((" : " ++) . renderSrcType) (P.paramType param)
+    case P.paramType param of
+        Nothing -> P.paramName param
+        Just ty -> "(" ++ P.paramName param ++ " : " ++ renderSrcType ty ++ ")"
 
 parenthesizeIf :: Bool -> String -> String
 parenthesizeIf shouldParenthesize rendered =

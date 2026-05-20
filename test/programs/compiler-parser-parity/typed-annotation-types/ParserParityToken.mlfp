@@ -1,0 +1,287 @@
+module ParserParityToken export (ModuleKeywordToken(..), ModuleNameToken(..), ExportKeywordToken(..), ExportLeftParenToken(..), ExportMainToken(..), ExportRightParenToken(..), ModuleLeftBraceToken(..), ImportKeywordToken(..), ImportModuleToken(..), ExposingKeywordToken(..), ImportLeftParenToken(..), ImportIntToken(..), ImportRightParenToken(..), ImportSemicolonToken(..), DefKeywordToken(..), DefNameToken(..), DefColonToken(..), IntTypeToken(..), EqualsToken(..), LetKeywordToken(..), LetBindingNameToken(..), LetAnnotationColonToken(..), ForallToken(..), TypeVarToken(..), TypeDotToken(..), ArrowToken(..), LetEqualsToken(..), LambdaToken(..), LambdaLeftParenToken(..), LambdaParamToken(..), LambdaParamColonToken(..), LambdaRightParenToken(..), LambdaBodyToken(..), LetInToken(..), AnnotationLeftParenToken(..), AppFunctionToken(..), AppIntLiteralToken(..), ExpressionAnnotationColonToken(..), AnnotationRightParenToken(..), DefSemicolonToken(..), ModuleRightBraceToken(..), HeaderPrefixTokens(..), HeaderSuffixTokens(..), ImportDeclTokens(..), LetAnnotationTypeTokens(..), LambdaExprTokens(..), AppExprTokens(..), ExpressionAnnotationTokens(..), LetExprTokens(..), DefTokens(..), TokenStream(..), LexerDiagnosticKind(..), LexerDiagnostic(..), LexerResult(..), tokenizeTypedAnnotationTypesDefinition, typedAnnotationTypesTokenStream, parserMissingLetAnnotationTypeTokens) {
+  import Prelude exposing (Option(..), stringIndexOf);
+  import ParserParitySource exposing (SourceSpan, SourceCursor(..), typedAnnotationTypesSourceText, moduleKeywordSpan, moduleNameSpan, exportKeywordSpan, exportLeftParenSpan, exportMainSpan, exportRightParenSpan, moduleLeftBraceSpan, importKeywordSpan, importModuleSpan, exposingKeywordSpan, importLeftParenSpan, importIntSpan, importRightParenSpan, importSemicolonSpan, defKeywordSpan, defNameSpan, defColonSpan, defIntTypeSpan, defEqualsSpan, letKeywordSpan, letBindingNameSpan, letAnnotationColonSpan, letForallSpan, letForallVarSpan, letForallDotSpan, letArrowDomainSpan, letArrowSpan, letArrowCodomainSpan, letEqualsSpan, lambdaTokenSpan, lambdaLeftParenSpan, lambdaParamSpan, lambdaParamColonSpan, lambdaParamIntSpan, lambdaRightParenSpan, lambdaBodyValueRefSpan, letInSpan, annotationLeftParenSpan, appFunctionSpan, appIntLiteralSpan, expressionAnnotationColonSpan, expressionAnnotationIntSpan, annotationRightParenSpan, defSemicolonSpan, moduleRightBraceSpan, unexpectedSpan);
+
+  data ModuleKeywordToken =
+      ModuleKeywordTok : SourceSpan -> ModuleKeywordToken;
+
+  data ModuleNameToken =
+      ModuleNameTok : SourceSpan -> ModuleNameToken;
+
+  data ExportKeywordToken =
+      ExportKeywordTok : SourceSpan -> ExportKeywordToken;
+
+  data ExportLeftParenToken =
+      ExportLeftParenTok : SourceSpan -> ExportLeftParenToken;
+
+  data ExportMainToken =
+      ExportMainTok : SourceSpan -> ExportMainToken;
+
+  data ExportRightParenToken =
+      ExportRightParenTok : SourceSpan -> ExportRightParenToken;
+
+  data ModuleLeftBraceToken =
+      ModuleLeftBraceTok : SourceSpan -> ModuleLeftBraceToken;
+
+  data ImportKeywordToken =
+      ImportKeywordTok : SourceSpan -> ImportKeywordToken;
+
+  data ImportModuleToken =
+      ImportModuleTok : SourceSpan -> ImportModuleToken;
+
+  data ExposingKeywordToken =
+      ExposingKeywordTok : SourceSpan -> ExposingKeywordToken;
+
+  data ImportLeftParenToken =
+      ImportLeftParenTok : SourceSpan -> ImportLeftParenToken;
+
+  data ImportIntToken =
+      ImportIntTok : SourceSpan -> ImportIntToken;
+
+  data ImportRightParenToken =
+      ImportRightParenTok : SourceSpan -> ImportRightParenToken;
+
+  data ImportSemicolonToken =
+      ImportSemicolonTok : SourceSpan -> ImportSemicolonToken;
+
+  data DefKeywordToken =
+      DefKeywordTok : SourceSpan -> DefKeywordToken;
+
+  data DefNameToken =
+      DefMainNameTok : SourceSpan -> DefNameToken;
+
+  data DefColonToken =
+      DefColonTok : SourceSpan -> DefColonToken;
+
+  data IntTypeToken =
+      IntTypeTok : SourceSpan -> IntTypeToken;
+
+  data EqualsToken =
+      EqualsTok : SourceSpan -> EqualsToken;
+
+  data LetKeywordToken =
+      LetKeywordTok : SourceSpan -> LetKeywordToken;
+
+  data LetBindingNameToken =
+      LetBindingNameTok : SourceSpan -> LetBindingNameToken;
+
+  data LetAnnotationColonToken =
+      LetAnnotationColonTok : SourceSpan -> LetAnnotationColonToken;
+
+  data ForallToken =
+      ForallTok : SourceSpan -> ForallToken;
+
+  data TypeVarToken =
+      TypeVarATok : SourceSpan -> TypeVarToken;
+
+  data TypeDotToken =
+      TypeDotTok : SourceSpan -> TypeDotToken;
+
+  data ArrowToken =
+      ArrowTok : SourceSpan -> ArrowToken;
+
+  data LetEqualsToken =
+      LetEqualsTok : SourceSpan -> LetEqualsToken;
+
+  data LambdaToken =
+      LambdaTok : SourceSpan -> LambdaToken;
+
+  data LambdaLeftParenToken =
+      LambdaLeftParenTok : SourceSpan -> LambdaLeftParenToken;
+
+  data LambdaParamToken =
+      LambdaParamTok : SourceSpan -> LambdaParamToken;
+
+  data LambdaParamColonToken =
+      LambdaParamColonTok : SourceSpan -> LambdaParamColonToken;
+
+  data LambdaRightParenToken =
+      LambdaRightParenTok : SourceSpan -> LambdaRightParenToken;
+
+  data LambdaBodyToken =
+      LambdaBodyValueRefTok : SourceSpan -> LambdaBodyToken;
+
+  data LetInToken =
+      LetInTok : SourceSpan -> LetInToken;
+
+  data AnnotationLeftParenToken =
+      AnnotationLeftParenTok : SourceSpan -> AnnotationLeftParenToken;
+
+  data AppFunctionToken =
+      AppFunctionIdTok : SourceSpan -> AppFunctionToken;
+
+  data AppIntLiteralToken =
+      AppIntLiteralTok : SourceSpan -> AppIntLiteralToken;
+
+  data ExpressionAnnotationColonToken =
+      ExpressionAnnotationColonTok : SourceSpan -> ExpressionAnnotationColonToken;
+
+  data AnnotationRightParenToken =
+      AnnotationRightParenTok : SourceSpan -> AnnotationRightParenToken;
+
+  data DefSemicolonToken =
+      DefSemicolonTok : SourceSpan -> DefSemicolonToken;
+
+  data ModuleRightBraceToken =
+      ModuleRightBraceTok : SourceSpan -> ModuleRightBraceToken;
+
+  data HeaderPrefixTokens =
+      HeaderPrefixTokens : ModuleKeywordToken -> ModuleNameToken -> ExportKeywordToken -> HeaderPrefixTokens;
+
+  data HeaderSuffixTokens =
+      HeaderSuffixTokens : ExportLeftParenToken -> ExportMainToken -> ExportRightParenToken -> ModuleLeftBraceToken -> HeaderSuffixTokens;
+
+  data ImportDeclTokens =
+      ImportDeclTokens : ImportKeywordToken -> ImportModuleToken -> ExposingKeywordToken -> ImportLeftParenToken -> ImportIntToken -> ImportRightParenToken -> ImportSemicolonToken -> ImportDeclTokens;
+
+  data LetAnnotationTypeTokens =
+      LetAnnotationForallIdTokens : ForallToken -> TypeVarToken -> TypeDotToken -> TypeVarToken -> ArrowToken -> TypeVarToken -> LetAnnotationTypeTokens
+    | MissingLetAnnotationTypeSlot : SourceSpan -> LetAnnotationTypeTokens;
+
+  data LambdaExprTokens =
+      LambdaExprTokens : LambdaToken -> LambdaLeftParenToken -> LambdaParamToken -> LambdaParamColonToken -> IntTypeToken -> LambdaRightParenToken -> LambdaBodyToken -> LambdaExprTokens;
+
+  data AppExprTokens =
+      AppExprTokens : AppFunctionToken -> AppIntLiteralToken -> AppExprTokens;
+
+  data ExpressionAnnotationTokens =
+      ExpressionAnnotationTokens : AnnotationLeftParenToken -> AppExprTokens -> ExpressionAnnotationColonToken -> IntTypeToken -> AnnotationRightParenToken -> ExpressionAnnotationTokens;
+
+  data LetExprTokens =
+      LetExprTokens : LetKeywordToken -> LetBindingNameToken -> LetAnnotationColonToken -> LetAnnotationTypeTokens -> LetEqualsToken -> LambdaExprTokens -> LetInToken -> ExpressionAnnotationTokens -> LetExprTokens;
+
+  data DefTokens =
+      DefTokens : DefKeywordToken -> DefNameToken -> DefColonToken -> IntTypeToken -> EqualsToken -> LetExprTokens -> DefSemicolonToken -> DefTokens;
+
+  data TokenStream =
+      TokenStream : HeaderPrefixTokens -> HeaderSuffixTokens -> ImportDeclTokens -> DefTokens -> ModuleRightBraceToken -> TokenStream;
+
+  data LexerDiagnosticKind =
+      UnexpectedSourceText : LexerDiagnosticKind;
+
+  data LexerDiagnostic =
+      LexerDiagnostic : SourceSpan -> LexerDiagnosticKind -> LexerDiagnostic;
+
+  data LexerResult =
+      LexerOk : TokenStream -> LexerResult
+    | LexerError : LexerDiagnostic -> LexerResult;
+
+  def tokenizeTypedAnnotationTypesDefinition : String -> LexerResult =
+    λ(source : String) tokensFromCursor (SourceCursor source);
+
+  def tokensFromCursor : SourceCursor -> LexerResult =
+    λ(cursor : SourceCursor) case cursor of {
+      SourceCursor source -> case stringIndexOf source typedAnnotationTypesSourceText of {
+        Some _ -> LexerOk typedAnnotationTypesTokenStream;
+        None -> LexerError (LexerDiagnostic unexpectedSpan UnexpectedSourceText)
+      }
+    };
+
+  def typedAnnotationTypesTokenStream : TokenStream =
+    TokenStream
+      (HeaderPrefixTokens
+        (ModuleKeywordTok moduleKeywordSpan)
+        (ModuleNameTok moduleNameSpan)
+        (ExportKeywordTok exportKeywordSpan))
+      (HeaderSuffixTokens
+        (ExportLeftParenTok exportLeftParenSpan)
+        (ExportMainTok exportMainSpan)
+        (ExportRightParenTok exportRightParenSpan)
+        (ModuleLeftBraceTok moduleLeftBraceSpan))
+      (ImportDeclTokens
+        (ImportKeywordTok importKeywordSpan)
+        (ImportModuleTok importModuleSpan)
+        (ExposingKeywordTok exposingKeywordSpan)
+        (ImportLeftParenTok importLeftParenSpan)
+        (ImportIntTok importIntSpan)
+        (ImportRightParenTok importRightParenSpan)
+        (ImportSemicolonTok importSemicolonSpan))
+      (DefTokens
+        (DefKeywordTok defKeywordSpan)
+        (DefMainNameTok defNameSpan)
+        (DefColonTok defColonSpan)
+        (IntTypeTok defIntTypeSpan)
+        (EqualsTok defEqualsSpan)
+        (LetExprTokens
+          (LetKeywordTok letKeywordSpan)
+          (LetBindingNameTok letBindingNameSpan)
+          (LetAnnotationColonTok letAnnotationColonSpan)
+          (LetAnnotationForallIdTokens
+            (ForallTok letForallSpan)
+            (TypeVarATok letForallVarSpan)
+            (TypeDotTok letForallDotSpan)
+            (TypeVarATok letArrowDomainSpan)
+            (ArrowTok letArrowSpan)
+            (TypeVarATok letArrowCodomainSpan))
+          (LetEqualsTok letEqualsSpan)
+          (LambdaExprTokens
+            (LambdaTok lambdaTokenSpan)
+            (LambdaLeftParenTok lambdaLeftParenSpan)
+            (LambdaParamTok lambdaParamSpan)
+            (LambdaParamColonTok lambdaParamColonSpan)
+            (IntTypeTok lambdaParamIntSpan)
+            (LambdaRightParenTok lambdaRightParenSpan)
+            (LambdaBodyValueRefTok lambdaBodyValueRefSpan))
+          (LetInTok letInSpan)
+          (ExpressionAnnotationTokens
+            (AnnotationLeftParenTok annotationLeftParenSpan)
+            (AppExprTokens
+              (AppFunctionIdTok appFunctionSpan)
+              (AppIntLiteralTok appIntLiteralSpan))
+            (ExpressionAnnotationColonTok expressionAnnotationColonSpan)
+            (IntTypeTok expressionAnnotationIntSpan)
+            (AnnotationRightParenTok annotationRightParenSpan)))
+        (DefSemicolonTok defSemicolonSpan))
+      (ModuleRightBraceTok moduleRightBraceSpan);
+
+  def parserMissingLetAnnotationTypeTokens : TokenStream =
+    TokenStream
+      (HeaderPrefixTokens
+        (ModuleKeywordTok moduleKeywordSpan)
+        (ModuleNameTok moduleNameSpan)
+        (ExportKeywordTok exportKeywordSpan))
+      (HeaderSuffixTokens
+        (ExportLeftParenTok exportLeftParenSpan)
+        (ExportMainTok exportMainSpan)
+        (ExportRightParenTok exportRightParenSpan)
+        (ModuleLeftBraceTok moduleLeftBraceSpan))
+      (ImportDeclTokens
+        (ImportKeywordTok importKeywordSpan)
+        (ImportModuleTok importModuleSpan)
+        (ExposingKeywordTok exposingKeywordSpan)
+        (ImportLeftParenTok importLeftParenSpan)
+        (ImportIntTok importIntSpan)
+        (ImportRightParenTok importRightParenSpan)
+        (ImportSemicolonTok importSemicolonSpan))
+      (DefTokens
+        (DefKeywordTok defKeywordSpan)
+        (DefMainNameTok defNameSpan)
+        (DefColonTok defColonSpan)
+        (IntTypeTok defIntTypeSpan)
+        (EqualsTok defEqualsSpan)
+        (LetExprTokens
+          (LetKeywordTok letKeywordSpan)
+          (LetBindingNameTok letBindingNameSpan)
+          (LetAnnotationColonTok letAnnotationColonSpan)
+          (MissingLetAnnotationTypeSlot letForallSpan)
+          (LetEqualsTok letEqualsSpan)
+          (LambdaExprTokens
+            (LambdaTok lambdaTokenSpan)
+            (LambdaLeftParenTok lambdaLeftParenSpan)
+            (LambdaParamTok lambdaParamSpan)
+            (LambdaParamColonTok lambdaParamColonSpan)
+            (IntTypeTok lambdaParamIntSpan)
+            (LambdaRightParenTok lambdaRightParenSpan)
+            (LambdaBodyValueRefTok lambdaBodyValueRefSpan))
+          (LetInTok letInSpan)
+          (ExpressionAnnotationTokens
+            (AnnotationLeftParenTok annotationLeftParenSpan)
+            (AppExprTokens
+              (AppFunctionIdTok appFunctionSpan)
+              (AppIntLiteralTok appIntLiteralSpan))
+            (ExpressionAnnotationColonTok expressionAnnotationColonSpan)
+            (IntTypeTok expressionAnnotationIntSpan)
+            (AnnotationRightParenTok annotationRightParenSpan)))
+        (DefSemicolonTok defSemicolonSpan))
+      (ModuleRightBraceTok moduleRightBraceSpan);
+}

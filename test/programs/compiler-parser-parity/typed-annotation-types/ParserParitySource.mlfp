@@ -1,0 +1,164 @@
+module ParserParitySource export (SourceSpan(..), SourceCursor(..), typedAnnotationTypesSourceFile, typedAnnotationTypesSourceText, moduleSpan, moduleKeywordSpan, moduleNameSpan, exportKeywordSpan, exportLeftParenSpan, exportMainSpan, exportRightParenSpan, moduleLeftBraceSpan, importKeywordSpan, importModuleSpan, exposingKeywordSpan, importLeftParenSpan, importIntSpan, importRightParenSpan, importSemicolonSpan, defKeywordSpan, defNameSpan, defColonSpan, defIntTypeSpan, defEqualsSpan, letKeywordSpan, letBindingNameSpan, letAnnotationColonSpan, letForallSpan, letForallVarSpan, letForallDotSpan, letArrowDomainSpan, letArrowSpan, letArrowCodomainSpan, letEqualsSpan, lambdaTokenSpan, lambdaLeftParenSpan, lambdaParamSpan, lambdaParamColonSpan, lambdaParamIntSpan, lambdaRightParenSpan, lambdaBodyValueRefSpan, letInSpan, annotationLeftParenSpan, appFunctionSpan, appIntLiteralSpan, expressionAnnotationColonSpan, expressionAnnotationIntSpan, annotationRightParenSpan, defSemicolonSpan, moduleRightBraceSpan, defMainSpan, unexpectedSpan, renderSpan) {
+  import Prelude exposing (stringAppend);
+
+  data SourceSpan =
+      SourceSpan : String -> SourceSpan;
+
+  data SourceCursor =
+      SourceCursor : String -> SourceCursor;
+
+  def typedAnnotationTypesSourceFile : String =
+    "test/conformance/mlfp/parser-parity/typed-annotation-types/src/Main.mlfp";
+
+  def typedAnnotationTypesSourceText : String =
+    "module Main export (main) {\n  import Prelude exposing (Int);\n  def main : Int = let id : ∀a. a -> a = λ(x : Int) x in (id 1 : Int);\n}\n";
+
+  def moduleSpan : SourceSpan =
+    SourceSpan "1:1-5:1";
+
+  def moduleKeywordSpan : SourceSpan =
+    SourceSpan "1:1-1:7";
+
+  def moduleNameSpan : SourceSpan =
+    SourceSpan "1:8-1:12";
+
+  def exportKeywordSpan : SourceSpan =
+    SourceSpan "1:13-1:19";
+
+  def exportLeftParenSpan : SourceSpan =
+    SourceSpan "1:20-1:21";
+
+  def exportMainSpan : SourceSpan =
+    SourceSpan "1:21-1:25";
+
+  def exportRightParenSpan : SourceSpan =
+    SourceSpan "1:25-1:26";
+
+  def moduleLeftBraceSpan : SourceSpan =
+    SourceSpan "1:27-1:28";
+
+  def importKeywordSpan : SourceSpan =
+    SourceSpan "2:3-2:9";
+
+  def importModuleSpan : SourceSpan =
+    SourceSpan "2:10-2:18";
+
+  def exposingKeywordSpan : SourceSpan =
+    SourceSpan "2:18-2:26";
+
+  def importLeftParenSpan : SourceSpan =
+    SourceSpan "2:27-2:28";
+
+  def importIntSpan : SourceSpan =
+    SourceSpan "2:28-2:31";
+
+  def importRightParenSpan : SourceSpan =
+    SourceSpan "2:31-2:32";
+
+  def importSemicolonSpan : SourceSpan =
+    SourceSpan "2:32-2:33";
+
+  def defKeywordSpan : SourceSpan =
+    SourceSpan "3:3-3:6";
+
+  def defNameSpan : SourceSpan =
+    SourceSpan "3:7-3:11";
+
+  def defColonSpan : SourceSpan =
+    SourceSpan "3:12-3:13";
+
+  def defIntTypeSpan : SourceSpan =
+    SourceSpan "3:14-3:17";
+
+  def defEqualsSpan : SourceSpan =
+    SourceSpan "3:18-3:19";
+
+  def letKeywordSpan : SourceSpan =
+    SourceSpan "3:20-3:23";
+
+  def letBindingNameSpan : SourceSpan =
+    SourceSpan "3:24-3:26";
+
+  def letAnnotationColonSpan : SourceSpan =
+    SourceSpan "3:27-3:28";
+
+  def letForallSpan : SourceSpan =
+    SourceSpan "3:29-3:30";
+
+  def letForallVarSpan : SourceSpan =
+    SourceSpan "3:30-3:31";
+
+  def letForallDotSpan : SourceSpan =
+    SourceSpan "3:31-3:32";
+
+  def letArrowDomainSpan : SourceSpan =
+    SourceSpan "3:33-3:34";
+
+  def letArrowSpan : SourceSpan =
+    SourceSpan "3:35-3:37";
+
+  def letArrowCodomainSpan : SourceSpan =
+    SourceSpan "3:38-3:39";
+
+  def letEqualsSpan : SourceSpan =
+    SourceSpan "3:40-3:41";
+
+  def lambdaTokenSpan : SourceSpan =
+    SourceSpan "3:42-3:43";
+
+  def lambdaLeftParenSpan : SourceSpan =
+    SourceSpan "3:43-3:44";
+
+  def lambdaParamSpan : SourceSpan =
+    SourceSpan "3:44-3:45";
+
+  def lambdaParamColonSpan : SourceSpan =
+    SourceSpan "3:46-3:47";
+
+  def lambdaParamIntSpan : SourceSpan =
+    SourceSpan "3:48-3:51";
+
+  def lambdaRightParenSpan : SourceSpan =
+    SourceSpan "3:51-3:52";
+
+  def lambdaBodyValueRefSpan : SourceSpan =
+    SourceSpan "3:53-3:54";
+
+  def letInSpan : SourceSpan =
+    SourceSpan "3:55-3:57";
+
+  def annotationLeftParenSpan : SourceSpan =
+    SourceSpan "3:58-3:59";
+
+  def appFunctionSpan : SourceSpan =
+    SourceSpan "3:59-3:61";
+
+  def appIntLiteralSpan : SourceSpan =
+    SourceSpan "3:62-3:63";
+
+  def expressionAnnotationColonSpan : SourceSpan =
+    SourceSpan "3:64-3:65";
+
+  def expressionAnnotationIntSpan : SourceSpan =
+    SourceSpan "3:66-3:69";
+
+  def annotationRightParenSpan : SourceSpan =
+    SourceSpan "3:69-3:70";
+
+  def defSemicolonSpan : SourceSpan =
+    SourceSpan "3:70-3:71";
+
+  def moduleRightBraceSpan : SourceSpan =
+    SourceSpan "4:1-4:2";
+
+  def defMainSpan : SourceSpan =
+    SourceSpan "3:3-4:1";
+
+  def unexpectedSpan : SourceSpan =
+    SourceSpan "1:1-1:1";
+
+  def renderSpan : String -> SourceSpan -> String =
+    λ(file : String) λ(span : SourceSpan) case span of {
+      SourceSpan coordinates -> stringAppend file (stringAppend ":" coordinates)
+    };
+}

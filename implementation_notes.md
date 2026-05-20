@@ -1,3 +1,27 @@
+## 2026-05-20 - Round 308 parser parity typed annotation tracer
+
+- Added a bounded parser-owned `.mlfp` parity package for
+  `import Prelude exposing (Int);` and
+  `def main : Int = let id : ∀a. a -> a = λ(x : Int) x in (id 1 : Int);`
+  under `test/programs/compiler-parser-parity/typed-annotation-types/`.
+- Added the matching canonical parser fixture and committed projection under
+  `test/conformance/mlfp/parser-parity/typed-annotation-types/`, covering
+  module/export/import spans, the `Int` exposing-item span, typed let
+  annotation rendering, annotated lambda parameter rendering, expression
+  annotation rendering, and arrow/forall source-type rendering.
+- Extended `ProgramParserParitySpec` only inside test-owned projection and
+  package evidence helpers: it now renders `STVar`, `STArrow`, `STForall`,
+  typed `ELet`, annotated parameters, and `EAnn`, and checks malformed
+  annotation syntax through the public `run-program` path.
+- Scope remains parser-only. This does not claim full parser parity, checker,
+  backend, driver, platform, compiler-package, proof, parser combinators, or
+  self-boot progress.
+- Evidence: focused RED typed-annotation matcher failed before the
+  fixture/package existed; focused GREEN typed-annotation matcher and focused
+  GREEN malformed-annotation matcher passed. Round-owned implementation notes
+  under `orchestrator/rounds/round-308/implementation-notes.md` record the
+  full focused, regression, full-suite, and thesis-gate validation.
+
 ## 2026-05-20 - Round 307 parser parity let/lambda/application tracer
 
 - Added a bounded parser-owned `.mlfp` parity package for

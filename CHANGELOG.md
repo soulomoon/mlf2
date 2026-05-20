@@ -5,6 +5,17 @@
 ### Added
 - Added the next bounded canonical parser parity tracer for one
   `import Prelude exposing (Int);` declaration plus
+  `def main : Int = let id : ∀a. a -> a = λ(x : Int) x in (id 1 : Int);`.
+  The `.mlfp` package under
+  `test/programs/compiler-parser-parity/typed-annotation-types/` owns its
+  source/token/AST/parser modules, prints the committed parser-program
+  projection with typed let annotations, annotated lambda parameters,
+  expression annotations, and arrow/forall source-type rendering, and records
+  malformed let-annotation evidence through the public `run-program` path;
+  this is not full parser parity, parser-combinator, checker/backend,
+  compiler-package, driver, platform, proof, or self-boot work.
+- Added the next bounded canonical parser parity tracer for one
+  `import Prelude exposing (Int);` declaration plus
   `def main : Int = let id = λx x in id 1;`. The `.mlfp` package under
   `test/programs/compiler-parser-parity/let-lambda-application/` owns its
   source/token/AST/parser modules, prints the committed parser-program
