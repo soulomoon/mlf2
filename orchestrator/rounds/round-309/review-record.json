@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-309",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-309-parser-parity-data-declaration-constructor-spans",
+  "decision": "approved",
+  "evidence_summary": "Parser-parity group, data-declaration package smoke, prior parser package smokes, diff hygiene, full Cabal gate, and thesis conformance gate passed for the bounded data-declaration parser tracer.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-309 completed item-309-parser-parity-data-declaration-constructor-spans as a partial milestone-4 parser-parity tracer; evidence: parser-parity group, package smokes, git diff --check, cabal build all && cabal test, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

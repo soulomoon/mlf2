@@ -3,6 +3,17 @@
 ## Unreleased
 
 ### Added
+- Added the next bounded canonical parser parity tracer for
+  `module Main export (Nat(..), main) { data Nat = Zero : Nat | Succ : Nat -> Nat; def main : Nat = Succ Zero; }`.
+  The `.mlfp` package under
+  `test/programs/compiler-parser-parity/data-declaration-constructor-spans/`
+  owns its source/token/AST/parser modules, prints the committed
+  parser-program projection with ordered export items, data-declaration and
+  constructor spans, carried `Nat -> Nat` source-type rendering, and
+  constructor application rendering, and records malformed data-declaration
+  evidence through the public `run-program` path; this is not full parser
+  parity, parser-combinator, checker/backend, compiler-package, driver,
+  platform, proof, or self-boot work.
 - Added the next bounded canonical parser parity tracer for one
   `import Prelude exposing (Int);` declaration plus
   `def main : Int = let id : ∀a. a -> a = λ(x : Int) x in (id 1 : Int);`.

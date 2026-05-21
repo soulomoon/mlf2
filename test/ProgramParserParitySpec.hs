@@ -71,10 +71,25 @@ spec =
             canonicalProjection `shouldBe` expected
             parserParityOutput `shouldBe` Right expected
 
+        it "parser-owned .mlfp parser matches canonical parser for data declarations and constructor spans" $ do
+            source <- readFile dataDeclarationConstructorSpansCanonicalSourcePath
+            expected <- readFile dataDeclarationConstructorSpansExpectedProjectionPath
+
+            canonicalProjection <- renderCanonicalProjection dataDeclarationConstructorSpansCanonicalSourcePath source
+            parserParityOutput <- runProgramArgs [dataDeclarationConstructorSpansParserParityPackageRoot]
+
+            canonicalProjection `shouldBe` expected
+            parserParityOutput `shouldBe` Right expected
+
         it "parser-owned .mlfp parser rejects malformed annotation syntax through public run-program" $ do
             evidenceRoot <- writeTypedAnnotationTypesNegativeEvidencePackage
             runProgramArgs [evidenceRoot]
                 `shouldReturn` Right typedAnnotationTypesNegativeEvidenceProjection
+
+        it "parser-owned .mlfp parser rejects malformed data declarations through public run-program" $ do
+            evidenceRoot <- writeDataDeclarationConstructorSpansNegativeEvidencePackage
+            runProgramArgs [evidenceRoot]
+                `shouldReturn` Right dataDeclarationConstructorSpansNegativeEvidenceProjection
 
         it "parser-owned .mlfp parser rejects malformed import syntax through public run-program" $ do
             evidenceRoot <- writeImportNegativeEvidencePackage
@@ -116,6 +131,10 @@ typedAnnotationTypesCanonicalSourcePath :: FilePath
 typedAnnotationTypesCanonicalSourcePath =
     "test/conformance/mlfp/parser-parity/typed-annotation-types/src/Main.mlfp"
 
+dataDeclarationConstructorSpansCanonicalSourcePath :: FilePath
+dataDeclarationConstructorSpansCanonicalSourcePath =
+    "test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp"
+
 expectedProjectionPath :: FilePath
 expectedProjectionPath =
     "test/conformance/mlfp/parser-parity/basic-module-def-bool/expected/parser-program.txt"
@@ -135,6 +154,10 @@ letLambdaApplicationExpectedProjectionPath =
 typedAnnotationTypesExpectedProjectionPath :: FilePath
 typedAnnotationTypesExpectedProjectionPath =
     "test/conformance/mlfp/parser-parity/typed-annotation-types/expected/parser-program.txt"
+
+dataDeclarationConstructorSpansExpectedProjectionPath :: FilePath
+dataDeclarationConstructorSpansExpectedProjectionPath =
+    "test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/expected/parser-program.txt"
 
 parserParityPackageRoot :: FilePath
 parserParityPackageRoot =
@@ -156,6 +179,10 @@ typedAnnotationTypesParserParityPackageRoot :: FilePath
 typedAnnotationTypesParserParityPackageRoot =
     "test/programs/compiler-parser-parity/typed-annotation-types"
 
+dataDeclarationConstructorSpansParserParityPackageRoot :: FilePath
+dataDeclarationConstructorSpansParserParityPackageRoot =
+    "test/programs/compiler-parser-parity/data-declaration-constructor-spans"
+
 retryEvidencePackageRoot :: FilePath
 retryEvidencePackageRoot =
     "dist-newstyle/parser-parity-basic-module-def-bool-retry-evidence"
@@ -175,6 +202,10 @@ letLambdaApplicationNegativeEvidencePackageRoot =
 typedAnnotationTypesNegativeEvidencePackageRoot :: FilePath
 typedAnnotationTypesNegativeEvidencePackageRoot =
     "dist-newstyle/parser-parity-typed-annotation-types-negative-evidence"
+
+dataDeclarationConstructorSpansNegativeEvidencePackageRoot :: FilePath
+dataDeclarationConstructorSpansNegativeEvidencePackageRoot =
+    "dist-newstyle/parser-parity-data-declaration-constructor-spans-negative-evidence"
 
 parserParitySupportModules :: [FilePath]
 parserParitySupportModules =
@@ -198,6 +229,10 @@ letLambdaApplicationParserParitySupportModules =
 
 typedAnnotationTypesParserParitySupportModules :: [FilePath]
 typedAnnotationTypesParserParitySupportModules =
+    parserParitySupportModules
+
+dataDeclarationConstructorSpansParserParitySupportModules :: [FilePath]
+dataDeclarationConstructorSpansParserParitySupportModules =
     parserParitySupportModules
 
 writeRetryEvidencePackage :: IO FilePath
@@ -265,6 +300,19 @@ writeTypedAnnotationTypesNegativeEvidencePackage = do
             (typedAnnotationTypesParserParityPackageRoot </> name)
             (typedAnnotationTypesNegativeEvidencePackageRoot </> name)
 
+writeDataDeclarationConstructorSpansNegativeEvidencePackage :: IO FilePath
+writeDataDeclarationConstructorSpansNegativeEvidencePackage = do
+    removePathForcibly dataDeclarationConstructorSpansNegativeEvidencePackageRoot
+    createDirectoryIfMissing True dataDeclarationConstructorSpansNegativeEvidencePackageRoot
+    mapM_ copySupportModule dataDeclarationConstructorSpansParserParitySupportModules
+    writeFile (dataDeclarationConstructorSpansNegativeEvidencePackageRoot </> "Main.mlfp") dataDeclarationConstructorSpansNegativeEvidenceMainSource
+    pure dataDeclarationConstructorSpansNegativeEvidencePackageRoot
+  where
+    copySupportModule name =
+        copyFile
+            (dataDeclarationConstructorSpansParserParityPackageRoot </> name)
+            (dataDeclarationConstructorSpansNegativeEvidencePackageRoot </> name)
+
 retryEvidenceMainSource :: String
 retryEvidenceMainSource =
     unlines
@@ -325,6 +373,18 @@ typedAnnotationTypesNegativeEvidenceMainSource =
         , "}"
         ]
 
+dataDeclarationConstructorSpansNegativeEvidenceMainSource :: String
+dataDeclarationConstructorSpansNegativeEvidenceMainSource =
+    unlines
+        [ "module Main export (main) {"
+        , "  import Prelude exposing (Unit(..), IO, putStrLn);"
+        , "  import ParserParityParser exposing (renderDataDeclarationParserNegativeEvidence);"
+        , ""
+        , "  def main : IO Unit ="
+        , "    putStrLn renderDataDeclarationParserNegativeEvidence;"
+        , "}"
+        ]
+
 retryEvidenceProjection :: String
 retryEvidenceProjection =
     unlines
@@ -357,6 +417,12 @@ typedAnnotationTypesNegativeEvidenceProjection =
         [ "typed-annotation-types parser negative expected-let-annotation-type@test/conformance/mlfp/parser-parity/typed-annotation-types/src/Main.mlfp:3:29-3:30"
         ]
 
+dataDeclarationConstructorSpansNegativeEvidenceProjection :: String
+dataDeclarationConstructorSpansNegativeEvidenceProjection =
+    unlines
+        [ "data-declaration parser negative expected-constructor-colon@test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp:3:12-3:13"
+        ]
+
 renderCanonicalProjection :: FilePath -> String -> IO String
 renderCanonicalProjection path source =
     case parseLocatedProgramWithFile path source of
@@ -375,20 +441,37 @@ renderLocatedProjection located =
 
 renderModuleProjection :: P.ProgramSpanIndex -> P.Module -> IO String
 renderModuleProjection spans module0 = do
-    exportName <- requireSingleValueExport (P.moduleExports module0)
+    renderedExports <- renderExportProjections spans (P.moduleExports module0)
     renderedImports <- renderImportProjections spans (P.moduleImports module0)
     renderedDefs <- renderDefProjections spans (P.moduleDecls module0)
     moduleSpan <- requireMapSpan "module" (P.moduleName module0) (P.spanModules spans)
-    exportSpan <- requireListSpan "export" exportName (P.spanExportItems spans)
 
     pure $
         unlines
             ( [ "module " ++ P.moduleName module0 ++ " span=" ++ renderSpan moduleSpan
-              , "export value " ++ exportName ++ " span=" ++ renderSpan exportSpan
               ]
+                ++ renderedExports
                 ++ renderedImports
                 ++ renderedDefs
             )
+
+renderExportProjections :: P.ProgramSpanIndex -> Maybe [P.ExportItem] -> IO [String]
+renderExportProjections spans exports =
+    case exports of
+        Nothing -> pure []
+        Just items -> traverse (renderExportProjection spans) items
+
+renderExportProjection :: P.ProgramSpanIndex -> P.ExportItem -> IO String
+renderExportProjection spans item = do
+    let name = P.exportItemName item
+    exportSpan <- requireListSpan "export" name (P.spanExportItems spans)
+    pure $
+        "export "
+            ++ renderExportKind item
+            ++ " "
+            ++ name
+            ++ " span="
+            ++ renderSpan exportSpan
 
 renderImportProjections :: P.ProgramSpanIndex -> [P.Import] -> IO [String]
 renderImportProjections spans imports =
@@ -429,25 +512,18 @@ renderExportKind item =
         P.ExportType _ -> "type"
         P.ExportTypeWithConstructors _ -> "type-with-constructors"
 
-requireSingleValueExport :: Maybe [P.ExportItem] -> IO String
-requireSingleValueExport exports =
-    case exports of
-        Just [P.ExportValue name] -> pure name
-        other ->
-            expectationFailure ("expected one value export, got: " ++ show other)
-                >> fail "unexpected export shape"
-
 renderDefProjections :: P.ProgramSpanIndex -> [P.Decl] -> IO [String]
 renderDefProjections spans decls =
-    traverse (renderDefProjection spans) decls
+    concat <$> traverse (renderDefProjection spans) decls
 
-renderDefProjection :: P.ProgramSpanIndex -> P.Decl -> IO String
+renderDefProjection :: P.ProgramSpanIndex -> P.Decl -> IO [String]
 renderDefProjection spans decl =
     case decl of
+        P.DeclData data0 -> renderDataProjection spans data0
         P.DeclDef def0 -> do
             defSpan <- requireListSpan "definition" (P.defDeclName def0) (P.spanValues spans)
-            pure $
-                "def "
+            pure
+                [ "def "
                     ++ P.defDeclName def0
                     ++ " type="
                     ++ renderSrcType (P.constrainedBody (P.defDeclType def0))
@@ -455,9 +531,33 @@ renderDefProjection spans decl =
                     ++ renderExpr (P.defDeclExpr def0)
                     ++ " span="
                     ++ renderSpan defSpan
+                ]
         other ->
-            expectationFailure ("expected def declaration, got: " ++ show other)
+            expectationFailure ("expected data or def declaration, got: " ++ show other)
                 >> fail "unexpected declaration shape"
+
+renderDataProjection :: P.ProgramSpanIndex -> P.DataDecl -> IO [String]
+renderDataProjection spans data0 = do
+    dataSpan <- requireListSpan "data declaration" (P.dataDeclName data0) (P.spanTypes spans)
+    renderedConstructors <- traverse (renderConstructorProjection spans) (P.dataDeclConstructors data0)
+    pure $
+        ( "data "
+            ++ P.dataDeclName data0
+            ++ " span="
+            ++ renderSpan dataSpan
+        )
+            : renderedConstructors
+
+renderConstructorProjection :: P.ProgramSpanIndex -> P.ConstructorDecl -> IO String
+renderConstructorProjection spans ctor = do
+    ctorSpan <- requireListSpan "constructor" (P.constructorDeclName ctor) (P.spanConstructors spans)
+    pure $
+        "constructor "
+            ++ P.constructorDeclName ctor
+            ++ " type="
+            ++ renderSrcType (P.constructorDeclType ctor)
+            ++ " span="
+            ++ renderSpan ctorSpan
 
 requireMapSpan :: String -> String -> Map.Map String P.SourceSpan -> IO P.SourceSpan
 requireMapSpan label name spans =

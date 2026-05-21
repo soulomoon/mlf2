@@ -1,0 +1,7 @@
+module Main span=test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp:1:1-8:1
+export type-with-constructors Nat span=test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp:1:21-1:28
+export value main span=test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp:1:30-1:34
+data Nat span=test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp:2:3-6:3
+constructor Zero type=Nat span=test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp:3:7-4:5
+constructor Succ type=Nat -> Nat span=test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp:4:7-4:24
+def main type=Nat expr=Succ Zero span=test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp:6:3-7:1

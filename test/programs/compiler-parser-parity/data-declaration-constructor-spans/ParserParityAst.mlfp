@@ -1,0 +1,124 @@
+module ParserParityAst export (ParsedProgram(..), ParsedModule(..), ParsedExport(..), ParsedData(..), ParsedConstructor(..), ParsedDef(..), ParsedType(..), ParsedExpr(..), renderParsedProgram) {
+  import Prelude exposing (stringAppend);
+  import ParserParitySource exposing (SourceSpan(..), renderSpan);
+
+  data ParsedProgram =
+      ParsedProgram : ParsedModule -> ParsedProgram;
+
+  data ParsedModule =
+      ParsedModule : String -> SourceSpan -> ParsedExport -> ParsedExport -> ParsedData -> ParsedDef -> ParsedModule;
+
+  data ParsedExport =
+      ParsedExportValue : String -> SourceSpan -> ParsedExport
+    | ParsedExportTypeWithConstructors : String -> SourceSpan -> ParsedExport;
+
+  data ParsedData =
+      ParsedData : String -> SourceSpan -> ParsedConstructor -> ParsedConstructor -> ParsedData;
+
+  data ParsedConstructor =
+      ParsedConstructor : String -> ParsedType -> SourceSpan -> ParsedConstructor;
+
+  data ParsedDef =
+      ParsedDef : String -> ParsedType -> ParsedExpr -> SourceSpan -> ParsedDef;
+
+  data ParsedType =
+      ParsedTypeBase : String -> ParsedType
+    | ParsedTypeArrow : ParsedType -> ParsedType -> ParsedType;
+
+  data ParsedExpr =
+      ParsedExprValueRef : String -> ParsedExpr
+    | ParsedExprApp : ParsedExpr -> ParsedExpr -> ParsedExpr;
+
+  def renderParsedProgram : String -> ParsedProgram -> String =
+    λ(sourceFile : String) λ(program : ParsedProgram) case program of {
+      ParsedProgram module0 -> renderParsedModule sourceFile module0
+    };
+
+  def renderParsedModule : String -> ParsedModule -> String =
+    λ(sourceFile : String) λ(module0 : ParsedModule) case module0 of {
+      ParsedModule name moduleSpan exportType exportValue data0 def0 ->
+        stringAppend
+          (stringAppend "module " (stringAppend name (stringAppend " span=" (renderSpan sourceFile moduleSpan))))
+          (stringAppend "\n"
+            (stringAppend
+              (renderExport sourceFile exportType)
+              (stringAppend "\n"
+                (stringAppend
+                  (renderExport sourceFile exportValue)
+                  (stringAppend "\n"
+                    (stringAppend
+                      (renderData sourceFile data0)
+                      (stringAppend "\n" (renderDef sourceFile def0))))))))
+    };
+
+  def renderExport : String -> ParsedExport -> String =
+    λ(sourceFile : String) λ(export0 : ParsedExport) case export0 of {
+      ParsedExportValue name span ->
+        stringAppend "export value " (stringAppend name (stringAppend " span=" (renderSpan sourceFile span)));
+      ParsedExportTypeWithConstructors name span ->
+        stringAppend "export type-with-constructors " (stringAppend name (stringAppend " span=" (renderSpan sourceFile span)))
+    };
+
+  def renderData : String -> ParsedData -> String =
+    λ(sourceFile : String) λ(data0 : ParsedData) case data0 of {
+      ParsedData name span firstCtor secondCtor ->
+        stringAppend
+          (stringAppend "data " (stringAppend name (stringAppend " span=" (renderSpan sourceFile span))))
+          (stringAppend "\n"
+            (stringAppend
+              (renderConstructor sourceFile firstCtor)
+              (stringAppend "\n" (renderConstructor sourceFile secondCtor))))
+    };
+
+  def renderConstructor : String -> ParsedConstructor -> String =
+    λ(sourceFile : String) λ(ctor : ParsedConstructor) case ctor of {
+      ParsedConstructor name ty span ->
+        stringAppend "constructor "
+          (stringAppend name
+            (stringAppend " type="
+              (stringAppend (renderType ty)
+                (stringAppend " span=" (renderSpan sourceFile span)))))
+    };
+
+  def renderDef : String -> ParsedDef -> String =
+    λ(sourceFile : String) λ(def0 : ParsedDef) case def0 of {
+      ParsedDef name ty expr span ->
+        stringAppend "def "
+          (stringAppend name
+            (stringAppend " type="
+              (stringAppend (renderType ty)
+                (stringAppend " expr="
+                  (stringAppend (renderExpr expr)
+                    (stringAppend " span=" (renderSpan sourceFile span)))))))
+    };
+
+  def renderType : ParsedType -> String =
+    λ(ty : ParsedType) case ty of {
+      ParsedTypeBase name -> name;
+      ParsedTypeArrow dom cod -> renderArrowType dom cod
+    };
+
+  def renderArrowType : ParsedType -> ParsedType -> String =
+    λ(dom : ParsedType) λ(cod : ParsedType) case dom of {
+      ParsedTypeBase domName -> case cod of {
+        ParsedTypeBase codName -> stringAppend domName (stringAppend " -> " codName);
+        ParsedTypeArrow _ _ -> "type-shape-mismatch"
+      };
+      ParsedTypeArrow _ _ -> "type-shape-mismatch"
+    };
+
+  def renderExpr : ParsedExpr -> String =
+    λ(expr : ParsedExpr) case expr of {
+      ParsedExprValueRef name -> name;
+      ParsedExprApp fun arg -> renderAppExpr fun arg
+    };
+
+  def renderAppExpr : ParsedExpr -> ParsedExpr -> String =
+    λ(fun : ParsedExpr) λ(arg : ParsedExpr) case fun of {
+      ParsedExprValueRef funName -> case arg of {
+        ParsedExprValueRef argName -> stringAppend funName (stringAppend " " argName);
+        ParsedExprApp _ _ -> "app-shape-mismatch"
+      };
+      ParsedExprApp _ _ -> "app-shape-mismatch"
+    };
+}

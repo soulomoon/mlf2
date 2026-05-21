@@ -1,0 +1,7 @@
+module Main export (Nat(..), main) {
+  data Nat =
+      Zero : Nat
+    | Succ : Nat -> Nat;
+
+  def main : Nat = Succ Zero;
+}

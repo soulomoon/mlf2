@@ -1,3 +1,28 @@
+## 2026-05-21 - Round 309 parser parity data declaration tracer
+
+- Added a bounded parser-owned `.mlfp` parity package for
+  `module Main export (Nat(..), main) { data Nat = Zero : Nat | Succ : Nat -> Nat; def main : Nat = Succ Zero; }`
+  under
+  `test/programs/compiler-parser-parity/data-declaration-constructor-spans/`.
+- Added the matching canonical parser fixture and committed projection under
+  `test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/`,
+  covering ordered export items, `ExportTypeWithConstructors`,
+  `DeclData`, data-declaration spans, constructor spans, `Nat -> Nat`
+  source-type rendering, and constructor application rendering.
+- Extended `ProgramParserParitySpec` only inside test-owned projection and
+  package evidence helpers: it now renders ordered export lists, data
+  declarations, constructor declarations, and the selected constructor-value
+  application, and checks malformed data-declaration syntax through the public
+  `run-program` path.
+- Scope remains parser-only. This does not claim full parser parity, checker,
+  backend, driver, platform, compiler-package, proof, parser combinators, or
+  self-boot progress.
+- Evidence: focused RED data-declaration matcher failed before renderer and
+  package support existed; focused GREEN data-declaration matcher and focused
+  GREEN malformed-data-declaration matcher passed. Round-owned implementation
+  notes under `orchestrator/rounds/round-309/implementation-notes.md` record
+  the full focused, regression, full-suite, and thesis-gate validation.
+
 ## 2026-05-20 - Round 308 parser parity typed annotation tracer
 
 - Added a bounded parser-owned `.mlfp` parity package for
