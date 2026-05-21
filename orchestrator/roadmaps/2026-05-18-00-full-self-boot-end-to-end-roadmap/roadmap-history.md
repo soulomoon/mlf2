@@ -2,6 +2,22 @@
 
 Roadmap family: `2026-05-18-00-full-self-boot-end-to-end-roadmap`
 
+## rev-004
+
+- Activated the integrated Broad String Library completion contract and marked
+  milestone 3 complete after the whole-library round proved the native-capable
+  text substrate.
+- Carried parser-parity progress from rounds 304-308 into milestone 4 as
+  fixture-scoped tracers for basic modules, imports, value definitions,
+  let/lambda/application expressions, and typed annotations.
+- Operator-directed correction on 2026-05-21: after observing that milestone 4
+  had drifted into one parser package per fixture, the next normal milestone-4
+  implementation selection after round-309 recovery/closeout must be
+  `item-310-parser-library-consolidation`. Future parser rounds must grow one
+  shared parser-owned `.mlfp` parser-combinator library with explicit parser
+  monad sequencing and route fixtures through it rather than adding another
+  exact-source fixture parser.
+
 ## rev-003
 
 - Semantic update from round-259: future planner, implementer, and reviewer

@@ -55,6 +55,14 @@ Every round must satisfy the checks matching its touched scope.
      extraction is the integrated
      `item-302-broad-string-library-completion` whole-library item unless a
      later approved semantic update changes the contract.
+   - For milestone 4 after the active round-309 recovery/closeout decision,
+     reject any next normal implementation plan whose main artifact is another
+     fixture-owned parser package with a fixture-specific
+     `ParserParityParser.mlfp` and exact-source token stream. The lawful next
+     extraction is `item-310-parser-library-consolidation`: one shared
+     parser-owned `.mlfp` parser-combinator library with an explicit parser
+     monad or equivalent monadic parser state abstraction, exercised by the
+     carried parser-parity fixtures.
    - Confirm behavior-changing implementation plans name the `tdd` skill path
      `/Users/ares/.agents/skills/tdd/SKILL.md` and are vertical TDD slices with
      a first public behavior and focused failing test named before coding. If
@@ -160,8 +168,27 @@ Every round must satisfy the checks matching its touched scope.
   - Verify parser-owned `.mlfp` modules produce the same parsed program syntax
     artifact and source spans as the current canonical parser for selected
     fixtures.
+  - For `item-310-parser-library-consolidation`, verify the carried
+    round-304 through round-308 positive fixtures call one shared parser-owned
+    `.mlfp` parser entrypoint. If round-309 is recovered and merged before the
+    consolidation starts, verify its data-declaration fixture is also routed
+    through that shared entrypoint.
+  - Verify the shared parser library is built from parser-owned combinators
+    over an explicit `Parser` abstraction or equivalent monadic parser state
+    functions for sequencing, mapping, failure propagation, choice, span
+    capture, and diagnostic labeling. If `.mlfp` has no typeclass support for
+    `Monad`, require named functions such as `parserBind` or `andThen` rather
+    than a claimed typeclass instance.
+  - Verify grammar functions compose through the parser combinator layer
+    instead of a direct case tree over complete fixture-specific token-stream
+    constructors.
+  - Verify fixture packages are thin source/evidence harnesses only. They must
+    not each own independent grammar parsers, and the normal success path must
+    not recognize one exact fixture source with
+    `stringIndexOf source <exactFixtureSourceText>` and return a prebuilt token
+    stream.
   - Verify parser diagnostics are committed conformance behavior where
-    relevant.
+    relevant and are produced through the same shared tokenizer/parser path.
   - Verify no checker/backend/driver scope is claimed by parser parity.
 
 - **milestone-5 (Self-Boot Platform Contract Implementation)**
@@ -236,6 +263,10 @@ Every round must satisfy the checks matching its touched scope.
 - For milestone-3 closeout after rev-004, manually confirm the reviewer record
   names the rev-004 whole-library matrix and states whether milestone 4 may
   start without inventing additional Prelude-level string requirements.
+- For milestone 4 after the active round-309 recovery/closeout decision,
+  manually confirm the next normal implementation plan selects
+  `item-310-parser-library-consolidation` rather than another
+  one-parser-per-fixture tracer.
 
 ## Roadmap Overrides
 
@@ -267,3 +298,12 @@ Every round must satisfy the checks matching its touched scope.
   Library completion round with grouped public behavior tests. The controller
   and reviewer should classify any one-function string-library follow-up plan
   as requiring replanning or another semantic update.
+- For milestone 4 after the active round-309 recovery/closeout decision, the
+  next normal implementation extraction must be
+  `item-310-parser-library-consolidation`: one shared parser-owned `.mlfp`
+  parser-combinator library consolidation round that routes carried
+  parser-parity fixtures through a common parser entrypoint. The controller and
+  reviewer should classify any follow-up plan that primarily adds a new
+  fixture-specific parser package, exact-source tokenizer, or non-combinator
+  fixture-token-stream case tree as requiring replanning or another semantic
+  update.

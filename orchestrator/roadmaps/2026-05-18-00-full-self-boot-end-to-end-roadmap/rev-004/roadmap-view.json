@@ -111,8 +111,8 @@
     {
       "direction_id": "direction-4a-canonical-parser-parity",
       "milestone_id": "milestone-4",
-      "summary": "Implement full canonical .mlfp parser parity on the broad text substrate.",
-      "preconditions": ["milestone-3 complete", "parser-relevant conformance fixtures available"],
+      "summary": "Implement full canonical .mlfp parser parity by growing one shared parser-owned parser-combinator library with explicit parser-monad sequencing on the broad text substrate; fixtures exercise that library rather than each owning a parser.",
+      "preconditions": ["milestone-3 complete", "parser-relevant conformance fixtures available", "inspect existing fixture-specific parser-parity packages and remove exact-source token-stream recognition as the normal success path during the next consolidation item", "design the shared parser around parser-owned combinators and an explicit Parser abstraction or equivalent monadic parser state functions rather than fixture-token-stream case trees"],
       "parallel_hints": "serial with text substrate"
     },
     {

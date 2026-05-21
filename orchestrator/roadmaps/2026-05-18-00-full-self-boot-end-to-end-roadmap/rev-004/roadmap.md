@@ -82,8 +82,8 @@ is not a compiler-only rewrite.
   - broad Unicode-scalar `Char` and `String` library with native slicing,
     classification, search, formatting, parser-needed cursor behavior, and
     exact native metadata for string-producing helpers;
-  - full canonical `.mlfp` parser parity built on parser-owned combinators and
-    the broad text substrate;
+  - full canonical `.mlfp` parser parity built on a parser-owned combinator
+    library, explicit parser-monad sequencing, and the broad text substrate;
   - stable target-scoped public `.mlfp` ABI, managed GC contract, shared Rust
     trusted substrate path, generated binding validation, package manifests,
     checked locks, host toolchain identity, native/link records, filesystem,
@@ -133,7 +133,15 @@ is not a compiler-only rewrite.
   whole-library completion item, not another one-function tracer.
 - Milestone 4 implements full canonical `.mlfp` parser parity on the broad text
   substrate and does not absorb checker, backend, driver, or package-manager
-  work.
+  work. The parser implementation must be structured as parser-owned
+  combinators over an explicit parser monad or equivalent monadic parser state
+  abstraction; grammar functions should compose through that abstraction rather
+  than manually pattern-matching complete fixture token streams. After the
+  active round-309 recovery/closeout decision, the next normal milestone-4
+  implementation selection must consolidate the carried parser-parity slices
+  into one shared parser-owned `.mlfp` parser library. It must not add another
+  fixture-owned parser package that recognizes one exact source file and
+  constructs one hardcoded AST.
 - Milestone 5 implements platform contracts needed by both compiler
   implementations before the `.mlfp` compiler source package can make a proof
   claim.
@@ -758,15 +766,22 @@ Milestone-3 closeout criteria after the whole-library round:
 
 - Milestone id: `milestone-4`
 - Depends on: `milestone-3`
-- Intent: build the parser-owned combinator core and full canonical `.mlfp`
-  parser on top of the broad text substrate.
-- Completion signal: `.mlfp` parser source produces the same parsed program
-  syntax artifact and source spans as the current canonical parser for the
-  selected corpus, with conformance-backed pass/fail evidence and no checker,
-  backend, or driver overclaim.
+- Intent: build one shared parser-owned combinator, parser-monad,
+  lexer/token, source cursor, and syntax parser library in `.mlfp` on top of
+  the broad text substrate, then use fixtures to exercise that library.
+- Completion signal: a shared `.mlfp` parser implementation produces the same
+  parsed program syntax artifact and source spans as the current canonical
+  parser for the selected corpus, with conformance-backed pass/fail evidence
+  and no checker, backend, or driver overclaim. Fixture packages may provide
+  source/evidence harnesses, but they must not each own independent grammar
+  parsers or exact-source token streams as the success path.
 - Parallel lane: `lane-text-parser`
 - Coordination notes: this milestone is parser parity only. Name resolution,
   checking, backend lowering, driver behavior, and self-hosting belong later.
+  Round-304 through round-308 established fixture-scoped parity tracers; any
+  accepted round-309 data-declaration tracer is the final instance of that
+  pattern. Future parser work must grow a shared parser library surface and
+  route multiple canonical fixtures through it.
 
 #### Completion Pointers: milestone-4
 
@@ -776,20 +791,141 @@ Milestone-3 closeout criteria after the whole-library round:
 - round-307 completed item-307-parser-parity-let-lambda-application-spans as a partial milestone-4 parser-parity tracer; evidence: focused let/lambda/application matcher, malformed-let matcher, parser-parity group, package smokes, full Cabal gate, and thesis gate passed.
 - round-308 completed item-308-parser-parity-typed-annotation-types as a partial milestone-4 parser-parity tracer; evidence: focused typed-annotation and malformed-annotation checks, parser-parity group, package smokes, full Cabal gate, and thesis gate passed.
 
+#### Rev-004 Parser Library Consolidation Contract
+
+The next normal milestone-4 implementation selection after the active
+round-309 recovery/closeout decision must use this extracted item:
+
+- Extracted item id: `item-310-parser-library-consolidation`
+- Summary: replace the one-parser-per-fixture tracer pattern with one shared
+  parser-owned `.mlfp` parser-combinator library with an explicit parser monad
+  or equivalent monadic parser state abstraction that the carried parser-parity
+  fixtures call through a common entrypoint.
+- Required planner shape: one `selection-record.json`, one `plan.md`, and one
+  `round-plan-record.json` for the shared parser-library consolidation item.
+  The plan may contain grouped vertical RED -> GREEN -> refactor cycles, but it
+  must not create another future round whose main artifact is a new
+  fixture-specific `ParserParityParser.mlfp` plus exact-source tokenizer.
+- Default worker mode: `none`. Worker fan-out is not expected; if proposed, the
+  planner must name disjoint write scopes for parser library, fixture harness
+  migration, and projection/diagnostic evidence, plus a single integration
+  owner.
+
+Already complete and carried forward from rounds 304-308:
+
+- Positive parser projections for basic module/value definition, import
+  exposing, multiple value definitions and value-reference spans,
+  let/lambda/application expressions, typed let annotations, annotated lambda
+  parameters, expression annotations, and source type rendering.
+- Negative public `run-program` evidence for malformed tokenizer/parser
+  mismatches, import syntax, value-definition sequencing, let syntax, and
+  annotation syntax.
+- The public parity pattern that compares the Haskell canonical parser
+  projection and the `.mlfp` parser package projection against the same
+  committed golden artifact.
+
+The shared parser-library item must implement and validate this consolidation
+matrix:
+
+- Shared entrypoint:
+  - Provide one parser-owned `.mlfp` parser entrypoint for complete module
+    source text, with a single success/failure result type used by all carried
+    parity fixtures.
+  - Existing fixture packages should become thin harnesses that provide source
+    text, call the shared parser entrypoint, and render the shared projection.
+  - Do not keep a separate grammar parser per fixture family.
+- Parser monad and combinators:
+  - Define a parser-owned `Parser` abstraction or equivalent record/function
+    shape that carries input cursor/token state, success value, remaining
+    state, source span context, and parser-owned diagnostic failure.
+  - Provide explicit monadic sequencing helpers such as `parserBind` or
+    `andThen`, `parserMap`, `parserPure`, and failure propagation. If `.mlfp`
+    typeclass support is not available, use named combinator functions rather
+    than claiming a typeclass instance.
+  - Provide parser combinators for token/symbol expectation, choice,
+    optional/repetition where needed, span capture, and diagnostic labeling.
+  - Grammar functions for modules, exports, imports, declarations, expressions,
+    and source types must be expressed by composing these parser combinators,
+    not by one large case split over fixture-specific token-stream
+    constructors.
+- Real scanning path:
+  - Replace success-path tokenizers that check
+    `stringIndexOf source <exactFixtureSourceText>` and return a prebuilt token
+    stream with a source-scanning lexer/token stream over the broad string
+    substrate.
+  - Golden fixture text and expected projection files remain valid test
+    oracles, but exact fixture recognition must not be the parser's normal
+    success mechanism.
+- Carried syntax coverage:
+  - Route the round-304 through round-308 positive fixtures through the shared
+    parser library in the same consolidation round.
+  - If round-309 is recovered and merged before this item starts, route the
+    data-declaration constructor-span fixture through the shared library too.
+    If round-309 is abandoned or replanned, do not add another data-declaration
+    one-off before consolidation.
+  - Preserve the same source-span projection contract for module headers,
+    exports, imports, definitions, let/lambda/application expressions,
+    annotations, source types, and carried diagnostics.
+- Diagnostics:
+  - Negative evidence must call the same shared tokenizer/parser path and render
+    stable parser-owned diagnostic categories and spans.
+  - Do not match or re-export exact Megaparsec prose as the `.mlfp` parser
+    diagnostic contract.
+- Boundaries:
+  - Keep parser combinators and parser cursor helpers parser-owned; do not
+    widen Prelude with a generic parser API.
+  - The parser monad is a parser-library implementation contract, not a new
+    public Prelude abstraction and not a permission to add generic effect,
+    typeclass, or application-level monad scope outside parser ownership.
+  - Do not introduce checker, resolver, backend, package manager, platform,
+    driver, proof, formatting, documentation generator, or REPL scope.
+
+Grouped verification strategy for `item-310-parser-library-consolidation`:
+
+- Shared-entrypoint group: at least two carried positive fixtures fail RED
+  until they call the same shared parser entrypoint, then the consolidation
+  expands to all carried positive fixtures in the same round.
+- Parser-combinator group: grammar functions use the parser-owned monadic
+  sequencing/combinator layer for state threading, failure propagation, span
+  capture, choice, and labeling; review rejects a direct fixture-token-stream
+  case tree as the main parser architecture.
+- Lexer/token group: fixture exact-source token recognition is removed from the
+  success path and token spans still match the committed parser projections.
+- Syntax group: carried module/import/value/let/lambda/application/annotation
+  syntax stays green through the shared parser library.
+- Diagnostic group: carried malformed inputs fail through the shared parser
+  path with stable categories and spans.
+- Regression group: direct package smokes for every carried parser-parity
+  fixture stay green.
+- Closeout group: `git diff --check`, focused parser-parity matchers,
+  `cabal build all`, `cabal test`, and
+  `./scripts/thesis-conformance-gate.sh`.
+
+Milestone-4 closeout remains broader than this consolidation item. Later parser
+rounds may add grammar families, but they must extend the shared parser library
+and add fixtures against that library instead of returning to the
+one-parser-per-test package pattern.
+
 #### Candidate Direction: Canonical Parser Parity
 
 - Direction id: `direction-4a-canonical-parser-parity`
-- Summary: implement the full canonical parser in `.mlfp` using parser-owned
-  modules and compare it against the current canonical parser behavior.
+- Summary: implement the full canonical parser in `.mlfp` by growing one
+  shared parser-owned parser-combinator library with explicit parser-monad
+  sequencing and comparing its behavior against the current canonical parser.
 - Why it matters now: the compiler source package cannot own language syntax
   until parser behavior is implemented in `.mlfp`.
 - Preconditions: broad string/`Char` native support is complete; conformance
-  corpus has parser-relevant fixtures and diagnostics.
+  corpus has parser-relevant fixtures and diagnostics; inspect the existing
+  fixture-specific parser-parity packages and remove the exact-source
+  token-stream success path as part of the next consolidation item.
 - Parallel hints: serial with text substrate; docs may trail after evidence.
 - Boundary notes: no checker, backend, package manager, or self-boot driver
-  scope.
-- Extraction notes: expand syntax by stable grammar families with committed
-  expected parse/diagnostic evidence.
+  scope. Keep parser helpers parser-owned rather than adding a generic Prelude
+  parser API or broad monad/effect API.
+- Extraction notes: select `item-310-parser-library-consolidation` as the next
+  normal implementation item after round-309 recovery/closeout. Subsequent
+  syntax work must extend the shared parser library with committed
+  parse/diagnostic evidence, not create one parser package per test fixture.
 
 ### [pending] 5. Self-Boot Platform Contract Implementation
 
