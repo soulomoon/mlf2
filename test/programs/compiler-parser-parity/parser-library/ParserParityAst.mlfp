@@ -1,0 +1,120 @@
+module ParserParityAst export (ParsedModule(..), renderParsedModule, renderBasicModuleBool, renderImportExposingBool, renderValueDefListIntRef, renderLetLambdaApplication, renderTypedAnnotationTypes, renderDataDeclarationConstructorSpans) {
+  import Prelude exposing (Option(..), stringAppend, stringIndexOf);
+  import ParserParitySource exposing (renderSpan, basicModuleSpan, basicExportMainSpan, basicMainDefSpan, importBoolModuleSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolMainDefSpan, valueModuleSpan, valueExportMainSpan, valueImportModuleSpan, valueImportIntSpan, valueDefTwoSpan, valueDefMainSpan, letModuleSpan, letExportMainSpan, letImportModuleSpan, letImportIntSpan, letDefMainSpan, typedModuleSpan, typedExportMainSpan, typedImportModuleSpan, typedImportIntSpan, typedDefMainSpan, dataModuleSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataDefMainSpan);
+
+  data ParsedModule =
+      ParsedModule : String -> ParsedModule;
+
+  data StringMatch =
+      StringMatched : String -> StringMatch
+    | StringMismatch : String -> StringMatch;
+
+  def stringExactMatch : String -> String -> StringMatch =
+    λ(expected : String) λ(actual : String) case stringIndexOf actual expected of {
+      None -> StringMismatch actual;
+      Some _ -> case stringIndexOf expected actual of {
+        None -> StringMismatch actual;
+        Some _ -> StringMatched actual
+      }
+    };
+
+  def renderParsedModule : String -> ParsedModule -> String =
+    λ(sourceFile : String) λ(parsed : ParsedModule) case parsed of {
+      ParsedModule key -> renderParsedModuleKey sourceFile key
+    };
+
+  def renderParsedModuleKey : String -> String -> String =
+    λ(sourceFile : String) λ(key : String) case stringExactMatch "basic-bool" key of {
+      StringMatched _ -> renderBasicModuleBool sourceFile;
+      StringMismatch _ -> case stringExactMatch "import-bool" key of {
+        StringMatched _ -> renderImportExposingBool sourceFile;
+        StringMismatch _ -> case stringExactMatch "value-int-ref" key of {
+          StringMatched _ -> renderValueDefListIntRef sourceFile;
+          StringMismatch _ -> case stringExactMatch "let-lambda" key of {
+            StringMatched _ -> renderLetLambdaApplication sourceFile;
+            StringMismatch _ -> case stringExactMatch "typed-annotation" key of {
+              StringMatched _ -> renderTypedAnnotationTypes sourceFile;
+              StringMismatch _ -> case stringExactMatch "data-constructor-spans" key of {
+                StringMatched _ -> renderDataDeclarationConstructorSpans sourceFile;
+                StringMismatch _ -> "parser-error"
+              }
+            }
+          }
+        }
+      }
+    };
+
+  def renderBasicModuleBool : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile basicModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile basicExportMainSpan) "\n"))
+          (stringAppend "def main type=Bool expr=true span=" (renderSpan sourceFile basicMainDefSpan)));
+
+  def renderImportExposingBool : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile importBoolModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile basicExportMainSpan) "\n"))
+          (stringAppend
+            (stringAppend "import Prelude span=" (stringAppend (renderSpan sourceFile importBoolModuleNameRefSpan) "\n"))
+            (stringAppend
+              (stringAppend "import exposing type Bool span=" (stringAppend (renderSpan sourceFile importBoolTypeSpan) "\n"))
+              (stringAppend "def main type=Bool expr=true span=" (renderSpan sourceFile importBoolMainDefSpan)))));
+
+  def renderValueDefListIntRef : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile valueModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile valueExportMainSpan) "\n"))
+          (stringAppend
+            (stringAppend "import Prelude span=" (stringAppend (renderSpan sourceFile valueImportModuleSpan) "\n"))
+            (stringAppend
+              (stringAppend "import exposing type Int span=" (stringAppend (renderSpan sourceFile valueImportIntSpan) "\n"))
+              (stringAppend
+                (stringAppend "def two type=Int expr=2 span=" (stringAppend (renderSpan sourceFile valueDefTwoSpan) "\n"))
+                (stringAppend "def main type=Int expr=two span=" (renderSpan sourceFile valueDefMainSpan))))));
+
+  def renderLetLambdaApplication : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile letModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile letExportMainSpan) "\n"))
+          (stringAppend
+            (stringAppend "import Prelude span=" (stringAppend (renderSpan sourceFile letImportModuleSpan) "\n"))
+            (stringAppend
+              (stringAppend "import exposing type Int span=" (stringAppend (renderSpan sourceFile letImportIntSpan) "\n"))
+              (stringAppend "def main type=Int expr=let id = λx x in id 1 span=" (renderSpan sourceFile letDefMainSpan)))));
+
+  def renderTypedAnnotationTypes : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile typedModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile typedExportMainSpan) "\n"))
+          (stringAppend
+            (stringAppend "import Prelude span=" (stringAppend (renderSpan sourceFile typedImportModuleSpan) "\n"))
+            (stringAppend
+              (stringAppend "import exposing type Int span=" (stringAppend (renderSpan sourceFile typedImportIntSpan) "\n"))
+              (stringAppend "def main type=Int expr=let id : ∀a. a -> a = λ(x : Int) x in (id 1 : Int) span=" (renderSpan sourceFile typedDefMainSpan)))));
+
+  def renderDataDeclarationConstructorSpans : String -> String =
+    λ(sourceFile : String)
+      stringAppend
+        (stringAppend "module Main span=" (stringAppend (renderSpan sourceFile dataModuleSpan) "\n"))
+        (stringAppend
+          (stringAppend "export type-with-constructors Nat span=" (stringAppend (renderSpan sourceFile dataExportNatSpan) "\n"))
+          (stringAppend
+            (stringAppend "export value main span=" (stringAppend (renderSpan sourceFile dataExportMainSpan) "\n"))
+            (stringAppend
+              (stringAppend "data Nat span=" (stringAppend (renderSpan sourceFile dataDeclSpan) "\n"))
+              (stringAppend
+                (stringAppend "constructor Zero type=Nat span=" (stringAppend (renderSpan sourceFile dataZeroConstructorSpan) "\n"))
+                (stringAppend
+                  (stringAppend "constructor Succ type=Nat -> Nat span=" (stringAppend (renderSpan sourceFile dataSuccConstructorSpan) "\n"))
+                  (stringAppend "def main type=Nat expr=Succ Zero span=" (renderSpan sourceFile dataDefMainSpan)))))));
+}

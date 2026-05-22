@@ -1,0 +1,200 @@
+module ParserParityParserCombinator export (Functor, Applicative, Monad, ParserState(..), ParserValue(..), ParserStep(..), Parser(..), ParserEnd(..), runParser, parserPure, parserFail, parserBind, parserMap, parserChoice, captureSpan, diagnosticLabel, labelEquals, labelImportSemicolon, labelDefSemicolon, labelLetIn, labelLetAnnotationType, labelConstructorColon, expectToken, parserStateAtEnd) {
+  import ParserParityDiagnostic exposing (ParserDiagnostic(..));
+  import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), basicUnexpectedSpan);
+  import ParserParityToken exposing (TokenKind(..), TokenMatch(..), tokenMatches);
+
+  class Functor (f :: * -> *) {
+    parserFunctorMap : ∀ a b. (a -> b) -> f a -> f b;
+  }
+
+  class Applicative (f :: * -> *) {
+    parserApplicativePure : ∀ a. a -> f a;
+    parserApplicativeAp : ∀ a b. f (a -> b) -> f a -> f b;
+  }
+
+  class Monad (m :: * -> *) {
+    parserMonadBind : ∀ a b. m a -> (a -> m b) -> m b;
+  }
+
+  data ParserState =
+      ParserState : ParserSourceInput -> ParserState;
+
+  data ParserValue =
+      ValueUnit : ParserValue
+    | ValueToken : ParserSourceSymbol -> ParserValue
+    | ValueModuleKey : String -> ParserValue;
+
+  data ParserStep =
+      ParserStepOk : ParserState -> ParserValue -> ParserStep
+    | ParserStepError : ParserDiagnostic -> ParserStep;
+
+  data Parser a =
+      Parser : (ParserState -> ParserStep) -> Parser a;
+
+  data ParserEnd =
+      ParserAtEnd : ParserEnd
+    | ParserNotAtEnd : ParserEnd
+    | ParserEndUnknown : ParserEnd;
+
+  def runParser : ∀ a. Parser a -> ParserState -> ParserStep =
+    λ(parser : Parser a) λ(state : ParserState) case parser of {
+      Parser run -> run state
+    };
+
+  def parserPure : ParserValue -> Parser ParserValue =
+    λ(value : ParserValue)
+      (Parser (λ(state : ParserState) ParserStepOk state value) : Parser ParserValue);
+
+  def parserFail : ParserDiagnostic -> Parser ParserValue =
+    λ(diagnostic : ParserDiagnostic)
+      (Parser (λ(state : ParserState) ParserStepError diagnostic) : Parser ParserValue);
+
+  def parserBind : Parser ParserValue -> (ParserValue -> Parser ParserValue) -> Parser ParserValue =
+    λ(parser : Parser ParserValue) λ(next : ParserValue -> Parser ParserValue)
+      (Parser
+        (λ(state : ParserState) case runParser parser state of {
+          ParserStepOk nextState value -> runParser (next value) nextState;
+          ParserStepError diagnostic -> ParserStepError diagnostic
+        }) : Parser ParserValue);
+
+  def parserMap : (ParserValue -> ParserValue) -> Parser ParserValue -> Parser ParserValue =
+    λ(mapper : ParserValue -> ParserValue) λ(parser : Parser ParserValue)
+      parserBind parser (λ(value : ParserValue) parserPure (mapper value));
+
+  def parserChoice : Parser ParserValue -> Parser ParserValue -> Parser ParserValue =
+    λ(first : Parser ParserValue) λ(second : Parser ParserValue)
+      (Parser
+        (λ(state : ParserState) case runParser first state of {
+          ParserStepOk nextState value -> ParserStepOk nextState value;
+          ParserStepError _ -> runParser second state
+        }) : Parser ParserValue);
+
+  def captureSpan : Parser ParserValue -> Parser ParserValue =
+    λ(parser : Parser ParserValue) parser;
+
+  def diagnosticLabel : Parser ParserValue -> Parser ParserValue =
+    λ(parser : Parser ParserValue) parserMap (λ(value : ParserValue) value) parser;
+
+  def labelEquals : Parser ParserValue -> Parser ParserValue =
+    λ(parser : Parser ParserValue)
+      (Parser
+        (λ(state : ParserState) case runParser parser state of {
+          ParserStepOk nextState value -> ParserStepOk nextState value;
+          ParserStepError diagnostic -> case diagnostic of {
+            UnexpectedSourceText span -> ParserStepError (ExpectedEquals span);
+            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
+            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
+            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
+            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
+            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
+            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
+            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span)
+          }
+        }) : Parser ParserValue);
+
+  def labelImportSemicolon : Parser ParserValue -> Parser ParserValue =
+    λ(parser : Parser ParserValue)
+      (Parser
+        (λ(state : ParserState) case runParser parser state of {
+          ParserStepOk nextState value -> ParserStepOk nextState value;
+          ParserStepError diagnostic -> case diagnostic of {
+            UnexpectedSourceText span -> ParserStepError (ExpectedImportSemicolon span);
+            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
+            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
+            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
+            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
+            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
+            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
+            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span)
+          }
+        }) : Parser ParserValue);
+
+  def labelDefSemicolon : Parser ParserValue -> Parser ParserValue =
+    λ(parser : Parser ParserValue)
+      (Parser
+        (λ(state : ParserState) case runParser parser state of {
+          ParserStepOk nextState value -> ParserStepOk nextState value;
+          ParserStepError diagnostic -> case diagnostic of {
+            UnexpectedSourceText span -> ParserStepError (ExpectedDefSemicolon span);
+            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
+            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
+            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
+            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
+            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
+            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
+            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span)
+          }
+        }) : Parser ParserValue);
+
+  def labelLetIn : Parser ParserValue -> Parser ParserValue =
+    λ(parser : Parser ParserValue)
+      (Parser
+        (λ(state : ParserState) case runParser parser state of {
+          ParserStepOk nextState value -> ParserStepOk nextState value;
+          ParserStepError diagnostic -> case diagnostic of {
+            UnexpectedSourceText span -> ParserStepError (ExpectedLetIn span);
+            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
+            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
+            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
+            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
+            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
+            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
+            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span)
+          }
+        }) : Parser ParserValue);
+
+  def labelLetAnnotationType : Parser ParserValue -> Parser ParserValue =
+    λ(parser : Parser ParserValue)
+      (Parser
+        (λ(state : ParserState) case runParser parser state of {
+          ParserStepOk nextState value -> ParserStepOk nextState value;
+          ParserStepError diagnostic -> case diagnostic of {
+            UnexpectedSourceText span -> ParserStepError (ExpectedLetAnnotationType span);
+            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
+            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
+            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
+            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
+            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
+            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
+            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span)
+          }
+        }) : Parser ParserValue);
+
+  def labelConstructorColon : Parser ParserValue -> Parser ParserValue =
+    λ(parser : Parser ParserValue)
+      (Parser
+        (λ(state : ParserState) case runParser parser state of {
+          ParserStepOk nextState value -> ParserStepOk nextState value;
+          ParserStepError diagnostic -> case diagnostic of {
+            UnexpectedSourceText span -> ParserStepError (ExpectedConstructorColon span);
+            ExpectedCompleteModule span -> ParserStepError (ExpectedCompleteModule span);
+            ExpectedEquals span -> ParserStepError (ExpectedEquals span);
+            ExpectedImportSemicolon span -> ParserStepError (ExpectedImportSemicolon span);
+            ExpectedDefSemicolon span -> ParserStepError (ExpectedDefSemicolon span);
+            ExpectedLetIn span -> ParserStepError (ExpectedLetIn span);
+            ExpectedLetAnnotationType span -> ParserStepError (ExpectedLetAnnotationType span);
+            ExpectedConstructorColon span -> ParserStepError (ExpectedConstructorColon span)
+          }
+        }) : Parser ParserValue);
+
+  def expectToken : TokenKind -> String -> Parser ParserValue =
+    λ(kind : TokenKind) λ(fallbackSpan : String)
+      (Parser
+        (λ(state : ParserState) case state of {
+          ParserState stream -> case stream of {
+            SourceInputNil -> ParserStepError (UnexpectedSourceText fallbackSpan);
+            SourceInputCons token rest -> case tokenMatches kind token of {
+              TokenMatched -> ParserStepOk (ParserState rest) (ValueToken token);
+              TokenMismatch -> ParserStepError (UnexpectedSourceText fallbackSpan)
+            }
+          }
+        }) : Parser ParserValue);
+
+  def parserStateAtEnd : ParserState -> ParserEnd =
+    λ(state : ParserState) case state of {
+      ParserState stream -> case stream of {
+        SourceInputNil -> ParserAtEnd;
+        SourceInputCons _ _ -> ParserNotAtEnd
+      }
+    };
+}

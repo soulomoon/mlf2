@@ -2,6 +2,8 @@
 
 module ProgramParserParitySpec (spec) where
 
+import Data.List (isInfixOf)
+import Data.Foldable (traverse_)
 import qualified Data.Map.Strict as Map
 import MLF.API
     ( parseLocatedProgramWithFile
@@ -11,8 +13,8 @@ import MLF.Frontend.Syntax (Lit (..), SrcTy (..), SrcType)
 import qualified MLF.Frontend.Syntax.Program as P
 import MLF.Program.CLI (runProgramArgs)
 import System.Directory
-    ( copyFile
-    , createDirectoryIfMissing
+    ( createDirectoryIfMissing
+    , doesFileExist
     , removePathForcibly
     )
 import System.FilePath ((</>))
@@ -26,7 +28,7 @@ spec =
             expected <- readFile expectedProjectionPath
 
             canonicalProjection <- renderCanonicalProjection canonicalSourcePath source
-            parserParityOutput <- runProgramArgs [parserParityPackageRoot]
+            parserParityOutput <- runSharedParserFixture parserParityPackageRoot
 
             canonicalProjection `shouldBe` expected
             parserParityOutput `shouldBe` Right expected
@@ -36,17 +38,61 @@ spec =
             expected <- readFile importExpectedProjectionPath
 
             canonicalProjection <- renderCanonicalProjection importCanonicalSourcePath source
-            parserParityOutput <- runProgramArgs [importParserParityPackageRoot]
+            parserParityOutput <- runSharedParserFixture importParserParityPackageRoot
 
             canonicalProjection `shouldBe` expected
             parserParityOutput `shouldBe` Right expected
+
+        it "shared parser-owned .mlfp parser library routes carried parser fixtures through one entrypoint" $ do
+            sharedParserExists <- doesFileExist (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedParserExists `shouldBe` True
+
+            basicExpected <- readFile expectedProjectionPath
+            importExpected <- readFile importExpectedProjectionPath
+
+            runSharedParserFixture parserParityPackageRoot
+                `shouldReturn` Right basicExpected
+            runSharedParserFixture importParserParityPackageRoot
+                `shouldReturn` Right importExpected
+
+        it "shared parser-owned .mlfp parser composes grammar without fixture-level token streams" $ do
+            sharedParserSource <- concat <$> traverse readFile sharedParserAuditFiles
+            let bannedMatches =
+                    filter (`isInfixOf` sharedParserSource) sharedParserBannedPhrases
+            bannedMatches `shouldBe` []
+
+        it "shared parser-owned .mlfp parser consumes tokens through parser-state grammar combinators" $ do
+            sharedParserSource <- concat <$> traverse readFile sharedParserAuditFiles
+            sharedCombinatorSource <- readFile (sharedParserLibraryRoot </> "ParserParityParserCombinator.mlfp")
+
+            let fixedOffsetMatches =
+                    filter (`isInfixOf` sharedParserSource) sharedParserFixedOffsetPhrases
+            fixedOffsetMatches `shouldBe` []
+
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedCombinatorSource)) sharedParserRequiredCombinators
+
+        it "shared parser-owned .mlfp parser reaches success only after complete syntax and dynamic diagnostics" $ do
+            sharedParserSource <- readFile (sharedParserLibraryRoot </> "ParserParityParser.mlfp")
+            sharedLexerSource <- readFile (sharedParserLibraryRoot </> "ParserParityLexer.mlfp")
+
+            let earlySuccessMatches =
+                    filter (`isInfixOf` sharedParserSource) sharedParserEarlySuccessPhrases
+                staticDiagnosticMatches =
+                    filter (`isInfixOf` sharedParserSource) sharedParserStaticNegativeEvidencePhrases
+
+            earlySuccessMatches `shouldBe` []
+            staticDiagnosticMatches `shouldBe` []
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserCompleteParseRequiredPhrases
+            traverse_ (`shouldSatisfy` (`isInfixOf` sharedParserSource)) sharedParserDynamicEvidenceRequiredPhrases
+            sharedLexerSource `shouldSatisfy` isInfixOf "def tokenizeCompleteModule : ParserSourceInput -> LexerResult"
+            sharedLexerSource `shouldSatisfy` isInfixOf "validateSourceInput input"
 
         it "parser-owned .mlfp parser matches canonical parser for multiple value definitions and value-reference spans" $ do
             source <- readFile valueDefListCanonicalSourcePath
             expected <- readFile valueDefListExpectedProjectionPath
 
             canonicalProjection <- renderCanonicalProjection valueDefListCanonicalSourcePath source
-            parserParityOutput <- runProgramArgs [valueDefListParserParityPackageRoot]
+            parserParityOutput <- runSharedParserFixture valueDefListParserParityPackageRoot
 
             canonicalProjection `shouldBe` expected
             parserParityOutput `shouldBe` Right expected
@@ -56,7 +102,7 @@ spec =
             expected <- readFile letLambdaApplicationExpectedProjectionPath
 
             canonicalProjection <- renderCanonicalProjection letLambdaApplicationCanonicalSourcePath source
-            parserParityOutput <- runProgramArgs [letLambdaApplicationParserParityPackageRoot]
+            parserParityOutput <- runSharedParserFixture letLambdaApplicationParserParityPackageRoot
 
             canonicalProjection `shouldBe` expected
             parserParityOutput `shouldBe` Right expected
@@ -66,7 +112,7 @@ spec =
             expected <- readFile typedAnnotationTypesExpectedProjectionPath
 
             canonicalProjection <- renderCanonicalProjection typedAnnotationTypesCanonicalSourcePath source
-            parserParityOutput <- runProgramArgs [typedAnnotationTypesParserParityPackageRoot]
+            parserParityOutput <- runSharedParserFixture typedAnnotationTypesParserParityPackageRoot
 
             canonicalProjection `shouldBe` expected
             parserParityOutput `shouldBe` Right expected
@@ -76,39 +122,39 @@ spec =
             expected <- readFile dataDeclarationConstructorSpansExpectedProjectionPath
 
             canonicalProjection <- renderCanonicalProjection dataDeclarationConstructorSpansCanonicalSourcePath source
-            parserParityOutput <- runProgramArgs [dataDeclarationConstructorSpansParserParityPackageRoot]
+            parserParityOutput <- runSharedParserFixture dataDeclarationConstructorSpansParserParityPackageRoot
 
             canonicalProjection `shouldBe` expected
             parserParityOutput `shouldBe` Right expected
 
         it "parser-owned .mlfp parser rejects malformed annotation syntax through public run-program" $ do
             evidenceRoot <- writeTypedAnnotationTypesNegativeEvidencePackage
-            runProgramArgs [evidenceRoot]
+            runSharedParserFixture evidenceRoot
                 `shouldReturn` Right typedAnnotationTypesNegativeEvidenceProjection
 
         it "parser-owned .mlfp parser rejects malformed data declarations through public run-program" $ do
             evidenceRoot <- writeDataDeclarationConstructorSpansNegativeEvidencePackage
-            runProgramArgs [evidenceRoot]
+            runSharedParserFixture evidenceRoot
                 `shouldReturn` Right dataDeclarationConstructorSpansNegativeEvidenceProjection
 
         it "parser-owned .mlfp parser rejects malformed import syntax through public run-program" $ do
             evidenceRoot <- writeImportNegativeEvidencePackage
-            runProgramArgs [evidenceRoot]
+            runSharedParserFixture evidenceRoot
                 `shouldReturn` Right importNegativeEvidenceProjection
 
         it "parser-owned .mlfp parser rejects malformed value-definition sequencing through public run-program" $ do
             evidenceRoot <- writeValueDefListNegativeEvidencePackage
-            runProgramArgs [evidenceRoot]
+            runSharedParserFixture evidenceRoot
                 `shouldReturn` Right valueDefListNegativeEvidenceProjection
 
         it "parser-owned .mlfp parser rejects malformed let expressions through public run-program" $ do
             evidenceRoot <- writeLetLambdaApplicationNegativeEvidencePackage
-            runProgramArgs [evidenceRoot]
+            runSharedParserFixture evidenceRoot
                 `shouldReturn` Right letLambdaApplicationNegativeEvidenceProjection
 
         it "parser-owned .mlfp tokenizer and parser reject discrete token mismatches" $ do
             evidenceRoot <- writeRetryEvidencePackage
-            runProgramArgs [evidenceRoot]
+            runSharedParserFixture evidenceRoot
                 `shouldReturn` Right retryEvidenceProjection
 
 canonicalSourcePath :: FilePath
@@ -183,6 +229,118 @@ dataDeclarationConstructorSpansParserParityPackageRoot :: FilePath
 dataDeclarationConstructorSpansParserParityPackageRoot =
     "test/programs/compiler-parser-parity/data-declaration-constructor-spans"
 
+sharedParserLibraryRoot :: FilePath
+sharedParserLibraryRoot =
+    "test/programs/compiler-parser-parity/parser-library"
+
+sharedParserAuditFiles :: [FilePath]
+sharedParserAuditFiles =
+    [ sharedParserLibraryRoot </> "ParserParityToken.mlfp"
+    , sharedParserLibraryRoot </> "ParserParityLexer.mlfp"
+    , sharedParserLibraryRoot </> "ParserParityParser.mlfp"
+    ]
+
+sharedParserBannedPhrases :: [String]
+sharedParserBannedPhrases =
+    [ "BasicModuleTokens"
+    , "ImportBoolTokens"
+    , "ValueDefListTokens"
+    , "LetLambdaApplicationTokens"
+    , "TypedAnnotationTypesTokens"
+    , "DataDeclarationTokens"
+    , "LexerOk basicModuleTokens"
+    , "LexerOk importBoolTokens"
+    , "LexerOk valueDefListTokens"
+    , "LexerOk letLambdaApplicationTokens"
+    , "LexerOk typedAnnotationTypesTokens"
+    , "LexerOk dataDeclarationTokens"
+    , "case tokens"
+    ]
+
+sharedParserFixedOffsetPhrases :: [String]
+sharedParserFixedOffsetPhrases =
+    map sharedParserFixedSourceProbe
+        [ 0
+        , 7
+        , 12
+        , 20
+        , 30
+        , 46
+        , 55
+        , 60
+        , 61
+        , 67
+        , 80
+        , 87
+        , 90
+        , 94
+        ]
+
+sharedParserFixedSourceProbe :: Int -> String
+sharedParserFixedSourceProbe offset =
+    "stringSlice " <> "source " <> show offset
+
+sharedParserRequiredCombinators :: [String]
+sharedParserRequiredCombinators =
+    [ "class Functor"
+    , "class Applicative"
+    , "class Monad"
+    , "data Parser a"
+    , "parserBind"
+    , "parserMap"
+    , "parserChoice"
+    , "captureSpan"
+    , "diagnosticLabel"
+    ]
+
+sharedParserEarlySuccessPhrases :: [String]
+sharedParserEarlySuccessPhrases =
+    [ "ParserTextMatched -> moduleKey \"data-constructor-spans\""
+    , "ParserTextMatched -> moduleKey boolKey"
+    , "ParserTextMatched -> moduleKey \"value-int-ref\""
+    , "ParserTextMatched -> moduleKey \"typed-annotation\""
+    , "ParserTextMismatch -> moduleKey \"let-lambda\""
+    ]
+
+sharedParserCompleteParseRequiredPhrases :: [String]
+sharedParserCompleteParseRequiredPhrases =
+    [ "parserStateAtEnd state"
+    , "ParserAtEnd ->"
+    , "ParserNotAtEnd ->"
+    , "completeModuleKey"
+    , "parseDataDeclaration"
+    , "parseBoolDefinitionEquals"
+    , "parseValueTwoDefinition"
+    , "parseLetLambdaTail"
+    , "parseTypedAnnotationTail"
+    ]
+
+sharedParserStaticNegativeEvidencePhrases :: [String]
+sharedParserStaticNegativeEvidencePhrases =
+    [ "stringAppend \"import parser negative expected-import-semicolon@\""
+    , "stringAppend \"value-def-list parser negative expected-def-semicolon@\""
+    , "stringAppend \"let-lambda-application parser negative expected-let-in@\""
+    , "stringAppend \"typed-annotation-types parser negative expected-let-annotation-type@\""
+    , "stringAppend \"data-declaration parser negative expected-constructor-colon@\""
+    ]
+
+sharedParserDynamicEvidenceRequiredPhrases :: [String]
+sharedParserDynamicEvidenceRequiredPhrases =
+    [ "parseCompleteModule basicParserNegativeSourceInput"
+    , "parseCompleteModule importParserNegativeSourceInput"
+    , "parseCompleteModule valueDefListParserNegativeSourceInput"
+    , "parseCompleteModule letLambdaApplicationParserNegativeSourceInput"
+    , "parseCompleteModule typedAnnotationTypesParserNegativeSourceInput"
+    , "parseCompleteModule dataDeclarationParserNegativeSourceInput"
+    , "tokenizeCompleteModule source"
+    , "tokenizeCompleteModule lexerMismatchSource"
+    , "renderDiagnosticEvidence"
+    ]
+
+runSharedParserFixture :: FilePath -> IO (Either String String)
+runSharedParserFixture fixtureRoot =
+    runProgramArgs [fixtureRoot, "--search-path", sharedParserLibraryRoot]
+
 retryEvidencePackageRoot :: FilePath
 retryEvidencePackageRoot =
     "dist-newstyle/parser-parity-basic-module-def-bool-retry-evidence"
@@ -207,121 +365,60 @@ dataDeclarationConstructorSpansNegativeEvidencePackageRoot :: FilePath
 dataDeclarationConstructorSpansNegativeEvidencePackageRoot =
     "dist-newstyle/parser-parity-data-declaration-constructor-spans-negative-evidence"
 
-parserParitySupportModules :: [FilePath]
-parserParitySupportModules =
-    [ "ParserParitySource.mlfp"
-    , "ParserParityToken.mlfp"
-    , "ParserParityAst.mlfp"
-    , "ParserParityParser.mlfp"
-    ]
-
-importParserParitySupportModules :: [FilePath]
-importParserParitySupportModules =
-    parserParitySupportModules
-
-valueDefListParserParitySupportModules :: [FilePath]
-valueDefListParserParitySupportModules =
-    parserParitySupportModules
-
-letLambdaApplicationParserParitySupportModules :: [FilePath]
-letLambdaApplicationParserParitySupportModules =
-    parserParitySupportModules
-
-typedAnnotationTypesParserParitySupportModules :: [FilePath]
-typedAnnotationTypesParserParitySupportModules =
-    parserParitySupportModules
-
-dataDeclarationConstructorSpansParserParitySupportModules :: [FilePath]
-dataDeclarationConstructorSpansParserParitySupportModules =
-    parserParitySupportModules
-
 writeRetryEvidencePackage :: IO FilePath
 writeRetryEvidencePackage = do
     removePathForcibly retryEvidencePackageRoot
     createDirectoryIfMissing True retryEvidencePackageRoot
-    mapM_ copySupportModule parserParitySupportModules
     writeFile (retryEvidencePackageRoot </> "Main.mlfp") retryEvidenceMainSource
     pure retryEvidencePackageRoot
-  where
-    copySupportModule name =
-        copyFile
-            (parserParityPackageRoot </> name)
-            (retryEvidencePackageRoot </> name)
 
 writeImportNegativeEvidencePackage :: IO FilePath
 writeImportNegativeEvidencePackage = do
     removePathForcibly importNegativeEvidencePackageRoot
     createDirectoryIfMissing True importNegativeEvidencePackageRoot
-    mapM_ copySupportModule importParserParitySupportModules
     writeFile (importNegativeEvidencePackageRoot </> "Main.mlfp") importNegativeEvidenceMainSource
     pure importNegativeEvidencePackageRoot
-  where
-    copySupportModule name =
-        copyFile
-            (importParserParityPackageRoot </> name)
-            (importNegativeEvidencePackageRoot </> name)
 
 writeValueDefListNegativeEvidencePackage :: IO FilePath
 writeValueDefListNegativeEvidencePackage = do
     removePathForcibly valueDefListNegativeEvidencePackageRoot
     createDirectoryIfMissing True valueDefListNegativeEvidencePackageRoot
-    mapM_ copySupportModule valueDefListParserParitySupportModules
     writeFile (valueDefListNegativeEvidencePackageRoot </> "Main.mlfp") valueDefListNegativeEvidenceMainSource
     pure valueDefListNegativeEvidencePackageRoot
-  where
-    copySupportModule name =
-        copyFile
-            (valueDefListParserParityPackageRoot </> name)
-            (valueDefListNegativeEvidencePackageRoot </> name)
 
 writeLetLambdaApplicationNegativeEvidencePackage :: IO FilePath
 writeLetLambdaApplicationNegativeEvidencePackage = do
     removePathForcibly letLambdaApplicationNegativeEvidencePackageRoot
     createDirectoryIfMissing True letLambdaApplicationNegativeEvidencePackageRoot
-    mapM_ copySupportModule letLambdaApplicationParserParitySupportModules
     writeFile (letLambdaApplicationNegativeEvidencePackageRoot </> "Main.mlfp") letLambdaApplicationNegativeEvidenceMainSource
     pure letLambdaApplicationNegativeEvidencePackageRoot
-  where
-    copySupportModule name =
-        copyFile
-            (letLambdaApplicationParserParityPackageRoot </> name)
-            (letLambdaApplicationNegativeEvidencePackageRoot </> name)
 
 writeTypedAnnotationTypesNegativeEvidencePackage :: IO FilePath
 writeTypedAnnotationTypesNegativeEvidencePackage = do
     removePathForcibly typedAnnotationTypesNegativeEvidencePackageRoot
     createDirectoryIfMissing True typedAnnotationTypesNegativeEvidencePackageRoot
-    mapM_ copySupportModule typedAnnotationTypesParserParitySupportModules
     writeFile (typedAnnotationTypesNegativeEvidencePackageRoot </> "Main.mlfp") typedAnnotationTypesNegativeEvidenceMainSource
     pure typedAnnotationTypesNegativeEvidencePackageRoot
-  where
-    copySupportModule name =
-        copyFile
-            (typedAnnotationTypesParserParityPackageRoot </> name)
-            (typedAnnotationTypesNegativeEvidencePackageRoot </> name)
 
 writeDataDeclarationConstructorSpansNegativeEvidencePackage :: IO FilePath
 writeDataDeclarationConstructorSpansNegativeEvidencePackage = do
     removePathForcibly dataDeclarationConstructorSpansNegativeEvidencePackageRoot
     createDirectoryIfMissing True dataDeclarationConstructorSpansNegativeEvidencePackageRoot
-    mapM_ copySupportModule dataDeclarationConstructorSpansParserParitySupportModules
     writeFile (dataDeclarationConstructorSpansNegativeEvidencePackageRoot </> "Main.mlfp") dataDeclarationConstructorSpansNegativeEvidenceMainSource
     pure dataDeclarationConstructorSpansNegativeEvidencePackageRoot
-  where
-    copySupportModule name =
-        copyFile
-            (dataDeclarationConstructorSpansParserParityPackageRoot </> name)
-            (dataDeclarationConstructorSpansNegativeEvidencePackageRoot </> name)
 
 retryEvidenceMainSource :: String
 retryEvidenceMainSource =
     unlines
         [ "module Main export (main) {"
         , "  import Prelude exposing (Unit(..), IO, putStrLn);"
-        , "  import ParserParityParser exposing (renderParserParityRetryEvidence);"
+        , "  import ParserParityParser exposing (basicLexerMismatchSourceInput, basicPositiveSourceInput, renderParserParityRetryEvidence);"
+        , ""
+        , "  def sourceFile : String ="
+        , "    \"test/conformance/mlfp/parser-parity/basic-module-def-bool/src/Main.mlfp\";"
         , ""
         , "  def main : IO Unit ="
-        , "    putStrLn renderParserParityRetryEvidence;"
+        , "    putStrLn (renderParserParityRetryEvidence sourceFile basicPositiveSourceInput basicLexerMismatchSourceInput);"
         , "}"
         ]
 
@@ -332,8 +429,11 @@ importNegativeEvidenceMainSource =
         , "  import Prelude exposing (Unit(..), IO, putStrLn);"
         , "  import ParserParityParser exposing (renderImportParserNegativeEvidence);"
         , ""
+        , "  def sourceFile : String ="
+        , "    \"test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp\";"
+        , ""
         , "  def main : IO Unit ="
-        , "    putStrLn renderImportParserNegativeEvidence;"
+        , "    putStrLn (renderImportParserNegativeEvidence sourceFile);"
         , "}"
         ]
 
@@ -344,8 +444,11 @@ valueDefListNegativeEvidenceMainSource =
         , "  import Prelude exposing (Unit(..), IO, putStrLn);"
         , "  import ParserParityParser exposing (renderValueDefListParserNegativeEvidence);"
         , ""
+        , "  def sourceFile : String ="
+        , "    \"test/conformance/mlfp/parser-parity/value-def-list-int-ref/src/Main.mlfp\";"
+        , ""
         , "  def main : IO Unit ="
-        , "    putStrLn renderValueDefListParserNegativeEvidence;"
+        , "    putStrLn (renderValueDefListParserNegativeEvidence sourceFile);"
         , "}"
         ]
 
@@ -356,8 +459,11 @@ letLambdaApplicationNegativeEvidenceMainSource =
         , "  import Prelude exposing (Unit(..), IO, putStrLn);"
         , "  import ParserParityParser exposing (renderLetLambdaApplicationParserNegativeEvidence);"
         , ""
+        , "  def sourceFile : String ="
+        , "    \"test/conformance/mlfp/parser-parity/let-lambda-application/src/Main.mlfp\";"
+        , ""
         , "  def main : IO Unit ="
-        , "    putStrLn renderLetLambdaApplicationParserNegativeEvidence;"
+        , "    putStrLn (renderLetLambdaApplicationParserNegativeEvidence sourceFile);"
         , "}"
         ]
 
@@ -368,8 +474,11 @@ typedAnnotationTypesNegativeEvidenceMainSource =
         , "  import Prelude exposing (Unit(..), IO, putStrLn);"
         , "  import ParserParityParser exposing (renderTypedAnnotationTypesParserNegativeEvidence);"
         , ""
+        , "  def sourceFile : String ="
+        , "    \"test/conformance/mlfp/parser-parity/typed-annotation-types/src/Main.mlfp\";"
+        , ""
         , "  def main : IO Unit ="
-        , "    putStrLn renderTypedAnnotationTypesParserNegativeEvidence;"
+        , "    putStrLn (renderTypedAnnotationTypesParserNegativeEvidence sourceFile);"
         , "}"
         ]
 
@@ -380,8 +489,11 @@ dataDeclarationConstructorSpansNegativeEvidenceMainSource =
         , "  import Prelude exposing (Unit(..), IO, putStrLn);"
         , "  import ParserParityParser exposing (renderDataDeclarationParserNegativeEvidence);"
         , ""
+        , "  def sourceFile : String ="
+        , "    \"test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp\";"
+        , ""
         , "  def main : IO Unit ="
-        , "    putStrLn renderDataDeclarationParserNegativeEvidence;"
+        , "    putStrLn (renderDataDeclarationParserNegativeEvidence sourceFile);"
         , "}"
         ]
 

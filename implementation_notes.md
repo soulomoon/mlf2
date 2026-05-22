@@ -1,3 +1,25 @@
+## 2026-05-21 - Round 310 parser parity shared library consolidation
+
+- Consolidated the carried parser-parity fixture packages for
+  `basic-module-def-bool`, `import-exposing-def-bool`,
+  `value-def-list-int-ref`, `let-lambda-application`,
+  `typed-annotation-types`, and `data-declaration-constructor-spans` onto one
+  shared parser-owned `.mlfp` library under
+  `test/programs/compiler-parser-parity/parser-library/`.
+- Fixture roots are now thin harnesses that provide source file identity and
+  `ParserSourceInput` token/source-symbol streams, then call the shared
+  `renderParserParityProjection` entrypoint through `--search-path`. Temporary
+  negative-evidence packages likewise call shared parser diagnostics instead
+  of copying fixture-local parser support.
+- The shared lexer validates the parser-parity source-input stream and no
+  longer recognizes complete fixture source text to return a success token
+  stream. The shared parser keeps parser-state evidence in
+  `ParserParityParserCombinator` and validates all carried positive and
+  negative token streams through one `parseTokens` entrypoint.
+- Scope remains parser parity only. This does not claim full parser parity,
+  checker, resolver, backend, driver, platform, proof, generic Prelude parser
+  APIs, or self-boot progress.
+
 ## 2026-05-21 - Round 309 parser parity data declaration tracer
 
 - Added a bounded parser-owned `.mlfp` parity package for

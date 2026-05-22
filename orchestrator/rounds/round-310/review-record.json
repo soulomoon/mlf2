@@ -1,0 +1,24 @@
+{
+  "schema_version": "review-record-v3",
+  "round_id": "round-310",
+  "roadmap_id": "2026-05-18-00-full-self-boot-end-to-end-roadmap",
+  "roadmap_revision": "rev-004",
+  "roadmap_dir": "orchestrator/roadmaps/2026-05-18-00-full-self-boot-end-to-end-roadmap/rev-004",
+  "milestone_id": "milestone-4",
+  "direction_id": "direction-4a-canonical-parser-parity",
+  "extracted_item_id": "item-310-parser-library-consolidation",
+  "decision": "approved",
+  "evidence_summary": "Approved round-310: shared parser-owned .mlfp parser library consolidation passed static audits, focused shared-entrypoint and ADT regression checks, six direct fixture smokes, the 16-example parser-parity group, git diff --check, cabal build all, cabal test, and the thesis gate.",
+  "roadmap_closeout": {
+    "mode": "status-only",
+    "status_changes": [],
+    "completion_pointers": [
+      {
+        "anchor_id": "milestone-4-completion",
+        "text": "round-310 completed item-310-parser-library-consolidation: carried parser-parity fixtures now route through one shared parser-owned .mlfp parser-combinator library with complete syntax/end-state checking and shared tokenizer/parser diagnostics; evidence: static audits, focused shared-entrypoint and ADT regressions, six direct smokes, parser-parity group, full Cabal gate, and thesis gate passed."
+      }
+    ],
+    "history_entries": [],
+    "semantic_update_required_reason": null
+  }
+}

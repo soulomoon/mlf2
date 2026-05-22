@@ -1422,6 +1422,71 @@ spec = do
             program <- requireParsed programText
             checkProgram program `shouldBe` Left (ProgramDuplicateTypeParameter "a")
 
+        it "checks nullary constructors from wide ADTs without leaking handler result polymorphism" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (main) {"
+                        , "  data Many ="
+                        , "      C01 : Many"
+                        , "    | C02 : Many"
+                        , "    | C03 : Many"
+                        , "    | C04 : Many"
+                        , "    | C05 : Many"
+                        , "    | C06 : Many"
+                        , "    | C07 : Many"
+                        , "    | C08 : Many"
+                        , "    | C09 : Many"
+                        , "    | C10 : Many"
+                        , "    | C11 : Many"
+                        , "    | C12 : Many"
+                        , "    | C13 : Many"
+                        , "    | C14 : Many"
+                        , "    | C15 : Many"
+                        , "    | C16 : Many"
+                        , "    | C17 : Many"
+                        , "    | C18 : Many"
+                        , "    | C19 : Many"
+                        , "    | C20 : Many"
+                        , "    | C21 : Many"
+                        , "    | C22 : Many"
+                        , "    | C23 : Many"
+                        , "    | C24 : Many"
+                        , "    | C25 : Many"
+                        , "    | C26 : Many"
+                        , "    | C27 : Many"
+                        , "    | C28 : Many"
+                        , "    | C29 : Many"
+                        , "    | C30 : Many"
+                        , "    | C31 : Many"
+                        , "    | C32 : Many"
+                        , "    | C33 : Many"
+                        , "    | C34 : Many"
+                        , "    | C35 : Many"
+                        , "    | C36 : Many"
+                        , "    | C37 : Many;"
+                        , ""
+                        , "  def main : Many = C01;"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
+
+        it "checks parameterized constructor applications without leaking identity substitutions" $ do
+            let programText =
+                    unlines
+                        [ "module Main export (Box(..), boxPure, main) {"
+                        , "  data Box a ="
+                        , "      Box : a -> Box a;"
+                        , ""
+                        , "  def boxPure : ∀ a. a -> Box a ="
+                        , "    λ(value : a) (Box value : Box a);"
+                        , ""
+                        , "  def main : Box String = boxPure \"ok\";"
+                        , "}"
+                        ]
+            program <- requireParsed programText
+            checkProgram program `shouldSatisfy` isRight
+
         it "rejects importing constructors from an abstract type export" $ do
             let programText =
                     unlines

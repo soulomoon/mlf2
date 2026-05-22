@@ -1,0 +1,30 @@
+module ParserParityFixture export (sourceFile, sourceInput) {
+  import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), sourceInputNil, sourceInputCons, basicModuleKeywordSpan, basicModuleNameSpan, basicExportKeywordSpan, basicExportLeftParenSpan, basicExportMainSpan, basicExportRightParenSpan, basicModuleLeftBraceSpan, basicModuleRightBraceSpan, basicDefKeywordSpan, basicDefNameSpan, basicDefColonSpan, basicBoolTypeSpan, basicDefEqualsSpan, basicBoolLiteralSpan, basicDefSemicolonSpan, importBoolModuleNameRefSpan, importBoolTypeSpan, importBoolSemicolonSpan);
+
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/import-exposing-def-bool/src/Main.mlfp";
+
+  def sourceInput : ParserSourceInput =
+    sourceInputCons (SourceSymbol basicModuleKeywordSpan "module")
+      (sourceInputCons (SourceSymbol basicModuleNameSpan "identifier:Main")
+        (sourceInputCons (SourceSymbol basicExportKeywordSpan "export")
+          (sourceInputCons (SourceSymbol basicExportLeftParenSpan "(")
+            (sourceInputCons (SourceSymbol basicExportMainSpan "identifier:main")
+              (sourceInputCons (SourceSymbol basicExportRightParenSpan ")")
+                (sourceInputCons (SourceSymbol basicModuleLeftBraceSpan "{")
+                  (sourceInputCons (SourceSymbol importBoolModuleNameRefSpan "import")
+                    (sourceInputCons (SourceSymbol importBoolModuleNameRefSpan "identifier:Prelude")
+                      (sourceInputCons (SourceSymbol importBoolModuleNameRefSpan "exposing")
+                        (sourceInputCons (SourceSymbol importBoolTypeSpan "(")
+                          (sourceInputCons (SourceSymbol importBoolTypeSpan "identifier:Bool")
+                            (sourceInputCons (SourceSymbol importBoolTypeSpan ")")
+                              (sourceInputCons (SourceSymbol importBoolSemicolonSpan ";")
+                                (sourceInputCons (SourceSymbol basicDefKeywordSpan "def")
+                                  (sourceInputCons (SourceSymbol basicDefNameSpan "identifier:main")
+                                    (sourceInputCons (SourceSymbol basicDefColonSpan ":")
+                                      (sourceInputCons (SourceSymbol basicBoolTypeSpan "identifier:Bool")
+                                        (sourceInputCons (SourceSymbol basicDefEqualsSpan "=")
+                                          (sourceInputCons (SourceSymbol basicBoolLiteralSpan "bool:true")
+                                            (sourceInputCons (SourceSymbol basicDefSemicolonSpan ";")
+                                              (sourceInputCons (SourceSymbol basicModuleRightBraceSpan "}") sourceInputNil)))))))))))))))))))));
+}

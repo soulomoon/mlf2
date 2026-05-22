@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### Changed
+- Consolidated the carried bounded canonical parser parity fixtures onto one
+  shared parser-owned `.mlfp` library under
+  `test/programs/compiler-parser-parity/parser-library/`. The fixture roots
+  for the basic Bool module, import-exposing Bool module, value-definition
+  list, let/lambda/application, typed annotation, and data-declaration
+  projections now call one common parser entrypoint through `--search-path`;
+  per-fixture parser/source/token/AST support modules and exact-source
+  success recognizers were retired without claiming full parser parity,
+  checker/backend, driver, platform, proof, or self-boot completion.
+
 ### Added
 - Added the next bounded canonical parser parity tracer for
   `module Main export (Nat(..), main) { data Nat = Zero : Nat | Succ : Nat -> Nat; def main : Nat = Succ Zero; }`.

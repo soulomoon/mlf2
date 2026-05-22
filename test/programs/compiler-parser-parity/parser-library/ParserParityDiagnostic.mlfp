@@ -1,0 +1,11 @@
+module ParserParityDiagnostic export (ParserDiagnostic(..)) {
+  data ParserDiagnostic =
+      UnexpectedSourceText : String -> ParserDiagnostic
+    | ExpectedCompleteModule : String -> ParserDiagnostic
+    | ExpectedEquals : String -> ParserDiagnostic
+    | ExpectedImportSemicolon : String -> ParserDiagnostic
+    | ExpectedDefSemicolon : String -> ParserDiagnostic
+    | ExpectedLetIn : String -> ParserDiagnostic
+    | ExpectedLetAnnotationType : String -> ParserDiagnostic
+    | ExpectedConstructorColon : String -> ParserDiagnostic;
+}

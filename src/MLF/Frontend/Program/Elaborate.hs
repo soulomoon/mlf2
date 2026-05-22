@@ -758,10 +758,13 @@ constructorSurfaceExprRaw scope ctorInfo =
           then map (constructorStructuralHandlerType resultVar . constructorShapeFromInfo) handlerCtorOrder
           else map (\ctor -> handlerSurfaceType scope ctor (STVar resultVar)) handlerCtorOrder
       selectedHandler =
-        foldl
-          surfaceApp
-          (surfaceVar (handlerNames !! ctorIndex ctorInfo))
-          (map surfaceVar argNames)
+        surfaceAnn
+          ( foldl
+              surfaceApp
+              (surfaceVar (handlerNames !! ctorIndex ctorInfo))
+              (map surfaceVar argNames)
+          )
+          (STVar resultVar)
       body = foldr (\(handlerName, handlerTy) acc -> surfaceLamAnn handlerName handlerTy acc) selectedHandler (zip handlerNames handlerTypes)
       lifted =
         foldr
@@ -1317,7 +1320,7 @@ bindTypeHeadVariable sameType subst name ty =
 constructorArgPlan :: ElaborateScope -> ConstructorInfo -> Maybe SrcType -> [P.Expr] -> (Map String SrcType, [SrcType])
 constructorArgPlan scope ctorInfo mbExpected args =
   let (subst, argTys) = foldl step (initialSubst, []) (zip (ctorArgs ctorInfo) args)
-   in (subst, reverse argTys)
+   in (nonIdentityConstructorSubst subst, reverse argTys)
   where
     initialSubst =
       constructorInitialSubst scope ctorInfo (length args) mbExpected
@@ -1333,7 +1336,7 @@ constructorArgPlan scope ctorInfo mbExpected args =
 constructorResolvedArgPlan :: ElaborateScope -> ConstructorInfo -> Maybe SrcType -> [P.ResolvedExpr] -> (Map String SrcType, [SrcType])
 constructorResolvedArgPlan scope ctorInfo mbExpected args =
   let (subst, argTys) = foldl step (initialSubst, []) (zip (ctorArgs ctorInfo) args)
-   in (subst, reverse argTys)
+   in (nonIdentityConstructorSubst subst, reverse argTys)
   where
     initialSubst =
       constructorInitialSubst scope ctorInfo (length args) mbExpected
@@ -1349,8 +1352,12 @@ constructorResolvedArgPlan scope ctorInfo mbExpected args =
 constructorInitialSubst :: ElaborateScope -> ConstructorInfo -> Int -> Maybe SrcType -> Map String SrcType
 constructorInitialSubst scope ctorInfo argCount mbExpected =
   case mbExpected >>= matchTypesInScope scope Map.empty (constructorOccurrenceType ctorInfo argCount) of
-    Just subst -> subst
+    Just subst -> nonIdentityConstructorSubst subst
     Nothing -> Map.empty
+
+nonIdentityConstructorSubst :: Map String SrcType -> Map String SrcType
+nonIdentityConstructorSubst =
+  Map.filterWithKey (\name ty -> ty /= STVar name)
 
 valueEvidenceArgs :: ElaborateScope -> ValueInfo -> Maybe SrcType -> [P.Expr] -> ElaborateM [SurfaceExpr]
 valueEvidenceArgs scope OrdinaryValue {valueDisplayName = displayName, valueType = visibleTy, valueConstraints = displayConstraints, valueConstraintInfos = constraints} mbExpected args

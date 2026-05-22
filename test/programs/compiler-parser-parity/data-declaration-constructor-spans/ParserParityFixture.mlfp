@@ -1,0 +1,42 @@
+module ParserParityFixture export (sourceFile, sourceInput) {
+  import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), sourceInputNil, sourceInputCons, basicModuleKeywordSpan, basicModuleNameSpan, basicExportKeywordSpan, basicExportLeftParenSpan, basicExportRightParenSpan, basicModuleLeftBraceSpan, basicModuleRightBraceSpan, basicDefKeywordSpan, basicDefNameSpan, basicDefColonSpan, basicDefEqualsSpan, basicDefSemicolonSpan, dataExportNatSpan, dataExportMainSpan, dataDeclSpan, dataZeroConstructorSpan, dataSuccConstructorSpan, dataZeroColonSpan);
+
+  def sourceFile : String =
+    "test/conformance/mlfp/parser-parity/data-declaration-constructor-spans/src/Main.mlfp";
+
+  def sourceInput : ParserSourceInput =
+    sourceInputCons (SourceSymbol basicModuleKeywordSpan "module")
+      (sourceInputCons (SourceSymbol basicModuleNameSpan "identifier:Main")
+        (sourceInputCons (SourceSymbol basicExportKeywordSpan "export")
+          (sourceInputCons (SourceSymbol basicExportLeftParenSpan "(")
+            (sourceInputCons (SourceSymbol dataExportNatSpan "identifier:Nat")
+              (sourceInputCons (SourceSymbol dataExportNatSpan "(")
+                (sourceInputCons (SourceSymbol dataExportNatSpan "..")
+                  (sourceInputCons (SourceSymbol dataExportNatSpan ")")
+                    (sourceInputCons (SourceSymbol dataExportMainSpan ",")
+                      (sourceInputCons (SourceSymbol dataExportMainSpan "identifier:main")
+                        (sourceInputCons (SourceSymbol basicExportRightParenSpan ")")
+                          (sourceInputCons (SourceSymbol basicModuleLeftBraceSpan "{")
+                            (sourceInputCons (SourceSymbol dataDeclSpan "data")
+                              (sourceInputCons (SourceSymbol dataDeclSpan "identifier:Nat")
+                                (sourceInputCons (SourceSymbol dataDeclSpan "=")
+                                  (sourceInputCons (SourceSymbol dataZeroConstructorSpan "identifier:Zero")
+                                    (sourceInputCons (SourceSymbol dataZeroColonSpan ":")
+                                      (sourceInputCons (SourceSymbol dataZeroConstructorSpan "identifier:Nat")
+                                        (sourceInputCons (SourceSymbol dataSuccConstructorSpan "|")
+                                          (sourceInputCons (SourceSymbol dataSuccConstructorSpan "identifier:Succ")
+                                            (sourceInputCons (SourceSymbol dataSuccConstructorSpan ":")
+                                              (sourceInputCons (SourceSymbol dataSuccConstructorSpan "identifier:Nat")
+                                                (sourceInputCons (SourceSymbol dataSuccConstructorSpan "->")
+                                                  (sourceInputCons (SourceSymbol dataSuccConstructorSpan "identifier:Nat")
+                                                    (sourceInputCons (SourceSymbol dataSuccConstructorSpan ";")
+                                                      (sourceInputCons (SourceSymbol basicDefKeywordSpan "def")
+                                                        (sourceInputCons (SourceSymbol basicDefNameSpan "identifier:main")
+                                                          (sourceInputCons (SourceSymbol basicDefColonSpan ":")
+                                                            (sourceInputCons (SourceSymbol dataDeclSpan "identifier:Nat")
+                                                              (sourceInputCons (SourceSymbol basicDefEqualsSpan "=")
+                                                                (sourceInputCons (SourceSymbol dataSuccConstructorSpan "identifier:Succ")
+                                                                  (sourceInputCons (SourceSymbol dataZeroConstructorSpan "identifier:Zero")
+                                                                    (sourceInputCons (SourceSymbol basicDefSemicolonSpan ";")
+                                                                      (sourceInputCons (SourceSymbol basicModuleRightBraceSpan "}") sourceInputNil)))))))))))))))))))))))))))))))));
+}

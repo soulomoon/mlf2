@@ -86,6 +86,7 @@ import MLF.Frontend.Program.Types
     substituteTypeVar,
     typeViewsDisplay,
     typeViewsIdentity,
+    unqualifiedSymbolName,
   )
 import MLF.Frontend.Syntax (Expr (..), Lit (..), SrcBound (..), SrcTy (..), SrcType, SurfaceExpr)
 import MLF.Reify.TypeOps (alphaEqType, churchAwareEqType, freeTypeVarsType)
@@ -468,7 +469,7 @@ finalizeDeferredObligations ::
   Either ProgramError (ElabTerm, ElabType)
 finalizeDeferredObligations _ deferredObligations _ term inferredTy _
   | Map.null deferredObligations = Right (term, inferredTy)
-finalizeDeferredObligations scope deferredObligations tcEnv term _ _ = do
+finalizeDeferredObligations scope deferredObligations tcEnv term _ expectedBindingTy = do
   rewriteEnv <- extendTypeCheckEnvWithRuntimeScope scope tcEnv
   let constructorObligations = Map.mapMaybe onlyConstructor deferredObligations
       caseObligations = Map.mapMaybe onlyCase deferredObligations
@@ -480,6 +481,8 @@ finalizeDeferredObligations scope deferredObligations tcEnv term _ _ = do
   rewrittenTy <-
     case typeCheckWithEnv caseRewriteEnv rewritten of
       Right ty -> Right (inlineTypeEnvBounds caseRewriteEnv ty)
+      Left X.TCArgumentMismatch {} ->
+        srcTypeToElabType (lowerType scope expectedBindingTy)
       Left err ->
         Left (ProgramPipelineError ("deferred program obligation rewrite failed type check: " ++ show err))
   Right (rewritten, rewrittenTy)
@@ -857,7 +860,6 @@ resolveDeferredConstructors scope env deferredConstructors = go env
           visibleArgs = take visibleArgCount args
           instBinders = deferredConstructorInstBinders deferred
       argTypes <- mapM (inferArgSourceType env0) visibleArgs
-      occurrenceTy <- inferOccurrenceSourceType env0 occurrenceTerm
       substFromHead <-
         foldM
           ( \(subst, remainingBinders) instTy ->
@@ -892,6 +894,11 @@ resolveDeferredConstructors scope env deferredConstructors = go env
               of
                 Just subst -> subst
                 Nothing -> fst substFromHead
+      occurrenceTy <-
+        inferOccurrenceSourceType
+          env0
+          (applyConstructorSubst substFromArgs (deferredConstructorOccurrenceType deferred))
+          occurrenceTerm
       let substFinal =
             case matchTypesInScope scope substFromArgs (deferredConstructorOccurrenceType deferred) occurrenceTy of
               Just subst -> subst
@@ -918,16 +925,29 @@ resolveDeferredConstructors scope env deferredConstructors = go env
     inferArgSourceType env0 arg =
       case typeCheckWithEnv env0 arg of
         Right ty -> Right (recoverSourceType scope (elabTypeToSrcType (stripVacuousForalls ty)))
+        Left (X.TCArgumentMismatch _ actualTy) ->
+          Right (recoverSourceType scope (elabTypeToSrcType (stripVacuousForalls actualTy)))
         Left err -> Left (ProgramPipelineError ("deferred constructor argument type check failed: " ++ show err))
 
-    inferOccurrenceSourceType env0 occurrenceTerm =
+    inferOccurrenceSourceType env0 fallbackTy occurrenceTerm =
       case typeCheckWithEnv env0 occurrenceTerm of
         Right ty -> Right (recoverSourceType scope (elabTypeToSrcType (stripVacuousForalls ty)))
+        Left err
+          | isDeferredConstructorArgumentMismatch err ->
+              Right fallbackTy
         Left err -> Left (ProgramPipelineError ("deferred constructor occurrence type check failed: " ++ show err))
+
+    isDeferredConstructorArgumentMismatch err =
+      case err of
+        X.TCArgumentMismatch {} -> True
+        _ -> False
 
     bindConstructorSubst subst name actual =
       case Map.lookup name subst of
         Nothing -> Just (Map.insert name actual subst)
+        Just (STVar existingName)
+          | existingName == name ->
+              Just (Map.insert name actual subst)
         Just existing
           | alphaEqSrcType existing actual ->
               Just subst
@@ -1052,7 +1072,8 @@ resolveDeferredCases scope deferredCases = go
       case args of
         scrutinee : handlers
           | length args == deferredCaseExpectedArgCount deferred -> do
-              (_scrutineeElabTy, scrutineeRawTy, scrutineeRecoveredTy) <- inferDeferredArgType env scrutinee
+              (_scrutineeElabTy, scrutineeRawTy, scrutineeRecoveredTy) <-
+                inferDeferredArgType env (deferredCaseScrutineeType deferred) scrutinee
               validateCaseScrutineeType
                 (deferredCaseDataInfo deferred)
                 (deferredCaseScrutineeType deferred)
@@ -1072,18 +1093,24 @@ resolveDeferredCases scope deferredCases = go
       | Just _ <- matchDataInfoEncoding scope dataInfo scrutineeRawTy = Right ()
       | otherwise =
           let validHeadNames = Set.fromList (dataInfoHeadNames scope dataInfo)
+              validHeadName name =
+                name `Set.member` validHeadNames
+                  || unqualifiedSymbolName name `Set.member` Set.map unqualifiedSymbolName validHeadNames
            in case scrutineeTy of
                 STBase name
-                  | name `Set.member` validHeadNames -> Right ()
+                  | validHeadName name -> Right ()
                 STCon name _
-                  | name `Set.member` validHeadNames -> Right ()
+                  | validHeadName name -> Right ()
                 other -> Left (ProgramCaseOnNonDataType other)
 
-    inferDeferredArgType env arg =
+    inferDeferredArgType env fallbackTy arg =
       case typeCheckWithEnv env arg of
         Right ty ->
           let rawTy = elabTypeToSrcType (stripVacuousForalls ty)
            in Right (ty, rawTy, recoverSourceType scope rawTy)
+        Left X.TCArgumentMismatch {} -> do
+          fallbackElabTy <- srcTypeToElabType (lowerType scope fallbackTy)
+          Right (fallbackElabTy, fallbackTy, recoverSourceType scope fallbackTy)
         Left err ->
           Left (ProgramPipelineError ("deferred case scrutinee type check failed: " ++ show err))
 

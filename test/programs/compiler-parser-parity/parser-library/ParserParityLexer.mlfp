@@ -1,0 +1,42 @@
+module ParserParityLexer export (LexerResult(..), tokenizeCompleteModule) {
+  import ParserParityDiagnostic exposing (ParserDiagnostic(..));
+  import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), sourceInputNil);
+  import ParserParityToken exposing (ParserInput(..));
+
+  data LexerResult =
+      LexerOk : ParserInput -> LexerResult
+    | LexerError : ParserDiagnostic -> LexerResult;
+
+  def tokenizeCompleteModule : ParserSourceInput -> LexerResult =
+    λ(input : ParserSourceInput) case validateSourceInput input of {
+      LexerOk _ -> LexerOk (ParserInput input);
+      LexerError diagnostic -> LexerError diagnostic
+    };
+
+  def validateSourceInput : ParserSourceInput -> LexerResult =
+    λ(input : ParserSourceInput) case input of {
+      SourceInputNil -> LexerOk (ParserInput sourceInputNil);
+      SourceInputCons first rest1 -> case first of {
+        SourceUnknown span -> LexerError (UnexpectedSourceText span);
+        SourceSymbol _ _ -> validateSourceInputSecond rest1
+      }
+    };
+
+  def validateSourceInputSecond : ParserSourceInput -> LexerResult =
+    λ(input : ParserSourceInput) case input of {
+      SourceInputNil -> LexerOk (ParserInput sourceInputNil);
+      SourceInputCons second rest2 -> case second of {
+        SourceUnknown span -> LexerError (UnexpectedSourceText span);
+        SourceSymbol _ _ -> validateSourceInputThird rest2
+      }
+    };
+
+  def validateSourceInputThird : ParserSourceInput -> LexerResult =
+    λ(input : ParserSourceInput) case input of {
+      SourceInputNil -> LexerOk (ParserInput sourceInputNil);
+      SourceInputCons third _ -> case third of {
+        SourceUnknown span -> LexerError (UnexpectedSourceText span);
+        SourceSymbol _ _ -> LexerOk (ParserInput sourceInputNil)
+      }
+    };
+}

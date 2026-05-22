@@ -1,0 +1,63 @@
+module ParserParityToken export (TokenKind(..), TokenMatch(..), ParserInput(..), tokenSpan, tokenMatches, renderTokenPrefixEvidence) {
+  import Prelude exposing (Option(..), stringAppend, stringIndexOf);
+  import ParserParitySource exposing (ParserSourceInput(..), ParserSourceSymbol(..), renderSpan, basicUnexpectedSpan);
+
+  data TokenKind =
+      TokenKind : String -> TokenKind;
+
+  data TokenMatch =
+      TokenMatched : TokenMatch
+    | TokenMismatch : TokenMatch;
+
+  data ParserInput =
+      ParserInput : ParserSourceInput -> ParserInput;
+
+  def tokenSpan : ParserSourceSymbol -> String =
+    λ(token : ParserSourceSymbol) case token of {
+      SourceSymbol span _ -> span;
+      SourceUnknown span -> span
+    };
+
+  def stringExactMatch : String -> String -> TokenMatch =
+    λ(expected : String) λ(actual : String) case stringIndexOf actual expected of {
+      None -> TokenMismatch;
+      Some _ -> case stringIndexOf expected actual of {
+        None -> TokenMismatch;
+        Some _ -> TokenMatched
+      }
+    };
+
+  def tokenKindText : TokenKind -> String =
+    λ(kind : TokenKind) case kind of {
+      TokenKind text -> text
+    };
+
+  def tokenText : ParserSourceSymbol -> String =
+    λ(token : ParserSourceSymbol) case token of {
+      SourceSymbol _ text -> text;
+      SourceUnknown _ -> "unknown"
+    };
+
+  def tokenMatches : TokenKind -> ParserSourceSymbol -> TokenMatch =
+    λ(kind : TokenKind) λ(token : ParserSourceSymbol)
+      stringExactMatch (tokenKindText kind) (tokenText token);
+
+  def renderTokenPrefixEvidence : String -> ParserInput -> String =
+    λ(sourceFile : String) λ(input : ParserInput) case input of {
+      ParserInput stream -> case stream of {
+        SourceInputNil -> "tokens mismatch";
+        SourceInputCons moduleToken rest1 -> case rest1 of {
+          SourceInputNil -> "tokens mismatch";
+          SourceInputCons nameToken rest2 -> case rest2 of {
+            SourceInputNil -> "tokens mismatch";
+            SourceInputCons exportToken _ ->
+              stringAppend "tokens module@"
+                (stringAppend (renderSpan sourceFile (tokenSpan moduleToken))
+                  (stringAppend " Main@"
+                    (stringAppend (renderSpan sourceFile (tokenSpan nameToken))
+                      (stringAppend " export@" (renderSpan sourceFile (tokenSpan exportToken))))))
+          }
+        }
+      }
+    };
+}

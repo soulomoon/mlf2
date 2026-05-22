@@ -41,9 +41,12 @@ round; this tracer does not provide regeneration or blessing tooling.
 `parser-parity/` contains committed parser-program projection oracles for
 bounded canonical-parser parity tracers. These artifacts are compared exactly
 against both the current Haskell canonical parser projection and the matching
-`.mlfp` parser-owned package output. They are not generated or blessed during
-test runs, and they do not imply full `.mlfp` parser parity. Current bounded
-projection fixtures cover the basic Bool module, one import-exposing Bool
-module, one value-definition-list Int/reference module, one let/lambda/app
+`.mlfp` parser-owned package output. The carried `.mlfp` fixture packages now
+route through the shared parser library at
+`test/programs/compiler-parser-parity/parser-library/` via `--search-path`
+instead of owning per-fixture parser modules. They are not generated or blessed
+during test runs, and they do not imply full `.mlfp` parser parity. Current
+bounded projection fixtures cover the basic Bool module, one import-exposing
+Bool module, one value-definition-list Int/reference module, one let/lambda/app
 Int expression module, one typed-annotation Int expression module, and one
 data-declaration Nat module with constructor spans.
